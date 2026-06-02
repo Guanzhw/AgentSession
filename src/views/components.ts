@@ -1,5 +1,5 @@
-import { escapeHtml, renderMarkdown } from "../markdown.mjs";
-import { t } from "../i18n.mjs";
+import { escapeHtml, renderMarkdown } from "../markdown.js";
+import { t } from "../i18n.js";
 
 function formatCount(value, prefix = "") {
   const amount = Number(value) || 0;
@@ -123,7 +123,7 @@ export function sessionCard(s, active = false, { showCheckbox = false, provider 
   </article>`;
 }
 
-export function messageBubble(role, content, meta = {}) {
+export function messageBubble(role, content, meta: any = {}) {
   const safeRole = escapeHtml(role || "unknown");
   const model = meta.model ? `<span class="message-model">${escapeHtml(meta.model)}</span>` : "";
   const tokens = formatTokens(meta.tokens);

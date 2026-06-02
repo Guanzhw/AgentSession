@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="./docs/preview-dashboard.png" alt="oh-my-opensession" width="720" />
+  <img src="./docs/preview-dashboard.png" alt="OpenSessionViewer" width="720" />
 </p>
 
-<h1 align="center">OpenSession</h1>
+<h1 align="center">OpenSessionViewer</h1>
 
 <p align="center">
   <strong>The Developer's AI Chronicle — binding your scattered conversation diaries into one volume</strong>
@@ -14,7 +14,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/node-%3E%3D22.5.0-brightgreen?style=flat-square&logo=node.js" alt="Node.js" />
-  <img src="https://img.shields.io/badge/dependencies-0-blue?style=flat-square" alt="Zero Dependencies" />
+  <img src="https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square" alt="Zero Runtime Dependencies" />
   <img src="https://img.shields.io/badge/license-MIT-purple?style=flat-square" alt="MIT License" />
   <img src="https://img.shields.io/badge/v1.2.0-orange?style=flat-square" alt="Version" />
 </p>
@@ -36,9 +36,15 @@ Think about it — every day you pour your most complex architecture decisions, 
 
 Except this journal is scattered across four different notebooks — OpenCode's SQLite database, Claude Code's JSONL files, Codex's JSON, Gemini's temp directory. Four formats, four corners, much like that "read later" bookmark folder you'll never actually organize.
 
-**OpenSession does one simple thing: gathers those four scattered diaries and binds them into one volume.**
+**OpenSessionViewer does one simple thing: gathers those four scattered diaries and binds them into one volume.**
 
-Search, browse, star, export, stats — dark mode, terminal aesthetic, zero dependencies. It'll even tell you exactly how many tokens you've burned (you might want to sit down before looking at that number 💸).
+Search, browse, star, export, stats — dark mode, terminal aesthetic, zero runtime dependencies. It'll even tell you exactly how many tokens you've burned (you might want to sit down before looking at that number 💸).
+
+---
+
+## Attribution
+
+OpenSessionViewer is based on [OpenSession](https://github.com/HeavyBunny19C/OpenSession). This project keeps the original spirit of a local, multi-provider AI session viewer while moving the codebase to TypeScript and extending the roadmap toward richer nested session visualization.
 
 ---
 
@@ -58,7 +64,7 @@ Search, browse, star, export, stats — dark mode, terminal aesthetic, zero depe
 ## 🚀 Quick Start
 
 ```bash
-npx @heavybunny19c_lee/opensession
+npx @guanzhw/opensessionviewer
 ```
 
 > 💡 Open `http://localhost:3456` and start exploring your AI coding sessions!
@@ -66,15 +72,16 @@ npx @heavybunny19c_lee/opensession
 ### Global Install
 
 ```bash
-npm install -g @heavybunny19c_lee/opensession
-opensession --open  # auto-opens browser
+npm install -g @guanzhw/opensessionviewer
+opensessionviewer --open  # auto-opens browser
 ```
 
 ### From Source
 
 ```bash
-git clone https://github.com/HeavyBunny19C/OpenSession.git
-cd OpenSession
+git clone https://github.com/Guanzhw/OpenSessionViewer.git
+cd OpenSessionViewer
+npm install
 npm start
 ```
 
@@ -84,16 +91,16 @@ npm start
 
 ```bash
 # Install
-npm install -g @heavybunny19c_lee/opensession
+npm install -g @guanzhw/opensessionviewer
 
 # Upgrade to latest
-npm update -g @heavybunny19c_lee/opensession
+npm update -g @guanzhw/opensessionviewer
 
 # Uninstall
-npm uninstall -g @heavybunny19c_lee/opensession
+npm uninstall -g @guanzhw/opensessionviewer
 ```
 
-> Backward compatible: the `oh-my-opensession` command still works after upgrade.
+> Backward compatible: the `opensession` and `oh-my-opensession` commands still work after upgrade.
 
 ---
 
@@ -111,7 +118,16 @@ npm uninstall -g @heavybunny19c_lee/opensession
 | 📊 | **Token stats** | Daily token usage charts |
 | 🔮 | **Trace visualization** | Agent/Skill/MCP/Tool/LSP call chain tree — see how AI thinks |
 | 🌐 | **i18n** | English & Chinese |
-| 🚀 | **Zero dependencies** | Pure Node.js, no npm install needed |
+| 🚀 | **Zero runtime dependencies** | Compiled TypeScript on Node.js built-ins |
+
+---
+
+## Roadmap
+
+1. Rewrite a session container that supports recursive session insertion.
+2. Expand task tool calls into nested subagent sessions.
+3. Add a table of contents.
+4. Add more metrics: token usage per session, runtime, and a better tool-flow view that includes every sub-session tree.
 
 ---
 
@@ -136,26 +152,27 @@ Option                  Description                     Default
 |:---|:---|
 | `PORT` | Server port (`--port` takes priority) |
 | `SESSION_VIEWER_DB_PATH` | OpenCode DB path (`--opencode-db` takes priority) |
-| `OH_MY_OPENSESSION_META_PATH` | Metadata DB directory |
+| `OPENSESSIONVIEWER_META_PATH` | Metadata DB path |
+| `OH_MY_OPENSESSION_META_PATH` | Legacy metadata DB path |
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-opensession
-├── bin/cli.mjs              # Entry point
+opensessionviewer
+├── bin/cli.ts              # Entry point
 ├── src/
-│   ├── server.mjs           # HTTP server, /:provider routing
+│   ├── server.ts           # HTTP server, /:provider routing
 │   ├── providers/
-│   │   ├── interface.mjs    # ProviderAdapter interface (JSDoc)
-│   │   ├── index.mjs        # Provider registry
+│   │   ├── interface.ts    # ProviderAdapter TypeScript types
+│   │   ├── index.ts        # Provider registry
 │   │   ├── opencode/        # OpenCode adapter (SQLite)
 │   │   ├── claude-code/     # Claude Code adapter (JSONL)
 │   │   ├── codex/           # Codex CLI adapter (JSONL)
 │   │   └── gemini/          # Gemini CLI adapter (JSON)
-│   ├── index-db.mjs         # Cross-provider session index
-│   ├── meta.mjs             # User metadata (star, rename, delete)
+│   ├── index-db.ts         # Cross-provider session index
+│   ├── meta.ts             # User metadata (star, rename, delete)
 │   ├── views/               # Server-rendered HTML templates
 │   ├── static/              # CSS + client JS
 │   └── locales/             # i18n (en, zh)
@@ -175,24 +192,24 @@ See [CONTRIBUTING-PROVIDER.md](./docs/CONTRIBUTING-PROVIDER.md) for a step-by-st
 <summary>🤖 <strong>AI Agent Context</strong> (click to expand)</summary>
 
 ```
-PROJECT: OpenSession v1.1.1
+PROJECT: OpenSessionViewer v1.2.0
 PURPOSE: Multi-provider AI session viewer (web UI)
-STACK: Node.js ≥22.5.0, zero dependencies, ESM, SQLite (node:sqlite)
+STACK: TypeScript, Node.js ≥22.5.0, zero runtime dependencies, ESM, SQLite (node:sqlite)
 PROVIDERS: OpenCode (read-write), Claude Code (read-only), Codex CLI (read-only), Gemini CLI (read-only)
 
 ARCHITECTURE:
-  src/providers/interface.mjs — ProviderAdapter interface
-  src/providers/*/adapter.mjs — Per-provider implementation
-  src/index-db.mjs — Cross-provider session index (SQLite)
-  src/meta.mjs — User metadata: star, rename, soft-delete (SQLite)
-  src/server.mjs — HTTP routing with /:provider prefix
+  src/providers/interface.ts — ProviderAdapter interface
+  src/providers/*/adapter.ts — Per-provider implementation
+  src/index-db.ts — Cross-provider session index (SQLite)
+  src/meta.ts — User metadata: star, rename, soft-delete (SQLite)
+  src/server.ts — HTTP routing with /:provider prefix
 
 KEY FACTS:
   - Read-only: Never modifies AI tool databases
-  - Meta storage: ~/.config/oh-my-opensession/meta.db
-  - Zero install: Clone and run, no npm install needed
-  - ESM only: "type": "module", entry is bin/cli.mjs
-  - No build step: Pure JavaScript, no bundler
+  - Meta storage: ~/.config/opensessionviewer/meta.db
+  - Source workflow: npm install, then npm start or npm run build
+  - ESM only: "type": "module", source entry is bin/cli.ts, published entry is dist/bin/cli.js
+  - Build step: TypeScript emits dist/, then scripts/copy-static.mjs copies static assets
 ```
 
 </details>

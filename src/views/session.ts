@@ -1,7 +1,7 @@
-import { escapeHtml } from "../markdown.mjs";
-import { layout } from "./layout.mjs";
-import { formatDuration, messageBubble, todoList, toolCallBlock, sessionCard } from "./components.mjs";
-import { t } from "../i18n.mjs";
+import { escapeHtml } from "../markdown.js";
+import { layout } from "./layout.js";
+import { formatDuration, messageBubble, todoList, toolCallBlock, sessionCard } from "./components.js";
+import { t } from "../i18n.js";
 
 function safeParse(value) {
   if (typeof value !== "string") {

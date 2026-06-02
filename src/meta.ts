@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { getConfig } from "./config.mjs";
+import { getConfig } from "./config.js";
 
 function getMetaDbPath() { return getConfig().metaPath; }
 
@@ -66,7 +66,7 @@ export function getMetaDb() {
  * Backward-compat: if called with 1 arg, treat it as sessionId with provider="opencode".
  * If called with 2 args, first is provider, second is sessionId.
  */
-function resolveArgs(providerOrId, sessionId) {
+function resolveArgs(providerOrId, sessionId = undefined) {
   if (sessionId === undefined) {
     return ["opencode", providerOrId];
   }
@@ -74,7 +74,7 @@ function resolveArgs(providerOrId, sessionId) {
 }
 
 /** 确保 session_id 在 session_meta 中有记录（upsert 辅助） */
-function ensureMeta(providerOrId, sessionId) {
+function ensureMeta(providerOrId, sessionId = undefined) {
   const [provider, sid] = resolveArgs(providerOrId, sessionId);
   const db = getMetaDb();
   const existing = db.prepare("SELECT 1 FROM session_meta WHERE provider = ? AND session_id = ?").get(provider, sid);
@@ -83,13 +83,13 @@ function ensureMeta(providerOrId, sessionId) {
   }
 }
 
-export function getMeta(providerOrId, sessionId) {
+export function getMeta(providerOrId, sessionId = undefined) {
   const [provider, sid] = resolveArgs(providerOrId, sessionId);
   const db = getMetaDb();
   return db.prepare("SELECT * FROM session_meta WHERE provider = ? AND session_id = ?").get(provider, sid) || null;
 }
 
-export function getAllMeta(provider) {
+export function getAllMeta(provider = undefined) {
   const db = getMetaDb();
   const rows = provider
     ? db.prepare("SELECT * FROM session_meta WHERE provider = ?").all(provider)
@@ -115,7 +115,7 @@ export function getExcludedIds(provider = "opencode") {
   );
 }
 
-export function toggleStar(providerOrId, sessionId) {
+export function toggleStar(providerOrId, sessionId = undefined) {
   const [provider, sid] = resolveArgs(providerOrId, sessionId);
   const db = getMetaDb();
   ensureMeta(provider, sid);
@@ -126,7 +126,7 @@ export function toggleStar(providerOrId, sessionId) {
   return newStarred === 1;
 }
 
-export function renameSession(providerOrId, sessionIdOrTitle, newTitle) {
+export function renameSession(providerOrId, sessionIdOrTitle, newTitle = undefined) {
   let provider, sid, title;
   if (newTitle === undefined) {
     // Legacy: renameSession(sessionId, title)
@@ -145,7 +145,7 @@ export function renameSession(providerOrId, sessionIdOrTitle, newTitle) {
     .run(title || null, Date.now(), provider, sid);
 }
 
-export function softDelete(providerOrId, sessionId) {
+export function softDelete(providerOrId, sessionId = undefined) {
   const [provider, sid] = resolveArgs(providerOrId, sessionId);
   const db = getMetaDb();
   ensureMeta(provider, sid);
@@ -153,14 +153,14 @@ export function softDelete(providerOrId, sessionId) {
     .run(Date.now(), provider, sid);
 }
 
-export function restoreSession(providerOrId, sessionId) {
+export function restoreSession(providerOrId, sessionId = undefined) {
   const [provider, sid] = resolveArgs(providerOrId, sessionId);
   const db = getMetaDb();
   db.prepare("UPDATE session_meta SET deleted = 0, time_deleted = NULL WHERE provider = ? AND session_id = ?")
     .run(provider, sid);
 }
 
-export function permanentDelete(providerOrId, sessionId) {
+export function permanentDelete(providerOrId, sessionId = undefined) {
   const [provider, sid] = resolveArgs(providerOrId, sessionId);
   const db = getMetaDb();
   ensureMeta(provider, sid);
@@ -168,7 +168,7 @@ export function permanentDelete(providerOrId, sessionId) {
     .run(provider, sid);
 }
 
-export function batchAction(providerOrIds, idsOrAction, actionArg) {
+export function batchAction(providerOrIds, idsOrAction, actionArg = undefined) {
   let provider, ids, action;
   if (actionArg === undefined) {
     // Legacy: batchAction(ids, action)

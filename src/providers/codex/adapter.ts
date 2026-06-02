@@ -1,8 +1,9 @@
 import { existsSync, readdirSync, lstatSync } from "node:fs";
 import path from "node:path";
-import { getConfig } from "../../config.mjs";
-import { parseSession, extractMeta, recordsToMessages } from "./parser.mjs";
-import { icons } from "../../icons.mjs";
+import { getConfig } from "../../config.js";
+import { parseSession, extractMeta, recordsToMessages } from "./parser.js";
+import { icons } from "../../icons.js";
+import type { ProviderAdapter } from "../interface.js";
 
 function getCodexDir() {
   return getConfig().codexDir;
@@ -41,7 +42,6 @@ function discoverSessionFiles() {
   return files;
 }
 
-/** @type {import('../interface.mjs').ProviderAdapter} */
 const codex = {
   id: "codex",
   name: "Codex CLI",
@@ -135,6 +135,6 @@ const codex = {
   },
 
   exportSession(_sessionId) { return null; }
-};
+} satisfies ProviderAdapter;
 
 export default codex;

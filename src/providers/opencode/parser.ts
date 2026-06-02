@@ -1,4 +1,4 @@
-// src/providers/opencode/parser.mjs
+// src/providers/opencode/parser.js
 
 export function parseJson(value) {
   if (typeof value !== "string") {

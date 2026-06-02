@@ -1,9 +1,9 @@
-// src/providers/opencode/adapter.mjs
+// src/providers/opencode/adapter.ts
 import os from "node:os";
 import path from "node:path";
 import { existsSync } from "node:fs";
-import { getConfig } from "../../config.mjs";
-import { icons } from "../../icons.mjs";
+import { getConfig } from "../../config.js";
+import { icons } from "../../icons.js";
 import {
   listSessions,
   getSession as dbGetSession,
@@ -11,8 +11,9 @@ import {
   getParts,
   searchMessages as dbSearchMessages,
   getTokenStats as dbGetTokenStats,
-} from "../../db.mjs";
-import { parseJson } from "./parser.mjs";
+} from "../../db.js";
+import { parseJson } from "./parser.js";
+import type { ProviderAdapter } from "../interface.js";
 
 function defaultDataPath() {
   if (process.platform === "win32") {
@@ -22,7 +23,6 @@ function defaultDataPath() {
   return path.join(dataHome, "opencode", "opencode.db");
 }
 
-/** @type {import('../interface.mjs').ProviderAdapter} */
 const opencode = {
   id: "opencode",
   name: "OpenCode",
@@ -286,6 +286,6 @@ const opencode = {
   exportSession(_sessionId) {
     return null;
   }
-};
+} satisfies ProviderAdapter;
 
 export default opencode;

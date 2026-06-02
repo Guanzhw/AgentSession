@@ -1,5 +1,5 @@
-import { en } from "./locales/en.mjs";
-import { zh } from "./locales/zh.mjs";
+import { en } from "./locales/en.js";
+import { zh } from "./locales/zh.js";
 
 const locales = { en, zh };
 let currentLocale = "en";

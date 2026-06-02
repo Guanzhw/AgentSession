@@ -1,6 +1,6 @@
-import { escapeHtml } from "../markdown.mjs";
-import { layout } from "./layout.mjs";
-import { t } from "../i18n.mjs";
+import { escapeHtml } from "../markdown.js";
+import { layout } from "./layout.js";
+import { t } from "../i18n.js";
 
 function formatNumber(n) {
   if (n >= 1000000) return (n / 1000000).toFixed(2) + 'M';

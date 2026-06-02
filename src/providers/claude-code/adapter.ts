@@ -1,8 +1,9 @@
 import { existsSync, readdirSync, lstatSync } from "node:fs";
 import path from "node:path";
-import { getConfig } from "../../config.mjs";
-import { parseTranscript, extractSessionMeta, recordsToMessages } from "./parser.mjs";
-import { icons } from "../../icons.mjs";
+import { getConfig } from "../../config.js";
+import { parseTranscript, extractSessionMeta, recordsToMessages } from "./parser.js";
+import { icons } from "../../icons.js";
+import type { ProviderAdapter } from "../interface.js";
 
 function getClaudeDir() {
   return getConfig().claudeDir;
@@ -54,7 +55,6 @@ function discoverSessionFiles() {
   return files;
 }
 
-/** @type {import('../interface.mjs').ProviderAdapter} */
 const claudeCode = {
   id: "claude-code",
   name: "Claude Code",
@@ -171,7 +171,7 @@ const claudeCode = {
   exportSession(_sessionId) {
     return null;
   }
-};
+} satisfies ProviderAdapter;
 
 function extractTextFromRecord(r) {
   if (r.type === "user") {

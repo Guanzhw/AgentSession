@@ -1,6 +1,6 @@
-import { escapeHtml } from "../markdown.mjs";
-import { t, getLocale } from "../i18n.mjs";
-import { icons } from "../icons.mjs";
+import { escapeHtml } from "../markdown.js";
+import { t, getLocale } from "../i18n.js";
+import { icons } from "../icons.js";
 
 export function layout(title, body, page = "home", { provider = null, providers = [] } = {}) {
   const providerPrefix = provider ? `/${provider}` : "";
@@ -25,14 +25,14 @@ export function layout(title, body, page = "home", { provider = null, providers 
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${escapeHtml(title)} — OpenSession</title>
+  <title>${escapeHtml(title)} — OpenSessionViewer</title>
   <script>document.documentElement.dataset.theme=localStorage.theme||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light')</script>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css">
 </head>
 <body data-page="${page}" data-provider="${provider || ""}">
   <nav class="topbar">
-    <a href="${providerPrefix || "/"}" class="logo">${icons.opensession}<span class="logo-text">OpenSession</span></a>
+    <a href="${providerPrefix || "/"}" class="logo">${icons.opensession}<span class="logo-text">OpenSessionViewer</span></a>
     <div class="topbar-tabs">${providerTabs}</div>
     <div class="topbar-actions">
       <a href="${providerPrefix}/stats" class="nav-link">${t("nav.stats")}</a>

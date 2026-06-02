@@ -35,10 +35,10 @@ function defaultDbPath() {
 
 function defaultMetaDir() {
   if (process.platform === "win32") {
-    return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "oh-my-opensession");
+    return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "opensessionviewer");
   }
   const configHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
-  return path.join(configHome, "oh-my-opensession");
+  return path.join(configHome, "opensessionviewer");
 }
 
 function defaultClaudeDir() {
@@ -98,7 +98,7 @@ function detectLang() {
 }
 
 export function parseArgs(argv = process.argv.slice(2)) {
-  const config = { ...defaults, lang: detectLang() };
+  const config = { ...defaults, lang: detectLang(), metaPath: "" };
 
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--port" && argv[i + 1]) {
@@ -118,9 +118,9 @@ export function parseArgs(argv = process.argv.slice(2)) {
     } else if (argv[i] === "--open") {
       config.open = true;
     } else if (argv[i] === "--help" || argv[i] === "-h") {
-      console.log(`oh-my-opensession — Multi-Provider Session Viewer & Manager
+      console.log(`OpenSessionViewer — Multi-Provider Session Viewer & Manager
 
-Usage: oh-my-opensession [options]
+Usage: opensessionviewer [options]
 
 Options:
   --port <number>       Server port (default: 3456, env: PORT)
@@ -143,8 +143,8 @@ Options:
   if (!argv.includes("--db") && !argv.includes("--opencode-db") && process.env.SESSION_VIEWER_DB_PATH) {
     config.dbPath = process.env.SESSION_VIEWER_DB_PATH;
   }
-  if (process.env.OH_MY_OPENSESSION_META_PATH) {
-    config.metaDir = path.dirname(process.env.OH_MY_OPENSESSION_META_PATH);
+  if (process.env.OPENSESSIONVIEWER_META_PATH || process.env.OH_MY_OPENSESSION_META_PATH) {
+    config.metaDir = path.dirname(process.env.OPENSESSIONVIEWER_META_PATH || process.env.OH_MY_OPENSESSION_META_PATH);
   }
 
   config.metaPath = path.join(config.metaDir, "meta.db");
@@ -162,7 +162,7 @@ export function getConfig() {
   return _config;
 }
 
-export function initConfig(argv) {
+export function initConfig(argv = process.argv.slice(2)) {
   _config = parseArgs(argv);
   return _config;
 }

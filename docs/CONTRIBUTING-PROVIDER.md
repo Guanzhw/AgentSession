@@ -1,10 +1,10 @@
 # Contributing a New Provider
 
-This guide explains how to add support for a new AI coding tool to OpenSession. Each provider is a lightweight adapter that implements a standard interface to expose session data.
+This guide explains how to add support for a new AI coding tool to OpenSessionViewer. Each provider is a lightweight adapter that implements a standard interface to expose session data.
 
 ## Provider Adapter Interface
 
-Every provider must export a default object matching this shape (see `src/providers/interface.mjs` for full JSDoc):
+Every provider must export a default object matching this shape (see `src/providers/interface.ts` for full TypeScript definitions):
 
 ```javascript
 {
@@ -73,16 +73,16 @@ Create `src/providers/{id}/` with two files:
 
 ```
 src/providers/my-tool/
-├── adapter.mjs    # Main adapter implementation
-└── parser.mjs     # Helper to parse raw data into standard format
+├── adapter.ts    # Main adapter implementation
+└── parser.ts     # Helper to parse raw data into standard format
 ```
 
 ### Step 2: Implement the Adapter
 
-In `src/providers/my-tool/adapter.mjs`:
+In `src/providers/my-tool/adapter.ts`:
 
 ```javascript
-import { parseSession, extractMeta, dataToMessages } from "./parser.mjs";
+import { parseSession, extractMeta, dataToMessages } from "./parser.js";
 
 const myTool = {
   id: "my-tool",
@@ -155,7 +155,7 @@ export default myTool;
 
 ### Step 3: Implement the Parser
 
-In `src/providers/my-tool/parser.mjs`, implement helpers:
+In `src/providers/my-tool/parser.ts`, implement helpers:
 
 ```javascript
 export function parseSession(filePath) {
@@ -192,10 +192,10 @@ export function dataToMessages(data, sessionId) {
 
 ### Step 4: Register the Provider
 
-In `src/providers/index.mjs`, add:
+In `src/providers/index.ts`, add:
 
 ```javascript
-import myTool from "./my-tool/adapter.mjs";
+import myTool from "./my-tool/adapter.js";
 
 // ... existing registrations ...
 registerProvider(myTool);
@@ -207,7 +207,7 @@ registerProvider(myTool);
 
 The Gemini adapter is the simplest implementation. Key patterns:
 
-**File discovery** (`gemini/adapter.mjs` lines 10-30):
+**File discovery** (`gemini/adapter.ts` lines 10-30):
 ```javascript
 function discoverSessionFiles() {
   const tmpDir = path.join(getGeminiDir(), "tmp");
@@ -228,7 +228,7 @@ function discoverSessionFiles() {
 }
 ```
 
-**Token stats aggregation** (`gemini/adapter.mjs` lines 76-97):
+**Token stats aggregation** (`gemini/adapter.ts` lines 76-97):
 ```javascript
 getTokenStats(days = 30) {
   const cutoff = Date.now() - days * 86400000;
@@ -254,7 +254,7 @@ getTokenStats(days = 30) {
 }
 ```
 
-**Search implementation** (`gemini/adapter.mjs` lines 99-124):
+**Search implementation** (`gemini/adapter.ts` lines 99-124):
 ```javascript
 searchMessages(query, limit = 20) {
   const term = (query || "").toLowerCase();
@@ -300,8 +300,9 @@ Before submitting your provider, verify all methods work:
 
 Test with:
 ```bash
+npm run build
 node -e "
-import adapter from './src/providers/my-tool/adapter.mjs';
+import adapter from './dist/src/providers/my-tool/adapter.js';
 console.log('Detected:', adapter.detect());
 if (adapter.detect()) {
   for await (const s of adapter.scan()) {
@@ -318,23 +319,23 @@ if (adapter.detect()) {
 
 ```
 src/providers/
-├── interface.mjs          # Type definitions (JSDoc only)
-├── index.mjs              # Registration hub
+├── interface.ts          # Type definitions (TypeScript)
+├── index.ts              # Registration hub
 ├── opencode/
-│   ├── adapter.mjs        # Main adapter
-│   └── parser.mjs         # Parsing helpers
+│   ├── adapter.ts        # Main adapter
+│   └── parser.ts         # Parsing helpers
 ├── claude-code/
-│   ├── adapter.mjs
-│   └── parser.mjs
+│   ├── adapter.ts
+│   └── parser.ts
 ├── codex/
-│   ├── adapter.mjs
-│   └── parser.mjs
+│   ├── adapter.ts
+│   └── parser.ts
 └── gemini/
-    ├── adapter.mjs
-    └── parser.mjs
+    ├── adapter.ts
+    └── parser.ts
 ```
 
-Each provider is self-contained. The adapter imports its parser, and `index.mjs` imports all adapters for registration.
+Each provider is self-contained. The adapter imports its parser, and `index.ts` imports all adapters for registration.
 
 ---
 
@@ -352,6 +353,6 @@ Each provider is self-contained. The adapter imports its parser, and `index.mjs`
 ## Questions?
 
 Refer to:
-- `src/providers/interface.mjs` — Full type definitions
+- `src/providers/interface.ts` — Full type definitions
 - `src/providers/gemini/` — Simplest working example
-- `src/server.mjs` — How adapters are used in routing
+- `src/server.ts` — How adapters are used in routing

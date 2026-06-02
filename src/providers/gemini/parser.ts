@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { Message, RawSession } from "../interface.js";
 
 /**
  * Parse a Gemini CLI JSON session file.
@@ -12,9 +13,9 @@ export function parseSession(filePath) {
 /**
  * Extract session metadata.
  * @param {object} data - ConversationRecord
- * @returns {import('../interface.mjs').RawSession}
+ * @returns {import('../interface.js').RawSession}
  */
-export function extractMeta(data) {
+export function extractMeta(data): RawSession {
   const messages = data.messages || [];
   let totalTokens = 0;
   let messageCount = 0;
@@ -42,9 +43,9 @@ export function extractMeta(data) {
  * Convert session data to unified Message[] format.
  * @param {object} data - ConversationRecord
  * @param {string} sessionId
- * @returns {import('../interface.mjs').Message[]}
+ * @returns {import('../interface.js').Message[]}
  */
-export function dataToMessages(data, sessionId) {
+export function dataToMessages(data, sessionId): Message[] {
   const messages = [];
   let idx = 0;
 

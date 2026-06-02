@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { Message, RawSession } from "../interface.js";
 
 /**
  * Parse a Claude Code JSONL transcript file into records.
@@ -24,9 +25,9 @@ export function parseTranscript(filePath) {
  * Extract session metadata from a transcript's records.
  * @param {object[]} records
  * @param {string} sessionId
- * @returns {import('../interface.mjs').RawSession}
+ * @returns {import('../interface.js').RawSession}
  */
-export function extractSessionMeta(records, sessionId) {
+export function extractSessionMeta(records, sessionId): RawSession {
   let timeCreated = 0;
   let timeUpdated = 0;
   let messageCount = 0;
@@ -64,9 +65,9 @@ export function extractSessionMeta(records, sessionId) {
  * Convert transcript records to unified Message[] format.
  * @param {object[]} records
  * @param {string} sessionId
- * @returns {import('../interface.mjs').Message[]}
+ * @returns {import('../interface.js').Message[]}
  */
-export function recordsToMessages(records, sessionId) {
+export function recordsToMessages(records, sessionId): Message[] {
   const messages = [];
   let msgIndex = 0;
 

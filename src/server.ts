@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { getConfig } from "./config.mjs";
+import { getConfig } from "./config.js";
 import {
   getDb,
   getMessages,
@@ -17,11 +17,11 @@ import {
   getModelDistribution,
   getDailySessionCounts,
   getSessionsByIds
-} from "./db.mjs";
-import opencodeAdapter from "./providers/opencode/adapter.mjs";
-import { getAvailableProviders, getAllProviders, getProvider } from "./providers/index.mjs";
-import { getIndexDb, upsertIndex, getIndexedSessions, clearIndex } from "./index-db.mjs";
-import { setLocale, getLocale } from "./i18n.mjs";
+} from "./db.js";
+import opencodeAdapter from "./providers/opencode/adapter.js";
+import { getAvailableProviders, getAllProviders, getProvider } from "./providers/index.js";
+import { getIndexDb, upsertIndex, getIndexedSessions, clearIndex } from "./index-db.js";
+import { setLocale, getLocale } from "./i18n.js";
 import {
   toggleStar,
   renameSession,
@@ -33,11 +33,11 @@ import {
   getDeletedIds,
   getAllMeta,
   getExcludedIds
-} from "./meta.mjs";
-import { renderSessionPage } from "./views/session.mjs";
-import { renderSessionsPage } from "./views/sessions.mjs";
-import { renderStatsPage } from "./views/stats.mjs";
-import { renderTrashPage } from "./views/trash.mjs";
+} from "./meta.js";
+import { renderSessionPage } from "./views/session.js";
+import { renderSessionsPage } from "./views/sessions.js";
+import { renderStatsPage } from "./views/stats.js";
+import { renderTrashPage } from "./views/trash.js";
 
 const staticDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "static");
 
@@ -61,7 +61,7 @@ function send(res, status, body, contentType = "text/html; charset=utf-8") {
   res.end(injectLocaleScript(body, contentType));
 }
 
-function readBody(req, maxBytes = 1024 * 1024) {
+function readBody(req, maxBytes = 1024 * 1024): Promise<any> {
   return new Promise((resolve, reject) => {
     let data = "";
     let size = 0;
@@ -463,8 +463,7 @@ export async function startServer(config = getConfig()) {
             sessions.push(session);
           }
           clearIndex(provider.id);
-        clearIndex(provider.id);
-        upsertIndex(provider.id, sessions);
+          upsertIndex(provider.id, sessions);
           results.push({ provider: provider.id, indexed: sessions.length, tookMs: Date.now() - startTime });
         }
         return json(res, { ok: true, results });
@@ -932,7 +931,7 @@ export async function startServer(config = getConfig()) {
     const stats = getStats();
     const server = createServer(requestHandler);
     server.listen(PORT, "127.0.0.1", () => {
-      console.log(`OpenSession running at http://localhost:${PORT}`);
+      console.log(`OpenSessionViewer running at http://localhost:${PORT}`);
       console.log(`Language: ${getLocale()}`);
       console.log(`DB: ${appConfig.dbPath}`);
       console.log(`${stats.totalSessions} sessions, ${stats.totalMessages} messages.`);

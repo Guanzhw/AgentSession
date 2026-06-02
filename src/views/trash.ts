@@ -1,7 +1,7 @@
-import { escapeHtml } from "../markdown.mjs";
-import { layout } from "./layout.mjs";
-import { formatTime } from "./components.mjs";
-import { t } from "../i18n.mjs";
+import { escapeHtml } from "../markdown.js";
+import { layout } from "./layout.js";
+import { formatTime } from "./components.js";
+import { t } from "../i18n.js";
 
 export function renderTrashPage({ sessions = [], provider = "opencode", providers = [] }) {
   const cards = sessions.length

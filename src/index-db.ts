@@ -1,6 +1,6 @@
-// src/index-db.mjs
+// src/index-db.js
 import { DatabaseSync } from "node:sqlite";
-import { getConfig } from "./config.mjs";
+import { getConfig } from "./config.js";
 
 let indexDb;
 
@@ -31,7 +31,7 @@ export function getIndexDb() {
 /**
  * Upsert a batch of RawSession objects into session_index.
  * @param {string} provider
- * @param {import('./providers/interface.mjs').RawSession[]} sessions
+ * @param {import('./providers/interface.js').RawSession[]} sessions
  */
 export function upsertIndex(provider, sessions) {
   const db = getIndexDb();
@@ -78,7 +78,7 @@ export function getIndexedSessions(provider, limit = 50, offset = 0, timeRange =
 
 /**
  * Run a full index for a provider using its scan() method.
- * @param {import('./providers/interface.mjs').ProviderAdapter} adapter
+ * @param {import('./providers/interface.js').ProviderAdapter} adapter
  */
 export async function indexProvider(adapter) {
   const batch = [];

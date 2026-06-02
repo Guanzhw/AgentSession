@@ -1,21 +1,28 @@
 {
-  "name": "@heavybunny19c_lee/opensession",
+  "name": "@guanzhw/opensessionviewer",
   "version": "1.2.0",
-  "description": "The developer's AI chronicle — your conversations with AI are scattered across four tools; OpenSession binds them into one searchable volume.",
+  "description": "The developer's AI chronicle — your conversations with AI are scattered across four tools; OpenSessionViewer binds them into one searchable volume.",
   "type": "module",
   "bin": {
-    "opensession": "bin/cli.mjs",
-    "oh-my-opensession": "bin/cli.mjs"
+    "opensessionviewer": "dist/bin/cli.js",
+    "open-session-viewer": "dist/bin/cli.js",
+    "opensession": "dist/bin/cli.js",
+    "oh-my-opensession": "dist/bin/cli.js"
   },
   "scripts": {
-    "start": "node bin/cli.mjs",
-    "dev": "node bin/cli.mjs --open"
+    "build": "tsc && node scripts/copy-static.mjs",
+    "start": "npm run build && node dist/bin/cli.js",
+    "dev": "npm run build && node dist/bin/cli.js --open",
+    "typecheck": "tsc --noEmit",
+    "prepare": "npm run build"
   },
   "engines": {
     "node": ">=22.5.0"
   },
   "keywords": [
+    "opensessionviewer",
     "opensession",
+    "open-session-viewer",
     "opencode",
     "claude-code",
     "codex",
@@ -25,15 +32,18 @@
     "session-manager",
     "cli"
   ],
-  "author": "HeavyBunny19C",
+  "author": "Guanzhw",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/HeavyBunny19C/OpenSession.git"
+    "url": "git+https://github.com/Guanzhw/OpenSessionViewer.git"
   },
-  "homepage": "https://github.com/HeavyBunny19C/OpenSession",
+  "homepage": "https://github.com/Guanzhw/OpenSessionViewer",
   "files": [
-    "bin/",
-    "src/"
-  ]
+    "dist/"
+  ],
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  }
 }

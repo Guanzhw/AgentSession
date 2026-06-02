@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { Message, RawSession } from "../interface.js";
 
 /**
  * Parse a Codex CLI JSONL session file.
@@ -22,9 +23,9 @@ export function parseSession(filePath) {
  * Extract session metadata from records.
  * @param {object[]} records
  * @param {string} fallbackId - Filename-derived session ID
- * @returns {import('../interface.mjs').RawSession}
+ * @returns {import('../interface.js').RawSession}
  */
-export function extractMeta(records, fallbackId) {
+export function extractMeta(records, fallbackId): RawSession {
   let sessionId = fallbackId;
   let timeCreated = 0;
   let timeUpdated = 0;
@@ -70,9 +71,9 @@ export function extractMeta(records, fallbackId) {
  * Convert records to unified Message[] format.
  * @param {object[]} records
  * @param {string} sessionId
- * @returns {import('../interface.mjs').Message[]}
+ * @returns {import('../interface.js').Message[]}
  */
-export function recordsToMessages(records, sessionId) {
+export function recordsToMessages(records, sessionId): Message[] {
   const messages = [];
   let idx = 0;
 

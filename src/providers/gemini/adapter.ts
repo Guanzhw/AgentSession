@@ -1,8 +1,9 @@
 import { existsSync, readdirSync, lstatSync } from "node:fs";
 import path from "node:path";
-import { getConfig } from "../../config.mjs";
-import { parseSession, extractMeta, dataToMessages } from "./parser.mjs";
-import { icons } from "../../icons.mjs";
+import { getConfig } from "../../config.js";
+import { parseSession, extractMeta, dataToMessages } from "./parser.js";
+import { icons } from "../../icons.js";
+import type { ProviderAdapter } from "../interface.js";
 
 function getGeminiDir() {
   return getConfig().geminiDir;
@@ -33,7 +34,6 @@ function discoverSessionFiles() {
   return files;
 }
 
-/** @type {import('../interface.mjs').ProviderAdapter} */
 const gemini = {
   id: "gemini",
   name: "Gemini CLI",
@@ -128,6 +128,6 @@ const gemini = {
   },
 
   exportSession(_sessionId) { return null; }
-};
+} satisfies ProviderAdapter;
 
 export default gemini;

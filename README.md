@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="./docs/preview-dashboard.png" alt="oh-my-opensession" width="720" />
+  <img src="./docs/preview-dashboard.png" alt="OpenSessionViewer" width="720" />
 </p>
 
-<h1 align="center">OpenSession</h1>
+<h1 align="center">OpenSessionViewer</h1>
 
 <p align="center">
   <strong>开发者的 AI 编年史 — 把散落四处的对话日记，装订成册</strong>
@@ -14,7 +14,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/node-%3E%3D22.5.0-brightgreen?style=flat-square&logo=node.js" alt="Node.js" />
-  <img src="https://img.shields.io/badge/dependencies-0-blue?style=flat-square" alt="Zero Dependencies" />
+  <img src="https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square" alt="Zero Runtime Dependencies" />
   <img src="https://img.shields.io/badge/license-MIT-purple?style=flat-square" alt="MIT License" />
   <img src="https://img.shields.io/badge/version-1.2.0-orange?style=flat-square" alt="Version" />
 </p>
@@ -36,9 +36,15 @@
 
 只不过这本日记散落在四个不同的笔记本里——OpenCode 的 SQLite、Claude Code 的 JSONL、Codex 的 JSON、Gemini 的临时目录。四种格式，四个角落，像极了你那个永远不会整理的「稍后阅读」书签文件夹。
 
-**OpenSession 做的事很简单：把这四本散落的日记收回来，装订成册。**
+**OpenSessionViewer 做的事很简单：把这四本散落的日记收回来，装订成册。**
 
-搜索、浏览、收藏、导出、统计——暗色模式、终端美学、零依赖。还能帮你算算到底烧了多少 token（这个数字建议做好心理准备再看 💸）。
+搜索、浏览、收藏、导出、统计——暗色模式、终端美学、零运行时依赖。还能帮你算算到底烧了多少 token（这个数字建议做好心理准备再看 💸）。
+
+---
+
+## 来源说明
+
+OpenSessionViewer 基于 [OpenSession](https://github.com/HeavyBunny19C/OpenSession) 开发。这个项目保留了本地、多 Provider AI 会话浏览器的核心方向，同时将代码迁移到 TypeScript，并继续推进更丰富的嵌套会话与调用链可视化。
 
 ---
 
@@ -115,7 +121,7 @@
 ### 方式一：npx 一键运行（推荐）
 
 ```bash
-npx @heavybunny19c_lee/opensession
+npx @guanzhw/opensessionviewer
 ```
 
 > 打开 `http://localhost:3456`，开始考古你的 AI 编程之旅！
@@ -123,15 +129,16 @@ npx @heavybunny19c_lee/opensession
 ### 方式二：全局安装
 
 ```bash
-npm install -g @heavybunny19c_lee/opensession
-opensession --open  # 自动弹浏览器
+npm install -g @guanzhw/opensessionviewer
+opensessionviewer --open  # 自动弹浏览器
 ```
 
 ### 方式三：从源码运行
 
 ```bash
-git clone https://github.com/HeavyBunny19C/OpenSession.git
-cd OpenSession
+git clone https://github.com/Guanzhw/OpenSessionViewer.git
+cd OpenSessionViewer
+npm install
 npm start
 ```
 
@@ -143,7 +150,7 @@ npm start
 # npx 用户：自动使用最新版，无需操作
 
 # 全局安装用户：
-npm update -g @heavybunny19c_lee/opensession
+npm update -g @guanzhw/opensessionviewer
 
 # 源码用户：
 git pull origin main
@@ -153,13 +160,13 @@ git pull origin main
 
 ```bash
 # 全局安装用户：
-npm uninstall -g @heavybunny19c_lee/opensession
+npm uninstall -g @guanzhw/opensessionviewer
 
 # 清理元数据（可选，收藏/重命名等数据）：
 # macOS/Linux:
-rm -rf ~/.config/oh-my-opensession
+rm -rf ~/.config/opensessionviewer
 # Windows:
-rd /s /q "%APPDATA%\oh-my-opensession"
+rd /s /q "%APPDATA%\opensessionviewer"
 ```
 
 ---
@@ -183,7 +190,16 @@ rd /s /q "%APPDATA%\oh-my-opensession"
 | 🗂️ | **批量操作** | 多选收藏/删除，效率拉满 |
 | 🌐 | **中英双语** | `--lang zh` 切中文，`--lang en` 切英文 |
 | 🔒 | **只读安全** | 绝不碰你的原始数据，放心用 |
-| 📦 | **零依赖** | 只要 Node.js，没有 node_modules 黑洞 |
+| 📦 | **零运行时依赖** | 编译后的 TypeScript 只依赖 Node.js 内置能力 |
+
+---
+
+## 路线图
+
+1. 重写 session-container，支持内部递归插入 session。
+2. 将 task tool call 展开为嵌套的 subagent session。
+3. 添加 Table of Content。
+4. 增加更多 metrics：每个 session 的 token usage、runtime，以及包含所有 sub-session trees 的更好 tool flow view。
 
 ---
 
@@ -198,7 +214,7 @@ rd /s /q "%APPDATA%\oh-my-opensession"
 | 🪟 Windows | x64 / arm64 | ✅ |
 | 🐧 Linux | x64 / arm64 | ✅ |
 
-> 纯 JS，零 native 依赖，有 Node.js 就能跑 🏃
+> TypeScript 编译为 ESM，运行时零 native 依赖，有 Node.js 就能跑 🏃
 
 ---
 
@@ -227,7 +243,8 @@ rd /s /q "%APPDATA%\oh-my-opensession"
 | `CLAUDE_CONFIG_DIR` | Claude Code 数据目录（`--claude-dir` 优先） |
 | `CODEX_HOME` | Codex CLI 数据目录（`--codex-dir` 优先） |
 | `GEMINI_HOME` | Gemini CLI 数据目录（`--gemini-dir` 优先） |
-| `OH_MY_OPENSESSION_META_PATH` | 元数据库路径 |
+| `OPENSESSIONVIEWER_META_PATH` | 元数据库路径 |
+| `OH_MY_OPENSESSION_META_PATH` | 旧版兼容元数据库路径 |
 
 ---
 
@@ -236,23 +253,23 @@ rd /s /q "%APPDATA%\oh-my-opensession"
 ```
 src/
 ├── providers/           # Provider 适配器（插件式架构）
-│   ├── interface.mjs    # 统一接口定义
-│   ├── index.mjs        # Provider 注册表
+│   ├── interface.ts    # 统一接口定义
+│   ├── index.ts        # Provider 注册表
 │   ├── opencode/        # OpenCode 适配器（SQLite）
 │   ├── claude-code/     # Claude Code 适配器（JSONL）
 │   ├── codex/           # Codex CLI 适配器（JSONL）
 │   └── gemini/          # Gemini CLI 适配器（JSON）
 ├── views/               # 服务端渲染模板
 ├── static/              # 前端 CSS + JS
-├── locales/             # 国际化（en.mjs / zh.mjs）
-├── icons.mjs            # Provider SVG 图标
-├── index-db.mjs         # 跨 Provider 会话索引
-├── meta.mjs             # 元数据（收藏/重命名/删除）
-├── db.mjs               # OpenCode 数据库查询
-├── markdown.mjs         # Markdown 渲染
-├── i18n.mjs             # 国际化加载
-├── server.mjs           # HTTP 路由
-└── config.mjs           # 配置解析 + 多路径探测
+├── locales/             # 国际化（en.ts / zh.ts）
+├── icons.ts            # Provider SVG 图标
+├── index-db.ts         # 跨 Provider 会话索引
+├── meta.ts             # 元数据（收藏/重命名/删除）
+├── db.ts               # OpenCode 数据库查询
+├── markdown.ts         # Markdown 渲染
+├── i18n.ts             # 国际化加载
+├── server.ts           # HTTP 路由
+└── config.ts           # 配置解析 + 多路径探测
 ```
 
 ### 添加新 Provider
@@ -266,7 +283,7 @@ src/
 <details>
 <summary><strong>Q: 启动后看不到某个工具的会话？</strong></summary>
 
-确认该工具已安装且有会话数据。OpenSession 会自动探测以下路径（按优先级）：
+确认该工具已安装且有会话数据。OpenSessionViewer 会自动探测以下路径（按优先级）：
 - OpenCode: `$XDG_DATA_HOME/opencode/opencode.db` → `~/.local/share/opencode/opencode.db`
 - Claude Code: `$CLAUDE_CONFIG_DIR` → `~/.claude/transcripts/` + `~/.claude/projects/`
 - Codex CLI: `$CODEX_HOME` → `~/.codex/sessions/**/*.jsonl`
@@ -279,14 +296,14 @@ src/
 <summary><strong>Q: 端口被占用？</strong></summary>
 
 ```bash
-opensession --port 8080
+opensessionviewer --port 8080
 ```
 </details>
 
 <details>
 <summary><strong>Q: 数据安全吗？</strong></summary>
 
-完全安全。OpenSession 以只读方式访问 AI 工具的数据，收藏/重命名/删除等操作存储在独立的 `meta.db` 中（`~/.config/oh-my-opensession/meta.db`），绝不修改原始数据。
+完全安全。OpenSessionViewer 以只读方式访问 AI 工具的数据，收藏/重命名/删除等操作存储在独立的 `meta.db` 中（`~/.config/opensessionviewer/meta.db`），绝不修改原始数据。
 </details>
 
 ---
@@ -297,10 +314,10 @@ opensession --port 8080
 <summary>点击展开（给 AI 助手看的）</summary>
 
 ```
-PROJECT: oh-my-opensession (OpenSession)
+PROJECT: OpenSessionViewer
 TYPE: Multi-provider AI session viewer & manager
-STACK: Node.js 22.5+, zero dependencies, ESM only, node:sqlite
-ENTRY: bin/cli.mjs → src/server.mjs
+STACK: TypeScript, Node.js 22.5+, zero runtime dependencies, ESM only, node:sqlite
+ENTRY: bin/cli.ts → src/server.ts → dist/bin/cli.js
 
 PROVIDERS:
   opencode   — SQLite DB at ~/.local/share/opencode/opencode.db (read-only)
@@ -309,18 +326,18 @@ PROVIDERS:
   gemini     — JSON files at ~/.gemini/tmp/*/gemini_history_aistudio.json
 
 ARCHITECTURE:
-  src/providers/interface.mjs — ProviderAdapter interface
-  src/providers/*/adapter.mjs — Per-provider implementation
-  src/index-db.mjs — Cross-provider session index (SQLite)
-  src/meta.mjs — User metadata: star, rename, soft-delete (SQLite)
-  src/server.mjs — HTTP routing with /:provider prefix
+  src/providers/interface.ts — ProviderAdapter interface
+  src/providers/*/adapter.ts — Per-provider implementation
+  src/index-db.ts — Cross-provider session index (SQLite)
+  src/meta.ts — User metadata: star, rename, soft-delete (SQLite)
+  src/server.ts — HTTP routing with /:provider prefix
 
 KEY FACTS:
   - Read-only: Never modifies AI tool databases
-  - Meta storage: ~/.config/oh-my-opensession/meta.db
-  - Zero install: Clone and run, no npm install needed
-  - ESM only: "type": "module", entry is bin/cli.mjs
-  - No build step: Pure JavaScript, no bundler
+  - Meta storage: ~/.config/opensessionviewer/meta.db
+  - Source workflow: npm install 后运行 npm start 或 npm run build
+  - ESM only: "type": "module", source entry is bin/cli.ts, published entry is dist/bin/cli.js
+  - Build step: TypeScript 输出 dist/，scripts/copy-static.mjs 复制静态资源
 ```
 
 </details>
