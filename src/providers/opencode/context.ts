@@ -30,6 +30,7 @@ export interface ContextStep {
   confidence: "reconstructed";
   items: ContextItem[];
   itemCounts: Record<string, number>;
+  diff: ContextDiff | null;
 }
 
 export interface SessionContextView {
@@ -37,6 +38,15 @@ export interface SessionContextView {
   mode: "reconstructed";
   note: string;
   steps: ContextStep[];
+}
+
+export interface ContextDiff {
+  baseStepIndex: number | null;
+  added: ContextItem[];
+  removed: ContextItem[];
+  retained: number;
+  addedCounts: Record<string, number>;
+  removedCounts: Record<string, number>;
 }
 
 function asObject(value: unknown): Row {
@@ -108,6 +118,26 @@ function countItems(items: ContextItem[]) {
   }, {} as Record<string, number>);
 }
 
+function contextItemKey(contextItem: ContextItem) {
+  return `${contextItem.kind}:${contextItem.id}`;
+}
+
+function diffItems(current: ContextItem[], previous: ContextItem[] = [], baseStepIndex: number | null = null): ContextDiff {
+  const previousKeys = new Set(previous.map(contextItemKey));
+  const currentKeys = new Set(current.map(contextItemKey));
+  const added = current.filter((contextItem) => !previousKeys.has(contextItemKey(contextItem)));
+  const removed = previous.filter((contextItem) => !currentKeys.has(contextItemKey(contextItem)));
+
+  return {
+    baseStepIndex,
+    added,
+    removed,
+    retained: current.length - added.length,
+    addedCounts: countItems(added),
+    removedCounts: countItems(removed)
+  };
+}
+
 function classifyCheckpoint(index: number, snapshotId: string | null, previousSnapshotId: string | null) {
   if (index === 1) {
     return {
@@ -152,6 +182,7 @@ export function buildOpenCodeSessionContext(sessionId: string, dbPath = undefine
 
   const openSteps = new Map<string, ContextStep>();
   let previousStepSnapshotId: string | null = null;
+  let previousCheckpoint: ContextStep | null = null;
   const messages = getMessages(sessionId, dbPath);
   for (const message of messages) {
     const messageData = asObject(typeof message.data === "string" ? parseJson(message.data) : message.data);
@@ -180,8 +211,13 @@ export function buildOpenCodeSessionContext(sessionId: string, dbPath = undefine
           cost: 0,
           confidence: "reconstructed",
           items: history.slice(),
-          itemCounts: countItems(history)
+          itemCounts: countItems(history),
+          diff: null
         };
+        if (step.checkpoint !== "step") {
+          step.diff = diffItems(step.items, previousCheckpoint?.items || [], previousCheckpoint?.index || null);
+          previousCheckpoint = step;
+        }
         steps.push(step);
         openSteps.set(message.id, step);
         continue;

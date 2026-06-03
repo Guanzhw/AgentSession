@@ -192,40 +192,106 @@ function renderSubagentChildSession(tree: SessionTree) {
   return [messageMarkup, detachedMarkup].filter(Boolean).join("\n");
 }
 
-function collectTocItems(tree: SessionTree, depth = 0) {
-  const items = [];
+function makeTocNode(id, type, label, meta, depth, children = []) {
+  return {
+    id,
+    type,
+    label,
+    meta,
+    depth,
+    children
+  };
+}
 
-  for (const message of tree.messages) {
-    if (isNavigableMessageRole(message.role)) {
-      items.push({
-        id: anchorId("msg", message.id),
-        type: message.role,
-        label: messageText(message) || `${message.role} message`,
-        meta: formatTime(message.timeCreated),
-        depth
-      });
+function collectMessageTaskTocNodes(message, parentAgentDepth) {
+  const nodes = [];
+
+  for (const part of message.parts) {
+    if (part.type === "tool" && isTaskTool(part.tool)) {
+      const children = part.childSessions.flatMap((child) => collectTocNodes(child, parentAgentDepth));
+      nodes.push(makeTocNode(
+        anchorId("part", part.id),
+        "Task",
+        taskTitle(part.data),
+        part.childSessions.length ? `${part.childSessions.length} branch` : partStatus(part.data) || part.tool || "task",
+        parentAgentDepth + 1,
+        children
+      ));
     }
 
-    for (const part of message.parts) {
-      if (part.type === "tool" && isTaskTool(part.tool)) {
-        items.push({
-          id: anchorId("part", part.id),
-          type: "Task",
-          label: taskTitle(part.data),
-          meta: part.childSessions.length ? `${part.childSessions.length} branch` : partStatus(part.data) || part.tool || "tool",
-          depth
-        });
+    for (const child of part.childSessions) {
+      if (!(part.type === "tool" && isTaskTool(part.tool))) {
+        nodes.push(...collectTocNodes(child, parentAgentDepth));
       }
-      for (const child of part.childSessions) {
-        items.push(...collectTocItems(child, depth + 1));
-      }
+    }
+  }
+
+  return nodes;
+}
+
+function collectTocNodes(tree: SessionTree, userDepth = 0) {
+  const nodes = [];
+  let currentUserNode = null;
+
+  for (const message of tree.messages) {
+    const role = String(message.role || "").toLowerCase();
+    if (!isNavigableMessageRole(role)) {
+      continue;
+    }
+
+    if (role === "user") {
+      currentUserNode = makeTocNode(
+        anchorId("msg", message.id),
+        message.role,
+        messageText(message) || "user message",
+        formatTime(message.timeCreated),
+        userDepth
+      );
+      nodes.push(currentUserNode);
+      continue;
+    }
+
+    const agentDepth = userDepth + 1;
+    const node = makeTocNode(
+      anchorId("msg", message.id),
+      message.role,
+      messageText(message) || `${message.role} message`,
+      formatTime(message.timeCreated),
+      agentDepth
+    );
+    node.children.push(...collectMessageTaskTocNodes(message, agentDepth));
+
+    if (currentUserNode) {
+      currentUserNode.children.push(node);
+    } else {
+      nodes.push(node);
     }
   }
 
   for (const child of tree.detachedChildren) {
-    items.push(...collectTocItems(child, depth + 1));
+    nodes.push(...collectTocNodes(child, userDepth + 1));
   }
-  return items;
+  return nodes;
+}
+
+function renderTocNode(node) {
+  const children = Array.isArray(node.children) ? node.children : [];
+  const link = `<a class="toc-link toc-${escapeHtml(node.type.toLowerCase())}" href="#${escapeHtml(node.id)}" style="--toc-depth:${Math.min(node.depth, 6)}">
+      <span class="toc-type">${escapeHtml(node.type)}</span>
+      <span class="toc-label">${escapeHtml(node.label)}</span>
+      ${node.meta ? `<span class="toc-meta">${escapeHtml(node.meta)}</span>` : ""}
+    </a>`;
+
+  if (!children.length) {
+    return link;
+  }
+
+  return `<details class="toc-group toc-group-${escapeHtml(node.type.toLowerCase())}" open>
+    <summary class="toc-group-summary">${link}</summary>
+    <div class="toc-children">
+      ${children.map(renderTocNode).join("\n")}
+    </div>
+  </details>`;
 }
 
 function renderToc(tree: SessionTree | null) {
@@ -233,14 +299,8 @@ function renderToc(tree: SessionTree | null) {
     return `<aside class="session-toc"><h2>Navigate</h2><p class="toc-empty">No indexed messages.</p></aside>`;
   }
 
-  const items = collectTocItems(tree);
-  const markup = items.map((item) => `
-    <a class="toc-link toc-${escapeHtml(item.type.toLowerCase())}" href="#${escapeHtml(item.id)}" style="--toc-depth:${Math.min(item.depth, 6)}">
-      <span class="toc-type">${escapeHtml(item.type)}</span>
-      <span class="toc-label">${escapeHtml(item.label)}</span>
-      ${item.meta ? `<span class="toc-meta">${escapeHtml(item.meta)}</span>` : ""}
-    </a>
-  `).join("\n");
+  const nodes = collectTocNodes(tree);
+  const markup = nodes.map(renderTocNode).join("\n");
 
   return `<aside class="session-toc">
     <h2>Navigate</h2>
@@ -479,6 +539,50 @@ function renderContextCounts(counts) {
     .join(" · ");
 }
 
+function renderContextDiffItems(items, emptyText) {
+  const sample = Array.isArray(items) ? items.slice(0, 8) : [];
+  if (!sample.length) {
+    return `<li class="context-diff-empty">${escapeHtml(emptyText)}</li>`;
+  }
+
+  return sample.map((item) => `<li>
+    <span class="context-kind">${escapeHtml(item.kind || "item")}</span>
+    <span class="context-title">${escapeHtml(item.title || item.id || "")}</span>
+  </li>`).join("\n");
+}
+
+function renderContextDiff(step) {
+  const diff = step.diff;
+  if (!diff) {
+    return "";
+  }
+
+  const addedCount = Array.isArray(diff.added) ? diff.added.length : 0;
+  const removedCount = Array.isArray(diff.removed) ? diff.removed.length : 0;
+  const addedCounts = renderContextCounts(diff.addedCounts);
+  const removedCounts = renderContextCounts(diff.removedCounts);
+  const base = diff.baseStepIndex ? `since step ${diff.baseStepIndex}` : "from empty context";
+
+  return `<div class="context-diff">
+    <div class="context-diff-summary">
+      ${renderMetric("added", formatCount(addedCount))}
+      ${renderMetric("removed", formatCount(removedCount))}
+      ${renderMetric("retained", formatCount(diff.retained))}
+    </div>
+    <p class="context-diff-note">${escapeHtml(`Reconstructed delta ${base}. Removed items only appear when local DB evidence proves they left the reconstructed set.`)}</p>
+    <div class="context-diff-columns">
+      <section>
+        <h3>Added${addedCounts ? ` · ${escapeHtml(addedCounts)}` : ""}</h3>
+        <ul>${renderContextDiffItems(diff.added, "No newly reconstructed items at this checkpoint.")}</ul>
+      </section>
+      <section>
+        <h3>Removed${removedCounts ? ` · ${escapeHtml(removedCounts)}` : ""}</h3>
+        <ul>${renderContextDiffItems(diff.removed, "No removals inferable from stored rows.")}</ul>
+      </section>
+    </div>
+  </div>`;
+}
+
 function contextItemsForDisplay(step) {
   const items = Array.isArray(step.items) ? step.items : [];
   if (step.checkpoint !== "step") {
@@ -550,6 +654,7 @@ function renderContextPanel(sessionContext) {
         <span class="context-step-meta">${escapeHtml(meta)}</span>
       </summary>
       ${counts ? `<p class="context-counts">${escapeHtml(counts)}</p>` : ""}
+      ${renderContextDiff(step)}
       <ul class="context-list">
         ${displayed.omitted ? `<li class="context-item context-omitted"><span class="context-preview">${escapeHtml(`${formatCount(displayed.omitted)} earlier items omitted in this step view; use checkpoints or JSON export for full reconstruction.`)}</span></li>` : ""}
         ${displayed.items.map(renderContextItem).join("\n") || `<li class="context-item"><span class="context-preview">No reconstructable context items.</span></li>`}
