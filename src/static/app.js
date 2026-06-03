@@ -454,6 +454,7 @@ if (scrollSentinel && sessionList && "IntersectionObserver" in window) {
 const sessionWorkbench = document.querySelector(".session-workbench");
 if (sessionWorkbench) {
   const navLinks = [...document.querySelectorAll(".session-toc a[href^='#'], .session-flow a[href^='#']")];
+  const tocGroups = [...document.querySelectorAll(".session-toc .toc-group")];
   const targets = [...new Set(navLinks
     .map((link) => document.getElementById(decodeURIComponent(link.getAttribute("href").slice(1))))
     .filter(Boolean))];
@@ -492,6 +493,15 @@ if (sessionWorkbench) {
   };
 
   document.addEventListener("click", (event) => {
+    const tocControl = event.target.closest("[data-toc-action]");
+    if (tocControl) {
+      const action = tocControl.getAttribute("data-toc-action");
+      tocGroups.forEach((group) => {
+        group.open = action === "expand";
+      });
+      return;
+    }
+
     const link = event.target.closest(".session-toc a[href^='#'], .session-flow a[href^='#']");
     if (!link) return;
     const target = document.getElementById(decodeURIComponent(link.getAttribute("href").slice(1)));

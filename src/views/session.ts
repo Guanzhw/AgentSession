@@ -276,8 +276,13 @@ function collectTocNodes(tree: SessionTree, userDepth = 0) {
 
 function renderTocNode(node) {
   const children = Array.isArray(node.children) ? node.children : [];
+  const typeLabel = String(node.type || "").toLowerCase() === "user"
+    ? "👤"
+    : String(node.type || "").toLowerCase() === "assistant"
+      ? "🤖"
+      : node.type;
   const link = `<a class="toc-link toc-${escapeHtml(node.type.toLowerCase())}" href="#${escapeHtml(node.id)}" style="--toc-depth:${Math.min(node.depth, 6)}">
-      <span class="toc-type">${escapeHtml(node.type)}</span>
+      <span class="toc-type">${escapeHtml(typeLabel)}</span>
       <span class="toc-label">${escapeHtml(node.label)}</span>
       ${node.meta ? `<span class="toc-meta">${escapeHtml(node.meta)}</span>` : ""}
     </a>`;
@@ -303,7 +308,13 @@ function renderToc(tree: SessionTree | null) {
   const markup = nodes.map(renderTocNode).join("\n");
 
   return `<aside class="session-toc">
-    <h2>Navigate</h2>
+    <div class="toc-header">
+      <h2>Navigate</h2>
+      <div class="toc-controls" aria-label="Navigate controls">
+        <button type="button" class="toc-control" data-toc-action="collapse">Collapse all</button>
+        <button type="button" class="toc-control" data-toc-action="expand">Expand all</button>
+      </div>
+    </div>
     <div class="toc-list">${markup || `<p class="toc-empty">No indexed messages.</p>`}</div>
   </aside>`;
 }
@@ -519,156 +530,51 @@ function renderCanonicalFlowPanel(sessionFlow) {
   </aside>`;
 }
 
-function renderContextItem(item) {
-  return `<li class="context-item context-${escapeHtml(item.kind || "unknown")}">
-    <span class="context-kind">${escapeHtml(item.kind || "item")}</span>
-    <span class="context-title">${escapeHtml(item.title || item.id || "")}</span>
-    ${item.preview ? `<span class="context-preview">${escapeHtml(item.preview)}</span>` : ""}
+function renderSystemPromptItem(item) {
+  return `<li class="system-prompt-item system-prompt-${escapeHtml(item.kind || "item")}">
+    <span class="system-prompt-kind">${escapeHtml(item.kind || "item")}</span>
+    <span class="system-prompt-title">
+      ${escapeHtml(item.title || "")}
+      ${item.source ? `<span class="system-prompt-source">${escapeHtml(item.source)}</span>` : ""}
+    </span>
+    ${item.preview ? `<span class="system-prompt-preview">${escapeHtml(item.preview)}</span>` : ""}
   </li>`;
 }
 
-function renderContextCounts(counts) {
-  if (!counts || typeof counts !== "object") {
+function renderSystemPromptSection(section) {
+  const items = Array.isArray(section.items) ? section.items : [];
+  return `<details class="system-prompt-section" open>
+    <summary class="system-prompt-summary">
+      <span>${escapeHtml(section.title || "Section")}</span>
+      <strong>${escapeHtml(formatCount(items.length))}</strong>
+    </summary>
+    ${section.note ? `<p class="system-prompt-note">${escapeHtml(section.note)}</p>` : ""}
+    <ul class="system-prompt-list">
+      ${items.map(renderSystemPromptItem).join("\n") || `<li class="system-prompt-empty">No stored rows for this category.</li>`}
+    </ul>
+  </details>`;
+}
+
+function renderSystemPromptsPanel(systemPrompts) {
+  if (!systemPrompts) {
     return "";
   }
 
-  return Object.entries(counts)
-    .filter(([, value]) => Number(value) > 0)
-    .sort((a, b) => Number(b[1]) - Number(a[1]) || String(a[0]).localeCompare(String(b[0])))
-    .map(([kind, value]) => `${kind} ${formatCount(value)}`)
-    .join(" · ");
-}
+  const sections = Array.isArray(systemPrompts.sections) ? systemPrompts.sections : [];
+  const firstUser = systemPrompts.firstUserMessage;
 
-function renderContextDiffItems(items, emptyText) {
-  const sample = Array.isArray(items) ? items.slice(0, 8) : [];
-  if (!sample.length) {
-    return `<li class="context-diff-empty">${escapeHtml(emptyText)}</li>`;
-  }
-
-  return sample.map((item) => `<li>
-    <span class="context-kind">${escapeHtml(item.kind || "item")}</span>
-    <span class="context-title">${escapeHtml(item.title || item.id || "")}</span>
-  </li>`).join("\n");
-}
-
-function renderContextDiff(step) {
-  const diff = step.diff;
-  if (!diff) {
-    return "";
-  }
-
-  const addedCount = Array.isArray(diff.added) ? diff.added.length : 0;
-  const removedCount = Array.isArray(diff.removed) ? diff.removed.length : 0;
-  const addedCounts = renderContextCounts(diff.addedCounts);
-  const removedCounts = renderContextCounts(diff.removedCounts);
-  const base = diff.baseStepIndex ? `since step ${diff.baseStepIndex}` : "from empty context";
-
-  return `<div class="context-diff">
-    <div class="context-diff-summary">
-      ${renderMetric("added", formatCount(addedCount))}
-      ${renderMetric("removed", formatCount(removedCount))}
-      ${renderMetric("retained", formatCount(diff.retained))}
-    </div>
-    <p class="context-diff-note">${escapeHtml(`Reconstructed delta ${base}. Removed items only appear when local DB evidence proves they left the reconstructed set.`)}</p>
-    <div class="context-diff-columns">
-      <section>
-        <h3>Added${addedCounts ? ` · ${escapeHtml(addedCounts)}` : ""}</h3>
-        <ul>${renderContextDiffItems(diff.added, "No newly reconstructed items at this checkpoint.")}</ul>
-      </section>
-      <section>
-        <h3>Removed${removedCounts ? ` · ${escapeHtml(removedCounts)}` : ""}</h3>
-        <ul>${renderContextDiffItems(diff.removed, "No removals inferable from stored rows.")}</ul>
-      </section>
-    </div>
-  </div>`;
-}
-
-function contextItemsForDisplay(step) {
-  const items = Array.isArray(step.items) ? step.items : [];
-  if (step.checkpoint !== "step") {
-    return { items, omitted: 0 };
-  }
-
-  if (items.length <= 12) {
-    return { items, omitted: 0 };
-  }
-
-  return {
-    items: items.slice(-12),
-    omitted: items.length - 12
-  };
-}
-
-function renderContextCheckpoints(steps) {
-  const checkpoints = steps.filter((step) => step.checkpoint !== "step");
-  if (!checkpoints.length) {
-    return "";
-  }
-
-  return `<div class="context-checkpoints">
-    ${checkpoints.map((step) => {
-      const counts = renderContextCounts(step.itemCounts);
-      const meta = [
-        step.snapshotId ? `snapshot ${String(step.snapshotId).slice(0, 8)}` : "no snapshot",
-        `${formatCount(Array.isArray(step.items) ? step.items.length : 0)} items`,
-        counts
-      ].filter(Boolean).join(" · ");
-      return `<a class="context-checkpoint context-checkpoint-${escapeHtml(step.checkpoint)}" href="#${escapeHtml(anchorId("context-step", step.index))}">
-        <span class="context-checkpoint-label">${escapeHtml(step.checkpointLabel || "Checkpoint")}</span>
-        <strong>Step ${escapeHtml(String(step.index))}</strong>
-        <span>${escapeHtml(meta)}</span>
-      </a>`;
-    }).join("\n")}
-  </div>`;
-}
-
-function renderContextPanel(sessionContext) {
-  if (!sessionContext) {
-    return "";
-  }
-
-  const steps = Array.isArray(sessionContext.steps) ? sessionContext.steps : [];
-  const rows = steps.map((step) => {
-    const tokens = step.tokens && typeof step.tokens === "object"
-      ? [
-        step.tokens.total != null ? `${Number(step.tokens.total).toLocaleString()} tokens` : "",
-        step.tokens.input != null ? `${Number(step.tokens.input).toLocaleString()} in` : "",
-        step.tokens.output != null ? `${Number(step.tokens.output).toLocaleString()} out` : ""
-      ].filter(Boolean).join(" · ")
-      : "";
-    const meta = [
-      step.snapshotId ? `snapshot ${step.snapshotId.slice(0, 8)}` : "no snapshot",
-      step.reason,
-      tokens,
-      step.cost ? `$${Number(step.cost).toFixed(4)}` : ""
-    ].filter(Boolean).join(" · ");
-    const totalItems = Array.isArray(step.items) ? step.items.length : 0;
-    const displayed = contextItemsForDisplay(step);
-    const counts = renderContextCounts(step.itemCounts);
-    const checkpoint = step.checkpoint !== "step";
-
-    return `<details id="${escapeHtml(anchorId("context-step", step.index))}" class="context-step context-${escapeHtml(step.checkpoint || "step")}" ${checkpoint ? "open" : ""}>
-      <summary class="context-summary" aria-label="${escapeHtml(`Toggle context step ${step.index}`)}">
-        <span class="context-step-index">step ${escapeHtml(String(step.index))}</span>
-        <span class="context-step-title">${escapeHtml(`${step.checkpointLabel || "Step"} · ${formatCount(totalItems)} reconstructed context items`)}</span>
-        <span class="context-step-meta">${escapeHtml(meta)}</span>
-      </summary>
-      ${counts ? `<p class="context-counts">${escapeHtml(counts)}</p>` : ""}
-      ${renderContextDiff(step)}
-      <ul class="context-list">
-        ${displayed.omitted ? `<li class="context-item context-omitted"><span class="context-preview">${escapeHtml(`${formatCount(displayed.omitted)} earlier items omitted in this step view; use checkpoints or JSON export for full reconstruction.`)}</span></li>` : ""}
-        ${displayed.items.map(renderContextItem).join("\n") || `<li class="context-item"><span class="context-preview">No reconstructable context items.</span></li>`}
-      </ul>
-    </details>`;
-  }).join("\n");
-
-  return `<section class="context-panel" id="context-view">
-    <header class="context-panel-header">
-      <h2>Context</h2>
-      <p>${escapeHtml(sessionContext.note || "Reconstructed context view.")}</p>
+  return `<section class="system-prompts-panel" id="system-prompts">
+    <header class="system-prompts-header">
+      <h2>System Prompts</h2>
+      <p>${escapeHtml(systemPrompts.note || "Stored pre-user context.")}</p>
+      ${systemPrompts.selectedAgent ? `<p class="system-prompt-boundary">${escapeHtml(`Selected agent: ${systemPrompts.selectedAgent}`)}</p>` : ""}
+      ${firstUser ? `<p class="system-prompt-boundary">${escapeHtml(`First user message: ${firstUser.id} · ${formatTime(firstUser.time)}`)}</p>` : ""}
     </header>
-    ${renderContextCheckpoints(steps)}
-    ${rows || `<p class="empty-state">No step context found.</p>`}
+    <div class="system-prompt-warning">
+      ${renderMetric("hidden prompt stored", systemPrompts.hiddenPromptStored ? "yes" : "no")}
+      ${renderMetric("sections", formatCount(sections.length))}
+    </div>
+    ${sections.map(renderSystemPromptSection).join("\n") || `<p class="empty-state">No stored pre-user prompt evidence found.</p>`}
   </section>`;
 }
 
@@ -793,7 +699,7 @@ function renderSessionTree(tree: SessionTree, depth = 0) {
   </details>`;
 }
 
-export function renderSessionPage({ session, sessionTree = null, sessionContext = null, sessionMetrics = null, sessionFlow = null, messages = [], partsByMessage = new Map(), todos = [], recentSessions = [], meta = null, provider = "opencode", providers = [] }) {
+export function renderSessionPage({ session, sessionTree = null, sessionSystemPrompts = null, sessionMetrics = null, sessionFlow = null, messages = [], partsByMessage = new Map(), todos = [], recentSessions = [], meta = null, provider = "opencode", providers = [] }) {
   const title = session.title || session.slug || session.id;
   const starred = meta?.starred ? 1 : 0;
   const actions = isOpenCodeLikeProvider(provider) ? `
@@ -837,7 +743,7 @@ ${actions}
     ${header}
     ${renderSessionMetricsPanel(sessionMetrics)}
     ${todoList(todos)}
-    ${renderContextPanel(sessionContext)}
+    ${renderSystemPromptsPanel(sessionSystemPrompts)}
     <section class="messages">
       ${messageMarkup || `<p class="empty-state">${t("detail.no_messages")}</p>`}
     </section>

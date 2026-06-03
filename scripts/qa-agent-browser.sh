@@ -73,10 +73,16 @@ ab "open search" open "$BASE/opencode/search?q=assistant" >/dev/null
 ab "wait for search" wait --text "Search" >/dev/null
 
 ab "open session detail" open "$BASE/opencode/session/$SAMPLE_SESSION_ID" >/dev/null
-ab "wait for context" wait --text "Context" >/dev/null
+ab "wait for system prompts" wait --text "System Prompts" >/dev/null
 detail="$(read_ab "read session detail" get text body)"
-assert_contains "detail" "$detail" "Context"
+assert_contains "detail" "$detail" "System Prompts"
 assert_contains "detail" "$detail" "TOOL"
+
+toc_unexpected="$(read_ab "count unexpected toc entries" get count ".session-toc .toc-link:not(.toc-user):not(.toc-assistant):not(.toc-agent):not(.toc-task)")"
+if [[ "$toc_unexpected" != "0" ]]; then
+  echo "TOC included non-message/non-task entries: $toc_unexpected" >&2
+  exit 1
+fi
 
 ab "open CodeAgent route" open "$BASE/codeagent" >/dev/null
 ab "wait for CodeAgent unavailable state" wait --text "Not installed" >/dev/null
