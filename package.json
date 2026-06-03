@@ -1,7 +1,7 @@
 {
   "name": "@guanzhw/opensessionviewer",
   "version": "1.2.0",
-  "description": "The developer's AI chronicle — your conversations with AI are scattered across four tools; OpenSessionViewer binds them into one searchable volume.",
+  "description": "The developer's AI chronicle — one local viewer for OpenCode, CodeAgent, Claude Code, Codex CLI, and Gemini CLI sessions.",
   "type": "module",
   "bin": {
     "opensessionviewer": "dist/bin/cli.js",
@@ -14,6 +14,7 @@
     "start": "npm run build && node dist/bin/cli.js",
     "dev": "npm run build && node dist/bin/cli.js --open",
     "typecheck": "tsc --noEmit",
+    "qa:e2e": "scripts\\qa-agent-browser.cmd",
     "prepare": "npm run build"
   },
   "engines": {

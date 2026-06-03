@@ -153,7 +153,7 @@ export function toolCallBlock(tool, input, output, status, duration, partId) {
   const summary = escapeHtml(toolDescription(tool || "tool", input));
 
   return `<details class="tool-call tool-status-${safeStatus}" ${partId ? `id="part-${escapeHtml(partId)}" data-part-id="${escapeHtml(partId)}"` : ""}>
-    <summary>
+    <summary aria-label="${escapeHtml(`Toggle tool call ${tool || "tool"}`)}">
       <span class="tool-name">${summary}</span>
       <span class="tool-status">${safeStatus}</span>
       ${safeDuration}

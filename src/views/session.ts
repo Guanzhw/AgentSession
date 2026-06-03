@@ -135,7 +135,7 @@ function renderSubsessionHeader(tree: SessionTree) {
     pieces.push(formatDuration(metrics.timeStart, metrics.timeEnd));
   }
 
-  return `<summary class="subsession-summary">
+  return `<summary class="subsession-summary" aria-label="${escapeHtml(`Toggle subsession ${title}`)}">
     <span class="subsession-kicker">subsession</span>
     <span class="subsession-title">${escapeHtml(title)}</span>
     <span class="subsession-meta">${escapeHtml(pieces.join(" · "))}</span>
@@ -153,7 +153,7 @@ function renderSubagentBranch(part: SessionPartNode, childMarkup: string) {
   ].filter(Boolean).join(" · ");
 
   return `<details class="subagent-branch" data-parent-part-id="${escapeHtml(part.id)}" open>
-    <summary class="subagent-summary">
+    <summary class="subagent-summary" aria-label="${escapeHtml(`Toggle subagent ${taskTitle(data)}`)}">
       <span class="subsession-kicker">subagent</span>
       <span class="subsession-title">${escapeHtml(taskTitle(data))}</span>
       ${meta ? `<span class="subsession-meta">${escapeHtml(meta)}</span>` : ""}
@@ -395,7 +395,7 @@ function renderContextPanel(sessionContext) {
     const items = (step.items || []).slice(-12);
 
     return `<details id="${escapeHtml(anchorId("context-step", step.index))}" class="context-step">
-      <summary class="context-summary">
+      <summary class="context-summary" aria-label="${escapeHtml(`Toggle context step ${step.index}`)}">
         <span class="context-step-index">step ${escapeHtml(String(step.index))}</span>
         <span class="context-step-title">${escapeHtml(`${items.length} reconstructed context items`)}</span>
         <span class="context-step-meta">${escapeHtml(meta)}</span>

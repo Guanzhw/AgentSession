@@ -56,3 +56,22 @@ Select-String -Path D:\WorkSpace\OpenSession\tmp\restart-page.html -Pattern 'sub
 ```
 
 The known-good count for that sample session is `35`.
+
+## Repeatable E2E QA
+
+Use these commands after the restart above. The QA command runs `agent-browser`
+against the live server and checks dashboard/search/stats/detail/context/flow/
+CodeAgent-unavailable flows.
+
+```powershell
+cd D:\WorkSpace\OpenSession
+$env:OPENSESSIONVIEWER_QA_BASE_URL = 'http://127.0.0.1:3456'
+$env:OPENSESSIONVIEWER_QA_SESSION_ID = 'ses_1ddf03616ffeTE5c6cbpUPMY3n'
+npm run qa:e2e
+```
+
+The script uses a workspace-local npm cache at `tmp\npm-cache` so it avoids the
+known global npm cache permission issue when invoking `npx agent-browser`.
+On Windows, `npm run qa:e2e` goes through `scripts\qa-agent-browser.cmd`, which
+chooses Git Bash or Cygwin Bash explicitly. If Bash is installed somewhere else,
+set `OPENSESSIONVIEWER_QA_BASH_PATH` to the full `bash.exe` path.
