@@ -1,4 +1,4 @@
-import { getChildSessions, getMessages, getParts, getSession } from "../../db.js";
+import { getChildSessionsSafe, getMessages, getParts, getSessionSafe } from "../../db.js";
 import { parseJson } from "./parser.js";
 
 type Row = Record<string, any>;
@@ -137,7 +137,7 @@ export function buildOpenCodeSessionTree(sessionId: string, dbPath = undefined, 
     return null;
   }
 
-  const session = getSession(sessionId, dbPath);
+  const session = getSessionSafe(sessionId, dbPath);
   if (!session) {
     return null;
   }
@@ -145,7 +145,7 @@ export function buildOpenCodeSessionTree(sessionId: string, dbPath = undefined, 
   const nextSeen = new Set(seen);
   nextSeen.add(sessionId);
 
-  const childRows = getChildSessions(sessionId, dbPath);
+  const childRows = getChildSessionsSafe(sessionId, dbPath);
   const childrenById = new Map<string, SessionTree>();
   for (const child of childRows) {
     const childTree = buildOpenCodeSessionTree(child.id, dbPath, nextSeen);

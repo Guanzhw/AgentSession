@@ -65,29 +65,72 @@ export function listSessions(limit = 50, offset = 0, search = "", timeRange = ""
 }
 
 export function getSession(id, pathOverride = undefined) {
+  return getSessionSafe(id, pathOverride);
+}
+
+export function getSessionSafe(id, pathOverride = undefined) {
   const db = getDb(pathOverride);
-  return db.prepare(`
-    SELECT id, project_id, parent_id, slug, title, directory, time_created, time_updated,
-           summary_additions, summary_deletions, summary_files, time_archived,
-           agent, model, cost, tokens_input, tokens_output, tokens_reasoning,
-           tokens_cache_read, tokens_cache_write
-    FROM session
-    WHERE id = ?
-  `).get(id) ?? null;
+  const row = db.prepare(`SELECT * FROM session WHERE id = ?`).get(id);
+  if (!row) return null;
+  return {
+    id: row.id,
+    project_id: row.project_id,
+    parent_id: row.parent_id,
+    slug: row.slug,
+    title: row.title,
+    directory: row.directory,
+    time_created: row.time_created,
+    time_updated: row.time_updated,
+    summary_additions: row.summary_additions ?? 0,
+    summary_deletions: row.summary_deletions ?? 0,
+    summary_files: row.summary_files ?? 0,
+    time_archived: row.time_archived,
+    agent: row.agent ?? null,
+    model: row.model ?? null,
+    cost: row.cost ?? 0,
+    tokens_input: row.tokens_input ?? 0,
+    tokens_output: row.tokens_output ?? 0,
+    tokens_reasoning: row.tokens_reasoning ?? 0,
+    tokens_cache_read: row.tokens_cache_read ?? 0,
+    tokens_cache_write: row.tokens_cache_write ?? 0,
+  };
 }
 
 export function getChildSessions(parentId, pathOverride = undefined) {
+  return getChildSessionsSafe(parentId, pathOverride);
+}
+
+export function getChildSessionsSafe(parentId, pathOverride = undefined) {
   const db = getDb(pathOverride);
-  return db.prepare(`
-    SELECT id, project_id, parent_id, slug, title, directory, time_created, time_updated,
-           summary_additions, summary_deletions, summary_files, time_archived,
-           agent, model, cost, tokens_input, tokens_output, tokens_reasoning,
-           tokens_cache_read, tokens_cache_write
+  const rows = db.prepare(`
+    SELECT *
     FROM session
     WHERE parent_id = ?
       AND time_archived IS NULL
     ORDER BY time_created ASC, id ASC
   `).all(parentId);
+  return rows.map(row => ({
+    id: row.id,
+    project_id: row.project_id,
+    parent_id: row.parent_id,
+    slug: row.slug,
+    title: row.title,
+    directory: row.directory,
+    time_created: row.time_created,
+    time_updated: row.time_updated,
+    summary_additions: row.summary_additions ?? 0,
+    summary_deletions: row.summary_deletions ?? 0,
+    summary_files: row.summary_files ?? 0,
+    time_archived: row.time_archived,
+    agent: row.agent ?? null,
+    model: row.model ?? null,
+    cost: row.cost ?? 0,
+    tokens_input: row.tokens_input ?? 0,
+    tokens_output: row.tokens_output ?? 0,
+    tokens_reasoning: row.tokens_reasoning ?? 0,
+    tokens_cache_read: row.tokens_cache_read ?? 0,
+    tokens_cache_write: row.tokens_cache_write ?? 0,
+  }));
 }
 
 export function getMessages(sessionId, pathOverride = undefined) {
