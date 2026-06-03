@@ -695,6 +695,125 @@ body::before {
   background: color-mix(in srgb, var(--error-bg) 50%, transparent);
 }
 
+.flow-timing {
+  margin: 0 0 12px;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+}
+
+.flow-timing-head,
+.flow-timing-axis {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.flow-timing-head {
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.flow-timing-head span {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.flow-timing-head strong {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  text-align: right;
+}
+
+.flow-timing-axis {
+  color: var(--text-muted);
+  font-size: 9px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 6px;
+}
+
+.flow-timing-rows {
+  display: grid;
+  gap: 5px;
+}
+
+.flow-timing-row {
+  display: grid;
+  grid-template-columns: minmax(68px, 0.45fr) minmax(120px, 1fr);
+  gap: 7px;
+  align-items: center;
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 10px;
+}
+
+.flow-timing-row:hover {
+  color: var(--text-primary);
+}
+
+.flow-timing-label {
+  min-width: 0;
+  padding-left: calc(var(--flow-depth, 0) * 7px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-timing-track {
+  position: relative;
+  min-width: 0;
+  height: 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border-color) 55%, transparent);
+  overflow: hidden;
+}
+
+.flow-timing-bar {
+  position: absolute;
+  left: var(--flow-left, 0%);
+  width: var(--flow-width, 1%);
+  top: 2px;
+  bottom: 2px;
+  border-radius: 999px;
+  background: var(--trace-text);
+}
+
+.flow-timing-subagent .flow-timing-bar {
+  background: var(--trace-agent);
+}
+
+.flow-timing-session .flow-timing-bar {
+  background: var(--accent-color);
+}
+
+.flow-timing-error .flow-timing-bar {
+  background: var(--error-color);
+}
+
+.flow-timing-point .flow-timing-bar {
+  width: max(var(--flow-width, 1%), 4px);
+}
+
+.flow-timing-meta {
+  grid-column: 2;
+  min-width: 0;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-timing-note {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
 .anchor-flash {
   animation: anchor-flash 0.9s ease-out;
 }

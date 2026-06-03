@@ -332,6 +332,86 @@ function flowHref(node) {
   return "#";
 }
 
+function flattenFlowTimeline(node, depth = 0, rows = []) {
+  if (!node) {
+    return rows;
+  }
+
+  if (node.kind !== "session" || depth > 0) {
+    const start = Number(node.timeStart) || 0;
+    const end = Number(node.timeEnd) || start + Number(node.duration || 0);
+    if (start) {
+      rows.push({
+        node,
+        depth,
+        start,
+        end: end > start ? end : start,
+        duration: Math.max(0, Number(node.duration) || end - start)
+      });
+    }
+  }
+
+  for (const child of Array.isArray(node.children) ? node.children : []) {
+    flattenFlowTimeline(child, depth + 1, rows);
+  }
+
+  return rows;
+}
+
+function renderFlowTimingDiagram(sessionFlow) {
+  const root = sessionFlow?.root;
+  if (!root?.timeStart || !root?.timeEnd || root.timeEnd <= root.timeStart) {
+    return "";
+  }
+
+  const total = root.timeEnd - root.timeStart;
+  const rows = flattenFlowTimeline(root)
+    .sort((a, b) => a.start - b.start || a.depth - b.depth)
+    .slice(0, 90);
+  if (!rows.length) {
+    return "";
+  }
+
+  const rowMarkup = rows.map(({ node, depth, start, end, duration }) => {
+    const left = Math.max(0, Math.min(100, ((start - root.timeStart) / total) * 100));
+    const rawWidth = Math.max(0, ((end - start) / total) * 100);
+    const width = duration ? Math.max(0.8, rawWidth) : 0.8;
+    const isPoint = !duration || rawWidth < 0.8;
+    const classes = [
+      "flow-timing-row",
+      `flow-timing-${escapeHtml(node.kind || "node")}`,
+      node.errors ? "flow-timing-error" : "",
+      isPoint ? "flow-timing-point" : ""
+    ].filter(Boolean).join(" ");
+    const meta = [
+      duration ? formatMilliseconds(duration) : "point",
+      node.toolCalls ? `${formatCount(node.toolCalls)} tools` : "",
+      node.errors ? `${formatCount(node.errors)} errors` : "",
+      node.subagents ? `${formatCount(node.subagents)} subagents` : ""
+    ].filter(Boolean).join(" · ");
+
+    return `<a class="${classes}" href="${escapeHtml(flowHref(node))}" style="--flow-left:${left.toFixed(3)}%;--flow-width:${Math.min(width, 100 - left).toFixed(3)}%;--flow-depth:${Math.min(depth, 6)}">
+      <span class="flow-timing-label">${escapeHtml(compactText(node.label, 42) || node.kind)}</span>
+      <span class="flow-timing-track"><span class="flow-timing-bar"></span></span>
+      <span class="flow-timing-meta">${escapeHtml(meta)}</span>
+    </a>`;
+  }).join("\n");
+
+  const omitted = flattenFlowTimeline(root).length - rows.length;
+  return `<section class="flow-timing">
+    <div class="flow-timing-head">
+      <span>Timing</span>
+      <strong>${escapeHtml(formatTime(root.timeStart))} → ${escapeHtml(formatTime(root.timeEnd))}</strong>
+    </div>
+    <div class="flow-timing-axis" aria-hidden="true">
+      <span>start</span>
+      <span>${escapeHtml(formatMilliseconds(total))}</span>
+    </div>
+    <div class="flow-timing-rows">${rowMarkup}</div>
+    ${omitted > 0 ? `<p class="flow-timing-note">${escapeHtml(`${formatCount(omitted)} later timing rows omitted in the compact panel.`)}</p>` : ""}
+  </section>`;
+}
+
 function renderCanonicalFlowNode(node, depth = 0) {
   const kind = node.kind || "part";
   const children = Array.isArray(node.children) ? node.children : [];
@@ -374,6 +454,7 @@ function renderCanonicalFlowPanel(sessionFlow) {
       ${renderMetric("steps", formatCount(summary.steps))}
       ${summary.totalCost ? renderMetric("cost", `$${Number(summary.totalCost).toFixed(3)}`) : ""}
     </div>
+    ${renderFlowTimingDiagram(sessionFlow)}
     <ul class="flow-tree">${renderCanonicalFlowNode(sessionFlow.root)}</ul>
   </aside>`;
 }
