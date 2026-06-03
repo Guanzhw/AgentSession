@@ -156,6 +156,15 @@ function renderSubagentBranch(part: SessionPartNode, childMarkup: string) {
 
 function collectTocItems(tree: SessionTree, depth = 0) {
   const items = [];
+  const session = tree.session || {};
+  items.push({
+    id: anchorId("session", session.id || "root"),
+    type: depth ? "Branch" : "Session",
+    label: session.title || session.slug || session.id || "Session",
+    meta: depth ? `${formatCount(tree.metrics.totalMessages)} msg` : "root",
+    depth
+  });
+
   for (const message of tree.messages) {
     if (message.role) {
       items.push({
@@ -168,12 +177,13 @@ function collectTocItems(tree: SessionTree, depth = 0) {
     }
 
     for (const part of message.parts) {
-      if (part.type === "tool" && isTaskTool(part.tool)) {
+      if (part.type === "tool") {
+        const isTask = isTaskTool(part.tool);
         items.push({
           id: anchorId("part", part.id),
-          type: "Task",
-          label: taskTitle(part.data),
-          meta: part.childSessions.length ? `${part.childSessions.length} branch` : partStatus(part.data) || "task",
+          type: isTask ? "Task" : "Tool",
+          label: isTask ? taskTitle(part.data) : toolTitle(part.data),
+          meta: part.childSessions.length ? `${part.childSessions.length} branch` : partStatus(part.data) || part.tool || "tool",
           depth
         });
       }
@@ -189,12 +199,26 @@ function collectTocItems(tree: SessionTree, depth = 0) {
   return items;
 }
 
-function renderToc(tree: SessionTree | null) {
-  if (!tree) {
+function collectContextTocItems(sessionContext) {
+  const steps = Array.isArray(sessionContext?.steps) ? sessionContext.steps : [];
+  return steps.map((step) => ({
+    id: anchorId("context-step", step.index),
+    type: "Context",
+    label: `Step ${step.index}`,
+    meta: step.snapshotId ? `snapshot ${String(step.snapshotId).slice(0, 8)}` : "reconstructed",
+    depth: 0
+  }));
+}
+
+function renderToc(tree: SessionTree | null, sessionContext = null) {
+  if (!tree && !sessionContext) {
     return `<aside class="session-toc"><h2>Navigate</h2><p class="toc-empty">No indexed prompts.</p></aside>`;
   }
 
-  const items = collectTocItems(tree);
+  const items = [
+    ...(tree ? collectTocItems(tree) : []),
+    ...collectContextTocItems(sessionContext)
+  ];
   const markup = items.map((item) => `
     <a class="toc-link toc-${escapeHtml(item.type.toLowerCase())}" href="#${escapeHtml(item.id)}" style="--toc-depth:${Math.min(item.depth, 6)}">
       <span class="toc-type">${escapeHtml(item.type)}</span>
@@ -314,7 +338,7 @@ function renderContextPanel(sessionContext) {
     ].filter(Boolean).join(" · ");
     const items = (step.items || []).slice(-12);
 
-    return `<details class="context-step">
+    return `<details id="${escapeHtml(anchorId("context-step", step.index))}" class="context-step">
       <summary class="context-summary">
         <span class="context-step-index">step ${escapeHtml(String(step.index))}</span>
         <span class="context-step-title">${escapeHtml(`${items.length} reconstructed context items`)}</span>
@@ -464,7 +488,7 @@ ${actions}
 
   const body = `
 <div class="session-workbench" data-session-id="${escapeHtml(session.id)}" data-provider="${escapeHtml(provider)}">
-  ${renderToc(sessionTree)}
+  ${renderToc(sessionTree, sessionContext)}
   <main id="${escapeHtml(anchorId("session", session.id))}" class="main-content">
     ${header}
     ${todoList(todos)}

@@ -579,6 +579,22 @@ body::before {
   color: var(--trace-agent);
 }
 
+.toc-session .toc-type {
+  color: var(--accent-color);
+}
+
+.toc-branch .toc-type {
+  color: var(--trace-agent);
+}
+
+.toc-tool .toc-type {
+  color: var(--trace-tool);
+}
+
+.toc-context .toc-type {
+  color: var(--trace-mcp);
+}
+
 .toc-label {
   min-width: 0;
   overflow: hidden;
