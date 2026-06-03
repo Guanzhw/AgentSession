@@ -18,6 +18,7 @@ import {
   getSessionsByIds
 } from "./db.js";
 import { buildOpenCodeSessionTree } from "./providers/opencode/session-tree.js";
+import { buildOpenCodeSessionContainer } from "./providers/opencode/session-container.js";
 import { isOpenCodeLikeProvider } from "./providers/kinds.js";
 import { getAvailableProviders, getAllProviders, getProvider } from "./providers/index.js";
 import { getIndexDb, upsertIndex, getIndexedSessions, clearIndex } from "./index-db.js";
@@ -603,6 +604,7 @@ export async function startServer(config = getConfig()) {
         if (format === "json") {
           const filename = `session-${id.slice(0, 8)}.json`;
           const sessionTree = isOpenCodeLikeProvider(providerId) ? buildOpenCodeSessionTree(id, adapter.getDataPath()) : null;
+          const sessionContainer = isOpenCodeLikeProvider(providerId) ? buildOpenCodeSessionContainer(id, adapter.getDataPath()) : null;
           res.writeHead(200, {
             "Content-Type": "application/json; charset=utf-8",
             "Content-Disposition": `attachment; filename="${filename}"`
@@ -610,6 +612,7 @@ export async function startServer(config = getConfig()) {
           return res.end(JSON.stringify({
             session,
             tree: sessionTree,
+            container: sessionContainer,
             messages: messages.map((message) => ({
               ...message,
               parts: (partsByMessage.get(message.id) || []).map((part) => part.data)
@@ -652,9 +655,11 @@ export async function startServer(config = getConfig()) {
           const messages = getMessages(sessionId, dbPath).map((message) => ({ ...message, data: safeJsonParse(message.data) }));
           const partsByMessage = loadPartsByMessage(messages, dbPath);
           const sessionTree = buildOpenCodeSessionTree(sessionId, dbPath);
+          const sessionContainer = buildOpenCodeSessionContainer(sessionId, dbPath);
           return json(res, {
             session: enrichedSession,
             tree: sessionTree,
+            container: sessionContainer,
             messages: messages.map((message) => ({
               ...message,
               parts: (partsByMessage.get(message.id) || []).map((part) => part.data)
