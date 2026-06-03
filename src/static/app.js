@@ -450,254 +450,73 @@ if (scrollSentinel && sessionList && "IntersectionObserver" in window) {
   }
 }
 
-let traceData = null;
-let currentStepIndex = 0;
+const sessionWorkbench = document.querySelector(".session-workbench");
+if (sessionWorkbench) {
+  const navLinks = [...document.querySelectorAll(".session-toc a[href^='#'], .session-flow a[href^='#']")];
+  const targets = [...new Set(navLinks
+    .map((link) => document.getElementById(decodeURIComponent(link.getAttribute("href").slice(1))))
+    .filter(Boolean))];
+  let lastManualNav = 0;
+  let scrollTicking = false;
 
-function truncateTraceText(value, maxLength = 220) {
-  const text = value == null ? "" : String(value);
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, maxLength)}…`;
-}
-
-function getTraceStepDuration(step) {
-  const duration = Number(step?.duration);
-  if (Number.isFinite(duration) && duration > 0) return duration;
-  const start = Number(step?.timeStart);
-  const end = Number(step?.timeEnd);
-  if (Number.isFinite(start) && Number.isFinite(end) && end >= start) {
-    return end - start;
-  }
-  return 0;
-}
-
-function updateTraceTitle() {
-  const titleEl = document.getElementById("trace-title");
-  const steps = Array.isArray(traceData?.steps) ? traceData.steps : [];
-  const step = steps[currentStepIndex] || null;
-  if (!titleEl) return;
-  if (!step) {
-    titleEl.textContent = "Trace";
-    return;
-  }
-  titleEl.textContent = `Step ${currentStepIndex + 1}/${steps.length} · ${step.model || "unknown"} · ${Math.max(0, Math.round(getTraceStepDuration(step)))}ms`;
-}
-
-function switchStep(stepIndex) {
-  const steps = Array.isArray(traceData?.steps) ? traceData.steps : [];
-  if (!steps.length) {
-    currentStepIndex = 0;
-    renderTimeline();
-    updateTraceTitle();
-    return;
-  }
-  const safeIndex = Math.max(0, Math.min(Number(stepIndex) || 0, steps.length - 1));
-  currentStepIndex = safeIndex;
-  renderTimeline();
-  updateTraceTitle();
-}
-
-async function openTracePanel(partId) {
-  const layoutEl = document.querySelector(".two-column");
-  const panelEl = document.getElementById("trace-panel");
-  if (!layoutEl || !panelEl) return;
-
-  const provider = layoutEl.dataset.provider || "";
-  const sessionId = layoutEl.dataset.sessionId || "";
-  if (provider !== "opencode") return;
-  if (!sessionId) return;
-
-  panelEl.querySelector('#trace-timeline').innerHTML = '<div class="trace-loading">Loading trace</div>';
-
-  try {
-    const res = await fetch(`/api/${encodeURIComponent(provider)}/session/${encodeURIComponent(sessionId)}/trace`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    traceData = data && typeof data === "object" ? data : { steps: [], summary: null };
-    const steps = Array.isArray(traceData.steps) ? traceData.steps : [];
-    const matchedIndex = steps.findIndex((step) =>
-      Array.isArray(step?.spans) && step.spans.some((span) => String(span?.id || "") === String(partId || ""))
-    );
-    currentStepIndex = matchedIndex >= 0 ? matchedIndex : 0;
-
-    renderTimeline();
-    panelEl.classList.add("open");
-    layoutEl.classList.add("trace-open");
-    updateTraceTitle();
-  } catch {
-    traceData = { steps: [], summary: null };
-    currentStepIndex = 0;
-    renderTimeline();
-    panelEl.classList.add("open");
-    layoutEl.classList.add("trace-open");
-    updateTraceTitle();
-  }
-}
-
-function closeTracePanel() {
-  const layoutEl = document.querySelector(".two-column");
-  const panelEl = document.getElementById("trace-panel");
-  panelEl?.classList.remove("open");
-  layoutEl?.classList.remove("trace-open");
-}
-
-function renderTimeline() {
-  const timelineEl = document.getElementById("trace-timeline");
-  if (!timelineEl) return;
-
-  const steps = Array.isArray(traceData?.steps) ? traceData.steps : [];
-  if (!steps.length) {
-    timelineEl.innerHTML = '<div class="trace-empty">No trace data available</div>';
-    return;
-  }
-
-  const allSpans = steps.flatMap((step, si) =>
-    (Array.isArray(step?.spans) ? step.spans : []).map((span) => ({ ...span, _stepIndex: si, _step: step }))
-  );
-
-  const catCounts = {};
-  allSpans.forEach((s) => { catCounts[s.category] = (catCounts[s.category] || 0) + 1; });
-
-  const agentNameMap = { explore: "Explorer", librarian: "Librarian", oracle: "Oracle", metis: "Metis", momus: "Momus" };
-
-  const getAgentName = (span) => {
-    try {
-      const inp = JSON.parse(span.input || "{}");
-      if (inp.subagent_type && agentNameMap[inp.subagent_type]) return agentNameMap[inp.subagent_type];
-      if (inp.subagent_type) return inp.subagent_type;
-      if (inp.category) return `Junior (${inp.category})`;
-      return "Sisyphus-Junior";
-    } catch { return "Sisyphus-Junior"; }
+  const setActiveTarget = (id) => {
+    navLinks.forEach((link) => {
+      link.classList.toggle("active", link.getAttribute("href") === `#${id}`);
+    });
   };
 
-  const getSkillName = (span) => {
-    try { const inp = JSON.parse(span.input || "{}"); return inp.name || "skill"; } catch { return "skill"; }
-  };
-
-  const getMcpLabel = (span) => {
-    const method = span.mcpServer ? (span.name || "").replace(span.mcpServer + "_", "") : span.name;
-    return { server: span.mcpServer || "mcp", method };
-  };
-
-  const getToolLabel = (span) => {
-    if (span.title) {
-      const parts = span.title.split("/");
-      return parts.length > 2 ? parts.slice(-2).join("/") : span.title;
-    }
-    return "";
-  };
-
-  const icons = { agent: "🤖", skill: "🎯", mcp: "🧠", tool: "🔧", lsp: "📡" };
-
-  const renderNode = (span, indent = 0) => {
-    const cat = escapeHtmlClient(span.category || "tool");
-    const errorCls = span.status === "error" ? " chain-error" : "";
-    const dur = Math.max(0, Math.round(Number(span.duration) || 0));
-    const icon = icons[span.category] || "🔧";
-
-    let nameHtml = "";
-    if (span.category === "agent") {
-      const agentName = getAgentName(span);
-      const desc = span.title || "";
-      nameHtml = `<span class="chain-agent-name">${escapeHtmlClient(agentName)}</span>`;
-      if (desc) nameHtml += `<span class="chain-desc">${escapeHtmlClient(truncateTraceText(desc, 45))}</span>`;
-    } else if (span.category === "skill") {
-      nameHtml = `<span class="chain-name">${escapeHtmlClient(getSkillName(span))}</span>`;
-    } else if (span.category === "mcp") {
-      const m = getMcpLabel(span);
-      nameHtml = `<span class="chain-mcp-name">${escapeHtmlClient(m.server)}</span><span class="chain-desc">${escapeHtmlClient(m.method)}</span>`;
-    } else if (span.category === "tool") {
-      const detail = getToolLabel(span);
-      nameHtml = `<span class="chain-name">${escapeHtmlClient(span.name || "tool")}</span>`;
-      if (detail) nameHtml += `<span class="chain-desc">${escapeHtmlClient(truncateTraceText(detail, 35))}</span>`;
-    } else if (span.category === "lsp") {
-      nameHtml = `<span class="chain-name">${escapeHtmlClient((span.name || "").replace("lsp_", ""))}</span>`;
-    } else {
-      nameHtml = `<span class="chain-name">${escapeHtmlClient(span.name || span.category)}</span>`;
+  const updateActiveFromScroll = () => {
+    scrollTicking = false;
+    if (Date.now() - lastManualNav < 1200) {
+      return;
     }
 
-    return `<div class="chain-node cat-bg-${cat}${errorCls}" style="margin-left:${indent * 18}px" data-trace-step-index="${span._stepIndex}">
-      <span class="chain-dot cat-${cat}"></span>
-      <span class="chain-icon">${icon}</span>
-      <span class="chain-cat">${cat}</span>
-      ${nameHtml}
-      <span class="chain-dur">${dur}ms</span>
-      ${span.status === "error" ? '<span class="chain-status-err">err</span>' : ""}
-    </div>`;
+    let best = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    targets.forEach((target) => {
+      const rect = target.getBoundingClientRect();
+      if (rect.bottom < 48 || rect.top > window.innerHeight) {
+        return;
+      }
+      const distance = Math.abs(rect.top - 64);
+      if (distance < bestDistance) {
+        best = target;
+        bestDistance = distance;
+      }
+    });
+
+    if (best?.id) {
+      setActiveTarget(best.id);
+    }
   };
 
-  let html = `<div class="chain-summary">
-    <span class="chain-stat"><span class="chain-dot cat-agent"></span>Agent ${catCounts.agent || 0}</span>
-    <span class="chain-stat"><span class="chain-dot cat-skill"></span>Skill ${catCounts.skill || 0}</span>
-    <span class="chain-stat"><span class="chain-dot cat-mcp"></span>MCP ${catCounts.mcp || 0}</span>
-    <span class="chain-stat"><span class="chain-dot cat-tool"></span>Tool ${catCounts.tool || 0}</span>
-    <span class="chain-stat"><span class="chain-dot cat-lsp"></span>LSP ${catCounts.lsp || 0}</span>
-  </div>`;
-
-  steps.forEach((step, stepIndex) => {
-    const spans = (Array.isArray(step?.spans) ? step.spans : [])
-      .map((sp) => ({ ...sp, _stepIndex: stepIndex, _step: step }))
-      .filter((s) => s.category !== "text" && s.category !== "invalid" && s.category !== "reasoning");
-    if (!spans.length) return;
-
-    const cost = Number(step?.cost);
-    const dur = Math.max(0, Math.round(Number(step?.duration) || 0));
-    const agentName = step?.agent ? `${typeof step.agent === "string" ? step.agent : step.agent.name || "Sisyphus"}` : "";
-
-    html += `<details class="chain-step-group" open>
-      <summary class="chain-step-header" data-trace-step-index="${stepIndex}">
-        <span class="step-num">Step ${stepIndex + 1}</span>
-        ${agentName ? `<span class="step-agent">${escapeHtmlClient(agentName)}</span>` : ""}
-        <span class="step-meta">${escapeHtmlClient(step?.model || "")} · ${dur}ms${Number.isFinite(cost) ? ` · $${cost.toFixed(3)}` : ""}</span>
-      </summary>`;
-
-    const agentSpans = spans.filter((s) => s.category === "agent");
-    const otherSpans = spans.filter((s) => s.category !== "agent");
-
-    if (agentSpans.length) {
-      agentSpans.forEach((agent) => {
-        html += renderNode(agent, 0);
-        const sameStepChildren = otherSpans.filter((s) => {
-          const agentTime = Number(agent.timeStart) || 0;
-          const spanTime = Number(s.timeStart) || 0;
-          return spanTime >= agentTime;
-        });
-        const childrenToShow = sameStepChildren.splice(0, Math.min(sameStepChildren.length, 5));
-        if (childrenToShow.length) {
-          html += `<div class="chain-children">`;
-          childrenToShow.forEach((child) => { html += renderNode(child, 0); });
-          html += `</div>`;
-        }
-      });
-      otherSpans.forEach((s) => { html += renderNode(s, 0); });
-    } else {
-      spans.forEach((s) => { html += renderNode(s, 0); });
-    }
-
-    html += `</details>`;
+  document.addEventListener("click", (event) => {
+    const link = event.target.closest(".session-toc a[href^='#'], .session-flow a[href^='#']");
+    if (!link) return;
+    const target = document.getElementById(decodeURIComponent(link.getAttribute("href").slice(1)));
+    if (!target) return;
+    event.preventDefault();
+    lastManualNav = Date.now();
+    history.pushState(null, "", link.getAttribute("href"));
+    target.scrollIntoView({ block: "start", behavior: "smooth" });
+    target.classList.add("anchor-flash");
+    setActiveTarget(target.id);
+    setTimeout(() => target.classList.remove("anchor-flash"), 900);
   });
 
-  const summary = traceData?.summary || {};
-  html += `<div class="chain-footer">${steps.length} steps · ${Number(summary.totalSpans) || 0} spans · $${Number(summary.totalCost)?.toFixed(2) || "0"} · ${(Number(summary.totalTokens) || 0).toLocaleString()} tokens</div>`;
+  if (targets.length) {
+    window.addEventListener("scroll", () => {
+      if (scrollTicking) {
+        return;
+      }
+      scrollTicking = true;
+      requestAnimationFrame(updateActiveFromScroll);
+    }, { passive: true });
 
-  timelineEl.innerHTML = html;
+    if (location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)))) {
+      setActiveTarget(decodeURIComponent(location.hash.slice(1)));
+    } else {
+      updateActiveFromScroll();
+    }
+  }
 }
-
-document.addEventListener("click", (e) => {
-  const stepHeader = e.target.closest("[data-trace-step-index]");
-  if (!stepHeader) return;
-  switchStep(Number(stepHeader.dataset.traceStepIndex) || 0);
-});
-
-document.addEventListener("click", async (e) => {
-  const traceBtn = e.target.closest(".trace-btn[data-part-id]");
-  if (!traceBtn) return;
-  const partId = traceBtn.dataset.partId || "";
-  if (!partId) return;
-  await openTracePanel(partId);
-});
-
-document.addEventListener("click", (e) => {
-  const closeBtn = e.target.closest(".trace-panel-close");
-  if (!closeBtn) return;
-  closeTracePanel();
-});

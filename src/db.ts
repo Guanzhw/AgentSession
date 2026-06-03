@@ -68,11 +68,27 @@ export function listSessions(limit = 50, offset = 0, search = "", timeRange = ""
 export function getSession(id) {
   const db = getDb();
   return db.prepare(`
-    SELECT id, project_id, slug, title, directory, time_created, time_updated,
-           summary_additions, summary_deletions, summary_files, time_archived
+    SELECT id, project_id, parent_id, slug, title, directory, time_created, time_updated,
+           summary_additions, summary_deletions, summary_files, time_archived,
+           agent, model, cost, tokens_input, tokens_output, tokens_reasoning,
+           tokens_cache_read, tokens_cache_write
     FROM session
     WHERE id = ?
   `).get(id) ?? null;
+}
+
+export function getChildSessions(parentId) {
+  const db = getDb();
+  return db.prepare(`
+    SELECT id, project_id, parent_id, slug, title, directory, time_created, time_updated,
+           summary_additions, summary_deletions, summary_files, time_archived,
+           agent, model, cost, tokens_input, tokens_output, tokens_reasoning,
+           tokens_cache_read, tokens_cache_write
+    FROM session
+    WHERE parent_id = ?
+      AND time_archived IS NULL
+    ORDER BY time_created ASC, id ASC
+  `).all(parentId);
 }
 
 export function getMessages(sessionId) {

@@ -151,11 +151,10 @@ export function toolCallBlock(tool, input, output, status, duration, partId) {
   const safeDuration = duration ? `<span class="tool-duration">${escapeHtml(duration)}</span>` : "";
   const summary = escapeHtml(toolDescription(tool || "tool", input));
 
-  return `<details class="tool-call tool-status-${safeStatus}" ${partId ? `data-part-id="${escapeHtml(partId)}"` : ""}>
+  return `<details class="tool-call tool-status-${safeStatus}" ${partId ? `id="part-${escapeHtml(partId)}" data-part-id="${escapeHtml(partId)}"` : ""}>
     <summary>
       <span class="tool-name">${summary}</span>
       <span class="tool-status">${safeStatus}</span>
-      <button type="button" class="trace-btn" data-part-id="${escapeHtml(partId)}" title="View trace">⚡</button>
       ${safeDuration}
     </summary>
     <div class="tool-panels">

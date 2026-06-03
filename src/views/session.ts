@@ -1,7 +1,8 @@
 import { escapeHtml } from "../markdown.js";
 import { layout } from "./layout.js";
-import { formatDuration, messageBubble, todoList, toolCallBlock, sessionCard } from "./components.js";
+import { formatDuration, formatTime, messageBubble, todoList, toolCallBlock } from "./components.js";
 import { t } from "../i18n.js";
+import type { SessionPartNode, SessionTree } from "../providers/opencode/session-tree.js";
 
 function safeParse(value) {
   if (typeof value !== "string") {
@@ -27,6 +28,239 @@ function modelLabel(model) {
   return model.modelID || model.providerID || "";
 }
 
+function messageModelLabel(messageData) {
+  return modelLabel(messageData.model) || modelLabel(messageData);
+}
+
+function formatCount(value) {
+  return (Number(value) || 0).toLocaleString();
+}
+
+function anchorId(prefix, id) {
+  return `${prefix}-${String(id || "").replace(/[^A-Za-z0-9_-]/g, "-")}`;
+}
+
+function stringifyCompact(value) {
+  if (value == null) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function compactText(value, limit = 72) {
+  const text = stringifyCompact(value).replace(/\s+/g, " ").trim();
+  if (!text) {
+    return "";
+  }
+  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
+}
+
+function partStatus(partData) {
+  return typeof partData?.state?.status === "string" ? partData.state.status : "";
+}
+
+function isErrorPart(partData) {
+  return partStatus(partData) === "error" || Boolean(partData?.error);
+}
+
+function isTaskTool(tool) {
+  return ["task", "subtask"].includes(String(tool || ""));
+}
+
+function taskTitle(partData) {
+  return partData?.state?.title
+    || partData?.state?.input?.description
+    || partData?.state?.input?.subagent_type
+    || "Subagent task";
+}
+
+function toolTitle(partData) {
+  if (partData?.type === "tool" && isTaskTool(partData?.tool)) {
+    return taskTitle(partData);
+  }
+
+  const input = partData?.state?.input;
+  const candidates = [
+    partData?.state?.title,
+    input?.filePath,
+    input?.command,
+    input?.pattern,
+    input?.url,
+    input?.description
+  ];
+  const detail = candidates.find((item) => typeof item === "string" && item.trim());
+  return detail ? `${partData?.tool || partData?.type} · ${detail}` : (partData?.tool || partData?.type || "part");
+}
+
+function messageText(message) {
+  const textPart = message.parts.find((part) => part.type === "text" && part.data?.text);
+  return compactText(textPart?.data?.text || message.data?.summary || message.id, 86);
+}
+
+function renderMetric(label, value) {
+  return `<span class="session-stat"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></span>`;
+}
+
+function renderSubsessionHeader(tree: SessionTree) {
+  const session = tree.session || {};
+  const title = session.title || session.slug || session.id;
+  const metrics = tree.metrics;
+  const pieces = [
+    `${formatCount(metrics.totalMessages)} messages`,
+    `${formatCount(metrics.totalToolCalls)} tools`
+  ];
+
+  if (metrics.descendantCount) {
+    pieces.push(`${formatCount(metrics.descendantCount)} nested`);
+  }
+  if (metrics.runtimeMs) {
+    pieces.push(formatDuration(metrics.timeStart, metrics.timeEnd));
+  }
+
+  return `<summary class="subsession-summary">
+    <span class="subsession-kicker">subsession</span>
+    <span class="subsession-title">${escapeHtml(title)}</span>
+    <span class="subsession-meta">${escapeHtml(pieces.join(" · "))}</span>
+  </summary>`;
+}
+
+function collectTocItems(tree: SessionTree, depth = 0) {
+  const items = [];
+  for (const message of tree.messages) {
+    if (message.role) {
+      items.push({
+        id: anchorId("msg", message.id),
+        type: message.role,
+        label: messageText(message) || `${message.role} message`,
+        meta: formatTime(message.timeCreated),
+        depth
+      });
+    }
+
+    for (const part of message.parts) {
+      if (part.type === "tool" && isTaskTool(part.tool)) {
+        items.push({
+          id: anchorId("part", part.id),
+          type: "Task",
+          label: taskTitle(part.data),
+          meta: part.childSessions.length ? `${part.childSessions.length} branch` : partStatus(part.data) || "task",
+          depth
+        });
+      }
+      for (const child of part.childSessions) {
+        items.push(...collectTocItems(child, depth + 1));
+      }
+    }
+  }
+
+  for (const child of tree.detachedChildren) {
+    items.push(...collectTocItems(child, depth + 1));
+  }
+  return items;
+}
+
+function renderToc(tree: SessionTree | null) {
+  if (!tree) {
+    return `<aside class="session-toc"><h2>Navigate</h2><p class="toc-empty">No indexed prompts.</p></aside>`;
+  }
+
+  const items = collectTocItems(tree);
+  const markup = items.map((item) => `
+    <a class="toc-link toc-${escapeHtml(item.type.toLowerCase())}" href="#${escapeHtml(item.id)}" style="--toc-depth:${Math.min(item.depth, 6)}">
+      <span class="toc-type">${escapeHtml(item.type)}</span>
+      <span class="toc-label">${escapeHtml(item.label)}</span>
+      ${item.meta ? `<span class="toc-meta">${escapeHtml(item.meta)}</span>` : ""}
+    </a>
+  `).join("\n");
+
+  return `<aside class="session-toc">
+    <h2>Navigate</h2>
+    <div class="toc-list">${markup || `<p class="toc-empty">No indexed prompts.</p>`}</div>
+  </aside>`;
+}
+
+function renderFlowPart(part: SessionPartNode, depth: number) {
+  const data = part.data || {};
+  const status = partStatus(data);
+  const duration = part.timeStart && part.timeEnd ? formatDuration(part.timeStart, part.timeEnd) : "";
+  const isTask = part.type === "tool" && isTaskTool(part.tool);
+  const kind = isTask ? "subagent" : part.type === "tool" ? "tool" : part.type;
+  const label = isTask ? taskTitle(data) : toolTitle(data);
+  const classes = ["flow-row", `flow-${kind}`, isErrorPart(data) ? "flow-error" : ""].filter(Boolean).join(" ");
+  const href = `#${anchorId("part", part.id)}`;
+  const childMarkup = part.childSessions.map((child) => renderFlowSession(child, depth + 1)).join("\n");
+
+  return `<li>
+    <a class="${classes}" href="${escapeHtml(href)}" style="--flow-depth:${Math.min(depth, 8)}">
+      <span class="flow-dot"></span>
+      <span class="flow-kind">${escapeHtml(kind)}</span>
+      <span class="flow-label">${escapeHtml(compactText(label, 90) || kind)}</span>
+      ${status ? `<span class="flow-status">${escapeHtml(status)}</span>` : ""}
+      ${duration ? `<span class="flow-duration">${escapeHtml(duration)}</span>` : ""}
+    </a>
+    ${childMarkup ? `<ul class="flow-children">${childMarkup}</ul>` : ""}
+  </li>`;
+}
+
+function renderFlowSession(tree: SessionTree, depth = 0) {
+  const session = tree.session || {};
+  const title = session.title || session.slug || session.id;
+  const metrics = tree.metrics;
+  const rows = [];
+
+  rows.push(`<li>
+    <a class="flow-row flow-session" href="#${escapeHtml(anchorId("session", session.id))}" style="--flow-depth:${Math.min(depth, 8)}">
+      <span class="flow-dot"></span>
+      <span class="flow-kind">${depth ? "branch" : "root"}</span>
+      <span class="flow-label">${escapeHtml(compactText(title, 92))}</span>
+      <span class="flow-status">${escapeHtml(formatCount(metrics.totalMessages))} msg</span>
+    </a>
+  </li>`);
+
+  for (const message of tree.messages) {
+    rows.push(`<li>
+      <a class="flow-row flow-message flow-role-${escapeHtml(message.role)}" href="#${escapeHtml(anchorId("msg", message.id))}" style="--flow-depth:${Math.min(depth + 1, 8)}">
+        <span class="flow-dot"></span>
+        <span class="flow-kind">${escapeHtml(message.role)}</span>
+        <span class="flow-label">${escapeHtml(messageText(message) || message.id)}</span>
+        ${message.timeCreated ? `<span class="flow-duration">${escapeHtml(formatTime(message.timeCreated))}</span>` : ""}
+      </a>
+      ${message.parts.length ? `<ul class="flow-children">${message.parts.map((part) => renderFlowPart(part, depth + 2)).join("\n")}</ul>` : ""}
+    </li>`);
+  }
+
+  for (const child of tree.detachedChildren) {
+    rows.push(renderFlowSession(child, depth + 1));
+  }
+
+  return rows.join("\n");
+}
+
+function renderFlowPanel(tree: SessionTree | null) {
+  if (!tree) {
+    return `<aside class="session-flow"><h2>Flow</h2><p class="toc-empty">No flow data.</p></aside>`;
+  }
+
+  const metrics = tree.metrics;
+  return `<aside class="session-flow">
+    <h2>Flow</h2>
+    <div class="flow-summary">
+      ${renderMetric("messages", formatCount(metrics.totalMessages))}
+      ${renderMetric("tools", formatCount(metrics.totalToolCalls))}
+      ${renderMetric("branches", formatCount(metrics.descendantCount))}
+      ${metrics.cost ? renderMetric("cost", `$${metrics.cost.toFixed(3)}`) : ""}
+    </div>
+    <ul class="flow-tree">${renderFlowSession(tree)}</ul>
+  </aside>`;
+}
+
 function renderPart(messageData, partData, partId) {
   if (!partData || typeof partData !== "object") {
     return "";
@@ -34,7 +268,7 @@ function renderPart(messageData, partData, partId) {
 
   if (partData.type === "text") {
     return messageBubble(messageData.role, partData.text || "", {
-      model: modelLabel(messageData.model),
+      model: messageModelLabel(messageData),
       tokens: messageData.tokens,
       time: messageData.time?.created
     });
@@ -64,7 +298,59 @@ function renderPart(messageData, partData, partId) {
   return "";
 }
 
-export function renderSessionPage({ session, messages = [], partsByMessage = new Map(), todos = [], recentSessions = [], meta = null, provider = "opencode", providers = [] }) {
+function renderPartNode(messageData, part: SessionPartNode, depth = 0) {
+  const isTaskWithSession = part.type === "tool" && isTaskTool(part.tool) && part.childSessions.length > 0;
+  const renderedPart = isTaskWithSession ? "" : renderPart(messageData, part.data, part.id);
+  const childMarkup = part.childSessions
+    .map((child) => renderSessionTree(child, depth + 1))
+    .filter(Boolean)
+    .join("\n");
+  const partAnchor = escapeHtml(anchorId("part", part.id));
+  const anchoredPart = renderedPart
+    ? (part.type === "tool" ? renderedPart : `<div id="${partAnchor}" class="session-part-anchor">${renderedPart}</div>`)
+    : `<span id="${partAnchor}" class="session-event-anchor" aria-hidden="true"></span>`;
+
+  if (!childMarkup) {
+    return anchoredPart;
+  }
+
+  return `${renderedPart}
+<div id="${partAnchor}" class="subsession-branch" data-parent-part-id="${escapeHtml(part.id)}">
+  ${childMarkup}
+</div>`;
+}
+
+function renderSessionTree(tree: SessionTree, depth = 0) {
+  const messageMarkup = tree.messages.map((message) => {
+    const renderedParts = message.parts
+      .map((part) => renderPartNode(message.data, part, depth))
+      .filter(Boolean)
+      .join("\n");
+    const messageAnchor = escapeHtml(anchorId("msg", message.id));
+    return renderedParts
+      ? `<article id="${messageAnchor}" class="message-group" data-role="${escapeHtml(message.role)}">${renderedParts}</article>`
+      : `<span id="${messageAnchor}" class="session-event-anchor" aria-hidden="true"></span>`;
+  }).filter(Boolean).join("\n");
+
+  const detachedMarkup = tree.detachedChildren
+    .map((child) => renderSessionTree(child, depth + 1))
+    .filter(Boolean)
+    .join("\n");
+  const body = [messageMarkup, detachedMarkup].filter(Boolean).join("\n");
+
+  if (depth === 0) {
+    return body;
+  }
+
+  return `<details id="${escapeHtml(anchorId("session", tree.session.id || ""))}" class="subsession-container" data-session-id="${escapeHtml(tree.session.id || "")}" data-depth="${depth}">
+    ${renderSubsessionHeader(tree)}
+    <div class="subsession-body">
+      ${body || `<p class="empty-state">${t("detail.no_messages")}</p>`}
+    </div>
+  </details>`;
+}
+
+export function renderSessionPage({ session, sessionTree = null, messages = [], partsByMessage = new Map(), todos = [], recentSessions = [], meta = null, provider = "opencode", providers = [] }) {
   const title = session.title || session.slug || session.id;
   const starred = meta?.starred ? 1 : 0;
   const actions = provider === "opencode" ? `
@@ -94,7 +380,7 @@ ${actions}
     </header>
   `;
 
-  const messageMarkup = messages.map((message) => {
+  const messageMarkup = sessionTree ? renderSessionTree(sessionTree) : messages.map((message) => {
     const messageData = safeParse(message.data);
     const parts = partsByMessage.get(message.id) || [];
     const renderedParts = parts.map((part) => renderPart(messageData, safeParse(part.data), part.id)).filter(Boolean).join("\n");
@@ -102,21 +388,16 @@ ${actions}
   }).filter(Boolean).join("\n");
 
   const body = `
-<div class="two-column" data-session-id="${escapeHtml(session.id)}" data-provider="${escapeHtml(provider)}">
-  <div class="main-content">
+<div class="session-workbench" data-session-id="${escapeHtml(session.id)}" data-provider="${escapeHtml(provider)}">
+  ${renderToc(sessionTree)}
+  <main id="${escapeHtml(anchorId("session", session.id))}" class="main-content">
     ${header}
     ${todoList(todos)}
     <section class="messages">
       ${messageMarkup || `<p class="empty-state">${t("detail.no_messages")}</p>`}
     </section>
-  </div>
-  <aside id="trace-panel" class="trace-panel">
-    <div class="trace-panel-header">
-      <h3 id="trace-title">Trace</h3>
-      <button type="button" class="trace-panel-close">&times;</button>
-    </div>
-    <div id="trace-timeline" class="trace-tab-content active"></div>
-  </aside>
+  </main>
+  ${renderFlowPanel(sessionTree)}
 </div>
   `;
 

@@ -19,6 +19,7 @@ import {
   getSessionsByIds
 } from "./db.js";
 import opencodeAdapter from "./providers/opencode/adapter.js";
+import { buildOpenCodeSessionTree } from "./providers/opencode/session-tree.js";
 import { getAvailableProviders, getAllProviders, getProvider } from "./providers/index.js";
 import { getIndexDb, upsertIndex, getIndexedSessions, clearIndex } from "./index-db.js";
 import { setLocale, getLocale } from "./i18n.js";
@@ -577,12 +578,14 @@ export async function startServer(config = getConfig()) {
 
         if (format === "json") {
           const filename = `session-${id.slice(0, 8)}.json`;
+          const sessionTree = providerId === "opencode" ? buildOpenCodeSessionTree(id) : null;
           res.writeHead(200, {
             "Content-Type": "application/json; charset=utf-8",
             "Content-Disposition": `attachment; filename="${filename}"`
           });
           return res.end(JSON.stringify({
             session,
+            tree: sessionTree,
             messages: messages.map((message) => ({
               ...message,
               parts: (partsByMessage.get(message.id) || []).map((part) => part.data)
@@ -622,8 +625,10 @@ export async function startServer(config = getConfig()) {
           const enrichedSession = normalizeSessionRecord(enrichSession(session, metaMap));
           const messages = getMessages(sessionId).map((message) => ({ ...message, data: safeJsonParse(message.data) }));
           const partsByMessage = loadPartsByMessage(messages);
+          const sessionTree = buildOpenCodeSessionTree(sessionId);
           return json(res, {
             session: enrichedSession,
+            tree: sessionTree,
             messages: messages.map((message) => ({
               ...message,
               parts: (partsByMessage.get(message.id) || []).map((part) => part.data)
@@ -854,11 +859,13 @@ export async function startServer(config = getConfig()) {
             data: safeJsonParse(message.data)
           }));
           const partsByMessage = loadPartsByMessage(messages);
+          const sessionTree = buildOpenCodeSessionTree(sessionId);
           const todos = getTodos(sessionId);
           const { sessions: recentSessions } = listSessions(30, 0);
           const enrichedRecentSessions = enrichSessionList(recentSessions, metaMap, excludedIds).map((item) => normalizeSessionRecord(item));
           send(res, 200, renderSessionPage({
             session: enrichedSession,
+            sessionTree,
             messages,
             partsByMessage,
             todos,
