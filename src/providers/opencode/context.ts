@@ -18,6 +18,9 @@ export interface ContextStep {
   startPartId: string;
   finishPartId: string | null;
   snapshotId: string | null;
+  previousSnapshotId: string | null;
+  checkpoint: "session-start" | "snapshot-change" | "step";
+  checkpointLabel: string;
   reason: string | null;
   timeStart: number;
   timeEnd: number;
@@ -26,6 +29,7 @@ export interface ContextStep {
   cost: number;
   confidence: "reconstructed";
   items: ContextItem[];
+  itemCounts: Record<string, number>;
 }
 
 export interface SessionContextView {
@@ -97,6 +101,34 @@ function buildPartContext(part: Row, messageData: Row): ContextItem | null {
   return null;
 }
 
+function countItems(items: ContextItem[]) {
+  return items.reduce((counts, contextItem) => {
+    counts[contextItem.kind] = (counts[contextItem.kind] || 0) + 1;
+    return counts;
+  }, {} as Record<string, number>);
+}
+
+function classifyCheckpoint(index: number, snapshotId: string | null, previousSnapshotId: string | null) {
+  if (index === 1) {
+    return {
+      checkpoint: "session-start" as const,
+      checkpointLabel: "Session start"
+    };
+  }
+
+  if (snapshotId && previousSnapshotId && snapshotId !== previousSnapshotId) {
+    return {
+      checkpoint: "snapshot-change" as const,
+      checkpointLabel: "Snapshot change / compaction candidate"
+    };
+  }
+
+  return {
+    checkpoint: "step" as const,
+    checkpointLabel: "Step"
+  };
+}
+
 export function buildOpenCodeSessionContext(sessionId: string, dbPath = undefined): SessionContextView {
   const session = getSession(sessionId, dbPath);
   const todos = getTodos(sessionId, dbPath);
@@ -119,6 +151,7 @@ export function buildOpenCodeSessionContext(sessionId: string, dbPath = undefine
   }
 
   const openSteps = new Map<string, ContextStep>();
+  let previousStepSnapshotId: string | null = null;
   const messages = getMessages(sessionId, dbPath);
   for (const message of messages) {
     const messageData = asObject(typeof message.data === "string" ? parseJson(message.data) : message.data);
@@ -129,12 +162,16 @@ export function buildOpenCodeSessionContext(sessionId: string, dbPath = undefine
       const partType = String(data.type || "unknown");
 
       if (partType === "step-start") {
+        const snapshotId = typeof data.snapshot === "string" ? data.snapshot : null;
+        const checkpoint = classifyCheckpoint(steps.length + 1, snapshotId, previousStepSnapshotId);
         const step: ContextStep = {
           index: steps.length + 1,
           messageId: message.id,
           startPartId: rawPart.id,
           finishPartId: null,
-          snapshotId: typeof data.snapshot === "string" ? data.snapshot : null,
+          snapshotId,
+          previousSnapshotId: previousStepSnapshotId,
+          ...checkpoint,
           reason: null,
           timeStart: partTime(data, asNumber(rawPart.time_created)),
           timeEnd: 0,
@@ -142,7 +179,8 @@ export function buildOpenCodeSessionContext(sessionId: string, dbPath = undefine
           tokens: null,
           cost: 0,
           confidence: "reconstructed",
-          items: history.slice()
+          items: history.slice(),
+          itemCounts: countItems(history)
         };
         steps.push(step);
         openSteps.set(message.id, step);
@@ -161,6 +199,7 @@ export function buildOpenCodeSessionContext(sessionId: string, dbPath = undefine
           if (!step.snapshotId && typeof data.snapshot === "string") {
             step.snapshotId = data.snapshot;
           }
+          previousStepSnapshotId = step.snapshotId || previousStepSnapshotId;
           openSteps.delete(message.id);
         }
         continue;

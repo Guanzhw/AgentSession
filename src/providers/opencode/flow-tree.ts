@@ -3,7 +3,7 @@ import { buildOpenCodeSessionMetrics, type SessionMetricsView } from "./session-
 
 export interface FlowNode {
   id: string;
-  kind: "session" | "message" | "tool" | "subagent" | "part";
+  kind: "session" | "step" | "subagent";
   label: string;
   meta: string;
   status: string | null;
@@ -12,6 +12,10 @@ export interface FlowNode {
   duration: number;
   cost: number;
   tokens: number;
+  toolCalls: number;
+  errors: number;
+  subagents: number;
+  errorRate: number;
   children: FlowNode[];
 }
 
@@ -22,8 +26,11 @@ export interface FlowTree {
     totalNodes: number;
     sessions: number;
     messages: number;
-    tools: number;
+    steps: number;
+    toolCalls: number;
     subagents: number;
+    errors: number;
+    errorRate: number;
     totalDuration: number;
     totalCost: number;
     totalTokens: number;
@@ -33,14 +40,6 @@ export interface FlowTree {
 function asNumber(value: unknown) {
   const amount = Number(value);
   return Number.isFinite(amount) ? amount : 0;
-}
-
-function compact(value: unknown, fallback = "") {
-  if (typeof value === "string" && value.trim()) {
-    const text = value.trim().replace(/\s+/g, " ");
-    return text.length > 96 ? `${text.slice(0, 95)}…` : text;
-  }
-  return fallback;
 }
 
 function stepByMessage(metrics: SessionMetricsView | null) {
@@ -53,40 +52,90 @@ function stepByMessage(metrics: SessionMetricsView | null) {
   return map;
 }
 
-function messageNode(message: MessageContainer, children: FlowNode[], steps: SessionMetricsView["steps"][number][] = []): FlowNode {
+function partStatus(part: PartContainer) {
+  return typeof part.data?.state?.status === "string" ? part.data.state.status : null;
+}
+
+function isErrorPart(part: PartContainer) {
+  return partStatus(part) === "error" || Boolean(part.data?.error);
+}
+
+function isTaskPart(part: PartContainer) {
+  return part.partType === "tool" && ["task", "subtask"].includes(String(part.tool || ""));
+}
+
+function toolParts(message: MessageContainer) {
+  return message.parts.filter((part) => part.partType === "tool");
+}
+
+function aggregate(node: FlowNode) {
+  for (const child of node.children) {
+    node.toolCalls += child.toolCalls;
+    node.errors += child.errors;
+    node.subagents += child.kind === "subagent" ? 1 + child.subagents : child.subagents;
+  }
+  node.errorRate = node.toolCalls ? node.errors / node.toolCalls : 0;
+  return node;
+}
+
+function stepNode(message: MessageContainer, children: FlowNode[], steps: SessionMetricsView["steps"][number][] = []): FlowNode | null {
+  const tools = toolParts(message);
+  if (!steps.length && !tools.length && !children.length) {
+    return null;
+  }
+
   const stepTokens = steps.reduce((sum, step) => sum + asNumber(step.totalTokens), 0);
   const stepCost = steps.reduce((sum, step) => sum + asNumber(step.cost), 0);
   const stepDuration = steps.reduce((sum, step) => sum + asNumber(step.duration), 0);
+  const errors = tools.filter(isErrorPart).length;
+  const status = errors ? "has errors" : steps.some((step) => step.reason === "tool-calls") ? "tool calls" : steps[steps.length - 1]?.reason || null;
 
-  return {
+  return aggregate({
     id: `msg:${message.id}`,
-    kind: "message",
-    label: message.title || `${message.role} message`,
-    meta: steps.length ? `${steps.length} steps` : message.role,
-    status: message.role,
+    kind: "step",
+    label: message.title || `${message.role} step`,
+    meta: [
+      steps.length ? `${steps.length} model ${steps.length === 1 ? "step" : "steps"}` : "",
+      tools.length ? `${tools.length} tools` : "",
+      children.length ? `${children.length} subagents` : "",
+      errors ? `${errors} errors` : ""
+    ].filter(Boolean).join(" · ") || message.role,
+    status,
     timeStart: message.timeCreated,
     timeEnd: message.timeCreated + stepDuration,
     duration: stepDuration,
     cost: stepCost,
     tokens: stepTokens,
+    toolCalls: tools.length,
+    errors,
+    subagents: 0,
+    errorRate: tools.length ? errors / tools.length : 0,
     children
-  };
+  });
 }
 
-function partNode(part: PartContainer): FlowNode {
-  const isSubagent = part.partType === "tool" && ["task", "subtask"].includes(String(part.tool || ""));
+function subagentNode(part: PartContainer): FlowNode {
   const childSessions = part.childSessions.map((child) => sessionNode(child));
+  const status = partStatus(part);
+  const errors = isErrorPart(part) ? 1 : 0;
   return {
     id: `part:${part.id}`,
-    kind: isSubagent ? "subagent" : part.partType === "tool" ? "tool" : "part",
+    kind: "subagent",
     label: part.title || part.tool || part.partType,
-    meta: childSessions.length ? `${childSessions.length} branches` : (part.tool || part.partType),
-    status: typeof part.data?.state?.status === "string" ? part.data.state.status : null,
+    meta: [
+      childSessions.length ? `${childSessions.length} ${childSessions.length === 1 ? "branch" : "branches"}` : "",
+      part.tool || "task"
+    ].filter(Boolean).join(" · "),
+    status,
     timeStart: part.timeStart,
     timeEnd: part.timeEnd,
     duration: part.timeStart && part.timeEnd ? Math.max(0, part.timeEnd - part.timeStart) : 0,
     cost: 0,
     tokens: 0,
+    toolCalls: 1,
+    errors,
+    subagents: 0,
+    errorRate: errors,
     children: childSessions
   };
 }
@@ -96,15 +145,20 @@ function sessionNode(container: SessionContainer, metrics: SessionMetricsView | 
   const children: FlowNode[] = [];
 
   for (const message of container.messages) {
-    const partChildren = message.parts.map(partNode);
-    children.push(messageNode(message, partChildren, stepsByMessage.get(message.id) || []));
+    const partChildren = message.parts
+      .filter(isTaskPart)
+      .map(subagentNode);
+    const step = stepNode(message, partChildren, stepsByMessage.get(message.id) || []);
+    if (step) {
+      children.push(step);
+    }
   }
 
   for (const child of container.detachedChildren) {
     children.push(sessionNode(child));
   }
 
-  return {
+  return aggregate({
     id: `session:${container.id}`,
     kind: "session",
     label: container.title,
@@ -115,29 +169,29 @@ function sessionNode(container: SessionContainer, metrics: SessionMetricsView | 
     duration: container.metrics.runtimeMs,
     cost: container.metrics.cost,
     tokens: container.metrics.inputTokens + container.metrics.outputTokens + container.metrics.reasoningTokens,
+    toolCalls: 0,
+    errors: 0,
+    subagents: 0,
+    errorRate: 0,
     children
-  };
+  });
 }
 
-function summarize(node: FlowNode, acc = {
+function countNodes(node: FlowNode, acc = {
   totalNodes: 0,
   sessions: 0,
   messages: 0,
-  tools: 0,
-  subagents: 0,
-  totalDuration: 0,
-  totalCost: 0,
-  totalTokens: 0
+  steps: 0,
+  subagents: 0
 }) {
   acc.totalNodes += 1;
   if (node.kind === "session") acc.sessions += 1;
-  if (node.kind === "message") acc.messages += 1;
-  if (node.kind === "tool") acc.tools += 1;
+  if (node.kind === "step") {
+    acc.steps += 1;
+    acc.messages += 1;
+  }
   if (node.kind === "subagent") acc.subagents += 1;
-  acc.totalDuration += asNumber(node.duration);
-  acc.totalCost += asNumber(node.cost);
-  acc.totalTokens += asNumber(node.tokens);
-  for (const child of node.children) summarize(child, acc);
+  for (const child of node.children) countNodes(child, acc);
   return acc;
 }
 
@@ -149,9 +203,18 @@ export function buildOpenCodeFlowTree(sessionId: string, dbPath = undefined): Fl
 
   const metrics = buildOpenCodeSessionMetrics(sessionId, dbPath);
   const root = sessionNode(container, metrics);
+  const counts = countNodes(root);
   return {
     sessionId,
     root,
-    summary: summarize(root)
+    summary: {
+      ...counts,
+      toolCalls: root.toolCalls,
+      errors: root.errors,
+      errorRate: root.errorRate,
+      totalDuration: root.duration,
+      totalCost: root.cost,
+      totalTokens: root.tokens
+    }
   };
 }

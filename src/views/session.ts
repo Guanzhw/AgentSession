@@ -85,6 +85,15 @@ function isTaskTool(tool) {
   return ["task", "subtask"].includes(String(tool || ""));
 }
 
+function formatPercent(value) {
+  const amount = Number(value) || 0;
+  return `${Math.round(amount * 100)}%`;
+}
+
+function isNavigableMessageRole(role) {
+  return ["user", "assistant", "agent"].includes(String(role || "").toLowerCase());
+}
+
 function taskTitle(partData) {
   return partData?.state?.title
     || partData?.state?.input?.description
@@ -185,17 +194,9 @@ function renderSubagentChildSession(tree: SessionTree) {
 
 function collectTocItems(tree: SessionTree, depth = 0) {
   const items = [];
-  const session = tree.session || {};
-  items.push({
-    id: anchorId("session", session.id || "root"),
-    type: depth ? "Branch" : "Session",
-    label: session.title || session.slug || session.id || "Session",
-    meta: depth ? `${formatCount(tree.metrics.totalMessages)} msg` : "root",
-    depth
-  });
 
   for (const message of tree.messages) {
-    if (message.role) {
+    if (isNavigableMessageRole(message.role)) {
       items.push({
         id: anchorId("msg", message.id),
         type: message.role,
@@ -206,12 +207,11 @@ function collectTocItems(tree: SessionTree, depth = 0) {
     }
 
     for (const part of message.parts) {
-      if (part.type === "tool") {
-        const isTask = isTaskTool(part.tool);
+      if (part.type === "tool" && isTaskTool(part.tool)) {
         items.push({
           id: anchorId("part", part.id),
-          type: isTask ? "Task" : "Tool",
-          label: isTask ? taskTitle(part.data) : toolTitle(part.data),
+          type: "Task",
+          label: taskTitle(part.data),
           meta: part.childSessions.length ? `${part.childSessions.length} branch` : partStatus(part.data) || part.tool || "tool",
           depth
         });
@@ -228,26 +228,12 @@ function collectTocItems(tree: SessionTree, depth = 0) {
   return items;
 }
 
-function collectContextTocItems(sessionContext) {
-  const steps = Array.isArray(sessionContext?.steps) ? sessionContext.steps : [];
-  return steps.map((step) => ({
-    id: anchorId("context-step", step.index),
-    type: "Context",
-    label: `Step ${step.index}`,
-    meta: step.snapshotId ? `snapshot ${String(step.snapshotId).slice(0, 8)}` : "reconstructed",
-    depth: 0
-  }));
-}
-
-function renderToc(tree: SessionTree | null, sessionContext = null) {
-  if (!tree && !sessionContext) {
-    return `<aside class="session-toc"><h2>Navigate</h2><p class="toc-empty">No indexed prompts.</p></aside>`;
+function renderToc(tree: SessionTree | null) {
+  if (!tree) {
+    return `<aside class="session-toc"><h2>Navigate</h2><p class="toc-empty">No indexed messages.</p></aside>`;
   }
 
-  const items = [
-    ...(tree ? collectTocItems(tree) : []),
-    ...collectContextTocItems(sessionContext)
-  ];
+  const items = collectTocItems(tree);
   const markup = items.map((item) => `
     <a class="toc-link toc-${escapeHtml(item.type.toLowerCase())}" href="#${escapeHtml(item.id)}" style="--toc-depth:${Math.min(item.depth, 6)}">
       <span class="toc-type">${escapeHtml(item.type)}</span>
@@ -258,7 +244,7 @@ function renderToc(tree: SessionTree | null, sessionContext = null) {
 
   return `<aside class="session-toc">
     <h2>Navigate</h2>
-    <div class="toc-list">${markup || `<p class="toc-empty">No indexed prompts.</p>`}</div>
+    <div class="toc-list">${markup || `<p class="toc-empty">No indexed messages.</p>`}</div>
   </aside>`;
 }
 
@@ -349,7 +335,13 @@ function flowHref(node) {
 function renderCanonicalFlowNode(node, depth = 0) {
   const kind = node.kind || "part";
   const children = Array.isArray(node.children) ? node.children : [];
-  const meta = [node.meta, node.status].filter(Boolean).join(" · ");
+  const operationalMeta = [
+    node.toolCalls ? `${formatCount(node.toolCalls)} tools` : "",
+    node.errors ? `${formatCount(node.errors)} errors` : "",
+    node.subagents ? `${formatCount(node.subagents)} subagents` : "",
+    node.errorRate ? `${formatPercent(node.errorRate)} error rate` : ""
+  ].filter(Boolean).join(" · ");
+  const meta = [node.meta, operationalMeta, node.status].filter(Boolean).join(" · ");
   const duration = node.duration ? formatMilliseconds(node.duration) : "";
   const classes = ["flow-row", `flow-${kind}`].join(" ");
 
@@ -374,9 +366,12 @@ function renderCanonicalFlowPanel(sessionFlow) {
   return `<aside class="session-flow">
     <h2>Flow</h2>
     <div class="flow-summary">
-      ${renderMetric("nodes", formatCount(summary.totalNodes))}
-      ${renderMetric("tools", formatCount(summary.tools))}
+      ${renderMetric("elapsed", formatMilliseconds(summary.totalDuration))}
+      ${renderMetric("tools", formatCount(summary.toolCalls))}
+      ${renderMetric("errors", formatCount(summary.errors))}
+      ${renderMetric("error rate", formatPercent(summary.errorRate))}
       ${renderMetric("subagents", formatCount(summary.subagents))}
+      ${renderMetric("steps", formatCount(summary.steps))}
       ${summary.totalCost ? renderMetric("cost", `$${Number(summary.totalCost).toFixed(3)}`) : ""}
     </div>
     <ul class="flow-tree">${renderCanonicalFlowNode(sessionFlow.root)}</ul>
@@ -389,6 +384,57 @@ function renderContextItem(item) {
     <span class="context-title">${escapeHtml(item.title || item.id || "")}</span>
     ${item.preview ? `<span class="context-preview">${escapeHtml(item.preview)}</span>` : ""}
   </li>`;
+}
+
+function renderContextCounts(counts) {
+  if (!counts || typeof counts !== "object") {
+    return "";
+  }
+
+  return Object.entries(counts)
+    .filter(([, value]) => Number(value) > 0)
+    .sort((a, b) => Number(b[1]) - Number(a[1]) || String(a[0]).localeCompare(String(b[0])))
+    .map(([kind, value]) => `${kind} ${formatCount(value)}`)
+    .join(" · ");
+}
+
+function contextItemsForDisplay(step) {
+  const items = Array.isArray(step.items) ? step.items : [];
+  if (step.checkpoint !== "step") {
+    return { items, omitted: 0 };
+  }
+
+  if (items.length <= 12) {
+    return { items, omitted: 0 };
+  }
+
+  return {
+    items: items.slice(-12),
+    omitted: items.length - 12
+  };
+}
+
+function renderContextCheckpoints(steps) {
+  const checkpoints = steps.filter((step) => step.checkpoint !== "step");
+  if (!checkpoints.length) {
+    return "";
+  }
+
+  return `<div class="context-checkpoints">
+    ${checkpoints.map((step) => {
+      const counts = renderContextCounts(step.itemCounts);
+      const meta = [
+        step.snapshotId ? `snapshot ${String(step.snapshotId).slice(0, 8)}` : "no snapshot",
+        `${formatCount(Array.isArray(step.items) ? step.items.length : 0)} items`,
+        counts
+      ].filter(Boolean).join(" · ");
+      return `<a class="context-checkpoint context-checkpoint-${escapeHtml(step.checkpoint)}" href="#${escapeHtml(anchorId("context-step", step.index))}">
+        <span class="context-checkpoint-label">${escapeHtml(step.checkpointLabel || "Checkpoint")}</span>
+        <strong>Step ${escapeHtml(String(step.index))}</strong>
+        <span>${escapeHtml(meta)}</span>
+      </a>`;
+    }).join("\n")}
+  </div>`;
 }
 
 function renderContextPanel(sessionContext) {
@@ -411,16 +457,21 @@ function renderContextPanel(sessionContext) {
       tokens,
       step.cost ? `$${Number(step.cost).toFixed(4)}` : ""
     ].filter(Boolean).join(" · ");
-    const items = (step.items || []).slice(-12);
+    const totalItems = Array.isArray(step.items) ? step.items.length : 0;
+    const displayed = contextItemsForDisplay(step);
+    const counts = renderContextCounts(step.itemCounts);
+    const checkpoint = step.checkpoint !== "step";
 
-    return `<details id="${escapeHtml(anchorId("context-step", step.index))}" class="context-step">
+    return `<details id="${escapeHtml(anchorId("context-step", step.index))}" class="context-step context-${escapeHtml(step.checkpoint || "step")}" ${checkpoint ? "open" : ""}>
       <summary class="context-summary" aria-label="${escapeHtml(`Toggle context step ${step.index}`)}">
         <span class="context-step-index">step ${escapeHtml(String(step.index))}</span>
-        <span class="context-step-title">${escapeHtml(`${items.length} reconstructed context items`)}</span>
+        <span class="context-step-title">${escapeHtml(`${step.checkpointLabel || "Step"} · ${formatCount(totalItems)} reconstructed context items`)}</span>
         <span class="context-step-meta">${escapeHtml(meta)}</span>
       </summary>
+      ${counts ? `<p class="context-counts">${escapeHtml(counts)}</p>` : ""}
       <ul class="context-list">
-        ${items.map(renderContextItem).join("\n") || `<li class="context-item"><span class="context-preview">No reconstructable context items.</span></li>`}
+        ${displayed.omitted ? `<li class="context-item context-omitted"><span class="context-preview">${escapeHtml(`${formatCount(displayed.omitted)} earlier items omitted in this step view; use checkpoints or JSON export for full reconstruction.`)}</span></li>` : ""}
+        ${displayed.items.map(renderContextItem).join("\n") || `<li class="context-item"><span class="context-preview">No reconstructable context items.</span></li>`}
       </ul>
     </details>`;
   }).join("\n");
@@ -430,6 +481,7 @@ function renderContextPanel(sessionContext) {
       <h2>Context</h2>
       <p>${escapeHtml(sessionContext.note || "Reconstructed context view.")}</p>
     </header>
+    ${renderContextCheckpoints(steps)}
     ${rows || `<p class="empty-state">No step context found.</p>`}
   </section>`;
 }
@@ -594,7 +646,7 @@ ${actions}
 
   const body = `
 <div class="session-workbench" data-session-id="${escapeHtml(session.id)}" data-provider="${escapeHtml(provider)}">
-  ${renderToc(sessionTree, sessionContext)}
+  ${renderToc(sessionTree)}
   <main id="${escapeHtml(anchorId("session", session.id))}" class="main-content">
     ${header}
     ${renderSessionMetricsPanel(sessionMetrics)}

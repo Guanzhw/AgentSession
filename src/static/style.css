@@ -644,7 +644,7 @@ body::before {
 
 .flow-row {
   display: grid;
-  grid-template-columns: 10px 48px minmax(0, 1fr) auto;
+  grid-template-columns: 10px 58px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 6px;
   padding: 6px 8px 6px calc(8px + var(--flow-depth, 0) * 10px);
@@ -663,6 +663,7 @@ body::before {
 }
 
 .flow-session .flow-dot { background: var(--accent-color); }
+.flow-step .flow-dot { background: var(--trace-text); }
 .flow-subagent .flow-dot { background: var(--trace-agent); }
 .flow-tool .flow-dot { background: var(--trace-tool); }
 .flow-message .flow-dot { background: var(--text-muted); }
@@ -1086,6 +1087,52 @@ details[open] summary {
   line-height: 1.5;
 }
 
+.context-checkpoints {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--bg-secondary) 65%, var(--bg-primary));
+}
+
+.context-checkpoint {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 8px;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.context-checkpoint:hover {
+  color: var(--text-primary);
+  border-color: var(--trace-mcp);
+}
+
+.context-checkpoint-label {
+  grid-column: 1 / -1;
+  color: var(--trace-mcp);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.context-checkpoint strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.context-checkpoint span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
 .context-step {
   border-bottom: 1px solid var(--border-color);
 }
@@ -1106,6 +1153,11 @@ details[open] summary {
 
 .context-summary:hover {
   background: var(--bg-secondary);
+}
+
+.context-snapshot-change .context-summary,
+.context-session-start .context-summary {
+  background: color-mix(in srgb, var(--trace-mcp) 10%, var(--bg-primary));
 }
 
 .context-step-index {
@@ -1141,6 +1193,12 @@ details[open] summary {
   background: color-mix(in srgb, var(--bg-secondary) 65%, var(--bg-primary));
 }
 
+.context-counts {
+  margin: 8px 14px 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .context-item {
   display: grid;
   grid-template-columns: 72px minmax(0, 0.7fr) minmax(0, 1.3fr);
@@ -1168,6 +1226,12 @@ details[open] summary {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.context-omitted {
+  border: 1px dashed var(--border-color);
+  border-radius: 6px;
+  padding: 6px 8px;
 }
 
 .subsession-container {
