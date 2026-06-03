@@ -318,6 +318,52 @@ function renderFlowPanel(tree: SessionTree | null) {
   </aside>`;
 }
 
+function flowHref(node) {
+  const [kind, ...rest] = String(node.id || "").split(":");
+  const id = rest.join(":");
+  if (kind === "session") return `#${anchorId("session", id)}`;
+  if (kind === "msg") return `#${anchorId("msg", id)}`;
+  if (kind === "part") return `#${anchorId("part", id)}`;
+  return "#";
+}
+
+function renderCanonicalFlowNode(node, depth = 0) {
+  const kind = node.kind || "part";
+  const children = Array.isArray(node.children) ? node.children : [];
+  const meta = [node.meta, node.status].filter(Boolean).join(" · ");
+  const duration = node.duration ? formatMilliseconds(node.duration) : "";
+  const classes = ["flow-row", `flow-${kind}`].join(" ");
+
+  return `<li>
+    <a class="${classes}" href="${escapeHtml(flowHref(node))}" style="--flow-depth:${Math.min(depth, 8)}">
+      <span class="flow-dot"></span>
+      <span class="flow-kind">${escapeHtml(kind)}</span>
+      <span class="flow-label">${escapeHtml(compactText(node.label, 92) || kind)}</span>
+      ${meta ? `<span class="flow-status">${escapeHtml(meta)}</span>` : ""}
+      ${duration ? `<span class="flow-duration">${escapeHtml(duration)}</span>` : ""}
+    </a>
+    ${children.length ? `<ul class="flow-children">${children.map((child) => renderCanonicalFlowNode(child, depth + 1)).join("\n")}</ul>` : ""}
+  </li>`;
+}
+
+function renderCanonicalFlowPanel(sessionFlow) {
+  if (!sessionFlow?.root) {
+    return "";
+  }
+
+  const summary = sessionFlow.summary || {};
+  return `<aside class="session-flow">
+    <h2>Flow</h2>
+    <div class="flow-summary">
+      ${renderMetric("nodes", formatCount(summary.totalNodes))}
+      ${renderMetric("tools", formatCount(summary.tools))}
+      ${renderMetric("subagents", formatCount(summary.subagents))}
+      ${summary.totalCost ? renderMetric("cost", `$${Number(summary.totalCost).toFixed(3)}`) : ""}
+    </div>
+    <ul class="flow-tree">${renderCanonicalFlowNode(sessionFlow.root)}</ul>
+  </aside>`;
+}
+
 function renderContextItem(item) {
   return `<li class="context-item context-${escapeHtml(item.kind || "unknown")}">
     <span class="context-kind">${escapeHtml(item.kind || "item")}</span>
@@ -490,7 +536,7 @@ function renderSessionTree(tree: SessionTree, depth = 0) {
   </details>`;
 }
 
-export function renderSessionPage({ session, sessionTree = null, sessionContext = null, sessionMetrics = null, messages = [], partsByMessage = new Map(), todos = [], recentSessions = [], meta = null, provider = "opencode", providers = [] }) {
+export function renderSessionPage({ session, sessionTree = null, sessionContext = null, sessionMetrics = null, sessionFlow = null, messages = [], partsByMessage = new Map(), todos = [], recentSessions = [], meta = null, provider = "opencode", providers = [] }) {
   const title = session.title || session.slug || session.id;
   const starred = meta?.starred ? 1 : 0;
   const actions = isOpenCodeLikeProvider(provider) ? `
@@ -539,7 +585,7 @@ ${actions}
       ${messageMarkup || `<p class="empty-state">${t("detail.no_messages")}</p>`}
     </section>
   </main>
-  ${renderFlowPanel(sessionTree)}
+  ${sessionFlow ? renderCanonicalFlowPanel(sessionFlow) : renderFlowPanel(sessionTree)}
 </div>
   `;
 

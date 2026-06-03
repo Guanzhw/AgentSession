@@ -21,6 +21,7 @@ import { buildOpenCodeSessionTree } from "./providers/opencode/session-tree.js";
 import { buildOpenCodeSessionContainer } from "./providers/opencode/session-container.js";
 import { buildOpenCodeSessionContext } from "./providers/opencode/context.js";
 import { buildOpenCodeSessionMetrics } from "./providers/opencode/session-metrics.js";
+import { buildOpenCodeFlowTree } from "./providers/opencode/flow-tree.js";
 import { isOpenCodeLikeProvider } from "./providers/kinds.js";
 import { getAvailableProviders, getAllProviders, getProvider } from "./providers/index.js";
 import { getIndexDb, upsertIndex, getIndexedSessions, clearIndex } from "./index-db.js";
@@ -609,6 +610,7 @@ export async function startServer(config = getConfig()) {
           const sessionContainer = isOpenCodeLikeProvider(providerId) ? buildOpenCodeSessionContainer(id, adapter.getDataPath()) : null;
           const sessionContext = isOpenCodeLikeProvider(providerId) ? buildOpenCodeSessionContext(id, adapter.getDataPath()) : null;
           const sessionMetrics = isOpenCodeLikeProvider(providerId) ? buildOpenCodeSessionMetrics(id, adapter.getDataPath()) : null;
+          const sessionFlow = isOpenCodeLikeProvider(providerId) ? buildOpenCodeFlowTree(id, adapter.getDataPath()) : null;
           res.writeHead(200, {
             "Content-Type": "application/json; charset=utf-8",
             "Content-Disposition": `attachment; filename="${filename}"`
@@ -619,6 +621,7 @@ export async function startServer(config = getConfig()) {
             container: sessionContainer,
             context: sessionContext,
             metrics: sessionMetrics,
+            flow: sessionFlow,
             messages: messages.map((message) => ({
               ...message,
               parts: (partsByMessage.get(message.id) || []).map((part) => part.data)
@@ -664,12 +667,14 @@ export async function startServer(config = getConfig()) {
           const sessionContainer = buildOpenCodeSessionContainer(sessionId, dbPath);
           const sessionContext = buildOpenCodeSessionContext(sessionId, dbPath);
           const sessionMetrics = buildOpenCodeSessionMetrics(sessionId, dbPath);
+          const sessionFlow = buildOpenCodeFlowTree(sessionId, dbPath);
           return json(res, {
             session: enrichedSession,
             tree: sessionTree,
             container: sessionContainer,
             context: sessionContext,
             metrics: sessionMetrics,
+            flow: sessionFlow,
             messages: messages.map((message) => ({
               ...message,
               parts: (partsByMessage.get(message.id) || []).map((part) => part.data)
@@ -745,6 +750,32 @@ export async function startServer(config = getConfig()) {
       }
     }
 
+    const apiSessionFlowMatch = pathname.match(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/flow$/);
+    if (apiSessionFlowMatch) {
+      const providerId = apiSessionFlowMatch[1];
+      const sessionId = decodeURIComponent(apiSessionFlowMatch[2]);
+      const adapter = providerMap.get(providerId);
+      if (!adapter) {
+        const missing = missingProviderResponse(providerId);
+        return json(res, missing.body, missing.status);
+      }
+
+      if (!isOpenCodeLikeProvider(providerId)) {
+        return json(res, { sessionId, root: null, summary: null });
+      }
+
+      try {
+        const flow = buildOpenCodeFlowTree(sessionId, adapter.getDataPath());
+        if (!flow) {
+          return json(res, { ok: false, error: "Not found" }, 404);
+        }
+        return json(res, flow);
+      } catch (err) {
+        console.error(`Route error: ${err.message}`);
+        return json(res, { error: "Internal server error" }, 500);
+      }
+    }
+
     const apiSessionTraceMatch = pathname.match(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/trace$/);
     if (apiSessionTraceMatch) {
       const providerId = apiSessionTraceMatch[1];
@@ -757,7 +788,10 @@ export async function startServer(config = getConfig()) {
 
       try {
         if (isOpenCodeLikeProvider(providerId) && adapter.getTrace) {
-          return json(res, adapter.getTrace(sessionId));
+          return json(res, {
+            ...adapter.getTrace(sessionId),
+            flow: buildOpenCodeFlowTree(sessionId, adapter.getDataPath())
+          });
         }
 
         return json(res, {
@@ -975,6 +1009,7 @@ export async function startServer(config = getConfig()) {
           const sessionTree = buildOpenCodeSessionTree(sessionId, dbPath);
           const sessionContext = buildOpenCodeSessionContext(sessionId, dbPath);
           const sessionMetrics = buildOpenCodeSessionMetrics(sessionId, dbPath);
+          const sessionFlow = buildOpenCodeFlowTree(sessionId, dbPath);
           const todos = getTodos(sessionId, dbPath);
           const { sessions: recentSessions } = listSessions(30, 0, "", "", dbPath);
           const enrichedRecentSessions = enrichSessionList(recentSessions, metaMap, excludedIds).map((item) => normalizeSessionRecord(item));
@@ -983,6 +1018,7 @@ export async function startServer(config = getConfig()) {
             sessionTree,
             sessionContext,
             sessionMetrics,
+            sessionFlow,
             messages,
             partsByMessage,
             todos,
