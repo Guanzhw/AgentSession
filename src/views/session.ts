@@ -164,6 +164,25 @@ function renderSubagentBranch(part: SessionPartNode, childMarkup: string) {
   </details>`;
 }
 
+function renderSubagentChildSession(tree: SessionTree) {
+  const messageMarkup = tree.messages.map((message) => {
+    const renderedParts = message.parts
+      .map((part) => renderPartNode(message.data, part, 0))
+      .filter(Boolean)
+      .join("\n");
+    const messageAnchor = escapeHtml(anchorId("msg", message.id));
+    return renderedParts
+      ? `<article id="${messageAnchor}" class="message-group" data-role="${escapeHtml(message.role)}">${renderedParts}</article>`
+      : `<span id="${messageAnchor}" class="session-event-anchor" aria-hidden="true"></span>`;
+  }).filter(Boolean).join("\n");
+
+  const detachedMarkup = tree.detachedChildren
+    .map((child) => renderSubagentChildSession(child))
+    .filter(Boolean)
+    .join("\n");
+  return [messageMarkup, detachedMarkup].filter(Boolean).join("\n");
+}
+
 function collectTocItems(tree: SessionTree, depth = 0) {
   const items = [];
   const session = tree.session || {};
@@ -487,7 +506,7 @@ function renderPartNode(messageData, part: SessionPartNode, depth = 0) {
   const isTaskWithSession = part.type === "tool" && isTaskTool(part.tool) && part.childSessions.length > 0;
   const renderedPart = isTaskWithSession ? "" : renderPart(messageData, part.data, part.id);
   const childMarkup = part.childSessions
-    .map((child) => renderSessionTree(child, depth + 1))
+    .map((child) => renderSubagentChildSession(child))
     .filter(Boolean)
     .join("\n");
   const partAnchor = escapeHtml(anchorId("part", part.id));
