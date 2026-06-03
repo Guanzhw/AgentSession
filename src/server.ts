@@ -19,6 +19,7 @@ import {
 } from "./db.js";
 import { buildOpenCodeSessionTree } from "./providers/opencode/session-tree.js";
 import { buildOpenCodeSessionContainer } from "./providers/opencode/session-container.js";
+import { buildOpenCodeSessionContext } from "./providers/opencode/context.js";
 import { isOpenCodeLikeProvider } from "./providers/kinds.js";
 import { getAvailableProviders, getAllProviders, getProvider } from "./providers/index.js";
 import { getIndexDb, upsertIndex, getIndexedSessions, clearIndex } from "./index-db.js";
@@ -605,6 +606,7 @@ export async function startServer(config = getConfig()) {
           const filename = `session-${id.slice(0, 8)}.json`;
           const sessionTree = isOpenCodeLikeProvider(providerId) ? buildOpenCodeSessionTree(id, adapter.getDataPath()) : null;
           const sessionContainer = isOpenCodeLikeProvider(providerId) ? buildOpenCodeSessionContainer(id, adapter.getDataPath()) : null;
+          const sessionContext = isOpenCodeLikeProvider(providerId) ? buildOpenCodeSessionContext(id, adapter.getDataPath()) : null;
           res.writeHead(200, {
             "Content-Type": "application/json; charset=utf-8",
             "Content-Disposition": `attachment; filename="${filename}"`
@@ -613,6 +615,7 @@ export async function startServer(config = getConfig()) {
             session,
             tree: sessionTree,
             container: sessionContainer,
+            context: sessionContext,
             messages: messages.map((message) => ({
               ...message,
               parts: (partsByMessage.get(message.id) || []).map((part) => part.data)
@@ -656,10 +659,12 @@ export async function startServer(config = getConfig()) {
           const partsByMessage = loadPartsByMessage(messages, dbPath);
           const sessionTree = buildOpenCodeSessionTree(sessionId, dbPath);
           const sessionContainer = buildOpenCodeSessionContainer(sessionId, dbPath);
+          const sessionContext = buildOpenCodeSessionContext(sessionId, dbPath);
           return json(res, {
             session: enrichedSession,
             tree: sessionTree,
             container: sessionContainer,
+            context: sessionContext,
             messages: messages.map((message) => ({
               ...message,
               parts: (partsByMessage.get(message.id) || []).map((part) => part.data)
@@ -676,6 +681,33 @@ export async function startServer(config = getConfig()) {
           session: normalizeSessionRecord(session),
           messages: adapter.getMessages(sessionId)
         });
+      } catch (err) {
+        console.error(`Route error: ${err.message}`);
+        return json(res, { error: "Internal server error" }, 500);
+      }
+    }
+
+    const apiSessionContextMatch = pathname.match(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/context$/);
+    if (apiSessionContextMatch) {
+      const providerId = apiSessionContextMatch[1];
+      const sessionId = decodeURIComponent(apiSessionContextMatch[2]);
+      const adapter = providerMap.get(providerId);
+      if (!adapter) {
+        const missing = missingProviderResponse(providerId);
+        return json(res, missing.body, missing.status);
+      }
+
+      if (!isOpenCodeLikeProvider(providerId)) {
+        return json(res, {
+          sessionId,
+          mode: "unavailable",
+          note: "Context reconstruction is currently available for OpenCode-compatible providers only.",
+          steps: []
+        });
+      }
+
+      try {
+        return json(res, buildOpenCodeSessionContext(sessionId, adapter.getDataPath()));
       } catch (err) {
         console.error(`Route error: ${err.message}`);
         return json(res, { error: "Internal server error" }, 500);
@@ -910,12 +942,14 @@ export async function startServer(config = getConfig()) {
           }));
           const partsByMessage = loadPartsByMessage(messages, dbPath);
           const sessionTree = buildOpenCodeSessionTree(sessionId, dbPath);
+          const sessionContext = buildOpenCodeSessionContext(sessionId, dbPath);
           const todos = getTodos(sessionId, dbPath);
           const { sessions: recentSessions } = listSessions(30, 0, "", "", dbPath);
           const enrichedRecentSessions = enrichSessionList(recentSessions, metaMap, excludedIds).map((item) => normalizeSessionRecord(item));
           send(res, 200, renderSessionPage({
             session: enrichedSession,
             sessionTree,
+            sessionContext,
             messages,
             partsByMessage,
             todos,

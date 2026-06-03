@@ -284,6 +284,57 @@ function renderFlowPanel(tree: SessionTree | null) {
   </aside>`;
 }
 
+function renderContextItem(item) {
+  return `<li class="context-item context-${escapeHtml(item.kind || "unknown")}">
+    <span class="context-kind">${escapeHtml(item.kind || "item")}</span>
+    <span class="context-title">${escapeHtml(item.title || item.id || "")}</span>
+    ${item.preview ? `<span class="context-preview">${escapeHtml(item.preview)}</span>` : ""}
+  </li>`;
+}
+
+function renderContextPanel(sessionContext) {
+  if (!sessionContext) {
+    return "";
+  }
+
+  const steps = Array.isArray(sessionContext.steps) ? sessionContext.steps : [];
+  const rows = steps.map((step) => {
+    const tokens = step.tokens && typeof step.tokens === "object"
+      ? [
+        step.tokens.total != null ? `${Number(step.tokens.total).toLocaleString()} tokens` : "",
+        step.tokens.input != null ? `${Number(step.tokens.input).toLocaleString()} in` : "",
+        step.tokens.output != null ? `${Number(step.tokens.output).toLocaleString()} out` : ""
+      ].filter(Boolean).join(" · ")
+      : "";
+    const meta = [
+      step.snapshotId ? `snapshot ${step.snapshotId.slice(0, 8)}` : "no snapshot",
+      step.reason,
+      tokens,
+      step.cost ? `$${Number(step.cost).toFixed(4)}` : ""
+    ].filter(Boolean).join(" · ");
+    const items = (step.items || []).slice(-12);
+
+    return `<details class="context-step">
+      <summary class="context-summary">
+        <span class="context-step-index">step ${escapeHtml(String(step.index))}</span>
+        <span class="context-step-title">${escapeHtml(`${items.length} reconstructed context items`)}</span>
+        <span class="context-step-meta">${escapeHtml(meta)}</span>
+      </summary>
+      <ul class="context-list">
+        ${items.map(renderContextItem).join("\n") || `<li class="context-item"><span class="context-preview">No reconstructable context items.</span></li>`}
+      </ul>
+    </details>`;
+  }).join("\n");
+
+  return `<section class="context-panel" id="context-view">
+    <header class="context-panel-header">
+      <h2>Context</h2>
+      <p>${escapeHtml(sessionContext.note || "Reconstructed context view.")}</p>
+    </header>
+    ${rows || `<p class="empty-state">No step context found.</p>`}
+  </section>`;
+}
+
 function renderPart(messageData, partData, partId) {
   if (!partData || typeof partData !== "object") {
     return "";
@@ -374,7 +425,7 @@ function renderSessionTree(tree: SessionTree, depth = 0) {
   </details>`;
 }
 
-export function renderSessionPage({ session, sessionTree = null, messages = [], partsByMessage = new Map(), todos = [], recentSessions = [], meta = null, provider = "opencode", providers = [] }) {
+export function renderSessionPage({ session, sessionTree = null, sessionContext = null, messages = [], partsByMessage = new Map(), todos = [], recentSessions = [], meta = null, provider = "opencode", providers = [] }) {
   const title = session.title || session.slug || session.id;
   const starred = meta?.starred ? 1 : 0;
   const actions = isOpenCodeLikeProvider(provider) ? `
@@ -417,6 +468,7 @@ ${actions}
   <main id="${escapeHtml(anchorId("session", session.id))}" class="main-content">
     ${header}
     ${todoList(todos)}
+    ${renderContextPanel(sessionContext)}
     <section class="messages">
       ${messageMarkup || `<p class="empty-state">${t("detail.no_messages")}</p>`}
     </section>

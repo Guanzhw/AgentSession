@@ -1023,6 +1023,116 @@ details[open] summary {
   background: color-mix(in srgb, var(--bg-secondary) 60%, var(--bg-primary));
 }
 
+.context-panel {
+  margin: 0 0 18px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+.context-panel-header {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--trace-mcp) 8%, var(--bg-secondary));
+}
+
+.context-panel-header h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.context-panel-header p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.context-step {
+  border-bottom: 1px solid var(--border-color);
+}
+
+.context-step:last-child {
+  border-bottom: 0;
+}
+
+.context-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  cursor: pointer;
+  background: var(--bg-primary);
+}
+
+.context-summary:hover {
+  background: var(--bg-secondary);
+}
+
+.context-step-index {
+  color: var(--trace-mcp);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.context-step-title {
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-step-meta {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.context-list {
+  list-style: none;
+  margin: 0;
+  padding: 10px 14px 12px;
+  display: grid;
+  gap: 6px;
+  background: color-mix(in srgb, var(--bg-secondary) 65%, var(--bg-primary));
+}
+
+.context-item {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 0.7fr) minmax(0, 1.3fr);
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+}
+
+.context-kind {
+  color: var(--trace-mcp);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.context-title {
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-preview {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .subsession-container {
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
