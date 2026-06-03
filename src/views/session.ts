@@ -1,6 +1,6 @@
 import { escapeHtml } from "../markdown.js";
 import { layout } from "./layout.js";
-import { formatDuration, formatTime, messageBubble, todoList, toolCallBlock } from "./components.js";
+import { formatDuration, formatTime, messageBubble, reasoningBlock, todoList, toolCallBlock } from "./components.js";
 import { t } from "../i18n.js";
 import type { SessionPartNode, SessionTree } from "../providers/opencode/session-tree.js";
 import { isOpenCodeLikeProvider } from "../providers/kinds.js";
@@ -98,7 +98,16 @@ function taskTitle(partData) {
   return partData?.state?.title
     || partData?.state?.input?.description
     || partData?.state?.input?.subagent_type
-    || "Subagent task";
+    || "";
+}
+
+function taskDisplayTitle(partData) {
+  return taskTitle(partData) || "Task";
+}
+
+function childSessionCountLabel(count) {
+  const amount = Number(count) || 0;
+  return `${amount} ${amount === 1 ? "session" : "sessions"}`;
 }
 
 function toolTitle(partData) {
@@ -122,6 +131,24 @@ function toolTitle(partData) {
 function messageText(message) {
   const textPart = message.parts.find((part) => part.type === "text" && part.data?.text);
   return compactText(textPart?.data?.text || message.data?.summary || message.id, 86);
+}
+
+function hasVisibleMessagePart(message) {
+  return message.parts.some((part) => {
+    if (part.type === "reasoning") {
+      return false;
+    }
+
+    if (part.type === "text" && part.data?.text) {
+      return true;
+    }
+
+    if (part.type === "tool" && !["todoread", "todowrite"].includes(String(part.tool || ""))) {
+      return true;
+    }
+
+    return part.childSessions.length > 0;
+  });
 }
 
 function renderMetric(label, value) {
@@ -151,42 +178,77 @@ function renderSubsessionHeader(tree: SessionTree) {
   </summary>`;
 }
 
-function renderSubagentBranch(part: SessionPartNode, childMarkup: string) {
+function renderSubagentExportActions(part: SessionPartNode, provider: string) {
+  const childSession = part.childSessions[0]?.session;
+  const childId = childSession?.id;
+  if (!childId) {
+    return "";
+  }
+
+  const encoded = encodeURIComponent(childId);
+  const suffix = part.childSessions.length > 1 ? ` first session of ${part.childSessions.length}` : "";
+  return `<span class="subagent-actions" aria-label="Subagent export actions">
+    <a class="subagent-export-btn" href="/api/${escapeHtml(provider)}/session/${encoded}/export?format=md" title="${escapeHtml(`Export${suffix} as Markdown`)}">MD</a>
+    <a class="subagent-export-btn" href="/api/${escapeHtml(provider)}/session/${encoded}/export?format=json" title="${escapeHtml(`Export${suffix} as JSON`)}">JSON</a>
+  </span>`;
+}
+
+function renderSubagentBranch(part: SessionPartNode, childMarkup: string, provider: string, reasoningMarkup = "") {
   const data = part.data || {};
+  const title = taskTitle(data);
   const status = partStatus(data);
   const duration = part.timeStart && part.timeEnd ? formatDuration(part.timeStart, part.timeEnd) : "";
   const meta = [
-    `${part.childSessions.length} ${part.childSessions.length === 1 ? "branch" : "branches"}`,
+    childSessionCountLabel(part.childSessions.length),
     status,
     duration
   ].filter(Boolean).join(" · ");
 
-  return `<details class="subagent-branch" data-parent-part-id="${escapeHtml(part.id)}" open>
-    <summary class="subagent-summary" aria-label="${escapeHtml(`Toggle subagent ${taskTitle(data)}`)}">
+  return `<details class="subagent-branch" data-subsession-container="task" data-parent-part-id="${escapeHtml(part.id)}" open>
+    <summary class="subagent-summary" aria-label="${escapeHtml(`Toggle subagent ${title || "task"}`)}">
       <span class="subsession-kicker">subagent</span>
-      <span class="subsession-title">${escapeHtml(taskTitle(data))}</span>
+      ${title ? `<span class="subsession-title">${escapeHtml(title)}</span>` : ""}
       ${meta ? `<span class="subsession-meta">${escapeHtml(meta)}</span>` : ""}
+      ${renderSubagentExportActions(part, provider)}
     </summary>
     <div class="subagent-body">
+      ${reasoningMarkup ? `<div class="subagent-reasoning">${reasoningMarkup}</div>` : ""}
       ${childMarkup}
     </div>
   </details>`;
 }
 
-function renderSubagentChildSession(tree: SessionTree) {
-  const messageMarkup = tree.messages.map((message) => {
-    const renderedParts = message.parts
-      .map((part) => renderPartNode(message.data, part, 0))
-      .filter(Boolean)
-      .join("\n");
+function renderMessageControls(message, provider: string) {
+  const role = String(message.role || "").toLowerCase();
+  if (role !== "user") {
+    return "";
+  }
+
+  return `<div class="message-controls">
+    <button type="button" class="flow-open-btn" data-flow-anchor="${escapeHtml(anchorId("msg", message.id))}" aria-expanded="false" aria-controls="session-flow-panel">Flow</button>
+  </div>`;
+}
+
+function renderSubagentChildSession(tree: SessionTree, provider: string) {
+  const messageBlocks = [];
+  let pendingReasoning = [];
+
+  for (const message of tree.messages) {
+    const result = renderMessagePartsResult(message, 0, provider, pendingReasoning);
+    pendingReasoning = result.pendingReasoning;
     const messageAnchor = escapeHtml(anchorId("msg", message.id));
-    return renderedParts
-      ? `<article id="${messageAnchor}" class="message-group" data-role="${escapeHtml(message.role)}">${renderedParts}</article>`
-      : `<span id="${messageAnchor}" class="session-event-anchor" aria-hidden="true"></span>`;
-  }).filter(Boolean).join("\n");
+    if (result.hasVisibleContent && result.markup) {
+      messageBlocks.push(`<article id="${messageAnchor}" class="message-group" data-role="${escapeHtml(message.role)}">${renderMessageControls(message, provider)}${result.markup}</article>`);
+    } else if (!pendingReasoning.length) {
+      messageBlocks.push(`<span id="${messageAnchor}" class="session-event-anchor" aria-hidden="true"></span>`);
+    }
+  }
+
+  attachPendingReasoning(messageBlocks, pendingReasoning);
+  const messageMarkup = messageBlocks.filter(Boolean).join("\n");
 
   const detachedMarkup = tree.detachedChildren
-    .map((child) => renderSubagentChildSession(child))
+    .map((child) => renderSubagentChildSession(child, provider))
     .filter(Boolean)
     .join("\n");
   return [messageMarkup, detachedMarkup].filter(Boolean).join("\n");
@@ -212,8 +274,8 @@ function collectMessageTaskTocNodes(message, parentAgentDepth) {
       nodes.push(makeTocNode(
         anchorId("part", part.id),
         "Task",
-        taskTitle(part.data),
-        part.childSessions.length ? `${part.childSessions.length} branch` : partStatus(part.data) || part.tool || "task",
+        taskDisplayTitle(part.data),
+        part.childSessions.length ? childSessionCountLabel(part.childSessions.length) : partStatus(part.data) || part.tool || "task",
         parentAgentDepth + 1,
         children
       ));
@@ -235,7 +297,7 @@ function collectTocNodes(tree: SessionTree, userDepth = 0) {
 
   for (const message of tree.messages) {
     const role = String(message.role || "").toLowerCase();
-    if (!isNavigableMessageRole(role)) {
+    if (!isNavigableMessageRole(role) || !hasVisibleMessagePart(message)) {
       continue;
     }
 
@@ -244,7 +306,7 @@ function collectTocNodes(tree: SessionTree, userDepth = 0) {
         anchorId("msg", message.id),
         message.role,
         messageText(message) || "user message",
-        formatTime(message.timeCreated),
+        "",
         userDepth
       );
       nodes.push(currentUserNode);
@@ -256,7 +318,7 @@ function collectTocNodes(tree: SessionTree, userDepth = 0) {
       anchorId("msg", message.id),
       message.role,
       messageText(message) || `${message.role} message`,
-      formatTime(message.timeCreated),
+      "",
       agentDepth
     );
     node.children.push(...collectMessageTaskTocNodes(message, agentDepth));
@@ -277,10 +339,10 @@ function collectTocNodes(tree: SessionTree, userDepth = 0) {
 function renderTocNode(node) {
   const children = Array.isArray(node.children) ? node.children : [];
   const typeLabel = String(node.type || "").toLowerCase() === "user"
-    ? "👤"
+    ? "U"
     : String(node.type || "").toLowerCase() === "assistant"
-      ? "🤖"
-      : node.type;
+      ? "A"
+      : String(node.type || "").slice(0, 1).toUpperCase();
   const link = `<a class="toc-link toc-${escapeHtml(node.type.toLowerCase())}" href="#${escapeHtml(node.id)}" style="--toc-depth:${Math.min(node.depth, 6)}">
       <span class="toc-type">${escapeHtml(typeLabel)}</span>
       <span class="toc-label">${escapeHtml(node.label)}</span>
@@ -309,10 +371,10 @@ function renderToc(tree: SessionTree | null) {
 
   return `<aside class="session-toc">
     <div class="toc-header">
-      <h2>Navigate</h2>
+      <h2>TOC</h2>
       <div class="toc-controls" aria-label="Navigate controls">
-        <button type="button" class="toc-control" data-toc-action="collapse">Collapse all</button>
-        <button type="button" class="toc-control" data-toc-action="expand">Expand all</button>
+        <button type="button" class="toc-control" data-toc-action="collapse" title="Collapse all">-</button>
+        <button type="button" class="toc-control" data-toc-action="expand" title="Expand all">+</button>
       </div>
     </div>
     <div class="toc-list">${markup || `<p class="toc-empty">No indexed messages.</p>`}</div>
@@ -377,21 +439,13 @@ function renderFlowSession(tree: SessionTree, depth = 0) {
 }
 
 function renderFlowPanel(tree: SessionTree | null) {
-  if (!tree) {
-    return `<aside class="session-flow"><h2>Flow</h2><p class="toc-empty">No flow data.</p></aside>`;
-  }
-
-  const metrics = tree.metrics;
-  return `<aside class="session-flow">
-    <h2>Flow</h2>
-    <div class="flow-summary">
-      ${renderMetric("messages", formatCount(metrics.totalMessages))}
-      ${renderMetric("tools", formatCount(metrics.totalToolCalls))}
-      ${renderMetric("branches", formatCount(metrics.descendantCount))}
-      ${metrics.cost ? renderMetric("cost", `$${metrics.cost.toFixed(3)}`) : ""}
+  return `<section id="session-flow-panel" class="session-flow-panel hidden" tabindex="-1" aria-hidden="true">
+    <div class="flow-panel-header">
+      <h2>Flow Timeline</h2>
+      <button type="button" class="flow-close-btn" data-flow-close aria-label="Close flow">x</button>
     </div>
-    <ul class="flow-tree">${renderFlowSession(tree)}</ul>
-  </aside>`;
+    <p class="toc-empty">${tree ? "No timing data for this session." : "No flow data."}</p>
+  </section>`;
 }
 
 function flowHref(node) {
@@ -463,23 +517,32 @@ function renderFlowTimingDiagram(sessionFlow) {
 
     return `<a class="${classes}" href="${escapeHtml(flowHref(node))}" style="--flow-left:${left.toFixed(3)}%;--flow-width:${Math.min(width, 100 - left).toFixed(3)}%;--flow-depth:${Math.min(depth, 6)}">
       <span class="flow-timing-label">${escapeHtml(compactText(node.label, 42) || node.kind)}</span>
-      <span class="flow-timing-track"><span class="flow-timing-bar"></span></span>
+      <span class="flow-timing-track"><span class="flow-timing-bar"><span class="flow-timing-bar-label">${escapeHtml(duration ? formatMilliseconds(duration) : "")}</span></span></span>
       <span class="flow-timing-meta">${escapeHtml(meta)}</span>
     </a>`;
   }).join("\n");
 
   const omitted = flattenFlowTimeline(root).length - rows.length;
+  const tickMarkup = [0, 25, 50, 75, 100].map((position) => {
+    const label = position === 0 ? "start" : position === 100 ? formatMilliseconds(total) : formatMilliseconds(total * (position / 100));
+    return `<span class="flow-timing-tick" style="--tick-left:${position}%">${escapeHtml(label)}</span>`;
+  }).join("\n");
   return `<section class="flow-timing">
     <div class="flow-timing-head">
-      <span>Timing</span>
+      <span>Timeline</span>
       <strong>${escapeHtml(formatTime(root.timeStart))} → ${escapeHtml(formatTime(root.timeEnd))}</strong>
     </div>
-    <div class="flow-timing-axis" aria-hidden="true">
-      <span>start</span>
-      <span>${escapeHtml(formatMilliseconds(total))}</span>
+    <div class="flow-timing-scroll">
+      <div class="flow-timing-grid">
+        <div class="flow-timing-axis" aria-hidden="true">
+          <span class="flow-timing-axis-spacer"></span>
+          <div class="flow-timing-ruler">${tickMarkup}</div>
+          <span class="flow-timing-axis-spacer"></span>
+        </div>
+        <div class="flow-timing-rows">${rowMarkup}</div>
+      </div>
     </div>
-    <div class="flow-timing-rows">${rowMarkup}</div>
-    ${omitted > 0 ? `<p class="flow-timing-note">${escapeHtml(`${formatCount(omitted)} later timing rows omitted in the compact panel.`)}</p>` : ""}
+    ${omitted > 0 ? `<p class="flow-timing-note">${escapeHtml(`${formatCount(omitted)} later timing rows omitted.`)}</p>` : ""}
   </section>`;
 }
 
@@ -513,68 +576,13 @@ function renderCanonicalFlowPanel(sessionFlow) {
     return "";
   }
 
-  const summary = sessionFlow.summary || {};
-  return `<aside class="session-flow">
-    <h2>Flow</h2>
-    <div class="flow-summary">
-      ${renderMetric("elapsed", formatMilliseconds(summary.totalDuration))}
-      ${renderMetric("tools", formatCount(summary.toolCalls))}
-      ${renderMetric("errors", formatCount(summary.errors))}
-      ${renderMetric("error rate", formatPercent(summary.errorRate))}
-      ${renderMetric("subagents", formatCount(summary.subagents))}
-      ${renderMetric("steps", formatCount(summary.steps))}
-      ${summary.totalCost ? renderMetric("cost", `$${Number(summary.totalCost).toFixed(3)}`) : ""}
+  const timingDiagram = renderFlowTimingDiagram(sessionFlow);
+  return `<section id="session-flow-panel" class="session-flow-panel hidden" tabindex="-1" aria-hidden="true">
+    <div class="flow-panel-header">
+      <h2>Flow Timeline</h2>
+      <button type="button" class="flow-close-btn" data-flow-close aria-label="Close flow">x</button>
     </div>
-    ${renderFlowTimingDiagram(sessionFlow)}
-    <ul class="flow-tree">${renderCanonicalFlowNode(sessionFlow.root)}</ul>
-  </aside>`;
-}
-
-function renderSystemPromptItem(item) {
-  return `<li class="system-prompt-item system-prompt-${escapeHtml(item.kind || "item")}">
-    <span class="system-prompt-kind">${escapeHtml(item.kind || "item")}</span>
-    <span class="system-prompt-title">
-      ${escapeHtml(item.title || "")}
-      ${item.source ? `<span class="system-prompt-source">${escapeHtml(item.source)}</span>` : ""}
-    </span>
-    ${item.preview ? `<span class="system-prompt-preview">${escapeHtml(item.preview)}</span>` : ""}
-  </li>`;
-}
-
-function renderSystemPromptSection(section) {
-  const items = Array.isArray(section.items) ? section.items : [];
-  return `<details class="system-prompt-section" open>
-    <summary class="system-prompt-summary">
-      <span>${escapeHtml(section.title || "Section")}</span>
-      <strong>${escapeHtml(formatCount(items.length))}</strong>
-    </summary>
-    ${section.note ? `<p class="system-prompt-note">${escapeHtml(section.note)}</p>` : ""}
-    <ul class="system-prompt-list">
-      ${items.map(renderSystemPromptItem).join("\n") || `<li class="system-prompt-empty">No stored rows for this category.</li>`}
-    </ul>
-  </details>`;
-}
-
-function renderSystemPromptsPanel(systemPrompts) {
-  if (!systemPrompts) {
-    return "";
-  }
-
-  const sections = Array.isArray(systemPrompts.sections) ? systemPrompts.sections : [];
-  const firstUser = systemPrompts.firstUserMessage;
-
-  return `<section class="system-prompts-panel" id="system-prompts">
-    <header class="system-prompts-header">
-      <h2>System Prompts</h2>
-      <p>${escapeHtml(systemPrompts.note || "Stored pre-user context.")}</p>
-      ${systemPrompts.selectedAgent ? `<p class="system-prompt-boundary">${escapeHtml(`Selected agent: ${systemPrompts.selectedAgent}`)}</p>` : ""}
-      ${firstUser ? `<p class="system-prompt-boundary">${escapeHtml(`First user message: ${firstUser.id} · ${formatTime(firstUser.time)}`)}</p>` : ""}
-    </header>
-    <div class="system-prompt-warning">
-      ${renderMetric("hidden prompt stored", systemPrompts.hiddenPromptStored ? "yes" : "no")}
-      ${renderMetric("sections", formatCount(sections.length))}
-    </div>
-    ${sections.map(renderSystemPromptSection).join("\n") || `<p class="empty-state">No stored pre-user prompt evidence found.</p>`}
+    ${timingDiagram || `<p class="toc-empty">No timing data for this session.</p>`}
   </section>`;
 }
 
@@ -609,7 +617,14 @@ function renderSessionMetricsPanel(sessionMetrics) {
   </section>`;
 }
 
-function renderPart(messageData, partData, partId) {
+function renderReasoningPart(partData) {
+  return reasoningBlock(
+    partData?.text || "",
+    formatDuration(partData?.time?.start, partData?.time?.end)
+  );
+}
+
+function renderPart(messageData, partData, partId, reasoningMarkup = "") {
   if (!partData || typeof partData !== "object") {
     return "";
   }
@@ -618,8 +633,13 @@ function renderPart(messageData, partData, partId) {
     return messageBubble(messageData.role, partData.text || "", {
       model: messageModelLabel(messageData),
       tokens: messageData.tokens,
-      time: messageData.time?.created
+      time: messageData.time?.created,
+      reasoning: reasoningMarkup
     });
+  }
+
+  if (partData.type === "reasoning") {
+    return "";
   }
 
   if (partData.type === "tool") {
@@ -635,7 +655,8 @@ function renderPart(messageData, partData, partId) {
       state.output,
       state.status,
       formatDuration(timing.start, timing.end),
-      partId
+      partId,
+      reasoningMarkup
     );
   }
 
@@ -646,11 +667,11 @@ function renderPart(messageData, partData, partId) {
   return "";
 }
 
-function renderPartNode(messageData, part: SessionPartNode, depth = 0) {
+function renderPartNode(messageData, part: SessionPartNode, depth = 0, provider = "opencode", reasoningMarkup = "") {
   const isTaskWithSession = part.type === "tool" && isTaskTool(part.tool) && part.childSessions.length > 0;
-  const renderedPart = isTaskWithSession ? "" : renderPart(messageData, part.data, part.id);
+  const renderedPart = isTaskWithSession ? "" : renderPart(messageData, part.data, part.id, reasoningMarkup);
   const childMarkup = part.childSessions
-    .map((child) => renderSubagentChildSession(child))
+    .map((child) => renderSubagentChildSession(child, provider))
     .filter(Boolean)
     .join("\n");
   const partAnchor = escapeHtml(anchorId("part", part.id));
@@ -663,26 +684,113 @@ function renderPartNode(messageData, part: SessionPartNode, depth = 0) {
   }
 
   const branch = isTaskWithSession
-    ? renderSubagentBranch(part, childMarkup)
+    ? renderSubagentBranch(part, childMarkup, provider, reasoningMarkup)
     : `<div class="subsession-branch" data-parent-part-id="${escapeHtml(part.id)}">${childMarkup}</div>`;
 
   return `<div id="${partAnchor}" class="session-part-anchor">${renderedPart}${branch}</div>`;
 }
 
-function renderSessionTree(tree: SessionTree, depth = 0) {
-  const messageMarkup = tree.messages.map((message) => {
-    const renderedParts = message.parts
-      .map((part) => renderPartNode(message.data, part, depth))
-      .filter(Boolean)
-      .join("\n");
+function attachReasoningToRenderedPart(renderedPart, reasoningMarkup) {
+  if (!renderedPart || !reasoningMarkup) {
+    return null;
+  }
+
+  if (renderedPart.includes('class="message message-')) {
+    return renderedPart.replace("</header>", `</header><div class="message-reasoning">${reasoningMarkup}</div>`);
+  }
+
+  if (renderedPart.includes('class="tool-call ')) {
+    return renderedPart.replace('<div class="tool-panels">', `<div class="tool-panels"><div class="tool-reasoning">${reasoningMarkup}</div>`);
+  }
+
+  if (renderedPart.includes('class="subagent-body"')) {
+    return renderedPart.replace('<div class="subagent-body">', `<div class="subagent-body"><div class="subagent-reasoning">${reasoningMarkup}</div>`);
+  }
+
+  return null;
+}
+
+function attachPendingReasoning(renderedParts, pendingReasoning) {
+  if (!pendingReasoning.length) {
+    return;
+  }
+
+  const reasoningMarkup = pendingReasoning.join("\n");
+  for (let index = renderedParts.length - 1; index >= 0; index -= 1) {
+    const attached = attachReasoningToRenderedPart(renderedParts[index], reasoningMarkup);
+    if (attached) {
+      renderedParts[index] = attached;
+      pendingReasoning.length = 0;
+      return;
+    }
+  }
+
+  renderedParts.push(`<div class="session-part-anchor">${reasoningMarkup}</div>`);
+  pendingReasoning.length = 0;
+}
+
+function renderMessagePartsResult(message, depth = 0, provider = "opencode", initialReasoning = []) {
+  const renderedParts = [];
+  const pendingReasoning = [...initialReasoning];
+  let visibleCount = 0;
+
+  for (const part of message.parts) {
+    if (part.type === "reasoning") {
+      const reasoning = renderReasoningPart(part.data);
+      if (reasoning) {
+        pendingReasoning.push(reasoning);
+      }
+      continue;
+    }
+
+    const rendered = renderPartNode(message.data, part, depth, provider, pendingReasoning.join("\n"));
+    if (rendered) {
+      renderedParts.push(rendered);
+      if (!rendered.includes("session-event-anchor")) {
+        visibleCount += 1;
+        pendingReasoning.length = 0;
+      }
+    }
+  }
+
+  if (pendingReasoning.length && visibleCount > 0) {
+    attachPendingReasoning(renderedParts, pendingReasoning);
+  }
+
+  return {
+    markup: renderedParts.filter(Boolean).join("\n"),
+    hasVisibleContent: visibleCount > 0,
+    pendingReasoning
+  };
+}
+
+function renderMessageParts(message, depth = 0, provider = "opencode") {
+  const result = renderMessagePartsResult(message, depth, provider);
+  const renderedParts = result.markup ? [result.markup] : [];
+  attachPendingReasoning(renderedParts, result.pendingReasoning);
+  return renderedParts.filter(Boolean).join("\n");
+}
+
+function renderSessionTree(tree: SessionTree, depth = 0, provider = "opencode") {
+  const messageBlocks = [];
+  let pendingReasoning = [];
+
+  for (const message of tree.messages) {
+    const result = renderMessagePartsResult(message, depth, provider, pendingReasoning);
+    pendingReasoning = result.pendingReasoning;
     const messageAnchor = escapeHtml(anchorId("msg", message.id));
-    return renderedParts
-      ? `<article id="${messageAnchor}" class="message-group" data-role="${escapeHtml(message.role)}">${renderedParts}</article>`
-      : `<span id="${messageAnchor}" class="session-event-anchor" aria-hidden="true"></span>`;
-  }).filter(Boolean).join("\n");
+    if (result.hasVisibleContent && result.markup) {
+      messageBlocks.push(`<article id="${messageAnchor}" class="message-group" data-role="${escapeHtml(message.role)}">${renderMessageControls(message, provider)}${result.markup}</article>`);
+    } else if (!pendingReasoning.length) {
+      messageBlocks.push(`<span id="${messageAnchor}" class="session-event-anchor" aria-hidden="true"></span>`);
+    }
+  }
+
+  attachPendingReasoning(messageBlocks, pendingReasoning);
+  const messageMarkup = messageBlocks.filter(Boolean).join("\n");
 
   const detachedMarkup = tree.detachedChildren
-    .map((child) => renderSessionTree(child, depth + 1))
+    .map((child) => renderSessionTree(child, depth + 1, provider))
     .filter(Boolean)
     .join("\n");
   const body = [messageMarkup, detachedMarkup].filter(Boolean).join("\n");
@@ -699,7 +807,33 @@ function renderSessionTree(tree: SessionTree, depth = 0) {
   </details>`;
 }
 
-export function renderSessionPage({ session, sessionTree = null, sessionSystemPrompts = null, sessionMetrics = null, sessionFlow = null, messages = [], partsByMessage = new Map(), todos = [], recentSessions = [], meta = null, provider = "opencode", providers = [] }) {
+function renderRawParts(messageData, parts = []) {
+  const renderedParts = [];
+  const pendingReasoning = [];
+
+  for (const part of parts) {
+    const partData = safeParse(part.data);
+    if (partData?.type === "reasoning") {
+      const reasoning = renderReasoningPart(partData);
+      if (reasoning) {
+        pendingReasoning.push(reasoning);
+      }
+      continue;
+    }
+
+    const rendered = renderPart(messageData, partData, part.id, pendingReasoning.join("\n"));
+    if (rendered) {
+      renderedParts.push(rendered);
+      pendingReasoning.length = 0;
+    }
+  }
+
+  attachPendingReasoning(renderedParts, pendingReasoning);
+
+  return renderedParts.filter(Boolean).join("\n");
+}
+
+export function renderSessionPage({ session, sessionTree = null, sessionMetrics = null, sessionFlow = null, messages = [], partsByMessage = new Map(), todos = [], recentSessions = [], meta = null, provider = "opencode", providers = [] }) {
   const title = session.title || session.slug || session.id;
   const starred = meta?.starred ? 1 : 0;
   const actions = isOpenCodeLikeProvider(provider) ? `
@@ -729,10 +863,10 @@ ${actions}
     </header>
   `;
 
-  const messageMarkup = sessionTree ? renderSessionTree(sessionTree) : messages.map((message) => {
+  const messageMarkup = sessionTree ? renderSessionTree(sessionTree, 0, provider) : messages.map((message) => {
     const messageData = safeParse(message.data);
     const parts = partsByMessage.get(message.id) || [];
-    const renderedParts = parts.map((part) => renderPart(messageData, safeParse(part.data), part.id)).filter(Boolean).join("\n");
+    const renderedParts = renderRawParts(messageData, parts);
     return renderedParts ? `<article class="message-group">${renderedParts}</article>` : "";
   }).filter(Boolean).join("\n");
 
@@ -743,12 +877,11 @@ ${actions}
     ${header}
     ${renderSessionMetricsPanel(sessionMetrics)}
     ${todoList(todos)}
-    ${renderSystemPromptsPanel(sessionSystemPrompts)}
     <section class="messages">
       ${messageMarkup || `<p class="empty-state">${t("detail.no_messages")}</p>`}
     </section>
+    ${sessionFlow ? renderCanonicalFlowPanel(sessionFlow) : renderFlowPanel(sessionTree)}
   </main>
-  ${sessionFlow ? renderCanonicalFlowPanel(sessionFlow) : renderFlowPanel(sessionTree)}
 </div>
   `;
 

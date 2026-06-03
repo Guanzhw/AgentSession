@@ -7,6 +7,17 @@ function formatCount(value, prefix = "") {
   return `${prefix}${amount}`;
 }
 
+function formatCompactCount(value) {
+  const amount = Number(value) || 0;
+  if (Math.abs(amount) >= 1_000_000) {
+    return `${(amount / 1_000_000).toFixed(amount >= 10_000_000 ? 0 : 1)}m`;
+  }
+  if (Math.abs(amount) >= 1_000) {
+    return `${(amount / 1_000).toFixed(amount >= 10_000 ? 0 : 1)}k`;
+  }
+  return String(amount);
+}
+
 function stringifyData(value) {
   if (value == null) {
     return "";
@@ -38,16 +49,32 @@ function toolDescription(tool, input) {
   return match ? `${tool} — ${match}` : tool;
 }
 
+function tokenChip(label, value, title) {
+  if (value == null || Number(value) === 0) {
+    return "";
+  }
+
+  return `<span class="token-chip" title="${escapeHtml(title)}"><span class="token-chip-label">${escapeHtml(label)}</span>${escapeHtml(formatCompactCount(value))}</span>`;
+}
+
 function formatTokens(tokens) {
   if (!tokens || typeof tokens !== "object") {
     return "";
   }
 
-  const pieces = [];
-  if (tokens.total != null) pieces.push(`${tokens.total} tokens`);
-  if (tokens.input != null) pieces.push(`${t("tool.input")} ${tokens.input}`);
-  if (tokens.output != null) pieces.push(`${t("tool.output")} ${tokens.output}`);
-  return pieces.join(" · ");
+  const cache = tokens.cache && typeof tokens.cache === "object" ? tokens.cache : {};
+  const pieces = [
+    tokenChip("↑", tokens.input, `Input tokens: ${formatCompactCount(tokens.input)}`),
+    tokenChip("↓", tokens.output, `Output tokens: ${formatCompactCount(tokens.output)}`),
+    tokenChip("R", tokens.reasoning, `Reasoning tokens: ${formatCompactCount(tokens.reasoning)}`),
+    tokenChip("C", cache.read, `Cache read tokens: ${formatCompactCount(cache.read)}`)
+  ].filter(Boolean);
+
+  if (!pieces.length && tokens.total != null) {
+    pieces.push(tokenChip("T", tokens.total, `Total tokens: ${formatCompactCount(tokens.total)}`));
+  }
+
+  return pieces.join("");
 }
 
 export function formatTime(ts) {
@@ -128,8 +155,10 @@ export function messageBubble(role, content, meta: any = {}) {
   const safeRole = escapeHtml(role || "unknown");
   const model = meta.model ? `<span class="message-model">${escapeHtml(meta.model)}</span>` : "";
   const tokens = formatTokens(meta.tokens);
-  const tokenMarkup = tokens ? `<span class="message-tokens">${escapeHtml(tokens)}</span>` : "";
+  const total = meta.tokens?.total != null ? ` title="Total tokens: ${escapeHtml(formatCompactCount(meta.tokens.total))}"` : "";
+  const tokenMarkup = tokens ? `<span class="message-tokens"${total}>${tokens}</span>` : "";
   const time = meta.time ? `<time class="message-time">${escapeHtml(formatTime(meta.time))}</time>` : "";
+  const reasoning = meta.reasoning ? `<div class="message-reasoning">${meta.reasoning}</div>` : "";
   const body = role === "assistant"
     ? `<div class="message-body markdown">${renderMarkdown(content || "")}</div>`
     : `<pre class="message-body plain">${escapeHtml(content || "")}</pre>`;
@@ -141,11 +170,25 @@ export function messageBubble(role, content, meta: any = {}) {
       ${tokenMarkup}
       ${time}
     </header>
+    ${reasoning}
     ${body}
   </section>`;
 }
 
-export function toolCallBlock(tool, input, output, status, duration, partId) {
+export function reasoningBlock(content, duration = "", partId = "") {
+  const text = truncate(content, 6000);
+  const safeDuration = duration ? `<span class="reasoning-duration">${escapeHtml(duration)}</span>` : "";
+
+  return `<details class="reasoning-block" ${partId ? `id="part-${escapeHtml(partId)}" data-part-id="${escapeHtml(partId)}"` : ""}>
+    <summary aria-label="Toggle reasoning">
+      <span class="reasoning-title">Reasoning</span>
+      ${safeDuration}
+    </summary>
+    <div class="reasoning-body markdown">${renderMarkdown(text || "")}</div>
+  </details>`;
+}
+
+export function toolCallBlock(tool, input, output, status, duration, partId, reasoning = "") {
   const inputText = truncate(input);
   const outputText = truncate(output);
   const safeStatus = escapeHtml(status || "unknown");
@@ -159,6 +202,7 @@ export function toolCallBlock(tool, input, output, status, duration, partId) {
       ${safeDuration}
     </summary>
     <div class="tool-panels">
+      ${reasoning ? `<div class="tool-reasoning">${reasoning}</div>` : ""}
       <section>
         <h4>${t("tool.input")}</h4>
         <pre>${escapeHtml(inputText)}</pre>

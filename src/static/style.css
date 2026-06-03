@@ -116,7 +116,10 @@
 .card-menu-trigger:focus-visible,
 .tool-call summary:focus-visible,
 .toc-link:focus-visible,
-.flow-row:focus-visible {
+.flow-row:focus-visible,
+.flow-open-btn:focus-visible,
+.flow-close-btn:focus-visible,
+.subagent-export-btn:focus-visible {
   outline: 2px solid var(--accent-color);
   outline-offset: 2px;
 }
@@ -498,7 +501,7 @@ body::before {
 /* Session Detail */
 .session-workbench {
   display: grid;
-  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr) minmax(260px, 360px);
+  grid-template-columns: minmax(144px, 188px) minmax(0, 1fr);
   gap: 0;
   min-height: calc(100vh - 48px);
   background: var(--bg-secondary);
@@ -512,8 +515,7 @@ body::before {
   padding: 18px 22px 64px;
 }
 
-.session-toc,
-.session-flow {
+.session-toc {
   position: sticky;
   top: 48px;
   height: calc(100vh - 48px);
@@ -527,12 +529,8 @@ body::before {
   border-right: 1px solid var(--border-color);
 }
 
-.session-flow {
-  border-left: 1px solid var(--border-color);
-}
-
 .session-toc h2,
-.session-flow h2 {
+.session-flow-panel h2 {
   font-size: 11px;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -544,8 +542,8 @@ body::before {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 10px;
+  gap: 6px;
+  margin-bottom: 6px;
 }
 
 .toc-header h2 {
@@ -554,17 +552,19 @@ body::before {
 
 .toc-controls {
   display: flex;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
 }
 
 .toc-control {
-  padding: 3px 6px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
   border: 1px solid var(--border-color);
   border-radius: 5px;
   background: var(--bg-secondary);
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 13px;
   line-height: 1.2;
   cursor: pointer;
   white-space: nowrap;
@@ -591,7 +591,7 @@ body::before {
 
 .toc-group-summary {
   display: grid;
-  grid-template-columns: 12px minmax(0, 1fr);
+  grid-template-columns: 10px minmax(0, 1fr);
   align-items: start;
   gap: 2px;
   list-style: none;
@@ -606,7 +606,7 @@ body::before {
   content: "v";
   color: var(--text-muted);
   font-size: 10px;
-  line-height: 28px;
+  line-height: 23px;
   text-align: center;
 }
 
@@ -626,9 +626,9 @@ body::before {
 .toc-link {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 4px 8px;
-  padding: 7px 8px 7px calc(8px + var(--toc-depth, 0) * 12px);
-  border-radius: 6px;
+  gap: 2px 5px;
+  padding: 4px 5px 4px calc(5px + var(--toc-depth, 0) * 8px);
+  border-radius: 5px;
   text-decoration: none;
   color: var(--text-secondary);
   border: 1px solid transparent;
@@ -645,7 +645,7 @@ body::before {
 
 .toc-type {
   color: var(--accent-color);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -675,13 +675,13 @@ body::before {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .toc-meta {
   grid-column: 2;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 9px;
 }
 
 .toc-empty {
@@ -694,6 +694,48 @@ body::before {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 12px;
+}
+
+.session-flow-panel {
+  margin: 22px 0 0;
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-primary) 90%, var(--bg-secondary));
+  box-shadow: var(--shadow-sm);
+  scroll-margin-top: 64px;
+}
+
+.flow-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.flow-panel-header h2 {
+  margin: 0;
+}
+
+.flow-close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.flow-close-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--accent-color);
 }
 
 .session-stat {
@@ -738,7 +780,6 @@ body::before {
 }
 
 .flow-session .flow-dot { background: var(--accent-color); }
-.flow-step .flow-dot { background: var(--trace-text); }
 .flow-subagent .flow-dot { background: var(--trace-agent); }
 .flow-tool .flow-dot { background: var(--trace-tool); }
 .flow-message .flow-dot { background: var(--text-muted); }
@@ -771,8 +812,8 @@ body::before {
 }
 
 .flow-timing {
-  margin: 0 0 12px;
-  padding: 10px;
+  margin: 0;
+  padding: 12px;
   border: 1px solid var(--border-color);
   border-radius: 6px;
   background: var(--bg-secondary);
@@ -787,7 +828,7 @@ body::before {
 
 .flow-timing-head {
   align-items: baseline;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .flow-timing-head span {
@@ -804,23 +845,59 @@ body::before {
   text-align: right;
 }
 
+.flow-timing-scroll {
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.flow-timing-grid {
+  min-width: 980px;
+}
+
 .flow-timing-axis {
+  position: relative;
+  display: grid;
+  grid-template-columns: 220px minmax(720px, 1fr) 132px;
+  height: 26px;
   color: var(--text-muted);
   font-size: 9px;
-  padding-bottom: 5px;
   border-bottom: 1px solid var(--border-color);
-  margin-bottom: 6px;
+  margin-bottom: 7px;
+}
+
+.flow-timing-ruler {
+  position: relative;
+  grid-column: 2;
+  background:
+    linear-gradient(to right, color-mix(in srgb, var(--border-color) 85%, transparent) 1px, transparent 1px);
+  background-size: 25% 100%;
+}
+
+.flow-timing-tick {
+  position: absolute;
+  left: var(--tick-left, 0%);
+  bottom: 5px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.flow-timing-tick:first-child {
+  transform: none;
+}
+
+.flow-timing-tick:last-child {
+  transform: translateX(-100%);
 }
 
 .flow-timing-rows {
   display: grid;
-  gap: 5px;
+  gap: 6px;
 }
 
 .flow-timing-row {
   display: grid;
-  grid-template-columns: minmax(68px, 0.45fr) minmax(120px, 1fr);
-  gap: 7px;
+  grid-template-columns: 220px minmax(720px, 1fr) 132px;
+  gap: 8px;
   align-items: center;
   color: var(--text-secondary);
   text-decoration: none;
@@ -833,7 +910,7 @@ body::before {
 
 .flow-timing-label {
   min-width: 0;
-  padding-left: calc(var(--flow-depth, 0) * 7px);
+  padding-left: calc(var(--flow-depth, 0) * 10px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -842,9 +919,12 @@ body::before {
 .flow-timing-track {
   position: relative;
   min-width: 0;
-  height: 10px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--border-color) 55%, transparent);
+  height: 18px;
+  border-radius: 4px;
+  background:
+    linear-gradient(to right, color-mix(in srgb, var(--border-color) 60%, transparent) 1px, transparent 1px),
+    color-mix(in srgb, var(--border-color) 35%, transparent);
+  background-size: 25% 100%, auto;
   overflow: hidden;
 }
 
@@ -852,10 +932,25 @@ body::before {
   position: absolute;
   left: var(--flow-left, 0%);
   width: var(--flow-width, 1%);
-  top: 2px;
-  bottom: 2px;
-  border-radius: 999px;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 4px;
   background: var(--trace-text);
+  min-width: 5px;
+  overflow: hidden;
+}
+
+.flow-timing-bar-label {
+  display: block;
+  max-width: 100%;
+  padding: 0 5px;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .flow-timing-subagent .flow-timing-bar {
@@ -875,7 +970,6 @@ body::before {
 }
 
 .flow-timing-meta {
-  grid-column: 2;
   min-width: 0;
   color: var(--text-muted);
   overflow: hidden;
@@ -968,7 +1062,36 @@ body::before {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  position: relative;
   scroll-margin-top: 64px;
+}
+
+.message-controls {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  display: flex;
+  gap: 6px;
+}
+
+.flow-open-btn {
+  padding: 3px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--bg-primary) 90%, transparent);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.flow-open-btn:hover,
+.flow-open-btn[aria-expanded="true"] {
+  color: var(--accent-color);
+  border-color: var(--accent-color);
+  background: var(--bg-primary);
 }
 
 .session-part-anchor,
@@ -1029,6 +1152,30 @@ body::before {
 .message-model, .message-tokens, .message-time {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.message-tokens {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.token-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 5px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--bg-secondary) 75%, transparent);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.token-chip-label {
+  color: var(--accent-color);
+  font-weight: 700;
 }
 
 .message-body.markdown {
@@ -1103,6 +1250,63 @@ body::before {
   border-radius: 8px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.reasoning-block {
+  background: color-mix(in srgb, var(--trace-reasoning) 5%, var(--bg-primary));
+  border: 1px solid color-mix(in srgb, var(--trace-reasoning) 28%, var(--border-color));
+  border-left: 4px solid var(--trace-reasoning);
+  border-radius: 7px;
+  margin: 8px 0;
+  overflow: hidden;
+  scroll-margin-top: 64px;
+}
+
+.message-reasoning,
+.tool-reasoning,
+.subagent-reasoning {
+  margin-bottom: 12px;
+}
+
+.message-reasoning .reasoning-block,
+.tool-reasoning .reasoning-block,
+.subagent-reasoning .reasoning-block {
+  margin: 0;
+}
+
+.reasoning-block summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--trace-reasoning) 9%, var(--bg-secondary));
+  user-select: none;
+}
+
+.reasoning-block summary:hover {
+  background: color-mix(in srgb, var(--trace-reasoning) 14%, var(--bg-secondary));
+}
+
+.reasoning-title {
+  color: var(--trace-reasoning);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.reasoning-duration {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.reasoning-body {
+  padding: 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 /* Code */
@@ -1217,7 +1421,7 @@ details[open] summary {
 
 .subagent-summary {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   gap: 10px;
   align-items: center;
   padding: 10px 12px;
@@ -1232,6 +1436,29 @@ details[open] summary {
 .subagent-body {
   padding: 10px 12px 12px;
   background: color-mix(in srgb, var(--bg-secondary) 60%, var(--bg-primary));
+}
+
+.subagent-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  justify-self: end;
+}
+
+.subagent-export-btn {
+  padding: 3px 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  background: var(--bg-primary);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.subagent-export-btn:hover {
+  color: var(--accent-color);
+  border-color: var(--accent-color);
 }
 
 .system-prompts-panel {
@@ -2182,16 +2409,7 @@ pre code.hljs {
 
 @media (max-width: 1180px) {
   .session-workbench {
-    grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
-  }
-
-  .session-flow {
-    grid-column: 1 / -1;
-    position: static;
-    height: auto;
-    max-height: 320px;
-    border-left: 0;
-    border-top: 1px solid var(--border-color);
+    grid-template-columns: minmax(136px, 176px) minmax(0, 1fr);
   }
 }
 
@@ -2200,12 +2418,10 @@ pre code.hljs {
     grid-template-columns: 1fr;
   }
 
-  .session-toc,
-  .session-flow {
+  .session-toc {
     position: static;
     height: auto;
     max-height: 280px;
-    border-left: 0;
     border-right: 0;
     border-bottom: 1px solid var(--border-color);
   }

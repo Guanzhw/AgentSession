@@ -115,6 +115,14 @@ document.addEventListener("keydown", (e) => {
     document.getElementById("search-input").focus();
   }
   if (e.key === "Escape") {
+    const flowPanel = document.getElementById("session-flow-panel");
+    if (flowPanel && !flowPanel.classList.contains("hidden")) {
+      flowPanel.classList.add("hidden");
+      flowPanel.setAttribute("aria-hidden", "true");
+      document.querySelectorAll(".flow-open-btn[aria-expanded='true']").forEach((btn) => {
+        btn.setAttribute("aria-expanded", "false");
+      });
+    }
     document.activeElement.blur();
   }
 });
@@ -453,8 +461,9 @@ if (scrollSentinel && sessionList && "IntersectionObserver" in window) {
 
 const sessionWorkbench = document.querySelector(".session-workbench");
 if (sessionWorkbench) {
-  const navLinks = [...document.querySelectorAll(".session-toc a[href^='#'], .session-flow a[href^='#']")];
+  const navLinks = [...document.querySelectorAll(".session-toc a[href^='#'], .session-flow-panel a[href^='#']")];
   const tocGroups = [...document.querySelectorAll(".session-toc .toc-group")];
+  const flowPanel = document.getElementById("session-flow-panel");
   const targets = [...new Set(navLinks
     .map((link) => document.getElementById(decodeURIComponent(link.getAttribute("href").slice(1))))
     .filter(Boolean))];
@@ -493,6 +502,53 @@ if (sessionWorkbench) {
   };
 
   document.addEventListener("click", (event) => {
+    const exportLink = event.target.closest(".subagent-export-btn");
+    if (exportLink) {
+      event.stopPropagation();
+      return;
+    }
+
+    const flowClose = event.target.closest("[data-flow-close]");
+    if (flowClose && flowPanel) {
+      flowPanel.classList.add("hidden");
+      flowPanel.setAttribute("aria-hidden", "true");
+      document.querySelectorAll(".flow-open-btn[aria-expanded='true']").forEach((btn) => {
+        btn.setAttribute("aria-expanded", "false");
+      });
+      return;
+    }
+
+    const flowButton = event.target.closest(".flow-open-btn");
+    if (flowButton && flowPanel) {
+      event.preventDefault();
+      const wasHidden = flowPanel.classList.contains("hidden");
+      const wasThisButtonOpen = flowButton.getAttribute("aria-expanded") === "true";
+      const shouldOpen = wasHidden || !wasThisButtonOpen;
+      document.querySelectorAll(".flow-open-btn").forEach((btn) => {
+        btn.setAttribute("aria-expanded", btn === flowButton && shouldOpen ? "true" : "false");
+      });
+      if (shouldOpen) {
+        const messageGroup = flowButton.closest(".message-group");
+        if (messageGroup) {
+          messageGroup.insertAdjacentElement("afterend", flowPanel);
+        }
+        flowPanel.classList.remove("hidden");
+        flowPanel.setAttribute("aria-hidden", "false");
+        const anchor = flowButton.dataset.flowAnchor;
+        const flowLink = anchor ? flowPanel.querySelector(`a[href="#${CSS.escape(anchor)}"]`) : null;
+        if (flowLink) {
+          navLinks.forEach((link) => link.classList.remove("active"));
+          flowLink.classList.add("active");
+        }
+        flowPanel.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        flowPanel.focus({ preventScroll: true });
+      } else {
+        flowPanel.classList.add("hidden");
+        flowPanel.setAttribute("aria-hidden", "true");
+      }
+      return;
+    }
+
     const tocControl = event.target.closest("[data-toc-action]");
     if (tocControl) {
       const action = tocControl.getAttribute("data-toc-action");
@@ -502,7 +558,7 @@ if (sessionWorkbench) {
       return;
     }
 
-    const link = event.target.closest(".session-toc a[href^='#'], .session-flow a[href^='#']");
+    const link = event.target.closest(".session-toc a[href^='#'], .session-flow-panel a[href^='#']");
     if (!link) return;
     const target = document.getElementById(decodeURIComponent(link.getAttribute("href").slice(1)));
     if (!target) return;

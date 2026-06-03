@@ -3,7 +3,7 @@ import { buildOpenCodeSessionMetrics, type SessionMetricsView } from "./session-
 
 export interface FlowNode {
   id: string;
-  kind: "session" | "step" | "subagent";
+  kind: "session" | "message" | "subagent";
   label: string;
   meta: string;
   status: string | null;
@@ -26,7 +26,6 @@ export interface FlowTree {
     totalNodes: number;
     sessions: number;
     messages: number;
-    steps: number;
     toolCalls: number;
     subagents: number;
     errors: number;
@@ -78,7 +77,7 @@ function aggregate(node: FlowNode) {
   return node;
 }
 
-function stepNode(message: MessageContainer, children: FlowNode[], steps: SessionMetricsView["steps"][number][] = []): FlowNode | null {
+function messageNode(message: MessageContainer, children: FlowNode[], steps: SessionMetricsView["steps"][number][] = []): FlowNode | null {
   const tools = toolParts(message);
   if (!steps.length && !tools.length && !children.length) {
     return null;
@@ -92,10 +91,10 @@ function stepNode(message: MessageContainer, children: FlowNode[], steps: Sessio
 
   return aggregate({
     id: `msg:${message.id}`,
-    kind: "step",
-    label: message.title || `${message.role} step`,
+    kind: "message",
+    label: message.title || `${message.role} message`,
     meta: [
-      steps.length ? `${steps.length} model ${steps.length === 1 ? "step" : "steps"}` : "",
+      steps.length ? `${steps.length} model ${steps.length === 1 ? "pass" : "passes"}` : "",
       tools.length ? `${tools.length} tools` : "",
       children.length ? `${children.length} subagents` : "",
       errors ? `${errors} errors` : ""
@@ -148,9 +147,9 @@ function sessionNode(container: SessionContainer, metrics: SessionMetricsView | 
     const partChildren = message.parts
       .filter(isTaskPart)
       .map(subagentNode);
-    const step = stepNode(message, partChildren, stepsByMessage.get(message.id) || []);
-    if (step) {
-      children.push(step);
+    const flowMessage = messageNode(message, partChildren, stepsByMessage.get(message.id) || []);
+    if (flowMessage) {
+      children.push(flowMessage);
     }
   }
 
@@ -181,13 +180,11 @@ function countNodes(node: FlowNode, acc = {
   totalNodes: 0,
   sessions: 0,
   messages: 0,
-  steps: 0,
   subagents: 0
 }) {
   acc.totalNodes += 1;
   if (node.kind === "session") acc.sessions += 1;
-  if (node.kind === "step") {
-    acc.steps += 1;
+  if (node.kind === "message") {
     acc.messages += 1;
   }
   if (node.kind === "subagent") acc.subagents += 1;

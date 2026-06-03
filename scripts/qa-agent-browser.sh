@@ -57,6 +57,25 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local label="$1"
+  local text="$2"
+  local pattern="$3"
+  if [[ "$text" == *"$pattern"* ]]; then
+    echo "$label unexpectedly included $pattern" >&2
+    return 1
+  fi
+}
+
+assert_positive_count() {
+  local label="$1"
+  local count="$2"
+  if ! [[ "$count" =~ ^[0-9]+$ ]] || (( count <= 0 )); then
+    echo "$label expected a positive count, got $count" >&2
+    return 1
+  fi
+}
+
 wait_for_server
 
 ab "clear previous session" close --all >/dev/null || true
@@ -73,9 +92,11 @@ ab "open search" open "$BASE/opencode/search?q=assistant" >/dev/null
 ab "wait for search" wait --text "Search" >/dev/null
 
 ab "open session detail" open "$BASE/opencode/session/$SAMPLE_SESSION_ID" >/dev/null
-ab "wait for system prompts" wait --text "System Prompts" >/dev/null
+ab "wait for reasoning" wait --text "Reasoning" >/dev/null
 detail="$(read_ab "read session detail" get text body)"
-assert_contains "detail" "$detail" "System Prompts"
+assert_not_contains "detail" "$detail" "System Prompts"
+assert_contains "detail" "$detail" "Reasoning"
+assert_contains "detail" "$detail" "Flow"
 assert_contains "detail" "$detail" "TOOL"
 
 toc_unexpected="$(read_ab "count unexpected toc entries" get count ".session-toc .toc-link:not(.toc-user):not(.toc-assistant):not(.toc-agent):not(.toc-task)")"
@@ -83,6 +104,82 @@ if [[ "$toc_unexpected" != "0" ]]; then
   echo "TOC included non-message/non-task entries: $toc_unexpected" >&2
   exit 1
 fi
+
+reasoning_count="$(read_ab "count reasoning blocks" get count ".reasoning-block")"
+assert_positive_count "reasoning blocks" "$reasoning_count"
+
+message_reasoning_count="$(read_ab "count message reasoning blocks" get count ".message-reasoning .reasoning-block")"
+tool_reasoning_count="$(read_ab "count tool reasoning blocks" get count ".tool-reasoning .reasoning-block")"
+subagent_reasoning_count="$(read_ab "count subagent reasoning blocks" get count ".subagent-reasoning .reasoning-block")"
+attached_reasoning_count=$((message_reasoning_count + tool_reasoning_count + subagent_reasoning_count))
+if [[ "$attached_reasoning_count" != "$reasoning_count" ]]; then
+  echo "Reasoning blocks should attach to assistant/tool/task content, got total $reasoning_count attached $attached_reasoning_count" >&2
+  exit 1
+fi
+
+message_toc_meta_count="$(read_ab "count message toc meta" get count ".toc-user .toc-meta, .toc-assistant .toc-meta, .toc-agent .toc-meta")"
+if [[ "$message_toc_meta_count" != "0" ]]; then
+  echo "Message ToC entries should not show timestamps/meta, got count $message_toc_meta_count" >&2
+  exit 1
+fi
+
+token_chip_count="$(read_ab "count token chips" get count ".message-tokens .token-chip")"
+assert_positive_count "token chips" "$token_chip_count"
+
+flow_button_count="$(read_ab "count flow buttons" get count ".flow-open-btn")"
+assert_positive_count "flow buttons" "$flow_button_count"
+
+subagent_export_count="$(read_ab "count subagent export buttons" get count ".subagent-export-btn")"
+assert_positive_count "subagent export buttons" "$subagent_export_count"
+
+subagent_task_title_count="$(read_ab "count generic subagent task titles" get count ".subagent-summary >> text=Subagent task")"
+if [[ "$subagent_task_title_count" != "0" ]]; then
+  echo "Subagent headers should not show the generic Subagent task title, got count $subagent_task_title_count" >&2
+  exit 1
+fi
+
+subagent_branch_word_count="$(read_ab "count subagent branch wording" get count ".subagent-summary >> text=branch")"
+if [[ "$subagent_branch_word_count" != "0" ]]; then
+  echo "Subagent headers should say session, not branch, got count $subagent_branch_word_count" >&2
+  exit 1
+fi
+
+flow_panel_hidden="$(read_ab "count hidden flow panel" get count "#session-flow-panel.hidden")"
+if [[ "$flow_panel_hidden" != "1" ]]; then
+  echo "Flow panel should start hidden, got count $flow_panel_hidden" >&2
+  exit 1
+fi
+
+flow_timing_count="$(read_ab "count flow timing rows" get count "#session-flow-panel .flow-timing-row")"
+assert_positive_count "flow timing rows" "$flow_timing_count"
+
+flow_tree_count="$(read_ab "count flow tree panels" get count "#session-flow-panel .flow-tree")"
+if [[ "$flow_tree_count" != "0" ]]; then
+  echo "Flow panel should only include the timing diagram, but found flow tree count $flow_tree_count" >&2
+  exit 1
+fi
+
+flow_summary_count="$(read_ab "count flow summaries" get count "#session-flow-panel .flow-summary")"
+if [[ "$flow_summary_count" != "0" ]]; then
+  echo "Flow panel should only include the timing diagram, but found summary count $flow_summary_count" >&2
+  exit 1
+fi
+
+flow_step_count="$(read_ab "count legacy flow step rows" get count ".flow-step")"
+if [[ "$flow_step_count" != "0" ]]; then
+  echo "Flow still included legacy step rows: $flow_step_count" >&2
+  exit 1
+fi
+
+json_export="$(curl -fsS "$BASE/api/opencode/session/$SAMPLE_SESSION_ID/export?format=json")"
+node -e "const data=JSON.parse(require('fs').readFileSync(0,'utf8')); if ('systemPrompts' in data) { process.exit(1); }" <<<"$json_export" || {
+  echo "JSON export still included systemPrompts" >&2
+  exit 1
+}
+
+md_export="$(curl -fsS "$BASE/api/opencode/session/$SAMPLE_SESSION_ID/export?format=md")"
+assert_contains "markdown export" "$md_export" "### Reasoning"
+assert_not_contains "markdown export" "$md_export" "System Prompts"
 
 ab "open CodeAgent route" open "$BASE/codeagent" >/dev/null
 ab "wait for CodeAgent unavailable state" wait --text "Not installed" >/dev/null

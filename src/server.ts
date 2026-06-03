@@ -19,7 +19,6 @@ import {
 } from "./db.js";
 import { buildOpenCodeSessionTree } from "./providers/opencode/session-tree.js";
 import { buildOpenCodeSessionContainer } from "./providers/opencode/session-container.js";
-import { buildOpenCodeSystemPrompts } from "./providers/opencode/system-prompts.js";
 import { buildOpenCodeSessionMetrics } from "./providers/opencode/session-metrics.js";
 import { buildOpenCodeFlowTree } from "./providers/opencode/flow-tree.js";
 import { isOpenCodeLikeProvider } from "./providers/kinds.js";
@@ -341,6 +340,8 @@ function renderMarkdownExport(session, messages, partsByMessage) {
       const partData = part.data;
       if (partData?.type === "text" && partData.text) {
         lines.push(`## ${role}`, "", partData.text, "");
+      } else if (partData?.type === "reasoning" && partData.text) {
+        lines.push(`### Reasoning`, "", partData.text, "");
       } else if (partData?.type === "tool") {
         lines.push(`### Tool Call: ${partData.tool || "unknown"}`, "");
         if (partData.state?.input) {
@@ -608,7 +609,6 @@ export async function startServer(config = getConfig()) {
           const filename = `session-${id.slice(0, 8)}.json`;
           const sessionTree = isOpenCodeLikeProvider(providerId) ? buildOpenCodeSessionTree(id, adapter.getDataPath()) : null;
           const sessionContainer = isOpenCodeLikeProvider(providerId) ? buildOpenCodeSessionContainer(id, adapter.getDataPath()) : null;
-          const sessionSystemPrompts = isOpenCodeLikeProvider(providerId) ? buildOpenCodeSystemPrompts(id, adapter.getDataPath()) : null;
           const sessionMetrics = isOpenCodeLikeProvider(providerId) ? buildOpenCodeSessionMetrics(id, adapter.getDataPath()) : null;
           const sessionFlow = isOpenCodeLikeProvider(providerId) ? buildOpenCodeFlowTree(id, adapter.getDataPath()) : null;
           res.writeHead(200, {
@@ -619,7 +619,6 @@ export async function startServer(config = getConfig()) {
             session,
             tree: sessionTree,
             container: sessionContainer,
-            systemPrompts: sessionSystemPrompts,
             metrics: sessionMetrics,
             flow: sessionFlow,
             messages: messages.map((message) => ({
@@ -665,14 +664,12 @@ export async function startServer(config = getConfig()) {
           const partsByMessage = loadPartsByMessage(messages, dbPath);
           const sessionTree = buildOpenCodeSessionTree(sessionId, dbPath);
           const sessionContainer = buildOpenCodeSessionContainer(sessionId, dbPath);
-          const sessionSystemPrompts = buildOpenCodeSystemPrompts(sessionId, dbPath);
           const sessionMetrics = buildOpenCodeSessionMetrics(sessionId, dbPath);
           const sessionFlow = buildOpenCodeFlowTree(sessionId, dbPath);
           return json(res, {
             session: enrichedSession,
             tree: sessionTree,
             container: sessionContainer,
-            systemPrompts: sessionSystemPrompts,
             metrics: sessionMetrics,
             flow: sessionFlow,
             messages: messages.map((message) => ({
@@ -691,33 +688,6 @@ export async function startServer(config = getConfig()) {
           session: normalizeSessionRecord(session),
           messages: adapter.getMessages(sessionId)
         });
-      } catch (err) {
-        console.error(`Route error: ${err.message}`);
-        return json(res, { error: "Internal server error" }, 500);
-      }
-    }
-
-    const apiSessionSystemPromptsMatch = pathname.match(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/system-prompts$/);
-    if (apiSessionSystemPromptsMatch) {
-      const providerId = apiSessionSystemPromptsMatch[1];
-      const sessionId = decodeURIComponent(apiSessionSystemPromptsMatch[2]);
-      const adapter = providerMap.get(providerId);
-      if (!adapter) {
-        const missing = missingProviderResponse(providerId);
-        return json(res, missing.body, missing.status);
-      }
-
-      try {
-        if (!isOpenCodeLikeProvider(providerId)) {
-          return json(res, {
-            sessionId,
-            mode: "unavailable",
-            note: "System prompt inspection is currently available for OpenCode-compatible providers only.",
-            sections: []
-          });
-        }
-
-        return json(res, buildOpenCodeSystemPrompts(sessionId, adapter.getDataPath()));
       } catch (err) {
         console.error(`Route error: ${err.message}`);
         return json(res, { error: "Internal server error" }, 500);
@@ -1007,7 +977,6 @@ export async function startServer(config = getConfig()) {
           }));
           const partsByMessage = loadPartsByMessage(messages, dbPath);
           const sessionTree = buildOpenCodeSessionTree(sessionId, dbPath);
-          const sessionSystemPrompts = buildOpenCodeSystemPrompts(sessionId, dbPath);
           const sessionMetrics = buildOpenCodeSessionMetrics(sessionId, dbPath);
           const sessionFlow = buildOpenCodeFlowTree(sessionId, dbPath);
           const todos = getTodos(sessionId, dbPath);
@@ -1016,7 +985,6 @@ export async function startServer(config = getConfig()) {
           send(res, 200, renderSessionPage({
             session: enrichedSession,
             sessionTree,
-            sessionSystemPrompts,
             sessionMetrics,
             sessionFlow,
             messages,
