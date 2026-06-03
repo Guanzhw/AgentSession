@@ -1047,6 +1047,27 @@ details[open] summary {
   background: var(--bg-primary);
 }
 
+.session-metrics-panel {
+  margin: 0 0 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-color) 5%, var(--bg-primary));
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px;
+}
+
+.metrics-detail {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .context-panel-header {
   padding: 14px 16px;
   border-bottom: 1px solid var(--border-color);

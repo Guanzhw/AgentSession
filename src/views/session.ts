@@ -37,6 +37,16 @@ function formatCount(value) {
   return (Number(value) || 0).toLocaleString();
 }
 
+function formatMilliseconds(ms) {
+  const totalSeconds = Math.round((Number(ms) || 0) / 1000);
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
 function anchorId(prefix, id) {
   return `${prefix}-${String(id || "").replace(/[^A-Za-z0-9_-]/g, "-")}`;
 }
@@ -359,6 +369,37 @@ function renderContextPanel(sessionContext) {
   </section>`;
 }
 
+function renderSessionMetricsPanel(sessionMetrics) {
+  if (!sessionMetrics?.totals) {
+    return "";
+  }
+
+  const totals = sessionMetrics.totals;
+  const topTools = Array.isArray(sessionMetrics.tools)
+    ? sessionMetrics.tools.slice(0, 5).map((tool) => `${tool.name} ${tool.count}`).join(" · ")
+    : "";
+  const tokenPieces = [
+    `${formatCount(totals.inputTokens)} in`,
+    `${formatCount(totals.outputTokens)} out`,
+    totals.reasoningTokens ? `${formatCount(totals.reasoningTokens)} reasoning` : "",
+    totals.cacheReadTokens ? `${formatCount(totals.cacheReadTokens)} cache read` : "",
+    totals.cacheWriteTokens ? `${formatCount(totals.cacheWriteTokens)} cache write` : ""
+  ].filter(Boolean).join(" · ");
+
+  return `<section class="session-metrics-panel">
+    <div class="metrics-grid">
+      ${renderMetric("messages", formatCount(totals.messages))}
+      ${renderMetric("steps", formatCount(totals.steps))}
+      ${renderMetric("tools", formatCount(totals.toolCalls))}
+      ${renderMetric("branches", formatCount(totals.branches))}
+      ${renderMetric("runtime", formatMilliseconds(totals.runtimeMs))}
+      ${renderMetric("cost", totals.cost ? `$${Number(totals.cost).toFixed(4)}` : "$0")}
+    </div>
+    <p class="metrics-detail">${escapeHtml(tokenPieces || "No token totals available.")}</p>
+    ${topTools ? `<p class="metrics-detail">${escapeHtml(`top tools: ${topTools}`)}</p>` : ""}
+  </section>`;
+}
+
 function renderPart(messageData, partData, partId) {
   if (!partData || typeof partData !== "object") {
     return "";
@@ -449,7 +490,7 @@ function renderSessionTree(tree: SessionTree, depth = 0) {
   </details>`;
 }
 
-export function renderSessionPage({ session, sessionTree = null, sessionContext = null, messages = [], partsByMessage = new Map(), todos = [], recentSessions = [], meta = null, provider = "opencode", providers = [] }) {
+export function renderSessionPage({ session, sessionTree = null, sessionContext = null, sessionMetrics = null, messages = [], partsByMessage = new Map(), todos = [], recentSessions = [], meta = null, provider = "opencode", providers = [] }) {
   const title = session.title || session.slug || session.id;
   const starred = meta?.starred ? 1 : 0;
   const actions = isOpenCodeLikeProvider(provider) ? `
@@ -491,6 +532,7 @@ ${actions}
   ${renderToc(sessionTree, sessionContext)}
   <main id="${escapeHtml(anchorId("session", session.id))}" class="main-content">
     ${header}
+    ${renderSessionMetricsPanel(sessionMetrics)}
     ${todoList(todos)}
     ${renderContextPanel(sessionContext)}
     <section class="messages">
