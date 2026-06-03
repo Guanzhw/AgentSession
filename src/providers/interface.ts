@@ -1,4 +1,4 @@
-export type ProviderId = "opencode" | "claude-code" | "codex" | "gemini";
+export type ProviderId = "opencode" | "codeagent" | "claude-code" | "codex" | "gemini";
 
 export interface RawSession {
   id: string;

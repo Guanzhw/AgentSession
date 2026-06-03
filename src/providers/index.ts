@@ -1,6 +1,7 @@
 // src/providers/index.ts
 import type { ProviderAdapter } from "./interface.js";
 import opencode from "./opencode/adapter.js";
+import codeagent from "./codeagent/adapter.js";
 import claudeCode from "./claude-code/adapter.js";
 import codex from "./codex/adapter.js";
 import gemini from "./gemini/adapter.js";
@@ -25,6 +26,7 @@ export function getAllProviders() {
 
 // --- Provider registration (MUST be after ALL_PROVIDERS declaration) ---
 registerProvider(opencode);
+registerProvider(codeagent);
 registerProvider(claudeCode);
 registerProvider(codex);
 registerProvider(gemini);

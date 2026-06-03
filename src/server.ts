@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 
 import { getConfig } from "./config.js";
 import {
-  getDb,
   getMessages,
   getParts,
   getSession,
@@ -18,8 +17,8 @@ import {
   getDailySessionCounts,
   getSessionsByIds
 } from "./db.js";
-import opencodeAdapter from "./providers/opencode/adapter.js";
 import { buildOpenCodeSessionTree } from "./providers/opencode/session-tree.js";
+import { isOpenCodeLikeProvider } from "./providers/kinds.js";
 import { getAvailableProviders, getAllProviders, getProvider } from "./providers/index.js";
 import { getIndexDb, upsertIndex, getIndexedSessions, clearIndex } from "./index-db.js";
 import { setLocale, getLocale } from "./i18n.js";
@@ -101,6 +100,27 @@ function json(res, data, status = 200) {
   res.end(JSON.stringify(data));
 }
 
+function missingProviderResponse(providerId) {
+  const provider = getProvider(providerId);
+  if (provider) {
+    return {
+      status: 503,
+      body: {
+        ok: false,
+        error: "Provider not detected",
+        provider: provider.id,
+        name: provider.name,
+        dataPath: provider.getDataPath()
+      }
+    };
+  }
+
+  return {
+    status: 404,
+    body: { ok: false, error: "Provider not found" }
+  };
+}
+
 function safeJsonParse(value) {
   if (typeof value !== "string") {
     return value || {};
@@ -132,14 +152,14 @@ function enrichSessionList(sessions, metaMap, excludedIds) {
     .map((session) => enrichSession(session, metaMap));
 }
 
-function getSearchResults(query, limit, offset) {
+function getSearchResults(query, limit, offset, dbPath = undefined) {
   const term = (query || "").trim();
   if (!term) {
     return { sessions: [], total: 0, note: "Enter a search query to find sessions." };
   }
 
-  const titleMatches = listSessions(1000, 0, term).sessions;
-  const contentMatches = searchMessages(term, 500);
+  const titleMatches = listSessions(1000, 0, term, "", dbPath).sessions;
+  const contentMatches = searchMessages(term, 500, dbPath);
   const orderedIds = [];
   const sessionMap = new Map();
 
@@ -152,7 +172,7 @@ function getSearchResults(query, limit, offset) {
 
   for (const match of contentMatches) {
     if (!sessionMap.has(match.sessionId)) {
-      const session = getSession(match.sessionId);
+      const session = getSession(match.sessionId, dbPath);
       if (session) {
         orderedIds.push(session.id);
         sessionMap.set(session.id, session);
@@ -167,12 +187,12 @@ function getSearchResults(query, limit, offset) {
   };
 }
 
-function loadPartsByMessage(messages) {
+function loadPartsByMessage(messages, dbPath = undefined) {
   const map = new Map();
   for (const message of messages) {
     map.set(
       message.id,
-      getParts(message.id).map((part) => ({
+      getParts(message.id, dbPath).map((part) => ({
         ...part,
         data: safeJsonParse(part.data)
       }))
@@ -391,7 +411,7 @@ export async function startServer(config = getConfig()) {
     const legacyMutationMatch = pathname.match(/^\/api\/session\/([^/]+)\/(star|rename|delete|restore|permanent-delete)$/);
     if (req.method === "POST" && (prefixedMutationMatch || legacyMutationMatch)) {
       const providerId = prefixedMutationMatch?.[1] || "opencode";
-      if (providerId !== "opencode") {
+      if (!isOpenCodeLikeProvider(providerId)) {
         return json(res, { ok: false, error: "Not supported for this provider" }, 501);
       }
 
@@ -399,30 +419,30 @@ export async function startServer(config = getConfig()) {
       const id = safeDecodeId(rawId);
       if (!id) return json(res, { ok: false, error: "Invalid session ID" }, 400);
       const action = prefixedMutationMatch?.[3] || legacyMutationMatch[2];
-      const adapter = providerMap.get("opencode");
+      const adapter = providerMap.get(providerId);
       if (adapter && !adapter.getSession(id)) {
         return json(res, { ok: false, error: "Session not found" }, 404);
       }
       try {
         if (action === "star") {
-          const starred = toggleStar(id);
+          const starred = toggleStar(providerId, id);
           return json(res, { ok: true, starred });
         }
         if (action === "rename") {
           const body = await readBody(req);
-          renameSession(id, body.title || "");
+          renameSession(providerId, id, body.title || "");
           return json(res, { ok: true });
         }
         if (action === "delete") {
-          softDelete(id);
+          softDelete(providerId, id);
           return json(res, { ok: true });
         }
         if (action === "restore") {
-          restoreSession(id);
+          restoreSession(providerId, id);
           return json(res, { ok: true });
         }
         if (action === "permanent-delete") {
-          permanentDelete(id);
+          permanentDelete(providerId, id);
           return json(res, { ok: true });
         }
       } catch (error) {
@@ -434,7 +454,7 @@ export async function startServer(config = getConfig()) {
     const prefixedBatchMatch = pathname.match(/^\/api\/([a-z][a-z0-9-]*)\/batch$/);
     if (req.method === "POST" && (pathname === "/api/batch" || prefixedBatchMatch)) {
       const providerId = prefixedBatchMatch?.[1] || "opencode";
-      if (providerId !== "opencode") {
+      if (!isOpenCodeLikeProvider(providerId)) {
         return json(res, { ok: false, error: "Not supported for this provider" }, 501);
       }
 
@@ -445,7 +465,7 @@ export async function startServer(config = getConfig()) {
         if (!validActions.includes(body.action)) {
           return json(res, { ok: false, error: "Invalid action" }, 400);
         }
-        const affected = batchAction(ids, body.action);
+        const affected = batchAction(providerId, ids, body.action);
         return json(res, { ok: true, affected });
       } catch (error) {
         console.error("Mutation error:", error?.message || error);
@@ -484,7 +504,8 @@ export async function startServer(config = getConfig()) {
       const providerId = apiSessionsMatch[1];
       const adapter = providerMap.get(providerId);
       if (!adapter) {
-        return json(res, { ok: false, error: "Provider not found" }, 404);
+        const missing = missingProviderResponse(providerId);
+        return json(res, missing.body, missing.status);
       }
 
       try {
@@ -493,18 +514,19 @@ export async function startServer(config = getConfig()) {
         const range = url.searchParams.get("range") || "";
         const query = url.searchParams.get("q") || "";
 
-        if (providerId === "opencode") {
-          const metaMap = getAllMeta();
-          const excludedIds = getExcludedIds();
+        if (isOpenCodeLikeProvider(providerId)) {
+          const dbPath = adapter.getDataPath();
+          const metaMap = getAllMeta(providerId);
+          const excludedIds = getExcludedIds(providerId);
 
           let sessions;
           let total;
           if (query) {
-            const results = getSearchResults(query, apiLimit, apiOffset);
+            const results = getSearchResults(query, apiLimit, apiOffset, dbPath);
             sessions = enrichSessionList(results.sessions, metaMap, excludedIds);
             total = results.total;
           } else {
-            const results = listSessions(apiLimit, apiOffset, "", range);
+            const results = listSessions(apiLimit, apiOffset, "", range, dbPath);
             sessions = enrichSessionList(results.sessions, metaMap, excludedIds);
             total = results.total;
           }
@@ -547,7 +569,8 @@ export async function startServer(config = getConfig()) {
       const id = decodeURIComponent(apiSessionExportMatch[2]);
       const adapter = providerMap.get(providerId);
       if (!adapter) {
-        return json(res, { ok: false, error: "Provider not found" }, 404);
+        const missing = missingProviderResponse(providerId);
+        return json(res, missing.body, missing.status);
       }
 
       try {
@@ -556,15 +579,16 @@ export async function startServer(config = getConfig()) {
         let messages;
         let partsByMessage;
 
-        if (providerId === "opencode") {
-          const metaMap = getAllMeta();
-          const rawSession = getSession(id);
+        if (isOpenCodeLikeProvider(providerId)) {
+          const dbPath = adapter.getDataPath();
+          const metaMap = getAllMeta(providerId);
+          const rawSession = getSession(id, dbPath);
           if (!rawSession) {
             return json(res, { ok: false, error: "Not found" }, 404);
           }
           session = normalizeSessionRecord(enrichSession(rawSession, metaMap));
-          messages = getMessages(id).map((message) => ({ ...message, data: safeJsonParse(message.data) }));
-          partsByMessage = loadPartsByMessage(messages);
+          messages = getMessages(id, dbPath).map((message) => ({ ...message, data: safeJsonParse(message.data) }));
+          partsByMessage = loadPartsByMessage(messages, dbPath);
         } else {
           const rawSession = adapter.getSession(id);
           if (!rawSession) {
@@ -578,7 +602,7 @@ export async function startServer(config = getConfig()) {
 
         if (format === "json") {
           const filename = `session-${id.slice(0, 8)}.json`;
-          const sessionTree = providerId === "opencode" ? buildOpenCodeSessionTree(id) : null;
+          const sessionTree = isOpenCodeLikeProvider(providerId) ? buildOpenCodeSessionTree(id, adapter.getDataPath()) : null;
           res.writeHead(200, {
             "Content-Type": "application/json; charset=utf-8",
             "Content-Disposition": `attachment; filename="${filename}"`
@@ -612,20 +636,22 @@ export async function startServer(config = getConfig()) {
       const sessionId = decodeURIComponent(apiSessionDetailMatch[2]);
       const adapter = providerMap.get(providerId);
       if (!adapter) {
-        return json(res, { ok: false, error: "Provider not found" }, 404);
+        const missing = missingProviderResponse(providerId);
+        return json(res, missing.body, missing.status);
       }
 
       try {
-        if (providerId === "opencode") {
-          const metaMap = getAllMeta();
-          const session = getSession(sessionId);
+        if (isOpenCodeLikeProvider(providerId)) {
+          const dbPath = adapter.getDataPath();
+          const metaMap = getAllMeta(providerId);
+          const session = getSession(sessionId, dbPath);
           if (!session) {
             return json(res, { ok: false, error: "Not found" }, 404);
           }
           const enrichedSession = normalizeSessionRecord(enrichSession(session, metaMap));
-          const messages = getMessages(sessionId).map((message) => ({ ...message, data: safeJsonParse(message.data) }));
-          const partsByMessage = loadPartsByMessage(messages);
-          const sessionTree = buildOpenCodeSessionTree(sessionId);
+          const messages = getMessages(sessionId, dbPath).map((message) => ({ ...message, data: safeJsonParse(message.data) }));
+          const partsByMessage = loadPartsByMessage(messages, dbPath);
+          const sessionTree = buildOpenCodeSessionTree(sessionId, dbPath);
           return json(res, {
             session: enrichedSession,
             tree: sessionTree,
@@ -657,12 +683,13 @@ export async function startServer(config = getConfig()) {
       const sessionId = decodeURIComponent(apiSessionTraceMatch[2]);
       const adapter = providerMap.get(providerId);
       if (!adapter) {
-        return json(res, { ok: false, error: "Provider not found" }, 404);
+        const missing = missingProviderResponse(providerId);
+        return json(res, missing.body, missing.status);
       }
 
       try {
-        if (providerId === "opencode") {
-          return json(res, opencodeAdapter.getTrace(sessionId));
+        if (isOpenCodeLikeProvider(providerId) && adapter.getTrace) {
+          return json(res, adapter.getTrace(sessionId));
         }
 
         return json(res, {
@@ -680,12 +707,13 @@ export async function startServer(config = getConfig()) {
       const providerId = apiStatsMatch[1];
       const adapter = providerMap.get(providerId);
       if (!adapter) {
-        return json(res, { ok: false, error: "Provider not found" }, 404);
+        const missing = missingProviderResponse(providerId);
+        return json(res, missing.body, missing.status);
       }
 
       try {
-        if (providerId === "opencode") {
-          return json(res, getStats());
+        if (isOpenCodeLikeProvider(providerId)) {
+          return json(res, getStats(adapter.getDataPath()));
         }
 
         const indexed = getIndexedSessions(providerId, 100000, 0, "").sessions;
@@ -708,7 +736,7 @@ export async function startServer(config = getConfig()) {
 
     const currentProvider = getProvider(providerSegment);
     const adapter = providerMap.get(providerSegment);
-    if (!currentProvider || !adapter) {
+    if (!currentProvider) {
       send(res, 404, "<h1>Provider not found</h1>");
       return;
     }
@@ -718,16 +746,29 @@ export async function startServer(config = getConfig()) {
       providers: providerInfo
     };
 
+    if (!adapter) {
+      const dataPath = currentProvider.getDataPath();
+      send(res, 200, renderSessionsPage({
+        sessions: [],
+        total: 0,
+        note: `${currentProvider.name} data was not detected at ${dataPath}.`,
+        providerAvailable: false,
+        ...renderContext
+      }));
+      return;
+    }
+
     if (subPath === "/") {
       try {
         const range = url.searchParams.get("range") || "";
-        if (providerSegment === "opencode") {
-          const { sessions, total } = listSessions(limit, offset, "", range);
-          const metaMap = getAllMeta();
-          const excludedIds = getExcludedIds();
+        if (isOpenCodeLikeProvider(providerSegment)) {
+          const dbPath = adapter.getDataPath();
+          const { sessions, total } = listSessions(limit, offset, "", range, dbPath);
+          const metaMap = getAllMeta(providerSegment);
+          const excludedIds = getExcludedIds(providerSegment);
           const enrichedSessions = enrichSessionList(sessions, metaMap, excludedIds).map((session) => normalizeSessionRecord(session));
-          const overviewStats = getStats();
-          const deletedCount = getDeletedIds().length;
+          const overviewStats = getStats(dbPath);
+          const deletedCount = getDeletedIds(providerSegment).length;
           send(res, 200, renderSessionsPage({
             sessions: enrichedSessions,
             total,
@@ -764,10 +805,11 @@ export async function startServer(config = getConfig()) {
     if (subPath === "/search") {
       try {
         const query = url.searchParams.get("q") || "";
-        if (providerSegment === "opencode") {
-          const results = getSearchResults(query, limit, offset);
-          const metaMap = getAllMeta();
-          const excludedIds = getExcludedIds();
+        if (isOpenCodeLikeProvider(providerSegment)) {
+          const dbPath = adapter.getDataPath();
+          const results = getSearchResults(query, limit, offset, dbPath);
+          const metaMap = getAllMeta(providerSegment);
+          const excludedIds = getExcludedIds(providerSegment);
           const enrichedSessions = enrichSessionList(results.sessions, metaMap, excludedIds).map((session) => normalizeSessionRecord(session));
           send(res, 200, renderSessionsPage({ ...results, sessions: enrichedSessions, limit, offset, query, ...renderContext }));
           return;
@@ -784,11 +826,12 @@ export async function startServer(config = getConfig()) {
 
     if (subPath === "/stats") {
       try {
-        if (providerSegment === "opencode") {
-          const tokenStats = getTokenStats(30);
-          const modelDistribution = getModelDistribution();
-          const dailySessions = getDailySessionCounts(30);
-          const overview = getStats();
+        if (isOpenCodeLikeProvider(providerSegment)) {
+          const dbPath = adapter.getDataPath();
+          const tokenStats = getTokenStats(30, dbPath);
+          const modelDistribution = getModelDistribution(dbPath);
+          const dailySessions = getDailySessionCounts(30, dbPath);
+          const overview = getStats(dbPath);
           send(res, 200, renderStatsPage({ tokenStats, modelDistribution, dailySessions, overview, ...renderContext }));
           return;
         }
@@ -822,14 +865,15 @@ export async function startServer(config = getConfig()) {
     }
 
     if (subPath === "/trash") {
-      if (providerSegment !== "opencode") {
+      if (!isOpenCodeLikeProvider(providerSegment)) {
         send(res, 404, "<h1>Not found</h1>");
         return;
       }
       try {
-        const deletedIds = getDeletedIds();
-        const sessions = getSessionsByIds(deletedIds);
-        const metaMap = getAllMeta();
+        const dbPath = adapter.getDataPath();
+        const deletedIds = getDeletedIds(providerSegment);
+        const sessions = getSessionsByIds(deletedIds, dbPath);
+        const metaMap = getAllMeta(providerSegment);
         const enriched = sessions.map((session) => normalizeSessionRecord(enrichSession(session, metaMap)));
         send(res, 200, renderTrashPage({ sessions: enriched, ...renderContext }));
         return;
@@ -843,25 +887,26 @@ export async function startServer(config = getConfig()) {
       try {
         const sessionId = decodeURIComponent(subPath.slice("/session/".length));
 
-        if (providerSegment === "opencode") {
-          const session = getSession(sessionId);
+        if (isOpenCodeLikeProvider(providerSegment)) {
+          const dbPath = adapter.getDataPath();
+          const session = getSession(sessionId, dbPath);
           if (!session) {
             send(res, 404, "<h1>Session not found</h1>");
             return;
           }
 
-          const meta = getMeta(sessionId);
-          const metaMap = getAllMeta();
-          const excludedIds = getExcludedIds();
+          const meta = getMeta(providerSegment, sessionId);
+          const metaMap = getAllMeta(providerSegment);
+          const excludedIds = getExcludedIds(providerSegment);
           const enrichedSession = normalizeSessionRecord(enrichSession(session, metaMap));
-          const messages = getMessages(sessionId).map((message) => ({
+          const messages = getMessages(sessionId, dbPath).map((message) => ({
             ...message,
             data: safeJsonParse(message.data)
           }));
-          const partsByMessage = loadPartsByMessage(messages);
-          const sessionTree = buildOpenCodeSessionTree(sessionId);
-          const todos = getTodos(sessionId);
-          const { sessions: recentSessions } = listSessions(30, 0);
+          const partsByMessage = loadPartsByMessage(messages, dbPath);
+          const sessionTree = buildOpenCodeSessionTree(sessionId, dbPath);
+          const todos = getTodos(sessionId, dbPath);
+          const { sessions: recentSessions } = listSessions(30, 0, "", "", dbPath);
           const enrichedRecentSessions = enrichSessionList(recentSessions, metaMap, excludedIds).map((item) => normalizeSessionRecord(item));
           send(res, 200, renderSessionPage({
             session: enrichedSession,
@@ -905,8 +950,6 @@ export async function startServer(config = getConfig()) {
   };
 
   try {
-    getDb();
-
     // Index all providers
     const providers = getAvailableProviders();
     getIndexDb();
@@ -925,7 +968,7 @@ export async function startServer(config = getConfig()) {
     }
 
     // Cache provider data after indexing (providers don't change at runtime)
-    availableProviders = getAvailableProviders();
+    availableProviders = providers;
     providerMap = new Map(availableProviders.map((provider) => [provider.id, provider]));
     const availableIds = new Set(availableProviders.map((p) => p.id));
     providerInfo = getAllProviders().map((p) => ({
@@ -935,12 +978,15 @@ export async function startServer(config = getConfig()) {
       available: availableIds.has(p.id)
     }));
 
-    const stats = getStats();
+    const statsProvider = availableProviders.find((provider) => provider.id === "opencode")
+      || availableProviders.find((provider) => isOpenCodeLikeProvider(provider.id));
+    const stats = statsProvider ? getStats(statsProvider.getDataPath()) : { totalSessions: 0, totalMessages: 0 };
+    const dbLog = statsProvider ? statsProvider.getDataPath() : appConfig.dbPath;
     const server = createServer(requestHandler);
     server.listen(PORT, "127.0.0.1", () => {
       console.log(`OpenSessionViewer running at http://localhost:${PORT}`);
       console.log(`Language: ${getLocale()}`);
-      console.log(`DB: ${appConfig.dbPath}`);
+      console.log(`DB: ${dbLog}`);
       console.log(`${stats.totalSessions} sessions, ${stats.totalMessages} messages.`);
     });
 

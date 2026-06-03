@@ -2,6 +2,7 @@ import { escapeHtml } from "../markdown.js";
 import { layout } from "./layout.js";
 import { sessionCard } from "./components.js";
 import { t } from "../i18n.js";
+import { isOpenCodeLikeProvider } from "../providers/kinds.js";
 
 export function renderSessionsPage({
   sessions = [],
@@ -14,9 +15,14 @@ export function renderSessionsPage({
   totalMessages = 0,
   deletedCount = 0,
   provider = "opencode",
+  providerAvailable = true,
   providers = []
 } = {}) {
-  const cards = sessions.length
+  const isAvailable = providerAvailable !== false;
+  const isManageableProvider = isAvailable && isOpenCodeLikeProvider(provider);
+  const cards = !isAvailable
+    ? `<p class="empty-state">${t("provider.not_detected")}</p>`
+    : sessions.length
     ? sessions.map((session) => sessionCard(session, false, { showCheckbox: true, provider })).join("\n")
     : query
       ? `<p class="empty-state">${t("sessions.empty_search").replace("{query}", escapeHtml(query))}</p>`
@@ -68,7 +74,7 @@ export function renderSessionsPage({
           <span class="dash-arrow">\u2192</span>
         </div>
       </a>
-      ${provider === "opencode" ? `
+      ${isManageableProvider ? `
       <a href="/${provider}/trash" class="dash-card">
         <div class="dash-card-header">
           <span class="dash-file">trash/</span>
@@ -87,19 +93,19 @@ export function renderSessionsPage({
   `;
   
   const body = `
-    ${!query ? dashboard : ""}
+    ${!query && isAvailable ? dashboard : ""}
     <section class="page-header">
       <div class="page-header-row">
         <div>
           <h1>${query ? t("sessions.search_title").replace("{query}", escapeHtml(query)) : t("sessions.title")}</h1>
           <p>${t("sessions.count").replace("{count}", total)}</p>
         </div>
-        ${!query && provider === "opencode" ? `<button class="btn btn-manage" id="toggle-batch">${t("sessions.manage")}</button>` : ""}
+        ${!query && isManageableProvider ? `<button class="btn btn-manage" id="toggle-batch">${t("sessions.manage")}</button>` : ""}
       </div>
       ${searchNote}
-      ${!query ? filterBar : ""}
+      ${!query && isAvailable ? filterBar : ""}
     </section>
-    ${provider === "opencode" ? `
+    ${isManageableProvider ? `
     <div class="batch-bar hidden" id="batch-bar">
       <label class="batch-select-all">
         <input type="checkbox" id="select-all"> ${t("batch.select_all")}
@@ -116,5 +122,5 @@ export function renderSessionsPage({
     ${total > limit ? `<div id="scroll-sentinel" data-offset="${offset + sessions.length}" data-total="${total}" data-range="${escapeHtml(range)}" data-query="${escapeHtml(query)}" data-provider="${provider}"></div>` : ""}
   `;
 
-  return layout(query ? t("sessions.search_title").replace("{query}", query) : t("sessions.title"), body, query ? "search" : "home", { provider, providers });
+  return layout(query ? t("sessions.search_title").replace("{query}", query) : t("sessions.title"), body, query ? "search" : "home", { provider, providers, providerAvailable: isAvailable });
 }

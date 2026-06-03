@@ -13,7 +13,7 @@ import {
   getTokenStats as dbGetTokenStats,
 } from "../../db.js";
 import { parseJson } from "./parser.js";
-import type { ProviderAdapter } from "../interface.js";
+import type { ProviderAdapter, ProviderId } from "../interface.js";
 
 function defaultDataPath() {
   if (process.platform === "win32") {
@@ -23,26 +23,48 @@ function defaultDataPath() {
   return path.join(dataHome, "opencode", "opencode.db");
 }
 
-const opencode = {
-  id: "opencode",
-  name: "OpenCode",
-  icon: icons.opencode,
+export function defaultOpenCodeDataPath() {
+  return defaultDataPath();
+}
+
+export function createOpenCodeAdapter({
+  id,
+  name,
+  icon = icons.opencode,
+  defaultDataPath,
+  useConfiguredDbPath = false
+}: {
+  id: ProviderId;
+  name: string;
+  icon?: string;
+  defaultDataPath: () => string;
+  useConfiguredDbPath?: boolean;
+}): ProviderAdapter {
+  function getAdapterDataPath() {
+    return useConfiguredDbPath ? (getConfig().dbPath || defaultDataPath()) : defaultDataPath();
+  }
+
+  return {
+    id,
+    name,
+    icon,
 
   detect() {
-    const dbPath = getConfig().dbPath || defaultDataPath();
+    const dbPath = getAdapterDataPath();
     return existsSync(dbPath);
   },
 
   getDataPath() {
-    return getConfig().dbPath || defaultDataPath();
+    return getAdapterDataPath();
   },
 
   async *scan() {
-    const { sessions } = listSessions(100000, 0);
+    const dbPath = getAdapterDataPath();
+    const { sessions } = listSessions(100000, 0, "", "", dbPath);
     for (const s of sessions) {
       yield {
         id: s.id,
-        provider: "opencode",
+        provider: id,
         parentId: null,
         title: s.title || s.slug || null,
         directory: s.directory || null,
@@ -55,15 +77,16 @@ const opencode = {
   },
 
   getSession(sessionId) {
-    return dbGetSession(sessionId);
+    return dbGetSession(sessionId, getAdapterDataPath());
   },
 
   getMessages(sessionId) {
-    const messages = dbGetMessages(sessionId);
+    const dbPath = getAdapterDataPath();
+    const messages = dbGetMessages(sessionId, dbPath);
     const results = [];
     for (const msg of messages) {
       const data = typeof msg.data === "string" ? parseJson(msg.data) : msg.data;
-      const parts = getParts(msg.id).map((p) => ({
+      const parts = getParts(msg.id, dbPath).map((p) => ({
         ...p,
         data: typeof p.data === "string" ? parseJson(p.data) : p.data
       }));
@@ -107,7 +130,7 @@ const opencode = {
   },
 
   getTokenStats(days = 30) {
-    return dbGetTokenStats(days).map((row) => ({
+    return dbGetTokenStats(days, getAdapterDataPath()).map((row) => ({
       day: row.day,
       inputTokens: Number(row.input_tokens) || 0,
       outputTokens: Number(row.output_tokens) || 0,
@@ -117,7 +140,7 @@ const opencode = {
   },
 
   searchMessages(query, limit = 20) {
-    return dbSearchMessages(query, limit).map((r) => ({
+    return dbSearchMessages(query, limit, getAdapterDataPath()).map((r) => ({
       sessionId: r.sessionId,
       messageId: r.messageId || r.partId,
       role: r.role || "unknown",
@@ -128,7 +151,8 @@ const opencode = {
 
   getTrace(sessionId) {
     const MAX_STEPS = 200;
-    const messages = dbGetMessages(sessionId);
+    const dbPath = getAdapterDataPath();
+    const messages = dbGetMessages(sessionId, dbPath);
     let steps = [];
 
     const knownBuiltins = new Set([
@@ -179,7 +203,7 @@ const opencode = {
 
     for (const msg of messages) {
       const msgData = typeof msg.data === "string" ? parseJson(msg.data) : msg.data;
-      const parts = getParts(msg.id).map((p) => ({
+      const parts = getParts(msg.id, dbPath).map((p) => ({
         ...p,
         data: typeof p.data === "string" ? parseJson(p.data) : p.data
       }));
@@ -286,6 +310,14 @@ const opencode = {
   exportSession(_sessionId) {
     return null;
   }
-} satisfies ProviderAdapter;
+  } satisfies ProviderAdapter;
+}
+
+const opencode = createOpenCodeAdapter({
+  id: "opencode",
+  name: "OpenCode",
+  defaultDataPath,
+  useConfiguredDbPath: true
+});
 
 export default opencode;

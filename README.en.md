@@ -1,82 +1,70 @@
-<p align="center">
-  <img src="./docs/preview-dashboard.png" alt="OpenSessionViewer" width="720" />
-</p>
+# OpenSessionViewer
 
-<h1 align="center">OpenSessionViewer</h1>
+> A local AI session archive for developers: one searchable, traceable, reviewable web UI for OpenCode, CodeAgent, Claude Code, Codex CLI, and Gemini CLI sessions.
 
-<p align="center">
-  <strong>The Developer's AI Chronicle — binding your scattered conversation diaries into one volume</strong>
-</p>
+[English](./README.en.md) · [中文](./README.md)
 
-<p align="center">
-  <a href="./README.en.md">English</a> · <a href="./README.md">中文</a>
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/node-%3E%3D22.5.0-brightgreen?style=flat-square&logo=node.js" alt="Node.js" />
-  <img src="https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square" alt="Zero Runtime Dependencies" />
-  <img src="https://img.shields.io/badge/license-MIT-purple?style=flat-square" alt="MIT License" />
-  <img src="https://img.shields.io/badge/v1.2.0-orange?style=flat-square" alt="Version" />
-</p>
-
-<p align="center">
-  <em>Developers keep journals too — ours just happen to be AI conversations.</em><br/>
-  <em>The problem? Your journal is scattered across four different drawers.</em>
-</p>
-
----
-
-## 🤔 What Is This?
-
-We might be the first generation of programmers who **talk to AI more than to our coworkers**.
-
-Think about it — every day you pour your most complex architecture decisions, your trickiest debugging logic, your most inspired design instincts into conversations with AI. These conversations are more honest than any code comment you've ever written (let's be real, you'd never put "I can't understand my own code from three days ago" in a comment), more informative than any standup, and closer to your actual work than any weekly report.
-
-**Your AI conversation history is the most authentic developer journal of this era.**
-
-Except this journal is scattered across four different notebooks — OpenCode's SQLite database, Claude Code's JSONL files, Codex's JSON, Gemini's temp directory. Four formats, four corners, much like that "read later" bookmark folder you'll never actually organize.
-
-**OpenSessionViewer does one simple thing: gathers those four scattered diaries and binds them into one volume.**
-
-Search, browse, star, export, stats — dark mode, terminal aesthetic, zero runtime dependencies. It'll even tell you exactly how many tokens you've burned (you might want to sit down before looking at that number 💸).
-
----
+![Node.js >= 22.5.0](https://img.shields.io/badge/node-%3E%3D22.5.0-brightgreen?style=flat-square&logo=node.js)
+![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
+![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
+![v1.2.0](https://img.shields.io/badge/v1.2.0-orange?style=flat-square)
 
 ## Attribution
 
-OpenSessionViewer is based on [OpenSession](https://github.com/HeavyBunny19C/OpenSession). This project keeps the original spirit of a local, multi-provider AI session viewer while moving the codebase to TypeScript and extending the roadmap toward richer nested session visualization.
+OpenSessionViewer is based on [OpenSession](https://github.com/HeavyBunny19C/OpenSession). It keeps the original local, multi-provider AI session viewer direction, moves the codebase to TypeScript, and extends the roadmap toward richer nested-session, tool-flow, and context visualization.
 
----
+## What It Is
 
-## 🤖 Supported AI Tools
+OpenSessionViewer is a local-first viewer for AI coding sessions. It reads session data already stored on your machine and presents a unified dashboard, search, detail pages, statistics, exports, and trace views. It does not modify the original provider databases.
 
-| Tool | Status | Capabilities |
-|:---|:---:|:---|
-| **OpenCode** | ✅ Full | Browse, search, star, rename, delete, export, trace |
-| **Claude Code** | 📖 Read-only | Browse, search, token stats |
-| **Codex CLI** | 📖 Read-only | Browse, search, token stats |
-| **Gemini CLI** | 📖 Read-only | Browse, search, token stats |
+The focus is no longer just “list my chats.” The goal is to help you reconstruct what happened during an AI-assisted engineering workflow:
 
-> Smart path detection: probes env vars, XDG, dotfiles, macOS ~/Library, Windows %AppData%. Star/rename/delete/batch/export are OpenCode-only.
+- which user prompt started the session
+- what each assistant step did
+- which tools, MCP servers, skills, LSP calls, or subagents were invoked
+- how task/subtask branches fit back into the main conversation
+- how token usage, cost, runtime, and model distribution changed
+- which sessions are worth starring, renaming, deleting, or exporting
 
----
+## Supported Providers
 
-## 🚀 Quick Start
+| Provider | Status | Default Source | Capabilities |
+|:---|:---:|:---|:---|
+| OpenCode | Full | `$XDG_DATA_HOME/opencode/opencode.db` or `~/.local/share/opencode/opencode.db` | Browse, search, star, rename, delete, trash, export, stats, trace, nested sessions |
+| CodeAgent | Full | `$XDG_DATA_HOME/opencode/db/ngagent.db` or `~/.local/share/opencode/db/ngagent.db` | OpenCode fork with the same viewer capabilities |
+| Claude Code | Read-only | `~/.claude/transcripts/` + `~/.claude/projects/` | Browse, search, token stats |
+| Codex CLI | Read-only | `~/.codex/sessions/**/*.jsonl` | Browse, search, token stats |
+| Gemini CLI | Read-only | `~/.gemini/tmp/*/chats/*.json` | Browse, search, token stats |
+
+OpenCode and CodeAgent store stars, custom titles, soft deletes, and trash state in OpenSessionViewer’s own metadata database. The original session databases remain read-only.
+
+## Features
+
+- **Unified dashboard**: detected and undetected providers are shown in the top bar, with unavailable providers disabled.
+- **Session list and search**: time-range filtering, infinite scroll, title search, and message-content search.
+- **Session detail review**: messages, tool calls, todos, and subsessions render in one review surface.
+- **Recursive session tree**: OpenCode/CodeAgent child sessions are organized as nested session containers instead of flat message rows.
+- **Tool Flow Tree**: the right-side Flow view shows root sessions, messages, tools, and subagent branches by hierarchy.
+- **Table of Contents**: long sessions get navigation for prompts, assistant turns, task branches, and nested sessions.
+- **Trace API**: step/span summaries classify tools, skills, agents, MCP calls, and LSP activity.
+- **Statistics**: total sessions, total messages, token trends, model distribution, and daily session activity.
+- **Local management**: OpenCode/CodeAgent support starring, renaming, batch actions, soft delete, restore, and permanent delete.
+- **Export**: OpenCode/CodeAgent sessions can be exported as Markdown or JSON, with JSON including the session tree.
+- **Bilingual UI**: use `--lang en` or `--lang zh`.
+
+## Quick Start
 
 ```bash
 npx @guanzhw/opensessionviewer
 ```
 
-> 💡 Open `http://localhost:3456` and start exploring your AI coding sessions!
+Then open:
 
-### Global Install
-
-```bash
-npm install -g @guanzhw/opensessionviewer
-opensessionviewer --open  # auto-opens browser
+```text
+http://localhost:3456
 ```
 
-### From Source
+Run from source:
 
 ```bash
 git clone https://github.com/Guanzhw/OpenSessionViewer.git
@@ -85,220 +73,109 @@ npm install
 npm start
 ```
 
----
+## CLI Options
 
-## 📦 Install / Upgrade / Uninstall
+```text
+opensessionviewer [options]
 
-```bash
-# Install
-npm install -g @guanzhw/opensessionviewer
-
-# Upgrade to latest
-npm update -g @guanzhw/opensessionviewer
-
-# Uninstall
-npm uninstall -g @guanzhw/opensessionviewer
+--port <number>       Server port, default 3456
+--opencode-db <path>  OpenCode database path, alias --db
+--claude-dir <path>   Claude Code data directory
+--codex-dir <path>    Codex CLI data directory
+--gemini-dir <path>   Gemini CLI data directory
+--reindex             Rebuild the cross-provider index on start
+--lang <en|zh>        UI language
+--open                Open the browser on start
+-h, --help            Show help
 ```
 
-> Backward compatible: the `opensession` and `oh-my-opensession` commands still work after upgrade.
+## Environment Variables
 
----
+| Variable | Purpose |
+|:---|:---|
+| `PORT` | Default server port |
+| `SESSION_VIEWER_DB_PATH` | OpenCode DB path, lower priority than `--opencode-db` |
+| `OPENCODE_DB_PATH` | Alternative OpenCode DB env var |
+| `XDG_DATA_HOME` | XDG data root for OpenCode and CodeAgent |
+| `CLAUDE_CONFIG_DIR` | Claude Code data directory |
+| `CODEX_HOME` | Codex CLI data directory |
+| `GEMINI_HOME` | Gemini CLI data directory |
+| `OPENSESSIONVIEWER_META_PATH` | OpenSessionViewer metadata DB path |
+| `OH_MY_OPENSESSION_META_PATH` | Legacy metadata DB path |
 
-## ✨ Features
+## Architecture
 
-| | Feature | Description |
-|:---:|:---|:---|
-| 🤖 | **Multi-provider** | One UI for OpenCode, Claude Code, Codex CLI, Gemini CLI |
-| 🌙 | **Dark mode** | Auto-follows system, easy on the eyes |
-| 🖥️ | **Terminal aesthetic** | Code block cards + grid background |
-| 🔍 | **Search & filter** | By keyword, time range, across all providers |
-| ⭐ | **Star & rename** | Mark important sessions (OpenCode) |
-| 📤 | **Export** | JSON / Markdown (OpenCode) |
-| 🗑️ | **Soft delete** | Recoverable trash bin (OpenCode) |
-| 📊 | **Token stats** | Daily token usage charts |
-| 🔮 | **Trace visualization** | Agent/Skill/MCP/Tool/LSP call chain tree — see how AI thinks |
-| 🌐 | **i18n** | English & Chinese |
-| 🚀 | **Zero runtime dependencies** | Compiled TypeScript on Node.js built-ins |
+```text
+src/
+├── providers/
+│   ├── interface.ts       # ProviderAdapter interface
+│   ├── index.ts           # Provider registry
+│   ├── opencode/          # OpenCode-compatible SQLite adapter factory
+│   ├── codeagent/         # CodeAgent adapter, reusing OpenCode schema/parser
+│   ├── claude-code/       # Claude Code JSONL adapter
+│   ├── codex/             # Codex CLI JSONL adapter
+│   └── gemini/            # Gemini JSON adapter
+├── db.ts                  # OpenCode-compatible DB queries
+├── meta.ts                # Local metadata for star, rename, delete, trash
+├── index-db.ts            # Cross-provider session index
+├── server.ts              # HTTP API and SSR pages
+├── views/                 # Server-rendered templates
+├── static/                # Browser JS/CSS
+└── locales/               # English and Chinese copy
+```
 
----
+## Current Validation
+
+The latest real-data validation used:
+
+```text
+OpenCode DB: C:\Users\QQ110\.local\share\opencode\opencode.db
+Server: http://127.0.0.1:3456/opencode
+Data: 24 sessions, 1903 messages
+```
+
+Validated coverage:
+
+- dashboard, session list, search, stats, and session detail
+- recursive session tree, TOC, and Flow view
+- OpenCode management action entry points
+- CodeAgent unavailable-provider page when the default DB is absent
+- delegated `agent-browser` E2E with no browser/page console errors
 
 ## Roadmap
 
-1. Rewrite a session container that supports recursive session insertion.
-2. Expand task tool calls into nested subagent sessions.
-3. Add a table of contents.
-4. Add more metrics: token usage per session, runtime, and a better tool-flow view that includes every sub-session tree.
+Next work focuses on making AI workflows easier to reconstruct precisely:
 
----
+1. **Session Container Rewrite**
+   - Model sessions as recursive containers so root sessions, child sessions, and subsessions can be inserted and rendered consistently.
 
-## ⚙️ CLI Options
+2. **Nested Subagent Expansion**
+   - Expand `task` / `subtask` tool calls into collapsible nested subagent sessions instead of ordinary tool rows.
 
-```
-Option                  Description                     Default
---port <port>           Server port                     3456
---opencode-db <path>    OpenCode database path          auto-detect
---claude-dir <path>     Claude Code projects dir        auto-detect
---codex-dir <path>      Codex CLI sessions dir          auto-detect
---gemini-dir <path>     Gemini CLI sessions dir         auto-detect
---lang <en|zh>          UI language                     auto-detect
---open                  Auto-open browser               false
---reindex               Force rebuild session index     false
--h, --help              Show help                       —
-```
+3. **Context View**
+   - Add a context view that shows what was placed into context for every step of every session.
+   - The goal is to answer: which messages, files, tool outputs, summaries, system prompts, agent prompts, or compacted history did the model actually see at that step?
 
-## 🔧 Environment Variables
+4. **Table Of Contents Upgrade**
+   - Improve navigation for long sessions: user prompts, assistant turns, tool calls, subagents, and important milestones.
 
-| Variable | Description |
-|:---|:---|
-| `PORT` | Server port (`--port` takes priority) |
-| `SESSION_VIEWER_DB_PATH` | OpenCode DB path (`--opencode-db` takes priority) |
-| `OPENSESSIONVIEWER_META_PATH` | Metadata DB path |
-| `OH_MY_OPENSESSION_META_PATH` | Legacy metadata DB path |
+5. **Metrics Upgrade**
+   - Add per-session token usage, runtime, step duration, tool counts, and better model/provider breakdowns.
 
----
+6. **Tool Flow Tree**
+   - Upgrade the current trace/tool view into a complete tree that includes all sub-session branches, task calls, spans, and timing.
 
-## 🏗️ Architecture
+7. **QA/Polish Pass**
+   - Fix and verify disclosure accessibility, add browser regression checks, and make `agent-browser` verification repeatable.
 
-```
-opensessionviewer
-├── bin/cli.ts              # Entry point
-├── src/
-│   ├── server.ts           # HTTP server, /:provider routing
-│   ├── providers/
-│   │   ├── interface.ts    # ProviderAdapter TypeScript types
-│   │   ├── index.ts        # Provider registry
-│   │   ├── opencode/        # OpenCode adapter (SQLite)
-│   │   ├── claude-code/     # Claude Code adapter (JSONL)
-│   │   ├── codex/           # Codex CLI adapter (JSONL)
-│   │   └── gemini/          # Gemini CLI adapter (JSON)
-│   ├── index-db.ts         # Cross-provider session index
-│   ├── meta.ts             # User metadata (star, rename, delete)
-│   ├── views/               # Server-rendered HTML templates
-│   ├── static/              # CSS + client JS
-│   └── locales/             # i18n (en, zh)
-└── docs/
-    └── CONTRIBUTING-PROVIDER.md  # How to add a new provider
+## Development
+
+```bash
+npm run typecheck
+npm run build
+npm start
 ```
 
----
+## License
 
-## 🔌 Add Your Own Provider
-
-See [CONTRIBUTING-PROVIDER.md](./docs/CONTRIBUTING-PROVIDER.md) for a step-by-step guide.
-
----
-
-<details>
-<summary>🤖 <strong>AI Agent Context</strong> (click to expand)</summary>
-
-```
-PROJECT: OpenSessionViewer v1.2.0
-PURPOSE: Multi-provider AI session viewer (web UI)
-STACK: TypeScript, Node.js ≥22.5.0, zero runtime dependencies, ESM, SQLite (node:sqlite)
-PROVIDERS: OpenCode (read-write), Claude Code (read-only), Codex CLI (read-only), Gemini CLI (read-only)
-
-ARCHITECTURE:
-  src/providers/interface.ts — ProviderAdapter interface
-  src/providers/*/adapter.ts — Per-provider implementation
-  src/index-db.ts — Cross-provider session index (SQLite)
-  src/meta.ts — User metadata: star, rename, soft-delete (SQLite)
-  src/server.ts — HTTP routing with /:provider prefix
-
-KEY FACTS:
-  - Read-only: Never modifies AI tool databases
-  - Meta storage: ~/.config/opensessionviewer/meta.db
-  - Source workflow: npm install, then npm start or npm run build
-  - ESM only: "type": "module", source entry is bin/cli.ts, published entry is dist/bin/cli.js
-  - Build step: TypeScript emits dist/, then scripts/copy-static.mjs copies static assets
-```
-
-</details>
-
----
-
-## 📋 Changelog
-
-### v1.2.0 — Smart Path Detection & Provider Audit Fixes
-
-**🔍 Smart Path Detection (New)**
-- Multi-path probe mechanism — auto-scans env vars, XDG paths, dotfiles, macOS `~/Library`, Windows `%AppData%`
-- Environment variable overrides: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GEMINI_HOME`, `OPENCODE_DB_PATH`
-- Zero manual configuration — data found wherever it lives
-
-**🔧 Provider Audit Fixes (Oracle Deep Review)**
-- OpenCode search/stats no longer leak subagent sessions — all queries filter `parent_id IS NULL`
-- Trace token data fixed — preserved as objects, aggregated via `tokens.total` (was coerced to 0)
-- Codex default path fixed — `~/.codex` not `~/.codex/sessions/sessions`
-- Gemini default path fixed — `~/.gemini` not `~/.gemini/tmp/tmp`
-- Claude Code detection by data directory — removed `which claude` dependency
-- Claude Code parser dual-format support — top-level + nested message records
-- Added `tool_use` record type parsing
-- Stale index entries cleared on reindex
-
-**🚫 Subagent Filtering**
-- OpenCode session list shows only user-initiated conversations — filters 85% automated subagent sessions
-- Search results, token stats, model distribution all filtered
-
-### v1.1.1 — Security Fixes & Visual Polish
-
-**🔒 Security**
-- Markdown link XSS fix — URL scheme whitelist (http/https/mailto/relative only)
-- Server binds to `127.0.0.1` — no LAN exposure
-- Request body capped at 1MB — DoS prevention
-- Trace API capped at 200 steps — browser freeze prevention
-- Symlink skipping in file-based providers — traversal attack prevention
-- Session ID validation — length + character sanitization
-- Session existence check before metadata mutations
-- Error messages sanitized — no internal details exposed to client
-
-**🎨 Visual Polish**
-- Unified `:focus-visible` ring + `active` feedback on all interactive elements
-- Topbar 3-column grid layout (Logo / Providers centered / Actions)
-- Session card borders, 2-line title clamp, `focus-within` action reveal
-- Trace panel loading spinner + empty state
-- Trace colors migrated to CSS variables (9 semantic + 4 z-index levels)
-- ⚡ Dedicated trace button separates tool expansion from trace opening
-
-### v1.1.0 — Trace Visualization & Provider Fixes
-
-**🔮 Trace Visualization (New Feature)**
-- Call chain tree panel in session detail (500px, grid layout)
-- Named agents: Sisyphus / Momus / Explorer / Librarian / Junior
-- Hierarchical indent: Agent → Skill → MCP → Tool parent-child
-- Color coded: 🤖Agent(pink) 🎯Skill(orange) 🧠MCP(green) 🔧Tool(cyan) 📡LSP(blue)
-- Chronological ordering, collapsible steps, summary footer
-
-**🔧 Provider Fixes**
-- OpenCode search/stats now filter subagent sessions (`parent_id IS NULL`)
-- Trace token data preserved as objects (was coerced to 0)
-- Codex default path fixed (`~/.codex` not `~/.codex/sessions/sessions`)
-- Gemini default path fixed (`~/.gemini` not `~/.gemini/tmp/tmp`)
-- Claude Code detection by data directory (removed `which claude` dependency)
-- Claude Code parser supports both top-level and nested record formats
-- Added `tool_use` record type parsing
-- Stale index entries cleared on reindex
-
-**🖥️ UI Changes**
-- Merged topbar: provider tabs inline (112px → 48px single bar)
-- Official SVG logos (OpenCode/Claude/OpenAI/Gemini)
-- Session detail sidebar removed, full-width layout
-- Compact session header (metadata in single line)
-- All providers always shown, unavailable ones grayed out
-- Responsive breakpoints (768px/480px)
-
-### v1.0.0 — Initial Release
-
-- Multi-provider adapter architecture (OpenCode / Claude Code / Codex CLI / Gemini CLI)
-- Session browsing, search, time-range filtering
-- Star, rename, soft-delete, batch operations (OpenCode)
-- Token usage stats (trend chart + model distribution)
-- Markdown / JSON export
-- Dark/light theme auto-detection
-- Chinese/English i18n
-- Zero external dependencies
-
----
-
-## 📄 License
-
-MIT — use it, have fun 🎉
+MIT

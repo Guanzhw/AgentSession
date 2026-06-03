@@ -132,12 +132,12 @@ function calculateMetrics(session: Row, messages: SessionMessageNode[], detached
   };
 }
 
-export function buildOpenCodeSessionTree(sessionId: string, seen = new Set<string>()): SessionTree | null {
+export function buildOpenCodeSessionTree(sessionId: string, dbPath = undefined, seen = new Set<string>()): SessionTree | null {
   if (seen.has(sessionId)) {
     return null;
   }
 
-  const session = getSession(sessionId);
+  const session = getSession(sessionId, dbPath);
   if (!session) {
     return null;
   }
@@ -145,19 +145,19 @@ export function buildOpenCodeSessionTree(sessionId: string, seen = new Set<strin
   const nextSeen = new Set(seen);
   nextSeen.add(sessionId);
 
-  const childRows = getChildSessions(sessionId);
+  const childRows = getChildSessions(sessionId, dbPath);
   const childrenById = new Map<string, SessionTree>();
   for (const child of childRows) {
-    const childTree = buildOpenCodeSessionTree(child.id, nextSeen);
+    const childTree = buildOpenCodeSessionTree(child.id, dbPath, nextSeen);
     if (childTree) {
       childrenById.set(child.id, childTree);
     }
   }
 
   const attachedChildIds = new Set<string>();
-  const messages: SessionMessageNode[] = getMessages(sessionId).map((message) => {
+  const messages: SessionMessageNode[] = getMessages(sessionId, dbPath).map((message) => {
     const messageData = asObject(typeof message.data === "string" ? parseJson(message.data) : message.data);
-    const parts: SessionPartNode[] = getParts(message.id).map((part) => {
+    const parts: SessionPartNode[] = getParts(message.id, dbPath).map((part) => {
       const partData = asObject(typeof part.data === "string" ? parseJson(part.data) : part.data);
       const childSessions = extractTaskSessionIds(partData)
         .map((id) => childrenById.get(id))

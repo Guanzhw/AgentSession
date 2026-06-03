@@ -1,5 +1,6 @@
 const __LOCALE__ = window.__LOCALE__ || "en";
 const PROVIDER = document.body.dataset.provider || "opencode";
+const IS_MANAGEABLE_PROVIDER = PROVIDER === "opencode" || PROVIDER === "codeagent";
 const __I18N__ = {
   en: {
     rename_prompt: "Enter new title:",
@@ -356,7 +357,7 @@ function renderSessionCard(s) {
   const classes = ["session-card"];
   if (s.starred) classes.push("starred");
 
-  const actionsHtml = PROVIDER === "opencode" ? `
+  const actionsHtml = IS_MANAGEABLE_PROVIDER ? `
     <div class="card-actions">
       <button class="star-btn ${s.starred ? "starred" : ""}" data-id="${id}" title="${ft("star_check")}">
         ${s.starred ? "★" : "☆"}

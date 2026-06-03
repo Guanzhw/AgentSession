@@ -1,8 +1,9 @@
 import { escapeHtml } from "../markdown.js";
 import { t, getLocale } from "../i18n.js";
 import { icons } from "../icons.js";
+import { isOpenCodeLikeProvider } from "../providers/kinds.js";
 
-export function layout(title, body, page = "home", { provider = null, providers = [] } = {}) {
+export function layout(title, body, page = "home", { provider = null, providers = [], providerAvailable = true } = {}) {
   const providerPrefix = provider ? `/${provider}` : "";
 
   const providerTabs = providers.map((p) => {
@@ -36,7 +37,7 @@ export function layout(title, body, page = "home", { provider = null, providers 
     <div class="topbar-tabs">${providerTabs}</div>
     <div class="topbar-actions">
       <a href="${providerPrefix}/stats" class="nav-link">${t("nav.stats")}</a>
-      ${provider === "opencode" ? `<a href="${providerPrefix}/trash" class="nav-link">${t("nav.trash")}</a>` : ""}
+      ${providerAvailable !== false && isOpenCodeLikeProvider(provider) ? `<a href="${providerPrefix}/trash" class="nav-link">${t("nav.trash")}</a>` : ""}
       <form class="search-form" action="${providerPrefix}/search" method="GET">
         <input type="text" name="q" placeholder="${t("nav.search_placeholder")}" class="search-input" id="search-input">
       </form>

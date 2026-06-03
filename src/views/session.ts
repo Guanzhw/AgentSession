@@ -3,6 +3,7 @@ import { layout } from "./layout.js";
 import { formatDuration, formatTime, messageBubble, todoList, toolCallBlock } from "./components.js";
 import { t } from "../i18n.js";
 import type { SessionPartNode, SessionTree } from "../providers/opencode/session-tree.js";
+import { isOpenCodeLikeProvider } from "../providers/kinds.js";
 
 function safeParse(value) {
   if (typeof value !== "string") {
@@ -353,7 +354,7 @@ function renderSessionTree(tree: SessionTree, depth = 0) {
 export function renderSessionPage({ session, sessionTree = null, messages = [], partsByMessage = new Map(), todos = [], recentSessions = [], meta = null, provider = "opencode", providers = [] }) {
   const title = session.title || session.slug || session.id;
   const starred = meta?.starred ? 1 : 0;
-  const actions = provider === "opencode" ? `
+  const actions = isOpenCodeLikeProvider(provider) ? `
       <div class="session-actions">
         <button class="star-btn action-btn ${starred ? "starred" : ""}" data-id="${escapeHtml(session.id)}">
           ${starred ? t("action.starred") : t("action.star")}

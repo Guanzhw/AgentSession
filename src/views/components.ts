@@ -1,5 +1,6 @@
 import { escapeHtml, renderMarkdown } from "../markdown.js";
 import { t } from "../i18n.js";
+import { isOpenCodeLikeProvider } from "../providers/kinds.js";
 
 function formatCount(value, prefix = "") {
   const amount = Number(value) || 0;
@@ -90,7 +91,7 @@ export function sessionCard(s, active = false, { showCheckbox = false, provider 
     ? `<input type="checkbox" class="card-checkbox" data-id="${escapeHtml(s.id)}">`
     : "";
 
-  const actionsHtml = provider === "opencode" ? `
+  const actionsHtml = isOpenCodeLikeProvider(provider) ? `
     <div class="card-actions">
       <button class="star-btn ${s.starred ? "starred" : ""}" data-id="${escapeHtml(s.id)}" title="${t("batch.star")}">
         ${s.starred ? "★" : "☆"}

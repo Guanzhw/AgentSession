@@ -4,29 +4,28 @@ import { parseJson, createSnippet, mapDataRow } from "./providers/opencode/parse
 
 let dbInstance;
 let dbPath;
+const dbInstances = new Map();
 
-function resolveDbPath() { return getConfig().dbPath; }
+function resolveDbPath(pathOverride = undefined) { return pathOverride || getConfig().dbPath; }
 
-export function getDb() {
-  const nextPath = resolveDbPath();
+export function getDb(pathOverride = undefined) {
+  const nextPath = resolveDbPath(pathOverride);
 
-  if (dbInstance && dbPath === nextPath) {
-    return dbInstance;
+  if (dbInstances.has(nextPath)) {
+    return dbInstances.get(nextPath);
   }
 
-  if (dbInstance && typeof dbInstance.close === "function") {
-    dbInstance.close();
-  }
-
-  dbInstance = new DatabaseSync(nextPath, { readOnly: true });
+  const nextDb = new DatabaseSync(nextPath, { readOnly: true });
+  nextDb.exec("PRAGMA journal_mode = WAL;");
+  nextDb.exec("PRAGMA busy_timeout = 5000;");
+  dbInstances.set(nextPath, nextDb);
+  dbInstance = nextDb;
   dbPath = nextPath;
-  dbInstance.exec("PRAGMA journal_mode = WAL;");
-  dbInstance.exec("PRAGMA busy_timeout = 5000;");
-  return dbInstance;
+  return nextDb;
 }
 
-export function listSessions(limit = 50, offset = 0, search = "", timeRange = "") {
-  const db = getDb();
+export function listSessions(limit = 50, offset = 0, search = "", timeRange = "", pathOverride = undefined) {
+  const db = getDb(pathOverride);
   const searchTerm = search ? `%${search}%` : null;
 
   // Time range filter
@@ -65,8 +64,8 @@ export function listSessions(limit = 50, offset = 0, search = "", timeRange = ""
   return { sessions, total: totalRow?.total ?? 0 };
 }
 
-export function getSession(id) {
-  const db = getDb();
+export function getSession(id, pathOverride = undefined) {
+  const db = getDb(pathOverride);
   return db.prepare(`
     SELECT id, project_id, parent_id, slug, title, directory, time_created, time_updated,
            summary_additions, summary_deletions, summary_files, time_archived,
@@ -77,8 +76,8 @@ export function getSession(id) {
   `).get(id) ?? null;
 }
 
-export function getChildSessions(parentId) {
-  const db = getDb();
+export function getChildSessions(parentId, pathOverride = undefined) {
+  const db = getDb(pathOverride);
   return db.prepare(`
     SELECT id, project_id, parent_id, slug, title, directory, time_created, time_updated,
            summary_additions, summary_deletions, summary_files, time_archived,
@@ -91,8 +90,8 @@ export function getChildSessions(parentId) {
   `).all(parentId);
 }
 
-export function getMessages(sessionId) {
-  const db = getDb();
+export function getMessages(sessionId, pathOverride = undefined) {
+  const db = getDb(pathOverride);
   const rows = db.prepare(`
     SELECT id, session_id, data
     FROM message
@@ -103,8 +102,8 @@ export function getMessages(sessionId) {
   return rows.map(mapDataRow);
 }
 
-export function getParts(messageId) {
-  const db = getDb();
+export function getParts(messageId, pathOverride = undefined) {
+  const db = getDb(pathOverride);
   const rows = db.prepare(`
     SELECT id, message_id, session_id, data
     FROM part
@@ -115,8 +114,8 @@ export function getParts(messageId) {
   return rows.map(mapDataRow);
 }
 
-export function getTodos(sessionId) {
-  const db = getDb();
+export function getTodos(sessionId, pathOverride = undefined) {
+  const db = getDb(pathOverride);
   return db.prepare(`
     SELECT session_id, content, status, priority, position, time_created
     FROM todo
@@ -125,8 +124,8 @@ export function getTodos(sessionId) {
   `).all(sessionId);
 }
 
-export function searchMessages(query, limit = 20) {
-  const db = getDb();
+export function searchMessages(query, limit = 20, pathOverride = undefined) {
+  const db = getDb(pathOverride);
   const term = query?.trim();
 
   if (!term) {
@@ -174,8 +173,8 @@ export function searchMessages(query, limit = 20) {
   });
 }
 
-export function getStats() {
-  const db = getDb();
+export function getStats(pathOverride = undefined) {
+  const db = getDb(pathOverride);
   const totalSessions = db.prepare(`
     SELECT COUNT(*) AS count
     FROM session
@@ -220,8 +219,8 @@ export function getStats() {
   };
 }
 
-export function getTokenStats(days = 30) {
-  const d = getDb();
+export function getTokenStats(days = 30, pathOverride = undefined) {
+  const d = getDb(pathOverride);
   const cutoff = Date.now() - days * 86400000;
   return d.prepare(`
     SELECT date(json_extract(message.data, '$.time.created') / 1000, 'unixepoch') as day,
@@ -240,8 +239,8 @@ export function getTokenStats(days = 30) {
   `).all(cutoff);
 }
 
-export function getModelDistribution() {
-  const d = getDb();
+export function getModelDistribution(pathOverride = undefined) {
+  const d = getDb(pathOverride);
   return d.prepare(`
     SELECT json_extract(message.data, '$.modelID') as model,
            json_extract(message.data, '$.providerID') as provider,
@@ -258,8 +257,8 @@ export function getModelDistribution() {
   `).all();
 }
 
-export function getDailySessionCounts(days = 30) {
-  const d = getDb();
+export function getDailySessionCounts(days = 30, pathOverride = undefined) {
+  const d = getDb(pathOverride);
   const cutoff = Date.now() - days * 86400000;
   return d.prepare(`
     SELECT date(time_created / 1000, 'unixepoch') as day,
@@ -270,9 +269,9 @@ export function getDailySessionCounts(days = 30) {
   `).all(cutoff);
 }
 
-export function getSessionsByIds(ids) {
+export function getSessionsByIds(ids, pathOverride = undefined) {
   if (!ids.length) return [];
-  const db = getDb();
+  const db = getDb(pathOverride);
   const placeholders = ids.map(() => "?").join(",");
   return db.prepare(`
     SELECT id, project_id, slug, title, directory, time_created, time_updated,
