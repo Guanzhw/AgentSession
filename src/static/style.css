@@ -994,6 +994,35 @@ details[open] summary {
   scroll-margin-top: 64px;
 }
 
+.subagent-branch {
+  margin: 10px 0 18px 14px;
+  border: 1px solid color-mix(in srgb, var(--trace-agent) 35%, var(--border-color));
+  border-left: 4px solid var(--trace-agent);
+  border-radius: 8px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--trace-agent) 5%, var(--bg-primary));
+  scroll-margin-top: 64px;
+}
+
+.subagent-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  cursor: pointer;
+  background: color-mix(in srgb, var(--trace-agent) 12%, var(--bg-secondary));
+}
+
+.subagent-summary:hover {
+  background: color-mix(in srgb, var(--trace-agent) 18%, var(--bg-secondary));
+}
+
+.subagent-body {
+  padding: 10px 12px 12px;
+  background: color-mix(in srgb, var(--bg-secondary) 60%, var(--bg-primary));
+}
+
 .subsession-container {
   background: var(--bg-primary);
   border: 1px solid var(--border-color);

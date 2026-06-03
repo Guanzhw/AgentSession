@@ -132,6 +132,28 @@ function renderSubsessionHeader(tree: SessionTree) {
   </summary>`;
 }
 
+function renderSubagentBranch(part: SessionPartNode, childMarkup: string) {
+  const data = part.data || {};
+  const status = partStatus(data);
+  const duration = part.timeStart && part.timeEnd ? formatDuration(part.timeStart, part.timeEnd) : "";
+  const meta = [
+    `${part.childSessions.length} ${part.childSessions.length === 1 ? "branch" : "branches"}`,
+    status,
+    duration
+  ].filter(Boolean).join(" · ");
+
+  return `<details class="subagent-branch" data-parent-part-id="${escapeHtml(part.id)}" open>
+    <summary class="subagent-summary">
+      <span class="subsession-kicker">subagent</span>
+      <span class="subsession-title">${escapeHtml(taskTitle(data))}</span>
+      ${meta ? `<span class="subsession-meta">${escapeHtml(meta)}</span>` : ""}
+    </summary>
+    <div class="subagent-body">
+      ${childMarkup}
+    </div>
+  </details>`;
+}
+
 function collectTocItems(tree: SessionTree, depth = 0) {
   const items = [];
   for (const message of tree.messages) {
@@ -315,10 +337,11 @@ function renderPartNode(messageData, part: SessionPartNode, depth = 0) {
     return anchoredPart;
   }
 
-  return `${renderedPart}
-<div id="${partAnchor}" class="subsession-branch" data-parent-part-id="${escapeHtml(part.id)}">
-  ${childMarkup}
-</div>`;
+  const branch = isTaskWithSession
+    ? renderSubagentBranch(part, childMarkup)
+    : `<div class="subsession-branch" data-parent-part-id="${escapeHtml(part.id)}">${childMarkup}</div>`;
+
+  return `<div id="${partAnchor}" class="session-part-anchor">${renderedPart}${branch}</div>`;
 }
 
 function renderSessionTree(tree: SessionTree, depth = 0) {
