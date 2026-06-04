@@ -753,10 +753,6 @@ function renderMessagePartsResult(message, depth = 0, provider = "opencode", ini
     }
   }
 
-  if (pendingReasoning.length && visibleCount > 0) {
-    attachPendingReasoning(renderedParts, pendingReasoning);
-  }
-
   return {
     markup: renderedParts.filter(Boolean).join("\n"),
     hasVisibleContent: visibleCount > 0,
