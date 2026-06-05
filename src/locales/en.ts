@@ -11,6 +11,7 @@ export const en = {
   "sessions.count": "{count} sessions",
   "sessions.empty": "No sessions found",
   "sessions.empty_search": "No sessions found for keyword: <strong>{query}</strong>",
+  "sessions.empty_filter": "No sessions match these filters",
   "sessions.manage": "Manage",
   "sessions.cancel_manage": "Cancel",
 
@@ -19,6 +20,16 @@ export const en = {
   "range.today": "Today",
   "range.week": "This Week",
   "range.month": "This Month",
+
+  // Home filters
+  "filter.keyword": "Keyword",
+  "filter.keyword_placeholder": "Title, slug, or directory",
+  "filter.project": "Project",
+  "filter.all_projects": "All projects",
+  "filter.unknown_project": "Unknown project",
+  "filter.time": "Time",
+  "filter.apply": "Apply",
+  "filter.clear": "Clear",
 
   // Session card
   "card.files": "{count} files",

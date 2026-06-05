@@ -15,7 +15,8 @@ import {
   getTokenStats,
   getModelDistribution,
   getDailySessionCounts,
-  getSessionsByIds
+  getSessionsByIds,
+  listSessionProjects
 } from "./db.js";
 import { buildOpenCodeSessionTree } from "./providers/opencode/session-tree.js";
 import { buildOpenCodeSessionContainer } from "./providers/opencode/session-container.js";
@@ -23,7 +24,7 @@ import { buildOpenCodeSessionMetrics } from "./providers/opencode/session-metric
 import { buildOpenCodeFlowTree } from "./providers/opencode/flow-tree.js";
 import { isOpenCodeLikeProvider } from "./providers/kinds.js";
 import { getAvailableProviders, getAllProviders, getProvider } from "./providers/index.js";
-import { getIndexDb, upsertIndex, getIndexedSessions, clearIndex } from "./index-db.js";
+import { getIndexDb, upsertIndex, getIndexedSessions, getIndexedSessionProjects, clearIndex } from "./index-db.js";
 import { setLocale, getLocale } from "./i18n.js";
 import {
   toggleStar,
@@ -518,6 +519,8 @@ export async function startServer(config = getConfig()) {
         const apiOffset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
         const range = url.searchParams.get("range") || "";
         const query = url.searchParams.get("q") || "";
+        const project = url.searchParams.get("project") || "";
+        const searchMode = url.searchParams.get("mode") || "list";
 
         if (isOpenCodeLikeProvider(providerId)) {
           const dbPath = adapter.getDataPath();
@@ -526,12 +529,12 @@ export async function startServer(config = getConfig()) {
 
           let sessions;
           let total;
-          if (query) {
+          if (query && searchMode === "content") {
             const results = getSearchResults(query, apiLimit, apiOffset, dbPath);
             sessions = enrichSessionList(results.sessions, metaMap, excludedIds);
             total = results.total;
           } else {
-            const results = listSessions(apiLimit, apiOffset, "", range, dbPath);
+            const results = listSessions(apiLimit, apiOffset, query, range, dbPath, project);
             sessions = enrichSessionList(results.sessions, metaMap, excludedIds);
             total = results.total;
           }
@@ -546,12 +549,12 @@ export async function startServer(config = getConfig()) {
 
         let sessions;
         let total;
-        if (query) {
+        if (query && searchMode === "content") {
           const results = getProviderSearchResults(adapter, query, apiLimit, apiOffset);
           sessions = results.sessions;
           total = results.total;
         } else {
-          const indexed = getIndexedSessions(providerId, apiLimit, apiOffset, range);
+          const indexed = getIndexedSessions(providerId, apiLimit, apiOffset, range, query, project);
           sessions = indexed.sessions.map((session) => normalizeSessionRecord(session));
           total = indexed.total;
         }
@@ -833,20 +836,27 @@ export async function startServer(config = getConfig()) {
     if (subPath === "/") {
       try {
         const range = url.searchParams.get("range") || "";
+        const query = url.searchParams.get("q") || "";
+        const project = url.searchParams.get("project") || "";
         if (isOpenCodeLikeProvider(providerSegment)) {
           const dbPath = adapter.getDataPath();
-          const { sessions, total } = listSessions(limit, offset, "", range, dbPath);
+          const { sessions, total } = listSessions(limit, offset, query, range, dbPath, project);
           const metaMap = getAllMeta(providerSegment);
           const excludedIds = getExcludedIds(providerSegment);
           const enrichedSessions = enrichSessionList(sessions, metaMap, excludedIds).map((session) => normalizeSessionRecord(session));
           const overviewStats = getStats(dbPath);
           const deletedCount = getDeletedIds(providerSegment).length;
+          const projectOptions = listSessionProjects(query, range, dbPath);
           send(res, 200, renderSessionsPage({
             sessions: enrichedSessions,
             total,
             limit,
             offset,
+            query,
             range,
+            project,
+            projectOptions,
+            searchMode: "list",
             totalMessages: overviewStats.totalMessages,
             deletedCount,
             ...renderContext
@@ -854,15 +864,20 @@ export async function startServer(config = getConfig()) {
           return;
         }
 
-        const indexed = getIndexedSessions(providerSegment, limit, offset, range);
+        const indexed = getIndexedSessions(providerSegment, limit, offset, range, query, project);
         const allIndexed = getIndexedSessions(providerSegment, 100000, 0, "").sessions;
         const totalMessages = allIndexed.reduce((sum, session) => sum + (Number(session.message_count) || 0), 0);
+        const projectOptions = getIndexedSessionProjects(providerSegment, range, query);
         send(res, 200, renderSessionsPage({
           sessions: indexed.sessions.map((session) => normalizeSessionRecord(session)),
           total: indexed.total,
           limit,
           offset,
+          query,
           range,
+          project,
+          projectOptions,
+          searchMode: "list",
           totalMessages,
           deletedCount: 0,
           ...renderContext
@@ -883,12 +898,12 @@ export async function startServer(config = getConfig()) {
           const metaMap = getAllMeta(providerSegment);
           const excludedIds = getExcludedIds(providerSegment);
           const enrichedSessions = enrichSessionList(results.sessions, metaMap, excludedIds).map((session) => normalizeSessionRecord(session));
-          send(res, 200, renderSessionsPage({ ...results, sessions: enrichedSessions, limit, offset, query, ...renderContext }));
+          send(res, 200, renderSessionsPage({ ...results, sessions: enrichedSessions, limit, offset, query, searchMode: "content", ...renderContext }));
           return;
         }
 
         const results = getProviderSearchResults(adapter, query, limit, offset);
-        send(res, 200, renderSessionsPage({ ...results, limit, offset, query, ...renderContext }));
+        send(res, 200, renderSessionsPage({ ...results, limit, offset, query, searchMode: "content", ...renderContext }));
         return;
       } catch (err) {
         console.error(`Route error: ${err.message}`);

@@ -2005,33 +2005,84 @@ mark {
   background-color: var(--bg-tertiary);
 }
 
-/* Time Range Filter */
-.range-filter {
+/* Session filters */
+.session-filter {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) minmax(180px, 1fr) minmax(140px, 0.7fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 18px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+}
+
+.filter-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.filter-field span {
+  font-size: 11px;
+  line-height: 1;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.filter-field input,
+.filter-field select {
+  width: 100%;
+  height: 34px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.filter-field input:focus,
+.filter-field select:focus {
+  outline: none;
+  border-color: var(--accent-color);
+  box-shadow: var(--focus-ring);
+}
+
+.filter-actions {
   display: flex;
   gap: 8px;
-  margin-top: 12px;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 34px;
 }
 
-.range-btn {
-  padding: 6px 16px;
-  border-radius: 20px;
-  font-size: 13px;
+.filter-actions .btn {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
   text-decoration: none;
+}
+
+.btn-secondary {
   color: var(--text-secondary);
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  transition: all 0.2s ease;
 }
 
-.range-btn:hover {
-  color: var(--text-primary);
-  border-color: var(--accent-color);
-}
+@media (max-width: 768px) {
+  .session-filter {
+    grid-template-columns: minmax(0, 1fr);
+  }
 
-.range-btn.active {
-  background: var(--accent-gradient);
-  color: var(--bg-primary);
-  border-color: transparent;
+  .filter-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
 }
 
 /* Code Highlighting Override */

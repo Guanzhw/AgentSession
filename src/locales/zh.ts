@@ -11,6 +11,7 @@ export const zh = {
   "sessions.count": "{count} 个会话",
   "sessions.empty": "未找到会话",
   "sessions.empty_search": "未找到会话，关键词：<strong>{query}</strong>",
+  "sessions.empty_filter": "没有符合筛选条件的会话",
   "sessions.manage": "管理",
   "sessions.cancel_manage": "取消",
 
@@ -19,6 +20,16 @@ export const zh = {
   "range.today": "今天",
   "range.week": "本周",
   "range.month": "本月",
+
+  // Home filters
+  "filter.keyword": "关键词",
+  "filter.keyword_placeholder": "标题、slug 或目录",
+  "filter.project": "项目",
+  "filter.all_projects": "全部项目",
+  "filter.unknown_project": "未知项目",
+  "filter.time": "时间",
+  "filter.apply": "应用",
+  "filter.clear": "清除",
 
   // Session card
   "card.files": "{count} 个文件",

@@ -54,26 +54,64 @@ export function upsertIndex(provider, sessions) {
  * @param {string} timeRange - "today"|"week"|"month"|""
  * @returns {{ sessions: object[], total: number }}
  */
-export function getIndexedSessions(provider, limit = 50, offset = 0, timeRange = "") {
+function indexedFilter(timeRange = "", search = "", project = "") {
+  const where = ["provider = ?"];
+  const params = [];
   const db = getIndexDb();
-  let timeFilter = "";
   const now = Date.now();
-  if (timeRange === "today") {
-    const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
-    timeFilter = ` AND time_updated >= ${startOfDay.getTime()}`;
-  } else if (timeRange === "week") {
-    timeFilter = ` AND time_updated >= ${now - 7 * 86400000}`;
-  } else if (timeRange === "month") {
-    timeFilter = ` AND time_updated >= ${now - 30 * 86400000}`;
+
+  if (search) {
+    where.push("(COALESCE(title, '') LIKE ? OR COALESCE(directory, '') LIKE ?)");
+    params.push(`%${search}%`, `%${search}%`);
   }
 
-  const total = db.prepare(`SELECT COUNT(*) as c FROM session_index WHERE provider = ?${timeFilter}`).get(provider).c;
+  if (timeRange === "today") {
+    const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+    where.push("time_updated >= ?");
+    params.push(startOfDay.getTime());
+  } else if (timeRange === "week") {
+    where.push("time_updated >= ?");
+    params.push(now - 7 * 86400000);
+  } else if (timeRange === "month") {
+    where.push("time_updated >= ?");
+    params.push(now - 30 * 86400000);
+  }
+
+  if (project) {
+    where.push("COALESCE(directory, '') = ?");
+    params.push(project);
+  }
+
+  return { db, whereClause: `WHERE ${where.join(" AND ")}`, params };
+}
+
+export function getIndexedSessions(provider, limit = 50, offset = 0, timeRange = "", search = "", project = "") {
+  const { db, whereClause, params } = indexedFilter(timeRange, search, project);
+  const total = db.prepare(`SELECT COUNT(*) as c FROM session_index ${whereClause}`).get(provider, ...params).c;
   const sessions = db.prepare(`
-    SELECT * FROM session_index WHERE provider = ?${timeFilter}
+    SELECT * FROM session_index ${whereClause}
     ORDER BY time_updated DESC LIMIT ? OFFSET ?
-  `).all(provider, limit, offset);
+  `).all(provider, ...params, limit, offset);
 
   return { sessions, total };
+}
+
+export function getIndexedSessionProjects(provider, timeRange = "", search = "") {
+  const { db, whereClause, params } = indexedFilter(timeRange, search, "");
+  return db.prepare(`
+    SELECT COALESCE(directory, '') AS id,
+           COALESCE(NULLIF(directory, ''), 'Unknown project') AS label,
+           COUNT(*) AS count
+    FROM session_index
+    ${whereClause}
+    GROUP BY COALESCE(directory, '')
+    ORDER BY count DESC, label COLLATE NOCASE ASC
+  `).all(provider, ...params).map((row) => ({
+    id: row.id,
+    label: row.label,
+    worktree: row.label,
+    count: Number(row.count) || 0
+  }));
 }
 
 /**

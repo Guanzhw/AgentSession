@@ -12,6 +12,9 @@ export function renderSessionsPage({
   query = "",
   note = "",
   range = "",
+  project = "",
+  projectOptions = [],
+  searchMode = "list",
   totalMessages = 0,
   deletedCount = 0,
   provider = "opencode",
@@ -20,30 +23,57 @@ export function renderSessionsPage({
 } = {}) {
   const isAvailable = providerAvailable !== false;
   const isManageableProvider = isAvailable && isOpenCodeLikeProvider(provider);
+  const hasActiveFilters = Boolean(query || range || project);
   const cards = !isAvailable
     ? `<p class="empty-state">${t("provider.not_detected")}</p>`
-    : sessions.length
+  : sessions.length
     ? sessions.map((session) => sessionCard(session, false, { showCheckbox: true, provider })).join("\n")
-    : query
-      ? `<p class="empty-state">${t("sessions.empty_search").replace("{query}", escapeHtml(query))}</p>`
+    : hasActiveFilters
+      ? `<p class="empty-state">${query ? t("sessions.empty_search").replace("{query}", escapeHtml(query)) : t("sessions.empty_filter")}</p>`
       : `<p class="empty-state">${t("sessions.empty")}</p>`;
 
   const searchNote = note ? `<p class="search-note">${escapeHtml(note)}</p>` : "";
-  
-  // Time range filter buttons
+
+  const shortProjectLabel = (value) => {
+    const text = String(value || "");
+    const parts = text.split(/[\\/]/).filter(Boolean);
+    return parts.at(-1) || text || t("filter.unknown_project");
+  };
+
   const ranges = [
     { key: "", label: t("range.all") },
     { key: "today", label: t("range.today") },
     { key: "week", label: t("range.week") },
     { key: "month", label: t("range.month") }
   ];
-  const rangeParam = range || "";
-  const rangeButtons = ranges.map(r => {
-    const active = r.key === rangeParam ? " active" : "";
-    const href = r.key ? `/${provider}?range=${r.key}` : `/${provider}`;
-    return `<a href="${href}" class="range-btn${active}">${r.label}</a>`;
-  }).join("");
-  const filterBar = `<div class="range-filter">${rangeButtons}</div>`;
+  const rangeOptions = ranges.map((item) => (
+    `<option value="${escapeHtml(item.key)}" ${item.key === range ? "selected" : ""}>${escapeHtml(item.label)}</option>`
+  )).join("");
+  const projectSelectOptions = [
+    `<option value="">${t("filter.all_projects")}</option>`,
+    ...projectOptions.map((item) => {
+      const label = `${shortProjectLabel(item.label)} (${Number(item.count) || 0})`;
+      return `<option value="${escapeHtml(item.id)}" ${String(item.id) === String(project) ? "selected" : ""} title="${escapeHtml(item.worktree || item.label || "")}">${escapeHtml(label)}</option>`;
+    })
+  ].join("");
+  const filterBar = isAvailable ? `<form class="session-filter" action="/${provider}" method="GET">
+    <label class="filter-field filter-keyword">
+      <span>${t("filter.keyword")}</span>
+      <input type="search" name="q" value="${escapeHtml(query)}" placeholder="${t("filter.keyword_placeholder")}">
+    </label>
+    <label class="filter-field">
+      <span>${t("filter.project")}</span>
+      <select name="project">${projectSelectOptions}</select>
+    </label>
+    <label class="filter-field">
+      <span>${t("filter.time")}</span>
+      <select name="range">${rangeOptions}</select>
+    </label>
+    <div class="filter-actions">
+      <button class="btn" type="submit">${t("filter.apply")}</button>
+      ${hasActiveFilters ? `<a class="btn btn-secondary" href="/${provider}">${t("filter.clear")}</a>` : ""}
+    </div>
+  </form>` : "";
   const dashboard = `
     <section class="dashboard-grid">
       <a href="#session-list" class="dash-card">
@@ -93,17 +123,17 @@ export function renderSessionsPage({
   `;
   
   const body = `
-    ${!query && isAvailable ? dashboard : ""}
+    ${!hasActiveFilters && isAvailable ? dashboard : ""}
     <section class="page-header">
       <div class="page-header-row">
         <div>
-          <h1>${query ? t("sessions.search_title").replace("{query}", escapeHtml(query)) : t("sessions.title")}</h1>
+          <h1>${searchMode === "content" && query ? t("sessions.search_title").replace("{query}", escapeHtml(query)) : t("sessions.title")}</h1>
           <p>${t("sessions.count").replace("{count}", total)}</p>
         </div>
-        ${!query && isManageableProvider ? `<button class="btn btn-manage" id="toggle-batch">${t("sessions.manage")}</button>` : ""}
+        ${searchMode !== "content" && isManageableProvider ? `<button class="btn btn-manage" id="toggle-batch">${t("sessions.manage")}</button>` : ""}
       </div>
       ${searchNote}
-      ${!query && isAvailable ? filterBar : ""}
+      ${searchMode !== "content" ? filterBar : ""}
     </section>
     ${isManageableProvider ? `
     <div class="batch-bar hidden" id="batch-bar">
@@ -119,8 +149,9 @@ export function renderSessionsPage({
     <section class="session-list" id="session-list">
       ${cards}
     </section>
-    ${total > limit ? `<div id="scroll-sentinel" data-offset="${offset + sessions.length}" data-total="${total}" data-range="${escapeHtml(range)}" data-query="${escapeHtml(query)}" data-provider="${provider}"></div>` : ""}
+    ${total > limit ? `<div id="scroll-sentinel" data-offset="${offset + sessions.length}" data-total="${total}" data-range="${escapeHtml(range)}" data-project="${escapeHtml(project)}" data-query="${escapeHtml(query)}" data-mode="${escapeHtml(searchMode)}" data-provider="${provider}"></div>` : ""}
   `;
 
-  return layout(query ? t("sessions.search_title").replace("{query}", query) : t("sessions.title"), body, query ? "search" : "home", { provider, providers, providerAvailable: isAvailable });
+  const isContentSearch = searchMode === "content" && query;
+  return layout(isContentSearch ? t("sessions.search_title").replace("{query}", query) : t("sessions.title"), body, isContentSearch ? "search" : "home", { provider, providers, providerAvailable: isAvailable });
 }

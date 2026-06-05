@@ -24,27 +24,49 @@ export function getDb(pathOverride = undefined) {
   return nextDb;
 }
 
-export function listSessions(limit = 50, offset = 0, search = "", timeRange = "", pathOverride = undefined) {
-  const db = getDb(pathOverride);
-  const searchTerm = search ? `%${search}%` : null;
-
-  // Time range filter
-  let timeFilter = "";
+function timeRangeCutoff(timeRange) {
   const now = Date.now();
   if (timeRange === "today") {
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
-    timeFilter = ` AND session.time_updated >= ${startOfDay.getTime()}`;
-  } else if (timeRange === "week") {
-    timeFilter = ` AND session.time_updated >= ${now - 7 * 86400000}`;
-  } else if (timeRange === "month") {
-    timeFilter = ` AND session.time_updated >= ${now - 30 * 86400000}`;
+    return startOfDay.getTime();
+  }
+  if (timeRange === "week") {
+    return now - 7 * 86400000;
+  }
+  if (timeRange === "month") {
+    return now - 30 * 86400000;
+  }
+  return null;
+}
+
+function sessionFilter(search = "", timeRange = "", project = "") {
+  const where = ["time_archived IS NULL", "parent_id IS NULL"];
+  const params = [];
+  const searchTerm = search ? `%${search}%` : null;
+  const cutoff = timeRangeCutoff(timeRange);
+
+  if (searchTerm) {
+    where.push("(COALESCE(title, '') LIKE ? OR COALESCE(slug, '') LIKE ? OR COALESCE(directory, '') LIKE ?)");
+    params.push(searchTerm, searchTerm, searchTerm);
   }
 
-  const whereClause = searchTerm
-    ? `WHERE time_archived IS NULL AND parent_id IS NULL AND (COALESCE(title, '') LIKE ? OR COALESCE(slug, '') LIKE ? OR COALESCE(directory, '') LIKE ?)${timeFilter}`
-    : `WHERE time_archived IS NULL AND parent_id IS NULL${timeFilter}`;
-  const searchParams = searchTerm ? [searchTerm, searchTerm, searchTerm] : [];
+  if (cutoff != null) {
+    where.push("session.time_updated >= ?");
+    params.push(cutoff);
+  }
+
+  if (project) {
+    where.push("COALESCE(project_id, '') = ?");
+    params.push(project);
+  }
+
+  return { whereClause: `WHERE ${where.join(" AND ")}`, params };
+}
+
+export function listSessions(limit = 50, offset = 0, search = "", timeRange = "", pathOverride = undefined, project = "") {
+  const db = getDb(pathOverride);
+  const { whereClause, params } = sessionFilter(search, timeRange, project);
 
   const sessions = db.prepare(`
     SELECT id, project_id, slug, title, directory, time_created, time_updated,
@@ -53,15 +75,39 @@ export function listSessions(limit = 50, offset = 0, search = "", timeRange = ""
     ${whereClause}
     ORDER BY time_updated DESC, time_created DESC
     LIMIT ? OFFSET ?
-  `).all(...searchParams, limit, offset);
+  `).all(...params, limit, offset);
 
   const totalRow = db.prepare(`
     SELECT COUNT(*) AS total
     FROM session
     ${whereClause}
-  `).get(...searchParams);
+  `).get(...params);
 
   return { sessions, total: totalRow?.total ?? 0 };
+}
+
+export function listSessionProjects(search = "", timeRange = "", pathOverride = undefined) {
+  const db = getDb(pathOverride);
+  const { whereClause, params } = sessionFilter(search, timeRange, "");
+  const rows = db.prepare(`
+    SELECT
+      COALESCE(session.project_id, '') AS id,
+      COALESCE(NULLIF(project.name, ''), NULLIF(project.worktree, ''), NULLIF(session.directory, ''), 'Unknown project') AS label,
+      project.worktree AS worktree,
+      COUNT(*) AS count
+    FROM session
+    LEFT JOIN project ON project.id = session.project_id
+    ${whereClause}
+    GROUP BY COALESCE(session.project_id, '')
+    ORDER BY count DESC, label COLLATE NOCASE ASC
+  `).all(...params);
+
+  return rows.map((row) => ({
+    id: row.id,
+    label: row.label,
+    worktree: row.worktree || row.label,
+    count: Number(row.count) || 0
+  }));
 }
 
 export function getSession(id, pathOverride = undefined) {
