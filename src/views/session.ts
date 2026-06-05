@@ -143,6 +143,11 @@ function messageText(message) {
   return compactText(textPart?.data?.text || message.data?.summary || messageToolName(message) || message.id, 86);
 }
 
+function tocMessageText(message) {
+  const textPart = message.parts.find((part) => part.type === "text" && compactText(part.data?.text));
+  return compactText(textPart?.data?.text || "", 86);
+}
+
 function hasVisibleMessagePart(message) {
   return message.parts.some((part) => {
     if (part.type === "reasoning") {
@@ -310,7 +315,21 @@ function collectTocNodes(tree: SessionTree, userDepth = 0) {
 
   for (const message of tree.messages) {
     const role = String(message.role || "").toLowerCase();
-    if (!isNavigableMessageRole(role) || !hasVisibleMessagePart(message)) {
+    if (!isNavigableMessageRole(role)) {
+      continue;
+    }
+
+    const label = tocMessageText(message);
+    const agentDepth = userDepth + 1;
+    const taskNodes = collectMessageTaskTocNodes(message, label ? agentDepth : userDepth);
+    if (!label) {
+      if (taskNodes.length) {
+        if (currentUserNode) {
+          currentUserNode.children.push(...taskNodes);
+        } else {
+          nodes.push(...taskNodes);
+        }
+      }
       continue;
     }
 
@@ -318,7 +337,7 @@ function collectTocNodes(tree: SessionTree, userDepth = 0) {
       currentUserNode = makeTocNode(
         anchorId("msg", message.id),
         message.role,
-        messageText(message) || "user message",
+        label,
         "",
         userDepth
       );
@@ -326,15 +345,14 @@ function collectTocNodes(tree: SessionTree, userDepth = 0) {
       continue;
     }
 
-    const agentDepth = userDepth + 1;
     const node = makeTocNode(
       anchorId("msg", message.id),
       message.role,
-      messageText(message) || `${message.role} message`,
+      label,
       "",
       agentDepth
     );
-    node.children.push(...collectMessageTaskTocNodes(message, agentDepth));
+    node.children.push(...taskNodes);
 
     if (currentUserNode) {
       currentUserNode.children.push(node);
@@ -757,7 +775,11 @@ function renderMessagePartsResult(message, depth = 0, provider = "opencode", ini
       continue;
     }
 
-    const rendered = renderPartNode(message.data, part, depth, provider, pendingReasoning.join("\n"));
+    const reasoningMarkup = pendingReasoning.join("\n");
+    let rendered = renderPartNode(message.data, part, depth, provider, reasoningMarkup);
+    if (rendered && reasoningMarkup && !rendered.includes(reasoningMarkup)) {
+      rendered = attachReasoningToRenderedPart(rendered, reasoningMarkup) || rendered;
+    }
     if (rendered) {
       renderedParts.push(rendered);
       if (!rendered.includes("session-event-anchor")) {
