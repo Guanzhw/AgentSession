@@ -1,4 +1,4 @@
-# OpenSessionViewer
+# CodeagentSession
 
 > 开发者的 AI 会话档案馆：把 OpenCode、CodeAgent、Claude Code、Codex CLI、Gemini CLI 的本地会话集中到一个可搜索、可追踪、可复盘的 Web UI。
 
@@ -7,15 +7,15 @@
 ![Node.js >= 22.5.0](https://img.shields.io/badge/node-%3E%3D22.5.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.2.0](https://img.shields.io/badge/version-1.2.0-orange?style=flat-square)
+![v1.3.0](https://img.shields.io/badge/version-1.3.0-orange?style=flat-square)
 
 ## 来源说明
 
-OpenSessionViewer 基于 [OpenSession](https://github.com/HeavyBunny19C/OpenSession) 开发。这个项目保留了本地、多 Provider AI 会话浏览器的核心方向，同时迁移到 TypeScript，并继续推进更丰富的嵌套会话、调用链和系统提示可视化。
+CodeagentSession 基于 [OpenSession](https://github.com/HeavyBunny19C/OpenSession) 开发。这个项目保留了本地、多 Provider AI 会话浏览器的核心方向，同时迁移到 TypeScript，并继续推进更丰富的嵌套会话、调用链和系统提示可视化。针对 CodeAgent 特定优化.
 
 ## 它现在是什么
 
-OpenSessionViewer 是一个本地优先的 AI 编程会话查看器。它不会修改原始工具数据库，而是读取你机器上的会话记录，生成统一的仪表盘、搜索、详情页、统计页、导出和调用链视图。
+CodeagentSession 是一个本地优先的 AI 编程会话查看器。它不会修改原始工具数据库，而是读取你机器上的会话记录，生成统一的仪表盘、搜索、详情页、统计页、导出和调用链视图。
 
 当前重点已经不只是“列出会话”，而是帮助你复盘一次 AI 工作流到底发生了什么：
 
@@ -54,23 +54,33 @@ OpenCode 和 CodeAgent 使用独立的本地元数据库保存收藏、重命名
 - **导出**：OpenCode/CodeAgent 支持 Markdown 与 JSON 导出，JSON 包含 session tree。
 - **中英双语**：通过 `--lang zh` 或 `--lang en` 指定界面语言。
 
-## 快速开始
+## 安装
+
+本项目当前支持以下安装方式：
+
+### 方式一：安装打包后的包（推荐）
+
+前往[下载页面](https://openx.huawei.com/codeagent-session/download)下载最新版本的安装包. 然后执行:
 
 ```bash
-npx @guanzhw/opensessionviewer
+# 安装本地包
+npm install --global {package}
+
+# 运行
+codeagent-session
+# 或
+codeagentsession
+# 或
+opensession
 ```
 
-然后打开：
+打开 http://localhost:3456 来访问主页
 
-```text
-http://localhost:3456
-```
-
-从源码运行：
+### 方式二：从源码运行
 
 ```bash
-git clone https://github.com/Guanzhw/OpenSessionViewer.git
-cd OpenSessionViewer
+git clone https://szv-open.codehub.huawei.com/innersource/codeagent-session_G/codeagent-session.git
+cd codeagent-session
 npm install
 npm start
 ```
@@ -78,7 +88,7 @@ npm start
 ## 命令行参数
 
 ```text
-opensessionviewer [options]
+codeagent-session [options]
 
 --port <number>       服务端口，默认 3456
 --opencode-db <path>  OpenCode 数据库路径，别名 --db
@@ -191,27 +201,17 @@ Data: 24 sessions, 1903 messages
 
 下一阶段会围绕“更准确地复盘 AI 工作流”继续推进：
 
-1. **Session Container Rewrite**
+[x] **Session Container Rewrite**
    - 将 session 建模为可递归容器，主会话、child session、subsession 都能以统一结构插入和渲染。
 
-2. **Nested Subagent Expansion**
+[x] **Nested Subagent Expansion**
    - 将 `task` / `subtask` 工具调用展开为可折叠的 nested subagent session，而不是普通工具行。
 
-3. **System Prompts**
-   - 继续增强用户第一条消息之前的 prompt 来源解析：agent prompt、AGENTS.md、CLAUDE.md、configured instructions、remote instruction URL。
-   - 目标是回答：在用户开始对话之前，哪些用户/项目配置内容会进入系统上下文，哪些历史或 plugin prompt 无法从本地 DB 复原。
-
-4. **Table of Contents Upgrade**
-   - 继续增强长会话导航，覆盖 user prompts、assistant turns、task/subtask subagents、重要 milestone；普通 tool calls 留在 Flow 视图。
-
-5. **Metrics Upgrade**
+[x] **Metrics Upgrade**
    - 增加 per-session token usage、runtime、step duration、tool counts、model/provider breakdown。
 
-6. **Tool Flow Tree**
+[ ] **Tool Flow Tree**
    - 将当前 trace/tool 视图升级为完整树，包含所有 sub-session branch、task calls、spans 和 timing。
-
-7. **QA/Polish Pass**
-   - 修复和验证 disclosure accessibility，补充浏览器回归检查，让 `agent-browser` 验证可重复运行。
 
 ## 开发命令
 
