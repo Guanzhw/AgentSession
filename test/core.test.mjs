@@ -6,6 +6,9 @@ import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 
 import { closeDb, getTokenStats } from "../dist/src/db.js";
+import { buildCodeAgentSessionTree } from "../dist/src/providers/codeagent/session-tree.js";
+import { enrichCodeAgentSession } from "../dist/src/providers/codeagent/schema.js";
+import { buildOpenCodeSessionTree } from "../dist/src/providers/opencode/session-tree.js";
 import {
   extractSessionMeta,
   parseTranscript,
@@ -83,6 +86,120 @@ test("OpenCode token stats include child sessions exactly once", () => {
   } finally {
     closeDb(dbPath);
   }
+});
+
+test("CodeAgent and OpenCode use provider-owned session metric readers", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-provider-metrics-"));
+  const dbPath = path.join(temp, "sessions.db");
+  try {
+    const db = new DatabaseSync(dbPath);
+    db.exec(`
+      CREATE TABLE session (
+        id TEXT PRIMARY KEY,
+        parent_id TEXT,
+        title TEXT,
+        slug TEXT,
+        directory TEXT,
+        time_created INTEGER,
+        time_updated INTEGER,
+        time_archived INTEGER,
+        tokens_input INTEGER,
+        tokens_output INTEGER,
+        tokens_reasoning INTEGER,
+        tokens_cache_read INTEGER,
+        tokens_cache_write INTEGER,
+        cost REAL
+      );
+      CREATE TABLE message (
+        id TEXT PRIMARY KEY,
+        session_id TEXT,
+        data TEXT
+      );
+      CREATE TABLE part (
+        id TEXT PRIMARY KEY,
+        message_id TEXT,
+        session_id TEXT,
+        data TEXT
+      );
+    `);
+    db.prepare(`
+      INSERT INTO session (
+        id, parent_id, title, time_created, time_updated, time_archived,
+        tokens_input, tokens_output, tokens_reasoning, tokens_cache_read,
+        tokens_cache_write, cost
+      ) VALUES (?, NULL, ?, 1000, 2000, NULL, 100, 50, 25, 10, 5, 9.5)
+    `).run("root", "Provider metrics");
+    db.prepare("INSERT INTO message (id, session_id, data) VALUES (?, ?, ?)").run(
+      "assistant",
+      "root",
+      JSON.stringify({
+        role: "assistant",
+        time: { created: 1100 },
+        cost: 1.25,
+        tokens: {
+          input: 7,
+          output: 3,
+          reasoning: 2,
+          cache: { read: 4, write: 1 }
+        }
+      })
+    );
+    db.close();
+
+    const codeAgent = buildCodeAgentSessionTree("root", dbPath);
+    assert.deepEqual({
+      input: codeAgent.metrics.inputTokens,
+      output: codeAgent.metrics.outputTokens,
+      reasoning: codeAgent.metrics.reasoningTokens,
+      cacheRead: codeAgent.metrics.cacheReadTokens,
+      cacheWrite: codeAgent.metrics.cacheWriteTokens,
+      cost: codeAgent.metrics.cost
+    }, {
+      input: 7,
+      output: 3,
+      reasoning: 2,
+      cacheRead: 4,
+      cacheWrite: 1,
+      cost: 1.25
+    });
+
+    const openCode = buildOpenCodeSessionTree("root", dbPath);
+    assert.equal(openCode.metrics.inputTokens, 100);
+    assert.equal(openCode.metrics.outputTokens, 50);
+    assert.equal(openCode.metrics.cost, 9.5);
+  } finally {
+    closeDb(dbPath);
+  }
+});
+
+test("CodeAgent derives session identity and totals from assistant messages", () => {
+  const session = enrichCodeAgentSession(
+    { id: "session", agent: null, model: null, cost: 0 },
+    [
+      {
+        id: "assistant",
+        data: JSON.stringify({
+          role: "assistant",
+          agent: "build",
+          providerID: "w3",
+          modelID: "MiniMax-M2.5",
+          cost: 0.75,
+          tokens: {
+            input: 11,
+            output: 4,
+            reasoning: 2,
+            cache: { read: 6, write: 1 }
+          }
+        })
+      }
+    ]
+  );
+
+  assert.equal(session.agent, "build");
+  assert.equal(session.model, "w3/MiniMax-M2.5");
+  assert.equal(session.tokens_input, 11);
+  assert.equal(session.tokens_cache_read, 6);
+  assert.equal(session.cost, 0.75);
 });
 
 test("resume commands use structured placeholders and validated directories", () => {

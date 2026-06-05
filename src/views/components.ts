@@ -1,6 +1,5 @@
 import { escapeHtml, renderMarkdown } from "../markdown.js";
 import { t } from "../i18n.js";
-import { isOpenCodeLikeProvider } from "../providers/kinds.js";
 
 function formatCount(value, prefix = "") {
   const amount = Number(value) || 0;
@@ -109,7 +108,7 @@ export function formatDuration(startMs, endMs) {
   return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
-export function sessionCard(s, active = false, { showCheckbox = false, provider = "opencode" } = {}) {
+export function sessionCard(s, active = false, { showCheckbox = false, provider = "opencode", manageable = false } = {}) {
   const title = s.title || s.slug || s.id;
   const classes = ["session-card"];
   if (active) classes.push("active");
@@ -119,7 +118,7 @@ export function sessionCard(s, active = false, { showCheckbox = false, provider 
     ? `<input type="checkbox" class="card-checkbox" data-id="${escapeHtml(s.id)}">`
     : "";
 
-  const actionsHtml = isOpenCodeLikeProvider(provider) ? `
+  const actionsHtml = manageable ? `
     <div class="card-actions">
       <button class="star-btn ${s.starred ? "starred" : ""}" data-id="${escapeHtml(s.id)}" title="${t("batch.star")}">
         ${s.starred ? "★" : "☆"}

@@ -18,11 +18,11 @@ import {
   getSessionsByIds,
   listSessionProjects
 } from "./db.js";
-import { buildOpenCodeSessionTree } from "./providers/opencode/session-tree.js";
-import { buildOpenCodeSessionContainer } from "./providers/opencode/session-container.js";
-import { buildOpenCodeSessionMetrics } from "./providers/opencode/session-metrics.js";
-import { buildOpenCodeFlowTree } from "./providers/opencode/flow-tree.js";
-import { isOpenCodeLikeProvider } from "./providers/kinds.js";
+import {
+  supportsLocalManagement,
+  supportsStructuredSessionViews,
+  usesSqliteSessionStore
+} from "./providers/kinds.js";
 import { getAvailableProviders, getAllProviders, getProvider } from "./providers/index.js";
 import { getIndexDb, upsertIndex, getIndexedSessions, getIndexedSessionProjects, clearIndex } from "./index-db.js";
 import { setLocale, getLocale } from "./i18n.js";
@@ -481,7 +481,8 @@ export async function startServer(config = getConfig()) {
     const legacyMutationMatch = pathname.match(/^\/api\/session\/([^/]+)\/(star|rename|delete|restore|permanent-delete)$/);
     if (req.method === "POST" && (prefixedMutationMatch || legacyMutationMatch)) {
       const providerId = prefixedMutationMatch?.[1] || "opencode";
-      if (!isOpenCodeLikeProvider(providerId)) {
+      const adapter = providerMap.get(providerId);
+      if (!supportsLocalManagement(adapter)) {
         return json(res, { ok: false, error: "Not supported for this provider" }, 501);
       }
 
@@ -489,7 +490,6 @@ export async function startServer(config = getConfig()) {
       const id = safeDecodeId(rawId);
       if (!id) return json(res, { ok: false, error: "Invalid session ID" }, 400);
       const action = prefixedMutationMatch?.[3] || legacyMutationMatch[2];
-      const adapter = providerMap.get(providerId);
       if (adapter && !adapter.getSession(id)) {
         return json(res, { ok: false, error: "Session not found" }, 404);
       }
@@ -524,7 +524,8 @@ export async function startServer(config = getConfig()) {
     const prefixedBatchMatch = pathname.match(/^\/api\/([a-z][a-z0-9-]*)\/batch$/);
     if (req.method === "POST" && (pathname === "/api/batch" || prefixedBatchMatch)) {
       const providerId = prefixedBatchMatch?.[1] || "opencode";
-      if (!isOpenCodeLikeProvider(providerId)) {
+      const adapter = providerMap.get(providerId);
+      if (!supportsLocalManagement(adapter)) {
         return json(res, { ok: false, error: "Not supported for this provider" }, 501);
       }
 
@@ -627,7 +628,7 @@ export async function startServer(config = getConfig()) {
         const project = url.searchParams.get("project") || "";
         const searchMode = url.searchParams.get("mode") || "list";
 
-        if (isOpenCodeLikeProvider(providerId)) {
+        if (usesSqliteSessionStore(adapter)) {
           const dbPath = adapter.getDataPath();
           const metaMap = getAllMeta(providerId);
           const excludedIds = getExcludedIds(providerId);
@@ -692,7 +693,7 @@ export async function startServer(config = getConfig()) {
         let messages;
         let partsByMessage;
 
-        if (isOpenCodeLikeProvider(providerId)) {
+        if (usesSqliteSessionStore(adapter)) {
           const dbPath = adapter.getDataPath();
           const metaMap = getAllMeta(providerId);
           const rawSession = getSession(id, dbPath);
@@ -715,10 +716,10 @@ export async function startServer(config = getConfig()) {
 
         if (format === "json") {
           const filename = `session-${id.slice(0, 8)}.json`;
-          const sessionTree = isOpenCodeLikeProvider(providerId) ? buildOpenCodeSessionTree(id, adapter.getDataPath()) : null;
-          const sessionContainer = isOpenCodeLikeProvider(providerId) ? buildOpenCodeSessionContainer(id, adapter.getDataPath()) : null;
-          const sessionMetrics = isOpenCodeLikeProvider(providerId) ? buildOpenCodeSessionMetrics(id, adapter.getDataPath()) : null;
-          const sessionFlow = isOpenCodeLikeProvider(providerId) ? buildOpenCodeFlowTree(id, adapter.getDataPath()) : null;
+          const sessionTree = adapter.getSessionTree?.(id) || null;
+          const sessionContainer = adapter.getSessionContainer?.(id) || null;
+          const sessionMetrics = adapter.getSessionMetrics?.(id) || null;
+          const sessionFlow = adapter.getSessionFlow?.(id) || null;
           res.writeHead(200, {
             "Content-Type": "application/json; charset=utf-8",
             "Content-Disposition": `attachment; filename="${filename}"`
@@ -760,7 +761,7 @@ export async function startServer(config = getConfig()) {
       }
 
       try {
-        if (isOpenCodeLikeProvider(providerId)) {
+        if (usesSqliteSessionStore(adapter)) {
           const dbPath = adapter.getDataPath();
           const metaMap = getAllMeta(providerId);
           const session = getSession(sessionId, dbPath);
@@ -770,10 +771,10 @@ export async function startServer(config = getConfig()) {
           const enrichedSession = normalizeSessionRecord(enrichSession(session, metaMap));
           const messages = getMessages(sessionId, dbPath).map((message) => ({ ...message, data: safeJsonParse(message.data) }));
           const partsByMessage = loadPartsByMessage(messages, dbPath);
-          const sessionTree = buildOpenCodeSessionTree(sessionId, dbPath);
-          const sessionContainer = buildOpenCodeSessionContainer(sessionId, dbPath);
-          const sessionMetrics = buildOpenCodeSessionMetrics(sessionId, dbPath);
-          const sessionFlow = buildOpenCodeFlowTree(sessionId, dbPath);
+          const sessionTree = adapter.getSessionTree?.(sessionId) || null;
+          const sessionContainer = adapter.getSessionContainer?.(sessionId) || null;
+          const sessionMetrics = adapter.getSessionMetrics?.(sessionId) || null;
+          const sessionFlow = adapter.getSessionFlow?.(sessionId) || null;
           return json(res, {
             session: enrichedSession,
             tree: sessionTree,
@@ -812,12 +813,12 @@ export async function startServer(config = getConfig()) {
         return json(res, missing.body, missing.status);
       }
 
-      if (!isOpenCodeLikeProvider(providerId)) {
+      if (!supportsStructuredSessionViews(adapter)) {
         return json(res, { sessionId, totals: null, tools: [], steps: [] });
       }
 
       try {
-        const metrics = buildOpenCodeSessionMetrics(sessionId, adapter.getDataPath());
+        const metrics = adapter.getSessionMetrics?.(sessionId);
         if (!metrics) {
           return json(res, { ok: false, error: "Not found" }, 404);
         }
@@ -838,12 +839,12 @@ export async function startServer(config = getConfig()) {
         return json(res, missing.body, missing.status);
       }
 
-      if (!isOpenCodeLikeProvider(providerId)) {
+      if (!supportsStructuredSessionViews(adapter)) {
         return json(res, { sessionId, root: null, summary: null });
       }
 
       try {
-        const flow = buildOpenCodeFlowTree(sessionId, adapter.getDataPath());
+        const flow = adapter.getSessionFlow?.(sessionId);
         if (!flow) {
           return json(res, { ok: false, error: "Not found" }, 404);
         }
@@ -865,10 +866,10 @@ export async function startServer(config = getConfig()) {
       }
 
       try {
-        if (isOpenCodeLikeProvider(providerId) && adapter.getTrace) {
+        if (supportsStructuredSessionViews(adapter) && adapter.getTrace) {
           return json(res, {
             ...adapter.getTrace(sessionId),
-            flow: buildOpenCodeFlowTree(sessionId, adapter.getDataPath())
+            flow: adapter.getSessionFlow?.(sessionId) || null
           });
         }
 
@@ -892,7 +893,7 @@ export async function startServer(config = getConfig()) {
       }
 
       try {
-        if (isOpenCodeLikeProvider(providerId)) {
+        if (usesSqliteSessionStore(adapter)) {
           const dbPath = adapter.getDataPath();
           const tokenStats = completeTokenStats(getTokenStats(30, dbPath), 30);
           return json(res, {
@@ -941,7 +942,8 @@ export async function startServer(config = getConfig()) {
 
     const renderContext = {
       provider: providerSegment,
-      providers: providerInfo
+      providers: providerInfo,
+      manageable: supportsLocalManagement(adapter)
     };
 
     if (!adapter) {
@@ -962,7 +964,7 @@ export async function startServer(config = getConfig()) {
         const range = url.searchParams.get("range") || "";
         const query = url.searchParams.get("q") || "";
         const project = url.searchParams.get("project") || "";
-        if (isOpenCodeLikeProvider(providerSegment)) {
+        if (usesSqliteSessionStore(adapter)) {
           const dbPath = adapter.getDataPath();
           const { sessions, total } = listSessions(limit, offset, query, range, dbPath, project);
           const metaMap = getAllMeta(providerSegment);
@@ -1016,7 +1018,7 @@ export async function startServer(config = getConfig()) {
     if (subPath === "/search") {
       try {
         const query = url.searchParams.get("q") || "";
-        if (isOpenCodeLikeProvider(providerSegment)) {
+        if (usesSqliteSessionStore(adapter)) {
           const dbPath = adapter.getDataPath();
           const results = getSearchResults(query, limit, offset, dbPath);
           const metaMap = getAllMeta(providerSegment);
@@ -1037,7 +1039,7 @@ export async function startServer(config = getConfig()) {
 
     if (subPath === "/stats") {
       try {
-        if (isOpenCodeLikeProvider(providerSegment)) {
+        if (usesSqliteSessionStore(adapter)) {
           const dbPath = adapter.getDataPath();
           const tokenStats = completeTokenStats(getTokenStats(30, dbPath), 30);
           const modelDistribution = getModelDistribution(dbPath);
@@ -1079,7 +1081,7 @@ export async function startServer(config = getConfig()) {
     }
 
     if (subPath === "/trash") {
-      if (!isOpenCodeLikeProvider(providerSegment)) {
+      if (!supportsLocalManagement(adapter)) {
         send(res, 404, "<h1>Not found</h1>");
         return;
       }
@@ -1101,7 +1103,7 @@ export async function startServer(config = getConfig()) {
       try {
         const sessionId = decodeURIComponent(subPath.slice("/session/".length));
 
-        if (isOpenCodeLikeProvider(providerSegment)) {
+        if (usesSqliteSessionStore(adapter)) {
           const dbPath = adapter.getDataPath();
           const session = getSession(sessionId, dbPath);
           if (!session) {
@@ -1118,9 +1120,9 @@ export async function startServer(config = getConfig()) {
             data: safeJsonParse(message.data)
           }));
           const partsByMessage = loadPartsByMessage(messages, dbPath);
-          const sessionTree = buildOpenCodeSessionTree(sessionId, dbPath);
-          const sessionMetrics = buildOpenCodeSessionMetrics(sessionId, dbPath);
-          const sessionFlow = buildOpenCodeFlowTree(sessionId, dbPath);
+          const sessionTree = adapter.getSessionTree?.(sessionId) || null;
+          const sessionMetrics = adapter.getSessionMetrics?.(sessionId) || null;
+          const sessionFlow = adapter.getSessionFlow?.(sessionId) || null;
           const todos = getTodos(sessionId, dbPath);
           const { sessions: recentSessions } = listSessions(30, 0, "", "", dbPath);
           const enrichedRecentSessions = enrichSessionList(recentSessions, metaMap, excludedIds).map((item) => normalizeSessionRecord(item));
@@ -1200,11 +1202,12 @@ export async function startServer(config = getConfig()) {
       id: p.id,
       name: p.name,
       icon: p.icon,
-      available: availableIds.has(p.id)
+      available: availableIds.has(p.id),
+      manageable: supportsLocalManagement(p)
     }));
 
     const statsProvider = availableProviders.find((provider) => provider.id === "opencode")
-      || availableProviders.find((provider) => isOpenCodeLikeProvider(provider.id));
+      || availableProviders.find((provider) => usesSqliteSessionStore(provider));
     const stats = statsProvider ? getStats(statsProvider.getDataPath()) : { totalSessions: 0, totalMessages: 0 };
     const dbLog = statsProvider ? statsProvider.getDataPath() : appConfig.dbPath;
     const server = createServer(requestHandler);

@@ -1,9 +1,8 @@
 import { escapeHtml } from "../markdown.js";
 import { t, getLocale } from "../i18n.js";
 import { icons } from "../icons.js";
-import { isOpenCodeLikeProvider } from "../providers/kinds.js";
 
-export function layout(title, body, page = "home", { provider = null, providers = [], providerAvailable = true } = {}) {
+export function layout(title, body, page = "home", { provider = null, providers = [], providerAvailable = true, manageable = false } = {}) {
   const providerPrefix = provider ? `/${provider}` : "";
 
   const providerTabs = providers.map((p) => {
@@ -31,13 +30,13 @@ export function layout(title, body, page = "home", { provider = null, providers 
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css">
 </head>
-<body data-page="${page}" data-provider="${provider || ""}">
+<body data-page="${page}" data-provider="${provider || ""}" data-manageable="${manageable ? "true" : "false"}">
   <nav class="topbar">
     <a href="${providerPrefix || "/"}" class="logo">${icons.opensession}<span class="logo-text">OpenSessionViewer</span></a>
     <div class="topbar-tabs">${providerTabs}</div>
     <div class="topbar-actions">
       <a href="${providerPrefix}/stats" class="nav-link">${t("nav.stats")}</a>
-      ${providerAvailable !== false && isOpenCodeLikeProvider(provider) ? `<a href="${providerPrefix}/trash" class="nav-link">${t("nav.trash")}</a>` : ""}
+      ${providerAvailable !== false && manageable ? `<a href="${providerPrefix}/trash" class="nav-link">${t("nav.trash")}</a>` : ""}
       <form class="search-form" action="${providerPrefix}/search" method="GET">
         <input type="text" name="q" placeholder="${t("nav.search_placeholder")}" class="search-input" id="search-input">
       </form>

@@ -68,6 +68,11 @@ export interface ProviderAdapter {
   id: ProviderId;
   name: string;
   icon: string;
+  capabilities?: {
+    localManagement?: boolean;
+    sqliteSessionStore?: boolean;
+    structuredSessionViews?: boolean;
+  };
   detect(): boolean;
   getDataPath(): string | null;
   scan(): AsyncIterable<RawSession>;
@@ -77,5 +82,9 @@ export interface ProviderAdapter {
   searchMessages(query: string, limit?: number): SearchResult[];
   exportSession(sessionId: string): unknown;
   getTrace?(sessionId: string): unknown;
+  getSessionTree?(sessionId: string): unknown;
+  getSessionContainer?(sessionId: string): unknown;
+  getSessionMetrics?(sessionId: string): unknown;
+  getSessionFlow?(sessionId: string): unknown;
   getUnavailableReason?(): string | null;
 }

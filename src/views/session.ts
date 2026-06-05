@@ -1,6 +1,5 @@
 import { t } from "../i18n.js";
 import { escapeHtml } from "../markdown.js";
-import { isOpenCodeLikeProvider } from "../providers/kinds.js";
 import type { SessionPartNode, SessionTree } from "../providers/opencode/session-tree.js";
 import { formatDuration, formatTime, messageBubble, reasoningBlock, todoList, toolCallBlock } from "./components.js";
 import { layout } from "./layout.js";
@@ -891,12 +890,13 @@ export function renderSessionPage({
   meta = null,
   provider = "opencode",
   providers = [],
+  manageable = false,
   resumeCommand = null,
   terminalLaunchAllowed = false
 }) {
   const title = session.title || session.slug || session.id;
   const starred = meta?.starred ? 1 : 0;
-  const managementActions = isOpenCodeLikeProvider(provider) ? `
+  const managementActions = manageable ? `
         <button class="star-btn action-btn ${starred ? "starred" : ""}" data-id="${escapeHtml(session.id)}">
           ${starred ? t("action.starred") : t("action.star")}
         </button>
@@ -959,5 +959,5 @@ ${actions}
 </div>
   `;
 
-  return layout(title, body, "home", { provider, providers });
+  return layout(title, body, "home", { provider, providers, manageable });
 }

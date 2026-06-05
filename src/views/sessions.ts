@@ -2,7 +2,6 @@ import { escapeHtml } from "../markdown.js";
 import { layout } from "./layout.js";
 import { sessionCard } from "./components.js";
 import { t } from "../i18n.js";
-import { isOpenCodeLikeProvider } from "../providers/kinds.js";
 
 export function renderSessionsPage({
   sessions = [],
@@ -19,15 +18,16 @@ export function renderSessionsPage({
   deletedCount = 0,
   provider = "opencode",
   providerAvailable = true,
+  manageable = false,
   providers = []
 } = {}) {
   const isAvailable = providerAvailable !== false;
-  const isManageableProvider = isAvailable && isOpenCodeLikeProvider(provider);
+  const isManageableProvider = isAvailable && manageable;
   const hasActiveFilters = Boolean(query || range || project);
   const cards = !isAvailable
     ? `<p class="empty-state">${t("provider.not_detected")}</p>`
   : sessions.length
-    ? sessions.map((session) => sessionCard(session, false, { showCheckbox: true, provider })).join("\n")
+    ? sessions.map((session) => sessionCard(session, false, { showCheckbox: true, provider, manageable: isManageableProvider })).join("\n")
     : hasActiveFilters
       ? `<p class="empty-state">${query ? t("sessions.empty_search").replace("{query}", escapeHtml(query)) : t("sessions.empty_filter")}</p>`
       : `<p class="empty-state">${t("sessions.empty")}</p>`;
@@ -153,5 +153,5 @@ export function renderSessionsPage({
   `;
 
   const isContentSearch = searchMode === "content" && query;
-  return layout(isContentSearch ? t("sessions.search_title").replace("{query}", query) : t("sessions.title"), body, isContentSearch ? "search" : "home", { provider, providers, providerAvailable: isAvailable });
+  return layout(isContentSearch ? t("sessions.search_title").replace("{query}", query) : t("sessions.title"), body, isContentSearch ? "search" : "home", { provider, providers, providerAvailable: isAvailable, manageable: isManageableProvider });
 }

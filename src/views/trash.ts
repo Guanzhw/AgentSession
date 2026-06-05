@@ -3,7 +3,7 @@ import { layout } from "./layout.js";
 import { formatTime } from "./components.js";
 import { t } from "../i18n.js";
 
-export function renderTrashPage({ sessions = [], provider = "opencode", providers = [] }) {
+export function renderTrashPage({ sessions = [], provider = "opencode", providers = [], manageable = false }) {
   const cards = sessions.length
     ? sessions.map(s => {
         const title = s.title || s.slug || s.id;
@@ -33,5 +33,5 @@ export function renderTrashPage({ sessions = [], provider = "opencode", provider
     </section>
   `;
 
-  return layout(t("trash.title"), body, "trash", { provider, providers });
+  return layout(t("trash.title"), body, "trash", { provider, providers, manageable });
 }

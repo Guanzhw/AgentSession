@@ -2,6 +2,8 @@ node_modules/
 dist/
 *.db
 logs/
+app.log
+app.err.log
 tmp/
 .DS_Store
 .idea/

@@ -1,6 +1,6 @@
 const __LOCALE__ = window.__LOCALE__ || "en";
 const PROVIDER = document.body.dataset.provider || "opencode";
-const IS_MANAGEABLE_PROVIDER = PROVIDER === "opencode" || PROVIDER === "codeagent";
+const IS_MANAGEABLE_PROVIDER = document.body.dataset.manageable === "true";
 const __I18N__ = {
   en: {
     rename_prompt: "Enter new title:",

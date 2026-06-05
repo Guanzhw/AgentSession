@@ -272,5 +272,5 @@ export function renderStatsPage(data) {
     </div>
   `;
   
-  return layout(t("stats.title"), content, "stats", { provider, providers });
+  return layout(t("stats.title"), content, "stats", { provider, providers, manageable: data.manageable === true });
 }

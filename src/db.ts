@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { getConfig } from "./config.js";
-import { parseJson, createSnippet, mapDataRow } from "./providers/opencode/parser.js";
+import { parseJson, createSnippet, mapDataRow } from "./providers/shared/parser.js";
 
 let dbInstance;
 let dbPath;
