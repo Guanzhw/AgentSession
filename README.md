@@ -85,6 +85,9 @@ opensessionviewer [options]
 --claude-dir <path>   Claude Code 数据目录
 --codex-dir <path>    Codex CLI 数据目录
 --gemini-dir <path>   Gemini CLI 数据目录
+--config <path>       OpenSessionViewer JSON 配置文件
+--allow-terminal-launch
+                      允许本地页面通过 Windows Terminal 继续会话
 --reindex             启动时重建跨 Provider 索引
 --lang <en|zh>        界面语言
 --open                启动后打开浏览器
@@ -104,6 +107,46 @@ opensessionviewer [options]
 | `GEMINI_HOME` | Gemini CLI 数据目录 |
 | `OPENSESSIONVIEWER_META_PATH` | OpenSessionViewer 元数据库路径 |
 | `OH_MY_OPENSESSION_META_PATH` | 旧版兼容元数据库路径 |
+| `OPENSESSIONVIEWER_CONFIG` | JSON 配置文件路径 |
+
+## 继续会话命令
+
+会话详情页始终显示可复制的 session ID。当 Provider 有已知的继续命令，且
+会话记录中的项目目录有效时，页面也会提供可复制的命令。只有使用
+`--allow-terminal-launch` 启动服务后，页面才允许实际打开终端。
+
+可以在 OpenSessionViewer 配置目录的 `config.json` 中覆盖 Provider 命令，
+也可以通过 `--config` 指定文件：
+
+```json
+{
+  "resumeCommands": {
+    "opencode": {
+      "executable": "opencode",
+      "args": ["--session", "{sessionId}"]
+    },
+    "codeagent": {
+      "executable": "my-codeagent",
+      "args": ["resume", "{sessionId}"],
+      "cwd": "D:\\WorkSpace"
+    }
+  }
+}
+```
+
+支持 `{sessionId}` 和 `{projectPath}` 占位符。命令以 executable/args 数组
+启动，不执行原始 shell 字符串。对于历史记录中没有项目目录的 Provider，
+可以显式配置 `cwd`。
+
+## Claude Code 历史记录
+
+Claude Code Provider 同时读取旧版 `~/.claude/transcripts` 和当前
+`~/.claude/projects/<project>/*.jsonl` 布局。OpenSessionViewer 不会修改这些文件。
+
+Claude Code 会按照 `cleanupPeriodDays` 清理历史 JSONL，默认保留 30 天。
+JSONL 被清理后，`~/.claude.json` 中可能仍保留项目元数据；此时页面会明确提示
+“只有元数据”，但无法恢复已删除的对话。如果需要长期归档，请设置合适的正数
+保留天数。
 
 ## 架构概览
 

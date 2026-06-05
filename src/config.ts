@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { mkdirSync, existsSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync } from "node:fs";
 
 /**
  * Try multiple candidate paths, return the first that exists on disk.
@@ -90,7 +90,22 @@ const defaults = {
   codexDir: defaultCodexDir(),
   geminiDir: defaultGeminiDir(),
   reindex: false,
+  allowTerminalLaunch: false,
 };
+
+function readUserConfig(configPath) {
+  if (!configPath || !existsSync(configPath)) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(readFileSync(configPath, "utf-8"));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (error) {
+    console.warn(`Ignoring invalid OpenSessionViewer config at ${configPath}: ${error.message}`);
+    return {};
+  }
+}
 
 function detectLang() {
   const env = process.env.LANG || process.env.LC_ALL || process.env.LANGUAGE || "";
@@ -98,7 +113,25 @@ function detectLang() {
 }
 
 export function parseArgs(argv = process.argv.slice(2)) {
-  const config = { ...defaults, lang: detectLang(), metaPath: "" };
+  let configPath = process.env.OPENSESSIONVIEWER_CONFIG || "";
+  const explicitConfigIndex = argv.indexOf("--config");
+  if (explicitConfigIndex >= 0 && argv[explicitConfigIndex + 1]) {
+    configPath = argv[explicitConfigIndex + 1];
+  }
+
+  const resolvedConfigPath = configPath || path.join(defaultMetaDir(), "config.json");
+  const fileConfig = readUserConfig(resolvedConfigPath);
+  const config = {
+    ...defaults,
+    ...fileConfig,
+    lang: detectLang(),
+    metaPath: "",
+    configPath: resolvedConfigPath,
+    allowTerminalLaunch: false,
+    resumeCommands: fileConfig.resumeCommands && typeof fileConfig.resumeCommands === "object"
+      ? fileConfig.resumeCommands
+      : {}
+  };
 
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--port" && argv[i + 1]) {
@@ -113,6 +146,10 @@ export function parseArgs(argv = process.argv.slice(2)) {
       config.geminiDir = argv[++i];
     } else if (argv[i] === "--reindex") {
       config.reindex = true;
+    } else if (argv[i] === "--allow-terminal-launch") {
+      config.allowTerminalLaunch = true;
+    } else if (argv[i] === "--config" && argv[i + 1]) {
+      config.configPath = argv[++i];
     } else if (argv[i] === "--lang" && argv[i + 1]) {
       config.lang = argv[++i] === "zh" ? "zh" : "en";
     } else if (argv[i] === "--open") {
@@ -128,6 +165,9 @@ Options:
   --claude-dir <path>   Path to Claude CLI data dir (default: ~/.claude)
   --codex-dir <path>    Path to Codex data dir (default: ~/.codex)
   --gemini-dir <path>   Path to Gemini data dir (default: ~/.gemini)
+  --config <path>       Path to OpenSessionViewer JSON config
+  --allow-terminal-launch
+                        Allow the local UI to open resume commands in a terminal
   --reindex             Force full reindex of all providers on start
   --lang <en|zh>        UI language (default: auto-detect from LANG)
   --open                Open browser on start

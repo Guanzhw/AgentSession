@@ -64,6 +64,10 @@ export const en = {
   "action.export_md": "Export MD",
   "action.export_json": "Export JSON",
   "action.delete": "Delete",
+  "action.copy": "Copy",
+  "action.copy_session_id": "Copy session ID",
+  "action.copy_resume": "Copy resume command",
+  "action.open_terminal": "Continue in terminal",
 
   // Trash
   "trash.title": "Trash",
@@ -76,10 +80,11 @@ export const en = {
   "stats.title": "Statistics Overview",
   "stats.desc": "Visualize token usage over time. Track consumption trends, discover usage patterns.",
   "stats.about_title": "About This Dashboard",
-  "stats.about_desc": "This dashboard shows token consumption and session activity over the last 30 days. Data is sourced from your local session database.",
+  "stats.about_desc": "This dashboard shows token consumption and session activity over the last 30 days. Token totals include active root and child/subagent sessions.",
   "stats.total_sessions": "Total Sessions",
   "stats.total_messages": "Total Messages",
   "stats.token_usage": "Token Usage",
+  "stats.token_scope": "30 days · all active sessions",
   "stats.avg_daily": "Avg Daily",
   "stats.peak_day": "Peak Day",
   "stats.token_trend": "Token Usage Trend",

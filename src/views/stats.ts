@@ -8,6 +8,10 @@ function formatNumber(n) {
   return n.toLocaleString();
 }
 
+function formatExact(n) {
+  return (Number(n) || 0).toLocaleString();
+}
+
 function renderLineChart(data, width = 600, height = 200) {
   if (!data || data.length === 0) return '<svg width="600" height="200"><text x="300" y="100" text-anchor="middle" fill="var(--text-secondary)">No data</text></svg>';
   
@@ -153,6 +157,13 @@ export function renderStatsPage(data) {
   const totalTokens = tokenStats && tokenStats.length > 0
     ? tokenStats.reduce((s, d) => s + (d.total_tokens || 0), 0)
     : 0;
+  const tokenBreakdown = {
+    input: tokenStats.reduce((sum, row) => sum + (Number(row.input_tokens) || 0), 0),
+    output: tokenStats.reduce((sum, row) => sum + (Number(row.output_tokens) || 0), 0),
+    reasoning: tokenStats.reduce((sum, row) => sum + (Number(row.reasoning_tokens) || 0), 0),
+    cacheRead: tokenStats.reduce((sum, row) => sum + (Number(row.cache_read_tokens) || 0), 0),
+    cacheWrite: tokenStats.reduce((sum, row) => sum + (Number(row.cache_write_tokens) || 0), 0)
+  };
 
   // Find peak day
   let peakDay = '';
@@ -166,9 +177,15 @@ export function renderStatsPage(data) {
     }
   }
 
-  const avgTokens = tokenStats && tokenStats.length > 0
-    ? Math.round(tokenStats.reduce((s, d) => s + (d.total_tokens || 0), 0) / tokenStats.length)
-    : 0;
+  const avgTokens = Math.round(totalTokens / 30);
+  const tokenTitle = [
+    `Total: ${formatExact(totalTokens)}`,
+    `Input: ${formatExact(tokenBreakdown.input)}`,
+    `Output: ${formatExact(tokenBreakdown.output)}`,
+    `Reasoning: ${formatExact(tokenBreakdown.reasoning)}`,
+    `Cache read: ${formatExact(tokenBreakdown.cacheRead)}`,
+    `Cache write: ${formatExact(tokenBreakdown.cacheWrite)}`
+  ].join(" | ");
 
   const content = `
     <div class="stats-page">
@@ -212,7 +229,8 @@ export function renderStatsPage(data) {
         </div>
         <div class="stats-summary-card">
           <div class="stats-summary-label">${t("stats.token_usage")}</div>
-          <div class="stats-summary-value">${formatNumber(totalTokens)}</div>
+          <div class="stats-summary-value" data-token-total="${escapeHtml(String(totalTokens))}" title="${escapeHtml(tokenTitle)}">${formatNumber(totalTokens)}</div>
+          <div class="stats-summary-sub">${t("stats.token_scope")}</div>
         </div>
         <div class="stats-summary-card">
           <div class="stats-summary-label">${t("stats.avg_daily")}</div>

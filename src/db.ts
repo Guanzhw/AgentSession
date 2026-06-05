@@ -16,12 +16,23 @@ export function getDb(pathOverride = undefined) {
   }
 
   const nextDb = new DatabaseSync(nextPath, { readOnly: true });
-  nextDb.exec("PRAGMA journal_mode = WAL;");
   nextDb.exec("PRAGMA busy_timeout = 5000;");
   dbInstances.set(nextPath, nextDb);
   dbInstance = nextDb;
   dbPath = nextPath;
   return nextDb;
+}
+
+export function closeDb(pathOverride = undefined) {
+  const target = resolveDbPath(pathOverride);
+  const instance = dbInstances.get(target);
+  if (!instance) return;
+  instance.close();
+  dbInstances.delete(target);
+  if (dbPath === target) {
+    dbInstance = undefined;
+    dbPath = undefined;
+  }
 }
 
 function timeRangeCutoff(timeRange) {
@@ -310,12 +321,34 @@ export function getStats(pathOverride = undefined) {
 
 export function getTokenStats(days = 30, pathOverride = undefined) {
   const d = getDb(pathOverride);
-  const cutoff = Date.now() - days * 86400000;
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const cutoff = today.getTime() - (Math.max(1, days) - 1) * 86400000;
+  // Token consumption happens inside child/subagent sessions as well as roots.
+  // Filtering to parent_id IS NULL makes the dashboard materially under-report
+  // provider usage, so this query intentionally includes the full active tree.
   return d.prepare(`
     SELECT date(json_extract(message.data, '$.time.created') / 1000, 'unixepoch') as day,
-           SUM(json_extract(message.data, '$.tokens.total')) as total_tokens,
-           SUM(json_extract(message.data, '$.tokens.input')) as input_tokens,
-           SUM(json_extract(message.data, '$.tokens.output')) as output_tokens,
+           SUM(
+             CASE
+               WHEN COALESCE(json_extract(message.data, '$.tokens.input'), 0)
+                  + COALESCE(json_extract(message.data, '$.tokens.output'), 0)
+                  + COALESCE(json_extract(message.data, '$.tokens.reasoning'), 0)
+                  + COALESCE(json_extract(message.data, '$.tokens.cache.read'), 0)
+                  + COALESCE(json_extract(message.data, '$.tokens.cache.write'), 0) > 0
+               THEN COALESCE(json_extract(message.data, '$.tokens.input'), 0)
+                  + COALESCE(json_extract(message.data, '$.tokens.output'), 0)
+                  + COALESCE(json_extract(message.data, '$.tokens.reasoning'), 0)
+                  + COALESCE(json_extract(message.data, '$.tokens.cache.read'), 0)
+                  + COALESCE(json_extract(message.data, '$.tokens.cache.write'), 0)
+               ELSE COALESCE(json_extract(message.data, '$.tokens.total'), 0)
+             END
+           ) as total_tokens,
+           SUM(COALESCE(json_extract(message.data, '$.tokens.input'), 0)) as input_tokens,
+           SUM(COALESCE(json_extract(message.data, '$.tokens.output'), 0)) as output_tokens,
+           SUM(COALESCE(json_extract(message.data, '$.tokens.reasoning'), 0)) as reasoning_tokens,
+           SUM(COALESCE(json_extract(message.data, '$.tokens.cache.read'), 0)) as cache_read_tokens,
+           SUM(COALESCE(json_extract(message.data, '$.tokens.cache.write'), 0)) as cache_write_tokens,
            COUNT(*) as message_count
     FROM message
     JOIN session ON session.id = message.session_id
@@ -323,7 +356,6 @@ export function getTokenStats(days = 30, pathOverride = undefined) {
       AND json_extract(message.data, '$.time.created') > ?
       AND json_extract(message.data, '$.tokens.total') > 0
       AND session.time_archived IS NULL
-      AND session.parent_id IS NULL
     GROUP BY day ORDER BY day ASC
   `).all(cutoff);
 }
@@ -340,7 +372,6 @@ export function getModelDistribution(pathOverride = undefined) {
     WHERE json_extract(message.data, '$.role') = 'assistant'
       AND json_extract(message.data, '$.modelID') IS NOT NULL
       AND session.time_archived IS NULL
-      AND session.parent_id IS NULL
     GROUP BY model, provider
     ORDER BY count DESC
   `).all();

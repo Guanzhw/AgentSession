@@ -82,7 +82,9 @@ const codex = {
   },
 
   getTokenStats(days = 30) {
-    const cutoff = Date.now() - days * 86400000;
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const cutoff = today.getTime() - (Math.max(1, days) - 1) * 86400000;
     const dailyMap = new Map();
     for (const { filePath } of discoverSessionFiles()) {
       try {
@@ -92,10 +94,15 @@ const codex = {
           if (ts < cutoff) continue;
           const day = new Date(ts).toISOString().slice(0, 10);
           const usage = r.payload.info?.last_token_usage || {};
-          const existing = dailyMap.get(day) || { day, inputTokens: 0, outputTokens: 0, totalTokens: 0, messageCount: 0 };
+          const existing = dailyMap.get(day) || {
+            day, inputTokens: 0, outputTokens: 0, totalTokens: 0, messageCount: 0,
+            reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0
+          };
           existing.inputTokens += usage.input_tokens || 0;
           existing.outputTokens += usage.output_tokens || 0;
           existing.totalTokens += usage.total_tokens || 0;
+          existing.reasoningTokens += usage.reasoning_output_tokens || 0;
+          existing.cacheReadTokens += usage.cached_input_tokens || 0;
           existing.messageCount += 1;
           dailyMap.set(day, existing);
         }

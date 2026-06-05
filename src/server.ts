@@ -42,6 +42,7 @@ import { renderSessionPage } from "./views/session.js";
 import { renderSessionsPage } from "./views/sessions.js";
 import { renderStatsPage } from "./views/stats.js";
 import { renderTrashPage } from "./views/trash.js";
+import { getResumeCommand, launchResumeCommand } from "./resume.js";
 
 const staticDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "static");
 
@@ -102,6 +103,37 @@ function safeDecodeId(encoded) {
 function json(res, data, status = 200) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(data));
+}
+
+function isLoopbackHostname(hostname) {
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1" || hostname === "[::1]";
+}
+
+function isTrustedResumeRequest(req) {
+  if (!String(req.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
+    return false;
+  }
+
+  const host = String(req.headers.host || "").replace(/:\d+$/, "");
+  if (!isLoopbackHostname(host)) {
+    return false;
+  }
+
+  const remote = req.socket?.remoteAddress || "";
+  if (remote && !["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(remote)) {
+    return false;
+  }
+
+  const origin = req.headers.origin;
+  if (!origin) {
+    return true;
+  }
+
+  try {
+    return isLoopbackHostname(new URL(String(origin)).hostname);
+  } catch {
+    return false;
+  }
 }
 
 function missingProviderResponse(providerId) {
@@ -237,12 +269,12 @@ function buildPartsFromProviderMessages(providerMessages = []) {
         role: source.role || "assistant",
         time: { created: Number(source.timestamp) || 0 },
         tokens: source.tokens || null,
-        model: source.metadata || null
+        model: source.metadata?.model || null
       }
     });
 
     const isTool = source.role === "tool" || source.toolName;
-    const partData = isTool
+    const contentPart = isTool
       ? {
         type: "tool",
         tool: source.toolName || "tool",
@@ -257,7 +289,15 @@ function buildPartsFromProviderMessages(providerMessages = []) {
         text: source.content || ""
       };
 
-    partsByMessage.set(messageId, [{ id: `${messageId}:part`, data: partData }]);
+    const parts = [];
+    if (source.thinking) {
+      parts.push({
+        id: `${messageId}:reasoning`,
+        data: { type: "reasoning", text: source.thinking }
+      });
+    }
+    parts.push({ id: `${messageId}:part`, data: contentPart });
+    partsByMessage.set(messageId, parts);
   }
 
   return { messages, partsByMessage };
@@ -303,6 +343,30 @@ function toApiSessionShape(session) {
     summary_deletions: Number(session.summary_deletions) || 0,
     starred: Boolean(session.starred)
   };
+}
+
+function completeTokenStats(rows, days = 30) {
+  const byDay = new Map(rows.map((row) => [row.day, row]));
+  const completed = [];
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+
+  for (let offset = days - 1; offset >= 0; offset -= 1) {
+    const date = new Date(today.getTime() - offset * 86400000);
+    const day = date.toISOString().slice(0, 10);
+    completed.push(byDay.get(day) || {
+      day,
+      input_tokens: 0,
+      output_tokens: 0,
+      reasoning_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+      total_tokens: 0,
+      message_count: 0
+    });
+  }
+
+  return completed;
 }
 
 function serveStatic(reqPath, res) {
@@ -497,6 +561,47 @@ export async function startServer(config = getConfig()) {
       } catch (error) {
         console.error("Mutation error:", error?.message || error);
         return json(res, { ok: false, error: "Internal server error" }, 500);
+      }
+    }
+
+    const resumeMatch = pathname.match(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/resume$/);
+    if (req.method === "POST" && resumeMatch) {
+      if (!isTrustedResumeRequest(req)) {
+        return json(res, { ok: false, error: "Resume requests must be same-origin JSON from loopback" }, 403);
+      }
+      if (!appConfig.allowTerminalLaunch) {
+        return json(res, { ok: false, error: "Terminal launch is disabled" }, 403);
+      }
+
+      const providerId = resumeMatch[1];
+      const sessionId = safeDecodeId(resumeMatch[2]);
+      const adapter = providerMap.get(providerId);
+      if (!sessionId || !adapter) {
+        return json(res, { ok: false, error: "Session not found" }, 404);
+      }
+
+      try {
+        const session = adapter.getSession(sessionId);
+        if (!session) {
+          return json(res, { ok: false, error: "Session not found" }, 404);
+        }
+        const command = getResumeCommand(
+          providerId,
+          sessionId,
+          session.directory,
+          appConfig.resumeCommands
+        );
+        if (!command) {
+          return json(res, { ok: false, error: "No valid project directory or resume command" }, 400);
+        }
+        if (!command.available) {
+          return json(res, { ok: false, error: "Configured resume executable was not found" }, 409);
+        }
+        launchResumeCommand(command);
+        return json(res, { ok: true });
+      } catch (error) {
+        console.error("Resume launch error:", error?.message || error);
+        return json(res, { ok: false, error: error?.message || "Failed to launch terminal" }, 500);
       }
     }
 
@@ -788,15 +893,33 @@ export async function startServer(config = getConfig()) {
 
       try {
         if (isOpenCodeLikeProvider(providerId)) {
-          return json(res, getStats(adapter.getDataPath()));
+          const dbPath = adapter.getDataPath();
+          const tokenStats = completeTokenStats(getTokenStats(30, dbPath), 30);
+          return json(res, {
+            ...getStats(dbPath),
+            tokenStats,
+            tokenTotal: tokenStats.reduce((sum, row) => sum + (Number(row.total_tokens) || 0), 0)
+          });
         }
 
         const indexed = getIndexedSessions(providerId, 100000, 0, "").sessions;
         const totalMessages = indexed.reduce((sum, session) => sum + (Number(session.message_count) || 0), 0);
+        const tokenStats = completeTokenStats(adapter.getTokenStats(30).map((row) => ({
+          day: row.day,
+          input_tokens: Number(row.inputTokens) || 0,
+          output_tokens: Number(row.outputTokens) || 0,
+          reasoning_tokens: Number(row.reasoningTokens) || 0,
+          cache_read_tokens: Number(row.cacheReadTokens) || 0,
+          cache_write_tokens: Number(row.cacheWriteTokens) || 0,
+          total_tokens: Number(row.totalTokens) || 0,
+          message_count: Number(row.messageCount) || 0
+        })), 30);
         return json(res, {
           totalSessions: indexed.length,
           totalMessages,
-          modelDistribution: []
+          modelDistribution: [],
+          tokenStats,
+          tokenTotal: tokenStats.reduce((sum, row) => sum + (Number(row.total_tokens) || 0), 0)
         });
       } catch (err) {
         console.error(`Route error: ${err.message}`);
@@ -823,10 +946,11 @@ export async function startServer(config = getConfig()) {
 
     if (!adapter) {
       const dataPath = currentProvider.getDataPath();
+      const unavailableReason = currentProvider.getUnavailableReason?.();
       send(res, 200, renderSessionsPage({
         sessions: [],
         total: 0,
-        note: `${currentProvider.name} data was not detected at ${dataPath}.`,
+        note: unavailableReason || `${currentProvider.name} data was not detected at ${dataPath}.`,
         providerAvailable: false,
         ...renderContext
       }));
@@ -915,7 +1039,7 @@ export async function startServer(config = getConfig()) {
       try {
         if (isOpenCodeLikeProvider(providerSegment)) {
           const dbPath = adapter.getDataPath();
-          const tokenStats = getTokenStats(30, dbPath);
+          const tokenStats = completeTokenStats(getTokenStats(30, dbPath), 30);
           const modelDistribution = getModelDistribution(dbPath);
           const dailySessions = getDailySessionCounts(30, dbPath);
           const overview = getStats(dbPath);
@@ -928,6 +1052,9 @@ export async function startServer(config = getConfig()) {
           day: row.day,
           input_tokens: Number(row.inputTokens) || 0,
           output_tokens: Number(row.outputTokens) || 0,
+          reasoning_tokens: Number(row.reasoningTokens) || 0,
+          cache_read_tokens: Number(row.cacheReadTokens) || 0,
+          cache_write_tokens: Number(row.cacheWriteTokens) || 0,
           total_tokens: Number(row.totalTokens) || 0,
           message_count: Number(row.messageCount) || 0
         }));
@@ -943,7 +1070,7 @@ export async function startServer(config = getConfig()) {
           totalSessions: indexed.length,
           totalMessages: indexed.reduce((sum, session) => sum + (Number(session.message_count) || 0), 0)
         };
-        send(res, 200, renderStatsPage({ tokenStats, modelDistribution: [], dailySessions, overview, ...renderContext }));
+        send(res, 200, renderStatsPage({ tokenStats: completeTokenStats(tokenStats, 30), modelDistribution: [], dailySessions, overview, ...renderContext }));
         return;
       } catch (err) {
         console.error(`Route error: ${err.message}`);
@@ -997,6 +1124,7 @@ export async function startServer(config = getConfig()) {
           const todos = getTodos(sessionId, dbPath);
           const { sessions: recentSessions } = listSessions(30, 0, "", "", dbPath);
           const enrichedRecentSessions = enrichSessionList(recentSessions, metaMap, excludedIds).map((item) => normalizeSessionRecord(item));
+          const resumeCommand = getResumeCommand(providerSegment, sessionId, enrichedSession.directory, appConfig.resumeCommands);
           send(res, 200, renderSessionPage({
             session: enrichedSession,
             sessionTree,
@@ -1007,6 +1135,8 @@ export async function startServer(config = getConfig()) {
             todos,
             recentSessions: enrichedRecentSessions,
             meta,
+            resumeCommand,
+            terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),
             ...renderContext
           }));
           return;
@@ -1021,13 +1151,17 @@ export async function startServer(config = getConfig()) {
         const providerMessages = adapter.getMessages(sessionId);
         const { messages, partsByMessage } = buildPartsFromProviderMessages(providerMessages);
         const recentSessions = getIndexedSessions(providerSegment, 30, 0, "").sessions.map((item) => normalizeSessionRecord(item));
+        const normalizedSession = normalizeSessionRecord(session);
+        const resumeCommand = getResumeCommand(providerSegment, sessionId, normalizedSession.directory, appConfig.resumeCommands);
         send(res, 200, renderSessionPage({
-          session: normalizeSessionRecord(session),
+          session: normalizedSession,
           messages,
           partsByMessage,
           todos: [],
           recentSessions,
           meta: null,
+          resumeCommand,
+          terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),
           ...renderContext
         }));
         return;

@@ -31,6 +31,7 @@ export function extractMeta(records, fallbackId): RawSession {
   let timeUpdated = 0;
   let messageCount = 0;
   let totalTokens = 0;
+  let directory = null;
 
   for (const r of records) {
     const ts = r.timestamp ? new Date(r.timestamp).getTime() : 0;
@@ -39,6 +40,7 @@ export function extractMeta(records, fallbackId): RawSession {
 
     if (r.type === "session_meta" && r.payload?.session_id) {
       sessionId = r.payload.session_id;
+      directory = r.payload.cwd || r.payload.workdir || directory;
     }
 
     if (r.type === "event_msg" && r.payload?.type === "user_message") {
@@ -59,7 +61,7 @@ export function extractMeta(records, fallbackId): RawSession {
     provider: "codex",
     parentId: null,
     title: null,
-    directory: null,
+    directory,
     timeCreated,
     timeUpdated,
     messageCount,

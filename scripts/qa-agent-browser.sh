@@ -84,9 +84,19 @@ ab "open dashboard" open "$BASE/opencode" >/dev/null
 ab "wait for dashboard" wait --text "Recent Sessions" >/dev/null
 dashboard="$(read_ab "read dashboard" get text body)"
 assert_contains "dashboard" "$dashboard" "Recent Sessions"
+dashboard_session_ids="$(read_ab "count dashboard session ids" get count ".session-card .session-id")"
+assert_positive_count "dashboard session ids" "$dashboard_session_ids"
+dashboard_copy_buttons="$(read_ab "count dashboard copy buttons" get count ".session-card [data-action='copy-session-id']")"
+assert_positive_count "dashboard session ID copy buttons" "$dashboard_copy_buttons"
 
 ab "open stats" open "$BASE/opencode/stats" >/dev/null
 ab "wait for stats" wait --text "Statistics Overview" >/dev/null
+page_token_total="$(read_ab "read stats token total" get attr ".stats-summary-value[data-token-total]" data-token-total)"
+api_token_total="$(curl -fsS "$BASE/api/opencode/stats" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>process.stdout.write(String(JSON.parse(s).tokenTotal)))")"
+if [[ "$page_token_total" != "$api_token_total" ]]; then
+  echo "Stats page token total $page_token_total did not match API total $api_token_total" >&2
+  exit 1
+fi
 
 ab "open search" open "$BASE/opencode/search?q=assistant" >/dev/null
 ab "wait for search" wait --text "Search" >/dev/null
@@ -98,6 +108,21 @@ assert_not_contains "detail" "$detail" "System Prompts"
 assert_contains "detail" "$detail" "Reasoning"
 assert_contains "detail" "$detail" "Flow"
 assert_contains "detail" "$detail" "TOOL"
+assert_contains "detail session ID" "$detail" "$SAMPLE_SESSION_ID"
+
+detail_session_id_count="$(read_ab "count detail session id" get count ".session-header .session-id")"
+if [[ "$detail_session_id_count" != "1" ]]; then
+  echo "Detail page should show one session ID below the title, got $detail_session_id_count" >&2
+  exit 1
+fi
+
+resume_copy_count="$(read_ab "count resume command buttons" get count ".session-actions [data-action='copy-resume-command']")"
+assert_positive_count "resume command buttons" "$resume_copy_count"
+resume_launch_count="$(read_ab "count disabled-by-default terminal buttons" get count ".session-actions [data-action='resume-session']")"
+if [[ "$resume_launch_count" != "0" ]]; then
+  echo "Terminal launch button should be hidden without --allow-terminal-launch" >&2
+  exit 1
+fi
 
 toc_unexpected="$(read_ab "count unexpected toc entries" get count ".session-toc .toc-link:not(.toc-user):not(.toc-assistant):not(.toc-agent):not(.toc-task)")"
 if [[ "$toc_unexpected" != "0" ]]; then

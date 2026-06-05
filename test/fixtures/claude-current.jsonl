@@ -1,0 +1,5 @@
+{"type":"summary","summary":"Inspect the current Claude transcript"}
+{"type":"user","uuid":"user-1","timestamp":"2026-06-01T10:00:00.000Z","cwd":"D:\\WorkSpace\\OpenSession","message":{"content":[{"type":"text","text":"Check this project"}]}}
+{"type":"assistant","uuid":"assistant-1","timestamp":"2026-06-01T10:00:01.000Z","cwd":"D:\\WorkSpace\\OpenSession","message":{"model":"claude-sonnet","usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":20,"cache_creation_input_tokens":3},"content":[{"type":"thinking","thinking":"I should inspect the files."},{"type":"tool_use","id":"tool-1","name":"Read","input":{"file_path":"README.md"}}]}}
+{"type":"user","uuid":"user-2","timestamp":"2026-06-01T10:00:02.000Z","cwd":"D:\\WorkSpace\\OpenSession","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":"OpenSessionViewer","is_error":false}]}}
+{"type":"assistant","uuid":"assistant-2","timestamp":"2026-06-01T10:00:03.000Z","cwd":"D:\\WorkSpace\\OpenSession","message":{"model":"claude-sonnet","usage":{"input_tokens":4,"output_tokens":2},"content":[{"type":"text","text":"The project is available."}]}}

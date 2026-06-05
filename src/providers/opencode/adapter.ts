@@ -153,7 +153,10 @@ export function createOpenCodeAdapter({
       inputTokens: Number(row.input_tokens) || 0,
       outputTokens: Number(row.output_tokens) || 0,
       totalTokens: Number(row.total_tokens) || 0,
-      messageCount: Number(row.message_count) || 0
+      messageCount: Number(row.message_count) || 0,
+      reasoningTokens: Number(row.reasoning_tokens) || 0,
+      cacheReadTokens: Number(row.cache_read_tokens) || 0,
+      cacheWriteTokens: Number(row.cache_write_tokens) || 0
     }));
   },
 

@@ -1,4 +1,5 @@
-import { existsSync, readdirSync, lstatSync } from "node:fs";
+import { existsSync, readdirSync, lstatSync, readFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { getConfig } from "../../config.js";
 import { parseTranscript, extractSessionMeta, recordsToMessages } from "./parser.js";
@@ -61,10 +62,7 @@ const claudeCode = {
   icon: icons.claude,
 
   detect() {
-    const claudeDir = getClaudeDir();
-    const transcripts = path.join(claudeDir, "transcripts");
-    const projects = path.join(claudeDir, "projects");
-    return existsSync(transcripts) || existsSync(projects);
+    return discoverSessionFiles().length > 0;
   },
 
   getDataPath() {
@@ -109,7 +107,9 @@ const claudeCode = {
   },
 
   getTokenStats(days = 30) {
-    const cutoff = Date.now() - days * 86400000;
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const cutoff = today.getTime() - (Math.max(1, days) - 1) * 86400000;
     const files = discoverSessionFiles();
     const dailyMap = new Map();
 
@@ -117,14 +117,26 @@ const claudeCode = {
       try {
         const records = parseTranscript(filePath);
         for (const r of records) {
-          if (r.type !== "assistant" || !r.message?.usage) continue;
+          if (r.type !== "assistant" || !(r.message?.usage ?? r.usage)) continue;
           const ts = r.timestamp ? new Date(r.timestamp).getTime() : 0;
           if (ts < cutoff) continue;
           const day = new Date(ts).toISOString().slice(0, 10);
-          const existing = dailyMap.get(day) || { day, inputTokens: 0, outputTokens: 0, totalTokens: 0, messageCount: 0 };
-          existing.inputTokens += r.message.usage.input_tokens || 0;
-          existing.outputTokens += r.message.usage.output_tokens || 0;
-          existing.totalTokens += (r.message.usage.input_tokens || 0) + (r.message.usage.output_tokens || 0);
+          const usage = r.message?.usage ?? r.usage;
+          const input = Number(usage.input_tokens) || 0;
+          const output = Number(usage.output_tokens) || 0;
+          const reasoning = Number(usage.reasoning_tokens) || 0;
+          const cacheRead = Number(usage.cache_read_input_tokens) || 0;
+          const cacheWrite = Number(usage.cache_creation_input_tokens) || 0;
+          const existing = dailyMap.get(day) || {
+            day, inputTokens: 0, outputTokens: 0, totalTokens: 0, messageCount: 0,
+            reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0
+          };
+          existing.inputTokens += input;
+          existing.outputTokens += output;
+          existing.reasoningTokens += reasoning;
+          existing.cacheReadTokens += cacheRead;
+          existing.cacheWriteTokens += cacheWrite;
+          existing.totalTokens += Number(usage.total_tokens) || input + output + reasoning + cacheRead + cacheWrite;
           existing.messageCount += 1;
           dailyMap.set(day, existing);
         }
@@ -170,6 +182,25 @@ const claudeCode = {
 
   exportSession(_sessionId) {
     return null;
+  },
+
+  getUnavailableReason() {
+    const metadataPath = path.join(os.homedir(), ".claude.json");
+    if (!existsSync(metadataPath)) {
+      return null;
+    }
+    try {
+      const metadata = JSON.parse(readFileSync(metadataPath, "utf-8"));
+      const projectCount = metadata?.projects && typeof metadata.projects === "object"
+        ? Object.keys(metadata.projects).length
+        : 0;
+      if (projectCount > 0) {
+        return `Claude Code metadata lists ${projectCount} projects, but no transcript JSONL files were found in ${getClaudeDir()}. Claude Code removes old transcripts according to cleanupPeriodDays (30 days by default).`;
+      }
+    } catch {
+      return null;
+    }
+    return null;
   }
 } satisfies ProviderAdapter;
 
@@ -181,6 +212,7 @@ function extractTextFromRecord(r) {
   }
   if (r.type === "assistant") {
     const content = r.message?.content ?? r.content ?? [];
+    if (typeof content === "string") return content;
     return content.filter((b) => b.type === "text").map((b) => b.text).join("");
   }
   return "";

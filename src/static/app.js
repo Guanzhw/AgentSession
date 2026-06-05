@@ -30,6 +30,10 @@ const __I18N__ = {
     menu_export_md: "Export MD",
     menu_export_json: "Export JSON",
     menu_delete: "Delete",
+    copy: "Copy",
+    copied: "Copied",
+    resume_opened: "Terminal opened",
+    resume_disabled: "Terminal launch is unavailable",
     scroll_all_loaded: "All sessions loaded",
     scroll_loading: "Loading..."
   },
@@ -61,6 +65,10 @@ const __I18N__ = {
     menu_export_md: "导出 MD",
     menu_export_json: "导出 JSON",
     menu_delete: "删除",
+    copy: "复制",
+    copied: "已复制",
+    resume_opened: "终端已打开",
+    resume_disabled: "无法启动终端",
     scroll_all_loaded: "已全部加载",
     scroll_loading: "加载中..."
   }
@@ -107,6 +115,22 @@ try {
 
 function queueToast(message, type = "success") {
   sessionStorage.setItem("pendingToast", JSON.stringify({ message, type }));
+}
+
+async function copyText(value) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
 }
 
 document.addEventListener("keydown", (e) => {
@@ -191,6 +215,43 @@ document.addEventListener("click", async (e) => {
 
   e.preventDefault();
   e.stopPropagation();
+
+  if (action === "copy-session-id") {
+    try {
+      await copyText(id);
+      showToast(ft("copied"), "success");
+    } catch {
+      showToast(ft("toast_error"), "error");
+    }
+    return;
+  }
+
+  if (action === "copy-resume-command") {
+    try {
+      await copyText(btn.dataset.command || "");
+      showToast(ft("copied"), "success");
+    } catch {
+      showToast(ft("toast_error"), "error");
+    }
+    return;
+  }
+
+  if (action === "resume-session") {
+    try {
+      const res = await fetch(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/resume`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}"
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      showToast(ft("resume_opened"), "success");
+    } catch {
+      showToast(ft("resume_disabled"), "error");
+    }
+    return;
+  }
 
   if (action === "rename") {
     const card = btn.closest(".session-card");
@@ -382,18 +443,24 @@ function renderSessionCard(s) {
 
   return `<article class="${classes.join(" ")}" data-session-id="${id}">
     <input type="checkbox" class="card-checkbox" data-id="${id}">
-    <a href="/${PROVIDER}/session/${encodeURIComponent(s.id)}" class="session-card-link">
+    <div class="session-card-content">
       <header class="session-card-header">
-        <h2 class="session-card-title">${title}</h2>
+        <a href="/${PROVIDER}/session/${encodeURIComponent(s.id)}" class="session-card-title-link">
+          <h2 class="session-card-title">${title}</h2>
+        </a>
         <time class="session-card-time" datetime="${new Date(timeUpdated).toISOString()}">${escapeHtmlClient(formatTimeClient(timeUpdated))}</time>
       </header>
+      <div class="session-id-row">
+        <code class="session-id">${id}</code>
+        <button class="copy-btn" type="button" data-action="copy-session-id" data-id="${id}" title="${ft("copy")}">${ft("copy")}</button>
+      </div>
       <p class="session-card-directory">${directory}</p>
       <footer class="session-card-stats">
         <span>${ft("card_files").replace("{count}", String(Number(s.summary_files) || 0))}</span>
         <span class="additions">+${Number(s.summary_additions) || 0}</span>
         <span class="deletions">-${Number(s.summary_deletions) || 0}</span>
       </footer>
-    </a>
+    </div>
     ${actionsHtml}
   </article>`;
 }

@@ -63,7 +63,13 @@ export function dataToMessages(data, sessionId): Message[] {
         toolInput: null,
         toolOutput: null,
         timestamp: ts,
-        tokens: m.tokenUsage ? { input: m.tokenUsage.input || 0, output: m.tokenUsage.output || 0 } : null,
+        tokens: m.tokenUsage ? {
+          input: m.tokenUsage.input || 0,
+          output: m.tokenUsage.output || 0,
+          reasoning: m.tokenUsage.thoughts || 0,
+          total: m.tokenUsage.total || 0,
+          cache: { read: m.tokenUsage.cached || 0, write: 0 }
+        } : null,
         metadata: null
       });
     }
@@ -79,7 +85,13 @@ export function dataToMessages(data, sessionId): Message[] {
         toolInput: null,
         toolOutput: null,
         timestamp: ts,
-        tokens: m.tokenUsage ? { input: m.tokenUsage.input || 0, output: m.tokenUsage.output || 0 } : null,
+        tokens: m.tokenUsage ? {
+          input: m.tokenUsage.input || 0,
+          output: m.tokenUsage.output || 0,
+          reasoning: m.tokenUsage.thoughts || 0,
+          total: m.tokenUsage.total || 0,
+          cache: { read: m.tokenUsage.cached || 0, write: 0 }
+        } : null,
         metadata: {
           cached: m.tokenUsage?.cached || 0,
           thoughts: m.tokenUsage?.thoughts || 0,

@@ -67,7 +67,8 @@ function formatTokens(tokens) {
     tokenChip("↑", tokens.input, `Input tokens: ${formatCompactCount(tokens.input)}`),
     tokenChip("↓", tokens.output, `Output tokens: ${formatCompactCount(tokens.output)}`),
     tokenChip("R", tokens.reasoning, `Reasoning tokens: ${formatCompactCount(tokens.reasoning)}`),
-    tokenChip("C", cache.read, `Cache read tokens: ${formatCompactCount(cache.read)}`)
+    tokenChip("C", cache.read, `Cache read tokens: ${formatCompactCount(cache.read)}`),
+    tokenChip("W", cache.write, `Cache write tokens: ${formatCompactCount(cache.write)}`)
   ].filter(Boolean);
 
   if (!pieces.length && tokens.total != null) {
@@ -135,18 +136,24 @@ export function sessionCard(s, active = false, { showCheckbox = false, provider 
 
   return `<article class="${classes.join(" ")}" data-session-id="${escapeHtml(s.id)}">
     ${checkboxHtml}
-    <a href="/${provider}/session/${encodeURIComponent(s.id)}" class="session-card-link">
+    <div class="session-card-content">
       <header class="session-card-header">
-        <h2 class="session-card-title">${escapeHtml(title)}</h2>
+        <a href="/${provider}/session/${encodeURIComponent(s.id)}" class="session-card-title-link">
+          <h2 class="session-card-title">${escapeHtml(title)}</h2>
+        </a>
         <time class="session-card-time" datetime="${new Date(Number(s.time_updated) || Date.now()).toISOString()}">${escapeHtml(formatTime(s.time_updated))}</time>
       </header>
+      <div class="session-id-row">
+        <code class="session-id">${escapeHtml(s.id)}</code>
+        <button class="copy-btn" type="button" data-action="copy-session-id" data-id="${escapeHtml(s.id)}" title="${t("action.copy_session_id")}">${t("action.copy")}</button>
+      </div>
       <p class="session-card-directory">${escapeHtml(s.directory || "")}</p>
       <footer class="session-card-stats">
         <span>${t("card.files").replace("{count}", formatCount(s.summary_files))}</span>
         <span class="additions">+${formatCount(s.summary_additions)}</span>
         <span class="deletions">-${formatCount(s.summary_deletions)}</span>
       </footer>
-    </a>
+    </div>
     ${actionsHtml}
   </article>`;
 }

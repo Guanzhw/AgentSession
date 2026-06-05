@@ -1,0 +1,2 @@
+{"type":"user","uuid":"legacy-user","timestamp":"2025-01-01T00:00:00.000Z","cwd":"C:\\legacy","message":{"content":"Legacy first prompt"}}
+{"type":"assistant","uuid":"legacy-assistant","timestamp":"2025-01-01T00:00:01.000Z","message":{"usage":{"input_tokens":2,"output_tokens":1},"content":[{"type":"text","text":"Legacy response"}]}}

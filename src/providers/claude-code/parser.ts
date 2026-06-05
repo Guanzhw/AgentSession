@@ -1,6 +1,62 @@
 import { readFileSync } from "node:fs";
 import type { Message, RawSession } from "../interface.js";
 
+function asNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function usageToTokens(usage) {
+  if (!usage || typeof usage !== "object") {
+    return null;
+  }
+
+  const input = asNumber(usage.input_tokens);
+  const output = asNumber(usage.output_tokens);
+  const cacheRead = asNumber(usage.cache_read_input_tokens);
+  const cacheWrite = asNumber(usage.cache_creation_input_tokens);
+  const reasoning = asNumber(usage.reasoning_tokens);
+  return {
+    input,
+    output,
+    reasoning,
+    cache: { read: cacheRead, write: cacheWrite },
+    total: asNumber(usage.total_tokens) || input + output + reasoning + cacheRead + cacheWrite
+  };
+}
+
+function contentBlocks(content) {
+  if (typeof content === "string") {
+    return [{ type: "text", text: content }];
+  }
+  return Array.isArray(content) ? content : [];
+}
+
+function textFromContent(content) {
+  return contentBlocks(content)
+    .filter((block) => block?.type === "text")
+    .map((block) => block.text || "")
+    .join("");
+}
+
+function titleFromRecords(records) {
+  const custom = [...records].reverse().find((record) => (
+    (record.type === "custom-title" || record.type === "custom_title") && record.customTitle
+  ));
+  if (custom?.customTitle) {
+    return String(custom.customTitle).slice(0, 160);
+  }
+
+  const summary = [...records].reverse().find((record) => record.type === "summary" && record.summary);
+  if (summary?.summary) {
+    return String(summary.summary).slice(0, 160);
+  }
+
+  const firstUser = records.find((record) => record.type === "user");
+  const firstText = textFromContent(firstUser?.message?.content ?? firstUser?.content).trim();
+  return firstText ? firstText.slice(0, 120) : null;
+}
+
 /**
  * Parse a Claude Code JSONL transcript file into records.
  * @param {string} filePath - Absolute path to .jsonl file
@@ -43,8 +99,9 @@ export function extractSessionMeta(records, sessionId): RawSession {
     if (r.type === "system" && r.cwd) directory = r.cwd;
     if (r.cwd && !directory) directory = r.cwd;
 
-    if (r.type === "assistant" && r.message?.usage) {
-      totalTokens += (r.message.usage.input_tokens || 0) + (r.message.usage.output_tokens || 0);
+    if (r.type === "assistant") {
+      const tokens = usageToTokens(r.message?.usage ?? r.usage);
+      totalTokens += tokens?.total || 0;
     }
   }
 
@@ -52,7 +109,7 @@ export function extractSessionMeta(records, sessionId): RawSession {
     id: sessionId,
     provider: "claude-code",
     parentId: null,
-    title: null, // Claude Code doesn't have session titles in transcripts
+    title: titleFromRecords(records),
     directory,
     timeCreated,
     timeUpdated,
@@ -75,7 +132,8 @@ export function recordsToMessages(records, sessionId): Message[] {
     const ts = r.timestamp ? new Date(r.timestamp).getTime() : 0;
 
     if (r.type === "user") {
-      const text = extractTextContent(r.message?.content ?? r.content);
+      const blocks = contentBlocks(r.message?.content ?? r.content);
+      const text = textFromContent(blocks);
       if (text) {
         messages.push({
           id: r.uuid || `msg-${msgIndex++}`,
@@ -91,55 +149,76 @@ export function recordsToMessages(records, sessionId): Message[] {
           metadata: { version: r.version, cwd: r.cwd }
         });
       }
+
+      // Current Claude Code transcripts embed tool results as blocks inside a
+      // user record rather than emitting a standalone tool_result record.
+      for (const block of blocks.filter((item) => item?.type === "tool_result")) {
+        const rawContent = block.content ?? block.tool_output ?? "";
+        messages.push({
+          id: block.tool_use_id || `tool-result-${msgIndex++}`,
+          sessionId,
+          role: "tool",
+          content: typeof rawContent === "string" ? rawContent : JSON.stringify(rawContent),
+          thinking: null,
+          toolName: block.tool_name || "tool_result",
+          toolInput: null,
+          toolOutput: rawContent,
+          timestamp: ts,
+          tokens: null,
+          metadata: { isError: Boolean(block.is_error), toolUseId: block.tool_use_id || null }
+        });
+      }
     }
 
     if (r.type === "assistant") {
-      const contentBlocks = r.message?.content ?? r.content ?? [];
-      const usage = r.message?.usage ?? r.usage;
-      let text = "";
-      let thinking = null;
+      const blocks = contentBlocks(r.message?.content ?? r.content);
+      const tokens = usageToTokens(r.message?.usage ?? r.usage);
+      let pendingThinking = [];
+      let usageAttached = false;
 
-      for (const block of contentBlocks) {
-        if (block.type === "text") text += block.text;
-        if (block.type === "thinking") thinking = block.thinking;
+      for (const block of blocks) {
+        if (block.type === "thinking" || block.type === "redacted_thinking") {
+          pendingThinking.push(block.thinking || block.data || "[Redacted thinking]");
+          continue;
+        }
+        if (block.type === "text" && block.text) {
+          messages.push({
+            id: r.uuid ? `${r.uuid}:${msgIndex++}` : `msg-${msgIndex++}`,
+            sessionId,
+            role: "assistant",
+            content: block.text,
+            thinking: pendingThinking.join("\n\n") || null,
+            toolName: null,
+            toolInput: null,
+            toolOutput: null,
+            timestamp: ts,
+            tokens: usageAttached ? null : tokens,
+            metadata: {
+              model: r.message?.model || null,
+              stopReason: r.message?.stop_reason || null
+            }
+          });
+          pendingThinking = [];
+          usageAttached = true;
+          continue;
+        }
         if (block.type === "tool_use") {
           messages.push({
             id: block.id || `tool-${msgIndex++}`,
             sessionId,
             role: "tool",
             content: "",
-            thinking: null,
+            thinking: pendingThinking.join("\n\n") || null,
             toolName: block.name || "unknown",
             toolInput: block.input || null,
             toolOutput: null, // output comes from tool_result records
             timestamp: ts,
-            tokens: null,
-            metadata: null
+            tokens: usageAttached ? null : tokens,
+            metadata: { model: r.message?.model || null }
           });
+          pendingThinking = [];
+          usageAttached = true;
         }
-      }
-
-      if (text) {
-        messages.push({
-          id: r.uuid || `msg-${msgIndex++}`,
-          sessionId,
-          role: "assistant",
-          content: text,
-          thinking,
-          toolName: null,
-          toolInput: null,
-          toolOutput: null,
-          timestamp: ts,
-          tokens: usage
-            ? { input: usage.input_tokens || 0, output: usage.output_tokens || 0 }
-            : null,
-          metadata: {
-            model: r.message?.model || null,
-            stopReason: r.message?.stop_reason || null,
-            cacheRead: usage?.cache_read_input_tokens || 0,
-            cacheCreation: usage?.cache_creation_input_tokens || 0
-          }
-        });
       }
     }
 
@@ -178,13 +257,4 @@ export function recordsToMessages(records, sessionId): Message[] {
   }
 
   return messages;
-}
-
-function extractTextContent(content) {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("");
 }

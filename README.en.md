@@ -83,6 +83,9 @@ opensessionviewer [options]
 --claude-dir <path>   Claude Code data directory
 --codex-dir <path>    Codex CLI data directory
 --gemini-dir <path>   Gemini CLI data directory
+--config <path>       OpenSessionViewer JSON config
+--allow-terminal-launch
+                      Allow the local UI to open resume commands in Windows Terminal
 --reindex             Rebuild the cross-provider index on start
 --lang <en|zh>        UI language
 --open                Open the browser on start
@@ -102,6 +105,50 @@ opensessionviewer [options]
 | `GEMINI_HOME` | Gemini CLI data directory |
 | `OPENSESSIONVIEWER_META_PATH` | OpenSessionViewer metadata DB path |
 | `OH_MY_OPENSESSION_META_PATH` | Legacy metadata DB path |
+| `OPENSESSIONVIEWER_CONFIG` | JSON config path |
+
+## Resume Commands
+
+Session detail pages always show a copyable session ID. When a provider has a
+known resume command and a valid recorded project directory, the page also
+offers a copyable command. Actual terminal launching is disabled unless the
+server starts with `--allow-terminal-launch`.
+
+Provider commands can be overridden in `config.json` under the normal
+OpenSessionViewer config directory, or in the file selected by `--config`:
+
+```json
+{
+  "resumeCommands": {
+    "opencode": {
+      "executable": "opencode",
+      "args": ["--session", "{sessionId}"]
+    },
+    "codeagent": {
+      "executable": "my-codeagent",
+      "args": ["resume", "{sessionId}"],
+      "cwd": "D:\\WorkSpace"
+    }
+  }
+}
+```
+
+Supported placeholders are `{sessionId}` and `{projectPath}`. Commands are
+started as executable/argument arrays rather than raw shell strings. A custom
+`cwd` is useful for providers whose history does not record a project path.
+
+## Claude Code History
+
+Claude Code histories are read from both the legacy `~/.claude/transcripts`
+layout and the current `~/.claude/projects/<project>/*.jsonl` layout.
+OpenSessionViewer never modifies these files.
+
+Claude Code removes transcript files according to its `cleanupPeriodDays`
+setting, which defaults to 30 days. Project metadata can remain in
+`~/.claude.json` after the JSONL transcript has been removed; in that case the
+viewer reports the metadata-only state but cannot reconstruct the deleted
+conversation. Use a positive retention period appropriate for your archive
+needs if older sessions must remain available.
 
 ## Architecture
 

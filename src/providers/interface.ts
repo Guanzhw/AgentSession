@@ -1,5 +1,22 @@
 export type ProviderId = "opencode" | "codeagent" | "claude-code" | "codex" | "gemini";
 
+export interface ResumeCommandSpec {
+  executable: string;
+  args: string[];
+  cwd?: string;
+}
+
+export interface TokenUsage {
+  input?: number;
+  output?: number;
+  reasoning?: number;
+  total?: number;
+  cache?: {
+    read?: number;
+    write?: number;
+  };
+}
+
 export interface RawSession {
   id: string;
   provider: ProviderId;
@@ -24,7 +41,7 @@ export interface Message {
   toolInput: unknown;
   toolOutput: unknown;
   timestamp: number;
-  tokens: { input: number; output: number } | null;
+  tokens: TokenUsage | null;
   metadata: Record<string, unknown> | null;
 }
 
@@ -34,6 +51,9 @@ export interface DailyTokenStat {
   outputTokens: number;
   totalTokens: number;
   messageCount: number;
+  reasoningTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
 }
 
 export interface SearchResult {
@@ -57,4 +77,5 @@ export interface ProviderAdapter {
   searchMessages(query: string, limit?: number): SearchResult[];
   exportSession(sessionId: string): unknown;
   getTrace?(sessionId: string): unknown;
+  getUnavailableReason?(): string | null;
 }

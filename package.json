@@ -11,6 +11,7 @@
   },
   "scripts": {
     "build": "tsc && node scripts/copy-static.mjs",
+    "test": "npm run build && node --test test/*.test.mjs",
     "start": "npm run build && node dist/bin/cli.js",
     "dev": "npm run build && node dist/bin/cli.js --open",
     "typecheck": "tsc --noEmit",

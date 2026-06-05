@@ -78,7 +78,9 @@ const gemini = {
   },
 
   getTokenStats(days = 30) {
-    const cutoff = Date.now() - days * 86400000;
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const cutoff = today.getTime() - (Math.max(1, days) - 1) * 86400000;
     const dailyMap = new Map();
     for (const { filePath } of discoverSessionFiles()) {
       try {
@@ -88,10 +90,15 @@ const gemini = {
           const ts = m.timestamp ? new Date(m.timestamp).getTime() : 0;
           if (ts < cutoff) continue;
           const day = new Date(ts).toISOString().slice(0, 10);
-          const existing = dailyMap.get(day) || { day, inputTokens: 0, outputTokens: 0, totalTokens: 0, messageCount: 0 };
+          const existing = dailyMap.get(day) || {
+            day, inputTokens: 0, outputTokens: 0, totalTokens: 0, messageCount: 0,
+            reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0
+          };
           existing.inputTokens += m.tokenUsage.input || 0;
           existing.outputTokens += m.tokenUsage.output || 0;
           existing.totalTokens += m.tokenUsage.total || 0;
+          existing.reasoningTokens += m.tokenUsage.thoughts || 0;
+          existing.cacheReadTokens += m.tokenUsage.cached || 0;
           existing.messageCount += 1;
           dailyMap.set(day, existing);
         }

@@ -149,21 +149,17 @@ function tocMessageText(message) {
 }
 
 function hasVisibleMessagePart(message) {
-  return message.parts.some((part) => {
-    if (part.type === "reasoning") {
-      return false;
-    }
+  return message.parts.some(isVisiblePartNode);
+}
 
-    if (part.type === "text" && part.data?.text) {
-      return true;
-    }
-
-    if (part.type === "tool" && !["todoread", "todowrite"].includes(String(part.tool || ""))) {
-      return true;
-    }
-
-    return part.childSessions.length > 0;
-  });
+function isVisiblePartNode(part) {
+  if (part.childSessions.length > 0) {
+    return true;
+  }
+  if (part.type === "text") {
+    return Boolean(part.data?.text);
+  }
+  return part.type === "tool" && !["todoread", "todowrite"].includes(String(part.tool || ""));
 }
 
 function renderMetric(label, value) {
@@ -702,22 +698,35 @@ function renderPart(messageData, partData, partId, reasoningMarkup = "") {
 function renderPartNode(messageData, part: SessionPartNode, depth = 0, provider = "opencode", reasoningMarkup = "") {
   const isTaskWithSession = part.type === "tool" && isTaskTool(part.tool) && part.childSessions.length > 0;
   const renderedPart = isTaskWithSession ? "" : renderPart(messageData, part.data, part.id, reasoningMarkup);
-  const childMarkup = part.childSessions
-    .map((child) => renderSubagentChildSession(child, provider))
-    .filter(Boolean)
-    .join("\n");
   const partAnchor = escapeHtml(anchorId("part", part.id));
   const anchoredPart = renderedPart
     ? (part.type === "tool" ? renderedPart : `<div id="${partAnchor}" class="session-part-anchor">${renderedPart}</div>`)
     : `<span id="${partAnchor}" class="session-event-anchor" aria-hidden="true"></span>`;
 
+  // A task can produce more than one child session. Give each child its own
+  // branch container so navigation, export actions, and QA identify every
+  // session instead of collapsing several IDs into one visual branch.
+  if (isTaskWithSession) {
+    const branches = part.childSessions.map((child, index) => (
+      renderSubagentBranch(
+        { ...part, childSessions: [child] },
+        renderSubagentChildSession(child, provider),
+        provider,
+        index === 0 ? reasoningMarkup : ""
+      )
+    )).join("\n");
+    return `<div id="${partAnchor}" class="session-part-anchor">${branches}</div>`;
+  }
+
+  const childMarkup = part.childSessions
+    .map((child) => renderSubagentChildSession(child, provider))
+    .filter(Boolean)
+    .join("\n");
   if (!childMarkup) {
     return anchoredPart;
   }
 
-  const branch = isTaskWithSession
-    ? renderSubagentBranch(part, childMarkup, provider, reasoningMarkup)
-    : `<div class="subsession-branch" data-parent-part-id="${escapeHtml(part.id)}">${childMarkup}</div>`;
+  const branch = `<div class="subsession-branch" data-parent-part-id="${escapeHtml(part.id)}">${childMarkup}</div>`;
 
   return `<div id="${partAnchor}" class="session-part-anchor">${renderedPart}${branch}</div>`;
 }
@@ -782,7 +791,9 @@ function renderMessagePartsResult(message, depth = 0, provider = "opencode", ini
     }
     if (rendered) {
       renderedParts.push(rendered);
-      if (!rendered.includes("session-event-anchor")) {
+      // Child markup can contain hidden event anchors even when the task branch
+      // itself is visible. Classify the source part, not its generated HTML.
+      if (isVisiblePartNode(part)) {
         visibleCount += 1;
         pendingReasoning.length = 0;
       }
@@ -868,11 +879,24 @@ function renderRawParts(messageData, parts = []) {
   return renderedParts.filter(Boolean).join("\n");
 }
 
-export function renderSessionPage({ session, sessionTree = null, sessionMetrics = null, sessionFlow = null, messages = [], partsByMessage = new Map(), todos = [], recentSessions = [], meta = null, provider = "opencode", providers = [] }) {
+export function renderSessionPage({
+  session,
+  sessionTree = null,
+  sessionMetrics = null,
+  sessionFlow = null,
+  messages = [],
+  partsByMessage = new Map(),
+  todos = [],
+  recentSessions = [],
+  meta = null,
+  provider = "opencode",
+  providers = [],
+  resumeCommand = null,
+  terminalLaunchAllowed = false
+}) {
   const title = session.title || session.slug || session.id;
   const starred = meta?.starred ? 1 : 0;
-  const actions = isOpenCodeLikeProvider(provider) ? `
-      <div class="session-actions">
+  const managementActions = isOpenCodeLikeProvider(provider) ? `
         <button class="star-btn action-btn ${starred ? "starred" : ""}" data-id="${escapeHtml(session.id)}">
           ${starred ? t("action.starred") : t("action.star")}
         </button>
@@ -880,11 +904,26 @@ export function renderSessionPage({ session, sessionTree = null, sessionMetrics 
         <a href="/api/${provider}/session/${encodeURIComponent(session.id)}/export?format=md" class="action-btn">${t("action.export_md")}</a>
         <a href="/api/${provider}/session/${encodeURIComponent(session.id)}/export?format=json" class="action-btn">${t("action.export_json")}</a>
         <button class="action-btn btn-danger" data-action="delete" data-id="${escapeHtml(session.id)}">${t("action.delete")}</button>
+  ` : "";
+  const resumeActions = resumeCommand ? `
+        <button class="action-btn" data-action="copy-resume-command" data-id="${escapeHtml(session.id)}" data-command="${escapeHtml(resumeCommand.display)}">${t("action.copy_resume")}</button>
+        ${terminalLaunchAllowed
+          ? `<button class="action-btn" data-action="resume-session" data-id="${escapeHtml(session.id)}" ${resumeCommand.available ? "" : "disabled"}>${t("action.open_terminal")}</button>`
+          : ""}
+  ` : "";
+  const actions = managementActions || resumeActions ? `
+      <div class="session-actions">
+        ${managementActions}
+        ${resumeActions}
       </div>
   ` : "";
   const header = `
     <header class="session-header">
       <h1>${escapeHtml(title)}</h1>
+      <div class="session-id-row session-detail-id">
+        <code class="session-id">${escapeHtml(session.id)}</code>
+        <button class="copy-btn" type="button" data-action="copy-session-id" data-id="${escapeHtml(session.id)}" title="${t("action.copy_session_id")}">${t("action.copy")}</button>
+      </div>
       <div class="session-meta-row">
         <span class="session-directory">${escapeHtml(session.directory || "")}</span>
         <span class="session-meta-sep">·</span>
