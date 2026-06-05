@@ -143,18 +143,6 @@ function messageText(message) {
   return compactText(textPart?.data?.text || message.data?.summary || messageToolName(message) || message.id, 86);
 }
 
-function hasOnlyToolParts(message) {
-  return !message.parts.some((part) => {
-    if (["step-start", "step-finish", "snapshot", "patch", "reasoning"].includes(part.type)) return false;
-    if (part.type === "text" && part.data?.text) return true;
-    return false;
-  });
-}
-
-function hasTextContent(message) {
-  return message.parts.some((part) => part.type === "text" && part.data?.text);
-}
-
 function hasVisibleMessagePart(message) {
   return message.parts.some((part) => {
     if (part.type === "reasoning") {
@@ -256,11 +244,11 @@ function renderSubagentChildSession(tree: SessionTree, provider: string) {
   let pendingReasoning = [];
 
   for (const message of tree.messages) {
+    const result = renderMessagePartsResult(message, 0, provider, pendingReasoning);
+    pendingReasoning = result.pendingReasoning;
     if (!hasVisibleMessagePart(message)) {
       continue;
     }
-    const result = renderMessagePartsResult(message, 0, provider, pendingReasoning);
-    pendingReasoning = result.pendingReasoning;
     const messageAnchor = escapeHtml(anchorId("msg", message.id));
     if (result.hasVisibleContent && result.markup) {
       messageBlocks.push(`<article id="${messageAnchor}" class="message-group" data-role="${escapeHtml(message.role)}">${renderMessageControls(message, provider)}${result.markup}</article>`);
@@ -674,7 +662,7 @@ function renderPart(messageData, partData, partId, reasoningMarkup = "") {
 
     const state = partData.state && typeof partData.state === "object" ? partData.state : {};
     const timing = state.time && typeof state.time === "object" ? state.time : {};
-    const output = state.status === "error" ? (state.error || state.output) : state.output;
+    const output = state.status === "error" ? (state.error ?? state.output) : state.output;
     return toolCallBlock(
       partData.tool,
       state.input,
@@ -798,11 +786,11 @@ function renderSessionTree(tree: SessionTree, depth = 0, provider = "opencode") 
   let pendingReasoning = [];
 
   for (const message of tree.messages) {
+    const result = renderMessagePartsResult(message, depth, provider, pendingReasoning);
+    pendingReasoning = result.pendingReasoning;
     if (!hasVisibleMessagePart(message)) {
       continue;
     }
-    const result = renderMessagePartsResult(message, depth, provider, pendingReasoning);
-    pendingReasoning = result.pendingReasoning;
     const messageAnchor = escapeHtml(anchorId("msg", message.id));
     if (result.hasVisibleContent && result.markup) {
       messageBlocks.push(`<article id="${messageAnchor}" class="message-group" data-role="${escapeHtml(message.role)}">${renderMessageControls(message, provider)}${result.markup}</article>`);

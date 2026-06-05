@@ -23,6 +23,20 @@ function defaultDataPath() {
   return path.join(dataHome, "opencode", "opencode.db");
 }
 
+function stringifyMessageContent(value) {
+  if (value == null) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
 export function defaultOpenCodeDataPath() {
   return defaultDataPath();
 }
@@ -112,11 +126,13 @@ export function createOpenCodeAdapter({
         } else if (pd.type === "tool") {
           const toolError = pd.state?.error;
           const toolOutput = pd.state?.output;
+          const toolContentValue = pd.state?.status === "error" ? (toolError ?? toolOutput) : (toolOutput ?? toolError);
+          const toolContent = stringifyMessageContent(toolContentValue);
           results.push({
             id: `${msg.id}:${part.id}`,
             sessionId,
             role: "tool",
-            content: toolOutput ? (typeof toolOutput === "string" ? toolOutput : JSON.stringify(toolOutput)) : toolError || "",
+            content: toolContent,
             thinking: null,
             toolName: pd.tool || "unknown",
             toolInput: pd.state?.input || null,
