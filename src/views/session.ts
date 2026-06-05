@@ -1,9 +1,9 @@
-import { escapeHtml } from "../markdown.js";
-import { layout } from "./layout.js";
-import { formatDuration, formatTime, messageBubble, reasoningBlock, todoList, toolCallBlock } from "./components.js";
 import { t } from "../i18n.js";
-import type { SessionPartNode, SessionTree } from "../providers/opencode/session-tree.js";
+import { escapeHtml } from "../markdown.js";
 import { isOpenCodeLikeProvider } from "../providers/kinds.js";
+import type { SessionPartNode, SessionTree } from "../providers/opencode/session-tree.js";
+import { formatDuration, formatTime, messageBubble, reasoningBlock, todoList, toolCallBlock } from "./components.js";
+import { layout } from "./layout.js";
 
 function safeParse(value) {
   if (typeof value !== "string") {
@@ -48,7 +48,10 @@ function formatMilliseconds(ms) {
 }
 
 function anchorId(prefix, id) {
-  return `${prefix}-${String(id || "").replace(/[^A-Za-z0-9_-]/g, "-")}`;
+  const cleanId = String(id || "").replace(/[^A-Za-z0-9_-]/g, "-");
+  const normalizedPrefix = prefix.endsWith("-") ? prefix.slice(0, -1) : prefix;
+  const alreadyHasPrefix = cleanId.toLowerCase().startsWith(normalizedPrefix.toLowerCase() + "-") || cleanId.toLowerCase().startsWith(normalizedPrefix.toLowerCase() + "_");
+  return alreadyHasPrefix ? cleanId : `${normalizedPrefix}-${cleanId}`;
 }
 
 function stringifyCompact(value) {
@@ -128,9 +131,28 @@ function toolTitle(partData) {
   return detail ? `${partData?.tool || partData?.type} · ${detail}` : (partData?.tool || partData?.type || "part");
 }
 
+function messageToolName(message) {
+  const toolPart = message.parts.find((part) => part.type === "tool" && !["todoread", "todowrite"].includes(String(part.tool || "")));
+  if (!toolPart) return "";
+  const input = toolPart.data?.state?.input || {};
+  return String(input.description || input.command || input.filePath || toolPart.tool || "");
+}
+
 function messageText(message) {
   const textPart = message.parts.find((part) => part.type === "text" && part.data?.text);
-  return compactText(textPart?.data?.text || message.data?.summary || message.id, 86);
+  return compactText(textPart?.data?.text || message.data?.summary || messageToolName(message) || message.id, 86);
+}
+
+function hasOnlyToolParts(message) {
+  return !message.parts.some((part) => {
+    if (["step-start", "step-finish", "snapshot", "patch", "reasoning"].includes(part.type)) return false;
+    if (part.type === "text" && part.data?.text) return true;
+    return false;
+  });
+}
+
+function hasTextContent(message) {
+  return message.parts.some((part) => part.type === "text" && part.data?.text);
 }
 
 function hasVisibleMessagePart(message) {
@@ -234,6 +256,9 @@ function renderSubagentChildSession(tree: SessionTree, provider: string) {
   let pendingReasoning = [];
 
   for (const message of tree.messages) {
+    if (!hasVisibleMessagePart(message)) {
+      continue;
+    }
     const result = renderMessagePartsResult(message, 0, provider, pendingReasoning);
     pendingReasoning = result.pendingReasoning;
     const messageAnchor = escapeHtml(anchorId("msg", message.id));
@@ -649,10 +674,11 @@ function renderPart(messageData, partData, partId, reasoningMarkup = "") {
 
     const state = partData.state && typeof partData.state === "object" ? partData.state : {};
     const timing = state.time && typeof state.time === "object" ? state.time : {};
+    const output = state.status === "error" ? (state.error || state.output) : state.output;
     return toolCallBlock(
       partData.tool,
       state.input,
-      state.output,
+      output,
       state.status,
       formatDuration(timing.start, timing.end),
       partId,
@@ -772,6 +798,9 @@ function renderSessionTree(tree: SessionTree, depth = 0, provider = "opencode") 
   let pendingReasoning = [];
 
   for (const message of tree.messages) {
+    if (!hasVisibleMessagePart(message)) {
+      continue;
+    }
     const result = renderMessagePartsResult(message, depth, provider, pendingReasoning);
     pendingReasoning = result.pendingReasoning;
     const messageAnchor = escapeHtml(anchorId("msg", message.id));

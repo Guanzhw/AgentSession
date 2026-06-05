@@ -1,11 +1,11 @@
 {
-  "name": "@guanzhw/opensessionviewer",
-  "version": "1.2.0",
-  "description": "The developer's AI chronicle — one local viewer for OpenCode, CodeAgent, Claude Code, Codex CLI, and Gemini CLI sessions.",
+  "name": "@openx/codeagent-session",
+  "version": "1.2.3",
+  "description": "Forked from OpenSession — The developer's AI chronicle. A session viewer for OpenCode/Claude Code/Codex/Gemini, with subagent conversation display and TOC navigation support.",
   "type": "module",
   "bin": {
-    "opensessionviewer": "dist/bin/cli.js",
-    "open-session-viewer": "dist/bin/cli.js",
+    "codeagentsession": "dist/bin/cli.js",
+    "codeagent-session": "dist/bin/cli.js",
     "opensession": "dist/bin/cli.js",
     "oh-my-opensession": "dist/bin/cli.js"
   },

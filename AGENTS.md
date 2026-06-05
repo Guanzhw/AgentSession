@@ -2,60 +2,36 @@
 
 ## Restart OpenSessionViewer
 
-Use these PowerShell commands from the repo root to rebuild, stop the current
-local server on port 3456, and restart against the real OpenCode database.
+Use these commands from the repo root to rebuild, stop the current
+local server on port 3456, and restart.
 
-```powershell
-cd D:\WorkSpace\OpenSession
+### Step 1: Build
+
+```bash
 npm run build
-netstat -ano | findstr :3456
-Stop-Process -Id <LISTENING_PID> -Force
-$env:OPENSESSIONVIEWER_META_PATH = 'D:\WorkSpace\OpenSession\tmp\verify-meta.db'
-$p = Start-Process `
-  -FilePath 'C:\Program Files\nodejs\node.exe' `
-  -ArgumentList @(
-    'D:\WorkSpace\OpenSession\dist\bin\cli.js',
-    '--db',
-    'C:\Users\QQ110\.local\share\opencode\opencode.db',
-    '--port',
-    '3456'
-  ) `
-  -WorkingDirectory 'D:\WorkSpace\OpenSession' `
-  -WindowStyle Hidden `
-  -RedirectStandardOutput 'D:\WorkSpace\OpenSession\logs\restart-3456.out' `
-  -RedirectStandardError 'D:\WorkSpace\OpenSession\logs\restart-3456.err' `
-  -PassThru
-$p.Id
 ```
 
-Verify the restart:
+### Step 2: Find and stop the running server
 
-```powershell
-netstat -ano | findstr :3456
-Get-Content D:\WorkSpace\OpenSession\logs\restart-3456.out
-Get-Content D:\WorkSpace\OpenSession\logs\restart-3456.err
-Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:3456/opencode' | Select-Object StatusCode
+```bash
+netstat -ano | grep :3456
+# Note the PID from the output, then on Windows:
+pwsh -C 'taskkill /F /PID <PID>'
 ```
 
-The expected startup log includes:
+### Step 3: Start the server in background
 
-```text
-OpenSessionViewer running at http://localhost:3456
-DB: C:\Users\QQ110\.local\share\opencode\opencode.db
-24 sessions, 1903 messages.
+```bash
+node dist/bin/cli.js > app.log 2>&1 &
 ```
 
-Nested-session smoke check:
+### Verify
 
-```powershell
-(Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:3456/opencode/session/ses_1ddf03616ffeTE5c6cbpUPMY3n').Content |
-  Set-Content -Path D:\WorkSpace\OpenSession\tmp\restart-page.html
-Select-String -Path D:\WorkSpace\OpenSession\tmp\restart-page.html -Pattern 'subsession-container' |
-  Measure-Object |
-  Select-Object Count
+```bash
+netstat -ano | grep :3456
 ```
 
-The known-good count for that sample session is `35`.
+The server should now be running on port 3456.
 
 ## Repeatable E2E QA
 
@@ -64,7 +40,6 @@ against the live server and checks dashboard/search/stats/detail/context/flow/
 CodeAgent-unavailable flows.
 
 ```powershell
-cd D:\WorkSpace\OpenSession
 $env:OPENSESSIONVIEWER_QA_BASE_URL = 'http://127.0.0.1:3456'
 $env:OPENSESSIONVIEWER_QA_SESSION_ID = 'ses_1ddf03616ffeTE5c6cbpUPMY3n'
 npm run qa:e2e

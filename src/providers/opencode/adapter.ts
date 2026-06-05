@@ -110,15 +110,17 @@ export function createOpenCodeAdapter({
             metadata: { model: data?.modelID, provider: data?.providerID }
           });
         } else if (pd.type === "tool") {
+          const toolError = pd.state?.error;
+          const toolOutput = pd.state?.output;
           results.push({
             id: `${msg.id}:${part.id}`,
             sessionId,
             role: "tool",
-            content: pd.state?.output ? (typeof pd.state.output === "string" ? pd.state.output : JSON.stringify(pd.state.output)) : "",
+            content: toolOutput ? (typeof toolOutput === "string" ? toolOutput : JSON.stringify(toolOutput)) : toolError || "",
             thinking: null,
             toolName: pd.tool || "unknown",
             toolInput: pd.state?.input || null,
-            toolOutput: pd.state?.output || null,
+            toolOutput: toolOutput ?? toolError ?? null,
             timestamp: Number(pd.time?.start) || Number(data?.time?.created) || 0,
             tokens: null,
             metadata: { duration: pd.time ? (Number(pd.time.end) - Number(pd.time.start)) : null }
