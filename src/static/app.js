@@ -760,10 +760,29 @@ if (sessionWorkbench) {
     });
   }
 
+  const updateTocActivePath = (id) => {
+    const activeTocLink = document.querySelector(`.session-toc .toc-link[href="#${CSS.escape(id)}"]`);
+    document.querySelectorAll(".session-toc .toc-link.active-parent").forEach((link) => {
+      link.classList.remove("active-parent");
+    });
+    if (!activeTocLink) return;
+
+    let group = activeTocLink.closest(".toc-group");
+    while (group) {
+      const parentLink = group.querySelector(":scope > .toc-group-summary > .toc-link");
+      if (parentLink && parentLink !== activeTocLink) {
+        parentLink.classList.add("active-parent");
+        group.open = true;
+      }
+      group = group.parentElement?.closest(".toc-group");
+    }
+  };
+
   const setActiveTarget = (id) => {
     navLinks.forEach((link) => {
       link.classList.toggle("active", link.getAttribute("href") === `#${id}`);
     });
+    updateTocActivePath(id);
   };
 
   const updateActiveFromScroll = () => {

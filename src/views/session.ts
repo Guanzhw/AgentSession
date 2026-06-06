@@ -466,13 +466,18 @@ function collectTocNodes(tree: SessionTree, userDepth = 0) {
 
 function renderTocNode(node) {
   const children = Array.isArray(node.children) ? node.children : [];
-  const typeLabel = String(node.type || "").toLowerCase() === "user"
-    ? "U"
-    : String(node.type || "").toLowerCase() === "assistant"
-      ? "A"
-      : String(node.type || "").slice(0, 1).toUpperCase();
-  const link = `<a class="toc-link toc-${escapeHtml(node.type.toLowerCase())}" href="#${escapeHtml(node.id)}" style="--toc-depth:${Math.min(node.depth, 6)}">
-      <span class="toc-type">${escapeHtml(typeLabel)}</span>
+  const normalizedType = String(node.type || "").toLowerCase();
+  const typeName = normalizedType === "user"
+    ? "User"
+    : normalizedType === "assistant" || normalizedType === "agent"
+      ? "Agent"
+      : normalizedType === "task"
+        ? "Task"
+        : normalizedType;
+  const typeLabel = typeName.slice(0, 1).toUpperCase();
+  const linkTitle = [typeName, node.label, node.meta].filter(Boolean).join(" - ");
+  const link = `<a class="toc-link toc-${escapeHtml(node.type.toLowerCase())}" href="#${escapeHtml(node.id)}" title="${escapeHtml(linkTitle)}" style="--toc-depth:${Math.min(node.depth, 6)}">
+      <span class="toc-type" title="${escapeHtml(typeName)}" aria-label="${escapeHtml(typeName)}">${escapeHtml(typeLabel)}</span>
       <span class="toc-label">${escapeHtml(node.label)}</span>
       ${node.meta ? `<span class="toc-meta">${escapeHtml(node.meta)}</span>` : ""}
     </a>`;

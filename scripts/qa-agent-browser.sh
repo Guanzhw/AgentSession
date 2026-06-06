@@ -130,6 +130,32 @@ if [[ "$toc_unexpected" != "0" ]]; then
   exit 1
 fi
 
+toc_user_labels="$(read_ab "read user toc labels" get text ".session-toc .toc-user .toc-type")"
+assert_contains "user toc labels" "$toc_user_labels" "U"
+
+toc_agent_count="$(read_ab "count agent toc entries" get count ".session-toc .toc-assistant, .session-toc .toc-agent")"
+if [[ "$toc_agent_count" != "0" ]]; then
+  toc_agent_labels="$(read_ab "read agent toc labels" get text ".session-toc .toc-assistant .toc-type, .session-toc .toc-agent .toc-type")"
+  assert_contains "agent toc labels" "$toc_agent_labels" "A"
+fi
+
+toc_task_count="$(read_ab "count task toc entries" get count ".session-toc .toc-task")"
+if [[ "$toc_task_count" != "0" ]]; then
+  toc_task_labels="$(read_ab "read task toc labels" get text ".session-toc .toc-task .toc-type")"
+  assert_contains "task toc labels" "$toc_task_labels" "T"
+fi
+
+deep_toc_target="$(read_ab "activate deep toc entry" eval "(() => { const link = [...document.querySelectorAll('.session-toc .toc-link')].find((candidate) => candidate.closest('.toc-children .toc-children')); if (!link) return ''; link.click(); return link.getAttribute('href') || ''; })()")"
+if [[ -n "$deep_toc_target" ]]; then
+  toc_parent_count="$(read_ab "count active toc parents" get count ".session-toc .toc-link.active-parent")"
+  assert_positive_count "active toc parents" "$toc_parent_count"
+  closed_toc_parent_count="$(read_ab "count hidden active toc parents" get count ".session-toc .toc-group:not([open]) .toc-link.active-parent")"
+  if [[ "$closed_toc_parent_count" != "0" ]]; then
+    echo "Active ToC parent path should stay expanded, got hidden parent count $closed_toc_parent_count" >&2
+    exit 1
+  fi
+fi
+
 reasoning_count="$(read_ab "count reasoning blocks" get count ".reasoning-block")"
 assert_positive_count "reasoning blocks" "$reasoning_count"
 

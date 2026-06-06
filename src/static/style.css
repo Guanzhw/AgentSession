@@ -546,7 +546,7 @@ body::before {
 
 /* Session Detail */
 .session-workbench {
-  --toc-width: 188px;
+  --toc-width: 176px;
   display: grid;
   grid-template-columns: var(--toc-width) minmax(0, 1fr);
   gap: 0;
@@ -572,7 +572,7 @@ body::before {
   overflow: hidden;
   background: color-mix(in srgb, var(--bg-primary) 88%, var(--bg-secondary));
   border-color: var(--border-color);
-  padding: 14px 12px;
+  padding: 10px 8px;
 }
 
 .session-toc {
@@ -629,7 +629,7 @@ body::before {
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .toc-header h2 {
@@ -643,14 +643,14 @@ body::before {
 }
 
 .toc-control {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   padding: 0;
   border: 1px solid var(--border-color);
   border-radius: 5px;
   background: var(--bg-secondary);
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.2;
   cursor: pointer;
   white-space: nowrap;
@@ -666,7 +666,7 @@ body::before {
 .toc-list {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 1px 2px 8px 0;
   min-height: 0;
   overflow: auto;
 }
@@ -675,9 +675,18 @@ body::before {
   margin: 0;
 }
 
+.toc-list > .toc-group-user {
+  margin: 0 0 6px;
+}
+
+.toc-list > .toc-group-user + .toc-group-user {
+  padding-top: 6px;
+  border-top: 1px solid var(--border-color);
+}
+
 .toc-group-summary {
   display: grid;
-  grid-template-columns: 10px minmax(0, 1fr);
+  grid-template-columns: 9px minmax(0, 1fr);
   align-items: start;
   gap: 2px;
   list-style: none;
@@ -689,15 +698,15 @@ body::before {
 }
 
 .toc-group-summary::before {
-  content: "v";
+  content: "\25BE";
   color: var(--text-muted);
-  font-size: 10px;
-  line-height: 23px;
+  font-size: 8px;
+  line-height: 24px;
   text-align: center;
 }
 
 .toc-group:not([open]) > .toc-group-summary::before {
-  content: ">";
+  content: "\25B8";
 }
 
 .toc-group-summary .toc-link {
@@ -707,31 +716,91 @@ body::before {
 .toc-children {
   display: grid;
   gap: 0;
+  margin: 1px 0 0 11px;
+  padding-left: 5px;
+  border-left: 1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color));
 }
 
 .toc-link {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
   gap: 2px 5px;
-  padding: 4px 5px 4px calc(5px + var(--toc-depth, 0) * 8px);
+  min-height: 22px;
+  padding: 2px 4px;
   border-radius: 5px;
   text-decoration: none;
   color: var(--text-secondary);
   border: 1px solid transparent;
 }
 
-.toc-link:hover,
-.toc-link.active {
+.toc-list > .toc-link {
+  margin-bottom: 2px;
+}
+
+.toc-link:hover {
   color: var(--text-primary);
   background: var(--bg-tertiary);
   border-color: var(--border-color);
 }
 
+.toc-link.active {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-color) 24%, var(--bg-tertiary));
+  border-color: color-mix(in srgb, var(--accent-color) 78%, var(--border-color));
+  box-shadow: inset 3px 0 0 var(--accent-color);
+}
+
+.toc-link.active-parent {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-color) 14%, var(--bg-secondary));
+  border-color: color-mix(in srgb, var(--accent-color) 48%, var(--border-color));
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent-color) 82%, white);
+}
+
+.toc-link.active-parent .toc-type {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-color) 24%, var(--bg-secondary));
+  border-color: color-mix(in srgb, var(--accent-color) 72%, var(--border-color));
+}
+
+.toc-link.active-parent .toc-label {
+  font-weight: 600;
+}
+
+.toc-user {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-color) 9%, var(--bg-secondary));
+  border-color: color-mix(in srgb, var(--accent-color) 28%, var(--border-color));
+  box-shadow: inset 2px 0 0 var(--accent-color);
+}
+
+.toc-task {
+  background: color-mix(in srgb, var(--trace-agent) 7%, transparent);
+}
+
 .toc-type {
   color: var(--accent-color);
-  font-size: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  width: 18px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  border-radius: 3px;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  font-size: 8px;
   font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
+}
+
+.toc-assistant .toc-type,
+.toc-agent .toc-type {
+  color: var(--text-muted);
 }
 
 .toc-task .toc-type {
@@ -759,13 +828,12 @@ body::before {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: 10px;
+  line-height: 1.25;
 }
 
 .toc-meta {
-  grid-column: 2;
-  color: var(--text-muted);
-  font-size: 9px;
+  display: none;
 }
 
 .toc-empty {
