@@ -4,6 +4,7 @@ import { getConfig } from "../../config.js";
 import { parseSession, extractMeta, recordsToMessages } from "./parser.js";
 import { icons } from "../../icons.js";
 import type { ProviderAdapter } from "../interface.js";
+import { buildMessageSessionViews } from "../shared/message-session.js";
 
 function getCodexDir() {
   return getConfig().codexDir;
@@ -46,6 +47,9 @@ const codex = {
   id: "codex",
   name: "Codex CLI",
   icon: icons.codex,
+  capabilities: {
+    structuredSessionViews: true
+  },
 
   detect() {
     return existsSync(path.join(getCodexDir(), "sessions"));
@@ -79,6 +83,22 @@ const codex = {
     try {
       return recordsToMessages(parseSession(entry.filePath), sessionId);
     } catch { return []; }
+  },
+
+  getSessionTree(sessionId) {
+    return getStructuredViews(sessionId)?.tree || null;
+  },
+
+  getSessionContainer(sessionId) {
+    return getStructuredViews(sessionId)?.container || null;
+  },
+
+  getSessionMetrics(sessionId) {
+    return getStructuredViews(sessionId)?.metrics || null;
+  },
+
+  getSessionFlow(sessionId) {
+    return getStructuredViews(sessionId)?.flow || null;
   },
 
   getTokenStats(days = 30) {
@@ -143,5 +163,11 @@ const codex = {
 
   exportSession(_sessionId) { return null; }
 } satisfies ProviderAdapter;
+
+function getStructuredViews(sessionId) {
+  const session = codex.getSession(sessionId);
+  if (!session) return null;
+  return buildMessageSessionViews(session, codex.getMessages(sessionId));
+}
 
 export default codex;

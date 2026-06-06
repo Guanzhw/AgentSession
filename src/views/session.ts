@@ -17,6 +17,9 @@ function safeParse(value) {
 }
 
 function modelLabel(model) {
+  if (typeof model === "string") {
+    return model;
+  }
   if (!model || typeof model !== "object") {
     return "";
   }

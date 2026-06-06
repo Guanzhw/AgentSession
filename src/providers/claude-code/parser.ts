@@ -86,24 +86,30 @@ export function parseTranscript(filePath) {
 export function extractSessionMeta(records, sessionId): RawSession {
   let timeCreated = 0;
   let timeUpdated = 0;
-  let messageCount = 0;
   let totalTokens = 0;
   let directory = null;
+  let previousAssistantUsage = "";
 
   for (const r of records) {
     const ts = r.timestamp ? new Date(r.timestamp).getTime() : 0;
     if (ts && (!timeCreated || ts < timeCreated)) timeCreated = ts;
     if (ts > timeUpdated) timeUpdated = ts;
 
-    if (r.type === "user" || r.type === "assistant") messageCount++;
     if (r.type === "system" && r.cwd) directory = r.cwd;
     if (r.cwd && !directory) directory = r.cwd;
 
     if (r.type === "assistant") {
       const tokens = usageToTokens(r.message?.usage ?? r.usage);
-      totalTokens += tokens?.total || 0;
+      const usageKey = JSON.stringify(tokens);
+      if (usageKey !== previousAssistantUsage) {
+        totalTokens += tokens?.total || 0;
+        previousAssistantUsage = usageKey;
+      }
+    } else {
+      previousAssistantUsage = "";
     }
   }
+  const messageCount = recordsToMessages(records, sessionId).length;
 
   return {
     id: sessionId,
@@ -127,6 +133,9 @@ export function extractSessionMeta(records, sessionId): RawSession {
 export function recordsToMessages(records, sessionId): Message[] {
   const messages = [];
   let msgIndex = 0;
+  let pendingThinking = [];
+  let assistantUsageKey = "";
+  let assistantTokens = null;
 
   for (const r of records) {
     const ts = r.timestamp ? new Date(r.timestamp).getTime() : 0;
@@ -173,8 +182,11 @@ export function recordsToMessages(records, sessionId): Message[] {
     if (r.type === "assistant") {
       const blocks = contentBlocks(r.message?.content ?? r.content);
       const tokens = usageToTokens(r.message?.usage ?? r.usage);
-      let pendingThinking = [];
-      let usageAttached = false;
+      const usageKey = JSON.stringify(tokens);
+      if (usageKey !== assistantUsageKey) {
+        assistantUsageKey = usageKey;
+        assistantTokens = tokens;
+      }
 
       for (const block of blocks) {
         if (block.type === "thinking" || block.type === "redacted_thinking") {
@@ -192,14 +204,14 @@ export function recordsToMessages(records, sessionId): Message[] {
             toolInput: null,
             toolOutput: null,
             timestamp: ts,
-            tokens: usageAttached ? null : tokens,
+            tokens: assistantTokens,
             metadata: {
               model: r.message?.model || null,
               stopReason: r.message?.stop_reason || null
             }
           });
           pendingThinking = [];
-          usageAttached = true;
+          assistantTokens = null;
           continue;
         }
         if (block.type === "tool_use") {
@@ -213,14 +225,18 @@ export function recordsToMessages(records, sessionId): Message[] {
             toolInput: block.input || null,
             toolOutput: null, // output comes from tool_result records
             timestamp: ts,
-            tokens: usageAttached ? null : tokens,
+            tokens: assistantTokens,
             metadata: { model: r.message?.model || null }
           });
           pendingThinking = [];
-          usageAttached = true;
+          assistantTokens = null;
         }
       }
+      continue;
     }
+
+    assistantUsageKey = "";
+    assistantTokens = null;
 
     if (r.type === "tool_result") {
       const rawContent = r.tool_output ?? r.content;

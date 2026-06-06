@@ -5,6 +5,7 @@ import { getConfig } from "../../config.js";
 import { parseTranscript, extractSessionMeta, recordsToMessages } from "./parser.js";
 import { icons } from "../../icons.js";
 import type { ProviderAdapter } from "../interface.js";
+import { buildMessageSessionViews } from "../shared/message-session.js";
 
 function getClaudeDir() {
   return getConfig().claudeDir;
@@ -60,6 +61,9 @@ const claudeCode = {
   id: "claude-code",
   name: "Claude Code",
   icon: icons.claude,
+  capabilities: {
+    structuredSessionViews: true
+  },
 
   detect() {
     return discoverSessionFiles().length > 0;
@@ -184,6 +188,22 @@ const claudeCode = {
     return null;
   },
 
+  getSessionTree(sessionId) {
+    return getStructuredViews(sessionId)?.tree || null;
+  },
+
+  getSessionContainer(sessionId) {
+    return getStructuredViews(sessionId)?.container || null;
+  },
+
+  getSessionMetrics(sessionId) {
+    return getStructuredViews(sessionId)?.metrics || null;
+  },
+
+  getSessionFlow(sessionId) {
+    return getStructuredViews(sessionId)?.flow || null;
+  },
+
   getUnavailableReason() {
     const metadataPath = path.join(os.homedir(), ".claude.json");
     if (!existsSync(metadataPath)) {
@@ -203,6 +223,12 @@ const claudeCode = {
     return null;
   }
 } satisfies ProviderAdapter;
+
+function getStructuredViews(sessionId) {
+  const session = claudeCode.getSession(sessionId);
+  if (!session) return null;
+  return buildMessageSessionViews(session, claudeCode.getMessages(sessionId));
+}
 
 function extractTextFromRecord(r) {
   if (r.type === "user") {

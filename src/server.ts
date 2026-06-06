@@ -795,6 +795,10 @@ export async function startServer(config = getConfig()) {
 
         return json(res, {
           session: normalizeSessionRecord(session),
+          tree: adapter.getSessionTree?.(sessionId) || null,
+          container: adapter.getSessionContainer?.(sessionId) || null,
+          metrics: adapter.getSessionMetrics?.(sessionId) || null,
+          flow: adapter.getSessionFlow?.(sessionId) || null,
           messages: adapter.getMessages(sessionId)
         });
       } catch (err) {
@@ -1157,6 +1161,9 @@ export async function startServer(config = getConfig()) {
         const resumeCommand = getResumeCommand(providerSegment, sessionId, normalizedSession.directory, appConfig.resumeCommands);
         send(res, 200, renderSessionPage({
           session: normalizedSession,
+          sessionTree: adapter.getSessionTree?.(sessionId) || null,
+          sessionMetrics: adapter.getSessionMetrics?.(sessionId) || null,
+          sessionFlow: adapter.getSessionFlow?.(sessionId) || null,
           messages,
           partsByMessage,
           todos: [],

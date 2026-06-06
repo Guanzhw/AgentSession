@@ -16,6 +16,11 @@ import {
   parseTranscript,
   recordsToMessages
 } from "../dist/src/providers/claude-code/parser.js";
+import {
+  extractMeta as extractCodexMeta,
+  recordsToMessages as codexRecordsToMessages
+} from "../dist/src/providers/codex/parser.js";
+import { buildMessageSessionViews } from "../dist/src/providers/shared/message-session.js";
 import { getResumeCommand, resolveProjectDirectory } from "../dist/src/resume.js";
 import { parseArgs } from "../dist/src/config.js";
 
@@ -45,6 +50,122 @@ test("Claude legacy transcripts derive a useful title", () => {
   const meta = extractSessionMeta(records, "legacy");
   assert.equal(meta.title, "Legacy first prompt");
   assert.equal(meta.tokenCount, 3);
+});
+
+test("Claude fragmented assistant records preserve reasoning and count repeated usage once", () => {
+  const records = [
+    {
+      type: "user",
+      uuid: "user",
+      timestamp: "2026-06-06T00:00:00.000Z",
+      message: { content: [{ type: "text", text: "Inspect package.json" }] }
+    },
+    {
+      type: "assistant",
+      uuid: "thinking",
+      timestamp: "2026-06-06T00:00:01.000Z",
+      message: {
+        model: "deepseek-v4-flash",
+        usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 50 },
+        content: [{ type: "thinking", thinking: "I should read the file." }]
+      }
+    },
+    {
+      type: "assistant",
+      uuid: "tool-record",
+      timestamp: "2026-06-06T00:00:01.000Z",
+      message: {
+        model: "deepseek-v4-flash",
+        usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 50 },
+        content: [{ type: "tool_use", id: "tool-1", name: "Read", input: { file_path: "package.json" } }]
+      }
+    }
+  ];
+  const meta = extractSessionMeta(records, "fragmented");
+  const messages = recordsToMessages(records, "fragmented");
+
+  assert.equal(meta.tokenCount, 170);
+  assert.equal(meta.messageCount, 2);
+  assert.equal(messages[1].thinking, "I should read the file.");
+  assert.equal(messages[1].toolName, "Read");
+  assert.deepEqual(messages[1].tokens, {
+    input: 100,
+    output: 20,
+    reasoning: 0,
+    cache: { read: 50, write: 0 },
+    total: 170
+  });
+});
+
+test("normalized message providers build structured tree, metrics, flow, and model-aware cache data", () => {
+  const records = parseTranscript(fixture("claude-current.jsonl"));
+  const session = extractSessionMeta(records, "session-current");
+  const messages = recordsToMessages(records, "session-current");
+  const views = buildMessageSessionViews(session, messages);
+
+  assert.equal(views.tree.messages.length, messages.length - 1);
+  assert.equal(views.metrics.totals.toolCalls, 1);
+  assert.equal(
+    views.tree.messages.find((message) => message.id === "tool-1")?.parts[1]?.data.state.output,
+    "OpenSessionViewer"
+  );
+  assert.equal(views.metrics.totals.inputTokens, 14);
+  assert.equal(views.metrics.totals.cacheReadTokens, 20);
+  assert.equal(views.flow.root.line.filter((node) => node.kind === "user").length, 1);
+  assert.equal(
+    views.tree.messages.find((message) => message.data.tokens)?.data.model.modelID,
+    "claude-sonnet"
+  );
+});
+
+test("Codex token_count records attach request usage to the preceding assistant output", () => {
+  const records = [
+    {
+      timestamp: "2026-06-06T00:00:00.000Z",
+      type: "session_meta",
+      payload: { id: "codex-test", cwd: "D:\\WorkSpace", model: "gpt-5" }
+    },
+    {
+      timestamp: "2026-06-06T00:00:01.000Z",
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "Done." }]
+      }
+    },
+    {
+      timestamp: "2026-06-06T00:00:01.100Z",
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          last_token_usage: {
+            input_tokens: 10000,
+            cached_input_tokens: 9000,
+            output_tokens: 120,
+            reasoning_output_tokens: 20,
+            total_tokens: 10120
+          }
+        }
+      }
+    }
+  ];
+  const session = extractCodexMeta(records, "codex-test");
+  const messages = codexRecordsToMessages(records, "codex-test");
+  const views = buildMessageSessionViews(session, messages);
+
+  assert.deepEqual(messages[0].tokens, {
+    input: 1000,
+    output: 120,
+    reasoning: 20,
+    cache: { read: 9000, write: 0 },
+    total: 10120
+  });
+  assert.equal(messages[0].metadata.model, "gpt-5");
+  assert.equal(session.id, "codex-test");
+  assert.equal(views.metrics.totals.cacheReadTokens, 9000);
+  assert.equal(views.flow.summary.totalTokens, 1140);
 });
 
 test("OpenCode token stats include child sessions exactly once", () => {
