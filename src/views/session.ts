@@ -1,7 +1,7 @@
 import { t } from "../i18n.js";
 import { escapeHtml } from "../markdown.js";
 import type { SessionPartNode, SessionTree } from "../providers/opencode/session-tree.js";
-import { formatDuration, formatTime, messageBubble, reasoningBlock, todoList, toolCallBlock } from "./components.js";
+import { formatDuration, formatTime, formatTokens, messageBubble, messageHeader, reasoningBlock, todoList, toolCallBlock } from "./components.js";
 import { layout } from "./layout.js";
 
 function safeParse(value) {
@@ -30,6 +30,53 @@ function modelLabel(model) {
 
 function messageModelLabel(messageData) {
   return modelLabel(messageData.model) || modelLabel(messageData);
+}
+
+function cacheUsage(messageData) {
+  const tokens = messageData?.tokens;
+  if (!tokens || typeof tokens !== "object") {
+    return null;
+  }
+
+  const uncached = Number(tokens.input) || 0;
+  const read = Number(tokens.cache?.read) || 0;
+  const write = Number(tokens.cache?.write) || 0;
+  const prompt = uncached + read + write;
+  if (!prompt) {
+    return null;
+  }
+
+  return {
+    model: messageModelLabel(messageData),
+    prompt,
+    rate: read / prompt
+  };
+}
+
+function annotateCacheWarning(message, previousUsage) {
+  const usage = cacheUsage(message.data);
+  const sameModel = usage?.model && usage.model === previousUsage?.model;
+  const unusualMiss = sameModel
+    && usage.prompt >= 8192
+    && previousUsage.prompt >= 8192
+    && usage.rate < 0.01
+    && previousUsage.rate >= 0.5;
+  if (!unusualMiss) {
+    return { message, usage };
+  }
+
+  return {
+    message: {
+      ...message,
+      data: {
+        ...message.data,
+        cacheWarning: {
+          previousRate: `${(previousUsage.rate * 100).toFixed(1)}%`
+        }
+      }
+    },
+    usage
+  };
 }
 
 function formatCount(value) {
@@ -131,7 +178,7 @@ function toolTitle(partData) {
 }
 
 function messageToolName(message) {
-  const toolPart = message.parts.find((part) => part.type === "tool" && !["todoread", "todowrite"].includes(String(part.tool || "")));
+  const toolPart = message.parts.find((part) => part.type === "tool");
   if (!toolPart) return "";
   const input = toolPart.data?.state?.input || {};
   return String(input.description || input.command || input.filePath || toolPart.tool || "");
@@ -158,7 +205,7 @@ function isVisiblePartNode(part) {
   if (part.type === "text") {
     return Boolean(part.data?.text);
   }
-  return part.type === "tool" && !["todoread", "todowrite"].includes(String(part.tool || ""));
+  return part.type === "tool";
 }
 
 function renderMetric(label, value) {
@@ -208,6 +255,22 @@ function renderSubagentBranch(part: SessionPartNode, childMarkup: string, provid
   const title = taskTitle(data);
   const status = partStatus(data);
   const duration = part.timeStart && part.timeEnd ? formatDuration(part.timeStart, part.timeEnd) : "";
+  const childMetrics = part.childSessions[0]?.metrics;
+  const childTokens = childMetrics ? {
+    input: childMetrics.inputTokens,
+    output: childMetrics.outputTokens,
+    reasoning: childMetrics.reasoningTokens,
+    cache: {
+      read: childMetrics.cacheReadTokens,
+      write: childMetrics.cacheWriteTokens
+    },
+    total: childMetrics.inputTokens
+      + childMetrics.outputTokens
+      + childMetrics.reasoningTokens
+      + childMetrics.cacheReadTokens
+      + childMetrics.cacheWriteTokens
+  } : null;
+  const tokenMarkup = formatTokens(childTokens);
   const meta = [
     childSessionCountLabel(part.childSessions.length),
     status,
@@ -219,6 +282,7 @@ function renderSubagentBranch(part: SessionPartNode, childMarkup: string, provid
       <span class="subsession-kicker">subagent</span>
       ${title ? `<span class="subsession-title">${escapeHtml(title)}</span>` : ""}
       ${meta ? `<span class="subsession-meta">${escapeHtml(meta)}</span>` : ""}
+      ${tokenMarkup ? `<span class="message-tokens subagent-tokens" title="Subagent session token usage">${tokenMarkup}</span>` : ""}
       ${renderSubagentExportActions(part, provider)}
     </summary>
     <div class="subagent-body">
@@ -239,25 +303,60 @@ function renderMessageControls(message, provider: string) {
   </div>`;
 }
 
+function messageTurnRole(role) {
+  const normalized = String(role || "assistant").toLowerCase();
+  if (normalized === "agent") return "assistant";
+  if (normalized === "tool") return "assistant";
+  return normalized;
+}
+
+function hasOwnMessageBubble(message) {
+  return Array.isArray(message.parts)
+    && message.parts.some((part) => part.type === "text" && Boolean(part.data?.text));
+}
+
+function renderMessageGroup(message, markup, provider: string) {
+  const role = messageTurnRole(message.role);
+  const messageAnchor = escapeHtml(anchorId("msg", message.id));
+  const data = message.data || {};
+  const toolOnlyHeader = role === "assistant" && !hasOwnMessageBubble(message)
+    ? messageHeader(role, {
+      model: messageModelLabel(data),
+      tokens: data.tokens,
+      cacheWarning: data.cacheWarning,
+      time: data.time?.created
+    })
+    : "";
+  return `<article id="${messageAnchor}" class="message-group message-turn message-turn-${escapeHtml(role)}" data-role="${escapeHtml(role)}">${renderMessageControls(message, provider)}${toolOnlyHeader}${markup}</article>`;
+}
+
 function renderSubagentChildSession(tree: SessionTree, provider: string) {
   const messageBlocks = [];
-  let pendingReasoning = [];
+  let previousCacheUsage = null;
 
-  for (const message of tree.messages) {
-    const result = renderMessagePartsResult(message, 0, provider, pendingReasoning);
-    pendingReasoning = result.pendingReasoning;
-    if (!hasVisibleMessagePart(message)) {
-      continue;
+  for (const sourceMessage of tree.messages) {
+    const annotated = annotateCacheWarning(sourceMessage, previousCacheUsage);
+    const message = annotated.message;
+    if (annotated.usage && messageTurnRole(message.role) === "assistant") {
+      previousCacheUsage = annotated.usage;
     }
-    const messageAnchor = escapeHtml(anchorId("msg", message.id));
+    const result = renderMessagePartsResult(message, 0, provider);
     if (result.hasVisibleContent && result.markup) {
-      messageBlocks.push(`<article id="${messageAnchor}" class="message-group" data-role="${escapeHtml(message.role)}">${renderMessageControls(message, provider)}${result.markup}</article>`);
-    } else if (!pendingReasoning.length) {
+      const group = [renderMessageGroup(message, result.markup, provider)];
+      attachPendingReasoning(group, result.pendingReasoning);
+      messageBlocks.push(group[0]);
+    } else if (result.pendingReasoning.length && messageTurnRole(message.role) === "assistant") {
+      messageBlocks.push(renderMessageGroup(
+        message,
+        renderTurnReasoning(result.pendingReasoning.join("\n")),
+        provider
+      ));
+    } else if (!result.pendingReasoning.length && hasVisibleMessagePart(message)) {
+      const messageAnchor = escapeHtml(anchorId("msg", message.id));
       messageBlocks.push(`<span id="${messageAnchor}" class="session-event-anchor" aria-hidden="true"></span>`);
     }
   }
 
-  attachPendingReasoning(messageBlocks, pendingReasoning);
   const messageMarkup = messageBlocks.filter(Boolean).join("\n");
 
   const detachedMarkup = tree.detachedChildren
@@ -389,7 +488,7 @@ function renderTocNode(node) {
 
 function renderToc(tree: SessionTree | null) {
   if (!tree) {
-    return `<aside class="session-toc"><h2>Navigate</h2><p class="toc-empty">No indexed messages.</p></aside>`;
+    return `<aside class="session-toc"><h2>Navigate</h2><p class="toc-empty">No indexed messages.</p><button class="toc-resize-handle" type="button" aria-label="Resize table of contents"></button></aside>`;
   }
 
   const nodes = collectTocNodes(tree);
@@ -404,197 +503,203 @@ function renderToc(tree: SessionTree | null) {
       </div>
     </div>
     <div class="toc-list">${markup || `<p class="toc-empty">No indexed messages.</p>`}</div>
+    <button class="toc-resize-handle" type="button" aria-label="Resize table of contents"></button>
   </aside>`;
 }
 
-function renderFlowPart(part: SessionPartNode, depth: number) {
-  const data = part.data || {};
-  const status = partStatus(data);
-  const duration = part.timeStart && part.timeEnd ? formatDuration(part.timeStart, part.timeEnd) : "";
-  const isTask = part.type === "tool" && isTaskTool(part.tool);
-  const kind = isTask ? "subagent" : part.type === "tool" ? "tool" : part.type;
-  const label = isTask ? taskTitle(data) : toolTitle(data);
-  const classes = ["flow-row", `flow-${kind}`, isErrorPart(data) ? "flow-error" : ""].filter(Boolean).join(" ");
-  const href = `#${anchorId("part", part.id)}`;
-  const childMarkup = part.childSessions.map((child) => renderFlowSession(child, depth + 1)).join("\n");
-
-  return `<li>
-    <a class="${classes}" href="${escapeHtml(href)}" style="--flow-depth:${Math.min(depth, 8)}">
-      <span class="flow-dot"></span>
-      <span class="flow-kind">${escapeHtml(kind)}</span>
-      <span class="flow-label">${escapeHtml(compactText(label, 90) || kind)}</span>
-      ${status ? `<span class="flow-status">${escapeHtml(status)}</span>` : ""}
-      ${duration ? `<span class="flow-duration">${escapeHtml(duration)}</span>` : ""}
-    </a>
-    ${childMarkup ? `<ul class="flow-children">${childMarkup}</ul>` : ""}
-  </li>`;
-}
-
-function renderFlowSession(tree: SessionTree, depth = 0) {
-  const session = tree.session || {};
-  const title = session.title || session.slug || session.id;
-  const metrics = tree.metrics;
-  const rows = [];
-
-  rows.push(`<li>
-    <a class="flow-row flow-session" href="#${escapeHtml(anchorId("session", session.id))}" style="--flow-depth:${Math.min(depth, 8)}">
-      <span class="flow-dot"></span>
-      <span class="flow-kind">${depth ? "branch" : "root"}</span>
-      <span class="flow-label">${escapeHtml(compactText(title, 92))}</span>
-      <span class="flow-status">${escapeHtml(formatCount(metrics.totalMessages))} msg</span>
-    </a>
-  </li>`);
-
-  for (const message of tree.messages) {
-    rows.push(`<li>
-      <a class="flow-row flow-message flow-role-${escapeHtml(message.role)}" href="#${escapeHtml(anchorId("msg", message.id))}" style="--flow-depth:${Math.min(depth + 1, 8)}">
-        <span class="flow-dot"></span>
-        <span class="flow-kind">${escapeHtml(message.role)}</span>
-        <span class="flow-label">${escapeHtml(messageText(message) || message.id)}</span>
-        ${message.timeCreated ? `<span class="flow-duration">${escapeHtml(formatTime(message.timeCreated))}</span>` : ""}
-      </a>
-      ${message.parts.length ? `<ul class="flow-children">${message.parts.map((part) => renderFlowPart(part, depth + 2)).join("\n")}</ul>` : ""}
-    </li>`);
-  }
-
-  for (const child of tree.detachedChildren) {
-    rows.push(renderFlowSession(child, depth + 1));
-  }
-
-  return rows.join("\n");
-}
-
-function renderFlowPanel(tree: SessionTree | null) {
+function renderFlowPanel(_tree: SessionTree | null) {
   return `<section id="session-flow-panel" class="session-flow-panel hidden" tabindex="-1" aria-hidden="true">
     <div class="flow-panel-header">
-      <h2>Flow Timeline</h2>
+      <h2>Conversation Flow</h2>
       <button type="button" class="flow-close-btn" data-flow-close aria-label="Close flow">x</button>
     </div>
-    <p class="toc-empty">${tree ? "No timing data for this session." : "No flow data."}</p>
+    <p class="toc-empty">No flow data.</p>
   </section>`;
 }
 
 function flowHref(node) {
-  const [kind, ...rest] = String(node.id || "").split(":");
-  const id = rest.join(":");
-  if (kind === "session") return `#${anchorId("session", id)}`;
-  if (kind === "msg") return `#${anchorId("msg", id)}`;
-  if (kind === "part") return `#${anchorId("part", id)}`;
+  const target = node?.target;
+  if (!target?.kind || !target?.id) {
+    return "#";
+  }
+  if (target.kind === "session") return `#${anchorId("session", target.id)}`;
+  if (target.kind === "msg") return `#${anchorId("msg", target.id)}`;
+  if (target.kind === "part") return `#${anchorId("part", target.id)}`;
   return "#";
 }
 
-function flattenFlowTimeline(node, depth = 0, rows = []) {
-  if (!node) {
-    return rows;
-  }
-
-  if (node.kind !== "session" || depth > 0) {
-    const start = Number(node.timeStart) || 0;
-    const end = Number(node.timeEnd) || start + Number(node.duration || 0);
-    if (start) {
-      rows.push({
-        node,
-        depth,
-        start,
-        end: end > start ? end : start,
-        duration: Math.max(0, Number(node.duration) || end - start)
-      });
-    }
-  }
-
-  for (const child of Array.isArray(node.children) ? node.children : []) {
-    flattenFlowTimeline(child, depth + 1, rows);
-  }
-
-  return rows;
+function flowNodeDetails(node) {
+  const metrics = node?.metrics || {};
+  const operationalMeta = [
+    metrics.duration ? formatMilliseconds(metrics.duration) : "",
+    metrics.errors ? `${formatCount(metrics.errors)} errors` : "",
+    metrics.tokens ? `${formatCount(metrics.tokens)} tokens` : "",
+    node.inferred ? "inferred attachment" : ""
+  ].filter(Boolean).join(" · ");
+  const isMessage = node.kind === "user" || node.kind === "agent";
+  const status = node.status === "tool calls" || node.status === "stop" ? "" : node.status;
+  return [isMessage ? "" : node.meta, operationalMeta, status].filter(Boolean).join(" · ");
 }
 
-function renderFlowTimingDiagram(sessionFlow) {
-  const root = sessionFlow?.root;
-  if (!root?.timeStart || !root?.timeEnd || root.timeEnd <= root.timeStart) {
-    return "";
-  }
+function renderFlowMapNode(node) {
+  const kind = node.kind || "agent";
+  const label = compactText(node.label, kind === "user" ? 64 : 48) || kind;
+  const details = flowNodeDetails(node);
+  const classes = [
+    "flow-map-node",
+    `flow-map-node-${kind}`,
+    node.inferred ? "flow-map-node-inferred" : "",
+    node?.metrics?.errors ? "flow-map-node-error" : ""
+  ].filter(Boolean).join(" ");
+  const accessibleTitle = [label, details].filter(Boolean).join(" — ");
 
-  const total = root.timeEnd - root.timeStart;
-  const rows = flattenFlowTimeline(root)
-    .sort((a, b) => a.start - b.start || a.depth - b.depth)
-    .slice(0, 90);
-  if (!rows.length) {
-    return "";
-  }
-
-  const rowMarkup = rows.map(({ node, depth, start, end, duration }) => {
-    const left = Math.max(0, Math.min(100, ((start - root.timeStart) / total) * 100));
-    const rawWidth = Math.max(0, ((end - start) / total) * 100);
-    const width = duration ? Math.max(0.8, rawWidth) : 0.8;
-    const isPoint = !duration || rawWidth < 0.8;
-    const classes = [
-      "flow-timing-row",
-      `flow-timing-${escapeHtml(node.kind || "node")}`,
-      node.errors ? "flow-timing-error" : "",
-      isPoint ? "flow-timing-point" : ""
-    ].filter(Boolean).join(" ");
-    const meta = [
-      duration ? formatMilliseconds(duration) : "point",
-      node.toolCalls ? `${formatCount(node.toolCalls)} tools` : "",
-      node.errors ? `${formatCount(node.errors)} errors` : "",
-      node.subagents ? `${formatCount(node.subagents)} subagents` : ""
-    ].filter(Boolean).join(" · ");
-
-    return `<a class="${classes}" href="${escapeHtml(flowHref(node))}" style="--flow-left:${left.toFixed(3)}%;--flow-width:${Math.min(width, 100 - left).toFixed(3)}%;--flow-depth:${Math.min(depth, 6)}">
-      <span class="flow-timing-label">${escapeHtml(compactText(node.label, 42) || node.kind)}</span>
-      <span class="flow-timing-track"><span class="flow-timing-bar"><span class="flow-timing-bar-label">${escapeHtml(duration ? formatMilliseconds(duration) : "")}</span></span></span>
-      <span class="flow-timing-meta">${escapeHtml(meta)}</span>
+  if (kind === "agent") {
+    const agentClasses = `${classes} ${node.emphasis === "final" ? "flow-map-node-agent-final" : ""}`.trim();
+    return `<a class="${agentClasses}" href="${escapeHtml(flowHref(node))}" title="${escapeHtml(accessibleTitle)}" aria-label="${escapeHtml(accessibleTitle)}">
+      <span class="flow-map-agent-label">${escapeHtml(label)}</span>
+      ${details ? `<span class="flow-map-agent-meta">${escapeHtml(details)}</span>` : ""}
     </a>`;
-  }).join("\n");
+  }
 
-  const omitted = flattenFlowTimeline(root).length - rows.length;
-  const tickMarkup = [0, 25, 50, 75, 100].map((position) => {
-    const label = position === 0 ? "start" : position === 100 ? formatMilliseconds(total) : formatMilliseconds(total * (position / 100));
-    return `<span class="flow-timing-tick" style="--tick-left:${position}%">${escapeHtml(label)}</span>`;
-  }).join("\n");
-  return `<section class="flow-timing">
-    <div class="flow-timing-head">
-      <span>Timeline</span>
-      <strong>${escapeHtml(formatTime(root.timeStart))} → ${escapeHtml(formatTime(root.timeEnd))}</strong>
-    </div>
-    <div class="flow-timing-scroll">
-      <div class="flow-timing-grid">
-        <div class="flow-timing-axis" aria-hidden="true">
-          <span class="flow-timing-axis-spacer"></span>
-          <div class="flow-timing-ruler">${tickMarkup}</div>
-          <span class="flow-timing-axis-spacer"></span>
-        </div>
-        <div class="flow-timing-rows">${rowMarkup}</div>
+  if (kind === "return") {
+    return `<a class="${classes}" href="${escapeHtml(flowHref(node))}" title="${escapeHtml(accessibleTitle)}" aria-label="${escapeHtml(accessibleTitle)}">
+      <span class="flow-map-return-mark"></span>
+      <span class="flow-map-node-popover">Return</span>
+    </a>`;
+  }
+
+  const typeLabel = kind === "user" ? "User" : "Subagent";
+  return `<a class="${classes}" href="${escapeHtml(flowHref(node))}" title="${escapeHtml(accessibleTitle)}">
+    <span class="flow-map-node-kind">${escapeHtml(typeLabel)}</span>
+    <span class="flow-map-node-label">${escapeHtml(label)}</span>
+    ${details ? `<span class="flow-map-node-meta">${escapeHtml(details)}</span>` : ""}
+  </a>`;
+}
+
+function flowBranchTemplateId(invocation, branch, index) {
+  return anchorId("flow-branch", `${invocation.id}-${branch.id}-${index}`);
+}
+
+function renderFlowBranchSummary(invocation, branch, index) {
+  const metrics = branch?.metrics || {};
+  const line = Array.isArray(branch?.line) ? branch.line : [];
+  const messageCount = line.filter((node) => node.kind === "user" || node.kind === "agent").length;
+  const templateId = flowBranchTemplateId(invocation, branch, index);
+  const meta = [
+    messageCount ? `${formatCount(messageCount)} messages` : "",
+    metrics.duration ? formatMilliseconds(metrics.duration) : "",
+    metrics.tokens ? `${formatCount(metrics.tokens)} tokens` : "",
+    metrics.errors ? `${formatCount(metrics.errors)} errors` : ""
+  ].filter(Boolean).join(" · ");
+  return `<button type="button" class="flow-branch-summary ${metrics.errors ? "flow-branch-summary-error" : ""}" data-flow-branch-open="${escapeHtml(templateId)}">
+    <span class="flow-branch-summary-title">${escapeHtml(compactText(branch.label, 52) || "Subagent")}</span>
+    <span class="flow-branch-summary-meta">${escapeHtml(meta || "No message data")}</span>
+    <span class="flow-branch-summary-action">Inspect</span>
+  </button>
+  <template id="${escapeHtml(templateId)}" data-flow-branch-template>
+    <div class="flow-branch-detail-content">
+      <div class="flow-branch-detail-heading">
+        <strong>${escapeHtml(compactText(branch.label, 96) || "Subagent")}</strong>
+        <span>${escapeHtml(meta)}</span>
       </div>
+      ${renderFlowMapSession(branch, 1)}
     </div>
-    ${omitted > 0 ? `<p class="flow-timing-note">${escapeHtml(`${formatCount(omitted)} later timing rows omitted.`)}</p>` : ""}
+  </template>`;
+}
+
+function renderFlowInvocationGroup(invocations, returnNodes) {
+  const inferred = invocations.some((node) => node.inferred);
+  const branchCount = invocations.reduce((sum, node) => sum + (Array.isArray(node.branches) ? node.branches.length : 0), 0);
+  const summaries = invocations.flatMap((invocation) => {
+    const branches = Array.isArray(invocation.branches) ? invocation.branches : [];
+    if (!branches.length) {
+      return [`<div class="flow-branch-summary flow-branch-summary-empty">
+        <span class="flow-branch-summary-title">${escapeHtml(compactText(invocation.label, 52) || "Subagent")}</span>
+        <span class="flow-branch-summary-meta">No child session data</span>
+      </div>`];
+    }
+    return branches.map((branch, index) => renderFlowBranchSummary(invocation, branch, index));
+  }).join("\n");
+  const groupLabel = invocations.length === 1
+    ? compactText(invocations[0].label, 44) || "Subagent"
+    : `${formatCount(invocations.length)} parallel calls`;
+  const returnNode = returnNodes.get(invocations[invocations.length - 1].id);
+
+  return `<div class="flow-map-step flow-map-fork flow-map-fork-collapsed ${inferred ? "flow-map-fork-inferred" : ""}" data-invocation-group="${escapeHtml(invocations.map((node) => node.id).join(","))}" data-invocation-count="${invocations.length}">
+    <div class="flow-fanout-main">
+      <div class="flow-fanout-node flow-map-node-invocation">
+        <span class="flow-map-node-kind">Subagent</span>
+        <span class="flow-map-node-label">${escapeHtml(groupLabel)}</span>
+        <span class="flow-map-node-meta">${formatCount(branchCount)} ${branchCount === 1 ? "branch" : "branches"}</span>
+      </div>
+      <span class="flow-fanout-span" aria-hidden="true"></span>
+      ${returnNode ? renderFlowMapNode(returnNode) : ""}
+    </div>
+    <div class="flow-branch-summaries">${summaries}</div>
+  </div>`;
+}
+
+function renderFlowMapSession(session, depth = 0) {
+  const line = Array.isArray(session?.line) ? session.line : [];
+  const returnNodes = new Map(
+    line.filter((node) => node.kind === "return").map((node) => [node.invocationId, node])
+  );
+  const rendered = [];
+
+  for (let index = 0; index < line.length; index += 1) {
+    const node = line[index];
+    if (node.kind === "return") {
+      continue;
+    }
+    if (node.kind !== "invocation") {
+      rendered.push(`<div class="flow-map-step">${renderFlowMapNode(node)}</div>`);
+      continue;
+    }
+
+    const invocations = [node];
+    let cursor = index + 2;
+    while (line[cursor]?.kind === "invocation") {
+      invocations.push(line[cursor]);
+      cursor += 2;
+    }
+    index = cursor - 1;
+    rendered.push(renderFlowInvocationGroup(invocations, returnNodes));
+  }
+
+  const sessionClasses = [
+    "flow-map-session",
+    depth ? "flow-map-branch-session" : "flow-map-root-session",
+    session.inferred ? "flow-map-session-inferred" : ""
+  ].filter(Boolean).join(" ");
+  return `<section class="${sessionClasses}" data-flow-session-id="${escapeHtml(session.id)}" data-flow-depth="${depth}">
+    ${depth ? `<a class="flow-map-branch-title" href="${escapeHtml(flowHref(session))}">${escapeHtml(compactText(session.label, 72) || "Subagent")}</a>` : ""}
+    <div class="flow-map-line">${rendered.join("\n") || `<span class="flow-map-empty-branch">No user or agent messages</span>`}</div>
   </section>`;
 }
 
-function renderCanonicalFlowNode(node, depth = 0) {
-  const kind = node.kind || "part";
-  const children = Array.isArray(node.children) ? node.children : [];
-  const operationalMeta = [
-    node.toolCalls ? `${formatCount(node.toolCalls)} tools` : "",
-    node.errors ? `${formatCount(node.errors)} errors` : "",
-    node.subagents ? `${formatCount(node.subagents)} subagents` : "",
-    node.errorRate ? `${formatPercent(node.errorRate)} error rate` : ""
-  ].filter(Boolean).join(" · ");
-  const meta = [node.meta, operationalMeta, node.status].filter(Boolean).join(" · ");
-  const duration = node.duration ? formatMilliseconds(node.duration) : "";
-  const classes = ["flow-row", `flow-${kind}`].join(" ");
+function renderFlowMapSummary(summary) {
+  const stats = [
+    ["Duration", formatMilliseconds(summary.totalDuration)],
+    ["Tools", formatCount(summary.toolCalls)],
+    ["Errors", summary.errors ? `${formatCount(summary.errors)} · ${formatPercent(summary.errorRate)}` : "0"],
+    ["Tokens", formatCount(summary.totalTokens)],
+    ["Cost", `$${Number(summary.totalCost || 0).toFixed(4)}`],
+    ["Subagents", formatCount(summary.subagents)]
+  ];
+  return `<div class="flow-map-stats" aria-label="Flow summary">
+    ${stats.map(([label, value]) => `<span class="flow-map-stat"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></span>`).join("\n")}
+  </div>`;
+}
 
-  return `<li>
-    <a class="${classes}" href="${escapeHtml(flowHref(node))}" style="--flow-depth:${Math.min(depth, 8)}">
-      <span class="flow-dot"></span>
-      <span class="flow-kind">${escapeHtml(kind)}</span>
-      <span class="flow-label">${escapeHtml(compactText(node.label, 92) || kind)}</span>
-      ${meta ? `<span class="flow-status">${escapeHtml(meta)}</span>` : ""}
-      ${duration ? `<span class="flow-duration">${escapeHtml(duration)}</span>` : ""}
-    </a>
-    ${children.length ? `<ul class="flow-children">${children.map((child) => renderCanonicalFlowNode(child, depth + 1)).join("\n")}</ul>` : ""}
-  </li>`;
+function renderFlowMapOverview(root) {
+  const line = Array.isArray(root?.line) ? root.line : [];
+  const marks = line
+    .filter((node) => node.kind !== "return")
+    .map((node) => `<span class="flow-map-overview-mark flow-map-overview-${escapeHtml(node.kind)} ${node.emphasis === "final" ? "flow-map-overview-final" : ""}"></span>`)
+    .join("");
+  return `<div class="flow-map-overview" data-flow-overview aria-label="Flow overview">
+    <div class="flow-map-overview-track">${marks}<span class="flow-map-overview-window" data-flow-overview-window></span></div>
+  </div>`;
 }
 
 function renderCanonicalFlowPanel(sessionFlow) {
@@ -602,13 +707,29 @@ function renderCanonicalFlowPanel(sessionFlow) {
     return "";
   }
 
-  const timingDiagram = renderFlowTimingDiagram(sessionFlow);
   return `<section id="session-flow-panel" class="session-flow-panel hidden" tabindex="-1" aria-hidden="true">
     <div class="flow-panel-header">
-      <h2>Flow Timeline</h2>
+      <div>
+        <h2>Conversation Flow</h2>
+        <p>Conversation order with subagent forks and returns</p>
+      </div>
       <button type="button" class="flow-close-btn" data-flow-close aria-label="Close flow">x</button>
     </div>
-    ${timingDiagram || `<p class="toc-empty">No timing data for this session.</p>`}
+    ${renderFlowMapSummary(sessionFlow.summary || {})}
+    ${renderFlowMapOverview(sessionFlow.root)}
+    <div class="flow-map-scroll">
+      <div class="flow-map">${renderFlowMapSession(sessionFlow.root)}</div>
+    </div>
+    <aside class="flow-branch-drawer hidden" data-flow-branch-drawer aria-hidden="true">
+      <div class="flow-branch-drawer-header">
+        <div>
+          <h3>Subagent Detail</h3>
+          <p>Focused child-session flow</p>
+        </div>
+        <button type="button" class="flow-branch-drawer-close" data-flow-branch-close aria-label="Close subagent detail">x</button>
+      </div>
+      <div class="flow-branch-drawer-body" data-flow-branch-body></div>
+    </aside>
   </section>`;
 }
 
@@ -623,8 +744,7 @@ function renderSessionMetricsPanel(sessionMetrics) {
     : "";
   const tokenPieces = [
     `${formatCount(totals.inputTokens)} in`,
-    `${formatCount(totals.outputTokens)} out`,
-    totals.reasoningTokens ? `${formatCount(totals.reasoningTokens)} reasoning` : "",
+    `${formatCount((Number(totals.outputTokens) || 0) + (Number(totals.reasoningTokens) || 0))} out`,
     totals.cacheReadTokens ? `${formatCount(totals.cacheReadTokens)} cache read` : "",
     totals.cacheWriteTokens ? `${formatCount(totals.cacheWriteTokens)} cache write` : ""
   ].filter(Boolean).join(" · ");
@@ -650,6 +770,10 @@ function renderReasoningPart(partData) {
   );
 }
 
+function renderTurnReasoning(reasoningMarkup) {
+  return reasoningMarkup ? `<div class="turn-reasoning">${reasoningMarkup}</div>` : "";
+}
+
 function renderPart(messageData, partData, partId, reasoningMarkup = "") {
   if (!partData || typeof partData !== "object") {
     return "";
@@ -659,6 +783,7 @@ function renderPart(messageData, partData, partId, reasoningMarkup = "") {
     return messageBubble(messageData.role, partData.text || "", {
       model: messageModelLabel(messageData),
       tokens: messageData.tokens,
+      cacheWarning: messageData.cacheWarning,
       time: messageData.time?.created,
       reasoning: reasoningMarkup
     });
@@ -669,10 +794,6 @@ function renderPart(messageData, partData, partId, reasoningMarkup = "") {
   }
 
   if (partData.type === "tool") {
-    if (["todoread", "todowrite"].includes(partData.tool)) {
-      return "";
-    }
-
     const state = partData.state && typeof partData.state === "object" ? partData.state : {};
     const timing = state.time && typeof state.time === "object" ? state.time : {};
     const output = state.status === "error" ? (state.error ?? state.output) : state.output;
@@ -682,8 +803,7 @@ function renderPart(messageData, partData, partId, reasoningMarkup = "") {
       output,
       state.status,
       formatDuration(timing.start, timing.end),
-      partId,
-      reasoningMarkup
+      partId
     );
   }
 
@@ -735,12 +855,16 @@ function attachReasoningToRenderedPart(renderedPart, reasoningMarkup) {
     return null;
   }
 
+  if (renderedPart.includes('class="message-group message-turn ')) {
+    return renderedPart.replace("</article>", `${renderTurnReasoning(reasoningMarkup)}</article>`);
+  }
+
   if (renderedPart.includes('class="message message-')) {
     return renderedPart.replace("</header>", `</header><div class="message-reasoning">${reasoningMarkup}</div>`);
   }
 
   if (renderedPart.includes('class="tool-call ')) {
-    return renderedPart.replace('<div class="tool-panels">', `<div class="tool-panels"><div class="tool-reasoning">${reasoningMarkup}</div>`);
+    return `${renderedPart}${renderTurnReasoning(reasoningMarkup)}`;
   }
 
   if (renderedPart.includes('class="subagent-body"')) {
@@ -784,8 +908,11 @@ function renderMessagePartsResult(message, depth = 0, provider = "opencode", ini
     }
 
     const reasoningMarkup = pendingReasoning.join("\n");
-    let rendered = renderPartNode(message.data, part, depth, provider, reasoningMarkup);
-    if (rendered && reasoningMarkup && !rendered.includes(reasoningMarkup)) {
+    const isToolPart = part.type === "tool";
+    let rendered = renderPartNode(message.data, part, depth, provider, isToolPart ? "" : reasoningMarkup);
+    if (rendered && reasoningMarkup && isToolPart) {
+      rendered = `${renderTurnReasoning(reasoningMarkup)}\n${rendered}`;
+    } else if (rendered && reasoningMarkup && !rendered.includes(reasoningMarkup)) {
       rendered = attachReasoningToRenderedPart(rendered, reasoningMarkup) || rendered;
     }
     if (rendered) {
@@ -815,23 +942,31 @@ function renderMessageParts(message, depth = 0, provider = "opencode") {
 
 function renderSessionTree(tree: SessionTree, depth = 0, provider = "opencode") {
   const messageBlocks = [];
-  let pendingReasoning = [];
+  let previousCacheUsage = null;
 
-  for (const message of tree.messages) {
-    const result = renderMessagePartsResult(message, depth, provider, pendingReasoning);
-    pendingReasoning = result.pendingReasoning;
-    if (!hasVisibleMessagePart(message)) {
-      continue;
+  for (const sourceMessage of tree.messages) {
+    const annotated = annotateCacheWarning(sourceMessage, previousCacheUsage);
+    const message = annotated.message;
+    if (annotated.usage && messageTurnRole(message.role) === "assistant") {
+      previousCacheUsage = annotated.usage;
     }
-    const messageAnchor = escapeHtml(anchorId("msg", message.id));
+    const result = renderMessagePartsResult(message, depth, provider);
     if (result.hasVisibleContent && result.markup) {
-      messageBlocks.push(`<article id="${messageAnchor}" class="message-group" data-role="${escapeHtml(message.role)}">${renderMessageControls(message, provider)}${result.markup}</article>`);
-    } else if (!pendingReasoning.length) {
+      const group = [renderMessageGroup(message, result.markup, provider)];
+      attachPendingReasoning(group, result.pendingReasoning);
+      messageBlocks.push(group[0]);
+    } else if (result.pendingReasoning.length && messageTurnRole(message.role) === "assistant") {
+      messageBlocks.push(renderMessageGroup(
+        message,
+        renderTurnReasoning(result.pendingReasoning.join("\n")),
+        provider
+      ));
+    } else if (!result.pendingReasoning.length && hasVisibleMessagePart(message)) {
+      const messageAnchor = escapeHtml(anchorId("msg", message.id));
       messageBlocks.push(`<span id="${messageAnchor}" class="session-event-anchor" aria-hidden="true"></span>`);
     }
   }
 
-  attachPendingReasoning(messageBlocks, pendingReasoning);
   const messageMarkup = messageBlocks.filter(Boolean).join("\n");
 
   const detachedMarkup = tree.detachedChildren
@@ -866,7 +1001,11 @@ function renderRawParts(messageData, parts = []) {
       continue;
     }
 
-    const rendered = renderPart(messageData, partData, part.id, pendingReasoning.join("\n"));
+    const reasoningMarkup = pendingReasoning.join("\n");
+    const renderedPart = renderPart(messageData, partData, part.id, partData?.type === "tool" ? "" : reasoningMarkup);
+    const rendered = renderedPart && reasoningMarkup && partData?.type === "tool"
+      ? `${renderTurnReasoning(reasoningMarkup)}\n${renderedPart}`
+      : renderedPart;
     if (rendered) {
       renderedParts.push(rendered);
       pendingReasoning.length = 0;
@@ -876,6 +1015,50 @@ function renderRawParts(messageData, parts = []) {
   attachPendingReasoning(renderedParts, pendingReasoning);
 
   return renderedParts.filter(Boolean).join("\n");
+}
+
+function renderRawMessageGroups(messages, partsByMessage, provider) {
+  const groups = [];
+  let previousCacheUsage = null;
+
+  for (const message of messages) {
+    const parsedData = safeParse(message.data);
+    const annotated = annotateCacheWarning(
+      { id: message.id, role: parsedData.role, data: parsedData, parts: [] },
+      previousCacheUsage
+    );
+    const messageData = annotated.message.data;
+    if (annotated.usage && messageTurnRole(messageData.role) === "assistant") {
+      previousCacheUsage = annotated.usage;
+    }
+    const parts = partsByMessage.get(message.id) || [];
+    const renderedParts = renderRawParts(messageData, parts);
+    if (!renderedParts) {
+      continue;
+    }
+
+    const role = messageTurnRole(messageData.role);
+    const previous = groups[groups.length - 1];
+    if (String(messageData.role || "").toLowerCase() === "tool" && previous?.role === "assistant") {
+      previous.markup.push(renderedParts);
+      continue;
+    }
+
+    groups.push({
+      role,
+      message: {
+        id: message.id,
+        role,
+        data: messageData,
+        parts: parts.map((part) => ({ id: part.id, data: safeParse(part.data), type: safeParse(part.data)?.type }))
+      },
+      markup: [renderedParts]
+    });
+  }
+
+  return groups
+    .map((group) => renderMessageGroup(group.message, group.markup.join("\n"), provider))
+    .join("\n");
 }
 
 export function renderSessionPage({
@@ -937,12 +1120,9 @@ ${actions}
     </header>
   `;
 
-  const messageMarkup = sessionTree ? renderSessionTree(sessionTree, 0, provider) : messages.map((message) => {
-    const messageData = safeParse(message.data);
-    const parts = partsByMessage.get(message.id) || [];
-    const renderedParts = renderRawParts(messageData, parts);
-    return renderedParts ? `<article class="message-group">${renderedParts}</article>` : "";
-  }).filter(Boolean).join("\n");
+  const messageMarkup = sessionTree
+    ? renderSessionTree(sessionTree, 0, provider)
+    : renderRawMessageGroups(messages, partsByMessage, provider);
 
   const body = `
 <div class="session-workbench" data-session-id="${escapeHtml(session.id)}" data-provider="${escapeHtml(provider)}">

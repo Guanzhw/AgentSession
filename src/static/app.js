@@ -143,6 +143,7 @@ document.addEventListener("keydown", (e) => {
     if (flowPanel && !flowPanel.classList.contains("hidden")) {
       flowPanel.classList.add("hidden");
       flowPanel.setAttribute("aria-hidden", "true");
+      document.body.classList.remove("flow-panel-open");
       document.querySelectorAll(".flow-open-btn[aria-expanded='true']").forEach((btn) => {
         btn.setAttribute("aria-expanded", "false");
       });
@@ -535,11 +536,229 @@ if (sessionWorkbench) {
   const navLinks = [...document.querySelectorAll(".session-toc a[href^='#'], .session-flow-panel a[href^='#']")];
   const tocGroups = [...document.querySelectorAll(".session-toc .toc-group")];
   const flowPanel = document.getElementById("session-flow-panel");
+  const tocResizeHandle = document.querySelector(".toc-resize-handle");
+  const flowScroll = flowPanel?.querySelector(".flow-map-scroll");
+  const flowOverview = flowPanel?.querySelector("[data-flow-overview]");
+  const flowOverviewWindow = flowPanel?.querySelector("[data-flow-overview-window]");
+  const flowRootLine = flowPanel?.querySelector(".flow-map-root-session > .flow-map-line");
+  const flowMap = flowPanel?.querySelector(".flow-map");
+  const flowBranchDrawer = flowPanel?.querySelector("[data-flow-branch-drawer]");
+  const flowBranchBody = flowPanel?.querySelector("[data-flow-branch-body]");
   const targets = [...new Set(navLinks
     .map((link) => document.getElementById(decodeURIComponent(link.getAttribute("href").slice(1))))
     .filter(Boolean))];
   let lastManualNav = 0;
   let scrollTicking = false;
+
+  try {
+    const storedTocWidth = Number(localStorage.getItem("opensessionviewer.tocWidth"));
+    if (storedTocWidth) {
+      sessionWorkbench.style.setProperty("--toc-width", `${storedTocWidth}px`);
+    }
+  } catch {}
+
+  if (tocResizeHandle) {
+    const setTocWidth = (clientX) => {
+      const workbenchLeft = sessionWorkbench.getBoundingClientRect().left;
+      const maxWidth = Math.min(520, window.innerWidth * 0.45);
+      const width = Math.max(144, Math.min(maxWidth, clientX - workbenchLeft));
+      sessionWorkbench.style.setProperty("--toc-width", `${Math.round(width)}px`);
+      return Math.round(width);
+    };
+
+    tocResizeHandle.addEventListener("pointerdown", (event) => {
+      if (window.innerWidth <= 820) return;
+      event.preventDefault();
+      sessionWorkbench.classList.add("toc-resizing");
+      tocResizeHandle.setPointerCapture?.(event.pointerId);
+      let width = setTocWidth(event.clientX);
+
+      const onMove = (moveEvent) => {
+        width = setTocWidth(moveEvent.clientX);
+      };
+      const onUp = () => {
+        sessionWorkbench.classList.remove("toc-resizing");
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", onUp);
+        try {
+          localStorage.setItem("opensessionviewer.tocWidth", String(width));
+        } catch {}
+      };
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onUp, { once: true });
+    });
+  }
+
+  const updateFlowOverview = () => {
+    if (!flowScroll || !flowOverviewWindow) return;
+    const wrapped = flowRootLine?.classList.contains("flow-map-line-wrapped");
+    const viewport = wrapped ? flowScroll.clientHeight : flowScroll.clientWidth;
+    const content = wrapped ? flowScroll.scrollHeight : flowScroll.scrollWidth;
+    const offset = wrapped ? flowScroll.scrollTop : flowScroll.scrollLeft;
+    const scrollable = Math.max(0, content - viewport);
+    const widthRatio = Math.min(1, viewport / Math.max(content, 1));
+    const leftRatio = scrollable ? offset / scrollable : 0;
+    flowOverviewWindow.style.width = `${widthRatio * 100}%`;
+    flowOverviewWindow.style.left = `${leftRatio * (1 - widthRatio) * 100}%`;
+  };
+
+  const seekFlowOverview = (clientX) => {
+    if (!flowScroll || !flowOverview) return;
+    const rect = flowOverview.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(rect.width, 1)));
+    if (flowRootLine?.classList.contains("flow-map-line-wrapped")) {
+      flowScroll.scrollTop = Math.max(0, ratio * flowScroll.scrollHeight - flowScroll.clientHeight / 2);
+    } else {
+      flowScroll.scrollLeft = Math.max(0, ratio * flowScroll.scrollWidth - flowScroll.clientWidth / 2);
+    }
+  };
+
+  const unwrapFlowRows = () => {
+    if (!flowRootLine) return [];
+    const rows = [...flowRootLine.querySelectorAll(":scope > .flow-map-row")];
+    if (!rows.length) {
+      return [...flowRootLine.querySelectorAll(":scope > .flow-map-step")];
+    }
+    const steps = rows.flatMap((row) => [...row.children].filter((child) => child.classList.contains("flow-map-step")));
+    flowRootLine.replaceChildren(...steps);
+    flowRootLine.classList.remove("flow-map-line-wrapped");
+    return steps;
+  };
+
+  const updateFlowTurnAnchors = () => {
+    if (!flowRootLine) return;
+    const rows = [...flowRootLine.querySelectorAll(":scope > .flow-map-row-continues")];
+    rows.forEach((row) => {
+      const steps = [...row.children].filter((child) => child.classList.contains("flow-map-step"));
+      const terminalStep = steps[steps.length - 1];
+      if (!terminalStep) return;
+
+      const rowRect = row.getBoundingClientRect();
+      const returnNode = terminalStep.querySelector(".flow-map-node-return");
+      const terminalRect = (returnNode || terminalStep).getBoundingClientRect();
+      const anchor = returnNode
+        ? terminalRect.left + terminalRect.width / 2 - rowRect.left
+        : row.classList.contains("flow-map-row-reverse")
+          ? terminalRect.left - rowRect.left
+          : terminalRect.right - rowRect.left;
+      row.style.setProperty("--flow-turn-anchor", `${Math.max(0, anchor)}px`);
+    });
+  };
+
+  const layoutFlowRows = () => {
+    if (!flowRootLine || !flowScroll || flowPanel?.classList.contains("hidden")) return;
+    const steps = unwrapFlowRows();
+    if (steps.length < 2) {
+      updateFlowOverview();
+      return;
+    }
+
+    const availableWidth = Math.max(320, flowScroll.clientWidth - 20);
+    const totalWidth = steps.reduce((sum, step, index) => (
+      sum + step.getBoundingClientRect().width + (index ? 34 : 0)
+    ), 0);
+    if (totalWidth <= availableWidth * 1.08) {
+      updateFlowOverview();
+      return;
+    }
+
+    const rows = [];
+    let row = [];
+    let rowWidth = 0;
+    for (const step of steps) {
+      const stepWidth = step.getBoundingClientRect().width;
+      const nextWidth = rowWidth + (row.length ? 34 : 0) + stepWidth;
+      if (row.length && nextWidth > availableWidth) {
+        rows.push(row);
+        row = [];
+        rowWidth = 0;
+      }
+      row.push(step);
+      rowWidth += (row.length > 1 ? 34 : 0) + stepWidth;
+    }
+    if (row.length) rows.push(row);
+
+    const fragment = document.createDocumentFragment();
+    rows.forEach((items, index) => {
+      const rowElement = document.createElement("div");
+      rowElement.className = `flow-map-row ${index % 2 ? "flow-map-row-reverse" : ""} ${index < rows.length - 1 ? "flow-map-row-continues" : ""}`.trim();
+      rowElement.dataset.flowRow = String(index);
+      rowElement.append(...items);
+      fragment.appendChild(rowElement);
+    });
+    flowRootLine.replaceChildren(fragment);
+    flowRootLine.classList.add("flow-map-line-wrapped");
+    updateFlowTurnAnchors();
+    flowScroll.scrollLeft = 0;
+    const activeFlowLink = flowRootLine.querySelector(".flow-map-node.active");
+    if (activeFlowLink) {
+      activeFlowLink.scrollIntoView({ block: "center", inline: "center" });
+    }
+    updateFlowOverview();
+  };
+
+  const clearFlowFocus = () => {
+    flowMap?.classList.remove("flow-focus-active");
+    flowPanel?.classList.remove("flow-branch-detail-open");
+    flowPanel?.querySelectorAll(".flow-focused, .flow-focus-context").forEach((node) => {
+      node.classList.remove("flow-focused", "flow-focus-context");
+    });
+  };
+
+  const closeFlowBranch = () => {
+    if (!flowBranchDrawer || !flowBranchBody) return;
+    flowBranchDrawer.classList.add("hidden");
+    flowBranchDrawer.setAttribute("aria-hidden", "true");
+    flowBranchBody.replaceChildren();
+    clearFlowFocus();
+    requestAnimationFrame(layoutFlowRows);
+  };
+
+  const openFlowBranch = (button) => {
+    if (!flowBranchDrawer || !flowBranchBody) return;
+    const templateId = button.dataset.flowBranchOpen;
+    const template = templateId ? document.getElementById(templateId) : null;
+    if (!(template instanceof HTMLTemplateElement)) return;
+
+    clearFlowFocus();
+    flowBranchBody.replaceChildren(template.content.cloneNode(true));
+    flowBranchDrawer.classList.remove("hidden");
+    flowBranchDrawer.setAttribute("aria-hidden", "false");
+    flowPanel?.classList.add("flow-branch-detail-open");
+    flowMap?.classList.add("flow-focus-active");
+
+    const focusedStep = button.closest(".flow-map-step");
+    focusedStep?.classList.add("flow-focused");
+    const rootSteps = flowRootLine
+      ? [...flowRootLine.querySelectorAll(".flow-map-step")].filter((step) => step.closest(".flow-map-root-session") === flowRootLine.closest(".flow-map-root-session"))
+      : [];
+    const focusedIndex = rootSteps.indexOf(focusedStep);
+    if (focusedIndex >= 0 && rootSteps[focusedIndex + 1]) {
+      rootSteps[focusedIndex + 1].classList.add("flow-focus-context");
+    }
+    requestAnimationFrame(layoutFlowRows);
+  };
+
+  if (flowScroll && flowOverview) {
+    flowScroll.addEventListener("scroll", updateFlowOverview, { passive: true });
+    let flowResizeTimer = null;
+    window.addEventListener("resize", () => {
+      clearTimeout(flowResizeTimer);
+      flowResizeTimer = setTimeout(layoutFlowRows, 120);
+    });
+    flowOverview.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      seekFlowOverview(event.clientX);
+      flowOverview.setPointerCapture?.(event.pointerId);
+      const onMove = (moveEvent) => seekFlowOverview(moveEvent.clientX);
+      const onUp = () => {
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", onUp);
+      };
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onUp, { once: true });
+    });
+  }
 
   const setActiveTarget = (id) => {
     navLinks.forEach((link) => {
@@ -581,11 +800,26 @@ if (sessionWorkbench) {
 
     const flowClose = event.target.closest("[data-flow-close]");
     if (flowClose && flowPanel) {
+      closeFlowBranch();
       flowPanel.classList.add("hidden");
       flowPanel.setAttribute("aria-hidden", "true");
+      document.body.classList.remove("flow-panel-open");
       document.querySelectorAll(".flow-open-btn[aria-expanded='true']").forEach((btn) => {
         btn.setAttribute("aria-expanded", "false");
       });
+      return;
+    }
+
+    const flowBranchClose = event.target.closest("[data-flow-branch-close]");
+    if (flowBranchClose) {
+      closeFlowBranch();
+      return;
+    }
+
+    const flowBranchOpen = event.target.closest("[data-flow-branch-open]");
+    if (flowBranchOpen) {
+      event.preventDefault();
+      openFlowBranch(flowBranchOpen);
       return;
     }
 
@@ -599,23 +833,23 @@ if (sessionWorkbench) {
         btn.setAttribute("aria-expanded", btn === flowButton && shouldOpen ? "true" : "false");
       });
       if (shouldOpen) {
-        const messageGroup = flowButton.closest(".message-group");
-        if (messageGroup) {
-          messageGroup.insertAdjacentElement("afterend", flowPanel);
-        }
         flowPanel.classList.remove("hidden");
         flowPanel.setAttribute("aria-hidden", "false");
+        document.body.classList.add("flow-panel-open");
         const anchor = flowButton.dataset.flowAnchor;
         const flowLink = anchor ? flowPanel.querySelector(`a[href="#${CSS.escape(anchor)}"]`) : null;
         if (flowLink) {
           navLinks.forEach((link) => link.classList.remove("active"));
           flowLink.classList.add("active");
+          flowLink.scrollIntoView({ block: "nearest", inline: "center" });
         }
-        flowPanel.scrollIntoView({ block: "nearest", behavior: "smooth" });
         flowPanel.focus({ preventScroll: true });
+        requestAnimationFrame(layoutFlowRows);
       } else {
+        closeFlowBranch();
         flowPanel.classList.add("hidden");
         flowPanel.setAttribute("aria-hidden", "true");
+        document.body.classList.remove("flow-panel-open");
       }
       return;
     }

@@ -134,9 +134,14 @@ reasoning_count="$(read_ab "count reasoning blocks" get count ".reasoning-block"
 assert_positive_count "reasoning blocks" "$reasoning_count"
 
 message_reasoning_count="$(read_ab "count message reasoning blocks" get count ".message-reasoning .reasoning-block")"
+turn_reasoning_count="$(read_ab "count assistant turn reasoning blocks" get count ".turn-reasoning .reasoning-block")"
 tool_reasoning_count="$(read_ab "count tool reasoning blocks" get count ".tool-reasoning .reasoning-block")"
+if [[ "$tool_reasoning_count" != "0" ]]; then
+  echo "Reasoning should sit outside tool disclosures, got tool reasoning count $tool_reasoning_count" >&2
+  exit 1
+fi
 subagent_reasoning_count="$(read_ab "count subagent reasoning blocks" get count ".subagent-reasoning .reasoning-block")"
-attached_reasoning_count=$((message_reasoning_count + tool_reasoning_count + subagent_reasoning_count))
+attached_reasoning_count=$((message_reasoning_count + turn_reasoning_count + subagent_reasoning_count))
 if [[ "$attached_reasoning_count" != "$reasoning_count" ]]; then
   echo "Reasoning blocks should attach to assistant/tool/task content, got total $reasoning_count attached $attached_reasoning_count" >&2
   exit 1
@@ -151,11 +156,35 @@ fi
 token_chip_count="$(read_ab "count token chips" get count ".message-tokens .token-chip")"
 assert_positive_count "token chips" "$token_chip_count"
 
+reasoning_token_chip_count="$(read_ab "count separate reasoning token chips" get count ".message-tokens .token-chip-label >> text=R")"
+if [[ "$reasoning_token_chip_count" != "0" ]]; then
+  echo "Reasoning tokens should be merged into output chips, got separate chip count $reasoning_token_chip_count" >&2
+  exit 1
+fi
+
+assistant_tool_count="$(read_ab "count tools nested in assistant turns" get count ".message-turn-assistant .tool-call")"
+assert_positive_count "tools nested in assistant turns" "$assistant_tool_count"
+
+top_level_tool_count="$(read_ab "count top-level tool calls" get count ".messages > .tool-call")"
+if [[ "$top_level_tool_count" != "0" ]]; then
+  echo "Ordinary tool calls should live inside assistant turns, got top-level count $top_level_tool_count" >&2
+  exit 1
+fi
+
 flow_button_count="$(read_ab "count flow buttons" get count ".flow-open-btn")"
 assert_positive_count "flow buttons" "$flow_button_count"
 
 subagent_export_count="$(read_ab "count subagent export buttons" get count ".subagent-export-btn")"
 assert_positive_count "subagent export buttons" "$subagent_export_count"
+
+subagent_summary_count="$(read_ab "count subagent headers" get count ".subagent-summary")"
+assert_positive_count "subagent headers" "$subagent_summary_count"
+
+subagent_token_count="$(read_ab "count subagent token groups" get count ".subagent-summary .subagent-tokens")"
+if [[ "$subagent_token_count" != "$subagent_summary_count" ]]; then
+  echo "Each subagent header should show token usage, got tokens $subagent_token_count headers $subagent_summary_count" >&2
+  exit 1
+fi
 
 subagent_task_title_count="$(read_ab "count generic subagent task titles" get count ".subagent-summary >> text=Subagent task")"
 if [[ "$subagent_task_title_count" != "0" ]]; then
@@ -175,18 +204,78 @@ if [[ "$flow_panel_hidden" != "1" ]]; then
   exit 1
 fi
 
-flow_timing_count="$(read_ab "count flow timing rows" get count "#session-flow-panel .flow-timing-row")"
-assert_positive_count "flow timing rows" "$flow_timing_count"
+flow_user_count="$(read_ab "count flow user nodes" get count "#session-flow-panel .flow-map-node-user")"
+assert_positive_count "flow user nodes" "$flow_user_count"
 
-flow_tree_count="$(read_ab "count flow tree panels" get count "#session-flow-panel .flow-tree")"
-if [[ "$flow_tree_count" != "0" ]]; then
-  echo "Flow panel should only include the timing diagram, but found flow tree count $flow_tree_count" >&2
+flow_agent_count="$(read_ab "count flow agent nodes" get count "#session-flow-panel .flow-map-node-agent")"
+assert_positive_count "flow agent nodes" "$flow_agent_count"
+
+flow_agent_label_count="$(read_ab "count labeled flow agent nodes" get count "#session-flow-panel .flow-map-agent-label")"
+if [[ "$flow_agent_label_count" != "$flow_agent_count" ]]; then
+  echo "Every flow agent node should have a meaningful label, got agents $flow_agent_count labels $flow_agent_label_count" >&2
   exit 1
 fi
 
-flow_summary_count="$(read_ab "count flow summaries" get count "#session-flow-panel .flow-summary")"
-if [[ "$flow_summary_count" != "0" ]]; then
-  echo "Flow panel should only include the timing diagram, but found summary count $flow_summary_count" >&2
+flow_agent_mark_count="$(read_ab "count legacy A agent marks" get count "#session-flow-panel .flow-map-agent-mark")"
+if [[ "$flow_agent_mark_count" != "0" ]]; then
+  echo "Flow still included meaningless A agent marks: $flow_agent_mark_count" >&2
+  exit 1
+fi
+
+flow_invocation_group_count="$(read_ab "count flow invocation groups" get count "#session-flow-panel .flow-map-fork-collapsed")"
+assert_positive_count "flow invocation groups" "$flow_invocation_group_count"
+
+flow_return_count="$(read_ab "count flow return nodes" get count "#session-flow-panel .flow-map-node-return")"
+if [[ "$flow_return_count" != "$flow_invocation_group_count" ]]; then
+  echo "Each compact invocation group should have one return node, got groups $flow_invocation_group_count returns $flow_return_count" >&2
+  exit 1
+fi
+
+flow_branch_summary_count="$(read_ab "count flow branch summaries" get count "#session-flow-panel .flow-branch-summary[data-flow-branch-open]")"
+assert_positive_count "flow branch summaries" "$flow_branch_summary_count"
+
+flow_branch_template_count="$(read_ab "count flow branch templates" get count "#session-flow-panel template[data-flow-branch-template]")"
+if [[ "$flow_branch_template_count" != "$flow_branch_summary_count" ]]; then
+  echo "Each branch summary should have one detail template, got summaries $flow_branch_summary_count templates $flow_branch_template_count" >&2
+  exit 1
+fi
+
+flow_expanded_branch_count="$(read_ab "count expanded flow branches in backbone" get count "#session-flow-panel .flow-map-root-session > .flow-map-line .flow-map-branches")"
+if [[ "$flow_expanded_branch_count" != "0" ]]; then
+  echo "Subagent detail should not expand inside the backbone, got $flow_expanded_branch_count expanded branches" >&2
+  exit 1
+fi
+
+flow_branch_drawer_count="$(read_ab "count flow branch drawers" get count "#session-flow-panel [data-flow-branch-drawer]")"
+if [[ "$flow_branch_drawer_count" != "1" ]]; then
+  echo "Flow should include one reusable branch detail drawer, got $flow_branch_drawer_count" >&2
+  exit 1
+fi
+
+flow_stat_count="$(read_ab "count flow summary stats" get count "#session-flow-panel .flow-map-stat")"
+assert_positive_count "flow summary stats" "$flow_stat_count"
+
+flow_overview_count="$(read_ab "count flow overview" get count "#session-flow-panel [data-flow-overview]")"
+if [[ "$flow_overview_count" != "1" ]]; then
+  echo "Flow should include one overview navigator, got $flow_overview_count" >&2
+  exit 1
+fi
+
+flow_root_line_count="$(read_ab "count flow root lines" get count "#session-flow-panel .flow-map-root-session > .flow-map-line")"
+if [[ "$flow_root_line_count" != "1" ]]; then
+  echo "Flow should include one root line for responsive wrapping, got $flow_root_line_count" >&2
+  exit 1
+fi
+
+toc_resize_count="$(read_ab "count toc resize handles" get count ".session-toc .toc-resize-handle")"
+if [[ "$toc_resize_count" != "1" ]]; then
+  echo "Session TOC should include one resize handle, got $toc_resize_count" >&2
+  exit 1
+fi
+
+flow_timing_count="$(read_ab "count legacy flow timing rows" get count "#session-flow-panel .flow-timing-row")"
+if [[ "$flow_timing_count" != "0" ]]; then
+  echo "Flow still included legacy timing rows: $flow_timing_count" >&2
   exit 1
 fi
 

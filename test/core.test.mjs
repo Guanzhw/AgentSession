@@ -9,6 +9,8 @@ import { closeDb, getTokenStats } from "../dist/src/db.js";
 import { buildCodeAgentSessionTree } from "../dist/src/providers/codeagent/session-tree.js";
 import { enrichCodeAgentSession } from "../dist/src/providers/codeagent/schema.js";
 import { buildOpenCodeSessionTree } from "../dist/src/providers/opencode/session-tree.js";
+import { buildFlowTreeFromContainer } from "../dist/src/providers/shared/flow-tree.js";
+import { renderSessionPage } from "../dist/src/views/session.js";
 import {
   extractSessionMeta,
   parseTranscript,
@@ -232,4 +234,662 @@ test("terminal launch requires the explicit startup flag", () => {
 
   assert.equal(parseArgs(["--config", configPath]).allowTerminalLaunch, false);
   assert.equal(parseArgs(["--config", configPath, "--allow-terminal-launch"]).allowTerminalLaunch, true);
+});
+
+function flowMetrics(overrides = {}) {
+  return {
+    messageCount: 0,
+    partCount: 0,
+    toolCallCount: 0,
+    directChildCount: 0,
+    descendantCount: 0,
+    totalMessages: 0,
+    totalToolCalls: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    cost: 0,
+    timeStart: 1000,
+    timeEnd: 2000,
+    runtimeMs: 1000,
+    ...overrides
+  };
+}
+
+function flowMessage(id, role, timeCreated, parts = [], { text = role !== "user" } = {}) {
+  const textParts = text
+    ? [{
+        kind: "part",
+        id: `${id}-text`,
+        messageId: id,
+        sessionId: "root",
+        partType: "text",
+        tool: null,
+        title: `${role} ${id}`,
+        timeStart: 0,
+        timeEnd: 0,
+        childSessions: [],
+        data: { type: "text", text: `${role} ${id}` }
+      }]
+    : [];
+  return {
+    kind: "message",
+    id,
+    sessionId: "root",
+    role,
+    title: `${role} ${id}`,
+    timeCreated,
+    parts: [...textParts, ...parts],
+    data: { role }
+  };
+}
+
+function flowSession(id, messages, overrides = {}) {
+  return {
+    kind: "session",
+    id,
+    title: overrides.title || id,
+    depth: overrides.depth || 0,
+    attachMode: overrides.attachMode || "root",
+    session: { id },
+    messages,
+    detachedChildren: overrides.detachedChildren || [],
+    metrics: flowMetrics({
+      messageCount: messages.length,
+      totalMessages: messages.length,
+      ...overrides.metrics
+    })
+  };
+}
+
+function flowTool(id, options = {}) {
+  return {
+    kind: "part",
+    id,
+    messageId: options.messageId || "assistant",
+    sessionId: options.sessionId || "root",
+    partType: "tool",
+    tool: options.tool || "read",
+    title: options.title || options.tool || "read",
+    timeStart: options.timeStart || 0,
+    timeEnd: options.timeEnd || 0,
+    childSessions: options.childSessions || [],
+    data: {
+      type: "tool",
+      tool: options.tool || "read",
+      state: {
+        status: options.status || "completed",
+        time: { start: options.timeStart || 0, end: options.timeEnd || 0 }
+      }
+    }
+  };
+}
+
+test("conversation flow includes all messages and hides ordinary tool nodes", () => {
+  const ordinaryTool = flowTool("read-1", { tool: "read", messageId: "a1" });
+  const container = flowSession("root", [
+    flowMessage("u1", "user", 1000),
+    flowMessage("a1", "assistant", 1100, [ordinaryTool], { text: false })
+  ], {
+    metrics: {
+      partCount: 1,
+      toolCallCount: 1,
+      totalToolCalls: 1,
+      inputTokens: 10,
+      outputTokens: 4
+    }
+  });
+
+  const flow = buildFlowTreeFromContainer(container);
+  assert.deepEqual(flow.root.line.map((node) => node.kind), ["user"]);
+  assert.equal(flow.summary.messages, 1);
+  assert.equal(flow.summary.toolCalls, 1);
+  assert.equal(flow.root.line.some((node) => node.id.includes("read-1")), false);
+});
+
+test("conversation flow renders recursive subagents as fork-and-join pairs", () => {
+  const grandchild = flowSession("grandchild", [
+    flowMessage("gu1", "user", 1250),
+    flowMessage("ga1", "assistant", 1300)
+  ], {
+    depth: 2,
+    attachMode: "task",
+    metrics: { timeStart: 1250, timeEnd: 1350, runtimeMs: 100 }
+  });
+  const nestedTask = flowTool("nested-task", {
+    tool: "task",
+    messageId: "ca1",
+    sessionId: "child-1",
+    timeStart: 1200,
+    timeEnd: 1400,
+    childSessions: [grandchild]
+  });
+  const childOne = flowSession("child-1", [
+    flowMessage("cu1", "user", 1150),
+    flowMessage("ca1", "assistant", 1200, [nestedTask])
+  ], {
+    depth: 1,
+    attachMode: "task",
+    metrics: {
+      partCount: 1,
+      toolCallCount: 1,
+      totalToolCalls: 1,
+      descendantCount: 1,
+      timeStart: 1150,
+      timeEnd: 1450,
+      runtimeMs: 300
+    }
+  });
+  const childTwo = flowSession("child-2", [
+    flowMessage("c2u1", "user", 1160),
+    flowMessage("c2a1", "assistant", 1250)
+  ], {
+    depth: 1,
+    attachMode: "task",
+    metrics: { timeStart: 1160, timeEnd: 1300, runtimeMs: 140 }
+  });
+  const task = flowTool("task-1", {
+    tool: "task",
+    messageId: "a1",
+    timeStart: 1100,
+    timeEnd: 1500,
+    childSessions: [childOne, childTwo]
+  });
+  const container = flowSession("root", [
+    flowMessage("u1", "user", 1000),
+    flowMessage("a1", "assistant", 1080, [task]),
+    flowMessage("a2", "assistant", 1600)
+  ], {
+    metrics: {
+      partCount: 1,
+      toolCallCount: 1,
+      totalToolCalls: 2,
+      descendantCount: 3,
+      timeStart: 1000,
+      timeEnd: 1700,
+      runtimeMs: 700
+    }
+  });
+
+  const flow = buildFlowTreeFromContainer(container);
+  assert.deepEqual(flow.root.line.map((node) => node.kind), [
+    "user", "agent", "invocation", "return", "agent"
+  ]);
+  const invocation = flow.root.line[2];
+  const returned = flow.root.line[3];
+  assert.equal(invocation.branches.length, 2);
+  assert.equal(invocation.returnId, returned.id);
+  assert.equal(returned.invocationId, invocation.id);
+  assert.deepEqual(invocation.branches[0].line.map((node) => node.kind), [
+    "user", "agent", "invocation", "return"
+  ]);
+  assert.equal(invocation.branches[0].line[2].branches[0].id, "session:grandchild");
+  assert.equal(flow.summary.subagents, 3);
+  assert.equal(flow.root.line[4].emphasis, "final");
+});
+
+test("conversation flow inserts detached sessions as inferred branches", () => {
+  const detached = flowSession("detached", [
+    flowMessage("du1", "user", 1400),
+    flowMessage("da1", "assistant", 1450)
+  ], {
+    depth: 1,
+    attachMode: "detached",
+    metrics: { timeStart: 1400, timeEnd: 1500, runtimeMs: 100 }
+  });
+  const container = flowSession("root", [
+    flowMessage("u1", "user", 1000),
+    flowMessage("a1", "assistant", 1300),
+    flowMessage("u2", "user", 1600)
+  ], {
+    detachedChildren: [detached],
+    metrics: {
+      descendantCount: 1,
+      timeStart: 1000,
+      timeEnd: 1700,
+      runtimeMs: 700
+    }
+  });
+
+  const flow = buildFlowTreeFromContainer(container);
+  assert.deepEqual(flow.root.line.map((node) => node.kind), [
+    "user", "agent", "invocation", "return", "user"
+  ]);
+  assert.equal(flow.root.line[2].inferred, true);
+  assert.equal(flow.root.line[3].inferred, true);
+  assert.equal(flow.root.line[2].branches[0].inferred, true);
+});
+
+test("session rendering merges reasoning tokens into output and nests tools in assistant turns", () => {
+  const sessionTree = {
+    session: { id: "root", title: "Render test" },
+    detachedChildren: [],
+    metrics: flowMetrics(),
+    messages: [{
+      id: "assistant-1",
+      sessionId: "root",
+      role: "assistant",
+      timeCreated: 1000,
+      data: {
+        role: "assistant",
+        modelID: "deepseek-v4-flash",
+        providerID: "deepseek",
+        time: { created: 1000 },
+        tokens: {
+          input: 100,
+          output: 121,
+          reasoning: 31,
+          cache: { read: 43, write: 0 },
+          total: 295
+        }
+      },
+      parts: [{
+        id: "reasoning-1",
+        messageId: "assistant-1",
+        sessionId: "root",
+        type: "reasoning",
+        tool: null,
+        timeStart: 1050,
+        timeEnd: 1090,
+        childSessions: [],
+        data: {
+          type: "reasoning",
+          text: "I should inspect the file.",
+          time: { start: 1050, end: 1090 }
+        }
+      }, {
+        id: "text-1",
+        messageId: "assistant-1",
+        sessionId: "root",
+        type: "text",
+        tool: null,
+        timeStart: 0,
+        timeEnd: 0,
+        childSessions: [],
+        data: { type: "text", text: "Let me inspect it." }
+      }, {
+        id: "tool-1",
+        messageId: "assistant-1",
+        sessionId: "root",
+        type: "tool",
+        tool: "read",
+        timeStart: 1100,
+        timeEnd: 1200,
+        childSessions: [],
+        data: {
+          type: "tool",
+          tool: "read",
+          state: {
+            status: "completed",
+            input: { filePath: "README.md" },
+            output: "contents",
+            time: { start: 1100, end: 1200 }
+          }
+        }
+      }]
+    }]
+  };
+
+  const html = renderSessionPage({
+    session: {
+      id: "root",
+      title: "Render test",
+      directory: "",
+      time_created: 1000
+    },
+    sessionTree,
+    provider: "opencode"
+  });
+
+  assert.match(html, /message-turn-assistant/);
+  assert.match(html, /message-turn-assistant[\s\S]*tool-call/);
+  assert.match(html, /message-reasoning[\s\S]*I should inspect the file/);
+  assert.doesNotMatch(html, /tool-reasoning/);
+  assert.match(html, /token-chip-label">↑<\/span>100/);
+  assert.match(html, /token-chip-label">↓<\/span>152/);
+  assert.doesNotMatch(html, /token-chip-label">R<\/span>/);
+});
+
+test("session rendering does not double-count reasoning already included in output", () => {
+  const messages = [{
+    id: "assistant",
+    data: {
+      role: "assistant",
+      tokens: {
+        input: 100,
+        output: 50,
+        reasoning: 20,
+        cache: { read: 40, write: 0 },
+        total: 150
+      }
+    }
+  }];
+  const partsByMessage = new Map([[
+    "assistant",
+    [{ id: "text", data: { type: "text", text: "Done." } }]
+  ]]);
+  const html = renderSessionPage({
+    session: { id: "root", title: "Inclusive output", time_created: 1000 },
+    messages,
+    partsByMessage,
+    provider: "codex"
+  });
+
+  assert.match(html, /token-chip-label">↑<\/span>100/);
+  assert.match(html, /token-chip-label">↓<\/span>50/);
+  assert.doesNotMatch(html, /token-chip-label">R<\/span>/);
+});
+
+test("session rendering shows uncached upload input and cache as prompt context", () => {
+  const messages = [{
+    id: "assistant",
+    data: {
+      role: "assistant",
+      tokens: {
+        total: 95274,
+        input: 24,
+        output: 114,
+        reasoning: 0,
+        cache: { read: 95136, write: 0 }
+      }
+    }
+  }];
+  const partsByMessage = new Map([[
+    "assistant",
+    [{ id: "tool", data: {
+      type: "tool",
+      tool: "bash",
+      state: { status: "completed", input: { command: "git diff --stat" }, output: "" }
+    } }]
+  ]]);
+  const html = renderSessionPage({
+    session: { id: "root", title: "Cached prompt", time_created: 1000 },
+    messages,
+    partsByMessage,
+    provider: "opencode"
+  });
+
+  assert.match(html, /token-chip-label">↑<\/span>24/);
+  assert.match(html, /token-chip-label">↓<\/span>114/);
+  assert.match(html, /token-chip-label">C<\/span>95k/);
+  assert.match(html, /Uncached prompt input uploaded for this request: 24\. Total prompt input: 95k/);
+  assert.match(html, /99\.97% cache hit/);
+});
+
+test("session rendering marks a same-model cache collapse after a strong hit", () => {
+  const messages = [{
+    id: "cached",
+    data: {
+      role: "assistant",
+      modelID: "glm-5.1",
+      providerID: "opencode-go",
+      tokens: {
+        total: 95614,
+        input: 324,
+        output: 90,
+        reasoning: 0,
+        cache: { read: 95200, write: 0 }
+      }
+    }
+  }, {
+    id: "miss",
+    data: {
+      role: "assistant",
+      modelID: "glm-5.1",
+      providerID: "opencode-go",
+      tokens: {
+        total: 96737,
+        input: 96660,
+        output: 45,
+        reasoning: 0,
+        cache: { read: 32, write: 0 }
+      }
+    }
+  }];
+  const partsByMessage = new Map(messages.map((message) => [message.id, [{
+    id: `${message.id}-tool`,
+    data: {
+      type: "tool",
+      tool: "bash",
+      state: { status: "completed", input: { command: `echo ${message.id}` }, output: "" }
+    }
+  }]]));
+  const html = renderSessionPage({
+    session: { id: "root", title: "Cache warning", time_created: 1000 },
+    messages,
+    partsByMessage,
+    provider: "opencode"
+  });
+
+  assert.equal((html.match(/cache-warning-badge/g) || []).length, 1);
+  assert.match(html, /token-chip-cache-warning[^>]*title="Possible cache miss/);
+  assert.match(html, /! cache miss/);
+  assert.match(html, /previous same-model request was 99\.7%/);
+});
+
+
+test("tool-only assistant turns still render assistant metadata", () => {
+  const messages = [{
+    id: "tool-only",
+    data: {
+      role: "tool",
+      time: { created: 1000 },
+      model: { providerID: "openai", modelID: "gpt-5" }
+    }
+  }];
+  const partsByMessage = new Map([[
+    "tool-only",
+    [{
+      id: "tool",
+      data: {
+        type: "tool",
+        tool: "read",
+        state: { status: "completed", input: {}, output: "ok" }
+      }
+    }]
+  ]]);
+  const html = renderSessionPage({
+    session: { id: "root", title: "Tool only", time_created: 1000 },
+    messages,
+    partsByMessage,
+    provider: "codex"
+  });
+
+  assert.match(html, /message-turn-assistant/);
+  assert.match(html, /message-role">assistant<\/span>/);
+  assert.match(html, /openai\/gpt-5/);
+});
+
+test("reasoning before a tool renders at assistant-turn level", () => {
+  const messages = [{
+    id: "tool-turn",
+    data: {
+      role: "assistant",
+      time: { created: 1000 },
+      model: { providerID: "deepseek", modelID: "deepseek-v4-flash" }
+    }
+  }];
+  const partsByMessage = new Map([[
+    "tool-turn",
+    [{
+      id: "reasoning",
+      data: { type: "reasoning", text: "Search the source first." }
+    }, {
+      id: "tool",
+      data: {
+        type: "tool",
+        tool: "grep",
+        state: { status: "completed", input: { pattern: "notify" }, output: "match" }
+      }
+    }]
+  ]]);
+  const html = renderSessionPage({
+    session: { id: "root", title: "Reasoning tool", time_created: 1000 },
+    messages,
+    partsByMessage,
+    provider: "opencode"
+  });
+
+  assert.match(html, /message-turn-assistant[\s\S]*turn-reasoning[\s\S]*tool-call/);
+  assert.doesNotMatch(html, /tool-panels[\s\S]*tool-reasoning/);
+});
+
+test("non-thinking models render assistant tools without an empty reasoning block", () => {
+  const messages = [{
+    id: "plain-tool",
+    data: {
+      role: "assistant",
+      time: { created: 1000 },
+      model: { providerID: "openai", modelID: "gpt-4.1" }
+    }
+  }];
+  const partsByMessage = new Map([[
+    "plain-tool",
+    [{
+      id: "tool",
+      data: {
+        type: "tool",
+        tool: "read",
+        state: { status: "completed", input: { filePath: "README.md" }, output: "ok" }
+      }
+    }]
+  ]]);
+  const html = renderSessionPage({
+    session: { id: "root", title: "Plain tool", time_created: 1000 },
+    messages,
+    partsByMessage,
+    provider: "opencode"
+  });
+
+  assert.match(html, /message-turn-assistant[\s\S]*tool-call/);
+  assert.doesNotMatch(html, /reasoning-block|turn-reasoning|tool-reasoning/);
+});
+
+test("reasoning does not cross assistant message boundaries", () => {
+  const makePart = (id, type, data) => ({
+    id,
+    messageId: id.startsWith("first") ? "first" : "second",
+    sessionId: "root",
+    type,
+    tool: data.tool || null,
+    timeStart: 0,
+    timeEnd: 0,
+    childSessions: [],
+    data: { type, ...data }
+  });
+  const sessionTree = {
+    session: { id: "root", title: "Separate reasoning turns" },
+    detachedChildren: [],
+    metrics: flowMetrics(),
+    messages: [{
+      id: "first",
+      sessionId: "root",
+      role: "assistant",
+      timeCreated: 1000,
+      data: { role: "assistant", time: { created: 1000 } },
+      parts: [
+        makePart("first-reasoning", "reasoning", { text: "Plan the work." }),
+        makePart("first-todo", "tool", {
+          tool: "todowrite",
+          state: { status: "completed", input: {}, output: "" }
+        })
+      ]
+    }, {
+      id: "second",
+      sessionId: "root",
+      role: "assistant",
+      timeCreated: 2000,
+      data: { role: "assistant", time: { created: 2000 } },
+      parts: [
+        makePart("second-reasoning", "reasoning", { text: "Start the search." }),
+        makePart("second-tool", "tool", {
+          tool: "grep",
+          state: { status: "completed", input: { pattern: "ctx" }, output: "match" }
+        })
+      ]
+    }]
+  };
+  const html = renderSessionPage({
+    session: { id: "root", title: "Separate reasoning turns", time_created: 1000 },
+    sessionTree,
+    provider: "opencode"
+  });
+  const firstStart = html.indexOf('id="msg-first"');
+  const secondStart = html.indexOf('id="msg-second"');
+  const firstMarkup = html.slice(firstStart, secondStart);
+  const secondMarkup = html.slice(secondStart);
+
+  assert.equal((firstMarkup.match(/reasoning-block/g) || []).length, 1);
+  assert.match(firstMarkup, /Plan the work/);
+  assert.match(firstMarkup, /tool-call[\s\S]*todowrite/);
+  assert.doesNotMatch(firstMarkup, /Start the search/);
+  assert.equal((secondMarkup.match(/reasoning-block/g) || []).length, 1);
+  assert.match(secondMarkup, /Start the search/);
+  assert.doesNotMatch(secondMarkup, /Plan the work/);
+});
+
+test("subagent invocation headers show child-session token usage", () => {
+  const child = flowSession("child", [
+    flowMessage("child-user", "user", 1100),
+    flowMessage("child-assistant", "assistant", 1200)
+  ], {
+    depth: 1,
+    attachMode: "task",
+    metrics: {
+      inputTokens: 76953,
+      outputTokens: 7966,
+      reasoningTokens: 1969,
+      cacheReadTokens: 794752,
+      cacheWriteTokens: 0
+    }
+  });
+  const task = flowTool("task", {
+    tool: "task",
+    messageId: "assistant",
+    childSessions: [child]
+  });
+  task.data.state.title = "Explore code";
+  const sessionTree = {
+    session: { id: "root", title: "Subagent tokens" },
+    detachedChildren: [],
+    metrics: flowMetrics(),
+    messages: [{
+      id: "assistant",
+      sessionId: "root",
+      role: "assistant",
+      timeCreated: 1000,
+      data: { role: "assistant", time: { created: 1000 } },
+      parts: [{
+        id: task.id,
+        messageId: task.messageId,
+        sessionId: task.sessionId,
+        type: task.partType,
+        tool: task.tool,
+        timeStart: task.timeStart,
+        timeEnd: task.timeEnd,
+        childSessions: task.childSessions,
+        data: task.data
+      }]
+    }]
+  };
+  const html = renderSessionPage({
+    session: { id: "root", title: "Subagent tokens", time_created: 1000 },
+    sessionTree,
+    provider: "opencode"
+  });
+
+  assert.match(html, /subagent-tokens/);
+  assert.match(html, /token-chip-label">↑<\/span>77k/);
+  assert.match(html, /token-chip-label">↓<\/span>9\.9k/);
+  assert.match(html, /token-chip-label">C<\/span>795k/);
+  const parentStart = html.indexOf('id="msg-assistant"');
+  const parentHeader = html.indexOf('<header class="message-meta">', parentStart);
+  const subagentStart = html.indexOf('class="subagent-branch"', parentStart);
+  assert.ok(parentHeader > parentStart && parentHeader < subagentStart);
+  assert.match(
+    html.slice(parentHeader, subagentStart),
+    /message-role">assistant<\/span>/
+  );
 });

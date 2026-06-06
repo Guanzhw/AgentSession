@@ -48,27 +48,92 @@ function toolDescription(tool, input) {
   return match ? `${tool} — ${match}` : tool;
 }
 
-function tokenChip(label, value, title) {
+function tokenChip(label, value, title, className = "") {
   if (value == null || Number(value) === 0) {
     return "";
   }
 
-  return `<span class="token-chip" title="${escapeHtml(title)}"><span class="token-chip-label">${escapeHtml(label)}</span>${escapeHtml(formatCompactCount(value))}</span>`;
+  const classes = ["token-chip", className].filter(Boolean).join(" ");
+  return `<span class="${classes}" title="${escapeHtml(title)}"><span class="token-chip-label">${escapeHtml(label)}</span>${escapeHtml(formatCompactCount(value))}</span>`;
 }
 
-function formatTokens(tokens) {
+function outputTokenCount(tokens) {
+  const input = Number(tokens.input) || 0;
+  const output = Number(tokens.output) || 0;
+  const reasoning = Number(tokens.reasoning) || 0;
+  const cacheRead = Number(tokens.cache?.read) || 0;
+  const cacheWrite = Number(tokens.cache?.write) || 0;
+  const total = Number(tokens.total) || 0;
+  if (!reasoning) {
+    return output;
+  }
+
+  // Providers disagree on whether output already includes reasoning. When a
+  // total is available, use it to distinguish the two representations.
+  const separateTotals = new Set([
+    input + output + reasoning,
+    input + output + reasoning + cacheRead + cacheWrite
+  ]);
+  const inclusiveTotals = new Set([
+    input + output,
+    input + output + cacheRead + cacheWrite
+  ]);
+  if (total && inclusiveTotals.has(total) && !separateTotals.has(total)) {
+    return output;
+  }
+
+  return output + reasoning;
+}
+
+function inputTokenCount(tokens, output) {
+  const input = Number(tokens.input) || 0;
+  const cacheRead = Number(tokens.cache?.read) || 0;
+  const cacheWrite = Number(tokens.cache?.write) || 0;
+  const total = Number(tokens.total) || 0;
+
+  // The normalized provider records may store cached tokens either inside
+  // `input` or alongside it. The request total is the least ambiguous source.
+  if (total && total >= output) {
+    return total - output;
+  }
+
+  return input + cacheRead + cacheWrite;
+}
+
+export function formatTokens(tokens, { cacheWarning = null } = {}) {
   if (!tokens || typeof tokens !== "object") {
     return "";
   }
 
   const cache = tokens.cache && typeof tokens.cache === "object" ? tokens.cache : {};
+  const output = outputTokenCount(tokens);
+  const input = inputTokenCount(tokens, output);
+  const uncachedInput = Number(tokens.input) || 0;
+  const cacheRead = Number(cache.read) || 0;
+  const cacheWrite = Number(cache.write) || 0;
+  const inputBreakdown = [
+    `${formatCompactCount(uncachedInput)} uncached`,
+    cacheRead ? `${formatCompactCount(cacheRead)} cache read` : "",
+    cacheWrite ? `${formatCompactCount(cacheWrite)} cache write` : ""
+  ].filter(Boolean).join(" + ");
+  const cachePercent = input > 0 ? cacheRead / input * 100 : 0;
+  const cachePrecision = cachePercent > 0 && (cachePercent < 1 || cachePercent > 99) ? 2 : 1;
+  const cacheRate = `${cachePercent.toFixed(cachePrecision)}%`;
+  const outputTitle = tokens.reasoning
+    ? `Output tokens including reasoning: ${formatCompactCount(output)}`
+    : `Output tokens: ${formatCompactCount(output)}`;
+  const cacheTitle = cacheWarning
+    ? `Possible cache miss: cached prompt input fell to ${cacheRate} after the previous same-model request was ${cacheWarning.previousRate}. Provider-reported values can also reflect routing or telemetry issues.`
+    : `Cached prompt input for this request: ${formatCompactCount(cache.read)} of ${formatCompactCount(input)} (${cacheRate} cache hit). This is provider-reported and not cumulative.`;
   const pieces = [
-    tokenChip("↑", tokens.input, `Input tokens: ${formatCompactCount(tokens.input)}`),
-    tokenChip("↓", tokens.output, `Output tokens: ${formatCompactCount(tokens.output)}`),
-    tokenChip("R", tokens.reasoning, `Reasoning tokens: ${formatCompactCount(tokens.reasoning)}`),
-    tokenChip("C", cache.read, `Cache read tokens: ${formatCompactCount(cache.read)}`),
+    tokenChip("↑", uncachedInput, `Uncached prompt input uploaded for this request: ${formatCompactCount(uncachedInput)}. Total prompt input: ${formatCompactCount(input)}${inputBreakdown ? ` (${inputBreakdown})` : ""}`),
+    tokenChip("↓", output, outputTitle),
+    tokenChip("C", cache.read, cacheTitle, cacheWarning ? "token-chip-cache-warning" : ""),
     tokenChip("W", cache.write, `Cache write tokens: ${formatCompactCount(cache.write)}`)
   ].filter(Boolean);
+  if (cacheWarning) {
+    pieces.push(`<span class="cache-warning-badge" title="${escapeHtml(cacheTitle)}">! cache miss</span>`);
+  }
 
   if (!pieces.length && tokens.total != null) {
     pieces.push(tokenChip("T", tokens.total, `Total tokens: ${formatCompactCount(tokens.total)}`));
@@ -157,25 +222,31 @@ export function sessionCard(s, active = false, { showCheckbox = false, provider 
   </article>`;
 }
 
-export function messageBubble(role, content, meta: any = {}) {
+export function messageHeader(role, meta: any = {}) {
   const safeRole = escapeHtml(role || "unknown");
   const model = meta.model ? `<span class="message-model">${escapeHtml(meta.model)}</span>` : "";
-  const tokens = formatTokens(meta.tokens);
+  const tokens = formatTokens(meta.tokens, { cacheWarning: meta.cacheWarning });
   const total = meta.tokens?.total != null ? ` title="Total tokens: ${escapeHtml(formatCompactCount(meta.tokens.total))}"` : "";
   const tokenMarkup = tokens ? `<span class="message-tokens"${total}>${tokens}</span>` : "";
   const time = meta.time ? `<time class="message-time">${escapeHtml(formatTime(meta.time))}</time>` : "";
+
+  return `<header class="message-meta">
+      <span class="message-role">${safeRole}</span>
+      ${model}
+      ${tokenMarkup}
+      ${time}
+    </header>`;
+}
+
+export function messageBubble(role, content, meta: any = {}) {
+  const safeRole = escapeHtml(role || "unknown");
   const reasoning = meta.reasoning ? `<div class="message-reasoning">${meta.reasoning}</div>` : "";
   const body = role === "assistant"
     ? `<div class="message-body markdown">${renderMarkdown(content || "")}</div>`
     : `<pre class="message-body plain">${escapeHtml(content || "")}</pre>`;
 
   return `<section class="message message-${safeRole}">
-    <header class="message-meta">
-      <span class="message-role">${safeRole}</span>
-      ${model}
-      ${tokenMarkup}
-      ${time}
-    </header>
+    ${messageHeader(role, meta)}
     ${reasoning}
     ${body}
   </section>`;
@@ -194,7 +265,7 @@ export function reasoningBlock(content, duration = "", partId = "") {
   </details>`;
 }
 
-export function toolCallBlock(tool, input, output, status, duration, partId, reasoning = "") {
+export function toolCallBlock(tool, input, output, status, duration, partId) {
   const inputText = truncate(input);
   const outputText = truncate(output);
   const safeStatus = escapeHtml(status || "unknown");
@@ -208,7 +279,6 @@ export function toolCallBlock(tool, input, output, status, duration, partId, rea
       ${safeDuration}
     </summary>
     <div class="tool-panels">
-      ${reasoning ? `<div class="tool-reasoning">${reasoning}</div>` : ""}
       <section>
         <h4>${t("tool.input")}</h4>
         <pre>${escapeHtml(inputText)}</pre>
