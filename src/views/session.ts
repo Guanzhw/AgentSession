@@ -788,12 +788,14 @@ function renderPart(messageData, partData, partId, reasoningMarkup = "") {
   }
 
   if (partData.type === "text") {
-    return messageBubble(messageData.role, partData.text || "", {
+    if (!partData.text) {
+      return "";
+    }
+    return messageBubble(messageData.role, partData.text, {
       model: messageModelLabel(messageData),
       tokens: messageData.tokens,
       cacheWarning: messageData.cacheWarning,
-      time: messageData.time?.created,
-      reasoning: reasoningMarkup
+      time: messageData.time?.created
     });
   }
 
@@ -849,8 +851,8 @@ function renderPartNode(messageData, part: SessionPartNode, depth = 0, provider 
     .map((child) => renderSubagentChildSession(child, provider))
     .filter(Boolean)
     .join("\n");
-  if (!childMarkup) {
-    return anchoredPart;
+  if (!childMarkup && !renderedPart) {
+    return "";
   }
 
   const branch = `<div class="subsession-branch" data-parent-part-id="${escapeHtml(part.id)}">${childMarkup}</div>`;
@@ -920,7 +922,7 @@ function renderMessagePartsResult(message, depth = 0, provider = "opencode", ini
     let rendered = renderPartNode(message.data, part, depth, provider, isToolPart ? "" : reasoningMarkup);
     if (rendered && reasoningMarkup && isToolPart) {
       rendered = `${renderTurnReasoning(reasoningMarkup)}\n${rendered}`;
-    } else if (rendered && reasoningMarkup && !rendered.includes(reasoningMarkup)) {
+    } else if (rendered && reasoningMarkup && !rendered.includes(reasoningMarkup) && !(part.type === "text" && !part.data?.text)) {
       rendered = attachReasoningToRenderedPart(rendered, reasoningMarkup) || rendered;
     }
     if (rendered) {
