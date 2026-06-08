@@ -1,6 +1,6 @@
 {
   "name": "@openx/codeagent-session",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Forked from OpenSession — The developer's AI chronicle. A session viewer for OpenCode/Claude Code/Codex/Gemini, with subagent conversation display and TOC navigation support.",
   "type": "module",
   "bin": {
@@ -39,9 +39,9 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Guanzhw/OpenSessionViewer.git"
+    "url": "git+https://szv-open.codehub.huawei.com/innersource/codeagent-session_G/codeagent-session.git"
   },
-  "homepage": "https://github.com/Guanzhw/OpenSessionViewer",
+  "homepage": "https://szv-open.codehub.huawei.com/innersource/codeagent-session_G/codeagent-session",
   "files": [
     "dist/"
   ],
