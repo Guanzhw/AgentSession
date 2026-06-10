@@ -38,6 +38,10 @@ const gemini = {
   id: "gemini",
   name: "Gemini CLI",
   icon: icons.gemini,
+  resumeCommand: {
+    executable: "gemini",
+    args: ["--resume", "{sessionId}"]
+  },
 
   detect() {
     return existsSync(path.join(getGeminiDir(), "tmp"));

@@ -61,6 +61,10 @@ const claudeCode = {
   id: "claude-code",
   name: "Claude Code",
   icon: icons.claude,
+  resumeCommand: {
+    executable: "claude",
+    args: ["--resume", "{sessionId}"]
+  },
   capabilities: {
     structuredSessionViews: true
   },

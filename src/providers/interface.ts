@@ -6,6 +6,11 @@ export interface ResumeCommandSpec {
   cwd?: string;
 }
 
+export interface ResumeShellSpec {
+  executable: string;
+  args?: string[];
+}
+
 export interface TokenUsage {
   input?: number;
   output?: number;
@@ -68,6 +73,7 @@ export interface ProviderAdapter {
   id: ProviderId;
   name: string;
   icon: string;
+  resumeCommand?: ResumeCommandSpec;
   capabilities?: {
     localManagement?: boolean;
     sqliteSessionStore?: boolean;

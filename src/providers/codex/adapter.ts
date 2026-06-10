@@ -47,6 +47,10 @@ const codex = {
   id: "codex",
   name: "Codex CLI",
   icon: icons.codex,
+  resumeCommand: {
+    executable: "codex",
+    args: ["resume", "{sessionId}"]
+  },
   capabilities: {
     structuredSessionViews: true
   },
@@ -70,19 +74,28 @@ const codex = {
   },
 
   getSession(sessionId) {
-    const entry = discoverSessionFiles().find((f) => f.sessionId === sessionId);
-    if (!entry) return null;
-    try {
-      return extractMeta(parseSession(entry.filePath), sessionId);
-    } catch { return null; }
+    for (const entry of discoverSessionFiles()) {
+      try {
+        const session = extractMeta(parseSession(entry.filePath), entry.sessionId);
+        if (session.id === sessionId || entry.sessionId === sessionId) {
+          return session;
+        }
+      } catch { /* skip */ }
+    }
+    return null;
   },
 
   getMessages(sessionId) {
-    const entry = discoverSessionFiles().find((f) => f.sessionId === sessionId);
-    if (!entry) return [];
-    try {
-      return recordsToMessages(parseSession(entry.filePath), sessionId);
-    } catch { return []; }
+    for (const entry of discoverSessionFiles()) {
+      try {
+        const records = parseSession(entry.filePath);
+        const session = extractMeta(records, entry.sessionId);
+        if (session.id === sessionId || entry.sessionId === sessionId) {
+          return recordsToMessages(records, session.id);
+        }
+      } catch { /* skip */ }
+    }
+    return [];
   },
 
   getSessionTree(sessionId) {
@@ -135,10 +148,12 @@ const codex = {
     const term = (query || "").toLowerCase();
     if (!term) return [];
     const results = [];
-    for (const { sessionId, filePath } of discoverSessionFiles()) {
+    for (const { sessionId: fallbackId, filePath } of discoverSessionFiles()) {
       if (results.length >= limit) break;
       try {
-        for (const r of parseSession(filePath)) {
+        const records = parseSession(filePath);
+        const sessionId = extractMeta(records, fallbackId).id;
+        for (const r of records) {
           if (results.length >= limit) break;
           let text = "";
           if (r.type === "event_msg" && r.payload?.type === "user_message") text = r.payload.message || "";

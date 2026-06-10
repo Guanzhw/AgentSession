@@ -130,7 +130,10 @@ export function parseArgs(argv = process.argv.slice(2)) {
     allowTerminalLaunch: false,
     resumeCommands: fileConfig.resumeCommands && typeof fileConfig.resumeCommands === "object"
       ? fileConfig.resumeCommands
-      : {}
+      : {},
+    resumeShell: fileConfig.resumeShell && typeof fileConfig.resumeShell === "object"
+      ? fileConfig.resumeShell
+      : null
   };
 
   for (let i = 0; i < argv.length; i++) {

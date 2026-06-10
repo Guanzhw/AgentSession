@@ -1,14 +1,7 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
-import type { ProviderId, ResumeCommandSpec } from "./providers/interface.js";
-
-const BUILTIN_COMMANDS: Partial<Record<ProviderId, ResumeCommandSpec>> = {
-  opencode: { executable: "opencode", args: ["--session", "{sessionId}"] },
-  "claude-code": { executable: "claude", args: ["--resume", "{sessionId}"] },
-  codex: { executable: "codex", args: ["resume", "{sessionId}"] },
-  gemini: { executable: "gemini", args: ["--resume", "{sessionId}"] }
-};
+import type { ProviderAdapter, ResumeCommandSpec, ResumeShellSpec } from "./providers/interface.js";
 
 function isCommandSpec(value): value is ResumeCommandSpec {
   return Boolean(
@@ -18,6 +11,19 @@ function isCommandSpec(value): value is ResumeCommandSpec {
     && value.executable.trim()
     && Array.isArray(value.args)
     && value.args.every((arg) => typeof arg === "string")
+  );
+}
+
+function isShellSpec(value): value is ResumeShellSpec {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && typeof value.executable === "string"
+    && value.executable.trim()
+    && (value.args === undefined || (
+      Array.isArray(value.args)
+      && value.args.every((arg) => typeof arg === "string")
+    ))
   );
 }
 
@@ -62,9 +68,12 @@ export function resolveProjectDirectory(directory) {
   }
 }
 
-export function getResumeCommand(providerId, sessionId, directory, configuredCommands = {}) {
-  const configured = configuredCommands?.[providerId];
-  const spec = isCommandSpec(configured) ? configured : BUILTIN_COMMANDS[providerId];
+export function getResumeCommand(provider: ProviderAdapter, sessionId, directory, configuredCommands = {}) {
+  const configured = configuredCommands?.[provider.id];
+  if (configured === false || configured === null) {
+    return null;
+  }
+  const spec = isCommandSpec(configured) ? configured : provider.resumeCommand;
   const cwd = resolveProjectDirectory(isCommandSpec(configured) && configured.cwd ? configured.cwd : directory);
   if (!spec || !cwd) {
     return null;
@@ -86,7 +95,24 @@ export function getResumeCommand(providerId, sessionId, directory, configuredCom
   };
 }
 
-export function launchResumeCommand(command) {
+export function buildPowerShellResumeArgs(powershell, shellArgs = ["-NoExit", "-NoLogo"]) {
+  const script = [
+    "$json=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:OPENSESSIONVIEWER_RESUME_SPEC))",
+    "$spec=$json|ConvertFrom-Json",
+    "Set-Location -LiteralPath $spec.cwd",
+    "& $spec.executable @($spec.args)"
+  ].join(";");
+  const encodedScript = Buffer.from(script, "utf16le").toString("base64");
+
+  return [
+    powershell,
+    ...shellArgs,
+    "-EncodedCommand",
+    encodedScript
+  ];
+}
+
+export function launchResumeCommand(command, configuredShell = null) {
   if (process.platform !== "win32") {
     throw new Error("Terminal launching is currently supported on Windows only");
   }
@@ -95,10 +121,14 @@ export function launchResumeCommand(command) {
   }
 
   const terminal = resolveExecutable("wt.exe");
-  const powershell = resolveExecutable("pwsh.exe") || resolveExecutable("powershell.exe");
+  const shellSpec = isShellSpec(configuredShell) ? configuredShell : null;
+  const powershell = shellSpec
+    ? resolveExecutable(shellSpec.executable)
+    : resolveExecutable("pwsh.exe") || resolveExecutable("powershell.exe");
   if (!terminal || !powershell) {
     throw new Error("Windows Terminal and PowerShell are required");
   }
+  const shellArgs = shellSpec?.args || ["-NoExit", "-NoLogo"];
 
   // The fixed PowerShell program reads data from the environment. Session IDs,
   // command arguments, and project paths never become PowerShell source text.
@@ -107,20 +137,9 @@ export function launchResumeCommand(command) {
     args: command.args,
     cwd: command.cwd
   }), "utf-8").toString("base64");
-  const script = [
-    "$json=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:OPENSESSIONVIEWER_RESUME_SPEC))",
-    "$spec=$json|ConvertFrom-Json",
-    "Set-Location -LiteralPath $spec.cwd",
-    "& $spec.executable @($spec.args)"
-  ].join(";");
-
   const child = spawn(terminal, [
     "-d", command.cwd,
-    powershell,
-    "-NoExit",
-    "-NoLogo",
-    "-Command",
-    script
+    ...buildPowerShellResumeArgs(powershell, shellArgs)
   ], {
     detached: true,
     stdio: "ignore",

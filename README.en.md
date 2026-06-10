@@ -114,8 +114,19 @@ known resume command and a valid recorded project directory, the page also
 offers a copyable command. Actual terminal launching is disabled unless the
 server starts with `--allow-terminal-launch`.
 
-Provider commands can be overridden in `config.json` under the normal
-OpenSessionViewer config directory, or in the file selected by `--config`:
+All registered providers declare a default resume command:
+
+| Provider | Default command |
+|---|---|
+| OpenCode | `opencode --session {sessionId}` |
+| CodeAgent | `codeagent --session {sessionId}` |
+| Claude Code | `claude --resume {sessionId}` |
+| Codex CLI | `codex resume {sessionId}` |
+| Gemini CLI | `gemini --resume {sessionId}` |
+
+Every command and the PowerShell-compatible terminal shell can be overridden in
+`config.json` under the normal OpenSessionViewer config directory, or in the
+file selected by `--config`:
 
 ```json
 {
@@ -128,14 +139,25 @@ OpenSessionViewer config directory, or in the file selected by `--config`:
       "executable": "my-codeagent",
       "args": ["resume", "{sessionId}"],
       "cwd": "D:\\WorkSpace"
-    }
+    },
+    "gemini": false
+  },
+  "resumeShell": {
+    "executable": "powershell.exe",
+    "args": ["-NoExit", "-NoLogo", "-NoProfile"]
   }
 }
 ```
 
 Supported placeholders are `{sessionId}` and `{projectPath}`. Commands are
 started as executable/argument arrays rather than raw shell strings. A custom
-`cwd` is useful for providers whose history does not record a project path.
+absolute `cwd` is useful for providers whose history does not record a project
+path. Set a provider entry to `false` to disable its resume actions.
+
+`resumeShell.executable` may be `pwsh.exe`, `powershell.exe`, or an absolute path
+to a PowerShell-compatible executable. Its `args` are inserted before the
+generated `-EncodedCommand` argument. When omitted, OpenSessionViewer selects
+`pwsh.exe` and then `powershell.exe`, using `["-NoExit", "-NoLogo"]`.
 
 ## Claude Code History
 

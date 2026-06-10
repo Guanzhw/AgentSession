@@ -587,7 +587,7 @@ export async function startServer(config = getConfig()) {
           return json(res, { ok: false, error: "Session not found" }, 404);
         }
         const command = getResumeCommand(
-          providerId,
+          adapter,
           sessionId,
           session.directory,
           appConfig.resumeCommands
@@ -598,7 +598,7 @@ export async function startServer(config = getConfig()) {
         if (!command.available) {
           return json(res, { ok: false, error: "Configured resume executable was not found" }, 409);
         }
-        launchResumeCommand(command);
+        launchResumeCommand(command, appConfig.resumeShell);
         return json(res, { ok: true });
       } catch (error) {
         console.error("Resume launch error:", error?.message || error);
@@ -1130,7 +1130,7 @@ export async function startServer(config = getConfig()) {
           const todos = getTodos(sessionId, dbPath);
           const { sessions: recentSessions } = listSessions(30, 0, "", "", dbPath);
           const enrichedRecentSessions = enrichSessionList(recentSessions, metaMap, excludedIds).map((item) => normalizeSessionRecord(item));
-          const resumeCommand = getResumeCommand(providerSegment, sessionId, enrichedSession.directory, appConfig.resumeCommands);
+          const resumeCommand = getResumeCommand(adapter, sessionId, enrichedSession.directory, appConfig.resumeCommands);
           send(res, 200, renderSessionPage({
             session: enrichedSession,
             sessionTree,
@@ -1158,7 +1158,7 @@ export async function startServer(config = getConfig()) {
         const { messages, partsByMessage } = buildPartsFromProviderMessages(providerMessages);
         const recentSessions = getIndexedSessions(providerSegment, 30, 0, "").sessions.map((item) => normalizeSessionRecord(item));
         const normalizedSession = normalizeSessionRecord(session);
-        const resumeCommand = getResumeCommand(providerSegment, sessionId, normalizedSession.directory, appConfig.resumeCommands);
+        const resumeCommand = getResumeCommand(adapter, sessionId, normalizedSession.directory, appConfig.resumeCommands);
         send(res, 200, renderSessionPage({
           session: normalizedSession,
           sessionTree: adapter.getSessionTree?.(sessionId) || null,

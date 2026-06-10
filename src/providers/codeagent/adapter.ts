@@ -19,6 +19,10 @@ const baseAdapter = createSqliteSessionAdapter({
   name: "CodeAgent",
   icon: icons.codeagent,
   defaultDataPath,
+  resumeCommand: {
+    executable: "codeagent",
+    args: ["--session", "{sessionId}"]
+  },
   capabilities: {
     localManagement: true,
     sqliteSessionStore: true,

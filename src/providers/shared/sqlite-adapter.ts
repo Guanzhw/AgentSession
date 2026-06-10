@@ -32,6 +32,7 @@ export function createSqliteSessionAdapter({
   icon = icons.opencode,
   defaultDataPath,
   useConfiguredDbPath = false,
+  resumeCommand,
   capabilities = {}
 }: {
   id: ProviderId;
@@ -39,6 +40,7 @@ export function createSqliteSessionAdapter({
   icon?: string;
   defaultDataPath: () => string;
   useConfiguredDbPath?: boolean;
+  resumeCommand?: ProviderAdapter["resumeCommand"];
   capabilities?: ProviderAdapter["capabilities"];
 }): ProviderAdapter {
   function getAdapterDataPath() {
@@ -49,6 +51,7 @@ export function createSqliteSessionAdapter({
     id,
     name,
     icon,
+    resumeCommand,
     capabilities,
 
   detect() {

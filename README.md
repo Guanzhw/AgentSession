@@ -125,8 +125,18 @@ codeagent-session [options]
 会话记录中的项目目录有效时，页面也会提供可复制的命令。只有使用
 `--allow-terminal-launch` 启动服务后，页面才允许实际打开终端。
 
-可以在 OpenSessionViewer 配置目录的 `config.json` 中覆盖 Provider 命令，
-也可以通过 `--config` 指定文件：
+所有已注册 Provider 都声明了默认继续命令：
+
+| Provider | 默认命令 |
+|---|---|
+| OpenCode | `opencode --session {sessionId}` |
+| CodeAgent | `codeagent --session {sessionId}` |
+| Claude Code | `claude --resume {sessionId}` |
+| Codex CLI | `codex resume {sessionId}` |
+| Gemini CLI | `gemini --resume {sessionId}` |
+
+每个命令和 PowerShell 兼容终端 shell 都可以在 OpenSessionViewer 配置目录的
+`config.json` 中覆盖，也可以通过 `--config` 指定文件：
 
 ```json
 {
@@ -139,14 +149,25 @@ codeagent-session [options]
       "executable": "my-codeagent",
       "args": ["resume", "{sessionId}"],
       "cwd": "D:\\WorkSpace"
-    }
+    },
+    "gemini": false
+  },
+  "resumeShell": {
+    "executable": "powershell.exe",
+    "args": ["-NoExit", "-NoLogo", "-NoProfile"]
   }
 }
 ```
 
 支持 `{sessionId}` 和 `{projectPath}` 占位符。命令以 executable/args 数组
 启动，不执行原始 shell 字符串。对于历史记录中没有项目目录的 Provider，
-可以显式配置 `cwd`。
+可以显式配置绝对路径 `cwd`。将 Provider 配置设为 `false` 可禁用其继续
+会话操作。
+
+`resumeShell.executable` 可以是 `pwsh.exe`、`powershell.exe`，或
+PowerShell 兼容程序的绝对路径。`args` 会插入到自动生成的
+`-EncodedCommand` 参数之前。未配置时，OpenSessionViewer 会依次查找
+`pwsh.exe` 和 `powershell.exe`，并使用 `["-NoExit", "-NoLogo"]`。
 
 ## Claude Code 历史记录
 

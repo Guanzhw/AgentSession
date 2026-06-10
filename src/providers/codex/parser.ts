@@ -67,8 +67,8 @@ export function extractMeta(records, fallbackId): RawSession {
     if (ts && (!timeCreated || ts < timeCreated)) timeCreated = ts;
     if (ts > timeUpdated) timeUpdated = ts;
 
-    if (r.type === "session_meta" && r.payload?.session_id) {
-      sessionId = r.payload.session_id;
+    if (r.type === "session_meta" && r.payload) {
+      sessionId = r.payload.session_id || r.payload.id || sessionId;
       directory = r.payload.cwd || r.payload.workdir || directory;
     }
 

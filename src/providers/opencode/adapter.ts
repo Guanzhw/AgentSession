@@ -25,6 +25,10 @@ const baseAdapter = createSqliteSessionAdapter({
   icon: icons.opencode,
   defaultDataPath,
   useConfiguredDbPath: true,
+  resumeCommand: {
+    executable: "opencode",
+    args: ["--session", "{sessionId}"]
+  },
   capabilities: {
     localManagement: true,
     sqliteSessionStore: true,

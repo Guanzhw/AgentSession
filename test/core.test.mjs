@@ -21,7 +21,12 @@ import {
   recordsToMessages as codexRecordsToMessages
 } from "../dist/src/providers/codex/parser.js";
 import { buildMessageSessionViews } from "../dist/src/providers/shared/message-session.js";
-import { getResumeCommand, resolveProjectDirectory } from "../dist/src/resume.js";
+import { getAllProviders } from "../dist/src/providers/index.js";
+import {
+  buildPowerShellResumeArgs,
+  getResumeCommand,
+  resolveProjectDirectory
+} from "../dist/src/resume.js";
 import { parseArgs } from "../dist/src/config.js";
 
 const fixture = (name) => path.join(process.cwd(), "test", "fixtures", name);
@@ -155,6 +160,8 @@ test("Codex token_count records attach request usage to the preceding assistant 
   const messages = codexRecordsToMessages(records, "codex-test");
   const views = buildMessageSessionViews(session, messages);
 
+  assert.equal(session.id, "codex-test");
+  assert.equal(session.directory, "D:\\WorkSpace");
   assert.deepEqual(messages[0].tokens, {
     input: 1000,
     output: 120,
@@ -328,7 +335,14 @@ test("CodeAgent derives session identity and totals from assistant messages", ()
 test("resume commands use structured placeholders and validated directories", () => {
   const cwd = resolveProjectDirectory(process.cwd());
   assert.ok(cwd);
-  const command = getResumeCommand("codeagent", "session id", cwd, {
+  const provider = {
+    id: "codeagent",
+    resumeCommand: {
+      executable: process.execPath,
+      args: ["--version", "{sessionId}"]
+    }
+  };
+  const command = getResumeCommand(provider, "session id", cwd, {
     codeagent: {
       executable: process.execPath,
       args: ["--version", "{sessionId}", "{projectPath}"]
@@ -339,22 +353,67 @@ test("resume commands use structured placeholders and validated directories", ()
   assert.deepEqual(command.args, ["--version", "session id", cwd]);
   assert.match(command.display, /"session id"/);
   assert.equal(resolveProjectDirectory("relative/path"), null);
-  assert.equal(getResumeCommand("codeagent", "id", "relative/path", {}), null);
+  assert.equal(getResumeCommand(provider, "id", "relative/path", {}), null);
 
-  const fixedExecutable = getResumeCommand("codeagent", "node", cwd, {
+  const fixedExecutable = getResumeCommand(provider, "node", cwd, {
     codeagent: { executable: "{sessionId}", args: [] }
   });
   assert.equal(fixedExecutable.executable, "{sessionId}");
   assert.equal(fixedExecutable.available, false);
+
+  const providerDefault = getResumeCommand(provider, "default id", cwd, {});
+  assert.equal(providerDefault.executable, process.execPath);
+  assert.deepEqual(providerDefault.args, ["--version", "default id"]);
+  assert.equal(getResumeCommand(provider, "disabled", cwd, { codeagent: false }), null);
+});
+
+test("every provider declares a configurable resume command", () => {
+  const providers = getAllProviders();
+  assert.deepEqual(
+    providers.map((provider) => provider.id),
+    ["opencode", "codeagent", "claude-code", "codex", "gemini"]
+  );
+  for (const provider of providers) {
+    assert.equal(typeof provider.resumeCommand?.executable, "string", provider.id);
+    assert.ok(provider.resumeCommand.executable, provider.id);
+    assert.ok(Array.isArray(provider.resumeCommand.args), provider.id);
+    assert.ok(provider.resumeCommand.args.includes("{sessionId}"), provider.id);
+  }
 });
 
 test("terminal launch requires the explicit startup flag", () => {
   const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-config-"));
   const configPath = path.join(temp, "config.json");
-  writeFileSync(configPath, JSON.stringify({ allowTerminalLaunch: true }));
+  writeFileSync(configPath, JSON.stringify({
+    allowTerminalLaunch: true,
+    resumeShell: {
+      executable: "powershell.exe",
+      args: ["-NoExit", "-NoLogo", "-NoProfile"]
+    }
+  }));
 
-  assert.equal(parseArgs(["--config", configPath]).allowTerminalLaunch, false);
+  const disabled = parseArgs(["--config", configPath]);
+  assert.equal(disabled.allowTerminalLaunch, false);
+  assert.deepEqual(disabled.resumeShell, {
+    executable: "powershell.exe",
+    args: ["-NoExit", "-NoLogo", "-NoProfile"]
+  });
   assert.equal(parseArgs(["--config", configPath, "--allow-terminal-launch"]).allowTerminalLaunch, true);
+});
+
+test("terminal launch encodes the complete PowerShell resume script", () => {
+  const powershell = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
+  const args = buildPowerShellResumeArgs(powershell, ["-NoProfile"]);
+
+  assert.deepEqual(args.slice(0, 3), [
+    powershell,
+    "-NoProfile",
+    "-EncodedCommand"
+  ]);
+  const script = Buffer.from(args[3], "base64").toString("utf16le");
+  assert.match(script, /ConvertFrom-Json/);
+  assert.match(script, /Set-Location -LiteralPath \$spec\.cwd/);
+  assert.match(script, /& \$spec\.executable @\(\$spec\.args\)$/);
 });
 
 function flowMetrics(overrides = {}) {
