@@ -68,6 +68,7 @@ export const en = {
   "action.copy_session_id": "Copy session ID",
   "action.copy_resume": "Copy resume command",
   "action.open_terminal": "Continue in terminal",
+  "action.analyze_session": "Analyze session",
 
   // Trash
   "trash.title": "Trash",

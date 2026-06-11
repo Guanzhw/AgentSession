@@ -1085,6 +1085,7 @@ export function renderSessionPage({
   providers = [],
   manageable = false,
   resumeCommand = null,
+  analysisAction = null,
   terminalLaunchAllowed = false
 }) {
   const title = session.title || session.slug || session.id;
@@ -1104,10 +1105,14 @@ export function renderSessionPage({
           ? `<button class="action-btn" data-action="resume-session" data-id="${escapeHtml(session.id)}" ${resumeCommand.available ? "" : "disabled"}>${t("action.open_terminal")}</button>`
           : ""}
   ` : "";
-  const actions = managementActions || resumeActions ? `
+  const analysisActions = analysisAction && terminalLaunchAllowed ? `
+        <button class="action-btn action-btn-primary" data-action="analyze-session" data-id="${escapeHtml(session.id)}" data-target="${escapeHtml(analysisAction.target)}" ${analysisAction.available ? "" : "disabled"}>${escapeHtml(analysisAction.label || t("action.analyze_session"))}</button>
+  ` : "";
+  const actions = managementActions || resumeActions || analysisActions ? `
       <div class="session-actions">
         ${managementActions}
         ${resumeActions}
+        ${analysisActions}
       </div>
   ` : "";
   const header = `

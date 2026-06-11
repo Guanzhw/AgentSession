@@ -68,6 +68,7 @@ export const zh = {
   "action.copy_session_id": "复制会话 ID",
   "action.copy_resume": "复制继续命令",
   "action.open_terminal": "在终端中继续",
+  "action.analyze_session": "分析会话",
 
   // Trash
   "trash.title": "回收站",

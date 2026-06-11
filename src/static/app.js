@@ -34,6 +34,8 @@ const __I18N__ = {
     copied: "Copied",
     resume_opened: "Terminal opened",
     resume_disabled: "Terminal launch is unavailable",
+    analysis_opened: "Session analysis started",
+    analysis_disabled: "Session analysis is unavailable",
     scroll_all_loaded: "All sessions loaded",
     scroll_loading: "Loading..."
   },
@@ -69,6 +71,8 @@ const __I18N__ = {
     copied: "已复制",
     resume_opened: "终端已打开",
     resume_disabled: "无法启动终端",
+    analysis_opened: "会话分析已启动",
+    analysis_disabled: "无法启动会话分析",
     scroll_all_loaded: "已全部加载",
     scroll_loading: "加载中..."
   }
@@ -250,6 +254,23 @@ document.addEventListener("click", async (e) => {
       showToast(ft("resume_opened"), "success");
     } catch {
       showToast(ft("resume_disabled"), "error");
+    }
+    return;
+  }
+
+  if (action === "analyze-session") {
+    try {
+      const res = await fetch(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target: btn.dataset.target || "skills" })
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      showToast(ft("analysis_opened"), "success");
+    } catch {
+      showToast(ft("analysis_disabled"), "error");
     }
     return;
   }

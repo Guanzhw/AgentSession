@@ -4,6 +4,7 @@ dist/
 logs/
 app.log
 app.err.log
+app-error.log
 tmp/
 .DS_Store
 .idea/

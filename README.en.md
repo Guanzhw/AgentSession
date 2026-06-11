@@ -159,6 +159,131 @@ to a PowerShell-compatible executable. Its `args` are inserted before the
 generated `-EncodedCommand` argument. When omitted, OpenSessionViewer selects
 `pwsh.exe` and then `powershell.exe`, using `["-NoExit", "-NoLogo"]`.
 
+## Session Analysis And Evaluation Proposals
+
+OpenSessionViewer can launch a configured agent non-interactively from a
+session detail page. The analysis run is proposal-only: it snapshots the
+session as indexed JSONL evidence, snapshots selected artifacts, creates an
+evaluation seed, and asks the agent to write:
+
+- `report.md`
+- `artifact-proposals.json`
+- `evaluation-proposals.json`
+
+Generated evaluation cases begin with `status: "proposed"`. OpenSessionViewer
+does not modify skills or mark a proposal as validated. Promotion should happen
+only after baseline and candidate executions pass replay, held-out, and
+regression checks.
+
+After the analyzer exits, OpenSessionViewer automatically checks the output
+schemas, requires replay/held-out/regression cases, verifies proposal roots and
+paths against the captured artifact inventory, resolves every `ev:...` and
+`artifact:...` reference, requires explicit baseline/candidate expectations and
+token/runtime criteria, and updates `manifest.json` to `completed`, `invalid`,
+or `failed`.
+
+The analyzer starts from a compact hierarchy and evidence index rather than a
+single large session bundle. The generated prompt exposes read-only commands:
+
+- `session_main_info`
+- `session_query_system_prompts`
+- `session_query_context`
+- `session_query_errors`
+- `session_query_tools` with `status: "completed"` for positive samples
+- `session_find_anomalies`
+- `session_get_evidence`
+- `extension_list`
+- `extension_get`
+
+Interruption signals come from explicit tool error reasons. High error rate is
+kept as a transparent heuristic: the result includes the threshold, minimum
+tool-call sample, raw counts, rate, and complete ranking. The analyzer is told
+to inspect successful and failed outcomes contrastively before proposing an
+edit.
+
+Analysis uses the same explicit `--allow-terminal-launch` safety gate as resume
+commands. It must also be enabled and configured for each provider:
+
+```json
+{
+  "analysis": {
+    "enabled": true,
+    "defaultTarget": "skills",
+    "outputDir": ".opensessionviewer/analysis",
+    "includeRawSnapshots": false,
+    "shell": {
+      "executable": "powershell.exe",
+      "args": ["-NoExit", "-NoLogo", "-NoProfile"]
+    },
+    "targets": {
+      "skills": {
+        "label": "Analyze skills",
+        "artifactRoots": ["skills", ".agents/skills", ".codex/skills"],
+        "extensions": [".md", ".json", ".yaml", ".yml", ".js", ".ts", ".py"],
+        "promptFile": "prompts/analyze-skills.md"
+      }
+    },
+    "providers": {
+      "opencode": {
+        "command": {
+          "executable": "opencode",
+          "args": [
+            "run",
+            "--model", "deepseek/deepseek-v4-flash",
+            "--dir", "{projectPath}",
+            "--file", "{promptPath}",
+            "Read the attached analysis request and write the requested proposal files."
+          ]
+        }
+      },
+      "claude-code": {
+        "command": {
+          "executable": "my-other-agent-cli",
+          "args": ["--non-interactive"],
+          "stdin": "prompt"
+        },
+        "shell": {
+          "executable": "pwsh.exe",
+          "args": ["-NoExit", "-NoLogo"]
+        }
+      }
+    }
+  }
+}
+```
+
+Supported command placeholders are `{sessionId}`, `{projectPath}`, `{target}`,
+`{runId}`, `{runDir}`, `{sessionPath}`, `{sessionIndexPath}`,
+`{evidenceIndexPath}`, `{evidencePath}`, `{analysisToolPath}`, `{promptPath}`,
+`{reportPath}`, `{evaluationSeedPath}`, `{evaluationPath}`, `{proposalsPath}`,
+and `{artifactsPath}`. `{prompt}` is also available for agents that require the
+complete prompt as one argument, although `{promptPath}` or `"stdin": "prompt"`
+is preferable for large sessions. `{messagesPath}` remains available when
+`includeRawSnapshots` is enabled for debugging or compatibility.
+
+The OpenCode example uses its non-interactive `run` command and attaches the
+generated request as a file. Configure OpenCode permissions so it may write
+only inside the analysis output directory. `--dangerously-skip-permissions`
+can make unattended local testing easier, but should only be added for a
+trusted project and trusted prompt.
+
+Relative `artifactRoots` and `outputDir` paths are resolved from the recorded
+session project directory. Absolute artifact roots are allowed when explicitly
+configured. Files are copied into a bounded snapshot so the analysis remains
+reviewable even if the original skill changes later.
+
+By default, analysis runs write `session-index.json`, `evidence-index.json`,
+and immutable `evidence.jsonl`; complete message/tree/container/flow/trace
+snapshots are omitted. Set `analysis.includeRawSnapshots` or a target-level
+`includeRawSnapshots` to `true` only when a legacy analyzer needs those bulk
+diagnostic files.
+
+Provider target overrides can be placed under
+`analysis.providers.<provider>.targets.<target>`. This allows different
+commands, prompts, shells, artifact roots, and extensions for the same target.
+Additional targets such as `agents-instructions`, `memories`, `agents`, or
+`commands` can use the same structure.
+
 ## Claude Code History
 
 Claude Code histories are read from both the legacy `~/.claude/transcripts`

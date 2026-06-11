@@ -133,7 +133,10 @@ export function parseArgs(argv = process.argv.slice(2)) {
       : {},
     resumeShell: fileConfig.resumeShell && typeof fileConfig.resumeShell === "object"
       ? fileConfig.resumeShell
-      : null
+      : null,
+    analysis: fileConfig.analysis && typeof fileConfig.analysis === "object"
+      ? fileConfig.analysis
+      : { enabled: false }
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -170,7 +173,7 @@ Options:
   --gemini-dir <path>   Path to Gemini data dir (default: ~/.gemini)
   --config <path>       Path to OpenSessionViewer JSON config
   --allow-terminal-launch
-                        Allow the local UI to open resume commands in a terminal
+                        Allow the local UI to open resume and analysis commands
   --reindex             Force full reindex of all providers on start
   --lang <en|zh>        UI language (default: auto-detect from LANG)
   --open                Open browser on start

@@ -43,6 +43,11 @@ import { renderSessionsPage } from "./views/sessions.js";
 import { renderStatsPage } from "./views/stats.js";
 import { renderTrashPage } from "./views/trash.js";
 import { getResumeCommand, launchResumeCommand } from "./resume.js";
+import {
+  getSessionAnalysisAction,
+  launchSessionAnalysis,
+  prepareSessionAnalysis
+} from "./analysis.js";
 
 const staticDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "static");
 
@@ -109,7 +114,7 @@ function isLoopbackHostname(hostname) {
   return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1" || hostname === "[::1]";
 }
 
-function isTrustedResumeRequest(req) {
+function isTrustedTerminalRequest(req) {
   if (!String(req.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
     return false;
   }
@@ -567,7 +572,7 @@ export async function startServer(config = getConfig()) {
 
     const resumeMatch = pathname.match(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/resume$/);
     if (req.method === "POST" && resumeMatch) {
-      if (!isTrustedResumeRequest(req)) {
+      if (!isTrustedTerminalRequest(req)) {
         return json(res, { ok: false, error: "Resume requests must be same-origin JSON from loopback" }, 403);
       }
       if (!appConfig.allowTerminalLaunch) {
@@ -603,6 +608,54 @@ export async function startServer(config = getConfig()) {
       } catch (error) {
         console.error("Resume launch error:", error?.message || error);
         return json(res, { ok: false, error: error?.message || "Failed to launch terminal" }, 500);
+      }
+    }
+
+    const analysisMatch = pathname.match(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/analyze$/);
+    if (req.method === "POST" && analysisMatch) {
+      if (!isTrustedTerminalRequest(req)) {
+        return json(res, { ok: false, error: "Analysis requests must be same-origin JSON from loopback" }, 403);
+      }
+      if (!appConfig.allowTerminalLaunch) {
+        return json(res, { ok: false, error: "Terminal launch is disabled" }, 403);
+      }
+
+      const providerId = analysisMatch[1];
+      const sessionId = safeDecodeId(analysisMatch[2]);
+      const adapter = providerMap.get(providerId);
+      if (!sessionId || !adapter) {
+        return json(res, { ok: false, error: "Session not found" }, 404);
+      }
+
+      try {
+        const body = await readBody(req);
+        const targetId = typeof body.target === "string" ? body.target : "";
+        const run = prepareSessionAnalysis({
+          provider: adapter,
+          sessionId,
+          analysisConfig: appConfig.analysis,
+          metaDir: appConfig.metaDir,
+          configPath: appConfig.configPath,
+          targetId
+        });
+        if (!run.command.resolvedExecutable) {
+          return json(res, {
+            ok: false,
+            error: "Configured analysis executable was not found",
+            runId: run.runId,
+            runDir: run.runDir
+          }, 409);
+        }
+        launchSessionAnalysis(run, appConfig.resumeShell);
+        return json(res, {
+          ok: true,
+          runId: run.runId,
+          runDir: run.runDir,
+          target: run.target
+        });
+      } catch (error) {
+        console.error("Session analysis launch error:", error?.message || error);
+        return json(res, { ok: false, error: error?.message || "Failed to launch session analysis" }, 500);
       }
     }
 
@@ -1131,6 +1184,7 @@ export async function startServer(config = getConfig()) {
           const { sessions: recentSessions } = listSessions(30, 0, "", "", dbPath);
           const enrichedRecentSessions = enrichSessionList(recentSessions, metaMap, excludedIds).map((item) => normalizeSessionRecord(item));
           const resumeCommand = getResumeCommand(adapter, sessionId, enrichedSession.directory, appConfig.resumeCommands);
+          const analysisAction = getSessionAnalysisAction(adapter, sessionId, enrichedSession.directory, appConfig.analysis);
           send(res, 200, renderSessionPage({
             session: enrichedSession,
             sessionTree,
@@ -1142,6 +1196,7 @@ export async function startServer(config = getConfig()) {
             recentSessions: enrichedRecentSessions,
             meta,
             resumeCommand,
+            analysisAction,
             terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),
             ...renderContext
           }));
@@ -1159,6 +1214,7 @@ export async function startServer(config = getConfig()) {
         const recentSessions = getIndexedSessions(providerSegment, 30, 0, "").sessions.map((item) => normalizeSessionRecord(item));
         const normalizedSession = normalizeSessionRecord(session);
         const resumeCommand = getResumeCommand(adapter, sessionId, normalizedSession.directory, appConfig.resumeCommands);
+        const analysisAction = getSessionAnalysisAction(adapter, sessionId, normalizedSession.directory, appConfig.analysis);
         send(res, 200, renderSessionPage({
           session: normalizedSession,
           sessionTree: adapter.getSessionTree?.(sessionId) || null,
@@ -1170,6 +1226,7 @@ export async function startServer(config = getConfig()) {
           recentSessions,
           meta: null,
           resumeCommand,
+          analysisAction,
           terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),
           ...renderContext
         }));

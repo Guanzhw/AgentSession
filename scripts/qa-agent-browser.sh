@@ -123,6 +123,11 @@ if [[ "$resume_launch_count" != "0" ]]; then
   echo "Terminal launch button should be hidden without --allow-terminal-launch" >&2
   exit 1
 fi
+analysis_launch_count="$(read_ab "count disabled-by-default analysis buttons" get count ".session-actions [data-action='analyze-session']")"
+if [[ "$analysis_launch_count" != "0" ]]; then
+  echo "Session analysis button should be hidden without configured terminal launch" >&2
+  exit 1
+fi
 
 toc_unexpected="$(read_ab "count unexpected toc entries" get count ".session-toc .toc-link:not(.toc-user):not(.toc-assistant):not(.toc-agent):not(.toc-task)")"
 if [[ "$toc_unexpected" != "0" ]]; then

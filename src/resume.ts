@@ -34,7 +34,7 @@ function quoteDisplayArg(value) {
   return `"${value.replaceAll('"', '\\"')}"`;
 }
 
-function resolveExecutable(executable) {
+export function resolveExecutable(executable) {
   if (path.isAbsolute(executable)) {
     return existsSync(executable) ? executable : null;
   }

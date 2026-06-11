@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -27,6 +33,14 @@ import {
   getResumeCommand,
   resolveProjectDirectory
 } from "../dist/src/resume.js";
+import {
+  buildPowerShellAnalysisArgs,
+  getSessionAnalysisAction,
+  prepareSessionAnalysis,
+  resolveAnalysisSettings
+} from "../dist/src/analysis.js";
+import { runAnalysisTool } from "../dist/src/analysis-tools.js";
+import { validateAnalysisOutputs } from "../dist/src/analysis-validator.js";
 import { parseArgs } from "../dist/src/config.js";
 
 const fixture = (name) => path.join(process.cwd(), "test", "fixtures", name);
@@ -389,6 +403,18 @@ test("terminal launch requires the explicit startup flag", () => {
     resumeShell: {
       executable: "powershell.exe",
       args: ["-NoExit", "-NoLogo", "-NoProfile"]
+    },
+    analysis: {
+      enabled: true,
+      defaultTarget: "skills",
+      providers: {
+        codex: {
+          command: {
+            executable: "codex",
+            args: ["exec", "{promptPath}"]
+          }
+        }
+      }
     }
   }));
 
@@ -398,6 +424,8 @@ test("terminal launch requires the explicit startup flag", () => {
     executable: "powershell.exe",
     args: ["-NoExit", "-NoLogo", "-NoProfile"]
   });
+  assert.equal(disabled.analysis.enabled, true);
+  assert.equal(disabled.analysis.providers.codex.command.executable, "codex");
   assert.equal(parseArgs(["--config", configPath, "--allow-terminal-launch"]).allowTerminalLaunch, true);
 });
 
@@ -414,6 +442,378 @@ test("terminal launch encodes the complete PowerShell resume script", () => {
   assert.match(script, /ConvertFrom-Json/);
   assert.match(script, /Set-Location -LiteralPath \$spec\.cwd/);
   assert.match(script, /& \$spec\.executable @\(\$spec\.args\)$/);
+});
+
+test("session analysis snapshots artifacts and generates evaluation inputs", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-analysis-"));
+  const projectPath = path.join(temp, "project");
+  const skillPath = path.join(projectPath, "skills", "review-session", "SKILL.md");
+  mkdirSync(path.dirname(skillPath), { recursive: true });
+  writeFileSync(skillPath, "# Review session\n\nUse execution evidence.\n");
+
+  const provider = {
+    id: "codex",
+    name: "Codex CLI",
+    icon: "",
+    detect: () => true,
+    getDataPath: () => null,
+    scan: async function* () {},
+    getSession: () => ({
+      id: "session-analysis",
+      provider: "codex",
+      parentId: null,
+      title: "Improve the review skill",
+      directory: projectPath,
+      timeCreated: 1,
+      timeUpdated: 4,
+      messageCount: 4,
+      tokenCount: 10
+    }),
+    getMessages: () => [
+      {
+        id: "user",
+        sessionId: "session-analysis",
+        role: "user",
+        content: "Review the current skill",
+        thinking: null,
+        toolName: null,
+        toolInput: null,
+        toolOutput: null,
+        timestamp: 1,
+        tokens: null,
+        metadata: null
+      },
+      {
+        id: "assistant",
+        sessionId: "session-analysis",
+        role: "assistant",
+        content: "The verifier is missing.",
+        thinking: null,
+        toolName: null,
+        toolInput: null,
+        toolOutput: null,
+        timestamp: 2,
+        tokens: null,
+        metadata: null
+      },
+      {
+        id: "tool-success",
+        sessionId: "session-analysis",
+        role: "tool",
+        content: "All tests passed.",
+        thinking: null,
+        toolName: "test",
+        toolInput: { command: "npm test" },
+        toolOutput: "All tests passed.",
+        timestamp: 3,
+        tokens: null,
+        metadata: { isError: false }
+      },
+      {
+        id: "tool-interrupted",
+        sessionId: "session-analysis",
+        role: "tool",
+        content: "User interrupted the command.",
+        thinking: null,
+        toolName: "shell",
+        toolInput: { command: "long-running-command" },
+        toolOutput: "User interrupted the command.",
+        timestamp: 4,
+        tokens: null,
+        metadata: { isError: true }
+      }
+    ],
+    getTokenStats: () => [],
+    searchMessages: () => [],
+    exportSession: () => null,
+    getSystemPrompts: () => ({
+      sessionId: "session-analysis",
+      sections: [
+        {
+          title: "Instructions",
+          note: "Resolved at session start",
+          items: [
+            {
+              kind: "instruction",
+              title: "AGENTS.md",
+              preview: "Run deterministic validation.",
+              source: path.join(projectPath, "AGENTS.md"),
+              time: 0
+            }
+          ]
+        }
+      ]
+    })
+  };
+  const analysisConfig = {
+    enabled: true,
+    outputDir: path.join(temp, "analysis-output"),
+    targets: {
+      skills: {
+        artifactRoots: ["skills"],
+        extensions: [".md"],
+        prompt: "Focus on deterministic validation."
+      }
+    },
+    providers: {
+      codex: {
+        command: {
+          executable: process.execPath,
+          args: ["--version", "{promptPath}", "{evaluationPath}"],
+          stdin: "prompt"
+        }
+      }
+    }
+  };
+
+  const action = getSessionAnalysisAction(
+    provider,
+    "session-analysis",
+    projectPath,
+    analysisConfig
+  );
+  assert.equal(action.target, "skills");
+  assert.equal(action.available, true);
+
+  const run = prepareSessionAnalysis({
+    provider,
+    sessionId: "session-analysis",
+    analysisConfig,
+    metaDir: path.join(temp, "meta")
+  });
+  assert.equal(run.command.stdinPath, run.files.promptPath);
+  assert.equal(run.command.args[1], run.files.promptPath);
+  assert.equal(run.command.args[2], run.files.evaluationPath);
+  assert.ok(existsSync(run.files.manifestPath));
+  assert.ok(existsSync(run.files.evaluationSeedPath));
+  assert.ok(existsSync(run.files.sessionIndexPath));
+  assert.ok(existsSync(run.files.evidenceIndexPath));
+  assert.ok(existsSync(run.files.evidencePath));
+  assert.equal(existsSync(run.files.messagesPath), false);
+  const analysisPrompt = readFileSync(run.files.promptPath, "utf-8");
+  assert.match(analysisPrompt, /Focus on deterministic validation/);
+  assert.match(analysisPrompt, /Never propose changes to those generated files/);
+  assert.match(analysisPrompt, /artifactRoot/);
+  assert.match(analysisPrompt, /session_query_tools/);
+  assert.match(analysisPrompt, /Contrast successful and failed tool outcomes/);
+
+  const artifacts = JSON.parse(readFileSync(run.files.artifactsPath, "utf-8"));
+  assert.equal(artifacts.files.length, 1);
+  assert.equal(artifacts.files[0].relativePath, path.join("review-session", "SKILL.md"));
+  assert.match(artifacts.files[0].artifactId, /^artifact:/);
+  assert.ok(existsSync(artifacts.files[0].snapshotPath));
+
+  const seed = JSON.parse(readFileSync(run.files.evaluationSeedPath, "utf-8"));
+  assert.equal(seed.status, "proposed");
+  assert.equal(seed.observedTask, "Review the current skill");
+  assert.equal(seed.cases[0].verifier.status, "missing");
+  assert.match(seed.cases[0].sourceEvidence[0], /^ev:/);
+
+  const mainInfo = runAnalysisTool(run.runDir, "session_main_info");
+  assert.equal(mainInfo.session.direct.toolCalls, 2);
+  assert.equal(mainInfo.session.direct.errors, 1);
+  assert.equal(mainInfo.systemPrompts.length, 1);
+  const systemPrompts = runAnalysisTool(run.runDir, "session_query_system_prompts");
+  assert.equal(systemPrompts.total, 1);
+  assert.match(systemPrompts.items[0].output, /Run deterministic validation/);
+  const errors = runAnalysisTool(run.runDir, "session_query_errors");
+  assert.equal(errors.total, 1);
+  assert.match(errors.items[0].errorReason, /interrupted/i);
+  const successes = runAnalysisTool(run.runDir, "session_query_tools", { status: "completed" });
+  assert.equal(successes.total, 1);
+  assert.equal(successes.items[0].toolName, "test");
+  const anomalies = runAnalysisTool(run.runDir, "session_find_anomalies");
+  assert.equal(anomalies.interruptions.length, 1);
+  assert.equal(anomalies.highErrorRate.heuristic, true);
+  assert.equal(anomalies.highErrorRate.flagged.length, 0);
+  const rootAnomalies = runAnalysisTool(run.runDir, "session_find_anomalies", {
+    includeRoot: true,
+    minToolCalls: 2,
+    errorRateThreshold: 0.4
+  });
+  assert.equal(rootAnomalies.highErrorRate.threshold, 0.4);
+  assert.equal(rootAnomalies.highErrorRate.flagged[0].toolCalls, 2);
+  assert.equal(rootAnomalies.highErrorRate.flagged[0].errors, 1);
+  const exactEvidence = runAnalysisTool(run.runDir, "session_get_evidence", {
+    evidenceId: errors.items[0].evidenceId
+  });
+  assert.equal(exactEvidence.complete, true);
+  assert.equal(exactEvidence.record.status, "error");
+  const extensions = runAnalysisTool(run.runDir, "extension_list");
+  assert.equal(extensions.total, 1);
+  const extension = runAnalysisTool(run.runDir, "extension_get", {
+    artifactId: artifacts.files[0].artifactId
+  });
+  assert.match(extension.content, /Use execution evidence/);
+
+  const rootEvidenceId = seed.cases[0].sourceEvidence[0];
+  const artifactId = artifacts.files[0].artifactId;
+
+  writeFileSync(
+    run.files.reportPath,
+    "# Session Analysis\n\nA sufficiently detailed analysis report with evidence, risks, proposed updates, and a concrete validation strategy for replay, held-out, and regression tasks.\n"
+  );
+  writeFileSync(run.files.evaluationPath, JSON.stringify({
+    schemaVersion: 1,
+    status: "proposed",
+    target: "skills",
+    sourceSessionId: "session-analysis",
+    cases: [
+      {
+        id: "replay",
+        title: "Replay",
+        kind: "replay",
+        status: "proposed",
+        task: "Replay the task",
+        setup: [],
+        sourceEvidence: [rootEvidenceId],
+        expectedOutcome: ["Task succeeds"],
+        comparison: {
+          baseline: "Captured skill",
+          candidate: "Proposed skill",
+          acceptance: ["Candidate succeeds"]
+        },
+        verifier: { kind: "assertions", assertions: ["success"] },
+        metrics: {
+          taskSuccess: true,
+          maxTokenIncreasePercent: null,
+          maxRuntimeIncreasePercent: null
+        }
+      },
+      {
+        id: "held-out",
+        title: "Held out",
+        kind: "held-out",
+        status: "proposed",
+        task: "Run a related task",
+        setup: [],
+        sourceEvidence: [artifactId],
+        expectedOutcome: ["Task succeeds"],
+        comparison: {
+          baseline: "Captured skill",
+          candidate: "Proposed skill",
+          acceptance: ["Candidate succeeds"]
+        },
+        verifier: { kind: "assertions", assertions: ["success"] },
+        metrics: {
+          taskSuccess: true,
+          maxTokenIncreasePercent: null,
+          maxRuntimeIncreasePercent: null
+        }
+      },
+      {
+        id: "regression",
+        title: "Regression",
+        kind: "regression",
+        status: "proposed",
+        task: "Run an existing passing task",
+        setup: [],
+        sourceEvidence: [artifactId],
+        expectedOutcome: ["Still passes"],
+        comparison: {
+          baseline: "Captured skill",
+          candidate: "Proposed skill",
+          acceptance: ["Candidate preserves the passing behavior"]
+        },
+        verifier: { kind: "command", command: "npm test" },
+        metrics: {
+          taskSuccess: true,
+          maxTokenIncreasePercent: null,
+          maxRuntimeIncreasePercent: null
+        }
+      }
+    ]
+  }));
+  writeFileSync(run.files.proposalsPath, JSON.stringify({
+    schemaVersion: 1,
+    status: "proposed",
+    target: "skills",
+    sourceSessionId: "session-analysis",
+    proposals: [
+      {
+        id: "update-review-session",
+        action: "replace",
+        artifactRoot: path.join(projectPath, "skills"),
+        artifactPath: path.join("review-session", "SKILL.md"),
+        description: "Require executable verification.",
+        evidence: [rootEvidenceId],
+        expectedBenefit: "Fewer unverified recommendations.",
+        risks: ["May be too strict for exploratory work."],
+        validationCaseIds: ["replay", "held-out", "regression"]
+      }
+    ]
+  }));
+  const validated = validateAnalysisOutputs(run.runDir, 0, run.integrity);
+  assert.equal(validated.state, "completed");
+  assert.equal(validated.validation.evaluationCaseCount, 3);
+  assert.equal(validated.validation.artifactProposalCount, 1);
+
+  writeFileSync(run.files.evidencePath, `${readFileSync(run.files.evidencePath, "utf-8")}\n`);
+  const tampered = validateAnalysisOutputs(run.runDir, 0, run.integrity);
+  assert.equal(tampered.state, "invalid");
+  assert.ok(tampered.validation.errors.some((error) => /integrity check/.test(error)));
+});
+
+test("session analysis requires enabled provider and target configuration", () => {
+  const provider = { id: "codex" };
+  assert.equal(resolveAnalysisSettings(provider, { enabled: false }), null);
+  assert.equal(resolveAnalysisSettings(provider, {
+    enabled: true,
+    providers: { codex: false }
+  }), null);
+  assert.equal(resolveAnalysisSettings(provider, {
+    enabled: true,
+    targets: { skills: false },
+    providers: {
+      codex: {
+        command: { executable: "codex", args: ["exec"] }
+      }
+    }
+  }), null);
+  assert.equal(resolveAnalysisSettings(provider, {
+    enabled: true,
+    providers: { codex: {} }
+  }), null);
+});
+
+test("terminal analysis passes the prompt through structured PowerShell input", () => {
+  const powershell = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
+  const args = buildPowerShellAnalysisArgs(powershell, ["-NoProfile"]);
+
+  assert.deepEqual(args.slice(0, 3), [
+    powershell,
+    "-NoProfile",
+    "-EncodedCommand"
+  ]);
+  const script = Buffer.from(args[3], "base64").toString("utf16le");
+  assert.match(script, /OPENSESSIONVIEWER_ANALYSIS_SPEC/);
+  assert.match(script, /\[IO\.File\]::ReadAllText\(\$spec\.stdinPath\)/);
+  assert.match(script, /& \$spec\.executable @\(\$spec\.args\)/);
+  assert.match(script, /\$spec\.validatorPath/);
+  assert.match(script, /\$spec\.integrityBase64/);
+});
+
+test("session rendering shows configured analysis actions only when launch is allowed", () => {
+  const session = {
+    id: "analysis-session",
+    title: "Analyze me",
+    directory: process.cwd(),
+    time_created: Date.now()
+  };
+  const hidden = renderSessionPage({
+    session,
+    analysisAction: { target: "skills", label: "Analyze skills", available: true },
+    terminalLaunchAllowed: false
+  });
+  assert.doesNotMatch(hidden, /data-action="analyze-session"/);
+
+  const visible = renderSessionPage({
+    session,
+    analysisAction: { target: "skills", label: "Analyze skills", available: true },
+    terminalLaunchAllowed: true
+  });
+  assert.match(visible, /data-action="analyze-session"/);
+  assert.match(visible, /data-target="skills"/);
 });
 
 function flowMetrics(overrides = {}) {

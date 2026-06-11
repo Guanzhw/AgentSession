@@ -169,6 +169,121 @@ PowerShell 兼容程序的绝对路径。`args` 会插入到自动生成的
 `-EncodedCommand` 参数之前。未配置时，OpenSessionViewer 会依次查找
 `pwsh.exe` 和 `powershell.exe`，并使用 `["-NoExit", "-NoLogo"]`。
 
+## 会话分析与评估提案
+
+OpenSessionViewer 可以从会话详情页以非交互方式启动已配置的 Agent。
+分析任务只生成提案：它会把会话保存为带索引的 JSONL 证据、保存选定工件
+快照、创建评估种子，并要求 Agent 输出：
+
+- `report.md`
+- `artifact-proposals.json`
+- `evaluation-proposals.json`
+
+生成的评估用例初始状态为 `status: "proposed"`。OpenSessionViewer 不会直接
+修改 Skill，也不会把提案标记为已验证。只有在基线版本与候选版本通过重放、
+留出和回归测试后，才应提升候选工件。
+
+Analyzer 退出后，OpenSessionViewer 会自动检查输出结构，要求同时包含重放、
+留出和回归用例，依据工件清单验证提案根目录与路径，解析每个 `ev:...` 与
+`artifact:...` 引用，并要求显式描述基线/候选预期以及 token/runtime 标准，
+最后将 `manifest.json` 状态更新为 `completed`、`invalid` 或 `failed`。
+
+Analyzer 首先读取紧凑的会话层级与证据索引，而不是单个大型会话 JSON。
+生成的分析请求提供以下只读命令：
+
+- `session_main_info`
+- `session_query_system_prompts`
+- `session_query_context`
+- `session_query_errors`
+- `session_query_tools`，使用 `status: "completed"` 获取正样本
+- `session_find_anomalies`
+- `session_get_evidence`
+- `extension_list`
+- `extension_get`
+
+用户中断信号来自明确的工具错误原因。“高错误率”仍是透明的启发式判断：
+结果会返回阈值、最小工具调用样本数、原始计数、错误率和完整排序。Analyzer
+在提出修改前还必须对比成功与失败的执行结果。
+
+会话分析与继续命令共用显式的 `--allow-terminal-launch` 安全开关，并且需要
+为每个 Provider 单独启用和配置：
+
+```json
+{
+  "analysis": {
+    "enabled": true,
+    "defaultTarget": "skills",
+    "outputDir": ".opensessionviewer/analysis",
+    "includeRawSnapshots": false,
+    "shell": {
+      "executable": "powershell.exe",
+      "args": ["-NoExit", "-NoLogo", "-NoProfile"]
+    },
+    "targets": {
+      "skills": {
+        "label": "分析 Skills",
+        "artifactRoots": ["skills", ".agents/skills", ".codex/skills"],
+        "extensions": [".md", ".json", ".yaml", ".yml", ".js", ".ts", ".py"],
+        "promptFile": "prompts/analyze-skills.md"
+      }
+    },
+    "providers": {
+      "opencode": {
+        "command": {
+          "executable": "opencode",
+          "args": [
+            "run",
+            "--model", "deepseek/deepseek-v4-flash",
+            "--dir", "{projectPath}",
+            "--file", "{promptPath}",
+            "读取附加的分析请求并写入要求的提案文件。"
+          ]
+        }
+      },
+      "claude-code": {
+        "command": {
+          "executable": "my-other-agent-cli",
+          "args": ["--non-interactive"],
+          "stdin": "prompt"
+        },
+        "shell": {
+          "executable": "pwsh.exe",
+          "args": ["-NoExit", "-NoLogo"]
+        }
+      }
+    }
+  }
+}
+```
+
+命令支持 `{sessionId}`、`{projectPath}`、`{target}`、`{runId}`、
+`{runDir}`、`{sessionPath}`、`{sessionIndexPath}`、
+`{evidenceIndexPath}`、`{evidencePath}`、`{analysisToolPath}`、
+`{promptPath}`、`{reportPath}`、`{evaluationSeedPath}`、
+`{evaluationPath}`、`{proposalsPath}` 和 `{artifactsPath}` 占位符。
+也可以使用 `{prompt}` 将完整提示词作为一个参数传入，但大体积会话更适合
+使用 `{promptPath}` 或 `"stdin": "prompt"`。只有启用
+`includeRawSnapshots` 进行调试或兼容旧 Analyzer 时，才应使用
+`{messagesPath}`。
+
+OpenCode 示例使用非交互的 `run` 命令，并把生成的请求作为文件附加。应配置
+OpenCode 权限，使其只能写入分析输出目录。`--dangerously-skip-permissions`
+可简化受信任本地项目的无人值守测试，但只应在项目和提示词均可信时添加。
+
+相对路径形式的 `artifactRoots` 和 `outputDir` 从会话记录的项目目录解析。
+显式配置时也允许使用绝对工件目录。分析文件使用有大小限制的快照，因此即使
+原 Skill 后续发生变化，分析证据仍可审查。
+
+默认情况下，分析任务写入 `session-index.json`、`evidence-index.json` 和
+不可变的 `evidence.jsonl`，不会生成完整的 message/tree/container/flow/
+trace 快照。只有旧 Analyzer 确实依赖这些大型诊断文件时，才应把
+`analysis.includeRawSnapshots` 或目标级 `includeRawSnapshots` 设为 `true`。
+
+可以在 `analysis.providers.<provider>.targets.<target>` 下覆盖某个
+Provider 的目标配置，包括命令、提示词、shell、工件目录和扩展名。未来的
+`agents-instructions`、`memories`、`agents`、`commands` 等目标也可复用
+相同结构。
+
 ## Claude Code 历史记录
 
 Claude Code Provider 同时读取旧版 `~/.claude/transcripts` 和当前

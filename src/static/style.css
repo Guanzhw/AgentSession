@@ -2970,6 +2970,11 @@ pre code.hljs {
   background: var(--bg-secondary);
 }
 
+.action-btn-primary {
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+}
+
 .action-btn:disabled {
   cursor: not-allowed;
   opacity: 0.5;

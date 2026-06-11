@@ -6,6 +6,7 @@ import { buildOpenCodeFlowTree } from "./flow-tree.js";
 import { buildOpenCodeSessionContainer } from "./session-container.js";
 import { buildOpenCodeSessionMetrics } from "./session-metrics.js";
 import { buildOpenCodeSessionTree } from "./session-tree.js";
+import { buildOpenCodeSystemPrompts } from "./system-prompts.js";
 
 function defaultDataPath() {
   if (process.platform === "win32") {
@@ -49,6 +50,9 @@ const opencode = {
   },
   getSessionFlow(sessionId: string) {
     return buildOpenCodeFlowTree(sessionId, baseAdapter.getDataPath() || undefined);
+  },
+  getSystemPrompts(sessionId: string) {
+    return buildOpenCodeSystemPrompts(sessionId, baseAdapter.getDataPath() || undefined);
   }
 };
 

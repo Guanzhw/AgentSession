@@ -11,6 +11,10 @@ export interface ResumeShellSpec {
   args?: string[];
 }
 
+export interface AnalysisCommandSpec extends ResumeCommandSpec {
+  stdin?: "prompt";
+}
+
 export interface TokenUsage {
   input?: number;
   output?: number;
@@ -87,6 +91,7 @@ export interface ProviderAdapter {
   getTokenStats(days?: number): DailyTokenStat[];
   searchMessages(query: string, limit?: number): SearchResult[];
   exportSession(sessionId: string): unknown;
+  getSystemPrompts?(sessionId: string): unknown;
   getTrace?(sessionId: string): unknown;
   getSessionTree?(sessionId: string): unknown;
   getSessionContainer?(sessionId: string): unknown;
