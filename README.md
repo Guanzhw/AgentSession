@@ -326,6 +326,12 @@ OpenCode 权限，使其只能写入分析输出目录。`--dangerously-skip-per
 或 `AGENTS.md` 等项目相对文件。分析文件使用有大小限制的快照，因此即使
 原工件后续发生变化，分析证据仍可审查。
 
+未配置 `analysis.outputDir` 时，run 默认写入会话项目下的
+`.opensessionviewer/analysis`。每个 run 都会在自己的 `tools/` 目录中携带
+只读 evidence 查询工具及其本地依赖，因此 Analyzer 不需要读取
+CodeagentSession 的安装目录。显式绝对 `outputDir` 仍受支持，但如果 Analyzer
+采用仅允许访问项目目录的 sandbox，该目录也必须对 Analyzer 可见。
+
 可以在设置页面直接编辑目标专用的 Analyzer 指令，也可以通过
 `analysis.targets.<target>.prompt` 配置。`promptFile` 只是对已有文本文件的
 可选引用；相对路径从 `config.json` 所在目录解析，OpenSessionViewer 不会

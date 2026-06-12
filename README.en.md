@@ -330,6 +330,13 @@ configured. `artifactFiles` can include specific project-relative files such
 as `README.md` or `AGENTS.md`. Files are copied into a bounded snapshot so the
 analysis remains reviewable even if the original artifact changes later.
 
+When `analysis.outputDir` is omitted, runs default to
+`.opensessionviewer/analysis` inside the session project. Each run carries the
+read-only evidence query tool and its local dependency in its own `tools/`
+directory, so the analyzer does not need access to the CodeagentSession
+installation directory. Explicit absolute output directories remain supported,
+but a project-scoped analyzer sandbox must also be able to access that path.
+
 Target-specific analyzer instructions can be edited directly on the settings
 page or configured as `analysis.targets.<target>.prompt`. `promptFile` is an
 optional reference to an existing text file; relative paths are resolved from

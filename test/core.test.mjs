@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 
@@ -40,6 +41,7 @@ import {
   buildPowerShellAnalysisArgs,
   getAnalysisTargetIds,
   getDefaultAnalysisTargetIds,
+  getAnalysisOutputRoot,
   getSessionAnalysisAction,
   listSessionAnalysisRuns,
   prepareSessionAnalysis,
@@ -662,6 +664,17 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   mkdirSync(path.dirname(skillPath), { recursive: true });
   writeFileSync(skillPath, "# Review session\n\nUse execution evidence.\n");
   writeFileSync(agentsPath, "# Agent rules\n\nRun deterministic validation.\n");
+  writeFileSync(path.join(projectPath, "package.json"), '{"type":"commonjs"}\n');
+  const staleAnalysisReport = path.join(
+    projectPath,
+    ".opensessionviewer",
+    "analysis",
+    "old-run",
+    "outputs",
+    "report.md"
+  );
+  mkdirSync(path.dirname(staleAnalysisReport), { recursive: true });
+  writeFileSync(staleAnalysisReport, "# Generated analysis output\n");
 
   const provider = {
     id: "codex",
@@ -760,10 +773,9 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   const analysisConfig = {
     enabled: true,
     defaultTargets: ["skills", "tests"],
-    outputDir: path.join(temp, "analysis-output"),
     targets: {
       skills: {
-        artifactRoots: ["skills"],
+        artifactRoots: ["."],
         artifactFiles: ["AGENTS.md"],
         extensions: [".md"],
         prompt: "Focus on deterministic validation."
@@ -808,6 +820,9 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.ok(existsSync(run.files.sessionIndexPath));
   assert.ok(existsSync(run.files.evidenceIndexPath));
   assert.ok(existsSync(run.files.evidencePath));
+  assert.ok(existsSync(run.files.analysisToolPath));
+  assert.ok(existsSync(run.files.analysisLayoutPath));
+  assert.ok(existsSync(run.files.analysisToolPackagePath));
   assert.equal(existsSync(run.files.messagesPath), false);
   assert.equal(path.relative(run.runDir, run.files.reportPath), path.join("outputs", "report.md"));
   assert.equal(path.relative(run.runDir, run.files.promptPath), path.join("inputs", "analysis-request.md"));
@@ -815,11 +830,18 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.equal(path.relative(run.runDir, run.files.messagesPath), path.join("diagnostics", "messages.json"));
   assert.deepEqual(
     readdirSync(run.runDir).sort(),
-    ["evidence", "inputs", "manifest.json", "outputs"].sort()
+    ["evidence", "inputs", "manifest.json", "outputs", "tools"].sort()
   );
   const manifest = JSON.parse(readFileSync(run.files.manifestPath, "utf-8"));
   assert.equal(manifest.layoutVersion, 1);
   assert.equal(typeof manifest.integrity.files["inputs/session.json"], "string");
+  assert.equal(typeof manifest.integrity.files["tools/analysis-tools.js"], "string");
+  assert.equal(typeof manifest.integrity.files["tools/analysis-layout.js"], "string");
+  assert.equal(typeof manifest.integrity.files["tools/package.json"], "string");
+  assert.equal(
+    JSON.parse(readFileSync(run.files.analysisToolPackagePath, "utf-8")).type,
+    "module"
+  );
   const preparedRuns = listSessionAnalysisRuns({
     providerId: "codex",
     sessionId: "session-analysis",
@@ -827,6 +849,10 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     analysisConfig,
     metaDir: path.join(temp, "meta")
   });
+  assert.equal(
+    path.dirname(run.runDir),
+    path.join(projectPath, ".opensessionviewer", "analysis")
+  );
   assert.equal(preparedRuns.length, 1);
   assert.equal(preparedRuns[0].state, "prepared");
   assert.equal(preparedRuns[0].active, true);
@@ -835,6 +861,9 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.match(analysisPrompt, /Never propose changes to those generated files/);
   assert.match(analysisPrompt, /artifactRoot/);
   assert.match(analysisPrompt, /session_query_tools/);
+  assert.match(analysisPrompt, new RegExp(
+    run.files.analysisToolPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  ));
   assert.match(analysisPrompt, /Contrast successful and failed tool outcomes/);
   assert.match(analysisPrompt, /use only exact, unmodified `ev:\.\.\.` IDs/);
   assert.match(analysisPrompt, /Never append descriptions, parentheses, quotes, line numbers, or filesystem paths/);
@@ -845,12 +874,17 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
 
   const artifacts = JSON.parse(readFileSync(run.files.artifactsPath, "utf-8"));
   assert.equal(artifacts.files.length, 2);
-  assert.equal(artifacts.files[0].relativePath, path.join("review-session", "SKILL.md"));
-  assert.match(artifacts.files[0].artifactId, /^artifact:/);
-  assert.ok(existsSync(artifacts.files[0].snapshotPath));
-  assert.equal(artifacts.files[1].relativePath, "AGENTS.md");
-  assert.equal(artifacts.files[1].explicit, true);
-  assert.equal(artifacts.files[1].artifactId, "artifact:file:AGENTS.md");
+  assert.equal(
+    artifacts.files.some((file) => file.sourcePath.includes(`${path.sep}.opensessionviewer${path.sep}`)),
+    false
+  );
+  const skillArtifact = artifacts.files.find(
+    (file) => file.relativePath === path.join("skills", "review-session", "SKILL.md")
+  );
+  const agentsArtifact = artifacts.files.find((file) => file.relativePath === "AGENTS.md");
+  assert.match(skillArtifact.artifactId, /^artifact:/);
+  assert.ok(existsSync(skillArtifact.snapshotPath));
+  assert.equal(agentsArtifact.explicit, false);
 
   const seed = JSON.parse(readFileSync(run.files.evaluationSeedPath, "utf-8"));
   assert.equal(seed.status, "proposed");
@@ -860,6 +894,13 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
 
   const mainInfo = runAnalysisTool(run.runDir, "session_main_info");
   assert.equal(mainInfo.session.direct.toolCalls, 2);
+  const bundledTool = spawnSync(
+    process.execPath,
+    [run.files.analysisToolPath, run.runDir, "session_main_info"],
+    { encoding: "utf-8" }
+  );
+  assert.equal(bundledTool.status, 0, bundledTool.stderr);
+  assert.equal(JSON.parse(bundledTool.stdout).session.direct.toolCalls, 2);
   assert.equal(mainInfo.session.direct.errors, 1);
   assert.equal(mainInfo.systemPrompts.length, 1);
   const systemPrompts = runAnalysisTool(run.runDir, "session_query_system_prompts");
@@ -891,13 +932,13 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   const extensions = runAnalysisTool(run.runDir, "extension_list");
   assert.equal(extensions.total, 2);
   const extension = runAnalysisTool(run.runDir, "extension_get", {
-    artifactId: artifacts.files[0].artifactId
+    artifactId: skillArtifact.artifactId
   });
   assert.match(extension.content, /Use execution evidence/);
 
   const rootEvidenceId = seed.cases[0].sourceEvidence[0];
-  const artifactId = artifacts.files[0].artifactId;
-  const explicitArtifactId = artifacts.files[1].artifactId;
+  const artifactId = skillArtifact.artifactId;
+  const rulesArtifactId = agentsArtifact.artifactId;
 
   writeFileSync(
     run.files.reportPath,
@@ -986,7 +1027,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
         artifactRoot: projectPath,
         artifactPath: "AGENTS.md",
         description: "Require executable verification.",
-        evidence: [explicitArtifactId],
+        evidence: [rulesArtifactId],
         expectedBenefit: "Fewer unverified recommendations.",
         risks: ["May be too strict for exploratory work."],
         validationCaseIds: ["replay", "held-out", "regression"]
@@ -1012,6 +1053,20 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.equal(completedRuns[0].outputs.proposals.available, true);
   assert.equal(completedRuns[0].validation.evaluationCaseCount, 3);
 
+  const generatedTargetProposal = JSON.parse(readFileSync(run.files.proposalsPath, "utf-8"));
+  generatedTargetProposal.proposals[0].artifactPath = path.relative(
+    projectPath,
+    run.files.reportPath
+  );
+  writeFileSync(run.files.proposalsPath, JSON.stringify(generatedTargetProposal));
+  const generatedTarget = validateAnalysisOutputs(run.runDir, 0, run.integrity);
+  assert.equal(generatedTarget.state, "invalid");
+  assert.ok(
+    generatedTarget.validation.errors.some((error) => /generated analysis output/.test(error))
+  );
+  generatedTargetProposal.proposals[0].artifactPath = "AGENTS.md";
+  writeFileSync(run.files.proposalsPath, JSON.stringify(generatedTargetProposal));
+
   writeFileSync(run.files.evidencePath, `${readFileSync(run.files.evidencePath, "utf-8")}\n`);
   const tampered = validateAnalysisOutputs(run.runDir, 0, run.integrity);
   assert.equal(tampered.state, "invalid");
@@ -1033,6 +1088,39 @@ test("analysis layout resolves legacy flat run files", () => {
     resolveAnalysisRunPath(runDir, manifest, "evidenceIndexPath"),
     path.join(runDir, "evidence-index.json")
   );
+});
+
+test("analysis run listing preserves legacy metadata-directory runs", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-legacy-runs-"));
+  const projectPath = path.join(temp, "project");
+  const metaDir = path.join(temp, "meta");
+  const runDir = path.join(metaDir, "analysis", "legacy-run");
+  mkdirSync(projectPath, { recursive: true });
+  mkdirSync(runDir, { recursive: true });
+  writeFileSync(path.join(runDir, "manifest.json"), `${JSON.stringify({
+    schemaVersion: 1,
+    runId: "legacy-run",
+    provider: "codex",
+    sessionId: "legacy-session",
+    target: "skills",
+    state: "failed",
+    createdAt: "2026-06-01T00:00:00.000Z"
+  })}\n`);
+
+  assert.equal(
+    getAnalysisOutputRoot(projectPath, {}, metaDir),
+    path.join(projectPath, ".opensessionviewer", "analysis")
+  );
+  const runs = listSessionAnalysisRuns({
+    providerId: "codex",
+    sessionId: "legacy-session",
+    directory: projectPath,
+    analysisConfig: {},
+    metaDir
+  });
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].runId, "legacy-run");
+  assert.equal(runs[0].runDir, runDir);
 });
 
 test("session analysis requires enabled provider and target configuration", () => {
@@ -1147,7 +1235,6 @@ test("built-in analysis targets resolve without target-specific config", () => {
       }
     }
   };
-
   assert.deepEqual(
     getAnalysisTargetIds(provider, analysisConfig),
     Object.keys(BUILTIN_ANALYSIS_TARGETS)

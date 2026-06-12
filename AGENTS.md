@@ -248,10 +248,17 @@ The analysis lifecycle is:
 
 1. Resolve provider and target configuration.
 2. Snapshot bounded artifacts and normalized session evidence.
-3. Write the prompt, manifest, integrity metadata, and run inputs.
-4. Launch the configured analyzer through the structured PowerShell wrapper.
-5. Run `analysis-validator.js` after the analyzer exits.
-6. Surface only the validator-derived state and outputs in the UI.
+3. Copy the read-only query helper into the run-local `tools/` directory.
+4. Write the prompt, manifest, integrity metadata, and run inputs.
+5. Launch the configured analyzer through the structured PowerShell wrapper.
+6. Run `analysis-validator.js` after the analyzer exits.
+7. Surface only the validator-derived state and outputs in the UI.
+
+Unconfigured runs belong under
+`<project>/.opensessionviewer/analysis` so project-scoped analyzers can access
+their evidence, helper, and outputs. Continue discovering legacy runs under the
+viewer metadata directory. Explicit absolute output directories remain valid,
+but the configured analyzer environment must be able to access them.
 
 Keep current and legacy layout resolution in `src/analysis-layout.ts` when
 moving run files. Any new analyzer output must have:

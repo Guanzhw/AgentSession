@@ -13,6 +13,9 @@ const CATEGORIZED_FILES = {
   evidenceIndexPath: "evidence/evidence-index.json",
   evidencePath: "evidence/evidence.jsonl",
   artifactsPath: "evidence/artifacts.json",
+  analysisToolPath: "tools/analysis-tools.js",
+  analysisLayoutPath: "tools/analysis-layout.js",
+  analysisToolPackagePath: "tools/package.json",
   messagesPath: "diagnostics/messages.json",
   treePath: "diagnostics/tree.json",
   containerPath: "diagnostics/container.json",
@@ -65,6 +68,7 @@ export function ensureAnalysisRunDirectories(
     files.reportPath,
     files.sessionPath,
     files.sessionIndexPath,
+    files.analysisToolPath,
     files.artifactSnapshotsDir,
     ...(includeDiagnostics ? [files.messagesPath] : [])
   ];

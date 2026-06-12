@@ -209,6 +209,7 @@ export function validateAnalysisOutputs(runDir, processExitCode = 0, expectedInt
       ? artifacts.roots.map((root) => path.resolve(String(root)))
       : []
   );
+  const analysisOutputRoot = path.dirname(resolvedRunDir);
   const allowedExplicitTargets = new Set(
     Array.isArray(artifacts?.files)
       ? artifacts.files
@@ -250,12 +251,19 @@ export function validateAnalysisOutputs(runDir, processExitCode = 0, expectedInt
         validateEvidenceRefs(proposal.evidence, `${label} evidence`);
         const artifactRoot = path.resolve(String(proposal.artifactRoot || ""));
         const target = `${artifactRoot}\0${proposal.artifactPath}`;
+        const proposedPath = path.resolve(artifactRoot, String(proposal.artifactPath || ""));
         const targetsExplicitFile = allowedExplicitTargets.has(target);
         if (!allowedRoots.has(artifactRoot) && !targetsExplicitFile) {
           errors.push(`${label} uses an artifact root outside artifacts.json`);
         }
         if (!targetsExplicitFile && !isInsideRoot(artifactRoot, proposal.artifactPath)) {
           errors.push(`${label} artifactPath escapes its artifact root`);
+        }
+        if (
+          proposedPath === analysisOutputRoot
+          || proposedPath.startsWith(`${analysisOutputRoot}${path.sep}`)
+        ) {
+          errors.push(`${label} targets generated analysis output`);
         }
         if (proposalTargets.has(target)) {
           errors.push(`${label} duplicates another proposal target`);

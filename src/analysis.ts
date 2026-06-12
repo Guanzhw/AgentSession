@@ -1,4 +1,5 @@
 import {
+  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -322,7 +323,14 @@ function addArtifactFile(sourcePath, root, extensions, output, state, explicit =
   }
 }
 
-function walkArtifactFiles(root, extensions, output, state, artifactRoot = root) {
+function isInsideExcludedRoot(candidate, excludedRoots) {
+  const resolved = path.resolve(candidate);
+  return excludedRoots.some((root) => (
+    resolved === root || resolved.startsWith(`${root}${path.sep}`)
+  ));
+}
+
+function walkArtifactFiles(root, extensions, output, state, artifactRoot = root, excludedRoots = []) {
   if (output.length >= MAX_ARTIFACT_FILES || state.totalBytes >= MAX_TOTAL_ARTIFACT_BYTES) {
     return;
   }
@@ -340,12 +348,15 @@ function walkArtifactFiles(root, extensions, output, state, artifactRoot = root)
     }
     const fullPath = path.join(root, entry.name);
     try {
+      if (isInsideExcludedRoot(fullPath, excludedRoots)) {
+        continue;
+      }
       const info = lstatSync(fullPath);
       if (info.isSymbolicLink()) {
         continue;
       }
       if (info.isDirectory()) {
-        walkArtifactFiles(fullPath, extensions, output, state, artifactRoot);
+        walkArtifactFiles(fullPath, extensions, output, state, artifactRoot, excludedRoots);
         continue;
       }
       addArtifactFile(fullPath, artifactRoot, extensions, output, state);
@@ -366,7 +377,8 @@ function truncateTextBuffer(buffer, maxBytes) {
   return buffer.subarray(0, end);
 }
 
-function snapshotArtifacts(projectPath, snapshotDir, target) {
+function snapshotArtifacts(projectPath, snapshotDir, target, excludedRoots = []) {
+  const resolvedExcludedRoots = excludedRoots.map((root) => path.resolve(root));
   const roots = [];
   const seenRoots = new Set();
   for (const configuredRoot of target.artifactRoots || []) {
@@ -385,12 +397,16 @@ function snapshotArtifacts(projectPath, snapshotDir, target) {
   const files = [];
   const state = { totalBytes: 0 };
   for (const root of roots) {
-    walkArtifactFiles(root, extensions, files, state);
+    walkArtifactFiles(root, extensions, files, state, root, resolvedExcludedRoots);
   }
   const seenFiles = new Set(files.map((file) => file.sourcePath));
   for (const configuredFile of target.artifactFiles || []) {
     const resolved = resolveArtifactFile(projectPath, configuredFile);
-    if (!resolved || seenFiles.has(resolved)) {
+    if (
+      !resolved
+      || seenFiles.has(resolved)
+      || isInsideExcludedRoot(resolved, resolvedExcludedRoots)
+    ) {
       continue;
     }
     seenFiles.add(resolved);
@@ -698,7 +714,7 @@ export function buildAnalysisPromptPreview({
     projectPath: "<session-project-directory>",
     customPrompt: configuredPrompt,
     files: previewFiles,
-    analysisToolPath: "<opensessionviewer-analysis-tool>",
+    analysisToolPath: previewFiles.analysisToolPath,
     rawSnapshotsIncluded: analysisConfig.includeRawSnapshots === true
       || settings.target.includeRawSnapshots === true
   });
@@ -733,7 +749,7 @@ export function getAnalysisOutputRoot(directory, analysisConfig, metaDir) {
     ? path.isAbsolute(configuredOutput)
       ? path.resolve(configuredOutput)
       : path.resolve(projectPath, configuredOutput)
-    : path.join(metaDir, "analysis");
+    : path.join(projectPath, ".opensessionviewer", "analysis");
 }
 
 export function listSessionAnalysisRuns({
@@ -745,90 +761,103 @@ export function listSessionAnalysisRuns({
   limit = 10
 }) {
   const outputRoot = getAnalysisOutputRoot(directory, analysisConfig, metaDir);
-  if (!outputRoot || !existsSync(outputRoot)) {
+  if (!outputRoot) {
     return [];
   }
 
   const runs = [];
-  let entries = [];
-  try {
-    entries = readdirSync(outputRoot, { withFileTypes: true });
-  } catch {
-    return [];
+  const outputRoots = [outputRoot];
+  if (!analysisConfig?.outputDir && metaDir) {
+    const legacyOutputRoot = path.join(metaDir, "analysis");
+    if (path.resolve(legacyOutputRoot) !== path.resolve(outputRoot)) {
+      outputRoots.push(legacyOutputRoot);
+    }
   }
 
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.isSymbolicLink()) {
+  for (const currentOutputRoot of outputRoots) {
+    if (!existsSync(currentOutputRoot)) {
       continue;
     }
-    const runDir = path.join(outputRoot, entry.name);
-    const manifestPath = path.join(runDir, "manifest.json");
+    let entries = [];
     try {
-      const manifestStat = lstatSync(manifestPath);
-      if (!manifestStat.isFile() || manifestStat.isSymbolicLink() || manifestStat.size > 1024 * 1024) {
-        continue;
-      }
-      const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
-      if (manifest?.provider !== providerId || manifest?.sessionId !== sessionId) {
-        continue;
-      }
-      const validation = manifest.validation && typeof manifest.validation === "object"
-        ? manifest.validation
-        : null;
-      const outputAvailable = (filePath) => {
-        try {
-          const info = lstatSync(filePath);
-          return info.isFile() && !info.isSymbolicLink() && info.size <= 16 * 1024 * 1024;
-        } catch {
-          return false;
-        }
-      };
-      const reportPath = resolveAnalysisRunPath(runDir, manifest, "reportPath");
-      const evaluationPath = resolveAnalysisRunPath(runDir, manifest, "evaluationPath");
-      const proposalsPath = resolveAnalysisRunPath(runDir, manifest, "proposalsPath");
-      const outputs = {
-        report: {
-          fileName: "report.md",
-          relativePath: analysisRunRelativePath(runDir, reportPath),
-          available: outputAvailable(reportPath)
-        },
-        evaluation: {
-          fileName: "evaluation-proposals.json",
-          relativePath: analysisRunRelativePath(runDir, evaluationPath),
-          available: outputAvailable(evaluationPath)
-        },
-        proposals: {
-          fileName: "artifact-proposals.json",
-          relativePath: analysisRunRelativePath(runDir, proposalsPath),
-          available: outputAvailable(proposalsPath)
-        }
-      };
-      runs.push({
-        runId: String(manifest.runId || entry.name),
-        state: String(manifest.state || "unknown"),
-        active: manifest.state === "prepared" || manifest.state === "launched",
-        target: String(manifest.target || ""),
-        createdAt: manifest.createdAt || null,
-        launchedAt: manifest.launchedAt || null,
-        completedAt: manifest.completedAt || null,
-        runDir,
-        hasReport: outputs.report.available,
-        outputs,
-        validation: validation
-          ? {
-            ok: Boolean(validation.ok),
-            checkedAt: validation.checkedAt || null,
-            processExitCode: Number(validation.processExitCode) || 0,
-            errors: Array.isArray(validation.errors)
-              ? validation.errors.slice(0, 20).map((error) => String(error))
-              : [],
-            evaluationCaseCount: Number(validation.evaluationCaseCount) || 0,
-            artifactProposalCount: Number(validation.artifactProposalCount) || 0
-          }
-          : null
-      });
+      entries = readdirSync(currentOutputRoot, { withFileTypes: true });
     } catch {
-      // Ignore incomplete or malformed run directories.
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) {
+        continue;
+      }
+      const runDir = path.join(currentOutputRoot, entry.name);
+      const manifestPath = path.join(runDir, "manifest.json");
+      try {
+        const manifestStat = lstatSync(manifestPath);
+        if (!manifestStat.isFile() || manifestStat.isSymbolicLink() || manifestStat.size > 1024 * 1024) {
+          continue;
+        }
+        const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+        if (manifest?.provider !== providerId || manifest?.sessionId !== sessionId) {
+          continue;
+        }
+        const validation = manifest.validation && typeof manifest.validation === "object"
+          ? manifest.validation
+          : null;
+        const outputAvailable = (filePath) => {
+          try {
+            const info = lstatSync(filePath);
+            return info.isFile() && !info.isSymbolicLink() && info.size <= 16 * 1024 * 1024;
+          } catch {
+            return false;
+          }
+        };
+        const reportPath = resolveAnalysisRunPath(runDir, manifest, "reportPath");
+        const evaluationPath = resolveAnalysisRunPath(runDir, manifest, "evaluationPath");
+        const proposalsPath = resolveAnalysisRunPath(runDir, manifest, "proposalsPath");
+        const outputs = {
+          report: {
+            fileName: "report.md",
+            relativePath: analysisRunRelativePath(runDir, reportPath),
+            available: outputAvailable(reportPath)
+          },
+          evaluation: {
+            fileName: "evaluation-proposals.json",
+            relativePath: analysisRunRelativePath(runDir, evaluationPath),
+            available: outputAvailable(evaluationPath)
+          },
+          proposals: {
+            fileName: "artifact-proposals.json",
+            relativePath: analysisRunRelativePath(runDir, proposalsPath),
+            available: outputAvailable(proposalsPath)
+          }
+        };
+        runs.push({
+          runId: String(manifest.runId || entry.name),
+          state: String(manifest.state || "unknown"),
+          active: manifest.state === "prepared" || manifest.state === "launched",
+          target: String(manifest.target || ""),
+          createdAt: manifest.createdAt || null,
+          launchedAt: manifest.launchedAt || null,
+          completedAt: manifest.completedAt || null,
+          runDir,
+          hasReport: outputs.report.available,
+          outputs,
+          validation: validation
+            ? {
+              ok: Boolean(validation.ok),
+              checkedAt: validation.checkedAt || null,
+              processExitCode: Number(validation.processExitCode) || 0,
+              errors: Array.isArray(validation.errors)
+                ? validation.errors.slice(0, 20).map((error) => String(error))
+                : [],
+              evaluationCaseCount: Number(validation.evaluationCaseCount) || 0,
+              artifactProposalCount: Number(validation.artifactProposalCount) || 0
+            }
+            : null
+        });
+      } catch {
+        // Ignore incomplete or malformed run directories.
+      }
     }
   }
 
@@ -881,7 +910,12 @@ export function prepareSessionAnalysis({
     || settings.target.includeRawSnapshots === true;
   const files = getAnalysisRunPaths(runDir);
   ensureAnalysisRunDirectories(files, includeRawSnapshots);
-  const artifacts = snapshotArtifacts(projectPath, files.artifactSnapshotsDir, settings.target);
+  const artifacts = snapshotArtifacts(
+    projectPath,
+    files.artifactSnapshotsDir,
+    settings.target,
+    [outputRoot]
+  );
 
   const evidence = writeAnalysisEvidence({
     provider,
@@ -902,10 +936,14 @@ export function prepareSessionAnalysis({
     settings.target.prompt,
     readPromptFile(settings.target.promptFile, configPath)
   ].filter(Boolean).join("\n\n");
-  const analysisToolPath = path.join(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "analysis-tools.js"
-  );
+  const runtimeDir = path.dirname(fileURLToPath(import.meta.url));
+  copyFileSync(path.join(runtimeDir, "analysis-tools.js"), files.analysisToolPath);
+  copyFileSync(path.join(runtimeDir, "analysis-layout.js"), files.analysisLayoutPath);
+  writeJson(files.analysisToolPackagePath, {
+    private: true,
+    type: "module"
+  });
+  const analysisToolPath = files.analysisToolPath;
   const prompt = buildAnalysisPrompt({
     provider,
     session,
@@ -946,6 +984,9 @@ export function prepareSessionAnalysis({
         files.evidenceIndexPath,
         files.evidencePath,
         files.artifactsPath,
+        files.analysisToolPath,
+        files.analysisLayoutPath,
+        files.analysisToolPackagePath,
         files.evaluationSeedPath,
         files.promptPath,
         ...(includeRawSnapshots
