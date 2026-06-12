@@ -17,6 +17,7 @@ import { closeDb, getTokenStats } from "../dist/src/db.js";
 import { buildCodeAgentSessionTree } from "../dist/src/providers/codeagent/session-tree.js";
 import { enrichCodeAgentSession } from "../dist/src/providers/codeagent/schema.js";
 import { buildOpenCodeSessionTree } from "../dist/src/providers/opencode/session-tree.js";
+import { buildOpenCodeRuntimeEnvironment } from "../dist/src/providers/opencode/runtime-environment.js";
 import { buildFlowTreeFromContainer } from "../dist/src/providers/shared/flow-tree.js";
 import { renderSessionPage } from "../dist/src/views/session.js";
 import { renderSettingsPage } from "../dist/src/views/settings.js";
@@ -448,6 +449,57 @@ test("terminal launch requires the explicit startup flag", () => {
   assert.equal(parseArgs(["--config", configPath, "--allow-terminal-launch"]).allowTerminalLaunch, true);
 });
 
+test("OpenCode runtime environment resolves project and user agent extensions", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-runtime-"));
+  const projectPath = path.join(temp, "project");
+  const configHome = path.join(temp, "config");
+  const userOpenCode = path.join(configHome, "opencode");
+  mkdirSync(path.join(projectPath, ".git"), { recursive: true });
+  mkdirSync(path.join(projectPath, ".opencode", "agents"), { recursive: true });
+  mkdirSync(path.join(projectPath, ".opencode", "skills", "project-skill"), { recursive: true });
+  mkdirSync(path.join(userOpenCode, "skills", "user-skill"), { recursive: true });
+  writeFileSync(path.join(projectPath, ".opencode", "agents", "review.md"), "# Review agent\n");
+  writeFileSync(
+    path.join(projectPath, ".opencode", "skills", "project-skill", "SKILL.md"),
+    "# Project skill\n"
+  );
+  writeFileSync(
+    path.join(userOpenCode, "skills", "user-skill", "SKILL.md"),
+    "# User skill\n"
+  );
+  writeFileSync(
+    path.join(userOpenCode, "opencode.json"),
+    '{"plugin":["example-plugin"]}\n'
+  );
+  const previousConfigHome = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = configHome;
+  try {
+    const runtime = buildOpenCodeRuntimeEnvironment("runtime-session", projectPath);
+    assert.equal(runtime.resolution, "current-local");
+    assert.ok(runtime.extensions.some((entry) => (
+      entry.scope === "project" && entry.kind === "agent" && entry.name === "review"
+    )));
+    assert.ok(runtime.extensions.some((entry) => (
+      entry.scope === "project" && entry.kind === "skill" && entry.name === "project-skill"
+    )));
+    assert.ok(runtime.extensions.some((entry) => (
+      entry.scope === "user" && entry.kind === "skill" && entry.name === "user-skill"
+    )));
+    assert.ok(runtime.extensions.some((entry) => (
+      entry.scope === "user"
+      && entry.kind === "plugin"
+      && entry.name === "example-plugin"
+      && entry.capturable === false
+    )));
+  } finally {
+    if (previousConfigHome === undefined) {
+      delete process.env.XDG_CONFIG_HOME;
+    } else {
+      process.env.XDG_CONFIG_HOME = previousConfigHome;
+    }
+  }
+});
+
 test("settings configuration validates, persists, and applies runtime fields", () => {
   const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-settings-"));
   const configPath = path.join(temp, "nested", "config.json");
@@ -663,9 +715,21 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-analysis-"));
   const projectPath = path.join(temp, "project");
   const skillPath = path.join(projectPath, "skills", "review-session", "SKILL.md");
+  const projectRuntimeSkillPath = path.join(
+    projectPath,
+    ".agents",
+    "skills",
+    "project-runtime",
+    "SKILL.md"
+  );
+  const userHookPath = path.join(temp, "user-runtime", "hooks.json");
   const agentsPath = path.join(projectPath, "AGENTS.md");
   mkdirSync(path.dirname(skillPath), { recursive: true });
+  mkdirSync(path.dirname(projectRuntimeSkillPath), { recursive: true });
+  mkdirSync(path.dirname(userHookPath), { recursive: true });
   writeFileSync(skillPath, "# Review session\n\nUse execution evidence.\n");
+  writeFileSync(projectRuntimeSkillPath, "# Project runtime\n\nUse project context.\n");
+  writeFileSync(userHookPath, '{"hooks":{"afterTool":"verify"}}\n');
   writeFileSync(agentsPath, "# Agent rules\n\nRun deterministic validation.\n");
   writeFileSync(path.join(projectPath, "package.json"), '{"type":"commonjs"}\n');
   const staleAnalysisReport = path.join(
@@ -754,6 +818,55 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     getTokenStats: () => [],
     searchMessages: () => [],
     exportSession: () => null,
+    getRuntimeEnvironment: () => ({
+      sessionId: "session-analysis",
+      resolution: "current-local",
+      note: "Resolved current test runtime.",
+      extensions: [
+        {
+          id: "runtime:codex:project:skill:project",
+          provider: "codex",
+          scope: "project",
+          kind: "skill",
+          name: "project-runtime",
+          source: projectRuntimeSkillPath,
+          sourcePath: path.dirname(projectRuntimeSkillPath),
+          sourceType: "directory",
+          available: true,
+          capturable: true,
+          defaultSelected: true,
+          note: "Project skill"
+        },
+        {
+          id: "runtime:codex:user:hook:user",
+          provider: "codex",
+          scope: "user",
+          kind: "hook",
+          name: "user hooks",
+          source: userHookPath,
+          sourcePath: userHookPath,
+          sourceType: "config",
+          available: true,
+          capturable: true,
+          defaultSelected: true,
+          note: "User hooks"
+        },
+        {
+          id: "runtime:codex:user:plugin:metadata",
+          provider: "codex",
+          scope: "user",
+          kind: "plugin",
+          name: "metadata-only",
+          source: "config.toml#plugins.metadata-only",
+          sourcePath: null,
+          sourceType: "package",
+          available: true,
+          capturable: false,
+          defaultSelected: true,
+          note: "Configured package"
+        }
+      ]
+    }),
     getSystemPrompts: () => ({
       sessionId: "session-analysis",
       sections: [
@@ -808,6 +921,12 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     action.targets.map((target) => target.id),
     Object.keys(BUILTIN_ANALYSIS_TARGETS)
   );
+  assert.equal(action.runtimeEnvironment.resolution, "current-local");
+  assert.deepEqual(action.selectedRuntimeExtensionIds, [
+    "runtime:codex:project:skill:project",
+    "runtime:codex:user:hook:user",
+    "runtime:codex:user:plugin:metadata"
+  ]);
 
   const run = prepareSessionAnalysis({
     provider,
@@ -877,7 +996,12 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   );
 
   const artifacts = JSON.parse(readFileSync(run.files.artifactsPath, "utf-8"));
-  assert.equal(artifacts.files.length, 2);
+  assert.equal(artifacts.files.length, 4);
+  assert.equal(artifacts.runtimeEnvironment.extensions.length, 3);
+  assert.deepEqual(
+    artifacts.runtimeEnvironment.selectedExtensionIds,
+    action.selectedRuntimeExtensionIds
+  );
   assert.equal(
     artifacts.files.some((file) => file.sourcePath.includes(`${path.sep}.opensessionviewer${path.sep}`)),
     false
@@ -886,9 +1010,21 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     (file) => file.relativePath === path.join("skills", "review-session", "SKILL.md")
   );
   const agentsArtifact = artifacts.files.find((file) => file.relativePath === "AGENTS.md");
+  const projectRuntimeArtifact = artifacts.files.find(
+    (file) => file.sourcePath === projectRuntimeSkillPath
+  );
+  const userRuntimeArtifact = artifacts.files.find((file) => file.sourcePath === userHookPath);
   assert.match(skillArtifact.artifactId, /^artifact:/);
   assert.ok(existsSync(skillArtifact.snapshotPath));
   assert.equal(agentsArtifact.explicit, false);
+  assert.deepEqual(
+    projectRuntimeArtifact.runtimeExtensionIds,
+    ["runtime:codex:project:skill:project"]
+  );
+  assert.deepEqual(
+    userRuntimeArtifact.runtimeExtensionIds,
+    ["runtime:codex:user:hook:user"]
+  );
 
   const seed = JSON.parse(readFileSync(run.files.evaluationSeedPath, "utf-8"));
   assert.equal(seed.status, "proposed");
@@ -920,14 +1056,14 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     formatAnalysisToolOutput(mainInfo)
   );
   const formattedArtifact = formatAnalysisToolOutput({
-    tool: "extension_get",
+    tool: "artifact_get",
     artifact: {
       artifactId: "artifact:example",
       relativePath: "skills/example/SKILL.md"
     },
     content: "# Example\n\n```text\nUse compact output.\n```"
   });
-  assert.match(formattedArtifact, /^# extension_get/m);
+  assert.match(formattedArtifact, /^# artifact_get/m);
   assert.match(formattedArtifact, /artifact:example/);
   assert.match(formattedArtifact, /````text\n# Example/);
   assert.match(formattedArtifact, /Use compact output\./);
@@ -960,11 +1096,18 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.equal(exactEvidence.complete, true);
   assert.equal(exactEvidence.record.status, "error");
   const extensions = runAnalysisTool(run.runDir, "extension_list");
-  assert.equal(extensions.total, 2);
+  assert.equal(extensions.total, 3);
   const extension = runAnalysisTool(run.runDir, "extension_get", {
+    extensionId: "runtime:codex:project:skill:project"
+  });
+  assert.equal(extension.extension.scope, "project");
+  assert.equal(extension.artifacts[0].artifactId, projectRuntimeArtifact.artifactId);
+  const artifactList = runAnalysisTool(run.runDir, "artifact_list");
+  assert.equal(artifactList.total, 4);
+  const artifact = runAnalysisTool(run.runDir, "artifact_get", {
     artifactId: skillArtifact.artifactId
   });
-  assert.match(extension.content, /Use execution evidence/);
+  assert.match(artifact.content, /Use execution evidence/);
 
   const rootEvidenceId = seed.cases[0].sourceEvidence[0];
   const artifactId = skillArtifact.artifactId;
@@ -1221,6 +1364,32 @@ test("session rendering shows configured analysis actions only when launch is al
         { id: "tests", label: "Analyze tests", available: true }
       ],
       selectedTargets: ["skills", "tests"],
+      selectedRuntimeExtensionIds: [
+        "runtime:codex:project:skill:project",
+        "runtime:codex:user:hook:user"
+      ],
+      runtimeEnvironment: {
+        resolution: "current-local",
+        note: "Current local runtime.",
+        extensions: [
+          {
+            id: "runtime:codex:project:skill:project",
+            scope: "project",
+            kind: "skill",
+            name: "project-runtime",
+            source: "D:\\project\\.agents\\skills\\project-runtime",
+            available: true
+          },
+          {
+            id: "runtime:codex:user:hook:user",
+            scope: "user",
+            kind: "hook",
+            name: "user hooks",
+            source: "C:\\Users\\me\\.codex\\config.toml#hooks",
+            available: true
+          }
+        ]
+      },
       label: null,
       available: true
     },
@@ -1245,6 +1414,11 @@ test("session rendering shows configured analysis actions only when launch is al
   assert.match(visible, /class="analysis-target-checkbox"/);
   assert.match(visible, /value="skills"\s+checked/);
   assert.match(visible, /value="tests"\s+checked/);
+  assert.match(visible, /class="analysis-runtime-extension-checkbox"/);
+  assert.match(visible, /project-runtime/);
+  assert.match(visible, /user hooks/);
+  assert.match(visible, /Project scope/);
+  assert.match(visible, /User scope/);
   assert.match(visible, /data-action="resume-session"/);
   assert.doesNotMatch(visible, /data-action="copy-resume-command"/);
   assert.match(visible, /id="analysis-status-panel"/);
@@ -1278,7 +1452,7 @@ test("built-in analysis targets resolve without target-specific config", () => {
     assert.equal(settings.targetId, targetId);
     assert.equal(settings.target.label, expected.label);
     assert.deepEqual(settings.target.artifactRoots, expected.artifactRoots);
-    assert.deepEqual(settings.target.extensions, expected.extensions);
+    assert.deepEqual(settings.target.fileExtensions, expected.fileExtensions);
     assert.match(settings.target.prompt, /\S/);
   }
 });

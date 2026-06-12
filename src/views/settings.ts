@@ -132,7 +132,7 @@ export function renderSettingsPage({
   const targetDefaults = builtinTargets[targetId] || {
       label: `Analyze ${targetId}`,
       artifactRoots: [],
-      extensions: defaultTarget.extensions,
+      fileExtensions: defaultTarget.fileExtensions,
       promptFile: ""
   };
   const target = { ...targetDefaults, ...configuredTarget };
@@ -314,9 +314,12 @@ export function renderSettingsPage({
               help: t("settings.artifact_files_help")
             })}
             ${textareaField({
-              id: "settings-extensions",
-              label: t("settings.extensions"),
-              values: stringList(target.extensions, defaultTarget.extensions),
+              id: "settings-file-extensions",
+              label: t("settings.file_extensions"),
+              values: stringList(
+                target.fileExtensions || (target as any).extensions,
+                defaultTarget.fileExtensions
+              ),
               help: t("settings.one_per_line")
             })}
           </div>

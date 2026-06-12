@@ -5,6 +5,7 @@ import { parseSession, extractMeta, recordsToMessages } from "./parser.js";
 import { icons } from "../../icons.js";
 import type { ProviderAdapter } from "../interface.js";
 import { buildMessageSessionViews } from "../shared/message-session.js";
+import { buildCodexRuntimeEnvironment } from "./runtime-environment.js";
 
 function getCodexDir() {
   return getConfig().codexDir;
@@ -83,6 +84,13 @@ const codex = {
       } catch { /* skip */ }
     }
     return null;
+  },
+
+  getRuntimeEnvironment(sessionId) {
+    const session = this.getSession(sessionId);
+    return session?.directory
+      ? buildCodexRuntimeEnvironment(sessionId, session.directory, getCodexDir())
+      : null;
   },
 
   getMessages(sessionId) {

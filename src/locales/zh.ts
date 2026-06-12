@@ -76,6 +76,9 @@ export const zh = {
   "analysis.status_description": "打开最终分析产物，并跟踪执行或校验详情。",
   "analysis.refresh": "刷新",
   "analysis.targets_label": "分析目标",
+  "analysis.runtime_label": "运行时扩展",
+  "analysis.runtime_scope_project": "项目级",
+  "analysis.runtime_scope_user": "用户级",
 
   // Settings
   "settings.title": "设置",
@@ -126,7 +129,7 @@ export const zh = {
   "settings.artifact_roots": "工件根目录",
   "settings.artifact_files": "包含的文件",
   "settings.artifact_files_help": "可选的项目相对文件路径，每行一个。",
-  "settings.extensions": "包含的文件扩展名",
+  "settings.file_extensions": "产物文件后缀筛选",
   "settings.one_per_line": "每行输入一个值。",
   "settings.analyzer_title": "Provider Analyzer",
   "settings.analyzer_description": "用于当前 Provider 会话分析的命令。",

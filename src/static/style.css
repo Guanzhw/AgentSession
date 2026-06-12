@@ -3656,6 +3656,54 @@ pre code.hljs {
   box-shadow: var(--shadow-md);
 }
 
+.analysis-runtime-choices {
+  grid-template-columns: 1fr 1fr;
+  width: min(620px, calc(100vw - 32px));
+  max-height: min(520px, calc(100vh - 140px));
+  overflow: auto;
+}
+
+.analysis-runtime-note {
+  grid-column: 1 / -1;
+  margin: 0 0 4px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.analysis-runtime-group h4 {
+  margin: 2px 8px 5px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.analysis-runtime-choice {
+  align-items: flex-start;
+}
+
+.analysis-runtime-choice span {
+  display: grid;
+  min-width: 0;
+}
+
+.analysis-runtime-choice span > strong {
+  overflow: hidden;
+  color: inherit;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.analysis-runtime-choice small {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .analysis-target-choice {
   display: flex;
   align-items: center;

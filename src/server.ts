@@ -790,13 +790,39 @@ export async function startServer(config = getConfig()) {
             target: unavailableTarget
           }, 409);
         }
+        const requestedRuntimeExtensionIds: string[] = Array.isArray(body.runtimeExtensionIds)
+          ? [...new Set<string>(
+            (body.runtimeExtensionIds as unknown[])
+              .filter((extensionId: unknown): extensionId is string => typeof extensionId === "string")
+              .map((extensionId: string) => extensionId.trim())
+              .filter(Boolean)
+          )]
+          : action?.selectedRuntimeExtensionIds || [];
+        if (requestedRuntimeExtensionIds.length > 300) {
+          return json(res, { ok: false, error: "Too many runtime extensions selected" }, 400);
+        }
+        const availableRuntimeExtensions = new Set(
+          (action?.runtimeEnvironment?.extensions || [])
+            .filter((extension) => extension.available)
+            .map((extension) => extension.id)
+        );
+        const unknownRuntimeExtension = requestedRuntimeExtensionIds.find(
+          (extensionId) => !availableRuntimeExtensions.has(extensionId)
+        );
+        if (unknownRuntimeExtension) {
+          return json(res, {
+            ok: false,
+            error: `Runtime extension is unavailable: ${unknownRuntimeExtension}`
+          }, 400);
+        }
         const runs = selectedTargets.map((targetId) => prepareSessionAnalysis({
           provider: adapter,
           sessionId,
           analysisConfig: appConfig.analysis,
           metaDir: appConfig.metaDir,
           configPath: appConfig.configPath,
-          targetId
+          targetId,
+          runtimeExtensionIds: requestedRuntimeExtensionIds
         }));
         for (const run of runs) {
           launchSessionAnalysis(run, appConfig.resumeShell);

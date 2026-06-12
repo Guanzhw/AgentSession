@@ -232,7 +232,7 @@ export function validateUserConfig(config) {
               errors.push(`analysis.targets.${targetId} must be an object.`);
               continue;
             }
-            for (const field of ["artifactRoots", "artifactFiles", "extensions"]) {
+            for (const field of ["artifactRoots", "artifactFiles", "fileExtensions", "extensions"]) {
               if (target[field] !== undefined) {
                 validateStringArray(target[field], `analysis.targets.${targetId}.${field}`, errors);
               }

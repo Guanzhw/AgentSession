@@ -4,6 +4,7 @@ import { getConfig } from "../../config.js";
 import { parseSession, extractMeta, dataToMessages } from "./parser.js";
 import { icons } from "../../icons.js";
 import type { ProviderAdapter } from "../interface.js";
+import { buildGeminiRuntimeEnvironment } from "./runtime-environment.js";
 
 function getGeminiDir() {
   return getConfig().geminiDir;
@@ -69,6 +70,13 @@ const gemini = {
       } catch { /* skip */ }
     }
     return null;
+  },
+
+  getRuntimeEnvironment(sessionId) {
+    const session = this.getSession(sessionId);
+    return session?.directory
+      ? buildGeminiRuntimeEnvironment(sessionId, session.directory, getGeminiDir())
+      : null;
   },
 
   getMessages(sessionId) {

@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import type {
   AnalysisCommandSpec,
   ProviderAdapter,
+  RuntimeEnvironmentView,
   ResumeShellSpec
 } from "./providers/interface.js";
 import { makeEvidenceId, writeAnalysisEvidence } from "./analysis-evidence.js";
@@ -35,7 +36,7 @@ import { resolveExecutable, resolveProjectDirectory } from "./resume.js";
 const DEFAULT_TARGET = {
   label: "",
   artifactRoots: [],
-  extensions: DEFAULT_ANALYSIS_EXTENSIONS,
+  fileExtensions: DEFAULT_ANALYSIS_EXTENSIONS,
   prompt: ""
 };
 
@@ -120,17 +121,32 @@ function mergeTarget(base, override) {
   const left = base && typeof base === "object" ? base : {};
   const right = override && typeof override === "object" ? override : {};
   const defaultRoots = Array.isArray(left.artifactRoots) ? left.artifactRoots : DEFAULT_TARGET.artifactRoots;
-  const defaultExtensions = Array.isArray(left.extensions) ? left.extensions : DEFAULT_TARGET.extensions;
+  const defaultFileExtensions = Array.isArray(left.fileExtensions)
+    ? left.fileExtensions
+    : Array.isArray(left.extensions)
+      ? left.extensions
+      : DEFAULT_TARGET.fileExtensions;
   return {
     ...left,
     ...right,
     artifactRoots: Array.isArray(right.artifactRoots)
       ? right.artifactRoots
       : defaultRoots,
-    extensions: Array.isArray(right.extensions)
-      ? right.extensions
-      : defaultExtensions
+    fileExtensions: Array.isArray(right.fileExtensions)
+      ? right.fileExtensions
+      : Array.isArray(right.extensions)
+        ? right.extensions
+        : defaultFileExtensions
   };
+}
+
+function resolveRuntimeEnvironment(provider: ProviderAdapter, sessionId: string) {
+  try {
+    return provider.getRuntimeEnvironment?.(sessionId) || null;
+  } catch (error) {
+    console.warn(`Unable to resolve ${provider.id} runtime environment: ${error?.message || error}`);
+    return null;
+  }
 }
 
 function normalizeTargetIds(value): string[] {
@@ -250,6 +266,10 @@ export function getSessionAnalysisAction(
   if (!targets.length || !effectiveSelection.length) {
     return null;
   }
+  const runtimeEnvironment = resolveRuntimeEnvironment(provider, sessionId);
+  const selectedRuntimeExtensionIds = (runtimeEnvironment?.extensions || [])
+    .filter((extension) => extension.defaultSelected && extension.available)
+    .map((extension) => extension.id);
 
   return {
     target: effectiveSelection[0].id,
@@ -258,7 +278,9 @@ export function getSessionAnalysisAction(
     label: effectiveSelection.length === 1 ? effectiveSelection[0].label : null,
     available: true,
     sessionId,
-    projectPath
+    projectPath,
+    runtimeEnvironment,
+    selectedRuntimeExtensionIds
   };
 }
 
@@ -291,7 +313,24 @@ function resolveArtifactFile(projectPath, filePath) {
   }
 }
 
-function addArtifactFile(sourcePath, root, extensions, output, state, explicit = false) {
+function addArtifactFile(
+  sourcePath,
+  root,
+  extensions,
+  output,
+  state,
+  explicit = false,
+  runtimeExtensionIds = []
+) {
+  const existing = output.find((file) => file.sourcePath === sourcePath);
+  if (existing) {
+    existing.runtimeExtensionIds = [...new Set([
+      ...(existing.runtimeExtensionIds || []),
+      ...runtimeExtensionIds
+    ])];
+    existing.explicit = existing.explicit || explicit;
+    return;
+  }
   if (output.length >= MAX_ARTIFACT_FILES || state.totalBytes >= MAX_TOTAL_ARTIFACT_BYTES) {
     return;
   }
@@ -312,6 +351,7 @@ function addArtifactFile(sourcePath, root, extensions, output, state, explicit =
       sourcePath,
       root,
       explicit,
+      runtimeExtensionIds: [...runtimeExtensionIds],
       size: info.size,
       capturedBytes,
       truncated: info.size > capturedBytes,
@@ -330,7 +370,15 @@ function isInsideExcludedRoot(candidate, excludedRoots) {
   ));
 }
 
-function walkArtifactFiles(root, extensions, output, state, artifactRoot = root, excludedRoots = []) {
+function walkArtifactFiles(
+  root,
+  extensions,
+  output,
+  state,
+  artifactRoot = root,
+  excludedRoots = [],
+  runtimeExtensionIds = []
+) {
   if (output.length >= MAX_ARTIFACT_FILES || state.totalBytes >= MAX_TOTAL_ARTIFACT_BYTES) {
     return;
   }
@@ -356,10 +404,26 @@ function walkArtifactFiles(root, extensions, output, state, artifactRoot = root,
         continue;
       }
       if (info.isDirectory()) {
-        walkArtifactFiles(fullPath, extensions, output, state, artifactRoot, excludedRoots);
+        walkArtifactFiles(
+          fullPath,
+          extensions,
+          output,
+          state,
+          artifactRoot,
+          excludedRoots,
+          runtimeExtensionIds
+        );
         continue;
       }
-      addArtifactFile(fullPath, artifactRoot, extensions, output, state);
+      addArtifactFile(
+        fullPath,
+        artifactRoot,
+        extensions,
+        output,
+        state,
+        false,
+        runtimeExtensionIds
+      );
     } catch {
       // Files may disappear while the inventory is being generated.
     }
@@ -377,7 +441,14 @@ function truncateTextBuffer(buffer, maxBytes) {
   return buffer.subarray(0, end);
 }
 
-function snapshotArtifacts(projectPath, snapshotDir, target, excludedRoots = []) {
+function snapshotArtifacts(
+  projectPath,
+  snapshotDir,
+  target,
+  runtimeEnvironment: RuntimeEnvironmentView | null,
+  selectedRuntimeExtensionIds: string[],
+  excludedRoots = []
+) {
   const resolvedExcludedRoots = excludedRoots.map((root) => path.resolve(root));
   const roots = [];
   const seenRoots = new Set();
@@ -389,15 +460,62 @@ function snapshotArtifacts(projectPath, snapshotDir, target, excludedRoots = [])
     }
   }
 
-  const extensions = new Set(
-    (target.extensions || DEFAULT_TARGET.extensions)
+  const fileExtensions = new Set(
+    (target.fileExtensions || target.extensions || DEFAULT_TARGET.fileExtensions)
       .filter((entry) => typeof entry === "string")
       .map((entry) => entry.startsWith(".") ? entry.toLowerCase() : `.${entry.toLowerCase()}`)
   );
+  const runtimeFileExtensions = new Set([
+    ...fileExtensions,
+    ...DEFAULT_ANALYSIS_EXTENSIONS,
+    ".toml",
+    ".txt",
+    ".mdx"
+  ]);
+  const requestedRuntimeIds = new Set(selectedRuntimeExtensionIds);
+  const selectedRuntimeExtensions = (runtimeEnvironment?.extensions || [])
+    .filter((extension) => requestedRuntimeIds.has(extension.id));
+  const runtimeDirectoryExtensions = [];
+  const runtimeFileExtensionsToCapture = [];
+  for (const extension of selectedRuntimeExtensions) {
+    if (!extension.sourcePath || !extension.capturable) continue;
+    try {
+      const info = lstatSync(extension.sourcePath);
+      if (info.isDirectory()) {
+        const root = realpathSync(extension.sourcePath);
+        if (!seenRoots.has(root)) {
+          seenRoots.add(root);
+          roots.push(root);
+        }
+        runtimeDirectoryExtensions.push({ root, extensionId: extension.id });
+      } else if (info.isFile()) {
+        runtimeFileExtensionsToCapture.push({
+          sourcePath: realpathSync(extension.sourcePath),
+          extensionId: extension.id
+        });
+      }
+    } catch {
+      // Runtime entries may disappear after the page was rendered.
+    }
+  }
   const files = [];
   const state = { totalBytes: 0 };
-  for (const root of roots) {
-    walkArtifactFiles(root, extensions, files, state, root, resolvedExcludedRoots);
+  const targetRoots = roots.filter(
+    (root) => !runtimeDirectoryExtensions.some((entry) => entry.root === root)
+  );
+  for (const root of targetRoots) {
+    walkArtifactFiles(root, fileExtensions, files, state, root, resolvedExcludedRoots);
+  }
+  for (const runtimeRoot of runtimeDirectoryExtensions) {
+    walkArtifactFiles(
+      runtimeRoot.root,
+      runtimeFileExtensions,
+      files,
+      state,
+      runtimeRoot.root,
+      resolvedExcludedRoots,
+      [runtimeRoot.extensionId]
+    );
   }
   const seenFiles = new Set(files.map((file) => file.sourcePath));
   for (const configuredFile of target.artifactFiles || []) {
@@ -410,7 +528,21 @@ function snapshotArtifacts(projectPath, snapshotDir, target, excludedRoots = [])
       continue;
     }
     seenFiles.add(resolved);
-    addArtifactFile(resolved, path.dirname(resolved), extensions, files, state, true);
+    addArtifactFile(resolved, path.dirname(resolved), fileExtensions, files, state, true);
+  }
+  for (const runtimeFile of runtimeFileExtensionsToCapture) {
+    if (isInsideExcludedRoot(runtimeFile.sourcePath, resolvedExcludedRoots)) {
+      continue;
+    }
+    addArtifactFile(
+      runtimeFile.sourcePath,
+      path.dirname(runtimeFile.sourcePath),
+      runtimeFileExtensions,
+      files,
+      state,
+      true,
+      [runtimeFile.extensionId]
+    );
   }
 
   mkdirSync(snapshotDir, { recursive: true });
@@ -425,12 +557,13 @@ function snapshotArtifacts(projectPath, snapshotDir, target, excludedRoots = [])
     writeFileSync(snapshotPath, content);
     return {
       artifactId: file.explicit
-        ? `artifact:file:${path.relative(projectPath, file.sourcePath).split(path.sep).join("/")}`
+        ? `artifact:file:${safeSegment(path.relative(projectPath, file.sourcePath))}:${createHash("sha256").update(file.sourcePath).digest("hex").slice(0, 12)}`
         : `artifact:${rootIndex >= 0 ? rootIndex : "unknown"}:${relative.split(path.sep).join("/")}`,
       sourcePath: file.sourcePath,
       root,
       relativePath: relative,
       explicit: file.explicit,
+      runtimeExtensionIds: file.runtimeExtensionIds,
       snapshotPath,
       size: file.size,
       capturedBytes: content.length,
@@ -444,7 +577,15 @@ function snapshotArtifacts(projectPath, snapshotDir, target, excludedRoots = [])
     roots,
     snapshotRoot: snapshotDir,
     explicitFiles: inventory.filter((file) => file.explicit).map((file) => file.sourcePath),
-    extensions: [...extensions],
+    fileExtensions: [...fileExtensions],
+    runtimeEnvironment: runtimeEnvironment
+      ? {
+        resolution: runtimeEnvironment.resolution,
+        note: runtimeEnvironment.note,
+        selectedExtensionIds: selectedRuntimeExtensions.map((extension) => extension.id),
+        extensions: selectedRuntimeExtensions
+      }
+      : null,
     limits: {
       maxFiles: MAX_ARTIFACT_FILES,
       maxBytesPerFile: MAX_ARTIFACT_BYTES,
@@ -527,7 +668,7 @@ You are analyzing an existing ${provider.name} session as evidence for improving
 - Session hierarchy: ${files.sessionIndexPath}
 - Evidence metadata index: ${files.evidenceIndexPath}
 - Immutable evidence records: ${files.evidencePath}
-- Extension inventory and snapshots: ${files.artifactsPath}
+- Selected runtime extensions and artifact snapshots: ${files.artifactsPath}
 - Evaluation seed: ${files.evaluationSeedPath}
 - Read-only analysis tool: ${analysisToolPath}
 ${rawSnapshotsIncluded ? `- Optional raw diagnostic snapshots: ${files.messagesPath}, ${files.treePath}, ${files.containerPath}, ${files.metricsPath}, ${files.flowPath}, ${files.tracePath}` : ""}
@@ -547,7 +688,9 @@ node "${analysisToolPath}" "${runDir}" session_find_anomalies
 node "${analysisToolPath}" "${runDir}" session_query_context '{"evidenceId":"..."}'
 node "${analysisToolPath}" "${runDir}" session_get_evidence '{"evidenceId":"..."}'
 node "${analysisToolPath}" "${runDir}" extension_list
-node "${analysisToolPath}" "${runDir}" extension_get '{"artifactId":"..."}'
+node "${analysisToolPath}" "${runDir}" extension_get '{"extensionId":"..."}'
+node "${analysisToolPath}" "${runDir}" artifact_list
+node "${analysisToolPath}" "${runDir}" artifact_get '{"artifactId":"..."}'
 \`\`\`
 
 \`session_find_anomalies\` reports explicit interruption reasons separately
@@ -885,7 +1028,8 @@ export function prepareSessionAnalysis({
   analysisConfig,
   metaDir,
   configPath = "",
-  targetId = ""
+  targetId = "",
+  runtimeExtensionIds = null
 }) {
   const settings = resolveAnalysisSettings(provider, analysisConfig, targetId);
   if (!settings) {
@@ -911,10 +1055,26 @@ export function prepareSessionAnalysis({
     || settings.target.includeRawSnapshots === true;
   const files = getAnalysisRunPaths(runDir);
   ensureAnalysisRunDirectories(files, includeRawSnapshots);
+  const runtimeEnvironment = resolveRuntimeEnvironment(provider, sessionId);
+  const availableRuntimeIds = new Set(
+    (runtimeEnvironment?.extensions || [])
+      .filter((extension) => extension.available)
+      .map((extension) => extension.id)
+  );
+  const selectedRuntimeIds = runtimeExtensionIds === null
+    ? (runtimeEnvironment?.extensions || [])
+      .filter((extension) => extension.defaultSelected && extension.available)
+      .map((extension) => extension.id)
+    : [...new Set(
+      (Array.isArray(runtimeExtensionIds) ? runtimeExtensionIds : [])
+        .filter((extensionId) => typeof extensionId === "string" && availableRuntimeIds.has(extensionId))
+    )];
   const artifacts = snapshotArtifacts(
     projectPath,
     files.artifactSnapshotsDir,
     settings.target,
+    runtimeEnvironment,
+    selectedRuntimeIds,
     [outputRoot]
   );
 

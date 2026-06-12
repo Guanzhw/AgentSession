@@ -152,6 +152,49 @@ function artifactInventory(run: ReturnType<typeof loadRun>) {
   return readJson(assertRegularFileInside(run.runDir, run.files.artifactsPath));
 }
 
+function readArtifactSnapshot(run, inventory, args, toolName) {
+  const artifact = (inventory.files || []).find((entry) => (
+    (args.artifactId && entry.artifactId === args.artifactId)
+    || (args.snapshotPath && entry.snapshotPath === args.snapshotPath)
+    || (args.relativePath && entry.relativePath === args.relativePath)
+  ));
+  if (!artifact) {
+    throw new Error(`${toolName} requires a valid artifactId, snapshotPath, or relativePath`);
+  }
+  const snapshotRoot = path.resolve(
+    typeof inventory.snapshotRoot === "string"
+      ? inventory.snapshotRoot
+      : run.files.artifactSnapshotsDir
+  );
+  const snapshotPath = path.resolve(String(artifact.snapshotPath || ""));
+  if (
+    snapshotPath === snapshotRoot
+    || !snapshotPath.startsWith(`${snapshotRoot}${path.sep}`)
+    || lstatSync(snapshotPath).isSymbolicLink()
+    || !lstatSync(snapshotPath).isFile()
+  ) {
+    throw new Error(`${toolName} rejected an artifact path outside the run snapshot`);
+  }
+  const realSnapshotRoot = realpathSync(snapshotRoot);
+  const realSnapshotPath = realpathSync(snapshotPath);
+  if (!realSnapshotPath.startsWith(`${realSnapshotRoot}${path.sep}`)) {
+    throw new Error(`${toolName} rejected an artifact path outside the run snapshot`);
+  }
+  const content = readFileSync(realSnapshotPath);
+  const offset = boundedInteger(args.offset, 0, 0, content.length);
+  const maxBytes = boundedInteger(args.maxBytes, 64 * 1024, 1024, MAX_EVIDENCE_BYTES);
+  const end = Math.min(content.length, offset + maxBytes);
+  return {
+    tool: toolName,
+    artifact,
+    offset,
+    returnedBytes: end - offset,
+    totalBytes: content.length,
+    nextOffset: end < content.length ? end : null,
+    content: content.subarray(offset, end).toString("utf-8")
+  };
+}
+
 function markdownHeading(value: unknown) {
   return String(value ?? "")
     .replace(/\r?\n/g, " ")
@@ -458,7 +501,7 @@ export function runAnalysisTool(runDir: string, toolName: string, args: Row = {}
     }
   }
 
-  if (toolName === "extension_list") {
+  if (toolName === "artifact_list") {
     const inventory = artifactInventory(run);
     const page = paginate(inventory.files || [], args);
     return {
@@ -470,47 +513,44 @@ export function runAnalysisTool(runDir: string, toolName: string, args: Row = {}
     };
   }
 
-  if (toolName === "extension_get") {
+  if (toolName === "artifact_get") {
     const inventory = artifactInventory(run);
-    const artifact = (inventory.files || []).find((entry) => (
-      (args.artifactId && entry.artifactId === args.artifactId)
-      || (args.snapshotPath && entry.snapshotPath === args.snapshotPath)
-      || (args.relativePath && entry.relativePath === args.relativePath)
-    ));
-    if (!artifact) {
-      throw new Error("extension_get requires a valid artifactId, snapshotPath, or relativePath");
+    return readArtifactSnapshot(run, inventory, args, toolName);
+  }
+
+  if (toolName === "extension_list") {
+    const inventory = artifactInventory(run);
+    if (!inventory.runtimeEnvironment) {
+      return {
+        tool: toolName,
+        legacyArtifactInventory: true,
+        roots: inventory.roots || [],
+        ...paginate(inventory.files || [], args)
+      };
     }
-    const snapshotRoot = path.resolve(
-      typeof inventory.snapshotRoot === "string"
-        ? inventory.snapshotRoot
-        : run.files.artifactSnapshotsDir
-    );
-    const snapshotPath = path.resolve(String(artifact.snapshotPath || ""));
-    if (
-      snapshotPath === snapshotRoot
-      || !snapshotPath.startsWith(`${snapshotRoot}${path.sep}`)
-      || lstatSync(snapshotPath).isSymbolicLink()
-      || !lstatSync(snapshotPath).isFile()
-    ) {
-      throw new Error("extension_get rejected an artifact path outside the run snapshot");
-    }
-    const realSnapshotRoot = realpathSync(snapshotRoot);
-    const realSnapshotPath = realpathSync(snapshotPath);
-    if (!realSnapshotPath.startsWith(`${realSnapshotRoot}${path.sep}`)) {
-      throw new Error("extension_get rejected an artifact path outside the run snapshot");
-    }
-    const content = readFileSync(realSnapshotPath);
-    const offset = boundedInteger(args.offset, 0, 0, content.length);
-    const maxBytes = boundedInteger(args.maxBytes, 64 * 1024, 1024, MAX_EVIDENCE_BYTES);
-    const end = Math.min(content.length, offset + maxBytes);
     return {
       tool: toolName,
-      artifact,
-      offset,
-      returnedBytes: end - offset,
-      totalBytes: content.length,
-      nextOffset: end < content.length ? end : null,
-      content: content.subarray(offset, end).toString("utf-8")
+      resolution: inventory.runtimeEnvironment.resolution,
+      note: inventory.runtimeEnvironment.note,
+      ...paginate(inventory.runtimeEnvironment.extensions || [], args)
+    };
+  }
+
+  if (toolName === "extension_get") {
+    const inventory = artifactInventory(run);
+    if (!inventory.runtimeEnvironment || !args.extensionId) {
+      return readArtifactSnapshot(run, inventory, args, toolName);
+    }
+    const extension = (inventory.runtimeEnvironment.extensions || [])
+      .find((entry) => entry.id === args.extensionId);
+    if (!extension) {
+      throw new Error("extension_get requires a selected extensionId");
+    }
+    return {
+      tool: toolName,
+      extension,
+      artifacts: (inventory.files || [])
+        .filter((artifact) => (artifact.runtimeExtensionIds || []).includes(extension.id))
     };
   }
 

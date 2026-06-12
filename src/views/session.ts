@@ -1111,6 +1111,51 @@ export function renderSessionPage({
         ? [analysisAction.target]
         : []
   );
+  const runtimeExtensions = Array.isArray(analysisAction?.runtimeEnvironment?.extensions)
+    ? analysisAction.runtimeEnvironment.extensions
+    : [];
+  const selectedRuntimeExtensions = new Set(
+    Array.isArray(analysisAction?.selectedRuntimeExtensionIds)
+      ? analysisAction.selectedRuntimeExtensionIds
+      : []
+  );
+  const runtimeExtensionGroups = ["project", "user"]
+    .map((scope) => ({
+      scope,
+      extensions: runtimeExtensions.filter((extension) => extension.scope === scope)
+    }))
+    .filter((group) => group.extensions.length);
+  const runtimePicker = runtimeExtensionGroups.length ? `
+          <details class="analysis-target-picker analysis-runtime-picker">
+            <summary>
+              <span>${t("analysis.runtime_label")}</span>
+              <strong data-runtime-selected-count>${escapeHtml(String(selectedRuntimeExtensions.size))}</strong>
+            </summary>
+            <div class="analysis-target-choices analysis-runtime-choices">
+              <p class="analysis-runtime-note">${escapeHtml(analysisAction.runtimeEnvironment.note || "")}</p>
+              ${runtimeExtensionGroups.map((group) => `
+                <section class="analysis-runtime-group">
+                  <h4>${t(`analysis.runtime_scope_${group.scope}`)}</h4>
+                  ${group.extensions.map((extension) => `
+                    <label class="analysis-target-choice analysis-runtime-choice">
+                      <input
+                        type="checkbox"
+                        class="analysis-runtime-extension-checkbox"
+                        value="${escapeHtml(extension.id)}"
+                        ${selectedRuntimeExtensions.has(extension.id) ? "checked" : ""}
+                        ${extension.available ? "" : "disabled"}
+                      >
+                      <span>
+                        <strong>${escapeHtml(extension.name)}</strong>
+                        <small>${escapeHtml(extension.kind)} · ${escapeHtml(extension.source)}</small>
+                      </span>
+                    </label>
+                  `).join("")}
+                </section>
+              `).join("")}
+            </div>
+          </details>
+  ` : "";
   const analysisActions = analysisAction && terminalLaunchAllowed ? `
         <div class="analysis-launch-control">
           <details class="analysis-target-picker">
@@ -1133,6 +1178,7 @@ export function renderSessionPage({
               `).join("")}
             </div>
           </details>
+          ${runtimePicker}
           <button class="action-btn action-btn-primary" data-action="analyze-session" data-id="${escapeHtml(session.id)}" ${analysisAction.available ? "" : "disabled"}>${t("action.analyze_selected")}</button>
         </div>
   ` : "";

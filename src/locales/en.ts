@@ -76,6 +76,9 @@ export const en = {
   "analysis.status_description": "Open final analysis outputs and track execution or validation details.",
   "analysis.refresh": "Refresh",
   "analysis.targets_label": "Analysis targets",
+  "analysis.runtime_label": "Runtime extensions",
+  "analysis.runtime_scope_project": "Project scope",
+  "analysis.runtime_scope_user": "User scope",
 
   // Settings
   "settings.title": "Settings",
@@ -126,7 +129,7 @@ export const en = {
   "settings.artifact_roots": "Artifact roots",
   "settings.artifact_files": "Included files",
   "settings.artifact_files_help": "Optional project-relative files, one per line.",
-  "settings.extensions": "Included file extensions",
+  "settings.file_extensions": "Artifact file suffix filters",
   "settings.one_per_line": "Enter one value per line.",
   "settings.analyzer_title": "Provider analyzer",
   "settings.analyzer_description": "Command used to run analysis for the provider shown above.",

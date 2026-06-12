@@ -190,6 +190,15 @@ and `manifest.json` are supporting evidence and diagnostics. Completed runs
 expose direct open and download links in the session's **Analysis activity**
 panel.
 
+Before launch, the session page also resolves the provider's current local
+runtime extensions and lets you select project-scoped and user-scoped skills,
+agents, commands, plugins, hooks, tools, rules, or provider extension bundles.
+The exact kinds and search paths remain provider-owned. Most provider
+transcripts do not contain an immutable historical extension manifest, so this
+picker is labeled as current local resolution rather than claiming to recreate
+the exact environment loaded when the session started. Each captured artifact
+records the runtime extension IDs that contributed it.
+
 New runs organize those files by purpose:
 
 ```text
@@ -252,6 +261,12 @@ preserved for follow-up queries and validation:
 - `session_get_evidence`
 - `extension_list`
 - `extension_get`
+- `artifact_list`
+- `artifact_get`
+
+`extension_*` queries inspect the selected agent runtime extensions.
+`artifact_*` queries inspect the bounded file snapshots. This terminology is
+separate from artifact filename suffix filtering.
 
 Interruption signals come from explicit tool error reasons. High error rate is
 kept as a transparent heuristic: the result includes the threshold, minimum
@@ -278,7 +293,7 @@ commands. It must also be enabled and configured for each provider:
       "skills": {
         "label": "Analyze skills",
         "artifactRoots": ["skills", ".agents/skills", ".codex/skills"],
-        "extensions": [".md", ".json", ".yaml", ".yml", ".js", ".ts", ".py"],
+        "fileExtensions": [".md", ".json", ".yaml", ".yml", ".js", ".ts", ".py"],
         "promptFile": "prompts/analyze-skills.md"
       }
     },
@@ -331,6 +346,8 @@ session project directory. Absolute artifact roots are allowed when explicitly
 configured. `artifactFiles` can include specific project-relative files such
 as `README.md` or `AGENTS.md`. Files are copied into a bounded snapshot so the
 analysis remains reviewable even if the original artifact changes later.
+`fileExtensions` controls filename suffix filtering for those artifact roots;
+the older `extensions` field remains accepted for existing configurations.
 
 When `analysis.outputDir` is omitted, runs default to
 `.opensessionviewer/analysis` inside the session project. Each run carries the
@@ -378,8 +395,8 @@ needs those bulk diagnostic files.
 
 Provider target overrides can be placed under
 `analysis.providers.<provider>.targets.<target>`. This allows different
-commands, prompts, shells, artifact roots, and extensions for the same target.
-Additional custom targets can use the same structure.
+commands, prompts, shells, artifact roots, and file suffix filters for the same
+target. Additional custom targets can use the same structure.
 
 ## Claude Code History
 

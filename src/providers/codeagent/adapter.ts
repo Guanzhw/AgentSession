@@ -8,6 +8,7 @@ import { buildCodeAgentSessionContainer } from "./session-container.js";
 import { buildCodeAgentSessionMetrics } from "./session-metrics.js";
 import { buildCodeAgentSessionTree } from "./session-tree.js";
 import { enrichCodeAgentSession } from "./schema.js";
+import { buildCodeAgentRuntimeEnvironment } from "./runtime-environment.js";
 
 function defaultDataPath() {
   const dataHome = process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share");
@@ -32,6 +33,12 @@ const baseAdapter = createSqliteSessionAdapter({
 
 const codeagent = {
   ...baseAdapter,
+  getRuntimeEnvironment(sessionId: string) {
+    const session = baseAdapter.getSession(sessionId);
+    return typeof session?.directory === "string"
+      ? buildCodeAgentRuntimeEnvironment(sessionId, session.directory)
+      : null;
+  },
   getSession(sessionId: string) {
     const session = baseAdapter.getSession(sessionId);
     if (!session) {

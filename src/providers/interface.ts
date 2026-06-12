@@ -73,6 +73,40 @@ export interface SearchResult {
   timestamp: number;
 }
 
+export type RuntimeExtensionScope = "project" | "user";
+
+export type RuntimeExtensionKind =
+  | "skill"
+  | "agent"
+  | "command"
+  | "plugin"
+  | "hook"
+  | "tool"
+  | "rule"
+  | "extension";
+
+export interface RuntimeExtensionReference {
+  id: string;
+  provider: ProviderId;
+  scope: RuntimeExtensionScope;
+  kind: RuntimeExtensionKind;
+  name: string;
+  source: string;
+  sourcePath: string | null;
+  sourceType: "directory" | "file" | "package" | "config";
+  available: boolean;
+  capturable: boolean;
+  defaultSelected: boolean;
+  note: string;
+}
+
+export interface RuntimeEnvironmentView {
+  sessionId: string;
+  resolution: "current-local";
+  note: string;
+  extensions: RuntimeExtensionReference[];
+}
+
 export interface ProviderAdapter {
   id: ProviderId;
   name: string;
@@ -91,6 +125,7 @@ export interface ProviderAdapter {
   getTokenStats(days?: number): DailyTokenStat[];
   searchMessages(query: string, limit?: number): SearchResult[];
   exportSession(sessionId: string): unknown;
+  getRuntimeEnvironment?(sessionId: string): RuntimeEnvironmentView | null;
   getSystemPrompts?(sessionId: string): unknown;
   getTrace?(sessionId: string): unknown;
   getSessionTree?(sessionId: string): unknown;

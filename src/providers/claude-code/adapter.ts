@@ -6,6 +6,7 @@ import { parseTranscript, extractSessionMeta, recordsToMessages } from "./parser
 import { icons } from "../../icons.js";
 import type { ProviderAdapter } from "../interface.js";
 import { buildMessageSessionViews } from "../shared/message-session.js";
+import { buildClaudeCodeRuntimeEnvironment } from "./runtime-environment.js";
 
 function getClaudeDir() {
   return getConfig().claudeDir;
@@ -100,6 +101,13 @@ const claudeCode = {
     } catch {
       return null;
     }
+  },
+
+  getRuntimeEnvironment(sessionId) {
+    const session = this.getSession(sessionId);
+    return session?.directory
+      ? buildClaudeCodeRuntimeEnvironment(sessionId, session.directory, getClaudeDir())
+      : null;
   },
 
   getMessages(sessionId) {

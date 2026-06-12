@@ -326,7 +326,7 @@ if (settingsForm) {
       : {
       label: `Analyze ${targetId}`,
       artifactRoots: [],
-      extensions: targetDefaults("skills").extensions || [],
+      fileExtensions: targetDefaults("skills").fileExtensions || [],
       promptFile: ""
     };
   };
@@ -337,7 +337,8 @@ if (settingsForm) {
     target.label = value("settings-target-label") || `Analyze ${targetId}`;
     target.artifactRoots = readLines("settings-artifact-roots");
     target.artifactFiles = readLines("settings-artifact-files");
-    target.extensions = readLines("settings-extensions");
+    target.fileExtensions = readLines("settings-file-extensions");
+    delete target.extensions;
     const prompt = document.getElementById("settings-target-prompt")?.value?.trim() || "";
     if (prompt) target.prompt = prompt;
     else delete target.prompt;
@@ -358,7 +359,7 @@ if (settingsForm) {
     setValue("settings-prompt-file", configured.promptFile || "");
     setLines("settings-artifact-roots", target.artifactRoots);
     setLines("settings-artifact-files", target.artifactFiles);
-    setLines("settings-extensions", target.extensions);
+    setLines("settings-file-extensions", target.fileExtensions || target.extensions);
     if (targetContextLabel) targetContextLabel.textContent = target.label || targetId;
     if (targetContextId) targetContextId.textContent = targetId;
     promptPreviewPanel?.classList.add("hidden");
@@ -1027,6 +1028,9 @@ document.addEventListener("click", async (e) => {
       const launchControl = btn.closest(".analysis-launch-control");
       const targets = [...(launchControl?.querySelectorAll(".analysis-target-checkbox:checked") || [])]
         .map((checkbox) => checkbox.value);
+      const runtimeExtensionIds = [
+        ...(launchControl?.querySelectorAll(".analysis-runtime-extension-checkbox:checked") || [])
+      ].map((checkbox) => checkbox.value);
       if (!targets.length) {
         showToast(ft("analysis_select_target"), "error");
         return;
@@ -1034,7 +1038,7 @@ document.addEventListener("click", async (e) => {
       const res = await fetch(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targets })
+        body: JSON.stringify({ targets, runtimeExtensionIds })
       });
       const result = await res.json();
       if (!res.ok || !result.ok) {
@@ -1120,13 +1124,19 @@ document.addEventListener("click", async (e) => {
 });
 
 document.addEventListener("change", (event) => {
-  const checkbox = event.target.closest?.(".analysis-target-checkbox");
+  const checkbox = event.target.closest?.(
+    ".analysis-target-checkbox, .analysis-runtime-extension-checkbox"
+  );
   if (!checkbox) return;
   const launchControl = checkbox.closest(".analysis-launch-control");
   const selectedCount = launchControl?.querySelectorAll(".analysis-target-checkbox:checked").length || 0;
+  const runtimeSelectedCount = launchControl
+    ?.querySelectorAll(".analysis-runtime-extension-checkbox:checked").length || 0;
   const count = launchControl?.querySelector("[data-analysis-selected-count]");
+  const runtimeCount = launchControl?.querySelector("[data-runtime-selected-count]");
   const button = launchControl?.querySelector("[data-action='analyze-session']");
   if (count) count.textContent = String(selectedCount);
+  if (runtimeCount) runtimeCount.textContent = String(runtimeSelectedCount);
   if (button) button.disabled = selectedCount === 0;
 });
 

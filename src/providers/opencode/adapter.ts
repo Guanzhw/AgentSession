@@ -7,6 +7,7 @@ import { buildOpenCodeSessionContainer } from "./session-container.js";
 import { buildOpenCodeSessionMetrics } from "./session-metrics.js";
 import { buildOpenCodeSessionTree } from "./session-tree.js";
 import { buildOpenCodeSystemPrompts } from "./system-prompts.js";
+import { buildOpenCodeRuntimeEnvironment } from "./runtime-environment.js";
 
 function defaultDataPath() {
   if (process.platform === "win32") {
@@ -39,6 +40,12 @@ const baseAdapter = createSqliteSessionAdapter({
 
 const opencode = {
   ...baseAdapter,
+  getRuntimeEnvironment(sessionId: string) {
+    const session = baseAdapter.getSession(sessionId);
+    return typeof session?.directory === "string"
+      ? buildOpenCodeRuntimeEnvironment(sessionId, session.directory)
+      : null;
+  },
   getSessionTree(sessionId: string) {
     return buildOpenCodeSessionTree(sessionId, baseAdapter.getDataPath() || undefined);
   },
