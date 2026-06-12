@@ -8,6 +8,10 @@ import {
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import {
+  resolveAnalysisRunPath,
+  resolveIntegrityPath
+} from "./analysis-layout.js";
 
 function readJson(filePath, errors, label) {
   if (!existsSync(filePath)) {
@@ -57,11 +61,11 @@ export function validateAnalysisOutputs(runDir, processExitCode = 0, expectedInt
     schemaVersion: 1,
     runDir: resolvedRunDir
   };
-  const reportPath = path.join(resolvedRunDir, "report.md");
-  const evaluationPath = path.join(resolvedRunDir, "evaluation-proposals.json");
-  const proposalsPath = path.join(resolvedRunDir, "artifact-proposals.json");
-  const artifactsPath = path.join(resolvedRunDir, "artifacts.json");
-  const evidenceIndexPath = path.join(resolvedRunDir, "evidence-index.json");
+  const reportPath = resolveAnalysisRunPath(resolvedRunDir, manifest, "reportPath");
+  const evaluationPath = resolveAnalysisRunPath(resolvedRunDir, manifest, "evaluationPath");
+  const proposalsPath = resolveAnalysisRunPath(resolvedRunDir, manifest, "proposalsPath");
+  const artifactsPath = resolveAnalysisRunPath(resolvedRunDir, manifest, "artifactsPath");
+  const evidenceIndexPath = resolveAnalysisRunPath(resolvedRunDir, manifest, "evidenceIndexPath");
 
   if (!existsSync(reportPath)) {
     errors.push("report.md is missing");
@@ -106,8 +110,8 @@ export function validateAnalysisOutputs(runDir, processExitCode = 0, expectedInt
       }
     }
     for (const [fileName, expectedHash] of Object.entries(expectedIntegrity.files)) {
-      const filePath = path.join(resolvedRunDir, path.basename(fileName));
-      if (!existsSync(filePath)) {
+      const filePath = resolveIntegrityPath(resolvedRunDir, fileName);
+      if (!filePath || !existsSync(filePath)) {
         errors.push(`captured input ${fileName} is missing`);
       } else if (hashFile(filePath) !== expectedHash) {
         errors.push(`captured input ${fileName} failed its sha256 integrity check`);
@@ -116,11 +120,21 @@ export function validateAnalysisOutputs(runDir, processExitCode = 0, expectedInt
   }
 
   for (const artifact of artifacts?.files || []) {
-    const snapshotRoot = path.resolve(resolvedRunDir, "artifacts");
+    const configuredSnapshotRoot = typeof artifacts?.snapshotRoot === "string"
+      ? path.resolve(artifacts.snapshotRoot)
+      : resolveAnalysisRunPath(resolvedRunDir, manifest, "artifactSnapshotsDir");
+    const fallbackSnapshotRoot = path.resolve(resolvedRunDir, "artifacts");
+    const snapshotRoots = [configuredSnapshotRoot, fallbackSnapshotRoot]
+      .filter((root) => resolveIntegrityPath(
+        resolvedRunDir,
+        path.relative(resolvedRunDir, root)
+      ));
     const snapshotPath = path.resolve(String(artifact.snapshotPath || ""));
     if (
-      snapshotPath === snapshotRoot
-      || !snapshotPath.startsWith(`${snapshotRoot}${path.sep}`)
+      !snapshotRoots.some((snapshotRoot) => (
+        snapshotPath !== snapshotRoot
+        && snapshotPath.startsWith(`${snapshotRoot}${path.sep}`)
+      ))
       || !existsSync(snapshotPath)
     ) {
       errors.push(`artifact snapshot ${artifact.artifactId || artifact.relativePath || "unknown"} is unavailable`);

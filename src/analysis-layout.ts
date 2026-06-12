@@ -1,0 +1,110 @@
+import { existsSync, mkdirSync } from "node:fs";
+import path from "node:path";
+
+const CATEGORIZED_FILES = {
+  manifestPath: "manifest.json",
+  reportPath: "outputs/report.md",
+  evaluationPath: "outputs/evaluation-proposals.json",
+  proposalsPath: "outputs/artifact-proposals.json",
+  sessionPath: "inputs/session.json",
+  evaluationSeedPath: "inputs/evaluation-seed.json",
+  promptPath: "inputs/analysis-request.md",
+  sessionIndexPath: "evidence/session-index.json",
+  evidenceIndexPath: "evidence/evidence-index.json",
+  evidencePath: "evidence/evidence.jsonl",
+  artifactsPath: "evidence/artifacts.json",
+  messagesPath: "diagnostics/messages.json",
+  treePath: "diagnostics/tree.json",
+  containerPath: "diagnostics/container.json",
+  metricsPath: "diagnostics/metrics.json",
+  flowPath: "diagnostics/flow.json",
+  tracePath: "diagnostics/trace.json",
+  artifactSnapshotsDir: "evidence/artifact-snapshots"
+};
+
+const LEGACY_FILES = {
+  reportPath: "report.md",
+  evaluationPath: "evaluation-proposals.json",
+  proposalsPath: "artifact-proposals.json",
+  sessionPath: "session.json",
+  evaluationSeedPath: "evaluation-seed.json",
+  promptPath: "analysis-request.md",
+  sessionIndexPath: "session-index.json",
+  evidenceIndexPath: "evidence-index.json",
+  evidencePath: "evidence.jsonl",
+  artifactsPath: "artifacts.json",
+  messagesPath: "messages.json",
+  treePath: "tree.json",
+  containerPath: "container.json",
+  metricsPath: "metrics.json",
+  flowPath: "flow.json",
+  tracePath: "trace.json",
+  artifactSnapshotsDir: "artifacts"
+};
+
+function isInsideRun(runDir: string, candidate: string) {
+  const root = path.resolve(runDir);
+  const resolved = path.resolve(candidate);
+  return resolved === root || resolved.startsWith(`${root}${path.sep}`);
+}
+
+export function getAnalysisRunPaths(runDir: string) {
+  return Object.fromEntries(
+    Object.entries(CATEGORIZED_FILES).map(([key, relativePath]) => [
+      key,
+      path.join(runDir, relativePath)
+    ])
+  ) as Record<keyof typeof CATEGORIZED_FILES, string>;
+}
+
+export function ensureAnalysisRunDirectories(
+  files: ReturnType<typeof getAnalysisRunPaths>,
+  includeDiagnostics = false
+) {
+  const targets = [
+    files.reportPath,
+    files.sessionPath,
+    files.sessionIndexPath,
+    files.artifactSnapshotsDir,
+    ...(includeDiagnostics ? [files.messagesPath] : [])
+  ];
+  for (const target of targets) {
+    const directory = target === files.artifactSnapshotsDir ? target : path.dirname(target);
+    mkdirSync(directory, { recursive: true });
+  }
+}
+
+export function resolveAnalysisRunPath(
+  runDir: string,
+  manifest: any,
+  key: keyof typeof CATEGORIZED_FILES
+) {
+  const candidates = [
+    manifest?.files?.[key],
+    path.join(runDir, CATEGORIZED_FILES[key]),
+    LEGACY_FILES[key] ? path.join(runDir, LEGACY_FILES[key]) : null
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string" || !candidate) {
+      continue;
+    }
+    const resolved = path.isAbsolute(candidate)
+      ? path.resolve(candidate)
+      : path.resolve(runDir, candidate);
+    if (isInsideRun(runDir, resolved) && existsSync(resolved)) {
+      return resolved;
+    }
+  }
+  return path.join(runDir, CATEGORIZED_FILES[key]);
+}
+
+export function analysisRunRelativePath(runDir: string, filePath: string) {
+  return path.relative(runDir, filePath).split(path.sep).join("/");
+}
+
+export function resolveIntegrityPath(runDir: string, relativePath: string) {
+  const resolved = path.resolve(runDir, relativePath);
+  return isInsideRun(runDir, resolved) && resolved !== path.resolve(runDir)
+    ? resolved
+    : null;
+}

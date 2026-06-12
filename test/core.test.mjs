@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   writeFileSync
 } from "node:fs";
 import os from "node:os";
@@ -47,6 +48,7 @@ import {
 import { runAnalysisTool } from "../dist/src/analysis-tools.js";
 import { validateAnalysisOutputs } from "../dist/src/analysis-validator.js";
 import { BUILTIN_ANALYSIS_TARGETS } from "../dist/src/analysis-targets.js";
+import { resolveAnalysisRunPath } from "../dist/src/analysis-layout.js";
 import {
   applyRuntimeUserConfig,
   parseArgs,
@@ -807,6 +809,17 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.ok(existsSync(run.files.evidenceIndexPath));
   assert.ok(existsSync(run.files.evidencePath));
   assert.equal(existsSync(run.files.messagesPath), false);
+  assert.equal(path.relative(run.runDir, run.files.reportPath), path.join("outputs", "report.md"));
+  assert.equal(path.relative(run.runDir, run.files.promptPath), path.join("inputs", "analysis-request.md"));
+  assert.equal(path.relative(run.runDir, run.files.evidencePath), path.join("evidence", "evidence.jsonl"));
+  assert.equal(path.relative(run.runDir, run.files.messagesPath), path.join("diagnostics", "messages.json"));
+  assert.deepEqual(
+    readdirSync(run.runDir).sort(),
+    ["evidence", "inputs", "manifest.json", "outputs"].sort()
+  );
+  const manifest = JSON.parse(readFileSync(run.files.manifestPath, "utf-8"));
+  assert.equal(manifest.layoutVersion, 1);
+  assert.equal(typeof manifest.integrity.files["inputs/session.json"], "string");
   const preparedRuns = listSessionAnalysisRuns({
     providerId: "codex",
     sessionId: "session-analysis",
@@ -1003,6 +1016,23 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   const tampered = validateAnalysisOutputs(run.runDir, 0, run.integrity);
   assert.equal(tampered.state, "invalid");
   assert.ok(tampered.validation.errors.some((error) => /integrity check/.test(error)));
+});
+
+test("analysis layout resolves legacy flat run files", () => {
+  const runDir = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-legacy-analysis-"));
+  const manifest = { schemaVersion: 1, runDir };
+  writeFileSync(path.join(runDir, "manifest.json"), `${JSON.stringify(manifest)}\n`);
+  writeFileSync(path.join(runDir, "report.md"), "# Legacy report\n");
+  writeFileSync(path.join(runDir, "evidence-index.json"), "{}\n");
+
+  assert.equal(
+    resolveAnalysisRunPath(runDir, manifest, "reportPath"),
+    path.join(runDir, "report.md")
+  );
+  assert.equal(
+    resolveAnalysisRunPath(runDir, manifest, "evidenceIndexPath"),
+    path.join(runDir, "evidence-index.json")
+  );
 });
 
 test("session analysis requires enabled provider and target configuration", () => {

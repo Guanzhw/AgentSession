@@ -190,6 +190,36 @@ and `manifest.json` are supporting evidence and diagnostics. Completed runs
 expose direct open and download links in the session's **Analysis activity**
 panel.
 
+New runs organize those files by purpose:
+
+```text
+<run>/
+├── manifest.json
+├── outputs/
+│   ├── report.md
+│   ├── evaluation-proposals.json
+│   └── artifact-proposals.json
+├── inputs/
+│   ├── session.json
+│   ├── evaluation-seed.json
+│   └── analysis-request.md
+├── evidence/
+│   ├── session-index.json
+│   ├── evidence-index.json
+│   ├── evidence.jsonl
+│   ├── artifacts.json
+│   └── artifact-snapshots/
+└── diagnostics/                 # only with includeRawSnapshots
+    ├── messages.json
+    ├── tree.json
+    ├── container.json
+    ├── metrics.json
+    ├── flow.json
+    └── trace.json
+```
+
+Older flat run directories remain readable.
+
 Generated evaluation cases begin with `status: "proposed"`. OpenSessionViewer
 does not modify skills or mark a proposal as validated. Promotion should happen
 only after baseline and candidate executions pass replay, held-out, and
@@ -331,11 +361,11 @@ validation result. It does not merge multiple targets into one output bundle.
 The older `defaultTarget` field remains supported as the first/default
 selection for existing configurations.
 
-By default, analysis runs write `session-index.json`, `evidence-index.json`,
-and immutable `evidence.jsonl`; complete message/tree/container/flow/trace
-snapshots are omitted. Set `analysis.includeRawSnapshots` or a target-level
-`includeRawSnapshots` to `true` only when a legacy analyzer needs those bulk
-diagnostic files.
+By default, analysis runs write `evidence/session-index.json`,
+`evidence/evidence-index.json`, and immutable `evidence/evidence.jsonl`;
+the `diagnostics/` directory is omitted. Set `analysis.includeRawSnapshots`
+or a target-level `includeRawSnapshots` to `true` only when a legacy analyzer
+needs those bulk diagnostic files.
 
 Provider target overrides can be placed under
 `analysis.providers.<provider>.targets.<target>`. This allows different

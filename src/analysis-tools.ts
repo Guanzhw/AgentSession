@@ -10,6 +10,7 @@ import {
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AnalysisEvidenceIndexEntry } from "./analysis-evidence.js";
+import { resolveAnalysisRunPath } from "./analysis-layout.js";
 
 type Row = Record<string, any>;
 
@@ -56,12 +57,16 @@ function loadRun(runDir: string) {
     throw new Error(`manifest.json was not found under ${resolvedRunDir}`);
   }
   const manifest = readJson(assertRegularFileInside(resolvedRunDir, manifestPath));
-  const evidenceIndexPath = path.join(resolvedRunDir, "evidence-index.json");
-  const sessionIndexPath = path.join(resolvedRunDir, "session-index.json");
-  const evidencePath = path.join(resolvedRunDir, "evidence.jsonl");
+  const evidenceIndexPath = resolveAnalysisRunPath(resolvedRunDir, manifest, "evidenceIndexPath");
+  const sessionIndexPath = resolveAnalysisRunPath(resolvedRunDir, manifest, "sessionIndexPath");
+  const evidencePath = resolveAnalysisRunPath(resolvedRunDir, manifest, "evidencePath");
   return {
     runDir: resolvedRunDir,
     manifest,
+    files: {
+      artifactsPath: resolveAnalysisRunPath(resolvedRunDir, manifest, "artifactsPath"),
+      artifactSnapshotsDir: resolveAnalysisRunPath(resolvedRunDir, manifest, "artifactSnapshotsDir")
+    },
     evidencePath: assertRegularFileInside(resolvedRunDir, evidencePath),
     evidenceIndex: readJson(assertRegularFileInside(resolvedRunDir, evidenceIndexPath)),
     sessionIndex: readJson(assertRegularFileInside(resolvedRunDir, sessionIndexPath))
@@ -142,7 +147,7 @@ function normalizeStatus(value: unknown) {
 }
 
 function artifactInventory(run: ReturnType<typeof loadRun>) {
-  return readJson(assertRegularFileInside(run.runDir, path.join(run.runDir, "artifacts.json")));
+  return readJson(assertRegularFileInside(run.runDir, run.files.artifactsPath));
 }
 
 export function runAnalysisTool(runDir: string, toolName: string, args: Row = {}) {
@@ -342,7 +347,11 @@ export function runAnalysisTool(runDir: string, toolName: string, args: Row = {}
     if (!artifact) {
       throw new Error("extension_get requires a valid artifactId, snapshotPath, or relativePath");
     }
-    const snapshotRoot = path.resolve(run.runDir, "artifacts");
+    const snapshotRoot = path.resolve(
+      typeof inventory.snapshotRoot === "string"
+        ? inventory.snapshotRoot
+        : run.files.artifactSnapshotsDir
+    );
     const snapshotPath = path.resolve(String(artifact.snapshotPath || ""));
     if (
       snapshotPath === snapshotRoot

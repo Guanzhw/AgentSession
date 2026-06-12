@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { Message, ProviderAdapter } from "./providers/interface.js";
 import { buildMessageSessionViews } from "./providers/shared/message-session.js";
@@ -144,13 +144,19 @@ export function writeAnalysisEvidence({
   session,
   sessionId,
   messages,
-  runDir
+  runDir,
+  files = null
 }: {
   provider: ProviderAdapter;
   session: Row;
   sessionId: string;
   messages: Message[];
   runDir: string;
+  files?: {
+    evidencePath: string;
+    evidenceIndexPath: string;
+    sessionIndexPath: string;
+  } | null;
 }) {
   const container = resolveSessionContainer(provider, session, sessionId, messages);
   const records: AnalysisEvidenceRecord[] = [];
@@ -328,9 +334,12 @@ export function writeAnalysisEvidence({
   };
 
   const tree = visitSession(container, null, null, "root");
-  const dataPath = path.join(runDir, "evidence.jsonl");
-  const indexPath = path.join(runDir, "evidence-index.json");
-  const sessionIndexPath = path.join(runDir, "session-index.json");
+  const dataPath = files?.evidencePath || path.join(runDir, "evidence.jsonl");
+  const indexPath = files?.evidenceIndexPath || path.join(runDir, "evidence-index.json");
+  const sessionIndexPath = files?.sessionIndexPath || path.join(runDir, "session-index.json");
+  mkdirSync(path.dirname(dataPath), { recursive: true });
+  mkdirSync(path.dirname(indexPath), { recursive: true });
+  mkdirSync(path.dirname(sessionIndexPath), { recursive: true });
   const chunks: Buffer[] = [];
   const entries: AnalysisEvidenceIndexEntry[] = [];
   let offset = 0;

@@ -23,6 +23,12 @@ import {
   DEFAULT_ANALYSIS_EXTENSIONS,
   getBuiltinAnalysisTarget
 } from "./analysis-targets.js";
+import {
+  analysisRunRelativePath,
+  ensureAnalysisRunDirectories,
+  getAnalysisRunPaths,
+  resolveAnalysisRunPath
+} from "./analysis-layout.js";
 import { resolveExecutable, resolveProjectDirectory } from "./resume.js";
 
 const DEFAULT_TARGET = {
@@ -360,7 +366,7 @@ function truncateTextBuffer(buffer, maxBytes) {
   return buffer.subarray(0, end);
 }
 
-function snapshotArtifacts(projectPath, runDir, target) {
+function snapshotArtifacts(projectPath, snapshotDir, target) {
   const roots = [];
   const seenRoots = new Set();
   for (const configuredRoot of target.artifactRoots || []) {
@@ -391,7 +397,6 @@ function snapshotArtifacts(projectPath, runDir, target) {
     addArtifactFile(resolved, path.dirname(resolved), extensions, files, state, true);
   }
 
-  const snapshotDir = path.join(runDir, "artifacts");
   mkdirSync(snapshotDir, { recursive: true });
   const inventory = files.map((file, index) => {
     const root = file.root;
@@ -421,6 +426,7 @@ function snapshotArtifacts(projectPath, runDir, target) {
 
   return {
     roots,
+    snapshotRoot: snapshotDir,
     explicitFiles: inventory.filter((file) => file.explicit).map((file) => file.sourcePath),
     extensions: [...extensions],
     limits: {
@@ -555,9 +561,9 @@ counts, minimum sample size, threshold, and ranked sessions.
 
 ## Required outputs
 
-Write these files inside ${runDir}:
+Write these files inside the categorized output directory:
 
-### report.md
+### ${files.reportPath}
 
 Include:
 
@@ -570,7 +576,7 @@ Include:
 - Risks, staleness, and possible overfitting
 - Validation strategy
 
-### evaluation-proposals.json
+### ${files.evaluationPath}
 
 Write valid JSON with this shape:
 
@@ -610,7 +616,7 @@ Write valid JSON with this shape:
 }
 \`\`\`
 
-### artifact-proposals.json
+### ${files.proposalsPath}
 
 Write valid JSON with this shape:
 
@@ -683,7 +689,7 @@ export function buildAnalysisPromptPreview({
     promptFile.content
   ].filter(Boolean).join("\n\n");
   const runDir = "<analysis-run-directory>";
-  const previewFile = (name) => path.join(runDir, name);
+  const previewFiles = getAnalysisRunPaths(runDir);
   const prompt = buildAnalysisPrompt({
     provider,
     session: { id: "session-preview" },
@@ -691,20 +697,7 @@ export function buildAnalysisPromptPreview({
     runDir,
     projectPath: "<session-project-directory>",
     customPrompt: configuredPrompt,
-    files: {
-      sessionPath: previewFile("session.json"),
-      sessionIndexPath: previewFile("session-index.json"),
-      evidenceIndexPath: previewFile("evidence-index.json"),
-      evidencePath: previewFile("evidence.jsonl"),
-      messagesPath: previewFile("messages.json"),
-      treePath: previewFile("tree.json"),
-      containerPath: previewFile("container.json"),
-      metricsPath: previewFile("metrics.json"),
-      flowPath: previewFile("flow.json"),
-      tracePath: previewFile("trace.json"),
-      artifactsPath: previewFile("artifacts.json"),
-      evaluationSeedPath: previewFile("evaluation-seed.json")
-    },
+    files: previewFiles,
     analysisToolPath: "<opensessionviewer-analysis-tool>",
     rawSnapshotsIncluded: analysisConfig.includeRawSnapshots === true
       || settings.target.includeRawSnapshots === true
@@ -782,26 +775,32 @@ export function listSessionAnalysisRuns({
       const validation = manifest.validation && typeof manifest.validation === "object"
         ? manifest.validation
         : null;
-      const outputAvailable = (fileName) => {
+      const outputAvailable = (filePath) => {
         try {
-          const info = lstatSync(path.join(runDir, fileName));
+          const info = lstatSync(filePath);
           return info.isFile() && !info.isSymbolicLink() && info.size <= 16 * 1024 * 1024;
         } catch {
           return false;
         }
       };
+      const reportPath = resolveAnalysisRunPath(runDir, manifest, "reportPath");
+      const evaluationPath = resolveAnalysisRunPath(runDir, manifest, "evaluationPath");
+      const proposalsPath = resolveAnalysisRunPath(runDir, manifest, "proposalsPath");
       const outputs = {
         report: {
           fileName: "report.md",
-          available: outputAvailable("report.md")
+          relativePath: analysisRunRelativePath(runDir, reportPath),
+          available: outputAvailable(reportPath)
         },
         evaluation: {
           fileName: "evaluation-proposals.json",
-          available: outputAvailable("evaluation-proposals.json")
+          relativePath: analysisRunRelativePath(runDir, evaluationPath),
+          available: outputAvailable(evaluationPath)
         },
         proposals: {
           fileName: "artifact-proposals.json",
-          available: outputAvailable("artifact-proposals.json")
+          relativePath: analysisRunRelativePath(runDir, proposalsPath),
+          available: outputAvailable(proposalsPath)
         }
       };
       runs.push({
@@ -880,33 +879,17 @@ export function prepareSessionAnalysis({
   const messages = provider.getMessages(sessionId);
   const includeRawSnapshots = analysisConfig.includeRawSnapshots === true
     || settings.target.includeRawSnapshots === true;
-  const artifacts = snapshotArtifacts(projectPath, runDir, settings.target);
-  const files = {
-    manifestPath: path.join(runDir, "manifest.json"),
-    sessionPath: path.join(runDir, "session.json"),
-    sessionIndexPath: path.join(runDir, "session-index.json"),
-    evidenceIndexPath: path.join(runDir, "evidence-index.json"),
-    evidencePath: path.join(runDir, "evidence.jsonl"),
-    messagesPath: path.join(runDir, "messages.json"),
-    treePath: path.join(runDir, "tree.json"),
-    containerPath: path.join(runDir, "container.json"),
-    metricsPath: path.join(runDir, "metrics.json"),
-    flowPath: path.join(runDir, "flow.json"),
-    tracePath: path.join(runDir, "trace.json"),
-    artifactsPath: path.join(runDir, "artifacts.json"),
-    evaluationSeedPath: path.join(runDir, "evaluation-seed.json"),
-    promptPath: path.join(runDir, "analysis-request.md"),
-    reportPath: path.join(runDir, "report.md"),
-    evaluationPath: path.join(runDir, "evaluation-proposals.json"),
-    proposalsPath: path.join(runDir, "artifact-proposals.json")
-  };
+  const files = getAnalysisRunPaths(runDir);
+  ensureAnalysisRunDirectories(files, includeRawSnapshots);
+  const artifacts = snapshotArtifacts(projectPath, files.artifactSnapshotsDir, settings.target);
 
   const evidence = writeAnalysisEvidence({
     provider,
     session,
     sessionId,
     messages,
-    runDir
+    runDir,
+    files
   });
   const evaluationSeed = buildEvaluationSeed(
     provider,
@@ -977,7 +960,7 @@ export function prepareSessionAnalysis({
           : [])
       ]
         .filter((filePath) => existsSync(filePath))
-        .map((filePath) => [path.basename(filePath), hashFile(filePath)])
+        .map((filePath) => [analysisRunRelativePath(runDir, filePath), hashFile(filePath)])
     )
   };
 
@@ -1026,6 +1009,7 @@ export function prepareSessionAnalysis({
     target: settings.targetId,
     projectPath,
     runDir,
+    layoutVersion: 1,
     rawSnapshotsIncluded: includeRawSnapshots,
     integrity,
     command: {

@@ -195,6 +195,36 @@ OpenSessionViewer 可以从会话详情页以非交互方式启动已配置的 A
 `evidence.jsonl`、`artifacts.json` 和 `manifest.json` 等文件属于支持证据和
 诊断数据。已完成运行会在会话的 **分析活动** 面板中显示直接打开和下载链接。
 
+新运行会按用途组织这些文件：
+
+```text
+<run>/
+├── manifest.json
+├── outputs/
+│   ├── report.md
+│   ├── evaluation-proposals.json
+│   └── artifact-proposals.json
+├── inputs/
+│   ├── session.json
+│   ├── evaluation-seed.json
+│   └── analysis-request.md
+├── evidence/
+│   ├── session-index.json
+│   ├── evidence-index.json
+│   ├── evidence.jsonl
+│   ├── artifacts.json
+│   └── artifact-snapshots/
+└── diagnostics/                 # 仅在 includeRawSnapshots 启用时生成
+    ├── messages.json
+    ├── tree.json
+    ├── container.json
+    ├── metrics.json
+    ├── flow.json
+    └── trace.json
+```
+
+旧版平铺运行目录仍可读取。
+
 生成的评估用例初始状态为 `status: "proposed"`。OpenSessionViewer 不会直接
 修改 Skill，也不会把提案标记为已验证。只有在基线版本与候选版本通过重放、
 留出和回归测试后，才应提升候选工件。
@@ -321,10 +351,11 @@ OpenCode 权限，使其只能写入分析输出目录。`--dangerously-skip-per
 评估提案、工件提案、manifest 和校验结果，不会把多个目标混合到同一个输出
 包中。旧的 `defaultTarget` 字段仍受支持，并作为已有配置的第一个默认选择。
 
-默认情况下，分析任务写入 `session-index.json`、`evidence-index.json` 和
-不可变的 `evidence.jsonl`，不会生成完整的 message/tree/container/flow/
-trace 快照。只有旧 Analyzer 确实依赖这些大型诊断文件时，才应把
-`analysis.includeRawSnapshots` 或目标级 `includeRawSnapshots` 设为 `true`。
+默认情况下，分析任务写入 `evidence/session-index.json`、
+`evidence/evidence-index.json` 和不可变的 `evidence/evidence.jsonl`，
+不会生成 `diagnostics/` 目录。只有旧 Analyzer 确实依赖这些大型诊断文件时，
+才应把 `analysis.includeRawSnapshots` 或目标级 `includeRawSnapshots`
+设为 `true`。
 
 可以在 `analysis.providers.<provider>.targets.<target>` 下覆盖某个
 Provider 的目标配置，包括命令、提示词、shell、工件目录和扩展名。其他

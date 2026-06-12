@@ -849,7 +849,7 @@ export async function startServer(config = getConfig()) {
         if (!run || !output?.available) {
           return json(res, { ok: false, error: "Analysis output not found" }, 404);
         }
-        const outputPath = path.join(run.runDir, output.fileName);
+        const outputPath = path.join(run.runDir, output.relativePath || output.fileName);
         const outputStat = lstatSync(outputPath);
         if (!outputStat.isFile() || outputStat.isSymbolicLink() || outputStat.size > 16 * 1024 * 1024) {
           return json(res, { ok: false, error: "Analysis output not found" }, 404);
