@@ -7,7 +7,7 @@
 ![Node.js >= 22.5.0](https://img.shields.io/badge/node-%3E%3D22.5.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.3.0](https://img.shields.io/badge/version-1.3.0-orange?style=flat-square)
+![v1.3.1](https://img.shields.io/badge/version-1.3.1-orange?style=flat-square)
 
 ## 来源说明
 
@@ -364,7 +364,7 @@ Provider 的目标配置，包括命令、提示词、shell、工件目录和扩
 ## Claude Code 历史记录
 
 Claude Code Provider 同时读取旧版 `~/.claude/transcripts` 和当前
-`~/.claude/projects/<project>/*.jsonl` 布局。OpenSessionViewer 不会修改这些文件。
+`~/.claude/projects/<project>/*.jsonl` 布局。CodeagentSession 不会修改这些文件。
 
 Claude Code 会按照 `cleanupPeriodDays` 清理历史 JSONL，默认保留 30 天。
 JSONL 被清理后，`~/.claude.json` 中可能仍保留项目元数据；此时页面会明确提示
@@ -374,41 +374,79 @@ JSONL 被清理后，`~/.claude.json` 中可能仍保留项目元数据；此时
 ## 架构概览
 
 ```text
+bin/
+└── cli.ts                  # CLI 入口，先初始化配置再加载服务
 src/
 ├── providers/
 │   ├── interface.ts       # ProviderAdapter 接口
+│   ├── kinds.ts           # Provider capability 判断
 │   ├── index.ts           # Provider 注册表
-│   ├── opencode/          # OpenCode-compatible SQLite 适配器工厂
-│   ├── codeagent/         # CodeAgent 适配器，复用 OpenCode schema/parser
+│   ├── shared/            # 与具体 schema 无关的共享 Provider 工具
+│   ├── opencode/          # OpenCode SQLite 适配器与结构化视图
+│   ├── codeagent/         # 独立的 CodeAgent schema、适配器与结构化视图
 │   ├── claude-code/       # Claude Code JSONL 适配器
 │   ├── codex/             # Codex CLI JSONL 适配器
 │   └── gemini/            # Gemini JSON 适配器
 ├── db.ts                  # OpenCode-compatible DB 查询
 ├── meta.ts                # 收藏、重命名、删除等本地元数据
 ├── index-db.ts            # 跨 Provider 会话索引
+├── config.ts              # CLI、环境变量与 JSON 配置
+├── resume.ts              # 结构化继续会话命令
+├── analysis*.ts           # 证据快照、查询、执行与验证流水线
 ├── server.ts              # HTTP API 与 SSR 页面
 ├── views/                 # 服务端渲染模板
-├── static/                # 前端 JS/CSS
+├── static/                # 原生前端 JS/CSS，构建时复制到 dist
 └── locales/               # 中英文文案
+scripts/
+├── copy-static.mjs        # 复制静态资源
+└── qa-agent-browser.*     # Live E2E QA
+test/
+└── core.test.mjs          # Provider、分析、配置和渲染回归测试
 ```
 
-## 当前验证状态
+详细的模块边界、代码约定、验证矩阵和本地服务操作见
+[AGENTS.md](./AGENTS.md)。新增 Provider 时同时参考
+[Provider 贡献指南](./docs/CONTRIBUTING-PROVIDER.md) 和
+`src/providers/interface.ts`；接口源码是最终契约。
 
-最近一次真实数据验证使用：
+## 验证
 
-```text
-OpenCode DB: C:\Users\QQ110\.local\share\opencode\opencode.db
-Server: http://127.0.0.1:3456/opencode
-Data: 24 sessions, 1903 messages
+基础验证：
+
+```powershell
+npm run typecheck
+npm test
 ```
 
-验证覆盖：
+涉及页面、静态资源、Provider 展示或 API 行为时，先构建并重启本地服务：
+
+```powershell
+npm run build
+node dist/bin/cli.js
+```
+
+然后使用一个真实、包含 reasoning/tool/subagent 数据的 OpenCode Session
+运行浏览器 E2E：
+
+```powershell
+$env:OPENSESSIONVIEWER_QA_BASE_URL = 'http://127.0.0.1:3456'
+$env:OPENSESSIONVIEWER_QA_SESSION_ID = '<real-session-id>'
+npm run qa:e2e
+```
+
+E2E 覆盖：
 
 - dashboard、session list、search、stats、session detail
-- recursive session tree、TOC、Flow 视图、System Prompts
-- OpenCode 管理操作入口
+- settings、recursive session tree、TOC、Flow、reasoning 与 token 渲染
+- JSON/Markdown 导出
+- 默认关闭的终端启动入口
 - CodeAgent 缺省 DB 不存在时的 unavailable 页面
-- `agent-browser` delegated E2E，无 browser/page console errors
+- browser/page errors 收集
+
+会话分析不能只看外部 analyzer 的退出码。最终成功条件是对应 run 的
+`manifest.json` 同时满足 `state: "completed"` 和
+`validation.ok: true`，并通过 evidence 引用、输出 schema、路径边界与
+SHA-256 完整性检查。
 
 ## Roadmap
 
@@ -426,13 +464,33 @@ Data: 24 sessions, 1903 messages
 [ ] **Tool Flow Tree**
    - 将当前 trace/tool 视图升级为完整树，包含所有 sub-session branch、task calls、spans 和 timing。
 
-## 开发命令
+## 开发
 
-```bash
+要求 Node.js `>= 22.5.0`。项目使用 TypeScript ESM、Node 内置测试运行器和
+原生浏览器 JavaScript/CSS，并保持零 runtime npm dependencies。
+
+```powershell
+npm install
 npm run typecheck
-npm run build
+npm test
 npm start
 ```
+
+常用命令：
+
+| 命令 | 说明 |
+|:---|:---|
+| `npm run typecheck` | 仅执行 TypeScript 检查，不生成文件 |
+| `npm run build` | 编译 `bin/`、`src/`，并复制 `src/static/` 到 `dist/` |
+| `npm test` | 先构建，再运行 `test/*.test.mjs` |
+| `npm start` | 构建并启动 `127.0.0.1:3456` |
+| `npm run dev` | 构建、启动并打开浏览器 |
+| `npm run qa:e2e` | 对已运行的本地服务执行 `agent-browser` E2E |
+
+开发时只修改源码目录，不要直接编辑 `dist/`。Provider 原始数据库和 transcript
+保持只读；收藏、重命名、软删除与永久排除状态写入独立的 viewer 元数据库。
+配置、Provider capability、渲染语义、分析输出和测试要求详见
+[AGENTS.md](./AGENTS.md)。
 
 ## License
 
