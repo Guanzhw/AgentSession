@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { mkdirSync, existsSync, readFileSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
 /**
  * Try multiple candidate paths, return the first that exists on disk.
@@ -93,18 +93,220 @@ const defaults = {
   allowTerminalLaunch: false,
 };
 
-function readUserConfig(configPath) {
+function isObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+export function readUserConfigDocument(configPath) {
   if (!configPath || !existsSync(configPath)) {
-    return {};
+    return {
+      exists: false,
+      raw: "{}\n",
+      config: {},
+      error: ""
+    };
   }
 
+  let raw = "";
   try {
-    const parsed = JSON.parse(readFileSync(configPath, "utf-8"));
-    return parsed && typeof parsed === "object" ? parsed : {};
+    raw = readFileSync(configPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (!isObject(parsed)) {
+      return {
+        exists: true,
+        raw,
+        config: {},
+        error: "Configuration root must be a JSON object."
+      };
+    }
+    return { exists: true, raw, config: parsed, error: "" };
   } catch (error) {
-    console.warn(`Ignoring invalid OpenSessionViewer config at ${configPath}: ${error.message}`);
-    return {};
+    return {
+      exists: true,
+      raw,
+      config: {},
+      error: error.message
+    };
   }
+}
+
+export function readUserConfig(configPath) {
+  const document = readUserConfigDocument(configPath);
+  if (document.error) {
+    console.warn(`Ignoring invalid OpenSessionViewer config at ${configPath}: ${document.error}`);
+  }
+  return document.config;
+}
+
+function validateStringArray(value, field, errors) {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    errors.push(`${field} must be an array of strings.`);
+  }
+}
+
+function validateShell(value, field, errors) {
+  if (!isObject(value)) {
+    errors.push(`${field} must be an object.`);
+    return;
+  }
+  if (value.executable !== undefined && (typeof value.executable !== "string" || !value.executable.trim())) {
+    errors.push(`${field}.executable must be a non-empty string.`);
+  }
+  if (value.args !== undefined) {
+    validateStringArray(value.args, `${field}.args`, errors);
+  }
+}
+
+function validateCommand(value, field, errors) {
+  if (!isObject(value)) {
+    errors.push(`${field} must be an object.`);
+    return;
+  }
+  if (typeof value.executable !== "string" || !value.executable.trim()) {
+    errors.push(`${field}.executable must be a non-empty string.`);
+  }
+  if (!Array.isArray(value.args) || value.args.some((item) => typeof item !== "string")) {
+    errors.push(`${field}.args must be an array of strings.`);
+  }
+  if (value.cwd !== undefined && typeof value.cwd !== "string") {
+    errors.push(`${field}.cwd must be a string.`);
+  }
+  if (value.stdin !== undefined && value.stdin !== "prompt") {
+    errors.push(`${field}.stdin must be "prompt" when provided.`);
+  }
+}
+
+export function validateUserConfig(config) {
+  const errors = [];
+  if (!isObject(config)) {
+    return ["Configuration root must be a JSON object."];
+  }
+
+  if (config.resumeCommands !== undefined) {
+    if (!isObject(config.resumeCommands)) {
+      errors.push("resumeCommands must be an object.");
+    } else {
+      for (const [provider, command] of Object.entries(config.resumeCommands)) {
+        if (command !== false) {
+          validateCommand(command, `resumeCommands.${provider}`, errors);
+        }
+      }
+    }
+  }
+
+  if (config.resumeShell !== undefined && config.resumeShell !== null) {
+    validateShell(config.resumeShell, "resumeShell", errors);
+  }
+
+  if (config.analysis !== undefined) {
+    if (!isObject(config.analysis)) {
+      errors.push("analysis must be an object.");
+    } else {
+      if (config.analysis.enabled !== undefined && typeof config.analysis.enabled !== "boolean") {
+        errors.push("analysis.enabled must be a boolean.");
+      }
+      if (config.analysis.defaultTarget !== undefined && typeof config.analysis.defaultTarget !== "string") {
+        errors.push("analysis.defaultTarget must be a string.");
+      }
+      if (config.analysis.defaultTargets !== undefined) {
+        validateStringArray(config.analysis.defaultTargets, "analysis.defaultTargets", errors);
+        if (Array.isArray(config.analysis.defaultTargets) && config.analysis.defaultTargets.length === 0) {
+          errors.push("analysis.defaultTargets must contain at least one target.");
+        }
+      }
+      if (config.analysis.outputDir !== undefined && typeof config.analysis.outputDir !== "string") {
+        errors.push("analysis.outputDir must be a string.");
+      }
+      if (config.analysis.includeRawSnapshots !== undefined && typeof config.analysis.includeRawSnapshots !== "boolean") {
+        errors.push("analysis.includeRawSnapshots must be a boolean.");
+      }
+      if (config.analysis.shell !== undefined) {
+        validateShell(config.analysis.shell, "analysis.shell", errors);
+      }
+      if (config.analysis.targets !== undefined) {
+        if (!isObject(config.analysis.targets)) {
+          errors.push("analysis.targets must be an object.");
+        } else {
+          for (const [targetId, target] of Object.entries(config.analysis.targets)) {
+            if (!isObject(target)) {
+              errors.push(`analysis.targets.${targetId} must be an object.`);
+              continue;
+            }
+            for (const field of ["artifactRoots", "artifactFiles", "extensions"]) {
+              if (target[field] !== undefined) {
+                validateStringArray(target[field], `analysis.targets.${targetId}.${field}`, errors);
+              }
+            }
+            for (const field of ["label", "prompt", "promptFile"]) {
+              if (target[field] !== undefined && typeof target[field] !== "string") {
+                errors.push(`analysis.targets.${targetId}.${field} must be a string.`);
+              }
+            }
+          }
+        }
+      }
+      if (config.analysis.providers !== undefined) {
+        if (!isObject(config.analysis.providers)) {
+          errors.push("analysis.providers must be an object.");
+        } else {
+          for (const [providerId, providerConfig] of Object.entries(config.analysis.providers)) {
+            if (!isObject(providerConfig)) {
+              errors.push(`analysis.providers.${providerId} must be an object.`);
+              continue;
+            }
+            const providerSettings: any = providerConfig;
+            if (
+              providerSettings.defaultTarget !== undefined
+              && typeof providerSettings.defaultTarget !== "string"
+            ) {
+              errors.push(`analysis.providers.${providerId}.defaultTarget must be a string.`);
+            }
+            if (providerSettings.defaultTargets !== undefined) {
+              validateStringArray(
+                providerSettings.defaultTargets,
+                `analysis.providers.${providerId}.defaultTargets`,
+                errors
+              );
+              if (
+                Array.isArray(providerSettings.defaultTargets)
+                && providerSettings.defaultTargets.length === 0
+              ) {
+                errors.push(
+                  `analysis.providers.${providerId}.defaultTargets must contain at least one target.`
+                );
+              }
+            }
+            if (providerSettings.command !== undefined) {
+              validateCommand(providerSettings.command, `analysis.providers.${providerId}.command`, errors);
+            }
+            if (providerSettings.shell !== undefined) {
+              validateShell(providerSettings.shell, `analysis.providers.${providerId}.shell`, errors);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return errors;
+}
+
+export function writeUserConfig(configPath, config) {
+  const errors = validateUserConfig(config);
+  if (errors.length) {
+    const error: any = new Error("Invalid OpenSessionViewer configuration.");
+    error.validationErrors = errors;
+    throw error;
+  }
+  mkdirSync(path.dirname(configPath), { recursive: true });
+  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf-8");
+}
+
+export function applyRuntimeUserConfig(config, fileConfig) {
+  config.resumeCommands = isObject(fileConfig.resumeCommands) ? fileConfig.resumeCommands : {};
+  config.resumeShell = isObject(fileConfig.resumeShell) ? fileConfig.resumeShell : null;
+  config.analysis = isObject(fileConfig.analysis) ? fileConfig.analysis : { enabled: false };
+  return config;
 }
 
 function detectLang() {

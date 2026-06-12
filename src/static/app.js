@@ -34,8 +34,56 @@ const __I18N__ = {
     copied: "Copied",
     resume_opened: "Terminal opened",
     resume_disabled: "Terminal launch is unavailable",
-    analysis_opened: "Session analysis started",
+    analysis_opened: "Analysis launched for {count} target(s). Tracking status below.",
     analysis_disabled: "Session analysis is unavailable",
+    analysis_select_target: "Select at least one analysis target",
+    analysis_status_prepared: "Preparing",
+    analysis_status_launched: "Running",
+    analysis_status_completed: "Completed",
+    analysis_status_invalid: "Invalid",
+    analysis_status_failed: "Failed",
+    analysis_status_unknown: "Unknown",
+    analysis_no_runs: "No analysis runs yet.",
+    analysis_waiting: "Waiting for analyzer output and validation.",
+    analysis_started_at: "Started {time}",
+    analysis_finished_at: "Finished {time}",
+    analysis_target: "Target: {target}",
+    analysis_run_folder: "Run folder",
+    analysis_exit_code: "Process exit code: {code}",
+    analysis_counts: "{cases} evaluation cases · {proposals} artifact proposals",
+    analysis_report_ready: "Report generated",
+    analysis_outputs_title: "Final outputs",
+    analysis_outputs_help: "These are the analysis products. Other run files are supporting evidence and diagnostics.",
+    analysis_output_report: "Read analysis report",
+    analysis_output_report_help: "Human-readable outcome, evidence, findings, and recommendations.",
+    analysis_output_evaluation: "View evaluation plan",
+    analysis_output_evaluation_help: "Replay, held-out, and regression cases used to validate proposed changes.",
+    analysis_output_proposals: "View artifact proposals",
+    analysis_output_proposals_help: "Suggested target changes. This file can contain an empty proposal list.",
+    analysis_output_download: "Download",
+    analysis_validation_errors: "Validation errors",
+    analysis_status_error: "Could not refresh analysis status",
+    settings_saved: "Settings saved",
+    settings_restart: "Restart required for: {keys}",
+    settings_invalid_json: "Enter valid JSON before saving",
+    settings_validation_error: "Configuration validation failed",
+    settings_launch_ignored: "allowTerminalLaunch is startup-only and was not applied",
+    settings_example_loaded: "Analysis example inserted",
+    settings_json_applied: "Advanced JSON applied to the form",
+    settings_target_builtin: "built-in",
+    settings_prompt_preview_loading: "Building prompt preview...",
+    settings_prompt_preview_error: "Could not load the analyzer prompt preview",
+    settings_prompt_source_builtin: "built-in target guidance",
+    settings_prompt_source_configured: "target configuration",
+    settings_prompt_source_provider: "provider target configuration",
+    settings_prompt_source_default: "default target guidance",
+    settings_prompt_file_none: "no prompt file",
+    settings_prompt_file_loaded: "prompt file loaded: {path}",
+    settings_prompt_file_missing: "prompt file missing: {path}",
+    settings_prompt_preview_meta: "Target guidance: {source}. {file}.",
+    settings_select_target: "Select at least one analysis target",
+    settings_all_saved: "All changes saved",
+    settings_unsaved: "Unsaved changes",
     scroll_all_loaded: "All sessions loaded",
     scroll_loading: "Loading..."
   },
@@ -71,8 +119,56 @@ const __I18N__ = {
     copied: "已复制",
     resume_opened: "终端已打开",
     resume_disabled: "无法启动终端",
-    analysis_opened: "会话分析已启动",
+    analysis_opened: "已为 {count} 个目标启动分析，可在下方跟踪状态。",
     analysis_disabled: "无法启动会话分析",
+    analysis_select_target: "请至少选择一个分析目标",
+    analysis_status_prepared: "准备中",
+    analysis_status_launched: "运行中",
+    analysis_status_completed: "已完成",
+    analysis_status_invalid: "校验未通过",
+    analysis_status_failed: "失败",
+    analysis_status_unknown: "未知",
+    analysis_no_runs: "暂无分析记录。",
+    analysis_waiting: "正在等待 Analyzer 输出和校验结果。",
+    analysis_started_at: "开始于 {time}",
+    analysis_finished_at: "完成于 {time}",
+    analysis_target: "目标：{target}",
+    analysis_run_folder: "运行目录",
+    analysis_exit_code: "进程退出码：{code}",
+    analysis_counts: "{cases} 个评估用例 · {proposals} 个工件提案",
+    analysis_report_ready: "已生成报告",
+    analysis_outputs_title: "最终产物",
+    analysis_outputs_help: "这些是分析产物；运行目录中的其他文件是支持证据和诊断数据。",
+    analysis_output_report: "阅读分析报告",
+    analysis_output_report_help: "面向人的分析结果、证据、发现和建议。",
+    analysis_output_evaluation: "查看评估计划",
+    analysis_output_evaluation_help: "用于验证提案的回放、留出和回归用例。",
+    analysis_output_proposals: "查看工件提案",
+    analysis_output_proposals_help: "建议的目标修改；该文件可能包含空的提案列表。",
+    analysis_output_download: "下载",
+    analysis_validation_errors: "校验错误",
+    analysis_status_error: "无法刷新分析状态",
+    settings_saved: "设置已保存",
+    settings_restart: "以下配置需要重启后生效：{keys}",
+    settings_invalid_json: "请先输入有效的 JSON",
+    settings_validation_error: "配置校验失败",
+    settings_launch_ignored: "allowTerminalLaunch 只能在启动时设置，本次未应用",
+    settings_example_loaded: "已插入分析配置示例",
+    settings_json_applied: "已将高级 JSON 应用到表单",
+    settings_target_builtin: "内置",
+    settings_prompt_preview_loading: "正在生成提示词预览...",
+    settings_prompt_preview_error: "无法加载 Analyzer 提示词预览",
+    settings_prompt_source_builtin: "内置目标指引",
+    settings_prompt_source_configured: "目标配置",
+    settings_prompt_source_provider: "Provider 目标配置",
+    settings_prompt_source_default: "默认目标指引",
+    settings_prompt_file_none: "未配置提示词文件",
+    settings_prompt_file_loaded: "已加载提示词文件：{path}",
+    settings_prompt_file_missing: "提示词文件不存在：{path}",
+    settings_prompt_preview_meta: "目标指引来源：{source}。{file}。",
+    settings_select_target: "请至少选择一个分析目标",
+    settings_all_saved: "所有更改均已保存",
+    settings_unsaved: "有未保存的更改",
     scroll_all_loaded: "已全部加载",
     scroll_loading: "加载中..."
   }
@@ -80,6 +176,13 @@ const __I18N__ = {
 
 function ft(key) {
   return __I18N__[__LOCALE__]?.[key] ?? __I18N__.en[key] ?? key;
+}
+
+function formatText(template, values = {}) {
+  return Object.entries(values).reduce(
+    (text, [key, value]) => text.replaceAll(`{${key}}`, String(value)),
+    template
+  );
 }
 
 const themeToggle = document.getElementById('theme-toggle');
@@ -135,6 +238,677 @@ async function copyText(value) {
   textarea.select();
   document.execCommand("copy");
   textarea.remove();
+}
+
+const settingsForm = document.getElementById("settings-form");
+if (settingsForm) {
+  const editor = document.getElementById("settings-json");
+  const feedback = document.getElementById("settings-feedback");
+  const formatButton = document.getElementById("settings-format");
+  const applyJsonButton = document.getElementById("settings-apply-json");
+  const presetButton = document.getElementById("settings-analysis-preset");
+  const promptPreviewButton = document.getElementById("settings-prompt-preview-button");
+  const promptPreviewPanel = document.getElementById("settings-prompt-preview-panel");
+  const promptPreviewMeta = document.getElementById("settings-prompt-preview-meta");
+  const promptPreviewContent = document.getElementById("settings-prompt-preview-content");
+  const targetSelect = document.getElementById("settings-target-id");
+  const targetLabelInput = document.getElementById("settings-target-label");
+  const targetContextLabel = document.getElementById("settings-target-context-label");
+  const targetContextId = document.getElementById("settings-target-context-id");
+  const shellMode = document.getElementById("settings-shell-mode");
+  const shellCustomField = document.getElementById("settings-shell-custom-field");
+  const initialNode = document.getElementById("settings-initial-data");
+  const initialData = JSON.parse(initialNode?.textContent || "{}");
+  const providerId = settingsForm.dataset.provider;
+  const submitButton = settingsForm.querySelector("button[type='submit']");
+  const dirtyState = document.getElementById("settings-dirty-state");
+  let settingsDirty = false;
+
+  const setSettingsFeedback = (message, type = "") => {
+    feedback.textContent = message;
+    feedback.className = `settings-feedback ${type ? `settings-feedback-${type}` : ""}`;
+  };
+
+  const setSettingsDirty = (dirty) => {
+    settingsDirty = Boolean(dirty);
+    if (dirtyState) {
+      dirtyState.dataset.dirty = String(settingsDirty);
+      dirtyState.textContent = ft(settingsDirty ? "settings_unsaved" : "settings_all_saved");
+    }
+    if (submitButton) {
+      submitButton.disabled = !settingsDirty;
+    }
+  };
+
+  const value = (id) => document.getElementById(id)?.value?.trim() || "";
+  const isChecked = (id) => Boolean(document.getElementById(id)?.checked);
+  const setValue = (id, next) => {
+    const element = document.getElementById(id);
+    if (element) element.value = next ?? "";
+  };
+  const setChecked = (id, next) => {
+    const element = document.getElementById(id);
+    if (element) element.checked = Boolean(next);
+  };
+  const readLines = (id) => (document.getElementById(id)?.value || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const setLines = (id, values) => setValue(id, Array.isArray(values) ? values.join("\n") : "");
+  const asObject = (next) => next && typeof next === "object" && !Array.isArray(next) ? next : {};
+  const clone = (next) => JSON.parse(JSON.stringify(next || {}));
+  let targetDrafts = {};
+  let currentTargetId = "skills";
+
+  const parseEditor = () => {
+    const parsed = JSON.parse(editor.value);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Configuration root must be a JSON object.");
+    }
+    return parsed;
+  };
+
+  const extractModel = (args) => {
+    const index = args.indexOf("--model");
+    return index >= 0 ? args[index + 1] || "" : "";
+  };
+
+  const withoutModel = (args) => {
+    const index = args.indexOf("--model");
+    return index < 0 ? args : [...args.slice(0, index), ...args.slice(index + 2)];
+  };
+
+  const targetDefaults = (targetId) => asObject(asObject(initialData.targetDefaults)[targetId]);
+  const resolvedTargetDefaults = (targetId) => {
+    const builtin = targetDefaults(targetId);
+    return Object.keys(builtin).length
+      ? builtin
+      : {
+      label: `Analyze ${targetId}`,
+      artifactRoots: [],
+      extensions: targetDefaults("skills").extensions || [],
+      promptFile: ""
+    };
+  };
+
+  const captureTargetDraft = (targetId) => {
+    if (!targetId) return;
+    const target = { ...asObject(targetDrafts[targetId]) };
+    target.label = value("settings-target-label") || `Analyze ${targetId}`;
+    target.artifactRoots = readLines("settings-artifact-roots");
+    target.artifactFiles = readLines("settings-artifact-files");
+    target.extensions = readLines("settings-extensions");
+    const prompt = document.getElementById("settings-target-prompt")?.value?.trim() || "";
+    if (prompt) target.prompt = prompt;
+    else delete target.prompt;
+    const promptFile = value("settings-prompt-file");
+    if (promptFile) target.promptFile = promptFile;
+    else delete target.promptFile;
+    targetDrafts[targetId] = target;
+  };
+
+  const loadTargetDraft = (targetId) => {
+    const configured = asObject(targetDrafts[targetId]);
+    const target = {
+      ...resolvedTargetDefaults(targetId),
+      ...configured
+    };
+    setValue("settings-target-label", target.label || `Analyze ${targetId}`);
+    setValue("settings-target-prompt", configured.prompt || "");
+    setValue("settings-prompt-file", configured.promptFile || "");
+    setLines("settings-artifact-roots", target.artifactRoots);
+    setLines("settings-artifact-files", target.artifactFiles);
+    setLines("settings-extensions", target.extensions);
+    if (targetContextLabel) targetContextLabel.textContent = target.label || targetId;
+    if (targetContextId) targetContextId.textContent = targetId;
+    promptPreviewPanel?.classList.add("hidden");
+  };
+
+  const promptSourceLabel = (source) => {
+    const keyBySource = {
+      "built-in": "settings_prompt_source_builtin",
+      configured: "settings_prompt_source_configured",
+      provider: "settings_prompt_source_provider",
+      default: "settings_prompt_source_default"
+    };
+    return ft(keyBySource[source] || keyBySource.default);
+  };
+
+  const loadPromptPreview = async () => {
+    if (!promptPreviewButton || !promptPreviewPanel || !promptPreviewMeta || !promptPreviewContent) return;
+    promptPreviewButton.disabled = true;
+    promptPreviewPanel.classList.remove("hidden");
+    promptPreviewMeta.textContent = ft("settings_prompt_preview_loading");
+    promptPreviewContent.textContent = "";
+    try {
+      const targetId = value("settings-target-id") || "skills";
+      const config = collectStructuredSettings(parseEditor());
+      const response = await fetch(`/api/${providerId}/analysis/prompt-preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target: targetId, config })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || `HTTP ${response.status}`);
+      }
+      const preview = result.preview;
+      const promptFile = preview.promptFile || {};
+      const fileStatus = !promptFile.configuredPath
+        ? ft("settings_prompt_file_none")
+        : formatText(
+          ft(promptFile.available ? "settings_prompt_file_loaded" : "settings_prompt_file_missing"),
+          { path: promptFile.resolvedPath || promptFile.configuredPath }
+        );
+      promptPreviewMeta.textContent = formatText(ft("settings_prompt_preview_meta"), {
+        source: promptSourceLabel(preview.targetInstructionSource),
+        file: fileStatus
+      });
+      promptPreviewContent.textContent = preview.prompt || "";
+    } catch (error) {
+      promptPreviewMeta.textContent = `${ft("settings_prompt_preview_error")}: ${error.message}`;
+    } finally {
+      promptPreviewButton.disabled = false;
+    }
+  };
+
+  const populateTargetOptions = (analysis, selectedTargetId) => {
+    if (!targetSelect) return;
+    const targets = asObject(analysis.targets);
+    const builtins = asObject(initialData.targetDefaults);
+    const defaultTargetIds = Array.isArray(analysis.defaultTargets) && analysis.defaultTargets.length
+      ? analysis.defaultTargets.filter((targetId) => typeof targetId === "string" && targetId)
+      : typeof analysis.defaultTarget === "string" && analysis.defaultTarget
+        ? [analysis.defaultTarget]
+        : ["skills"];
+    const targetIds = [...new Set([
+      ...Object.keys(builtins),
+      ...Object.keys(targets),
+      ...defaultTargetIds,
+      selectedTargetId
+    ])];
+    targetSelect.replaceChildren(...targetIds.map((targetId) => {
+      const configured = asObject(targets[targetId]);
+      const fallback = resolvedTargetDefaults(targetId);
+      const option = document.createElement("option");
+      option.value = targetId;
+      const label = configured.label || fallback.label;
+      option.textContent = builtins[targetId]
+        ? `${label} (${ft("settings_target_builtin")})`
+        : `${label} (${targetId})`;
+      return option;
+    }));
+    targetSelect.value = selectedTargetId;
+
+    const choiceGrid = document.querySelector("#settings-default-targets .settings-choice-grid");
+    if (choiceGrid) {
+      choiceGrid.replaceChildren(...targetIds.map((targetId) => {
+        const configured = asObject(targets[targetId]);
+        const fallback = resolvedTargetDefaults(targetId);
+        const choice = document.createElement("label");
+        choice.className = "settings-choice";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.name = "settings-default-target";
+        checkbox.value = targetId;
+        checkbox.checked = defaultTargetIds.includes(targetId);
+        const label = document.createElement("span");
+        const targetLabel = configured.label || fallback.label;
+        label.textContent = builtins[targetId]
+          ? `${targetLabel} (${ft("settings_target_builtin")})`
+          : `${targetLabel} (${targetId})`;
+        choice.append(checkbox, label);
+        return choice;
+      }));
+    }
+  };
+
+  const populateSettingsForm = (config) => {
+    const analysis = asObject(config.analysis);
+    const targetId = Array.isArray(analysis.defaultTargets) && analysis.defaultTargets.length
+      ? analysis.defaultTargets[0]
+      : typeof analysis.defaultTarget === "string" && analysis.defaultTarget
+        ? analysis.defaultTarget
+        : "skills";
+    targetDrafts = clone(asObject(analysis.targets));
+    currentTargetId = targetId;
+    const providerSettings = asObject(asObject(analysis.providers)[providerId]);
+    const command = {
+      ...asObject(initialData.analysisDefaultCommand),
+      ...asObject(providerSettings.command)
+    };
+    const commandArgs = Array.isArray(command.args) ? command.args : [];
+
+    setChecked("settings-analysis-enabled", analysis.enabled);
+    setValue("settings-analysis-output", analysis.outputDir || ".opensessionviewer/analysis");
+    setChecked("settings-raw-snapshots", analysis.includeRawSnapshots);
+    populateTargetOptions(analysis, targetId);
+    loadTargetDraft(targetId);
+    setChecked("settings-analyzer-enabled", Boolean(providerSettings.command) || providerId === "opencode");
+    setValue("settings-analyzer-executable", command.executable || "");
+    if (providerId === "opencode") {
+      setValue("settings-analyzer-model", extractModel(commandArgs));
+      setLines("settings-analyzer-args", withoutModel(commandArgs));
+    } else {
+      setLines("settings-analyzer-args", commandArgs);
+    }
+
+    const resumeCommands = asObject(config.resumeCommands);
+    const configuredResume = resumeCommands[providerId];
+    const resumeEnabled = configuredResume !== false;
+    const resume = configuredResume && configuredResume !== false
+      ? configuredResume
+      : asObject(initialData.resumeDefault);
+    setChecked("settings-resume-enabled", resumeEnabled);
+    setValue("settings-resume-executable", resume.executable || "");
+    setValue("settings-resume-cwd", resume.cwd || "");
+    setLines("settings-resume-args", resume.args);
+
+    const resumeShell = asObject(config.resumeShell);
+    const executable = resumeShell.executable || "";
+    const mode = ["", "pwsh.exe", "powershell.exe"].includes(executable) ? executable : "custom";
+    setValue("settings-shell-mode", mode);
+    setValue("settings-shell-custom", mode === "custom" ? executable : "");
+    setLines("settings-shell-args", resumeShell.args);
+    shellCustomField?.classList.toggle("hidden", mode !== "custom");
+  };
+
+  const collectStructuredSettings = (baseConfig) => {
+    const config = clone(baseConfig);
+    const analysis = asObject(config.analysis);
+    analysis.enabled = isChecked("settings-analysis-enabled");
+    analysis.outputDir = value("settings-analysis-output") || ".opensessionviewer/analysis";
+    analysis.includeRawSnapshots = isChecked("settings-raw-snapshots");
+
+    const targetId = value("settings-target-id") || "skills";
+    captureTargetDraft(targetId);
+    const defaultTargets = [...document.querySelectorAll(
+      "#settings-default-targets input[name='settings-default-target']:checked"
+    )].map((input) => input.value);
+    if (!defaultTargets.length) {
+      throw new Error(ft("settings_select_target"));
+    }
+    analysis.defaultTargets = defaultTargets;
+    analysis.defaultTarget = defaultTargets[0];
+    analysis.targets = {
+      ...asObject(analysis.targets),
+      ...targetDrafts
+    };
+
+    const analysisProviders = { ...asObject(analysis.providers) };
+    const providerSettings = { ...asObject(analysisProviders[providerId]) };
+    if (isChecked("settings-analyzer-enabled")) {
+      const executable = value("settings-analyzer-executable");
+      if (!executable) {
+        throw new Error("Analyzer executable is required when provider analysis is enabled.");
+      }
+      let args = readLines("settings-analyzer-args");
+      if (providerId === "opencode") {
+        const model = value("settings-analyzer-model");
+        if (model) {
+          const insertAt = args[0] === "run" ? 1 : 0;
+          args = [...args.slice(0, insertAt), "--model", model, ...args.slice(insertAt)];
+        }
+      }
+      providerSettings.command = { ...asObject(providerSettings.command), executable, args };
+      analysisProviders[providerId] = providerSettings;
+    } else {
+      delete providerSettings.command;
+      if (Object.keys(providerSettings).length) analysisProviders[providerId] = providerSettings;
+      else delete analysisProviders[providerId];
+    }
+    analysis.providers = analysisProviders;
+    config.analysis = analysis;
+
+    const resumeCommands = { ...asObject(config.resumeCommands) };
+    if (!isChecked("settings-resume-enabled")) {
+      resumeCommands[providerId] = false;
+    } else {
+      const executable = value("settings-resume-executable");
+      if (!executable) {
+        throw new Error("Resume executable is required when resume is enabled.");
+      }
+      const resume = {
+        executable,
+        args: readLines("settings-resume-args")
+      };
+      const cwd = value("settings-resume-cwd");
+      if (cwd) resume.cwd = cwd;
+      resumeCommands[providerId] = resume;
+    }
+    config.resumeCommands = resumeCommands;
+
+    const selectedShell = value("settings-shell-mode");
+    if (!selectedShell) {
+      delete config.resumeShell;
+    } else {
+      const executable = selectedShell === "custom" ? value("settings-shell-custom") : selectedShell;
+      if (!executable) {
+        throw new Error("Custom shell executable is required.");
+      }
+      config.resumeShell = {
+        executable,
+        args: readLines("settings-shell-args")
+      };
+    }
+    return config;
+  };
+
+  try {
+    populateSettingsForm(parseEditor());
+  } catch {}
+
+  formatButton?.addEventListener("click", () => {
+    try {
+      editor.value = `${JSON.stringify(parseEditor(), null, 2)}\n`;
+      setSettingsFeedback("");
+    } catch (error) {
+      setSettingsFeedback(`${ft("settings_invalid_json")}: ${error.message}`, "error");
+    }
+  });
+
+  applyJsonButton?.addEventListener("click", () => {
+    try {
+      populateSettingsForm(parseEditor());
+      setSettingsDirty(true);
+      setSettingsFeedback(ft("settings_json_applied"), "success");
+    } catch (error) {
+      setSettingsFeedback(`${ft("settings_invalid_json")}: ${error.message}`, "error");
+    }
+  });
+
+  presetButton?.addEventListener("click", () => {
+    const preset = asObject(initialData.analysisDefaultCommand);
+    const args = Array.isArray(preset.args) ? preset.args : [];
+    setChecked("settings-analyzer-enabled", true);
+    setValue("settings-analyzer-executable", preset.executable || "opencode");
+    setValue("settings-analyzer-model", extractModel(args));
+    setLines("settings-analyzer-args", withoutModel(args));
+    setSettingsDirty(true);
+    setSettingsFeedback(ft("settings_example_loaded"), "success");
+  });
+
+  promptPreviewButton?.addEventListener("click", loadPromptPreview);
+
+  targetSelect?.addEventListener("change", () => {
+    captureTargetDraft(currentTargetId);
+    currentTargetId = targetSelect.value || "skills";
+    loadTargetDraft(currentTargetId);
+  });
+
+  targetLabelInput?.addEventListener("input", () => {
+    if (targetContextLabel) {
+      targetContextLabel.textContent = targetLabelInput.value.trim() || currentTargetId;
+    }
+  });
+
+  shellMode?.addEventListener("change", () => {
+    shellCustomField?.classList.toggle("hidden", shellMode.value !== "custom");
+  });
+
+  settingsForm.addEventListener("input", () => {
+    setSettingsDirty(true);
+    setSettingsFeedback("");
+  });
+
+  settingsForm.addEventListener("change", (event) => {
+    if (event.target !== targetSelect) {
+      setSettingsDirty(true);
+      setSettingsFeedback("");
+    }
+  });
+
+  settingsForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      const config = collectStructuredSettings(parseEditor());
+      submitButton.disabled = true;
+      setSettingsFeedback("");
+      const response = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) {
+        const details = Array.isArray(result.validationErrors) && result.validationErrors.length
+          ? `: ${result.validationErrors.join(" ")}`
+          : result.error
+            ? `: ${result.error}`
+            : "";
+        throw new Error(`${ft("settings_validation_error")}${details}`);
+      }
+
+      editor.value = `${JSON.stringify(config, null, 2)}\n`;
+      const messages = [ft("settings_saved")];
+      if (result.restartRequiredKeys?.length) {
+        messages.push(formatText(ft("settings_restart"), { keys: result.restartRequiredKeys.join(", ") }));
+      }
+      if (result.ignoredKeys?.includes("allowTerminalLaunch")) {
+        messages.push(ft("settings_launch_ignored"));
+      }
+      setSettingsFeedback(messages.join(" "), "success");
+      setSettingsDirty(false);
+      showToast(ft("settings_saved"), "success");
+    } catch (error) {
+      setSettingsFeedback(error.message || ft("settings_validation_error"), "error");
+      showToast(ft("toast_error"), "error");
+    } finally {
+      submitButton.disabled = !settingsDirty;
+    }
+  });
+}
+
+const analysisStatusPanel = document.getElementById("analysis-status-panel");
+let analysisStatusTimer = null;
+
+function analysisStateLabel(state) {
+  const known = ["prepared", "launched", "completed", "invalid", "failed"];
+  return ft(`analysis_status_${known.includes(state) ? state : "unknown"}`);
+}
+
+function analysisTimestamp(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+}
+
+function renderAnalysisRuns(runs) {
+  if (!analysisStatusPanel) return;
+  const container = document.getElementById("analysis-runs");
+  container.replaceChildren();
+  if (!Array.isArray(runs) || !runs.length) {
+    const empty = document.createElement("p");
+    empty.className = "analysis-run-empty";
+    empty.textContent = ft("analysis_no_runs");
+    container.appendChild(empty);
+    return;
+  }
+
+  for (const run of runs) {
+    const card = document.createElement("article");
+    card.className = `analysis-run analysis-run-${run.state || "unknown"}`;
+
+    const header = document.createElement("div");
+    header.className = "analysis-run-header";
+    const title = document.createElement("div");
+    title.className = "analysis-run-title";
+    const badge = document.createElement("span");
+    badge.className = `analysis-run-badge analysis-run-badge-${run.state || "unknown"}`;
+    badge.textContent = analysisStateLabel(run.state);
+    const target = document.createElement("strong");
+    target.textContent = formatText(ft("analysis_target"), { target: run.target || "skills" });
+    title.append(badge, target);
+    const time = document.createElement("time");
+    const displayTime = run.completedAt || run.launchedAt || run.createdAt;
+    time.dateTime = displayTime || "";
+    time.textContent = run.completedAt
+      ? formatText(ft("analysis_finished_at"), { time: analysisTimestamp(run.completedAt) })
+      : formatText(ft("analysis_started_at"), { time: analysisTimestamp(run.launchedAt || run.createdAt) });
+    header.append(title, time);
+    card.appendChild(header);
+
+    const runId = document.createElement("code");
+    runId.className = "analysis-run-id";
+    runId.textContent = run.runId || "";
+    card.appendChild(runId);
+
+    if (run.active) {
+      const waiting = document.createElement("p");
+      waiting.className = "analysis-run-waiting";
+      waiting.textContent = ft("analysis_waiting");
+      card.appendChild(waiting);
+    }
+
+    const details = document.createElement("div");
+    details.className = "analysis-run-details";
+    if (run.validation) {
+      const counts = document.createElement("span");
+      counts.textContent = formatText(ft("analysis_counts"), {
+        cases: run.validation.evaluationCaseCount || 0,
+        proposals: run.validation.artifactProposalCount || 0
+      });
+      details.appendChild(counts);
+      const exitCode = document.createElement("span");
+      exitCode.textContent = formatText(ft("analysis_exit_code"), {
+        code: run.validation.processExitCode ?? 0
+      });
+      details.appendChild(exitCode);
+    }
+    if (run.hasReport) {
+      const report = document.createElement("span");
+      report.className = "analysis-report-ready";
+      report.textContent = ft("analysis_report_ready");
+      details.appendChild(report);
+    }
+    card.appendChild(details);
+
+    const outputDefinitions = [
+      {
+        id: "report",
+        label: ft("analysis_output_report"),
+        help: ft("analysis_output_report_help"),
+        primary: true
+      },
+      {
+        id: "evaluation",
+        label: ft("analysis_output_evaluation"),
+        help: ft("analysis_output_evaluation_help")
+      },
+      {
+        id: "proposals",
+        label: ft("analysis_output_proposals"),
+        help: ft("analysis_output_proposals_help")
+      }
+    ];
+    const availableOutputs = outputDefinitions.filter(
+      (definition) => run.outputs?.[definition.id]?.available
+    );
+    if (availableOutputs.length) {
+      const outputs = document.createElement("section");
+      outputs.className = "analysis-run-outputs";
+      const outputsHeader = document.createElement("div");
+      outputsHeader.className = "analysis-run-outputs-header";
+      const outputsTitle = document.createElement("h3");
+      outputsTitle.textContent = ft("analysis_outputs_title");
+      const outputsHelp = document.createElement("p");
+      outputsHelp.textContent = ft("analysis_outputs_help");
+      outputsHeader.append(outputsTitle, outputsHelp);
+      outputs.appendChild(outputsHeader);
+
+      const outputList = document.createElement("div");
+      outputList.className = "analysis-output-list";
+      const outputBase = `/api/${analysisStatusPanel.dataset.provider}/session/${encodeURIComponent(analysisStatusPanel.dataset.sessionId)}/analyses/${encodeURIComponent(run.runId)}/outputs`;
+      for (const definition of availableOutputs) {
+        const item = document.createElement("div");
+        item.className = `analysis-output-item${definition.primary ? " analysis-output-report" : ""}`;
+        const description = document.createElement("div");
+        description.className = "analysis-output-description";
+        const viewLink = document.createElement("a");
+        viewLink.className = "analysis-output-link";
+        viewLink.href = `${outputBase}/${definition.id}`;
+        viewLink.target = "_blank";
+        viewLink.rel = "noopener";
+        viewLink.textContent = definition.label;
+        const help = document.createElement("p");
+        help.textContent = definition.help;
+        description.append(viewLink, help);
+
+        const downloadLink = document.createElement("a");
+        downloadLink.className = "analysis-output-download";
+        downloadLink.href = `${outputBase}/${definition.id}?download=1`;
+        downloadLink.textContent = ft("analysis_output_download");
+        item.append(description, downloadLink);
+        outputList.appendChild(item);
+      }
+      outputs.appendChild(outputList);
+      card.appendChild(outputs);
+    }
+
+    if (run.validation?.errors?.length) {
+      const errorBlock = document.createElement("details");
+      errorBlock.className = "analysis-run-errors";
+      errorBlock.open = run.state === "failed" || run.state === "invalid";
+      const summary = document.createElement("summary");
+      summary.textContent = `${ft("analysis_validation_errors")} (${run.validation.errors.length})`;
+      const list = document.createElement("ul");
+      for (const error of run.validation.errors) {
+        const item = document.createElement("li");
+        item.textContent = error;
+        list.appendChild(item);
+      }
+      errorBlock.append(summary, list);
+      card.appendChild(errorBlock);
+    }
+
+    const folderLabel = document.createElement("span");
+    folderLabel.className = "analysis-run-folder-label";
+    folderLabel.textContent = ft("analysis_run_folder");
+    const folder = document.createElement("code");
+    folder.className = "analysis-run-folder";
+    folder.textContent = run.runDir || "";
+    card.append(folderLabel, folder);
+    container.appendChild(card);
+  }
+}
+
+async function refreshAnalysisRuns(scheduleNext = true) {
+  if (!analysisStatusPanel) return;
+  const refreshButton = document.getElementById("analysis-status-refresh");
+  refreshButton?.setAttribute("disabled", "");
+  try {
+    const provider = analysisStatusPanel.dataset.provider;
+    const sessionId = analysisStatusPanel.dataset.sessionId;
+    const response = await fetch(`/api/${provider}/session/${encodeURIComponent(sessionId)}/analyses`);
+    const result = await response.json();
+    if (!response.ok || !result.ok) {
+      throw new Error(result.error || `HTTP ${response.status}`);
+    }
+    renderAnalysisRuns(result.runs);
+    if (analysisStatusTimer) clearTimeout(analysisStatusTimer);
+    if (scheduleNext && result.runs?.some((run) => run.active)) {
+      analysisStatusTimer = setTimeout(() => refreshAnalysisRuns(true), 2000);
+    }
+  } catch {
+    showToast(ft("analysis_status_error"), "error");
+  } finally {
+    refreshButton?.removeAttribute("disabled");
+  }
+}
+
+if (analysisStatusPanel) {
+  try {
+    const initial = JSON.parse(document.getElementById("analysis-runs-initial")?.textContent || "[]");
+    renderAnalysisRuns(initial);
+    if (initial.some((run) => run.active)) {
+      analysisStatusTimer = setTimeout(() => refreshAnalysisRuns(true), 2000);
+    }
+  } catch {
+    renderAnalysisRuns([]);
+  }
+  document.getElementById("analysis-status-refresh")?.addEventListener("click", () => {
+    refreshAnalysisRuns(true);
+  });
 }
 
 document.addEventListener("keydown", (e) => {
@@ -231,16 +1005,6 @@ document.addEventListener("click", async (e) => {
     return;
   }
 
-  if (action === "copy-resume-command") {
-    try {
-      await copyText(btn.dataset.command || "");
-      showToast(ft("copied"), "success");
-    } catch {
-      showToast(ft("toast_error"), "error");
-    }
-    return;
-  }
-
   if (action === "resume-session") {
     try {
       const res = await fetch(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/resume`, {
@@ -260,15 +1024,25 @@ document.addEventListener("click", async (e) => {
 
   if (action === "analyze-session") {
     try {
+      const launchControl = btn.closest(".analysis-launch-control");
+      const targets = [...(launchControl?.querySelectorAll(".analysis-target-checkbox:checked") || [])]
+        .map((checkbox) => checkbox.value);
+      if (!targets.length) {
+        showToast(ft("analysis_select_target"), "error");
+        return;
+      }
       const res = await fetch(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target: btn.dataset.target || "skills" })
+        body: JSON.stringify({ targets })
       });
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
+      const result = await res.json();
+      if (!res.ok || !result.ok) {
+        throw new Error(result.error || `HTTP ${res.status}`);
       }
-      showToast(ft("analysis_opened"), "success");
+      showToast(formatText(ft("analysis_opened"), { count: result.runs?.length || targets.length }), "success");
+      await refreshAnalysisRuns(true);
+      analysisStatusPanel?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     } catch {
       showToast(ft("analysis_disabled"), "error");
     }
@@ -343,6 +1117,17 @@ document.addEventListener("click", async (e) => {
   if (action === "export-json") {
     window.open(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/export?format=json`, "_blank");
   }
+});
+
+document.addEventListener("change", (event) => {
+  const checkbox = event.target.closest?.(".analysis-target-checkbox");
+  if (!checkbox) return;
+  const launchControl = checkbox.closest(".analysis-launch-control");
+  const selectedCount = launchControl?.querySelectorAll(".analysis-target-checkbox:checked").length || 0;
+  const count = launchControl?.querySelector("[data-analysis-selected-count]");
+  const button = launchControl?.querySelector("[data-action='analyze-session']");
+  if (count) count.textContent = String(selectedCount);
+  if (button) button.disabled = selectedCount === 0;
 });
 
 const toggleBatchBtn = document.getElementById("toggle-batch");

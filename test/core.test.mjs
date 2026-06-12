@@ -17,6 +17,7 @@ import { enrichCodeAgentSession } from "../dist/src/providers/codeagent/schema.j
 import { buildOpenCodeSessionTree } from "../dist/src/providers/opencode/session-tree.js";
 import { buildFlowTreeFromContainer } from "../dist/src/providers/shared/flow-tree.js";
 import { renderSessionPage } from "../dist/src/views/session.js";
+import { renderSettingsPage } from "../dist/src/views/settings.js";
 import {
   extractSessionMeta,
   parseTranscript,
@@ -34,14 +35,25 @@ import {
   resolveProjectDirectory
 } from "../dist/src/resume.js";
 import {
+  buildAnalysisPromptPreview,
   buildPowerShellAnalysisArgs,
+  getAnalysisTargetIds,
+  getDefaultAnalysisTargetIds,
   getSessionAnalysisAction,
+  listSessionAnalysisRuns,
   prepareSessionAnalysis,
   resolveAnalysisSettings
 } from "../dist/src/analysis.js";
 import { runAnalysisTool } from "../dist/src/analysis-tools.js";
 import { validateAnalysisOutputs } from "../dist/src/analysis-validator.js";
-import { parseArgs } from "../dist/src/config.js";
+import { BUILTIN_ANALYSIS_TARGETS } from "../dist/src/analysis-targets.js";
+import {
+  applyRuntimeUserConfig,
+  parseArgs,
+  readUserConfigDocument,
+  validateUserConfig,
+  writeUserConfig
+} from "../dist/src/config.js";
 
 const fixture = (name) => path.join(process.cwd(), "test", "fixtures", name);
 
@@ -429,6 +441,202 @@ test("terminal launch requires the explicit startup flag", () => {
   assert.equal(parseArgs(["--config", configPath, "--allow-terminal-launch"]).allowTerminalLaunch, true);
 });
 
+test("settings configuration validates, persists, and applies runtime fields", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-settings-"));
+  const configPath = path.join(temp, "nested", "config.json");
+  const fileConfig = {
+    port: 4567,
+    resumeCommands: {
+      opencode: {
+        executable: "opencode",
+        args: ["--session", "{sessionId}"]
+      }
+    },
+    resumeShell: {
+      executable: "powershell.exe",
+      args: ["-NoExit", "-NoLogo"]
+    },
+    analysis: {
+      enabled: true,
+      defaultTargets: ["skills", "tests"],
+      defaultTarget: "skills",
+      targets: {
+        skills: {
+          artifactRoots: ["skills"],
+          extensions: [".md"],
+          prompt: "Focus on deterministic validation."
+        }
+      },
+      providers: {
+        opencode: {
+          command: {
+            executable: "opencode",
+            args: ["run", "--file", "{promptPath}"]
+          }
+        }
+      }
+    }
+  };
+
+  assert.deepEqual(validateUserConfig(fileConfig), []);
+  writeUserConfig(configPath, fileConfig);
+  const document = readUserConfigDocument(configPath);
+  assert.equal(document.exists, true);
+  assert.equal(document.error, "");
+  assert.deepEqual(document.config, fileConfig);
+  assert.equal(
+    document.config.analysis.targets.skills.prompt,
+    "Focus on deterministic validation."
+  );
+
+  const runtimeConfig = {
+    allowTerminalLaunch: true,
+    resumeCommands: {},
+    resumeShell: null,
+    analysis: { enabled: false }
+  };
+  applyRuntimeUserConfig(runtimeConfig, fileConfig);
+  assert.equal(runtimeConfig.allowTerminalLaunch, true);
+  assert.deepEqual(runtimeConfig.analysis, fileConfig.analysis);
+  assert.deepEqual(runtimeConfig.resumeCommands, fileConfig.resumeCommands);
+  assert.deepEqual(runtimeConfig.resumeShell, fileConfig.resumeShell);
+
+  assert.deepEqual(
+    validateUserConfig({
+      analysis: {
+        enabled: "yes",
+        defaultTargets: [],
+        targets: {
+          skills: {
+            prompt: 42
+          }
+        },
+        providers: {
+          opencode: {
+            defaultTargets: [],
+            command: { executable: "", args: "run" }
+          }
+        }
+      }
+    }),
+    [
+      "analysis.enabled must be a boolean.",
+      "analysis.defaultTargets must contain at least one target.",
+      "analysis.targets.skills.prompt must be a string.",
+      "analysis.providers.opencode.defaultTargets must contain at least one target.",
+      "analysis.providers.opencode.command.executable must be a non-empty string.",
+      "analysis.providers.opencode.command.args must be an array of strings."
+    ]
+  );
+});
+
+test("settings page exposes config location and startup-only launch status", () => {
+  const html = renderSettingsPage({
+    configPath: "C:\\Users\\tester\\config.json",
+    configDocument: {
+      exists: false,
+      raw: "{}\n",
+      config: {},
+      error: ""
+    },
+    terminalLaunchAllowed: true,
+    provider: "opencode",
+    providerName: "OpenCode",
+    resumeDefault: {
+      executable: "opencode",
+      args: ["--session", "{sessionId}"]
+    },
+    providers: [{
+      id: "opencode",
+      name: "OpenCode",
+      icon: "OC",
+      available: true
+    }]
+  });
+
+  assert.match(html, /data-page="settings"/);
+  assert.match(html, /id="settings-form"/);
+  assert.match(html, /class="settings-section-nav"/);
+  assert.match(html, /href="#settings-target"/);
+  assert.match(html, /id="settings-analysis"/);
+  assert.match(html, /id="settings-target"/);
+  assert.match(html, /id="settings-analyzer"/);
+  assert.match(html, /id="settings-resume"/);
+  assert.match(html, /id="settings-advanced"/);
+  assert.match(html, /id="settings-json"/);
+  assert.match(html, /id="settings-analysis-enabled"/);
+  assert.match(html, /id="settings-default-targets"/);
+  assert.match(html, /name="settings-default-target" value="skills" checked/);
+  assert.match(html, /id="settings-target-id"/);
+  assert.match(html, /id="settings-target-context-label"/);
+  assert.match(html, /Target display name/);
+  assert.match(html, /<option value="skills" selected>/);
+  assert.match(html, /Analyze skills \(built-in\)/);
+  assert.match(html, /id="settings-target-prompt"/);
+  assert.match(html, /OpenSessionViewer does not create it/);
+  assert.match(html, /id="settings-prompt-preview-button"/);
+  assert.match(html, /Preview current prompt/);
+  for (const [targetId, target] of Object.entries(BUILTIN_ANALYSIS_TARGETS)) {
+    assert.match(html, new RegExp(`<option value="${targetId}"`));
+    assert.match(html, new RegExp(`${target.label} \\(built-in\\)`));
+  }
+  assert.match(html, /id="settings-analyzer-model"/);
+  assert.match(html, /id="settings-resume-enabled"/);
+  assert.match(html, /id="settings-shell-mode"/);
+  assert.match(html, /C:\\Users\\tester\\config\.json/);
+  assert.match(html, /Enabled for this server process/);
+  assert.match(html, /--allow-terminal-launch/);
+  assert.match(html, /id="settings-initial-data"/);
+  assert.match(html, /id="settings-dirty-state"[^>]+data-dirty="false"/);
+  assert.match(html, /class="btn settings-save" disabled/);
+  assert.match(html, /deepseek\/deepseek-v4-flash/);
+  const settingsInitialData = JSON.parse(
+    html.match(/<script type="application\/json" id="settings-initial-data">([\s\S]*?)<\/script>/)[1]
+  );
+  assert.deepEqual(
+    Object.keys(settingsInitialData.targetDefaults),
+    Object.keys(BUILTIN_ANALYSIS_TARGETS)
+  );
+  const presetArgs = settingsInitialData.analysisDefaultCommand.args;
+  assert.equal(presetArgs[0], "run");
+  assert.ok(
+    presetArgs.indexOf("Read the attached analysis request and write the requested proposal files.")
+      < presetArgs.indexOf("--file")
+  );
+
+  const customTargetHtml = renderSettingsPage({
+    configPath: "C:\\Users\\tester\\config.json",
+    configDocument: {
+      exists: true,
+      raw: "{}\n",
+      config: {
+        analysis: {
+          enabled: true,
+          defaultTargets: ["memories", "skills"],
+          defaultTarget: "memories",
+          targets: {
+            memories: {
+              label: "Analyze memories",
+              artifactRoots: ["memories"],
+              extensions: [".md"],
+              prompt: "Look for stale operational knowledge."
+            }
+          }
+        }
+      },
+      error: ""
+    },
+    provider: "opencode",
+    providerName: "OpenCode"
+  });
+  assert.match(customTargetHtml, /<option value="skills"\s*>/);
+  assert.match(customTargetHtml, /<option value="memories" selected>/);
+  assert.match(customTargetHtml, /name="settings-default-target" value="skills" checked/);
+  assert.match(customTargetHtml, /name="settings-default-target" value="memories" checked/);
+  assert.match(customTargetHtml, /Analyze memories \(memories\)/);
+  assert.match(customTargetHtml, /Look for stale operational knowledge\./);
+});
+
 test("terminal launch encodes the complete PowerShell resume script", () => {
   const powershell = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
   const args = buildPowerShellResumeArgs(powershell, ["-NoProfile"]);
@@ -448,8 +656,10 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-analysis-"));
   const projectPath = path.join(temp, "project");
   const skillPath = path.join(projectPath, "skills", "review-session", "SKILL.md");
+  const agentsPath = path.join(projectPath, "AGENTS.md");
   mkdirSync(path.dirname(skillPath), { recursive: true });
   writeFileSync(skillPath, "# Review session\n\nUse execution evidence.\n");
+  writeFileSync(agentsPath, "# Agent rules\n\nRun deterministic validation.\n");
 
   const provider = {
     id: "codex",
@@ -547,10 +757,12 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   };
   const analysisConfig = {
     enabled: true,
+    defaultTargets: ["skills", "tests"],
     outputDir: path.join(temp, "analysis-output"),
     targets: {
       skills: {
         artifactRoots: ["skills"],
+        artifactFiles: ["AGENTS.md"],
         extensions: [".md"],
         prompt: "Focus on deterministic validation."
       }
@@ -574,6 +786,11 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   );
   assert.equal(action.target, "skills");
   assert.equal(action.available, true);
+  assert.deepEqual(action.selectedTargets, ["skills", "tests"]);
+  assert.deepEqual(
+    action.targets.map((target) => target.id),
+    Object.keys(BUILTIN_ANALYSIS_TARGETS)
+  );
 
   const run = prepareSessionAnalysis({
     provider,
@@ -590,18 +807,37 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.ok(existsSync(run.files.evidenceIndexPath));
   assert.ok(existsSync(run.files.evidencePath));
   assert.equal(existsSync(run.files.messagesPath), false);
+  const preparedRuns = listSessionAnalysisRuns({
+    providerId: "codex",
+    sessionId: "session-analysis",
+    directory: projectPath,
+    analysisConfig,
+    metaDir: path.join(temp, "meta")
+  });
+  assert.equal(preparedRuns.length, 1);
+  assert.equal(preparedRuns[0].state, "prepared");
+  assert.equal(preparedRuns[0].active, true);
   const analysisPrompt = readFileSync(run.files.promptPath, "utf-8");
   assert.match(analysisPrompt, /Focus on deterministic validation/);
   assert.match(analysisPrompt, /Never propose changes to those generated files/);
   assert.match(analysisPrompt, /artifactRoot/);
   assert.match(analysisPrompt, /session_query_tools/);
   assert.match(analysisPrompt, /Contrast successful and failed tool outcomes/);
+  assert.match(analysisPrompt, /use only exact, unmodified `ev:\.\.\.` IDs/);
+  assert.match(analysisPrompt, /Never append descriptions, parentheses, quotes, line numbers, or filesystem paths/);
+  assert.match(
+    analysisPrompt,
+    /"sourceEvidence": \["ev:codex:session-analysis:session:session-analysis"\]/
+  );
 
   const artifacts = JSON.parse(readFileSync(run.files.artifactsPath, "utf-8"));
-  assert.equal(artifacts.files.length, 1);
+  assert.equal(artifacts.files.length, 2);
   assert.equal(artifacts.files[0].relativePath, path.join("review-session", "SKILL.md"));
   assert.match(artifacts.files[0].artifactId, /^artifact:/);
   assert.ok(existsSync(artifacts.files[0].snapshotPath));
+  assert.equal(artifacts.files[1].relativePath, "AGENTS.md");
+  assert.equal(artifacts.files[1].explicit, true);
+  assert.equal(artifacts.files[1].artifactId, "artifact:file:AGENTS.md");
 
   const seed = JSON.parse(readFileSync(run.files.evaluationSeedPath, "utf-8"));
   assert.equal(seed.status, "proposed");
@@ -640,7 +876,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.equal(exactEvidence.complete, true);
   assert.equal(exactEvidence.record.status, "error");
   const extensions = runAnalysisTool(run.runDir, "extension_list");
-  assert.equal(extensions.total, 1);
+  assert.equal(extensions.total, 2);
   const extension = runAnalysisTool(run.runDir, "extension_get", {
     artifactId: artifacts.files[0].artifactId
   });
@@ -648,6 +884,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
 
   const rootEvidenceId = seed.cases[0].sourceEvidence[0];
   const artifactId = artifacts.files[0].artifactId;
+  const explicitArtifactId = artifacts.files[1].artifactId;
 
   writeFileSync(
     run.files.reportPath,
@@ -731,12 +968,12 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     sourceSessionId: "session-analysis",
     proposals: [
       {
-        id: "update-review-session",
+        id: "update-agent-rules",
         action: "replace",
-        artifactRoot: path.join(projectPath, "skills"),
-        artifactPath: path.join("review-session", "SKILL.md"),
+        artifactRoot: projectPath,
+        artifactPath: "AGENTS.md",
         description: "Require executable verification.",
-        evidence: [rootEvidenceId],
+        evidence: [explicitArtifactId],
         expectedBenefit: "Fewer unverified recommendations.",
         risks: ["May be too strict for exploratory work."],
         validationCaseIds: ["replay", "held-out", "regression"]
@@ -747,6 +984,20 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.equal(validated.state, "completed");
   assert.equal(validated.validation.evaluationCaseCount, 3);
   assert.equal(validated.validation.artifactProposalCount, 1);
+  const completedRuns = listSessionAnalysisRuns({
+    providerId: "codex",
+    sessionId: "session-analysis",
+    directory: projectPath,
+    analysisConfig,
+    metaDir: path.join(temp, "meta")
+  });
+  assert.equal(completedRuns[0].state, "completed");
+  assert.equal(completedRuns[0].active, false);
+  assert.equal(completedRuns[0].hasReport, true);
+  assert.equal(completedRuns[0].outputs.report.available, true);
+  assert.equal(completedRuns[0].outputs.evaluation.available, true);
+  assert.equal(completedRuns[0].outputs.proposals.available, true);
+  assert.equal(completedRuns[0].validation.evaluationCaseCount, 3);
 
   writeFileSync(run.files.evidencePath, `${readFileSync(run.files.evidencePath, "utf-8")}\n`);
   const tampered = validateAnalysisOutputs(run.runDir, 0, run.integrity);
@@ -802,18 +1053,148 @@ test("session rendering shows configured analysis actions only when launch is al
   };
   const hidden = renderSessionPage({
     session,
-    analysisAction: { target: "skills", label: "Analyze skills", available: true },
+    analysisAction: {
+      target: "skills",
+      targets: [{ id: "skills", label: "Analyze skills", available: true }],
+      selectedTargets: ["skills"],
+      label: "Analyze skills",
+      available: true
+    },
     terminalLaunchAllowed: false
   });
   assert.doesNotMatch(hidden, /data-action="analyze-session"/);
 
   const visible = renderSessionPage({
     session,
-    analysisAction: { target: "skills", label: "Analyze skills", available: true },
+    analysisAction: {
+      target: "skills",
+      targets: [
+        { id: "skills", label: "Analyze skills", available: true },
+        { id: "tests", label: "Analyze tests", available: true }
+      ],
+      selectedTargets: ["skills", "tests"],
+      label: null,
+      available: true
+    },
+    analysisRuns: [{
+      runId: "run-1",
+      state: "failed",
+      active: false,
+      target: "skills",
+      runDir: "C:\\analysis\\run-1",
+      validation: {
+        ok: false,
+        processExitCode: 1,
+        errors: ["report.md is missing"],
+        evaluationCaseCount: 0,
+        artifactProposalCount: 0
+      }
+    }],
+    resumeCommand: { display: "opencode --session analysis-session", available: true },
     terminalLaunchAllowed: true
   });
   assert.match(visible, /data-action="analyze-session"/);
-  assert.match(visible, /data-target="skills"/);
+  assert.match(visible, /class="analysis-target-checkbox"/);
+  assert.match(visible, /value="skills"\s+checked/);
+  assert.match(visible, /value="tests"\s+checked/);
+  assert.match(visible, /data-action="resume-session"/);
+  assert.doesNotMatch(visible, /data-action="copy-resume-command"/);
+  assert.match(visible, /id="analysis-status-panel"/);
+  assert.match(visible, /report\.md is missing/);
+});
+
+test("built-in analysis targets resolve without target-specific config", () => {
+  const provider = { id: "opencode" };
+  const analysisConfig = {
+    enabled: true,
+    defaultTargets: ["skills", "tests"],
+    providers: {
+      opencode: {
+        command: {
+          executable: "opencode",
+          args: ["run"]
+        }
+      }
+    }
+  };
+
+  assert.deepEqual(
+    getAnalysisTargetIds(provider, analysisConfig),
+    Object.keys(BUILTIN_ANALYSIS_TARGETS)
+  );
+  assert.deepEqual(
+    getDefaultAnalysisTargetIds(provider, analysisConfig),
+    ["skills", "tests"]
+  );
+  for (const [targetId, expected] of Object.entries(BUILTIN_ANALYSIS_TARGETS)) {
+    const settings = resolveAnalysisSettings(provider, analysisConfig, targetId);
+    assert.equal(settings.targetId, targetId);
+    assert.equal(settings.target.label, expected.label);
+    assert.deepEqual(settings.target.artifactRoots, expected.artifactRoots);
+    assert.deepEqual(settings.target.extensions, expected.extensions);
+    assert.match(settings.target.prompt, /\S/);
+  }
+});
+
+test("analysis prompt preview uses the real builder and reports configured sources", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-prompt-preview-"));
+  const configPath = path.join(temp, "config.json");
+  const promptPath = path.join(temp, "prompts", "analyze-skills.md");
+  mkdirSync(path.dirname(promptPath), { recursive: true });
+  writeFileSync(promptPath, "Inspect successful and failed executions contrastively.\n");
+  const provider = { id: "opencode", name: "OpenCode" };
+  const analysisConfig = {
+    enabled: true,
+    defaultTarget: "skills",
+    includeRawSnapshots: true,
+    targets: {
+      skills: {
+        prompt: "Propose only minimal evidence-backed changes.",
+        promptFile: "prompts/analyze-skills.md"
+      }
+    },
+    providers: {
+      opencode: {
+        command: {
+          executable: "opencode",
+          args: ["run"]
+        }
+      }
+    }
+  };
+
+  const preview = buildAnalysisPromptPreview({
+    provider,
+    analysisConfig,
+    configPath,
+    targetId: "skills"
+  });
+  assert.equal(preview.target, "skills");
+  assert.equal(preview.targetInstructionSource, "configured");
+  assert.equal(preview.promptFile.available, true);
+  assert.equal(preview.promptFile.resolvedPath, promptPath);
+  assert.match(preview.prompt, /# OpenSessionViewer session analysis/);
+  assert.match(preview.prompt, /<analysis-run-directory>/);
+  assert.match(preview.prompt, /Propose only minimal evidence-backed changes/);
+  assert.match(preview.prompt, /Inspect successful and failed executions contrastively/);
+  assert.match(preview.prompt, /Optional raw diagnostic snapshots/);
+
+  const builtInPreview = buildAnalysisPromptPreview({
+    provider,
+    analysisConfig: {
+      ...analysisConfig,
+      includeRawSnapshots: false,
+      targets: {}
+    },
+    configPath,
+    targetId: "skills"
+  });
+  assert.equal(builtInPreview.targetInstructionSource, "built-in");
+  assert.equal(builtInPreview.promptFile.configuredPath, "");
+  assert.match(
+    builtInPreview.prompt,
+    /Focus proposals on reusable agent skills and their supporting files/
+  );
 });
 
 function flowMetrics(overrides = {}) {

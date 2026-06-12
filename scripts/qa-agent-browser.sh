@@ -98,6 +98,23 @@ if [[ "$page_token_total" != "$api_token_total" ]]; then
   exit 1
 fi
 
+ab "open settings" open "$BASE/opencode/settings" >/dev/null
+ab "wait for settings" wait --text "Session analysis" >/dev/null
+settings="$(read_ab "read settings" get text body)"
+assert_contains "settings" "$settings" "CONFIGURATION FILE"
+assert_contains "settings" "$settings" "Disabled for this server process"
+assert_contains "settings" "$settings" "Provider analyzer"
+settings_editor_count="$(read_ab "count settings editor" get count "#settings-json")"
+if [[ "$settings_editor_count" != "1" ]]; then
+  echo "Settings page should render one JSON editor, got $settings_editor_count" >&2
+  exit 1
+fi
+settings_switch_count="$(read_ab "count settings switches" get count ".settings-switch input[type='checkbox']")"
+if ! [[ "$settings_switch_count" =~ ^[0-9]+$ ]] || (( settings_switch_count < 4 )); then
+  echo "Settings page should render at least four switches, got $settings_switch_count" >&2
+  exit 1
+fi
+
 ab "open search" open "$BASE/opencode/search?q=assistant" >/dev/null
 ab "wait for search" wait --text "Search" >/dev/null
 
@@ -117,7 +134,10 @@ if [[ "$detail_session_id_count" != "1" ]]; then
 fi
 
 resume_copy_count="$(read_ab "count resume command buttons" get count ".session-actions [data-action='copy-resume-command']")"
-assert_positive_count "resume command buttons" "$resume_copy_count"
+if [[ "$resume_copy_count" != "0" ]]; then
+  echo "Copy resume command button should not be rendered" >&2
+  exit 1
+fi
 resume_launch_count="$(read_ab "count disabled-by-default terminal buttons" get count ".session-actions [data-action='resume-session']")"
 if [[ "$resume_launch_count" != "0" ]]; then
   echo "Terminal launch button should be hidden without --allow-terminal-launch" >&2

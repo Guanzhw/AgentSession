@@ -35,8 +35,9 @@ export function layout(title, body, page = "home", { provider = null, providers 
     <a href="${providerPrefix || "/"}" class="logo">${icons.opensession}<span class="logo-text">OpenSessionViewer</span></a>
     <div class="topbar-tabs">${providerTabs}</div>
     <div class="topbar-actions">
-      <a href="${providerPrefix}/stats" class="nav-link">${t("nav.stats")}</a>
-      ${providerAvailable !== false && manageable ? `<a href="${providerPrefix}/trash" class="nav-link">${t("nav.trash")}</a>` : ""}
+      <a href="${providerPrefix}/stats" class="nav-link ${page === "stats" ? "active" : ""}">${t("nav.stats")}</a>
+      ${providerAvailable !== false && manageable ? `<a href="${providerPrefix}/trash" class="nav-link ${page === "trash" ? "active" : ""}">${t("nav.trash")}</a>` : ""}
+      <a href="${providerPrefix}/settings" class="nav-link ${page === "settings" ? "active" : ""}">${t("nav.settings")}</a>
       <form class="search-form" action="${providerPrefix}/search" method="GET">
         <input type="text" name="q" placeholder="${t("nav.search_placeholder")}" class="search-input" id="search-input">
       </form>

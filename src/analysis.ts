@@ -18,12 +18,17 @@ import type {
   ResumeShellSpec
 } from "./providers/interface.js";
 import { makeEvidenceId, writeAnalysisEvidence } from "./analysis-evidence.js";
+import {
+  BUILTIN_ANALYSIS_TARGETS,
+  DEFAULT_ANALYSIS_EXTENSIONS,
+  getBuiltinAnalysisTarget
+} from "./analysis-targets.js";
 import { resolveExecutable, resolveProjectDirectory } from "./resume.js";
 
 const DEFAULT_TARGET = {
   label: "",
-  artifactRoots: ["skills", ".agents/skills", ".codex/skills"],
-  extensions: [".md", ".json", ".yaml", ".yml", ".js", ".mjs", ".ts", ".py", ".sh", ".ps1"],
+  artifactRoots: [],
+  extensions: DEFAULT_ANALYSIS_EXTENSIONS,
   prompt: ""
 };
 
@@ -65,18 +70,43 @@ function timestampSegment(date = new Date()) {
   return date.toISOString().replace(/[:.]/g, "-");
 }
 
-function readPromptFile(promptFile, configPath) {
+function inspectPromptFile(promptFile, configPath) {
   if (!promptFile || typeof promptFile !== "string") {
-    return "";
+    return {
+      configuredPath: "",
+      resolvedPath: "",
+      available: false,
+      content: "",
+      error: ""
+    };
   }
   const base = configPath ? path.dirname(configPath) : process.cwd();
   const resolved = path.isAbsolute(promptFile) ? promptFile : path.resolve(base, promptFile);
   try {
-    return readFileSync(resolved, "utf-8");
+    return {
+      configuredPath: promptFile,
+      resolvedPath: resolved,
+      available: true,
+      content: readFileSync(resolved, "utf-8"),
+      error: ""
+    };
   } catch (error) {
-    console.warn(`Ignoring unavailable analysis prompt file at ${resolved}: ${error.message}`);
-    return "";
+    return {
+      configuredPath: promptFile,
+      resolvedPath: resolved,
+      available: false,
+      content: "",
+      error: error.message
+    };
   }
+}
+
+function readPromptFile(promptFile, configPath) {
+  const inspected = inspectPromptFile(promptFile, configPath);
+  if (inspected.error) {
+    console.warn(`Ignoring unavailable analysis prompt file at ${inspected.resolvedPath}: ${inspected.error}`);
+  }
+  return inspected.content;
 }
 
 function mergeTarget(base, override) {
@@ -96,6 +126,51 @@ function mergeTarget(base, override) {
   };
 }
 
+function normalizeTargetIds(value): string[] {
+  const values = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
+  return [...new Set(
+    values
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter(Boolean)
+  )];
+}
+
+function configuredDefaultTargetIds(provider: ProviderAdapter, analysisConfig): string[] {
+  const providerConfig = analysisConfig?.providers?.[provider.id];
+  return normalizeTargetIds(
+    providerConfig?.defaultTargets?.length
+      ? providerConfig.defaultTargets
+      : providerConfig?.defaultTarget
+        ? providerConfig.defaultTarget
+        : analysisConfig?.defaultTargets?.length
+          ? analysisConfig.defaultTargets
+          : analysisConfig?.defaultTarget || "skills"
+  );
+}
+
+export function getAnalysisTargetIds(provider: ProviderAdapter, analysisConfig): string[] {
+  const providerConfig = analysisConfig?.providers?.[provider.id];
+  if (!analysisConfig || analysisConfig.enabled !== true || !providerConfig || providerConfig === false) {
+    return [];
+  }
+  return [...new Set([
+    ...Object.keys(BUILTIN_ANALYSIS_TARGETS),
+    ...Object.keys(analysisConfig.targets || {}),
+    ...Object.keys(providerConfig.targets || {}),
+    ...configuredDefaultTargetIds(provider, analysisConfig)
+  ])].filter((targetId) => resolveAnalysisSettings(provider, analysisConfig, targetId));
+}
+
+export function getDefaultAnalysisTargetIds(provider: ProviderAdapter, analysisConfig): string[] {
+  const configured = configuredDefaultTargetIds(provider, analysisConfig)
+    .filter((targetId) => resolveAnalysisSettings(provider, analysisConfig, targetId));
+  if (configured.length) {
+    return configured;
+  }
+  return getAnalysisTargetIds(provider, analysisConfig).slice(0, 1);
+}
+
 export function resolveAnalysisSettings(provider: ProviderAdapter, analysisConfig, targetId = "") {
   if (!analysisConfig || analysisConfig.enabled !== true) {
     return null;
@@ -106,23 +181,16 @@ export function resolveAnalysisSettings(provider: ProviderAdapter, analysisConfi
     return null;
   }
 
-  const selectedTarget = targetId
-    || providerConfig.defaultTarget
-    || analysisConfig.defaultTarget
-    || "skills";
+  const selectedTarget = targetId || configuredDefaultTargetIds(provider, analysisConfig)[0] || "skills";
   const configuredTarget = analysisConfig.targets?.[selectedTarget];
   const providerTarget = providerConfig.targets?.[selectedTarget];
   if (configuredTarget === false || providerTarget === false) {
     return null;
   }
-  const defaults = selectedTarget === "skills"
-    ? DEFAULT_TARGET
-    : {
-      label: `Analyze ${selectedTarget}`,
-      artifactRoots: [],
-      extensions: DEFAULT_TARGET.extensions,
-      prompt: ""
-    };
+  const defaults = getBuiltinAnalysisTarget(selectedTarget) || {
+    ...DEFAULT_TARGET,
+    label: `Analyze ${selectedTarget}`
+  };
   const baseTarget = mergeTarget(defaults, configuredTarget);
   const target = mergeTarget(baseTarget, providerTarget);
   const command = providerTarget?.command || providerConfig.command || target.command;
@@ -149,17 +217,39 @@ export function getSessionAnalysisAction(
   analysisConfig,
   targetId = ""
 ) {
-  const settings = resolveAnalysisSettings(provider, analysisConfig, targetId);
   const projectPath = resolveProjectDirectory(directory);
-  if (!settings || !projectPath) {
+  if (!projectPath) {
     return null;
   }
 
-  const resolvedExecutable = resolveExecutable(settings.command.executable);
+  const targetIds = targetId ? [targetId] : getAnalysisTargetIds(provider, analysisConfig);
+  const targets = targetIds
+    .map((id) => resolveAnalysisSettings(provider, analysisConfig, id))
+    .filter(Boolean)
+    .map((settings) => ({
+      id: settings.targetId,
+      label: settings.target.label ? String(settings.target.label) : settings.targetId,
+      available: Boolean(resolveExecutable(settings.command.executable))
+    }));
+  const selectedTargets = targetId
+    ? [targetId]
+    : getDefaultAnalysisTargetIds(provider, analysisConfig);
+  const selected = targets.filter(
+    (target) => selectedTargets.includes(target.id) && target.available
+  );
+  const effectiveSelection = selected.length
+    ? selected
+    : targets.filter((target) => target.available).slice(0, 1);
+  if (!targets.length || !effectiveSelection.length) {
+    return null;
+  }
+
   return {
-    target: settings.targetId,
-    label: settings.target.label ? String(settings.target.label) : null,
-    available: Boolean(resolvedExecutable),
+    target: effectiveSelection[0].id,
+    targets,
+    selectedTargets: effectiveSelection.map((target) => target.id),
+    label: effectiveSelection.length === 1 ? effectiveSelection[0].label : null,
+    available: true,
     sessionId,
     projectPath
   };
@@ -178,7 +268,55 @@ function resolveArtifactRoot(projectPath, root) {
   }
 }
 
-function walkArtifactFiles(root, extensions, output, state) {
+function resolveArtifactFile(projectPath, filePath) {
+  if (typeof filePath !== "string" || !filePath.trim()) {
+    return null;
+  }
+  const candidate = path.isAbsolute(filePath) ? filePath : path.resolve(projectPath, filePath);
+  try {
+    const info = lstatSync(candidate);
+    if (info.isSymbolicLink() || !info.isFile()) {
+      return null;
+    }
+    return realpathSync(candidate);
+  } catch {
+    return null;
+  }
+}
+
+function addArtifactFile(sourcePath, root, extensions, output, state, explicit = false) {
+  if (output.length >= MAX_ARTIFACT_FILES || state.totalBytes >= MAX_TOTAL_ARTIFACT_BYTES) {
+    return;
+  }
+  try {
+    const info = lstatSync(sourcePath);
+    if (
+      info.isSymbolicLink()
+      || !info.isFile()
+      || (!explicit && !extensions.has(path.extname(sourcePath).toLowerCase()))
+    ) {
+      return;
+    }
+    const capturedBytes = Math.min(info.size, MAX_ARTIFACT_BYTES);
+    if (state.totalBytes + capturedBytes > MAX_TOTAL_ARTIFACT_BYTES) {
+      return;
+    }
+    output.push({
+      sourcePath,
+      root,
+      explicit,
+      size: info.size,
+      capturedBytes,
+      truncated: info.size > capturedBytes,
+      modifiedAt: info.mtime.toISOString()
+    });
+    state.totalBytes += capturedBytes;
+  } catch {
+    // Files may disappear while the inventory is being generated.
+  }
+}
+
+function walkArtifactFiles(root, extensions, output, state, artifactRoot = root) {
   if (output.length >= MAX_ARTIFACT_FILES || state.totalBytes >= MAX_TOTAL_ARTIFACT_BYTES) {
     return;
   }
@@ -201,24 +339,10 @@ function walkArtifactFiles(root, extensions, output, state) {
         continue;
       }
       if (info.isDirectory()) {
-        walkArtifactFiles(fullPath, extensions, output, state);
+        walkArtifactFiles(fullPath, extensions, output, state, artifactRoot);
         continue;
       }
-      if (!info.isFile() || !extensions.has(path.extname(entry.name).toLowerCase())) {
-        continue;
-      }
-      const capturedBytes = Math.min(info.size, MAX_ARTIFACT_BYTES);
-      if (state.totalBytes + capturedBytes > MAX_TOTAL_ARTIFACT_BYTES) {
-        continue;
-      }
-      output.push({
-        sourcePath: fullPath,
-        size: info.size,
-        capturedBytes,
-        truncated: info.size > capturedBytes,
-        modifiedAt: info.mtime.toISOString()
-      });
-      state.totalBytes += capturedBytes;
+      addArtifactFile(fullPath, artifactRoot, extensions, output, state);
     } catch {
       // Files may disappear while the inventory is being generated.
     }
@@ -257,11 +381,20 @@ function snapshotArtifacts(projectPath, runDir, target) {
   for (const root of roots) {
     walkArtifactFiles(root, extensions, files, state);
   }
+  const seenFiles = new Set(files.map((file) => file.sourcePath));
+  for (const configuredFile of target.artifactFiles || []) {
+    const resolved = resolveArtifactFile(projectPath, configuredFile);
+    if (!resolved || seenFiles.has(resolved)) {
+      continue;
+    }
+    seenFiles.add(resolved);
+    addArtifactFile(resolved, path.dirname(resolved), extensions, files, state, true);
+  }
 
   const snapshotDir = path.join(runDir, "artifacts");
   mkdirSync(snapshotDir, { recursive: true });
   const inventory = files.map((file, index) => {
-    const root = roots.find((candidate) => file.sourcePath === candidate || file.sourcePath.startsWith(`${candidate}${path.sep}`));
+    const root = file.root;
     const rootIndex = root ? roots.indexOf(root) : -1;
     const relative = root ? path.relative(root, file.sourcePath) : path.basename(file.sourcePath);
     const snapshotRelative = path.join(`${String(index + 1).padStart(3, "0")}-${safeSegment(path.basename(root || "root"))}`, relative);
@@ -270,10 +403,13 @@ function snapshotArtifacts(projectPath, runDir, target) {
     const content = truncateTextBuffer(readFileSync(file.sourcePath), file.capturedBytes);
     writeFileSync(snapshotPath, content);
     return {
-      artifactId: `artifact:${rootIndex >= 0 ? rootIndex : "unknown"}:${relative.split(path.sep).join("/")}`,
+      artifactId: file.explicit
+        ? `artifact:file:${path.relative(projectPath, file.sourcePath).split(path.sep).join("/")}`
+        : `artifact:${rootIndex >= 0 ? rootIndex : "unknown"}:${relative.split(path.sep).join("/")}`,
       sourcePath: file.sourcePath,
       root,
       relativePath: relative,
+      explicit: file.explicit,
       snapshotPath,
       size: file.size,
       capturedBytes: content.length,
@@ -285,6 +421,7 @@ function snapshotArtifacts(projectPath, runDir, target) {
 
   return {
     roots,
+    explicitFiles: inventory.filter((file) => file.explicit).map((file) => file.sourcePath),
     extensions: [...extensions],
     limits: {
       maxFiles: MAX_ARTIFACT_FILES,
@@ -353,6 +490,7 @@ function buildAnalysisPrompt({
   analysisToolPath,
   rawSnapshotsIncluded
 }) {
+  const rootEvidenceId = makeEvidenceId(provider.id, session.id, "session", session.id);
   return `# OpenSessionViewer session analysis
 
 You are analyzing an existing ${provider.name} session as evidence for improving external agent guidance.
@@ -397,7 +535,7 @@ counts, minimum sample size, threshold, and ranked sessions.
 
 1. Treat the session as evidence, not proof that a proposed change is generally useful.
 2. Inspect the captured artifacts before proposing updates or new artifacts.
-3. Cite concrete session messages, tool results, or artifact paths for every proposal.
+3. Cite concrete session messages, tool results, or captured artifacts for every proposal.
 4. Do not modify project files or the original artifacts.
 5. Generate proposals only. A proposal is not validated until executable evaluation compares a baseline with the candidate.
 6. Prefer small, focused edits over comprehensive documentation.
@@ -409,9 +547,11 @@ counts, minimum sample size, threshold, and ranked sessions.
 12. Do not propose generic project documentation, scripts, or guidance unless that artifact type is explicitly included by the selected target.
 13. Combine overlapping proposals for the same artifact into one bounded proposal.
 14. Contrast successful and failed tool outcomes before diagnosing missing guidance.
-15. Cite stable \`ev:...\` evidence IDs or \`artifact:...\` snapshot IDs, not broad session-level claims.
+15. In every \`sourceEvidence\` or \`evidence\` array, use only exact, unmodified \`ev:...\` IDs from \`evidence-index.json\` or exact \`artifact:...\` IDs from \`artifacts.json\`.
 16. Treat anomaly flags as retrieval signals. Re-check their underlying evidence before drawing a conclusion.
 17. Include baseline-versus-candidate expectations and track task success, token cost, and runtime where measurable.
+18. Never append descriptions, parentheses, quotes, line numbers, or filesystem paths to an evidence ID. Never invent an ID. A valid array item is the ID string by itself.
+19. Held-out and regression cases may describe new tasks, but their \`sourceEvidence\` must still contain exact IDs captured in this run. Use \`${rootEvidenceId}\` when only session-level evidence applies.
 
 ## Required outputs
 
@@ -448,7 +588,7 @@ Write valid JSON with this shape:
       "status": "proposed",
       "task": "Task presented to the agent",
       "setup": ["Reproducible setup steps"],
-      "sourceEvidence": ["session or artifact references"],
+      "sourceEvidence": ["${rootEvidenceId}"],
       "expectedOutcome": ["Observable acceptance criteria"],
       "comparison": {
         "baseline": "Expected behavior with the captured artifact",
@@ -487,7 +627,7 @@ Write valid JSON with this shape:
       "artifactRoot": "An exact root path from artifacts.json",
       "artifactPath": "A path relative to artifactRoot",
       "description": "The bounded proposed change",
-      "evidence": ["Session or captured artifact references"],
+      "evidence": ["${rootEvidenceId}"],
       "expectedBenefit": "Observable benefit",
       "risks": ["Overfitting, staleness, or regression risks"],
       "validationCaseIds": ["IDs from evaluation-proposals.json"]
@@ -500,11 +640,202 @@ For the \`${targetId}\` target, do not use paths under ${runDir} as
 \`artifactRoot\` or \`artifactPath\`. If no captured artifact should change,
 return an empty \`proposals\` array and explain why in \`report.md\`.
 
+Before finishing, verify all of the following:
+
+- Every \`sourceEvidence\` and \`evidence\` item is an exact ID copied from this run's indexes, with no annotation.
+- No evidence array contains a filesystem path or free-form observation.
+- Every evaluation case has at least one valid evidence ID.
+- Evaluation cases include exactly supported kinds and collectively cover replay, held-out, and regression.
+- Every proposal references declared evaluation case IDs and an exact captured artifact root.
+
 ${customPrompt ? `## Additional configured instructions\n\n${customPrompt}\n` : ""}`;
+}
+
+export function buildAnalysisPromptPreview({
+  provider,
+  analysisConfig,
+  configPath = "",
+  targetId = ""
+}) {
+  const settings = resolveAnalysisSettings(provider, analysisConfig, targetId);
+  if (!settings) {
+    throw new Error("Session analysis is not configured for this provider and target");
+  }
+
+  const providerConfig = analysisConfig.providers?.[provider.id] || {};
+  const configuredTarget = analysisConfig.targets?.[settings.targetId];
+  const providerTarget = providerConfig.targets?.[settings.targetId];
+  const hasPrompt = (value) => Boolean(
+    value
+    && typeof value === "object"
+    && Object.prototype.hasOwnProperty.call(value, "prompt")
+  );
+  const targetInstructionSource = hasPrompt(providerTarget)
+    ? "provider"
+    : hasPrompt(configuredTarget)
+      ? "configured"
+      : getBuiltinAnalysisTarget(settings.targetId)
+        ? "built-in"
+        : "default";
+  const promptFile = inspectPromptFile(settings.target.promptFile, configPath);
+  const configuredPrompt = [
+    settings.target.prompt,
+    promptFile.content
+  ].filter(Boolean).join("\n\n");
+  const runDir = "<analysis-run-directory>";
+  const previewFile = (name) => path.join(runDir, name);
+  const prompt = buildAnalysisPrompt({
+    provider,
+    session: { id: "session-preview" },
+    targetId: settings.targetId,
+    runDir,
+    projectPath: "<session-project-directory>",
+    customPrompt: configuredPrompt,
+    files: {
+      sessionPath: previewFile("session.json"),
+      sessionIndexPath: previewFile("session-index.json"),
+      evidenceIndexPath: previewFile("evidence-index.json"),
+      evidencePath: previewFile("evidence.jsonl"),
+      messagesPath: previewFile("messages.json"),
+      treePath: previewFile("tree.json"),
+      containerPath: previewFile("container.json"),
+      metricsPath: previewFile("metrics.json"),
+      flowPath: previewFile("flow.json"),
+      tracePath: previewFile("trace.json"),
+      artifactsPath: previewFile("artifacts.json"),
+      evaluationSeedPath: previewFile("evaluation-seed.json")
+    },
+    analysisToolPath: "<opensessionviewer-analysis-tool>",
+    rawSnapshotsIncluded: analysisConfig.includeRawSnapshots === true
+      || settings.target.includeRawSnapshots === true
+  });
+
+  return {
+    target: settings.targetId,
+    targetLabel: String(settings.target.label || settings.targetId),
+    targetInstructions: String(settings.target.prompt || ""),
+    targetInstructionSource,
+    promptFile: {
+      configuredPath: promptFile.configuredPath,
+      resolvedPath: promptFile.resolvedPath,
+      available: promptFile.available,
+      error: promptFile.error
+    },
+    usesPlaceholders: true,
+    prompt
+  };
 }
 
 function writeJson(filePath, value) {
   writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
+}
+
+export function getAnalysisOutputRoot(directory, analysisConfig, metaDir) {
+  const projectPath = resolveProjectDirectory(directory);
+  if (!projectPath) {
+    return null;
+  }
+  const configuredOutput = analysisConfig?.outputDir;
+  return configuredOutput
+    ? path.isAbsolute(configuredOutput)
+      ? path.resolve(configuredOutput)
+      : path.resolve(projectPath, configuredOutput)
+    : path.join(metaDir, "analysis");
+}
+
+export function listSessionAnalysisRuns({
+  providerId,
+  sessionId,
+  directory,
+  analysisConfig,
+  metaDir,
+  limit = 10
+}) {
+  const outputRoot = getAnalysisOutputRoot(directory, analysisConfig, metaDir);
+  if (!outputRoot || !existsSync(outputRoot)) {
+    return [];
+  }
+
+  const runs = [];
+  let entries = [];
+  try {
+    entries = readdirSync(outputRoot, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.isSymbolicLink()) {
+      continue;
+    }
+    const runDir = path.join(outputRoot, entry.name);
+    const manifestPath = path.join(runDir, "manifest.json");
+    try {
+      const manifestStat = lstatSync(manifestPath);
+      if (!manifestStat.isFile() || manifestStat.isSymbolicLink() || manifestStat.size > 1024 * 1024) {
+        continue;
+      }
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+      if (manifest?.provider !== providerId || manifest?.sessionId !== sessionId) {
+        continue;
+      }
+      const validation = manifest.validation && typeof manifest.validation === "object"
+        ? manifest.validation
+        : null;
+      const outputAvailable = (fileName) => {
+        try {
+          const info = lstatSync(path.join(runDir, fileName));
+          return info.isFile() && !info.isSymbolicLink() && info.size <= 16 * 1024 * 1024;
+        } catch {
+          return false;
+        }
+      };
+      const outputs = {
+        report: {
+          fileName: "report.md",
+          available: outputAvailable("report.md")
+        },
+        evaluation: {
+          fileName: "evaluation-proposals.json",
+          available: outputAvailable("evaluation-proposals.json")
+        },
+        proposals: {
+          fileName: "artifact-proposals.json",
+          available: outputAvailable("artifact-proposals.json")
+        }
+      };
+      runs.push({
+        runId: String(manifest.runId || entry.name),
+        state: String(manifest.state || "unknown"),
+        active: manifest.state === "prepared" || manifest.state === "launched",
+        target: String(manifest.target || ""),
+        createdAt: manifest.createdAt || null,
+        launchedAt: manifest.launchedAt || null,
+        completedAt: manifest.completedAt || null,
+        runDir,
+        hasReport: outputs.report.available,
+        outputs,
+        validation: validation
+          ? {
+            ok: Boolean(validation.ok),
+            checkedAt: validation.checkedAt || null,
+            processExitCode: Number(validation.processExitCode) || 0,
+            errors: Array.isArray(validation.errors)
+              ? validation.errors.slice(0, 20).map((error) => String(error))
+              : [],
+            evaluationCaseCount: Number(validation.evaluationCaseCount) || 0,
+            artifactProposalCount: Number(validation.artifactProposalCount) || 0
+          }
+          : null
+      });
+    } catch {
+      // Ignore incomplete or malformed run directories.
+    }
+  }
+
+  return runs
+    .sort((a, b) => String(b.createdAt || b.runId).localeCompare(String(a.createdAt || a.runId)))
+    .slice(0, Math.max(1, Math.min(Number(limit) || 10, 50)));
 }
 
 function hashFile(filePath) {
@@ -540,12 +871,7 @@ export function prepareSessionAnalysis({
     throw new Error("Session has no valid project directory");
   }
 
-  const configuredOutput = analysisConfig.outputDir;
-  const outputRoot = configuredOutput
-    ? path.isAbsolute(configuredOutput)
-      ? configuredOutput
-      : path.resolve(projectPath, configuredOutput)
-    : path.join(metaDir, "analysis");
+  const outputRoot = getAnalysisOutputRoot(session.directory, analysisConfig, metaDir);
   mkdirSync(outputRoot, { recursive: true });
   const runId = `${timestampSegment()}-${safeSegment(provider.id)}-${safeSegment(sessionId)}-${randomUUID().slice(0, 8)}`;
   const runDir = path.join(outputRoot, runId);

@@ -159,6 +159,20 @@ to a PowerShell-compatible executable. Its `args` are inserted before the
 generated `-EncodedCommand` argument. When omitted, OpenSessionViewer selects
 `pwsh.exe` and then `powershell.exe`, using `["-NoExit", "-NoLogo"]`.
 
+## Web Settings
+
+Open `/:provider/settings`, for example
+`http://127.0.0.1:3456/opencode/settings`, to manage analysis, target paths,
+provider commands, resume commands, and the PowerShell host with switches and
+form fields. The page shows the exact config path and validates settings before
+saving. The underlying JSON remains available in a collapsed Advanced section.
+
+Changes to `analysis`, `resumeCommands`, and `resumeShell` apply to the running
+server immediately. Server paths, port, and provider data directories are
+persisted but require a restart. `allowTerminalLaunch` is intentionally not a
+web-configurable permission: start OpenSessionViewer with
+`--allow-terminal-launch` to grant that capability to the current process.
+
 ## Session Analysis And Evaluation Proposals
 
 OpenSessionViewer can launch a configured agent non-interactively from a
@@ -166,9 +180,15 @@ session detail page. The analysis run is proposal-only: it snapshots the
 session as indexed JSONL evidence, snapshots selected artifacts, creates an
 evaluation seed, and asks the agent to write:
 
-- `report.md`
-- `artifact-proposals.json`
-- `evaluation-proposals.json`
+- `report.md`: the primary, human-readable analysis result
+- `evaluation-proposals.json`: the replay, held-out, and regression validation plan
+- `artifact-proposals.json`: proposed target changes, which may be an empty list
+
+These three files are the final analysis products. Files such as
+`session-index.json`, `evidence-index.json`, `evidence.jsonl`, `artifacts.json`,
+and `manifest.json` are supporting evidence and diagnostics. Completed runs
+expose direct open and download links in the session's **Analysis activity**
+panel.
 
 Generated evaluation cases begin with `status: "proposed"`. OpenSessionViewer
 does not modify skills or mark a proposal as validated. Promotion should happen
@@ -181,6 +201,12 @@ paths against the captured artifact inventory, resolves every `ev:...` and
 `artifact:...` reference, requires explicit baseline/candidate expectations and
 token/runtime criteria, and updates `manifest.json` to `completed`, `invalid`,
 or `failed`.
+
+The session page includes an **Analysis activity** panel. It polls while a run
+is active and then shows the authoritative manifest result, process exit code,
+proposal counts, validation errors, and local run directory. The launch toast
+only confirms that the command was started; the activity panel determines
+whether the run actually completed successfully.
 
 The analyzer starts from a compact hierarchy and evidence index rather than a
 single large session bundle. The generated prompt exposes read-only commands:
@@ -208,6 +234,7 @@ commands. It must also be enabled and configured for each provider:
 {
   "analysis": {
     "enabled": true,
+    "defaultTargets": ["skills", "tests"],
     "defaultTarget": "skills",
     "outputDir": ".opensessionviewer/analysis",
     "includeRawSnapshots": false,
@@ -229,10 +256,10 @@ commands. It must also be enabled and configured for each provider:
           "executable": "opencode",
           "args": [
             "run",
+            "Read the attached analysis request and write the requested proposal files.",
             "--model", "deepseek/deepseek-v4-flash",
             "--dir", "{projectPath}",
-            "--file", "{promptPath}",
-            "Read the attached analysis request and write the requested proposal files."
+            "--file", "{promptPath}"
           ]
         }
       },
@@ -269,8 +296,40 @@ trusted project and trusted prompt.
 
 Relative `artifactRoots` and `outputDir` paths are resolved from the recorded
 session project directory. Absolute artifact roots are allowed when explicitly
-configured. Files are copied into a bounded snapshot so the analysis remains
-reviewable even if the original skill changes later.
+configured. `artifactFiles` can include specific project-relative files such
+as `README.md` or `AGENTS.md`. Files are copied into a bounded snapshot so the
+analysis remains reviewable even if the original artifact changes later.
+
+Target-specific analyzer instructions can be edited directly on the settings
+page or configured as `analysis.targets.<target>.prompt`. `promptFile` is an
+optional reference to an existing text file; relative paths are resolved from
+the directory containing `config.json`, and OpenSessionViewer does not create
+that file. Use **Preview effective prompt** on the settings page to inspect the
+same composed prompt template used for a run, with session-specific paths shown
+as placeholders.
+
+Built-in analysis targets are available without adding entries under
+`analysis.targets`:
+
+- `skills`: reusable agent skills
+- `prompts`: prompt files and templates
+- `agents`: agent definitions and roles
+- `docs`: documentation directories
+- `rules`: agent/project rule directories
+- `tests`: tests, specs, and fixtures
+- `workflows`: CI and repository automation
+- `scripts`: project scripts and command-line helpers
+
+The settings page exposes these as presets. Entries under `analysis.targets`
+can override a built-in target or define another custom target.
+
+`analysis.defaultTargets` controls which targets are checked initially on a
+session page. You can select any combination before launching analysis.
+OpenSessionViewer creates one independent run per selected target, each with
+its own report, evaluation proposals, artifact proposals, manifest, and
+validation result. It does not merge multiple targets into one output bundle.
+The older `defaultTarget` field remains supported as the first/default
+selection for existing configurations.
 
 By default, analysis runs write `session-index.json`, `evidence-index.json`,
 and immutable `evidence.jsonl`; complete message/tree/container/flow/trace
@@ -281,8 +340,7 @@ diagnostic files.
 Provider target overrides can be placed under
 `analysis.providers.<provider>.targets.<target>`. This allows different
 commands, prompts, shells, artifact roots, and extensions for the same target.
-Additional targets such as `agents-instructions`, `memories`, `agents`, or
-`commands` can use the same structure.
+Additional custom targets can use the same structure.
 
 ## Claude Code History
 

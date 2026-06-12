@@ -1,9 +1,15 @@
 import { createServer } from "node:http";
-import { readFileSync } from "node:fs";
+import { lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { getConfig } from "./config.js";
+import {
+  applyRuntimeUserConfig,
+  getConfig,
+  readUserConfigDocument,
+  validateUserConfig,
+  writeUserConfig
+} from "./config.js";
 import {
   getMessages,
   getParts,
@@ -42,9 +48,13 @@ import { renderSessionPage } from "./views/session.js";
 import { renderSessionsPage } from "./views/sessions.js";
 import { renderStatsPage } from "./views/stats.js";
 import { renderTrashPage } from "./views/trash.js";
+import { renderSettingsPage } from "./views/settings.js";
 import { getResumeCommand, launchResumeCommand } from "./resume.js";
 import {
+  buildAnalysisPromptPreview,
+  getDefaultAnalysisTargetIds,
   getSessionAnalysisAction,
+  listSessionAnalysisRuns,
   launchSessionAnalysis,
   prepareSessionAnalysis
 } from "./analysis.js";
@@ -114,7 +124,7 @@ function isLoopbackHostname(hostname) {
   return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1" || hostname === "[::1]";
 }
 
-function isTrustedTerminalRequest(req) {
+function isTrustedLocalJsonRequest(req) {
   if (!String(req.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
     return false;
   }
@@ -139,6 +149,18 @@ function isTrustedTerminalRequest(req) {
   } catch {
     return false;
   }
+}
+
+function getRestartRequiredKeys(previousConfig, nextConfig) {
+  const runtimeKeys = new Set(["analysis", "resumeCommands", "resumeShell", "allowTerminalLaunch"]);
+  const keys = new Set([
+    ...Object.keys(previousConfig || {}),
+    ...Object.keys(nextConfig || {})
+  ]);
+  return [...keys]
+    .filter((key) => !runtimeKeys.has(key))
+    .filter((key) => JSON.stringify(previousConfig?.[key]) !== JSON.stringify(nextConfig?.[key]))
+    .sort();
 }
 
 function missingProviderResponse(providerId) {
@@ -482,6 +504,98 @@ export async function startServer(config = getConfig()) {
       return json(res, providerInfo);
     }
 
+    if (req.method === "GET" && pathname === "/api/settings") {
+      const configDocument = readUserConfigDocument(appConfig.configPath);
+      return json(res, {
+        ok: true,
+        configPath: appConfig.configPath,
+        config: configDocument.config,
+        raw: configDocument.raw,
+        error: configDocument.error,
+        terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch)
+      });
+    }
+
+    const promptPreviewMatch = pathname.match(/^\/api\/([a-z][a-z0-9-]*)\/analysis\/prompt-preview$/);
+    if ((req.method === "GET" || req.method === "POST") && promptPreviewMatch) {
+      const provider = getProvider(promptPreviewMatch[1]);
+      if (!provider) {
+        return json(res, { ok: false, error: "Provider not found" }, 404);
+      }
+      try {
+        let analysisConfig = appConfig.analysis;
+        let targetId = url.searchParams.get("target") || "";
+        if (req.method === "POST") {
+          if (!isTrustedLocalJsonRequest(req)) {
+            return json(res, { ok: false, error: "Prompt preview requests must be same-origin JSON from loopback" }, 403);
+          }
+          const body = await readBody(req);
+          const validationErrors = validateUserConfig(body?.config);
+          if (validationErrors.length) {
+            return json(res, {
+              ok: false,
+              error: "Invalid configuration",
+              validationErrors
+            }, 400);
+          }
+          analysisConfig = body.config.analysis;
+          targetId = typeof body.target === "string" ? body.target : "";
+        }
+        const preview = buildAnalysisPromptPreview({
+          provider,
+          analysisConfig,
+          configPath: appConfig.configPath,
+          targetId
+        });
+        return json(res, { ok: true, preview });
+      } catch (error) {
+        return json(res, {
+          ok: false,
+          error: error?.message || "Failed to build analyzer prompt preview"
+        }, 409);
+      }
+    }
+
+    if (req.method === "POST" && pathname === "/api/settings") {
+      if (!isTrustedLocalJsonRequest(req)) {
+        return json(res, { ok: false, error: "Settings requests must be same-origin JSON from loopback" }, 403);
+      }
+
+      try {
+        const body = await readBody(req);
+        const nextConfig = body?.config;
+        const validationErrors = validateUserConfig(nextConfig);
+        if (validationErrors.length) {
+          return json(res, {
+            ok: false,
+            error: "Invalid configuration",
+            validationErrors
+          }, 400);
+        }
+
+        const previousDocument = readUserConfigDocument(appConfig.configPath);
+        const restartRequiredKeys = getRestartRequiredKeys(previousDocument.config, nextConfig);
+        writeUserConfig(appConfig.configPath, nextConfig);
+        applyRuntimeUserConfig(appConfig, nextConfig);
+        return json(res, {
+          ok: true,
+          configPath: appConfig.configPath,
+          restartRequiredKeys,
+          terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),
+          ignoredKeys: Object.prototype.hasOwnProperty.call(nextConfig, "allowTerminalLaunch")
+            ? ["allowTerminalLaunch"]
+            : []
+        });
+      } catch (error) {
+        console.error("Settings save error:", error?.message || error);
+        return json(res, {
+          ok: false,
+          error: error?.message || "Failed to save settings",
+          validationErrors: error?.validationErrors || []
+        }, 500);
+      }
+    }
+
     const prefixedMutationMatch = pathname.match(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/(star|rename|delete|restore|permanent-delete)$/);
     const legacyMutationMatch = pathname.match(/^\/api\/session\/([^/]+)\/(star|rename|delete|restore|permanent-delete)$/);
     if (req.method === "POST" && (prefixedMutationMatch || legacyMutationMatch)) {
@@ -572,7 +686,7 @@ export async function startServer(config = getConfig()) {
 
     const resumeMatch = pathname.match(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/resume$/);
     if (req.method === "POST" && resumeMatch) {
-      if (!isTrustedTerminalRequest(req)) {
+      if (!isTrustedLocalJsonRequest(req)) {
         return json(res, { ok: false, error: "Resume requests must be same-origin JSON from loopback" }, 403);
       }
       if (!appConfig.allowTerminalLaunch) {
@@ -583,6 +697,10 @@ export async function startServer(config = getConfig()) {
       const sessionId = safeDecodeId(resumeMatch[2]);
       const adapter = providerMap.get(providerId);
       if (!sessionId || !adapter) {
+        return json(res, { ok: false, error: "Session not found" }, 404);
+      }
+      const session = adapter.getSession(sessionId);
+      if (!session) {
         return json(res, { ok: false, error: "Session not found" }, 404);
       }
 
@@ -613,7 +731,7 @@ export async function startServer(config = getConfig()) {
 
     const analysisMatch = pathname.match(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/analyze$/);
     if (req.method === "POST" && analysisMatch) {
-      if (!isTrustedTerminalRequest(req)) {
+      if (!isTrustedLocalJsonRequest(req)) {
         return json(res, { ok: false, error: "Analysis requests must be same-origin JSON from loopback" }, 403);
       }
       if (!appConfig.allowTerminalLaunch) {
@@ -626,36 +744,158 @@ export async function startServer(config = getConfig()) {
       if (!sessionId || !adapter) {
         return json(res, { ok: false, error: "Session not found" }, 404);
       }
+      const session = adapter.getSession(sessionId);
+      if (!session) {
+        return json(res, { ok: false, error: "Session not found" }, 404);
+      }
 
       try {
         const body = await readBody(req);
-        const targetId = typeof body.target === "string" ? body.target : "";
-        const run = prepareSessionAnalysis({
+        const requestedTargets: unknown[] = Array.isArray(body.targets)
+          ? body.targets
+          : typeof body.target === "string"
+            ? [body.target]
+            : [];
+        const targetIds: string[] = [...new Set<string>(
+          requestedTargets
+            .filter((target): target is string => typeof target === "string")
+            .map((target) => target.trim())
+            .filter(Boolean)
+        )];
+        const selectedTargets: string[] = targetIds.length
+          ? targetIds
+          : getDefaultAnalysisTargetIds(adapter, appConfig.analysis);
+        if (!selectedTargets.length) {
+          return json(res, { ok: false, error: "Select at least one analysis target" }, 400);
+        }
+        if (selectedTargets.length > 16) {
+          return json(res, { ok: false, error: "Too many analysis targets selected" }, 400);
+        }
+        const action = getSessionAnalysisAction(
+          adapter,
+          sessionId,
+          session.directory,
+          appConfig.analysis
+        );
+        const actionTargets = new Map((action?.targets || []).map((target) => [target.id, target]));
+        const unknownTarget = selectedTargets.find((targetId) => !actionTargets.has(targetId));
+        if (unknownTarget) {
+          return json(res, { ok: false, error: `Analysis target is unavailable: ${unknownTarget}` }, 400);
+        }
+        const unavailableTarget = selectedTargets.find((targetId) => !actionTargets.get(targetId)?.available);
+        if (unavailableTarget) {
+          return json(res, {
+            ok: false,
+            error: "Configured analysis executable was not found",
+            target: unavailableTarget
+          }, 409);
+        }
+        const runs = selectedTargets.map((targetId) => prepareSessionAnalysis({
           provider: adapter,
           sessionId,
           analysisConfig: appConfig.analysis,
           metaDir: appConfig.metaDir,
           configPath: appConfig.configPath,
           targetId
-        });
-        if (!run.command.resolvedExecutable) {
-          return json(res, {
-            ok: false,
-            error: "Configured analysis executable was not found",
-            runId: run.runId,
-            runDir: run.runDir
-          }, 409);
+        }));
+        for (const run of runs) {
+          launchSessionAnalysis(run, appConfig.resumeShell);
         }
-        launchSessionAnalysis(run, appConfig.resumeShell);
         return json(res, {
           ok: true,
-          runId: run.runId,
-          runDir: run.runDir,
-          target: run.target
+          runId: runs[0].runId,
+          runDir: runs[0].runDir,
+          target: runs[0].target,
+          targets: runs.map((run) => run.target),
+          runs: runs.map((run) => ({
+            runId: run.runId,
+            runDir: run.runDir,
+            target: run.target
+          }))
         });
       } catch (error) {
         console.error("Session analysis launch error:", error?.message || error);
         return json(res, { ok: false, error: error?.message || "Failed to launch session analysis" }, 500);
+      }
+    }
+
+    const analysisOutputMatch = pathname.match(
+      /^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/analyses\/([^/]+)\/outputs\/(report|evaluation|proposals)$/
+    );
+    if (req.method === "GET" && analysisOutputMatch) {
+      const providerId = analysisOutputMatch[1];
+      const sessionId = safeDecodeId(analysisOutputMatch[2]);
+      const runId = safeDecodeId(analysisOutputMatch[3]);
+      const outputId = analysisOutputMatch[4];
+      const adapter = providerMap.get(providerId);
+      if (!sessionId || !runId || !adapter) {
+        return json(res, { ok: false, error: "Analysis output not found" }, 404);
+      }
+      try {
+        const session = adapter.getSession(sessionId);
+        if (!session) {
+          return json(res, { ok: false, error: "Analysis output not found" }, 404);
+        }
+        const runs = listSessionAnalysisRuns({
+          providerId,
+          sessionId,
+          directory: session.directory,
+          analysisConfig: appConfig.analysis,
+          metaDir: appConfig.metaDir,
+          limit: 50
+        });
+        const run = runs.find((item) => item.runId === runId);
+        const output = run?.outputs?.[outputId];
+        if (!run || !output?.available) {
+          return json(res, { ok: false, error: "Analysis output not found" }, 404);
+        }
+        const outputPath = path.join(run.runDir, output.fileName);
+        const outputStat = lstatSync(outputPath);
+        if (!outputStat.isFile() || outputStat.isSymbolicLink() || outputStat.size > 16 * 1024 * 1024) {
+          return json(res, { ok: false, error: "Analysis output not found" }, 404);
+        }
+        const contentType = output.fileName.endsWith(".json")
+          ? "application/json; charset=utf-8"
+          : "text/markdown; charset=utf-8";
+        const disposition = url.searchParams.get("download") === "1" ? "attachment" : "inline";
+        res.writeHead(200, {
+          "Content-Type": contentType,
+          "Content-Disposition": `${disposition}; filename="${output.fileName}"`,
+          "X-Content-Type-Options": "nosniff"
+        });
+        res.end(readFileSync(outputPath));
+        return;
+      } catch (error) {
+        console.error("Analysis output error:", error?.message || error);
+        return json(res, { ok: false, error: "Failed to read analysis output" }, 500);
+      }
+    }
+
+    const analysesMatch = pathname.match(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/analyses$/);
+    if (req.method === "GET" && analysesMatch) {
+      const providerId = analysesMatch[1];
+      const sessionId = safeDecodeId(analysesMatch[2]);
+      const adapter = providerMap.get(providerId);
+      if (!sessionId || !adapter) {
+        return json(res, { ok: false, error: "Session not found" }, 404);
+      }
+      try {
+        const session = adapter.getSession(sessionId);
+        if (!session) {
+          return json(res, { ok: false, error: "Session not found" }, 404);
+        }
+        const runs = listSessionAnalysisRuns({
+          providerId,
+          sessionId,
+          directory: session.directory,
+          analysisConfig: appConfig.analysis,
+          metaDir: appConfig.metaDir,
+          limit: 10
+        });
+        return json(res, { ok: true, runs });
+      } catch (error) {
+        console.error("Analysis status error:", error?.message || error);
+        return json(res, { ok: false, error: "Failed to read analysis status" }, 500);
       }
     }
 
@@ -1003,6 +1243,20 @@ export async function startServer(config = getConfig()) {
       manageable: supportsLocalManagement(adapter)
     };
 
+    if (subPath === "/settings") {
+      const configDocument = readUserConfigDocument(appConfig.configPath);
+      send(res, 200, renderSettingsPage({
+        configPath: appConfig.configPath,
+        configDocument,
+        terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),
+        providerName: currentProvider.name,
+        resumeDefault: currentProvider.resumeCommand || null,
+        providerAvailable: Boolean(adapter),
+        ...renderContext
+      }));
+      return;
+    }
+
     if (!adapter) {
       const dataPath = currentProvider.getDataPath();
       const unavailableReason = currentProvider.getUnavailableReason?.();
@@ -1185,6 +1439,13 @@ export async function startServer(config = getConfig()) {
           const enrichedRecentSessions = enrichSessionList(recentSessions, metaMap, excludedIds).map((item) => normalizeSessionRecord(item));
           const resumeCommand = getResumeCommand(adapter, sessionId, enrichedSession.directory, appConfig.resumeCommands);
           const analysisAction = getSessionAnalysisAction(adapter, sessionId, enrichedSession.directory, appConfig.analysis);
+          const analysisRuns = listSessionAnalysisRuns({
+            providerId: providerSegment,
+            sessionId,
+            directory: enrichedSession.directory,
+            analysisConfig: appConfig.analysis,
+            metaDir: appConfig.metaDir
+          });
           send(res, 200, renderSessionPage({
             session: enrichedSession,
             sessionTree,
@@ -1197,6 +1458,7 @@ export async function startServer(config = getConfig()) {
             meta,
             resumeCommand,
             analysisAction,
+            analysisRuns,
             terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),
             ...renderContext
           }));
@@ -1215,6 +1477,13 @@ export async function startServer(config = getConfig()) {
         const normalizedSession = normalizeSessionRecord(session);
         const resumeCommand = getResumeCommand(adapter, sessionId, normalizedSession.directory, appConfig.resumeCommands);
         const analysisAction = getSessionAnalysisAction(adapter, sessionId, normalizedSession.directory, appConfig.analysis);
+        const analysisRuns = listSessionAnalysisRuns({
+          providerId: providerSegment,
+          sessionId,
+          directory: normalizedSession.directory,
+          analysisConfig: appConfig.analysis,
+          metaDir: appConfig.metaDir
+        });
         send(res, 200, renderSessionPage({
           session: normalizedSession,
           sessionTree: adapter.getSessionTree?.(sessionId) || null,
@@ -1227,6 +1496,7 @@ export async function startServer(config = getConfig()) {
           meta: null,
           resumeCommand,
           analysisAction,
+          analysisRuns,
           terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),
           ...renderContext
         }));

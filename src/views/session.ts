@@ -1086,6 +1086,7 @@ export function renderSessionPage({
   manageable = false,
   resumeCommand = null,
   analysisAction = null,
+  analysisRuns = [],
   terminalLaunchAllowed = false
 }) {
   const title = session.title || session.slug || session.id;
@@ -1099,14 +1100,41 @@ export function renderSessionPage({
         <a href="/api/${provider}/session/${encodeURIComponent(session.id)}/export?format=json" class="action-btn">${t("action.export_json")}</a>
         <button class="action-btn btn-danger" data-action="delete" data-id="${escapeHtml(session.id)}">${t("action.delete")}</button>
   ` : "";
-  const resumeActions = resumeCommand ? `
-        <button class="action-btn" data-action="copy-resume-command" data-id="${escapeHtml(session.id)}" data-command="${escapeHtml(resumeCommand.display)}">${t("action.copy_resume")}</button>
-        ${terminalLaunchAllowed
-          ? `<button class="action-btn" data-action="resume-session" data-id="${escapeHtml(session.id)}" ${resumeCommand.available ? "" : "disabled"}>${t("action.open_terminal")}</button>`
-          : ""}
+  const resumeActions = resumeCommand && terminalLaunchAllowed ? `
+        <button class="action-btn" data-action="resume-session" data-id="${escapeHtml(session.id)}" ${resumeCommand.available ? "" : "disabled"}>${t("action.open_terminal")}</button>
   ` : "";
+  const analysisTargets = Array.isArray(analysisAction?.targets) ? analysisAction.targets : [];
+  const selectedAnalysisTargets = new Set(
+    Array.isArray(analysisAction?.selectedTargets)
+      ? analysisAction.selectedTargets
+      : analysisAction?.target
+        ? [analysisAction.target]
+        : []
+  );
   const analysisActions = analysisAction && terminalLaunchAllowed ? `
-        <button class="action-btn action-btn-primary" data-action="analyze-session" data-id="${escapeHtml(session.id)}" data-target="${escapeHtml(analysisAction.target)}" ${analysisAction.available ? "" : "disabled"}>${escapeHtml(analysisAction.label || t("action.analyze_session"))}</button>
+        <div class="analysis-launch-control">
+          <details class="analysis-target-picker">
+            <summary>
+              <span>${t("analysis.targets_label")}</span>
+              <strong data-analysis-selected-count>${escapeHtml(String(selectedAnalysisTargets.size))}</strong>
+            </summary>
+            <div class="analysis-target-choices">
+              ${analysisTargets.map((target) => `
+                <label class="analysis-target-choice">
+                  <input
+                    type="checkbox"
+                    class="analysis-target-checkbox"
+                    value="${escapeHtml(target.id)}"
+                    ${selectedAnalysisTargets.has(target.id) ? "checked" : ""}
+                    ${target.available ? "" : "disabled"}
+                  >
+                  <span>${escapeHtml(target.label || target.id)}</span>
+                </label>
+              `).join("")}
+            </div>
+          </details>
+          <button class="action-btn action-btn-primary" data-action="analyze-session" data-id="${escapeHtml(session.id)}" ${analysisAction.available ? "" : "disabled"}>${t("action.analyze_selected")}</button>
+        </div>
   ` : "";
   const actions = managementActions || resumeActions || analysisActions ? `
       <div class="session-actions">
@@ -1134,6 +1162,20 @@ export function renderSessionPage({
 ${actions}
     </header>
   `;
+  const showAnalysisStatus = Boolean(analysisAction) || analysisRuns.length > 0;
+  const analysisStatus = showAnalysisStatus ? `
+    <section class="analysis-status-panel" id="analysis-status-panel" data-provider="${escapeHtml(provider)}" data-session-id="${escapeHtml(session.id)}">
+      <div class="analysis-status-header">
+        <div>
+          <h2>${t("analysis.status_title")}</h2>
+          <p>${t("analysis.status_description")}</p>
+        </div>
+        <button type="button" class="btn" id="analysis-status-refresh">${t("analysis.refresh")}</button>
+      </div>
+      <div id="analysis-runs" class="analysis-runs" aria-live="polite"></div>
+      <script type="application/json" id="analysis-runs-initial">${JSON.stringify(analysisRuns).replace(/</g, "\\u003c")}</script>
+    </section>
+  ` : "";
 
   const messageMarkup = sessionTree
     ? renderSessionTree(sessionTree, 0, provider)
@@ -1144,6 +1186,7 @@ ${actions}
   ${renderToc(sessionTree)}
   <main id="${escapeHtml(anchorId("session", session.id))}" class="main-content">
     ${header}
+    ${analysisStatus}
     ${renderSessionMetricsPanel(sessionMetrics)}
     ${todoList(todos)}
     <section class="messages">
