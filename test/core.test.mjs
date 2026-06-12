@@ -47,7 +47,10 @@ import {
   prepareSessionAnalysis,
   resolveAnalysisSettings
 } from "../dist/src/analysis.js";
-import { runAnalysisTool } from "../dist/src/analysis-tools.js";
+import {
+  formatAnalysisToolOutput,
+  runAnalysisTool
+} from "../dist/src/analysis-tools.js";
 import { validateAnalysisOutputs } from "../dist/src/analysis-validator.js";
 import { BUILTIN_ANALYSIS_TARGETS } from "../dist/src/analysis-targets.js";
 import { resolveAnalysisRunPath } from "../dist/src/analysis-layout.js";
@@ -861,6 +864,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.match(analysisPrompt, /Never propose changes to those generated files/);
   assert.match(analysisPrompt, /artifactRoot/);
   assert.match(analysisPrompt, /session_query_tools/);
+  assert.match(analysisPrompt, /return compact Markdown/);
   assert.match(analysisPrompt, new RegExp(
     run.files.analysisToolPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   ));
@@ -900,7 +904,33 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     { encoding: "utf-8" }
   );
   assert.equal(bundledTool.status, 0, bundledTool.stderr);
-  assert.equal(JSON.parse(bundledTool.stdout).session.direct.toolCalls, 2);
+  assert.match(bundledTool.stdout, /^# session_main_info/m);
+  assert.match(bundledTool.stdout, /## session/);
+  assert.match(bundledTool.stdout, /\*\*toolCalls:\*\* `2`/);
+  assert.match(
+    bundledTool.stdout,
+    /ev:codex:session-analysis:session:session-analysis/
+  );
+  assert.ok(
+    bundledTool.stdout.length < JSON.stringify(mainInfo, null, 2).length,
+    "compact Markdown should be shorter than pretty-printed JSON"
+  );
+  assert.equal(
+    bundledTool.stdout,
+    formatAnalysisToolOutput(mainInfo)
+  );
+  const formattedArtifact = formatAnalysisToolOutput({
+    tool: "extension_get",
+    artifact: {
+      artifactId: "artifact:example",
+      relativePath: "skills/example/SKILL.md"
+    },
+    content: "# Example\n\n```text\nUse compact output.\n```"
+  });
+  assert.match(formattedArtifact, /^# extension_get/m);
+  assert.match(formattedArtifact, /artifact:example/);
+  assert.match(formattedArtifact, /````text\n# Example/);
+  assert.match(formattedArtifact, /Use compact output\./);
   assert.equal(mainInfo.session.direct.errors, 1);
   assert.equal(mainInfo.systemPrompts.length, 1);
   const systemPrompts = runAnalysisTool(run.runDir, "session_query_system_prompts");

@@ -535,7 +535,8 @@ ${rawSnapshotsIncluded ? `- Optional raw diagnostic snapshots: ${files.messagesP
 ## Evidence tools
 
 Do not begin by reading the complete JSONL evidence file. Use the read-only
-analysis tool and expand only the records needed for a conclusion:
+analysis tool and expand only the records needed for a conclusion. Commands
+return compact Markdown with exact evidence and artifact IDs preserved:
 
 \`\`\`text
 node "${analysisToolPath}" "${runDir}" session_main_info

@@ -239,7 +239,9 @@ only confirms that the command was started; the activity panel determines
 whether the run actually completed successfully.
 
 The analyzer starts from a compact hierarchy and evidence index rather than a
-single large session bundle. The generated prompt exposes read-only commands:
+single large session bundle. The generated prompt exposes read-only commands.
+Their CLI output is compact Markdown, while exact evidence and artifact IDs are
+preserved for follow-up queries and validation:
 
 - `session_main_info`
 - `session_query_system_prompts`

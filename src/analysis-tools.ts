@@ -18,6 +18,8 @@ const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 const DEFAULT_CONTENT_CHARS = 4000;
 const MAX_EVIDENCE_BYTES = 256 * 1024;
+const INLINE_VALUE_CHARS = 180;
+const INLINE_LINE_CHARS = 240;
 
 function readJson(filePath: string) {
   return JSON.parse(readFileSync(filePath, "utf-8"));
@@ -148,6 +150,137 @@ function normalizeStatus(value: unknown) {
 
 function artifactInventory(run: ReturnType<typeof loadRun>) {
   return readJson(assertRegularFileInside(run.runDir, run.files.artifactsPath));
+}
+
+function markdownHeading(value: unknown) {
+  return String(value ?? "")
+    .replace(/\r?\n/g, " ")
+    .trim();
+}
+
+function markdownCode(value: unknown) {
+  const text = value == null
+    ? "null"
+    : typeof value === "string"
+      ? value
+      : JSON.stringify(value);
+  const longestTicks = Math.max(0, ...Array.from(text.matchAll(/`+/g), (match) => match[0].length));
+  const fence = "`".repeat(longestTicks + 1);
+  const padding = text.startsWith("`") || text.endsWith("`") || text.startsWith(" ") || text.endsWith(" ")
+    ? " "
+    : "";
+  return `${fence}${padding}${text}${padding}${fence}`;
+}
+
+function markdownFence(value: string) {
+  const longestTicks = Math.max(2, ...Array.from(value.matchAll(/`+/g), (match) => match[0].length));
+  const fence = "`".repeat(longestTicks + 1);
+  return `${fence}text\n${value}\n${fence}`;
+}
+
+function isInlineValue(value: unknown) {
+  if (value == null || typeof value === "number" || typeof value === "boolean") {
+    return true;
+  }
+  if (typeof value === "string") {
+    return !value.includes("\n") && !value.includes("\r") && value.length <= INLINE_VALUE_CHARS;
+  }
+  return Array.isArray(value) && value.every((item) => (
+    item == null || ["string", "number", "boolean"].includes(typeof item)
+  )) && JSON.stringify(value).length <= INLINE_VALUE_CHARS;
+}
+
+function itemLabel(value: Row, index: number) {
+  const kind = value.toolName || value.role || value.kind || value.title || value.relativePath || value.id;
+  const identity = value.evidenceId || value.artifactId || value.sessionId;
+  if (kind && identity && kind !== identity) {
+    return `${index + 1}. ${markdownHeading(kind)} - ${markdownHeading(identity)}`;
+  }
+  return `${index + 1}. ${markdownHeading(identity || kind || "item")}`;
+}
+
+function appendHeading(lines: string[], level: number, label: string) {
+  if (level <= 6) {
+    lines.push(`${"#".repeat(level)} ${markdownHeading(label)}`);
+  } else {
+    lines.push(`**${markdownHeading(label)}**`);
+  }
+}
+
+function appendInlineValues(lines: string[], entries: Array<[string, unknown]>) {
+  let current = "";
+  for (const [key, value] of entries) {
+    const fragment = `**${markdownHeading(key)}:** ${markdownCode(value)}`;
+    if (current && current.length + fragment.length + 3 > INLINE_LINE_CHARS) {
+      lines.push(`- ${current}`);
+      current = fragment;
+    } else {
+      current = current ? `${current} | ${fragment}` : fragment;
+    }
+  }
+  if (current) {
+    lines.push(`- ${current}`);
+  }
+}
+
+function appendMarkdownValue(lines: string[], label: string, value: unknown, level: number) {
+  if (Array.isArray(value)) {
+    appendHeading(lines, level, `${label} (${value.length})`);
+    if (value.length === 0) {
+      lines.push("- None");
+      return;
+    }
+    if (value.every((item) => item == null || typeof item !== "object")) {
+      appendInlineValues(lines, value.map((item, index) => [`${index + 1}`, item]));
+      return;
+    }
+    value.forEach((item, index) => {
+      if (item && typeof item === "object" && !Array.isArray(item)) {
+        appendHeading(lines, level + 1, itemLabel(item, index));
+        appendMarkdownObject(lines, item, level + 2);
+      } else {
+        appendHeading(lines, level + 1, `${index + 1}. item`);
+        appendMarkdownValue(lines, "value", item, level + 2);
+      }
+    });
+    return;
+  }
+
+  if (value && typeof value === "object") {
+    appendHeading(lines, level, label);
+    appendMarkdownObject(lines, value as Row, level + 1);
+    return;
+  }
+
+  appendHeading(lines, level, label);
+  lines.push(markdownFence(value == null ? "null" : String(value)));
+}
+
+function appendMarkdownObject(lines: string[], value: Row, level: number) {
+  const entries = Object.entries(value);
+  if (entries.length === 0) {
+    lines.push("- None");
+    return;
+  }
+
+  const inline = entries.filter(([, item]) => isInlineValue(item));
+  appendInlineValues(lines, inline);
+
+  for (const [key, item] of entries) {
+    if (!isInlineValue(item)) {
+      appendMarkdownValue(lines, key, item, level);
+    }
+  }
+}
+
+export function formatAnalysisToolOutput(result: Row) {
+  const tool = typeof result?.tool === "string" && result.tool
+    ? result.tool
+    : "analysis_tool";
+  const lines = [`# ${markdownHeading(tool)}`];
+  const body = Object.fromEntries(Object.entries(result || {}).filter(([key]) => key !== "tool"));
+  appendMarkdownObject(lines, body, 2);
+  return `${lines.join("\n")}\n`;
 }
 
 export function runAnalysisTool(runDir: string, toolName: string, args: Row = {}) {
@@ -394,7 +527,7 @@ if (invokedPath === path.resolve(fileURLToPath(import.meta.url))) {
   } else {
     try {
       const args = process.argv[4] ? JSON.parse(process.argv[4]) : {};
-      console.log(JSON.stringify(runAnalysisTool(runDir, toolName, args), null, 2));
+      process.stdout.write(formatAnalysisToolOutput(runAnalysisTool(runDir, toolName, args)));
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
       process.exitCode = 1;
