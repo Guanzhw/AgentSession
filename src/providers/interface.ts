@@ -76,6 +76,7 @@ export interface SearchResult {
 export type RuntimeExtensionScope = "project" | "user";
 
 export type RuntimeExtensionKind =
+  | "instruction"
   | "skill"
   | "agent"
   | "command"

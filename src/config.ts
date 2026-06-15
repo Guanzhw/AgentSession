@@ -97,6 +97,71 @@ function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+const LEGACY_ANALYSIS_MATERIALS = {
+  skills: {
+    roots: [
+      ["skills", ".agents/skills", ".codex/skills"],
+      [".opencode/skills", ".agents/skills", ".codex/skills"]
+    ],
+    files: [["AGENTS.md"]]
+  },
+  prompts: {
+    roots: [["prompts", ".agents/prompts", ".codex/prompts"]]
+  },
+  agents: {
+    roots: [[".agents/agents", ".codex/agents", ".claude/agents"]]
+  },
+  rules: {
+    roots: [[".agents", ".codex", ".claude"]],
+    files: [["AGENTS.md", "CLAUDE.md", "GEMINI.md", ".cursorrules"]]
+  }
+};
+
+function sameStringArray(left, right) {
+  return Array.isArray(left)
+    && left.length === right.length
+    && left.every((value, index) => value === right[index]);
+}
+
+function migrateLegacyTargetMaterials(targetId, target) {
+  if (!isObject(target)) return;
+  const legacy = LEGACY_ANALYSIS_MATERIALS[targetId];
+  if (!legacy) return;
+  const legacyRootsMatched = legacy.roots?.some(
+    (roots) => sameStringArray(target.artifactRoots, roots)
+  );
+  if (legacyRootsMatched) {
+    delete target.artifactRoots;
+  }
+  if (
+    legacyRootsMatched
+    && legacy.files?.some((files) => sameStringArray(target.artifactFiles, files))
+  ) {
+    delete target.artifactFiles;
+  }
+}
+
+function migrateLegacyAnalysisMaterials(config) {
+  const analysis = isObject(config.analysis) ? config.analysis : null;
+  if (!analysis) return config;
+  const targetGroups = [analysis.targets];
+  if (isObject(analysis.providers)) {
+    for (const provider of Object.values(analysis.providers)) {
+      if (isObject(provider)) {
+        const providerSettings: any = provider;
+        targetGroups.push(providerSettings.targets);
+      }
+    }
+  }
+  for (const targets of targetGroups) {
+    if (!isObject(targets)) continue;
+    for (const [targetId, target] of Object.entries(targets)) {
+      migrateLegacyTargetMaterials(targetId, target);
+    }
+  }
+  return config;
+}
+
 export function readUserConfigDocument(configPath) {
   if (!configPath || !existsSync(configPath)) {
     return {
@@ -119,7 +184,12 @@ export function readUserConfigDocument(configPath) {
         error: "Configuration root must be a JSON object."
       };
     }
-    return { exists: true, raw, config: parsed, error: "" };
+    return {
+      exists: true,
+      raw,
+      config: migrateLegacyAnalysisMaterials(parsed),
+      error: ""
+    };
   } catch (error) {
     return {
       exists: true,
@@ -328,11 +398,13 @@ export function writeUserConfig(configPath, config) {
     error.validationErrors = errors;
     throw error;
   }
+  migrateLegacyAnalysisMaterials(config);
   mkdirSync(path.dirname(configPath), { recursive: true });
   writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf-8");
 }
 
 export function applyRuntimeUserConfig(config, fileConfig) {
+  migrateLegacyAnalysisMaterials(fileConfig);
   config.resumeCommands = isObject(fileConfig.resumeCommands) ? fileConfig.resumeCommands : {};
   config.resumeShell = isObject(fileConfig.resumeShell) ? fileConfig.resumeShell : null;
   config.analysis = isObject(fileConfig.analysis) ? fileConfig.analysis : { enabled: false };

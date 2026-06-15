@@ -1132,6 +1132,7 @@ export function renderSessionPage({
               <strong data-runtime-selected-count>${escapeHtml(String(selectedRuntimeExtensions.size))}</strong>
             </summary>
             <div class="analysis-target-choices analysis-runtime-choices">
+              <p class="analysis-runtime-note">${t("analysis.runtime_help")}</p>
               <p class="analysis-runtime-note">${escapeHtml(analysisAction.runtimeEnvironment.note || "")}</p>
               ${runtimeExtensionGroups.map((group) => `
                 <section class="analysis-runtime-group">
@@ -1164,6 +1165,7 @@ export function renderSessionPage({
               <strong data-analysis-selected-count>${escapeHtml(String(selectedAnalysisTargets.size))}</strong>
             </summary>
             <div class="analysis-target-choices">
+              <p class="analysis-runtime-note">${t("analysis.targets_help")}</p>
               ${analysisTargets.map((target) => `
                 <label class="analysis-target-choice">
                   <input

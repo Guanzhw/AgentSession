@@ -5,6 +5,7 @@ import {
   createRuntimeExtension,
   projectDirectories,
   readJsonLike,
+  runtimeInstructionFiles,
   scanRuntimeChildren
 } from "../shared/runtime-environment.js";
 
@@ -44,6 +45,14 @@ function addClaudeDirectory(
       kind: "plugin",
       root: path.join(base, "plugins"),
       note: `${scope}-scoped Claude Code plugins`
+    }),
+    ...scanRuntimeChildren({
+      provider: "claude-code",
+      scope,
+      kind: "rule",
+      root: path.join(base, "rules"),
+      fileExtensions: [".md"],
+      note: `${scope}-scoped Claude Code rules`
     })
   );
 }
@@ -90,10 +99,26 @@ export function buildClaudeCodeRuntimeEnvironment(
 ) {
   const entries: RuntimeExtensionReference[] = [];
   addClaudeDirectory(entries, "user", claudeDir);
+  entries.push(...runtimeInstructionFiles({
+    provider: "claude-code",
+    scope: "user",
+    files: [path.join(claudeDir, "CLAUDE.md")],
+    note: "User Claude Code instructions"
+  }));
   addSettings(entries, "user", path.join(claudeDir, "settings.json"));
   for (const base of projectDirectories(directory)) {
     const projectClaudeDir = path.join(base, ".claude");
     addClaudeDirectory(entries, "project", projectClaudeDir);
+    entries.push(...runtimeInstructionFiles({
+      provider: "claude-code",
+      scope: "project",
+      files: [
+        path.join(base, "CLAUDE.md"),
+        path.join(base, "CLAUDE.local.md"),
+        path.join(projectClaudeDir, "CLAUDE.md")
+      ],
+      note: "Project Claude Code instructions"
+    }));
     addSettings(entries, "project", path.join(projectClaudeDir, "settings.json"));
     addSettings(entries, "project", path.join(projectClaudeDir, "settings.local.json"));
   }

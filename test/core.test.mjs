@@ -18,6 +18,9 @@ import { buildCodeAgentSessionTree } from "../dist/src/providers/codeagent/sessi
 import { enrichCodeAgentSession } from "../dist/src/providers/codeagent/schema.js";
 import { buildOpenCodeSessionTree } from "../dist/src/providers/opencode/session-tree.js";
 import { buildOpenCodeRuntimeEnvironment } from "../dist/src/providers/opencode/runtime-environment.js";
+import { buildClaudeCodeRuntimeEnvironment } from "../dist/src/providers/claude-code/runtime-environment.js";
+import { buildCodexRuntimeEnvironment } from "../dist/src/providers/codex/runtime-environment.js";
+import { buildGeminiRuntimeEnvironment } from "../dist/src/providers/gemini/runtime-environment.js";
 import { buildFlowTreeFromContainer } from "../dist/src/providers/shared/flow-tree.js";
 import { renderSessionPage } from "../dist/src/views/session.js";
 import { renderSettingsPage } from "../dist/src/views/settings.js";
@@ -460,7 +463,11 @@ test("OpenCode runtime environment resolves project and user agent extensions", 
   mkdirSync(path.join(projectPath, ".git"), { recursive: true });
   mkdirSync(path.join(projectPath, ".opencode", "agents"), { recursive: true });
   mkdirSync(path.join(projectPath, ".opencode", "skills", "project-skill"), { recursive: true });
+  mkdirSync(path.join(projectPath, "docs"), { recursive: true });
   mkdirSync(path.join(userOpenCode, "skills", "user-skill"), { recursive: true });
+  writeFileSync(path.join(projectPath, "AGENTS.md"), "# Project instructions\n");
+  writeFileSync(path.join(projectPath, "docs", "runtime.md"), "# Configured instructions\n");
+  writeFileSync(path.join(userOpenCode, "AGENTS.md"), "# User instructions\n");
   writeFileSync(path.join(projectPath, ".opencode", "agents", "review.md"), "# Review agent\n");
   writeFileSync(
     path.join(projectPath, ".opencode", "skills", "project-skill", "SKILL.md"),
@@ -472,7 +479,7 @@ test("OpenCode runtime environment resolves project and user agent extensions", 
   );
   writeFileSync(
     path.join(userOpenCode, "opencode.json"),
-    '{"plugin":["example-plugin"]}\n'
+    '{"plugin":["example-plugin"],"instructions":["docs/runtime.md"]}\n'
   );
   const previousConfigHome = process.env.XDG_CONFIG_HOME;
   process.env.XDG_CONFIG_HOME = configHome;
@@ -494,6 +501,21 @@ test("OpenCode runtime environment resolves project and user agent extensions", 
       && entry.name === "example-plugin"
       && entry.capturable === false
     )));
+    assert.ok(runtime.extensions.some((entry) => (
+      entry.scope === "project"
+      && entry.kind === "instruction"
+      && entry.sourcePath === path.join(projectPath, "AGENTS.md")
+    )));
+    assert.ok(runtime.extensions.some((entry) => (
+      entry.scope === "project"
+      && entry.kind === "instruction"
+      && entry.sourcePath === path.join(projectPath, "docs", "runtime.md")
+    )));
+    assert.ok(runtime.extensions.some((entry) => (
+      entry.scope === "user"
+      && entry.kind === "instruction"
+      && entry.sourcePath === path.join(userOpenCode, "AGENTS.md")
+    )));
   } finally {
     if (previousConfigHome === undefined) {
       delete process.env.XDG_CONFIG_HOME;
@@ -501,6 +523,67 @@ test("OpenCode runtime environment resolves project and user agent extensions", 
       process.env.XDG_CONFIG_HOME = previousConfigHome;
     }
   }
+});
+
+test("provider runtime environments classify instruction files as runtime extensions", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-instructions-"));
+  const projectPath = path.join(temp, "project");
+  const codexDir = path.join(temp, "codex");
+  const claudeDir = path.join(temp, "claude");
+  const geminiDir = path.join(temp, "gemini");
+  mkdirSync(path.join(projectPath, ".git"), { recursive: true });
+  mkdirSync(path.join(projectPath, ".claude", "rules"), { recursive: true });
+  mkdirSync(codexDir, { recursive: true });
+  mkdirSync(claudeDir, { recursive: true });
+  mkdirSync(geminiDir, { recursive: true });
+  writeFileSync(path.join(codexDir, "AGENTS.md"), "# Global Codex instructions\n");
+  writeFileSync(path.join(projectPath, "AGENTS.override.md"), "# Project Codex instructions\n");
+  writeFileSync(path.join(claudeDir, "CLAUDE.md"), "# User Claude instructions\n");
+  writeFileSync(path.join(projectPath, "CLAUDE.md"), "# Project Claude instructions\n");
+  writeFileSync(path.join(projectPath, ".claude", "rules", "review.md"), "# Review rules\n");
+  writeFileSync(path.join(geminiDir, "GEMINI.md"), "# User Gemini context\n");
+  writeFileSync(path.join(projectPath, "GEMINI.md"), "# Project Gemini context\n");
+
+  const codex = buildCodexRuntimeEnvironment("codex-session", projectPath, codexDir);
+  assert.ok(codex.extensions.some((entry) => (
+    entry.scope === "user"
+    && entry.kind === "instruction"
+    && entry.sourcePath === path.join(codexDir, "AGENTS.md")
+  )));
+  assert.ok(codex.extensions.some((entry) => (
+    entry.scope === "project"
+    && entry.kind === "instruction"
+    && entry.sourcePath === path.join(projectPath, "AGENTS.override.md")
+  )));
+
+  const claude = buildClaudeCodeRuntimeEnvironment("claude-session", projectPath, claudeDir);
+  assert.ok(claude.extensions.some((entry) => (
+    entry.scope === "user"
+    && entry.kind === "instruction"
+    && entry.sourcePath === path.join(claudeDir, "CLAUDE.md")
+  )));
+  assert.ok(claude.extensions.some((entry) => (
+    entry.scope === "project"
+    && entry.kind === "instruction"
+    && entry.sourcePath === path.join(projectPath, "CLAUDE.md")
+  )));
+  assert.ok(claude.extensions.some((entry) => (
+    entry.scope === "project"
+    && entry.kind === "rule"
+    && entry.sourcePath === path.join(projectPath, ".claude", "rules", "review.md")
+  )));
+
+  const gemini = buildGeminiRuntimeEnvironment("gemini-session", projectPath, geminiDir);
+  assert.ok(gemini.extensions.some((entry) => (
+    entry.scope === "user"
+    && entry.kind === "instruction"
+    && entry.sourcePath === path.join(geminiDir, "GEMINI.md")
+  )));
+  assert.ok(gemini.extensions.some((entry) => (
+    entry.scope === "project"
+    && entry.kind === "instruction"
+    && entry.sourcePath === path.join(projectPath, "GEMINI.md")
+  )));
 });
 
 test("settings configuration validates, persists, and applies runtime fields", () => {
@@ -533,8 +616,8 @@ test("settings configuration validates, persists, and applies runtime fields", (
         opencode: {
           targets: {
             skills: {
-              artifactRoots: [".opencode/skills"],
-              artifactFiles: ["AGENTS.md"],
+              artifactRoots: ["provider-materials"],
+              artifactFiles: ["REFERENCE.md"],
               fileExtensions: [".md"]
             }
           },
@@ -605,6 +688,64 @@ test("settings configuration validates, persists, and applies runtime fields", (
   );
 });
 
+test("legacy analysis material defaults migrate without removing custom paths", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-config-migration-"));
+  const configPath = path.join(temp, "config.json");
+  writeFileSync(configPath, JSON.stringify({
+    analysis: {
+      targets: {
+        skills: {
+          artifactRoots: ["skills", ".agents/skills", ".codex/skills"]
+        },
+        prompts: {
+          artifactRoots: ["custom-prompts"]
+        }
+      },
+      providers: {
+        opencode: {
+          targets: {
+            skills: {
+              artifactRoots: [".opencode/skills", ".agents/skills", ".codex/skills"],
+              artifactFiles: ["AGENTS.md"]
+            }
+          }
+        },
+        codex: {
+          targets: {
+            skills: {
+              artifactFiles: ["AGENTS.md"]
+            }
+          }
+        }
+      }
+    }
+  }));
+
+  const document = readUserConfigDocument(configPath);
+  assert.equal(document.config.analysis.targets.skills.artifactRoots, undefined);
+  assert.deepEqual(document.config.analysis.targets.prompts.artifactRoots, ["custom-prompts"]);
+  assert.equal(
+    document.config.analysis.providers.opencode.targets.skills.artifactRoots,
+    undefined
+  );
+  assert.equal(
+    document.config.analysis.providers.opencode.targets.skills.artifactFiles,
+    undefined
+  );
+  assert.deepEqual(
+    document.config.analysis.providers.codex.targets.skills.artifactFiles,
+    ["AGENTS.md"]
+  );
+  assert.match(document.raw, /\.agents\/skills/);
+
+  const savedPath = path.join(temp, "saved.json");
+  writeUserConfig(savedPath, JSON.parse(document.raw));
+  const saved = JSON.parse(readFileSync(savedPath, "utf-8"));
+  assert.equal(saved.analysis.targets.skills.artifactRoots, undefined);
+  assert.equal(saved.analysis.providers.opencode.targets.skills.artifactRoots, undefined);
+  assert.equal(saved.analysis.providers.opencode.targets.skills.artifactFiles, undefined);
+});
+
 test("settings page exposes config location and startup-only launch status", () => {
   const html = renderSettingsPage({
     configPath: "C:\\Users\\tester\\config.json",
@@ -651,7 +792,7 @@ test("settings page exposes config location and startup-only launch status", () 
   assert.match(html, /data-reset-setting="target-prompt"/);
   assert.match(html, /OpenSessionViewer does not create it/);
   assert.match(html, /id="settings-artifact-summary-roots"/);
-  assert.match(html, /Artifacts used by default/);
+  assert.match(html, /Analysis materials used by default/);
   assert.match(html, /data-reset-setting="artifact-roots"/);
   assert.match(html, /data-reset-setting="resume-executable"/);
   assert.match(html, /id="settings-prompt-preview-button"/);
@@ -728,6 +869,18 @@ test("settings page exposes config location and startup-only launch status", () 
   assert.match(customTargetHtml, /Look for stale operational knowledge\./);
   assert.match(customTargetHtml, /provider-memories/);
   assert.match(customTargetHtml, /MEMORY\.md/);
+});
+
+test("built-in analysis materials do not claim provider runtime paths", () => {
+  const providerRuntimePath = /(^|[\\/])\.(agents|codex|claude|opencode|gemini)([\\/]|$)/;
+  const instructionFile = /^(AGENTS(?:\.override)?|CLAUDE(?:\.local)?|GEMINI)\.md$/i;
+  for (const target of Object.values(BUILTIN_ANALYSIS_TARGETS)) {
+    assert.equal(target.artifactRoots.some((root) => providerRuntimePath.test(root)), false);
+    assert.equal(Boolean(target.artifactFiles?.some((file) => instructionFile.test(file))), false);
+  }
+  assert.deepEqual(BUILTIN_ANALYSIS_TARGETS.skills.artifactRoots, []);
+  assert.deepEqual(BUILTIN_ANALYSIS_TARGETS.agents.artifactRoots, []);
+  assert.deepEqual(BUILTIN_ANALYSIS_TARGETS.rules.artifactRoots, []);
 });
 
 test("terminal launch encodes the complete PowerShell resume script", () => {
@@ -872,6 +1025,20 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
           note: "Project skill"
         },
         {
+          id: "runtime:codex:project:instruction:agents",
+          provider: "codex",
+          scope: "project",
+          kind: "instruction",
+          name: "AGENTS.md",
+          source: agentsPath,
+          sourcePath: agentsPath,
+          sourceType: "file",
+          available: true,
+          capturable: true,
+          defaultSelected: true,
+          note: "Project instructions"
+        },
+        {
           id: "runtime:codex:user:hook:user",
           provider: "codex",
           scope: "user",
@@ -925,8 +1092,8 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     defaultTargets: ["skills", "tests"],
     targets: {
       skills: {
-        artifactRoots: ["."],
-        artifactFiles: ["AGENTS.md"],
+        artifactRoots: ["skills"],
+        artifactFiles: [],
         extensions: [".md"],
         prompt: "Focus on deterministic validation."
       }
@@ -958,14 +1125,15 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.deepEqual(
     action.targets.find((target) => target.id === "skills").artifacts,
     {
-      roots: ["."],
-      files: ["AGENTS.md"],
+      roots: ["skills"],
+      files: [],
       fileExtensions: [".md"]
     }
   );
   assert.equal(action.runtimeEnvironment.resolution, "current-local");
   assert.deepEqual(action.selectedRuntimeExtensionIds, [
     "runtime:codex:project:skill:project",
+    "runtime:codex:project:instruction:agents",
     "runtime:codex:user:hook:user",
     "runtime:codex:user:plugin:metadata"
   ]);
@@ -1039,7 +1207,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
 
   const artifacts = JSON.parse(readFileSync(run.files.artifactsPath, "utf-8"));
   assert.equal(artifacts.files.length, 4);
-  assert.equal(artifacts.runtimeEnvironment.extensions.length, 3);
+  assert.equal(artifacts.runtimeEnvironment.extensions.length, 4);
   assert.deepEqual(
     artifacts.runtimeEnvironment.selectedExtensionIds,
     action.selectedRuntimeExtensionIds
@@ -1049,7 +1217,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     false
   );
   const skillArtifact = artifacts.files.find(
-    (file) => file.relativePath === path.join("skills", "review-session", "SKILL.md")
+    (file) => file.sourcePath === skillPath
   );
   const agentsArtifact = artifacts.files.find((file) => file.relativePath === "AGENTS.md");
   const projectRuntimeArtifact = artifacts.files.find(
@@ -1058,7 +1226,11 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   const userRuntimeArtifact = artifacts.files.find((file) => file.sourcePath === userHookPath);
   assert.match(skillArtifact.artifactId, /^artifact:/);
   assert.ok(existsSync(skillArtifact.snapshotPath));
-  assert.equal(agentsArtifact.explicit, false);
+  assert.equal(agentsArtifact.explicit, true);
+  assert.deepEqual(
+    agentsArtifact.runtimeExtensionIds,
+    ["runtime:codex:project:instruction:agents"]
+  );
   assert.deepEqual(
     projectRuntimeArtifact.runtimeExtensionIds,
     ["runtime:codex:project:skill:project"]
@@ -1138,12 +1310,17 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.equal(exactEvidence.complete, true);
   assert.equal(exactEvidence.record.status, "error");
   const extensions = runAnalysisTool(run.runDir, "extension_list");
-  assert.equal(extensions.total, 3);
+  assert.equal(extensions.total, 4);
   const extension = runAnalysisTool(run.runDir, "extension_get", {
     extensionId: "runtime:codex:project:skill:project"
   });
   assert.equal(extension.extension.scope, "project");
   assert.equal(extension.artifacts[0].artifactId, projectRuntimeArtifact.artifactId);
+  const instructionExtension = runAnalysisTool(run.runDir, "extension_get", {
+    extensionId: "runtime:codex:project:instruction:agents"
+  });
+  assert.equal(instructionExtension.extension.kind, "instruction");
+  assert.equal(instructionExtension.artifacts[0].artifactId, agentsArtifact.artifactId);
   const artifactList = runAnalysisTool(run.runDir, "artifact_list");
   assert.equal(artifactList.total, 4);
   const artifact = runAnalysisTool(run.runDir, "artifact_get", {
@@ -1505,7 +1682,7 @@ test("provider analysis targets override shared artifacts without changing other
     targets: {
       skills: {
         artifactRoots: ["shared-skills"],
-        artifactFiles: ["AGENTS.md"],
+        artifactFiles: ["REFERENCE.md"],
         fileExtensions: [".md"]
       }
     },
@@ -1514,7 +1691,7 @@ test("provider analysis targets override shared artifacts without changing other
         command: { executable: "opencode", args: ["run"] },
         targets: {
           skills: {
-            artifactRoots: [".opencode/skills"],
+            artifactRoots: ["provider-materials"],
             artifactFiles: ["OPENCODE.md"]
           }
         }
@@ -1527,11 +1704,11 @@ test("provider analysis targets override shared artifacts without changing other
 
   const openCode = resolveAnalysisSettings({ id: "opencode" }, analysisConfig, "skills");
   const codex = resolveAnalysisSettings({ id: "codex" }, analysisConfig, "skills");
-  assert.deepEqual(openCode.target.artifactRoots, [".opencode/skills"]);
+  assert.deepEqual(openCode.target.artifactRoots, ["provider-materials"]);
   assert.deepEqual(openCode.target.artifactFiles, ["OPENCODE.md"]);
   assert.deepEqual(openCode.target.fileExtensions, [".md"]);
   assert.deepEqual(codex.target.artifactRoots, ["shared-skills"]);
-  assert.deepEqual(codex.target.artifactFiles, ["AGENTS.md"]);
+  assert.deepEqual(codex.target.artifactFiles, ["REFERENCE.md"]);
 });
 
 test("analysis prompt preview uses the real builder and reports configured sources", () => {
@@ -1591,7 +1768,7 @@ test("analysis prompt preview uses the real builder and reports configured sourc
   assert.equal(builtInPreview.promptFile.configuredPath, "");
   assert.match(
     builtInPreview.prompt,
-    /Focus proposals on reusable agent skills and their supporting files/
+    /Focus proposals on the selected provider runtime skills and their supporting files/
   );
 });
 

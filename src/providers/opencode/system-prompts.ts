@@ -452,6 +452,19 @@ function defaultSystemInstructionFiles(sessionDirectory: string, worktree: strin
   return unique(files);
 }
 
+export function resolveOpenCodeInstructionSources(sessionDirectory: string, worktree: string) {
+  const configs = configFiles(sessionDirectory, worktree).map(loadConfigFile).filter((entry): entry is LoadedConfig => Boolean(entry));
+  const merged = mergePromptConfig(configs);
+  const configured = configuredInstructionFiles(merged.instructions, sessionDirectory, worktree);
+  return {
+    localFiles: unique([
+      ...defaultSystemInstructionFiles(sessionDirectory, worktree),
+      ...configured.localFiles
+    ]),
+    remoteUrls: configured.remoteUrls
+  };
+}
+
 function resolveOpenCodePromptSources(session: Row | undefined, project: Row | undefined) {
   const sessionDirectory = String(session?.directory || project?.worktree || process.cwd());
   const worktree = String(project?.worktree || sessionDirectory);
@@ -467,11 +480,7 @@ function resolveOpenCodePromptSources(session: Row | undefined, project: Row | u
 
   const selectedAgent = String(session?.agent || merged.defaultAgent || "build");
   const selectedPrompt = merged.agents[selectedAgent];
-  const instructionPaths = unique([
-    ...defaultSystemInstructionFiles(sessionDirectory, worktree),
-    ...configuredInstructionFiles(merged.instructions, sessionDirectory, worktree).localFiles
-  ]);
-  const remoteInstructions = configuredInstructionFiles(merged.instructions, sessionDirectory, worktree).remoteUrls;
+  const instructions = resolveOpenCodeInstructionSources(sessionDirectory, worktree);
 
   return {
     sessionDirectory,
@@ -479,8 +488,8 @@ function resolveOpenCodePromptSources(session: Row | undefined, project: Row | u
     configs,
     selectedAgent,
     selectedPrompt,
-    instructionPaths,
-    remoteInstructions,
+    instructionPaths: instructions.localFiles,
+    remoteInstructions: instructions.remoteUrls,
     allAgents: Object.values(merged.agents)
   };
 }

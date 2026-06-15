@@ -5,6 +5,7 @@ import {
   createRuntimeExtension,
   projectDirectories,
   readJsonLike,
+  runtimeInstructionFiles,
   scanRuntimeChildren
 } from "../shared/runtime-environment.js";
 
@@ -75,10 +76,22 @@ export function buildGeminiRuntimeEnvironment(
 ) {
   const entries: RuntimeExtensionReference[] = [];
   addGeminiDirectory(entries, "user", geminiDir);
+  entries.push(...runtimeInstructionFiles({
+    provider: "gemini",
+    scope: "user",
+    files: [path.join(geminiDir, "GEMINI.md")],
+    note: "Global Gemini CLI context"
+  }));
   addHooks(entries, "user", path.join(geminiDir, "settings.json"));
   for (const base of projectDirectories(directory)) {
     const projectGeminiDir = path.join(base, ".gemini");
     addGeminiDirectory(entries, "project", projectGeminiDir);
+    entries.push(...runtimeInstructionFiles({
+      provider: "gemini",
+      scope: "project",
+      files: [path.join(base, "GEMINI.md")],
+      note: "Project Gemini CLI context"
+    }));
     addHooks(entries, "project", path.join(projectGeminiDir, "settings.json"));
   }
   return buildRuntimeEnvironment(

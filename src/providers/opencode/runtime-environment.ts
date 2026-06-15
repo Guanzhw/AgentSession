@@ -5,15 +5,26 @@ import type { RuntimeExtensionReference } from "../interface.js";
 import {
   buildRuntimeEnvironment,
   createRuntimeExtension,
+  findProjectRoot,
   projectDirectories,
   readJsonLike,
+  runtimeInstructionFiles,
   scanRuntimeChildren
 } from "../shared/runtime-environment.js";
+import { resolveOpenCodeInstructionSources } from "./system-prompts.js";
 
 function globalConfigDir() {
   return process.env.XDG_CONFIG_HOME
     ? path.join(process.env.XDG_CONFIG_HOME, "opencode")
     : path.join(os.homedir(), ".config", "opencode");
+}
+
+function isInsideDirectory(root: string, candidate: string) {
+  const relative = path.relative(root, candidate);
+  return Boolean(relative)
+    && relative !== ".."
+    && !relative.startsWith(`..${path.sep}`)
+    && !path.isAbsolute(relative);
 }
 
 function addDirectoryKinds(
@@ -66,6 +77,7 @@ function addConfiguredPlugins(
 
 export function buildOpenCodeRuntimeEnvironment(sessionId: string, directory: string) {
   const entries: RuntimeExtensionReference[] = [];
+  const projectRoot = findProjectRoot(directory);
   const userConfigDirs = [...new Set([
     globalConfigDir(),
     process.env.OPENCODE_CONFIG_DIR || "",
@@ -106,6 +118,28 @@ export function buildOpenCodeRuntimeEnvironment(sessionId: string, directory: st
       note: `${scope}-scoped compatible skill directory`
     }));
   }
+
+  const instructions = resolveOpenCodeInstructionSources(directory, projectRoot);
+  const projectInstructionFiles = instructions.localFiles.filter(
+    (filePath) => isInsideDirectory(projectRoot, filePath)
+  );
+  const userInstructionFiles = instructions.localFiles.filter(
+    (filePath) => !projectInstructionFiles.includes(filePath)
+  );
+  entries.push(
+    ...runtimeInstructionFiles({
+      provider: "opencode",
+      scope: "project",
+      files: projectInstructionFiles,
+      note: "Project instruction loaded by OpenCode"
+    }),
+    ...runtimeInstructionFiles({
+      provider: "opencode",
+      scope: "user",
+      files: userInstructionFiles,
+      note: "User or external instruction loaded by OpenCode"
+    })
+  );
 
   return buildRuntimeEnvironment(
     sessionId,

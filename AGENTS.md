@@ -84,6 +84,13 @@ The package is intentionally small:
 - Session analysis snapshots inputs and produces reviewable proposals. It must
   never directly modify source skills, tests, prompts, or other analyzed
   artifacts.
+- Keep analysis inputs distinct: session records are evidence, target artifacts
+  are provider-neutral raw materials such as docs/tests/scripts, and runtime
+  extensions are provider-owned instructions and behavior such as `AGENTS.md`,
+  `CLAUDE.md`, skills, agents, commands, plugins, hooks, and rules.
+- Do not put provider runtime directories or instruction files in built-in
+  `artifactRoots` or `artifactFiles`. Discover them through the owning
+  provider's runtime environment.
 - Treat `evidence/session-index.json`, `evidence/evidence-index.json`, and
   `evidence/evidence.jsonl` as the bounded evidence interface for an analysis
   run. Prefer the query commands in `src/analysis-tools.ts` over broad raw-file

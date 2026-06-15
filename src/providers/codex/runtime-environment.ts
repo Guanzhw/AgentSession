@@ -6,6 +6,7 @@ import {
   buildRuntimeEnvironment,
   createRuntimeExtension,
   projectDirectories,
+  runtimeInstructionFiles,
   scanRuntimeChildren
 } from "../shared/runtime-environment.js";
 
@@ -54,12 +55,26 @@ function addPluginConfig(
   }
 }
 
+function firstExisting(paths: string[]) {
+  return paths.find((filePath) => existsSync(filePath)) || "";
+}
+
 export function buildCodexRuntimeEnvironment(
   sessionId: string,
   directory: string,
   codexDir: string
 ) {
   const entries: RuntimeExtensionReference[] = [];
+  const globalInstruction = firstExisting([
+    path.join(codexDir, "AGENTS.override.md"),
+    path.join(codexDir, "AGENTS.md")
+  ]);
+  entries.push(...runtimeInstructionFiles({
+    provider: "codex",
+    scope: "user",
+    files: globalInstruction ? [globalInstruction] : [],
+    note: "Global Codex instructions"
+  }));
   addSkills(entries, "user", path.join(os.homedir(), ".agents", "skills"), "User-scoped Codex skills");
   addSkills(entries, "user", path.join(codexDir, "skills"), "Codex-managed user and bundled skills");
   entries.push(...scanRuntimeChildren({
@@ -72,6 +87,16 @@ export function buildCodexRuntimeEnvironment(
   addPluginConfig(entries, "user", path.join(codexDir, "config.toml"));
 
   for (const base of projectDirectories(directory)) {
+    const instruction = firstExisting([
+      path.join(base, "AGENTS.override.md"),
+      path.join(base, "AGENTS.md")
+    ]);
+    entries.push(...runtimeInstructionFiles({
+      provider: "codex",
+      scope: "project",
+      files: instruction ? [instruction] : [],
+      note: "Project Codex instructions"
+    }));
     addSkills(entries, "project", path.join(base, ".agents", "skills"), "Project-scoped Codex skills");
     addSkills(entries, "project", path.join(base, ".codex", "skills"), "Project Codex skills");
     entries.push(...scanRuntimeChildren({

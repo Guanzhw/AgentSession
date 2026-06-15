@@ -46,6 +46,39 @@ function usablePath(sourcePath: string | null) {
   }
 }
 
+export function runtimeInstructionFiles({
+  provider,
+  scope,
+  files,
+  note
+}: {
+  provider: ProviderId;
+  scope: RuntimeExtensionScope;
+  files: string[];
+  note: string;
+}) {
+  return files
+    .filter((filePath) => {
+      const resolvedPath = usablePath(filePath);
+      if (!resolvedPath) return false;
+      try {
+        return lstatSync(resolvedPath).isFile();
+      } catch {
+        return false;
+      }
+    })
+    .map((filePath) => createRuntimeExtension({
+      provider,
+      scope,
+      kind: "instruction",
+      name: path.basename(filePath),
+      source: path.resolve(filePath),
+      sourcePath: filePath,
+      sourceType: "file",
+      note
+    }));
+}
+
 export function createRuntimeExtension({
   provider,
   scope,

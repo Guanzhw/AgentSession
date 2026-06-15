@@ -673,9 +673,15 @@ counts, minimum sample size, threshold, and ranked sessions.
 
 ## Required behavior
 
+The analysis inputs have three distinct roles:
+
+- Session evidence is the normalized conversation, tool results, system-prompt records, and related session data.
+- Target artifacts are provider-neutral raw materials configured for this analysis target, such as docs, tests, prompts, scripts, or explicit external reference files.
+- Runtime extensions are provider-resolved instructions and behavior selected for this run, such as AGENTS.md, CLAUDE.md, skills, agents, commands, plugins, hooks, and rules.
+
 1. Treat the session as evidence, not proof that a proposed change is generally useful.
-2. Inspect the captured artifacts before proposing updates or new artifacts.
-3. Cite concrete session messages, tool results, or captured artifacts for every proposal.
+2. Inspect both the configured target artifacts and selected runtime extensions before proposing updates or new artifacts.
+3. Cite concrete session messages, tool results, captured target artifacts, or captured runtime extensions for every proposal.
 4. Do not modify project files or the original artifacts.
 5. Generate proposals only. A proposal is not validated until executable evaluation compares a baseline with the candidate.
 6. Prefer small, focused edits over comprehensive documentation.

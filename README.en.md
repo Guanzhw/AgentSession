@@ -190,9 +190,21 @@ and `manifest.json` are supporting evidence and diagnostics. Completed runs
 expose direct open and download links in the session's **Analysis activity**
 panel.
 
+Analysis inputs are intentionally separated:
+
+- **Session evidence** is the normalized conversation, tool results, system
+  prompt records, and other session data.
+- **Analysis materials** are provider-neutral raw inputs configured by the
+  selected target, such as documentation, tests, prompt assets, scripts, or
+  explicit external reference files.
+- **Runtime extensions** are provider-resolved instructions and behavior,
+  including files such as `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md`, plus
+  skills, agents, commands, plugins, hooks, tools, and rules.
+
 Before launch, the session page also resolves the provider's current local
 runtime extensions and lets you select project-scoped and user-scoped skills,
-agents, commands, plugins, hooks, tools, rules, or provider extension bundles.
+instructions, agents, commands, plugins, hooks, tools, rules, or provider
+extension bundles.
 The exact kinds and search paths remain provider-owned. Most provider
 transcripts do not contain an immutable historical extension manifest, so this
 picker is labeled as current local resolution rather than claiming to recreate
@@ -264,9 +276,11 @@ preserved for follow-up queries and validation:
 - `artifact_list`
 - `artifact_get`
 
-`extension_*` queries inspect the selected agent runtime extensions.
-`artifact_*` queries inspect the bounded file snapshots. This terminology is
-separate from artifact filename suffix filtering.
+`extension_*` queries inspect selected provider runtime context. `artifact_*`
+queries inspect the bounded snapshots produced from both configured analysis
+materials and selected, capturable runtime extensions. The
+`runtimeExtensionIds` field identifies snapshots that came from runtime
+context.
 
 Interruption signals come from explicit tool error reasons. High error rate is
 kept as a transparent heuristic: the result includes the threshold, minimum
@@ -293,9 +307,13 @@ Analysis must also be enabled and configured for each provider:
     "targets": {
       "skills": {
         "label": "Analyze skills",
-        "artifactRoots": ["skills", ".agents/skills", ".codex/skills"],
         "fileExtensions": [".md", ".json", ".yaml", ".yml", ".js", ".ts", ".py"],
         "promptFile": "prompts/analyze-skills.md"
+      },
+      "docs": {
+        "artifactRoots": ["docs"],
+        "artifactFiles": ["README.md"],
+        "fileExtensions": [".md", ".mdx", ".txt"]
       }
     },
     "providers": {
@@ -303,9 +321,7 @@ Analysis must also be enabled and configured for each provider:
         "defaultTargets": ["skills", "tests"],
         "targets": {
           "skills": {
-            "artifactRoots": [".opencode/skills", ".agents/skills", ".codex/skills"],
-            "artifactFiles": ["AGENTS.md"],
-            "fileExtensions": [".md", ".json", ".yaml", ".yml", ".js", ".ts", ".py"]
+            "prompt": "Prioritize reusable skills that affected the selected session."
           }
         },
         "command": {
@@ -352,11 +368,17 @@ trusted project and trusted prompt.
 
 Relative `artifactRoots` and `outputDir` paths are resolved from the recorded
 session project directory. Absolute artifact roots are allowed when explicitly
-configured. `artifactFiles` can include specific project-relative files such
-as `README.md` or `AGENTS.md`. Files are copied into a bounded snapshot so the
-analysis remains reviewable even if the original artifact changes later.
+configured. `artifactFiles` can include project-relative files such as
+`README.md` or absolute external reference documents. Provider runtime paths
+such as `.opencode/skills`, `.claude/skills`, `~/.claude/skills`, `AGENTS.md`,
+and `CLAUDE.md` should not be repeated here; the provider adapter discovers
+them as runtime extensions. Files are copied into a bounded snapshot so the
+analysis remains reviewable even if the original material changes later.
 `fileExtensions` controls filename suffix filtering for those artifact roots;
 the older `extensions` field remains accepted for existing configurations.
+Exact legacy built-in/example arrays that mixed runtime paths into artifacts
+are normalized on load and removed the next time settings are saved. Other
+custom paths are preserved.
 
 When `analysis.outputDir` is omitted, runs default to
 `.opensessionviewer/analysis` inside the session project. Each run carries the
@@ -376,11 +398,11 @@ as placeholders.
 Built-in analysis targets are available without adding entries under
 `analysis.targets`:
 
-- `skills`: reusable agent skills
+- `skills`: selected provider runtime skills
 - `prompts`: prompt files and templates
-- `agents`: agent definitions and roles
+- `agents`: selected provider runtime agent definitions and roles
 - `docs`: documentation directories
-- `rules`: agent/project rule directories
+- `rules`: selected provider runtime instructions and rules
 - `tests`: tests, specs, and fixtures
 - `workflows`: CI and repository automation
 - `scripts`: project scripts and command-line helpers
@@ -398,10 +420,11 @@ selection for existing configurations.
 
 The provider settings page edits `analysis.providers.<provider>.defaultTargets`
 and `analysis.providers.<provider>.targets.<target>` overrides. Each target
-shows the effective artifact roots, explicit files, and suffix filters that
-will be used by default. **Reset to default** removes the provider-specific
-difference when possible so the value inherits from `analysis.targets` or the
-built-in target again.
+shows the effective provider-neutral analysis material roots, explicit files,
+and suffix filters that will be used by default. Provider runtime context is
+shown separately on the session page. **Reset to default** removes the
+provider-specific difference when possible so the value inherits from
+`analysis.targets` or the built-in target again.
 
 By default, analysis runs write `evidence/session-index.json`,
 `evidence/evidence-index.json`, and immutable `evidence/evidence.jsonl`;

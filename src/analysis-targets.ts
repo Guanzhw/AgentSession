@@ -25,21 +25,21 @@ export const DEFAULT_ANALYSIS_TARGET = {
 export const BUILTIN_ANALYSIS_TARGETS = {
   skills: {
     label: "Analyze skills",
-    artifactRoots: ["skills", ".agents/skills", ".codex/skills"],
+    artifactRoots: [],
     fileExtensions: DEFAULT_ANALYSIS_EXTENSIONS,
-    prompt: "Focus proposals on reusable agent skills and their supporting files."
+    prompt: "Focus proposals on the selected provider runtime skills and their supporting files."
   },
   prompts: {
     label: "Analyze prompts",
-    artifactRoots: ["prompts", ".agents/prompts", ".codex/prompts"],
+    artifactRoots: ["prompts"],
     fileExtensions: [".md", ".txt", ".json", ".yaml", ".yml"],
     prompt: "Focus proposals on reusable prompts, prompt templates, and prompt-specific guidance."
   },
   agents: {
     label: "Analyze agents",
-    artifactRoots: [".agents/agents", ".codex/agents", ".claude/agents"],
+    artifactRoots: [],
     fileExtensions: [".md", ".json", ".yaml", ".yml", ".toml"],
-    prompt: "Focus proposals on agent definitions, roles, tools, permissions, and handoff behavior."
+    prompt: "Focus proposals on selected provider runtime agent definitions, roles, tools, permissions, and handoff behavior."
   },
   docs: {
     label: "Analyze docs",
@@ -50,10 +50,10 @@ export const BUILTIN_ANALYSIS_TARGETS = {
   },
   rules: {
     label: "Analyze rules",
-    artifactRoots: [".agents", ".codex", ".claude"],
-    artifactFiles: ["AGENTS.md", "CLAUDE.md", "GEMINI.md", ".cursorrules"],
+    artifactRoots: [],
+    artifactFiles: [],
     fileExtensions: [".md", ".json", ".yaml", ".yml", ".toml"],
-    prompt: "Focus proposals on project and agent instruction files, policies, permissions, and operating rules."
+    prompt: "Focus proposals on selected provider runtime instructions, policies, permissions, and operating rules."
   },
   tests: {
     label: "Analyze tests",
