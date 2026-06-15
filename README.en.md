@@ -84,8 +84,8 @@ opensessionviewer [options]
 --codex-dir <path>    Codex CLI data directory
 --gemini-dir <path>   Gemini CLI data directory
 --config <path>       OpenSessionViewer JSON config
---allow-terminal-launch
-                      Allow the local UI to open resume commands in Windows Terminal
+--disable-terminal-launch
+                      Disable resume and analysis command launching
 --reindex             Rebuild the cross-provider index on start
 --lang <en|zh>        UI language
 --open                Open the browser on start
@@ -110,9 +110,9 @@ opensessionviewer [options]
 ## Resume Commands
 
 Session detail pages always show a copyable session ID. When a provider has a
-known resume command and a valid recorded project directory, the page also
-offers a copyable command. Actual terminal launching is disabled unless the
-server starts with `--allow-terminal-launch`.
+known resume command and a valid recorded project directory, the page can open
+the command in a terminal. Command launching is enabled by default; start with
+`--disable-terminal-launch` to hide and disable resume and analysis launches.
 
 All registered providers declare a default resume command:
 
@@ -169,9 +169,9 @@ saving. The underlying JSON remains available in a collapsed Advanced section.
 
 Changes to `analysis`, `resumeCommands`, and `resumeShell` apply to the running
 server immediately. Server paths, port, and provider data directories are
-persisted but require a restart. `allowTerminalLaunch` is intentionally not a
-web-configurable permission: start OpenSessionViewer with
-`--allow-terminal-launch` to grant that capability to the current process.
+persisted but require a restart. `allowTerminalLaunch` is intentionally not
+web-configurable. Command launching is enabled by default; start OpenSessionViewer
+with `--disable-terminal-launch` to turn it off for the current process.
 
 ## Session Analysis And Evaluation Proposals
 
@@ -274,8 +274,9 @@ tool-call sample, raw counts, rate, and complete ranking. The analyzer is told
 to inspect successful and failed outcomes contrastively before proposing an
 edit.
 
-Analysis uses the same explicit `--allow-terminal-launch` safety gate as resume
-commands. It must also be enabled and configured for each provider:
+Analysis uses the same startup launch setting as resume commands. Launching is
+enabled by default and can be turned off with `--disable-terminal-launch`.
+Analysis must also be enabled and configured for each provider:
 
 ```json
 {
@@ -299,6 +300,14 @@ commands. It must also be enabled and configured for each provider:
     },
     "providers": {
       "opencode": {
+        "defaultTargets": ["skills", "tests"],
+        "targets": {
+          "skills": {
+            "artifactRoots": [".opencode/skills", ".agents/skills", ".codex/skills"],
+            "artifactFiles": ["AGENTS.md"],
+            "fileExtensions": [".md", ".json", ".yaml", ".yml", ".js", ".ts", ".py"]
+          }
+        },
         "command": {
           "executable": "opencode",
           "args": [
@@ -386,6 +395,13 @@ its own report, evaluation proposals, artifact proposals, manifest, and
 validation result. It does not merge multiple targets into one output bundle.
 The older `defaultTarget` field remains supported as the first/default
 selection for existing configurations.
+
+The provider settings page edits `analysis.providers.<provider>.defaultTargets`
+and `analysis.providers.<provider>.targets.<target>` overrides. Each target
+shows the effective artifact roots, explicit files, and suffix filters that
+will be used by default. **Reset to default** removes the provider-specific
+difference when possible so the value inherits from `analysis.targets` or the
+built-in target again.
 
 By default, analysis runs write `evidence/session-index.json`,
 `evidence/evidence-index.json`, and immutable `evidence/evidence.jsonl`;

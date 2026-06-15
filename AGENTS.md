@@ -98,7 +98,9 @@ The package is intentionally small:
 
 ### Terminal launch is explicitly trusted local behavior
 
-- Resume and analysis launch endpoints require `--allow-terminal-launch`.
+- Resume and analysis launch endpoints are enabled by default for this
+  loopback-only local server. `--disable-terminal-launch` disables them for the
+  current process.
 - Keep launch requests restricted to same-origin JSON requests from loopback.
 - Build commands as structured executable/argument/cwd objects. Do not
   concatenate user or session data into an unquoted shell command.
@@ -367,8 +369,8 @@ Git Bash alternative:
 node dist/bin/cli.js > app.log 2>&1 &
 ```
 
-For resume or analysis launch testing, add `--allow-terminal-launch` to the
-argument list. Only do this for a trusted local config and project.
+For the normal resume or analysis launch path, start without an extra launch
+flag. Add `--disable-terminal-launch` when testing the opt-out path.
 
 ### 4. Verify
 

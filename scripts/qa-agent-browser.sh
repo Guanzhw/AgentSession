@@ -7,6 +7,7 @@ DB_PATH="${OPENSESSIONVIEWER_QA_DB_PATH:-${SESSION_VIEWER_DB_PATH:-$HOME/.local/
 SAMPLE_SESSION_ID="${OPENSESSIONVIEWER_QA_SESSION_ID:-ses_1ddf03616ffeTE5c6cbpUPMY3n}"
 SESSION_NAME="${OPENSESSIONVIEWER_QA_BROWSER_SESSION:-opensessionviewer-qa-$PORT-$$}"
 BASE="${OPENSESSIONVIEWER_QA_BASE_URL:-http://127.0.0.1:$PORT}"
+TERMINAL_LAUNCH="${OPENSESSIONVIEWER_QA_TERMINAL_LAUNCH:-enabled}"
 
 mkdir -p "$ROOT/tmp" "$ROOT/logs"
 export npm_config_cache="$ROOT/tmp/npm-cache"
@@ -102,7 +103,11 @@ ab "open settings" open "$BASE/opencode/settings" >/dev/null
 ab "wait for settings" wait --text "Session analysis" >/dev/null
 settings="$(read_ab "read settings" get text body)"
 assert_contains "settings" "$settings" "CONFIGURATION FILE"
-assert_contains "settings" "$settings" "Disabled for this server process"
+if [[ "$TERMINAL_LAUNCH" == "disabled" ]]; then
+  assert_contains "settings" "$settings" "Disabled for this server process"
+else
+  assert_contains "settings" "$settings" "Enabled for this server process"
+fi
 assert_contains "settings" "$settings" "Provider analyzer"
 settings_editor_count="$(read_ab "count settings editor" get count "#settings-json")"
 if [[ "$settings_editor_count" != "1" ]]; then
@@ -138,15 +143,18 @@ if [[ "$resume_copy_count" != "0" ]]; then
   echo "Copy resume command button should not be rendered" >&2
   exit 1
 fi
-resume_launch_count="$(read_ab "count disabled-by-default terminal buttons" get count ".session-actions [data-action='resume-session']")"
-if [[ "$resume_launch_count" != "0" ]]; then
-  echo "Terminal launch button should be hidden without --allow-terminal-launch" >&2
-  exit 1
-fi
-analysis_launch_count="$(read_ab "count disabled-by-default analysis buttons" get count ".session-actions [data-action='analyze-session']")"
-if [[ "$analysis_launch_count" != "0" ]]; then
-  echo "Session analysis button should be hidden without configured terminal launch" >&2
-  exit 1
+resume_launch_count="$(read_ab "count terminal launch buttons" get count ".session-actions [data-action='resume-session']")"
+analysis_launch_count="$(read_ab "count analysis launch buttons" get count ".session-actions [data-action='analyze-session']")"
+if [[ "$TERMINAL_LAUNCH" == "disabled" ]]; then
+  if [[ "$resume_launch_count" != "0" || "$analysis_launch_count" != "0" ]]; then
+    echo "Terminal and analysis launch buttons should be hidden with --disable-terminal-launch" >&2
+    exit 1
+  fi
+else
+  if [[ "$resume_launch_count" != "1" || "$analysis_launch_count" != "1" ]]; then
+    echo "Terminal and analysis launch buttons should be visible by default" >&2
+    exit 1
+  fi
 fi
 
 toc_unexpected="$(read_ab "count unexpected toc entries" get count ".session-toc .toc-link:not(.toc-user):not(.toc-assistant):not(.toc-agent):not(.toc-task)")"

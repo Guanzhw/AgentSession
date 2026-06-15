@@ -82,6 +82,8 @@ const __I18N__ = {
     settings_prompt_file_missing: "prompt file missing: {path}",
     settings_prompt_preview_meta: "Target guidance: {source}. {file}.",
     settings_select_target: "Select at least one analysis target",
+    settings_reset_applied: "Reset to the inherited default",
+    settings_artifact_none: "None",
     settings_all_saved: "All changes saved",
     settings_unsaved: "Unsaved changes",
     scroll_all_loaded: "All sessions loaded",
@@ -167,6 +169,8 @@ const __I18N__ = {
     settings_prompt_file_missing: "提示词文件不存在：{path}",
     settings_prompt_preview_meta: "目标指引来源：{source}。{file}。",
     settings_select_target: "请至少选择一个分析目标",
+    settings_reset_applied: "已恢复为继承的默认值",
+    settings_artifact_none: "无",
     settings_all_saved: "所有更改均已保存",
     settings_unsaved: "有未保存的更改",
     scroll_all_loaded: "已全部加载",
@@ -255,6 +259,9 @@ if (settingsForm) {
   const targetLabelInput = document.getElementById("settings-target-label");
   const targetContextLabel = document.getElementById("settings-target-context-label");
   const targetContextId = document.getElementById("settings-target-context-id");
+  const artifactSummaryRoots = document.getElementById("settings-artifact-summary-roots");
+  const artifactSummaryFiles = document.getElementById("settings-artifact-summary-files");
+  const artifactSummaryExtensions = document.getElementById("settings-artifact-summary-extensions");
   const shellMode = document.getElementById("settings-shell-mode");
   const shellCustomField = document.getElementById("settings-shell-custom-field");
   const initialNode = document.getElementById("settings-initial-data");
@@ -297,8 +304,11 @@ if (settingsForm) {
   const setLines = (id, values) => setValue(id, Array.isArray(values) ? values.join("\n") : "");
   const asObject = (next) => next && typeof next === "object" && !Array.isArray(next) ? next : {};
   const clone = (next) => JSON.parse(JSON.stringify(next || {}));
+  const sameValue = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+  let sharedTargetConfigs = {};
   let targetDrafts = {};
   let currentTargetId = "skills";
+  let inheritedDefaultTargetIds = ["skills"];
 
   const parseEditor = () => {
     const parsed = JSON.parse(editor.value);
@@ -319,50 +329,113 @@ if (settingsForm) {
   };
 
   const targetDefaults = (targetId) => asObject(asObject(initialData.targetDefaults)[targetId]);
-  const resolvedTargetDefaults = (targetId) => {
+  const mergeTarget = (base, override) => {
+    const left = asObject(base);
+    const right = asObject(override);
+    return {
+      ...left,
+      ...right,
+      artifactRoots: Array.isArray(right.artifactRoots)
+        ? right.artifactRoots
+        : Array.isArray(left.artifactRoots) ? left.artifactRoots : [],
+      artifactFiles: Array.isArray(right.artifactFiles)
+        ? right.artifactFiles
+        : Array.isArray(left.artifactFiles) ? left.artifactFiles : [],
+      fileExtensions: Array.isArray(right.fileExtensions)
+        ? right.fileExtensions
+        : Array.isArray(right.extensions)
+          ? right.extensions
+          : Array.isArray(left.fileExtensions)
+            ? left.fileExtensions
+            : Array.isArray(left.extensions) ? left.extensions : []
+    };
+  };
+  const builtinTargetDefaults = (targetId) => {
     const builtin = targetDefaults(targetId);
-    return Object.keys(builtin).length
-      ? builtin
-      : {
+    return Object.keys(builtin).length ? builtin : {
       label: `Analyze ${targetId}`,
       artifactRoots: [],
       fileExtensions: targetDefaults("skills").fileExtensions || [],
       promptFile: ""
     };
   };
+  const inheritedTargetDefaults = (targetId) => mergeTarget(
+    builtinTargetDefaults(targetId),
+    sharedTargetConfigs[targetId]
+  );
+  const resolvedTargetDefaults = (targetId) => mergeTarget(
+    inheritedTargetDefaults(targetId),
+    targetDrafts[targetId]
+  );
+  const configDefaultTargetIds = (analysis) => (
+    Array.isArray(analysis.defaultTargets) && analysis.defaultTargets.length
+      ? analysis.defaultTargets.filter((targetId) => typeof targetId === "string" && targetId)
+      : typeof analysis.defaultTarget === "string" && analysis.defaultTarget
+        ? [analysis.defaultTarget]
+        : ["skills"]
+  );
+
+  const setArtifactSummary = (node, values) => {
+    if (!node) return;
+    const entries = Array.isArray(values) ? values : [];
+    if (!entries.length) {
+      const empty = document.createElement("span");
+      empty.textContent = ft("settings_artifact_none");
+      node.replaceChildren(empty);
+      return;
+    }
+    node.replaceChildren(...entries.map((entry) => {
+      const code = document.createElement("code");
+      code.textContent = entry;
+      return code;
+    }));
+  };
+
+  const updateArtifactSummary = () => {
+    setArtifactSummary(artifactSummaryRoots, readLines("settings-artifact-roots"));
+    setArtifactSummary(artifactSummaryFiles, readLines("settings-artifact-files"));
+    setArtifactSummary(artifactSummaryExtensions, readLines("settings-file-extensions"));
+  };
 
   const captureTargetDraft = (targetId) => {
     if (!targetId) return;
+    const inherited = inheritedTargetDefaults(targetId);
     const target = { ...asObject(targetDrafts[targetId]) };
-    target.label = value("settings-target-label") || `Analyze ${targetId}`;
-    target.artifactRoots = readLines("settings-artifact-roots");
-    target.artifactFiles = readLines("settings-artifact-files");
-    target.fileExtensions = readLines("settings-file-extensions");
+    const label = value("settings-target-label") || `Analyze ${targetId}`;
+    if (label === inherited.label) delete target.label;
+    else target.label = label;
+    for (const [field, control] of [
+      ["artifactRoots", "settings-artifact-roots"],
+      ["artifactFiles", "settings-artifact-files"],
+      ["fileExtensions", "settings-file-extensions"]
+    ]) {
+      const entries = readLines(control);
+      if (sameValue(entries, inherited[field] || [])) delete target[field];
+      else target[field] = entries;
+    }
     delete target.extensions;
     const prompt = document.getElementById("settings-target-prompt")?.value?.trim() || "";
-    if (prompt) target.prompt = prompt;
+    if (prompt && prompt !== inherited.prompt) target.prompt = prompt;
     else delete target.prompt;
     const promptFile = value("settings-prompt-file");
-    if (promptFile) target.promptFile = promptFile;
+    if (promptFile && promptFile !== inherited.promptFile) target.promptFile = promptFile;
     else delete target.promptFile;
-    targetDrafts[targetId] = target;
+    if (Object.keys(target).length) targetDrafts[targetId] = target;
+    else delete targetDrafts[targetId];
   };
 
   const loadTargetDraft = (targetId) => {
-    const configured = asObject(targetDrafts[targetId]);
-    const target = {
-      ...resolvedTargetDefaults(targetId),
-      ...configured
-    };
+    const target = resolvedTargetDefaults(targetId);
     setValue("settings-target-label", target.label || `Analyze ${targetId}`);
-    setValue("settings-target-prompt", configured.prompt || "");
-    setValue("settings-prompt-file", configured.promptFile || "");
+    setValue("settings-target-prompt", target.prompt || "");
+    setValue("settings-prompt-file", target.promptFile || "");
     setLines("settings-artifact-roots", target.artifactRoots);
     setLines("settings-artifact-files", target.artifactFiles);
     setLines("settings-file-extensions", target.fileExtensions || target.extensions);
     if (targetContextLabel) targetContextLabel.textContent = target.label || targetId;
     if (targetContextId) targetContextId.textContent = targetId;
     promptPreviewPanel?.classList.add("hidden");
+    updateArtifactSummary();
   };
 
   const promptSourceLabel = (source) => {
@@ -413,27 +486,28 @@ if (settingsForm) {
     }
   };
 
-  const populateTargetOptions = (analysis, selectedTargetId) => {
+  const populateTargetOptions = (analysis, providerSettings, selectedTargetId) => {
     if (!targetSelect) return;
     const targets = asObject(analysis.targets);
+    const providerTargets = asObject(providerSettings.targets);
     const builtins = asObject(initialData.targetDefaults);
-    const defaultTargetIds = Array.isArray(analysis.defaultTargets) && analysis.defaultTargets.length
-      ? analysis.defaultTargets.filter((targetId) => typeof targetId === "string" && targetId)
-      : typeof analysis.defaultTarget === "string" && analysis.defaultTarget
-        ? [analysis.defaultTarget]
-        : ["skills"];
+    const defaultTargetIds = Array.isArray(providerSettings.defaultTargets) && providerSettings.defaultTargets.length
+      ? providerSettings.defaultTargets.filter((targetId) => typeof targetId === "string" && targetId)
+      : typeof providerSettings.defaultTarget === "string" && providerSettings.defaultTarget
+        ? [providerSettings.defaultTarget]
+        : inheritedDefaultTargetIds;
     const targetIds = [...new Set([
       ...Object.keys(builtins),
       ...Object.keys(targets),
+      ...Object.keys(providerTargets),
       ...defaultTargetIds,
       selectedTargetId
     ])];
     targetSelect.replaceChildren(...targetIds.map((targetId) => {
-      const configured = asObject(targets[targetId]);
       const fallback = resolvedTargetDefaults(targetId);
       const option = document.createElement("option");
       option.value = targetId;
-      const label = configured.label || fallback.label;
+      const label = fallback.label;
       option.textContent = builtins[targetId]
         ? `${label} (${ft("settings_target_builtin")})`
         : `${label} (${targetId})`;
@@ -444,7 +518,6 @@ if (settingsForm) {
     const choiceGrid = document.querySelector("#settings-default-targets .settings-choice-grid");
     if (choiceGrid) {
       choiceGrid.replaceChildren(...targetIds.map((targetId) => {
-        const configured = asObject(targets[targetId]);
         const fallback = resolvedTargetDefaults(targetId);
         const choice = document.createElement("label");
         choice.className = "settings-choice";
@@ -454,7 +527,7 @@ if (settingsForm) {
         checkbox.value = targetId;
         checkbox.checked = defaultTargetIds.includes(targetId);
         const label = document.createElement("span");
-        const targetLabel = configured.label || fallback.label;
+        const targetLabel = fallback.label;
         label.textContent = builtins[targetId]
           ? `${targetLabel} (${ft("settings_target_builtin")})`
           : `${targetLabel} (${targetId})`;
@@ -466,14 +539,18 @@ if (settingsForm) {
 
   const populateSettingsForm = (config) => {
     const analysis = asObject(config.analysis);
-    const targetId = Array.isArray(analysis.defaultTargets) && analysis.defaultTargets.length
-      ? analysis.defaultTargets[0]
-      : typeof analysis.defaultTarget === "string" && analysis.defaultTarget
-        ? analysis.defaultTarget
-        : "skills";
-    targetDrafts = clone(asObject(analysis.targets));
-    currentTargetId = targetId;
     const providerSettings = asObject(asObject(analysis.providers)[providerId]);
+    inheritedDefaultTargetIds = configDefaultTargetIds(analysis);
+    const providerDefaultTargetIds = Array.isArray(providerSettings.defaultTargets)
+      && providerSettings.defaultTargets.length
+      ? providerSettings.defaultTargets
+      : typeof providerSettings.defaultTarget === "string" && providerSettings.defaultTarget
+        ? [providerSettings.defaultTarget]
+        : inheritedDefaultTargetIds;
+    const targetId = providerDefaultTargetIds[0] || "skills";
+    sharedTargetConfigs = clone(asObject(analysis.targets));
+    targetDrafts = clone(asObject(providerSettings.targets));
+    currentTargetId = targetId;
     const command = {
       ...asObject(initialData.analysisDefaultCommand),
       ...asObject(providerSettings.command)
@@ -483,7 +560,7 @@ if (settingsForm) {
     setChecked("settings-analysis-enabled", analysis.enabled);
     setValue("settings-analysis-output", analysis.outputDir || ".opensessionviewer/analysis");
     setChecked("settings-raw-snapshots", analysis.includeRawSnapshots);
-    populateTargetOptions(analysis, targetId);
+    populateTargetOptions(analysis, providerSettings, targetId);
     loadTargetDraft(targetId);
     setChecked("settings-analyzer-enabled", Boolean(providerSettings.command) || providerId === "opencode");
     setValue("settings-analyzer-executable", command.executable || "");
@@ -517,9 +594,13 @@ if (settingsForm) {
   const collectStructuredSettings = (baseConfig) => {
     const config = clone(baseConfig);
     const analysis = asObject(config.analysis);
-    analysis.enabled = isChecked("settings-analysis-enabled");
-    analysis.outputDir = value("settings-analysis-output") || ".opensessionviewer/analysis";
-    analysis.includeRawSnapshots = isChecked("settings-raw-snapshots");
+    if (isChecked("settings-analysis-enabled")) analysis.enabled = true;
+    else delete analysis.enabled;
+    const outputDir = value("settings-analysis-output") || ".opensessionviewer/analysis";
+    if (outputDir === ".opensessionviewer/analysis") delete analysis.outputDir;
+    else analysis.outputDir = outputDir;
+    if (isChecked("settings-raw-snapshots")) analysis.includeRawSnapshots = true;
+    else delete analysis.includeRawSnapshots;
 
     const targetId = value("settings-target-id") || "skills";
     captureTargetDraft(targetId);
@@ -529,15 +610,18 @@ if (settingsForm) {
     if (!defaultTargets.length) {
       throw new Error(ft("settings_select_target"));
     }
-    analysis.defaultTargets = defaultTargets;
-    analysis.defaultTarget = defaultTargets[0];
-    analysis.targets = {
-      ...asObject(analysis.targets),
-      ...targetDrafts
-    };
 
     const analysisProviders = { ...asObject(analysis.providers) };
     const providerSettings = { ...asObject(analysisProviders[providerId]) };
+    if (sameValue(defaultTargets, inheritedDefaultTargetIds)) {
+      delete providerSettings.defaultTargets;
+      delete providerSettings.defaultTarget;
+    } else {
+      providerSettings.defaultTargets = defaultTargets;
+      providerSettings.defaultTarget = defaultTargets[0];
+    }
+    if (Object.keys(targetDrafts).length) providerSettings.targets = targetDrafts;
+    else delete providerSettings.targets;
     if (isChecked("settings-analyzer-enabled")) {
       const executable = value("settings-analyzer-executable");
       if (!executable) {
@@ -551,14 +635,15 @@ if (settingsForm) {
           args = [...args.slice(0, insertAt), "--model", model, ...args.slice(insertAt)];
         }
       }
-      providerSettings.command = { ...asObject(providerSettings.command), executable, args };
-      analysisProviders[providerId] = providerSettings;
+      const command = { ...asObject(providerSettings.command), executable, args };
+      providerSettings.command = command;
     } else {
       delete providerSettings.command;
-      if (Object.keys(providerSettings).length) analysisProviders[providerId] = providerSettings;
-      else delete analysisProviders[providerId];
     }
-    analysis.providers = analysisProviders;
+    if (Object.keys(providerSettings).length) analysisProviders[providerId] = providerSettings;
+    else delete analysisProviders[providerId];
+    if (Object.keys(analysisProviders).length) analysis.providers = analysisProviders;
+    else delete analysis.providers;
     config.analysis = analysis;
 
     const resumeCommands = { ...asObject(config.resumeCommands) };
@@ -575,9 +660,15 @@ if (settingsForm) {
       };
       const cwd = value("settings-resume-cwd");
       if (cwd) resume.cwd = cwd;
-      resumeCommands[providerId] = resume;
+      const resumeDefault = asObject(initialData.resumeDefault);
+      if (resumeDefault.executable && sameValue(resume, resumeDefault)) {
+        delete resumeCommands[providerId];
+      } else {
+        resumeCommands[providerId] = resume;
+      }
     }
-    config.resumeCommands = resumeCommands;
+    if (Object.keys(resumeCommands).length) config.resumeCommands = resumeCommands;
+    else delete config.resumeCommands;
 
     const selectedShell = value("settings-shell-mode");
     if (!selectedShell) {
@@ -629,6 +720,82 @@ if (settingsForm) {
     setSettingsFeedback(ft("settings_example_loaded"), "success");
   });
 
+  settingsForm.addEventListener("click", (event) => {
+    const reset = event.target.closest?.("[data-reset-setting]");
+    if (!reset) return;
+    const key = reset.dataset.resetSetting;
+    const inheritedTarget = inheritedTargetDefaults(currentTargetId);
+    const analysisDefaultCommand = asObject(initialData.analysisDefaultCommand);
+    const analysisDefaultArgs = Array.isArray(analysisDefaultCommand.args)
+      ? analysisDefaultCommand.args
+      : [];
+    const resumeDefault = asObject(initialData.resumeDefault);
+
+    if (key === "analysis-enabled") setChecked("settings-analysis-enabled", false);
+    if (key === "analysis-output") setValue("settings-analysis-output", ".opensessionviewer/analysis");
+    if (key === "raw-snapshots") setChecked("settings-raw-snapshots", false);
+    if (key === "default-targets") {
+      for (const checkbox of document.querySelectorAll(
+        "#settings-default-targets input[name='settings-default-target']"
+      )) {
+        checkbox.checked = inheritedDefaultTargetIds.includes(checkbox.value);
+      }
+    }
+    if (key === "target-label") {
+      setValue("settings-target-label", inheritedTarget.label || `Analyze ${currentTargetId}`);
+      if (targetContextLabel) {
+        targetContextLabel.textContent = inheritedTarget.label || currentTargetId;
+      }
+    }
+    if (key === "target-prompt") setValue("settings-target-prompt", inheritedTarget.prompt || "");
+    if (key === "prompt-file") setValue("settings-prompt-file", inheritedTarget.promptFile || "");
+    if (key === "artifact-roots") setLines("settings-artifact-roots", inheritedTarget.artifactRoots);
+    if (key === "artifact-files") setLines("settings-artifact-files", inheritedTarget.artifactFiles);
+    if (key === "file-extensions") {
+      setLines("settings-file-extensions", inheritedTarget.fileExtensions || inheritedTarget.extensions);
+    }
+    if (key === "analyzer-enabled") {
+      setChecked("settings-analyzer-enabled", Boolean(analysisDefaultCommand.executable));
+    }
+    if (key === "analyzer-executable") {
+      setValue("settings-analyzer-executable", analysisDefaultCommand.executable || "");
+      if (!analysisDefaultCommand.executable) {
+        setChecked("settings-analyzer-enabled", false);
+      }
+    }
+    if (key === "analyzer-model") {
+      setValue("settings-analyzer-model", extractModel(analysisDefaultArgs));
+    }
+    if (key === "analyzer-args") {
+      setLines(
+        "settings-analyzer-args",
+        providerId === "opencode" ? withoutModel(analysisDefaultArgs) : analysisDefaultArgs
+      );
+    }
+    if (key === "resume-enabled") {
+      setChecked("settings-resume-enabled", Boolean(resumeDefault.executable));
+    }
+    if (key === "resume-executable") {
+      setValue("settings-resume-executable", resumeDefault.executable || "");
+    }
+    if (key === "resume-cwd") setValue("settings-resume-cwd", resumeDefault.cwd || "");
+    if (key === "resume-args") setLines("settings-resume-args", resumeDefault.args);
+    if (key === "shell-mode") {
+      setValue("settings-shell-mode", "");
+      shellCustomField?.classList.add("hidden");
+    }
+    if (key === "shell-custom") {
+      setValue("settings-shell-custom", "");
+      setValue("settings-shell-mode", "");
+      shellCustomField?.classList.add("hidden");
+    }
+    if (key === "shell-args") setLines("settings-shell-args", []);
+
+    updateArtifactSummary();
+    setSettingsDirty(true);
+    setSettingsFeedback(ft("settings_reset_applied"), "success");
+  });
+
   promptPreviewButton?.addEventListener("click", loadPromptPreview);
 
   targetSelect?.addEventListener("change", () => {
@@ -642,6 +809,10 @@ if (settingsForm) {
       targetContextLabel.textContent = targetLabelInput.value.trim() || currentTargetId;
     }
   });
+
+  for (const id of ["settings-artifact-roots", "settings-artifact-files", "settings-file-extensions"]) {
+    document.getElementById(id)?.addEventListener("input", updateArtifactSummary);
+  }
 
   shellMode?.addEventListener("change", () => {
     shellCustomField?.classList.toggle("hidden", shellMode.value !== "custom");

@@ -415,11 +415,11 @@ test("every provider declares a configurable resume command", () => {
   }
 });
 
-test("terminal launch requires the explicit startup flag", () => {
+test("terminal launch is enabled by default and supports an explicit startup opt-out", () => {
   const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-config-"));
   const configPath = path.join(temp, "config.json");
   writeFileSync(configPath, JSON.stringify({
-    allowTerminalLaunch: true,
+    allowTerminalLaunch: false,
     resumeShell: {
       executable: "powershell.exe",
       args: ["-NoExit", "-NoLogo", "-NoProfile"]
@@ -438,15 +438,18 @@ test("terminal launch requires the explicit startup flag", () => {
     }
   }));
 
-  const disabled = parseArgs(["--config", configPath]);
-  assert.equal(disabled.allowTerminalLaunch, false);
-  assert.deepEqual(disabled.resumeShell, {
+  const enabled = parseArgs(["--config", configPath]);
+  assert.equal(enabled.allowTerminalLaunch, true);
+  assert.deepEqual(enabled.resumeShell, {
     executable: "powershell.exe",
     args: ["-NoExit", "-NoLogo", "-NoProfile"]
   });
-  assert.equal(disabled.analysis.enabled, true);
-  assert.equal(disabled.analysis.providers.codex.command.executable, "codex");
-  assert.equal(parseArgs(["--config", configPath, "--allow-terminal-launch"]).allowTerminalLaunch, true);
+  assert.equal(enabled.analysis.enabled, true);
+  assert.equal(enabled.analysis.providers.codex.command.executable, "codex");
+  assert.equal(
+    parseArgs(["--config", configPath, "--disable-terminal-launch"]).allowTerminalLaunch,
+    false
+  );
 });
 
 test("OpenCode runtime environment resolves project and user agent extensions", () => {
@@ -528,6 +531,13 @@ test("settings configuration validates, persists, and applies runtime fields", (
       },
       providers: {
         opencode: {
+          targets: {
+            skills: {
+              artifactRoots: [".opencode/skills"],
+              artifactFiles: ["AGENTS.md"],
+              fileExtensions: [".md"]
+            }
+          },
           command: {
             executable: "opencode",
             args: ["run", "--file", "{promptPath}"]
@@ -573,7 +583,12 @@ test("settings configuration validates, persists, and applies runtime fields", (
         providers: {
           opencode: {
             defaultTargets: [],
-            command: { executable: "", args: "run" }
+            command: { executable: "", args: "run" },
+            targets: {
+              skills: {
+                artifactRoots: "skills"
+              }
+            }
           }
         }
       }
@@ -584,7 +599,8 @@ test("settings configuration validates, persists, and applies runtime fields", (
       "analysis.targets.skills.prompt must be a string.",
       "analysis.providers.opencode.defaultTargets must contain at least one target.",
       "analysis.providers.opencode.command.executable must be a non-empty string.",
-      "analysis.providers.opencode.command.args must be an array of strings."
+      "analysis.providers.opencode.command.args must be an array of strings.",
+      "analysis.providers.opencode.targets.skills.artifactRoots must be an array of strings."
     ]
   );
 });
@@ -632,7 +648,12 @@ test("settings page exposes config location and startup-only launch status", () 
   assert.match(html, /<option value="skills" selected>/);
   assert.match(html, /Analyze skills \(built-in\)/);
   assert.match(html, /id="settings-target-prompt"/);
+  assert.match(html, /data-reset-setting="target-prompt"/);
   assert.match(html, /OpenSessionViewer does not create it/);
+  assert.match(html, /id="settings-artifact-summary-roots"/);
+  assert.match(html, /Artifacts used by default/);
+  assert.match(html, /data-reset-setting="artifact-roots"/);
+  assert.match(html, /data-reset-setting="resume-executable"/);
   assert.match(html, /id="settings-prompt-preview-button"/);
   assert.match(html, /Preview current prompt/);
   for (const [targetId, target] of Object.entries(BUILTIN_ANALYSIS_TARGETS)) {
@@ -644,7 +665,7 @@ test("settings page exposes config location and startup-only launch status", () 
   assert.match(html, /id="settings-shell-mode"/);
   assert.match(html, /C:\\Users\\tester\\config\.json/);
   assert.match(html, /Enabled for this server process/);
-  assert.match(html, /--allow-terminal-launch/);
+  assert.match(html, /--disable-terminal-launch/);
   assert.match(html, /id="settings-initial-data"/);
   assert.match(html, /id="settings-dirty-state"[^>]+data-dirty="false"/);
   assert.match(html, /class="btn settings-save" disabled/);
@@ -680,6 +701,17 @@ test("settings page exposes config location and startup-only launch status", () 
               extensions: [".md"],
               prompt: "Look for stale operational knowledge."
             }
+          },
+          providers: {
+            opencode: {
+              defaultTargets: ["memories", "skills"],
+              targets: {
+                memories: {
+                  artifactRoots: ["provider-memories"],
+                  artifactFiles: ["MEMORY.md"]
+                }
+              }
+            }
           }
         }
       },
@@ -694,6 +726,8 @@ test("settings page exposes config location and startup-only launch status", () 
   assert.match(customTargetHtml, /name="settings-default-target" value="memories" checked/);
   assert.match(customTargetHtml, /Analyze memories \(memories\)/);
   assert.match(customTargetHtml, /Look for stale operational knowledge\./);
+  assert.match(customTargetHtml, /provider-memories/);
+  assert.match(customTargetHtml, /MEMORY\.md/);
 });
 
 test("terminal launch encodes the complete PowerShell resume script", () => {
@@ -920,6 +954,14 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.deepEqual(
     action.targets.map((target) => target.id),
     Object.keys(BUILTIN_ANALYSIS_TARGETS)
+  );
+  assert.deepEqual(
+    action.targets.find((target) => target.id === "skills").artifacts,
+    {
+      roots: ["."],
+      files: ["AGENTS.md"],
+      fileExtensions: [".md"]
+    }
   );
   assert.equal(action.runtimeEnvironment.resolution, "current-local");
   assert.deepEqual(action.selectedRuntimeExtensionIds, [
@@ -1455,6 +1497,41 @@ test("built-in analysis targets resolve without target-specific config", () => {
     assert.deepEqual(settings.target.fileExtensions, expected.fileExtensions);
     assert.match(settings.target.prompt, /\S/);
   }
+});
+
+test("provider analysis targets override shared artifacts without changing other providers", () => {
+  const analysisConfig = {
+    enabled: true,
+    targets: {
+      skills: {
+        artifactRoots: ["shared-skills"],
+        artifactFiles: ["AGENTS.md"],
+        fileExtensions: [".md"]
+      }
+    },
+    providers: {
+      opencode: {
+        command: { executable: "opencode", args: ["run"] },
+        targets: {
+          skills: {
+            artifactRoots: [".opencode/skills"],
+            artifactFiles: ["OPENCODE.md"]
+          }
+        }
+      },
+      codex: {
+        command: { executable: "codex", args: ["exec"] }
+      }
+    }
+  };
+
+  const openCode = resolveAnalysisSettings({ id: "opencode" }, analysisConfig, "skills");
+  const codex = resolveAnalysisSettings({ id: "codex" }, analysisConfig, "skills");
+  assert.deepEqual(openCode.target.artifactRoots, [".opencode/skills"]);
+  assert.deepEqual(openCode.target.artifactFiles, ["OPENCODE.md"]);
+  assert.deepEqual(openCode.target.fileExtensions, [".md"]);
+  assert.deepEqual(codex.target.artifactRoots, ["shared-skills"]);
+  assert.deepEqual(codex.target.artifactFiles, ["AGENTS.md"]);
 });
 
 test("analysis prompt preview uses the real builder and reports configured sources", () => {

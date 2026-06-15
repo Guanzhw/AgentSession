@@ -1173,7 +1173,18 @@ export function renderSessionPage({
                     ${selectedAnalysisTargets.has(target.id) ? "checked" : ""}
                     ${target.available ? "" : "disabled"}
                   >
-                  <span>${escapeHtml(target.label || target.id)}</span>
+                  <span class="analysis-target-copy">
+                    <strong>${escapeHtml(target.label || target.id)}</strong>
+                    <small>
+                      ${t("analysis.artifact_roots")}: ${escapeHtml(target.artifacts?.roots?.join(", ") || t("analysis.artifact_none"))}
+                    </small>
+                    <small>
+                      ${t("analysis.artifact_files")}: ${escapeHtml(target.artifacts?.files?.join(", ") || t("analysis.artifact_none"))}
+                    </small>
+                    <small>
+                      ${t("analysis.artifact_extensions")}: ${escapeHtml(target.artifacts?.fileExtensions?.join(", ") || t("analysis.artifact_none"))}
+                    </small>
+                  </span>
                 </label>
               `).join("")}
             </div>

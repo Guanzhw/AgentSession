@@ -90,7 +90,7 @@ const defaults = {
   codexDir: defaultCodexDir(),
   geminiDir: defaultGeminiDir(),
   reindex: false,
-  allowTerminalLaunch: false,
+  allowTerminalLaunch: true,
 };
 
 function isObject(value) {
@@ -176,6 +176,48 @@ function validateCommand(value, field, errors) {
   }
 }
 
+function validateAnalysisTargets(value, field, errors) {
+  if (!isObject(value)) {
+    errors.push(`${field} must be an object.`);
+    return;
+  }
+  for (const [targetId, target] of Object.entries(value)) {
+    if (target === false) {
+      continue;
+    }
+    if (!isObject(target)) {
+      errors.push(`${field}.${targetId} must be an object or false.`);
+      continue;
+    }
+    const targetSettings: any = target;
+    for (const listField of ["artifactRoots", "artifactFiles", "fileExtensions", "extensions"]) {
+      if (targetSettings[listField] !== undefined) {
+        validateStringArray(targetSettings[listField], `${field}.${targetId}.${listField}`, errors);
+      }
+    }
+    for (const textField of ["label", "prompt", "promptFile"]) {
+      if (
+        targetSettings[textField] !== undefined
+        && typeof targetSettings[textField] !== "string"
+      ) {
+        errors.push(`${field}.${targetId}.${textField} must be a string.`);
+      }
+    }
+    if (
+      targetSettings.includeRawSnapshots !== undefined
+      && typeof targetSettings.includeRawSnapshots !== "boolean"
+    ) {
+      errors.push(`${field}.${targetId}.includeRawSnapshots must be a boolean.`);
+    }
+    if (targetSettings.command !== undefined) {
+      validateCommand(targetSettings.command, `${field}.${targetId}.command`, errors);
+    }
+    if (targetSettings.shell !== undefined) {
+      validateShell(targetSettings.shell, `${field}.${targetId}.shell`, errors);
+    }
+  }
+}
+
 export function validateUserConfig(config) {
   const errors = [];
   if (!isObject(config)) {
@@ -224,26 +266,7 @@ export function validateUserConfig(config) {
         validateShell(config.analysis.shell, "analysis.shell", errors);
       }
       if (config.analysis.targets !== undefined) {
-        if (!isObject(config.analysis.targets)) {
-          errors.push("analysis.targets must be an object.");
-        } else {
-          for (const [targetId, target] of Object.entries(config.analysis.targets)) {
-            if (!isObject(target)) {
-              errors.push(`analysis.targets.${targetId} must be an object.`);
-              continue;
-            }
-            for (const field of ["artifactRoots", "artifactFiles", "fileExtensions", "extensions"]) {
-              if (target[field] !== undefined) {
-                validateStringArray(target[field], `analysis.targets.${targetId}.${field}`, errors);
-              }
-            }
-            for (const field of ["label", "prompt", "promptFile"]) {
-              if (target[field] !== undefined && typeof target[field] !== "string") {
-                errors.push(`analysis.targets.${targetId}.${field} must be a string.`);
-              }
-            }
-          }
-        }
+        validateAnalysisTargets(config.analysis.targets, "analysis.targets", errors);
       }
       if (config.analysis.providers !== undefined) {
         if (!isObject(config.analysis.providers)) {
@@ -281,6 +304,13 @@ export function validateUserConfig(config) {
             }
             if (providerSettings.shell !== undefined) {
               validateShell(providerSettings.shell, `analysis.providers.${providerId}.shell`, errors);
+            }
+            if (providerSettings.targets !== undefined) {
+              validateAnalysisTargets(
+                providerSettings.targets,
+                `analysis.providers.${providerId}.targets`,
+                errors
+              );
             }
           }
         }
@@ -329,7 +359,7 @@ export function parseArgs(argv = process.argv.slice(2)) {
     lang: detectLang(),
     metaPath: "",
     configPath: resolvedConfigPath,
-    allowTerminalLaunch: false,
+    allowTerminalLaunch: defaults.allowTerminalLaunch,
     resumeCommands: fileConfig.resumeCommands && typeof fileConfig.resumeCommands === "object"
       ? fileConfig.resumeCommands
       : {},
@@ -354,8 +384,8 @@ export function parseArgs(argv = process.argv.slice(2)) {
       config.geminiDir = argv[++i];
     } else if (argv[i] === "--reindex") {
       config.reindex = true;
-    } else if (argv[i] === "--allow-terminal-launch") {
-      config.allowTerminalLaunch = true;
+    } else if (argv[i] === "--disable-terminal-launch") {
+      config.allowTerminalLaunch = false;
     } else if (argv[i] === "--config" && argv[i + 1]) {
       config.configPath = argv[++i];
     } else if (argv[i] === "--lang" && argv[i + 1]) {
@@ -374,8 +404,8 @@ Options:
   --codex-dir <path>    Path to Codex data dir (default: ~/.codex)
   --gemini-dir <path>   Path to Gemini data dir (default: ~/.gemini)
   --config <path>       Path to OpenSessionViewer JSON config
-  --allow-terminal-launch
-                        Allow the local UI to open resume and analysis commands
+  --disable-terminal-launch
+                        Disable resume and analysis command launching
   --reindex             Force full reindex of all providers on start
   --lang <en|zh>        UI language (default: auto-detect from LANG)
   --open                Open browser on start

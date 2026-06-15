@@ -22,8 +22,10 @@ import type {
 import { makeEvidenceId, writeAnalysisEvidence } from "./analysis-evidence.js";
 import {
   BUILTIN_ANALYSIS_TARGETS,
+  DEFAULT_ANALYSIS_TARGET,
   DEFAULT_ANALYSIS_EXTENSIONS,
-  getBuiltinAnalysisTarget
+  getBuiltinAnalysisTarget,
+  getProviderAnalysisTarget
 } from "./analysis-targets.js";
 import {
   analysisRunRelativePath,
@@ -32,13 +34,6 @@ import {
   resolveAnalysisRunPath
 } from "./analysis-layout.js";
 import { resolveExecutable, resolveProjectDirectory } from "./resume.js";
-
-const DEFAULT_TARGET = {
-  label: "",
-  artifactRoots: [],
-  fileExtensions: DEFAULT_ANALYSIS_EXTENSIONS,
-  prompt: ""
-};
 
 const MAX_ARTIFACT_FILES = 200;
 const MAX_ARTIFACT_BYTES = 256 * 1024;
@@ -117,29 +112,6 @@ function readPromptFile(promptFile, configPath) {
   return inspected.content;
 }
 
-function mergeTarget(base, override) {
-  const left = base && typeof base === "object" ? base : {};
-  const right = override && typeof override === "object" ? override : {};
-  const defaultRoots = Array.isArray(left.artifactRoots) ? left.artifactRoots : DEFAULT_TARGET.artifactRoots;
-  const defaultFileExtensions = Array.isArray(left.fileExtensions)
-    ? left.fileExtensions
-    : Array.isArray(left.extensions)
-      ? left.extensions
-      : DEFAULT_TARGET.fileExtensions;
-  return {
-    ...left,
-    ...right,
-    artifactRoots: Array.isArray(right.artifactRoots)
-      ? right.artifactRoots
-      : defaultRoots,
-    fileExtensions: Array.isArray(right.fileExtensions)
-      ? right.fileExtensions
-      : Array.isArray(right.extensions)
-        ? right.extensions
-        : defaultFileExtensions
-  };
-}
-
 function resolveRuntimeEnvironment(provider: ProviderAdapter, sessionId: string) {
   try {
     return provider.getRuntimeEnvironment?.(sessionId) || null;
@@ -210,12 +182,7 @@ export function resolveAnalysisSettings(provider: ProviderAdapter, analysisConfi
   if (configuredTarget === false || providerTarget === false) {
     return null;
   }
-  const defaults = getBuiltinAnalysisTarget(selectedTarget) || {
-    ...DEFAULT_TARGET,
-    label: `Analyze ${selectedTarget}`
-  };
-  const baseTarget = mergeTarget(defaults, configuredTarget);
-  const target = mergeTarget(baseTarget, providerTarget);
+  const target = getProviderAnalysisTarget(analysisConfig, provider.id, selectedTarget);
   const command = providerTarget?.command || providerConfig.command || target.command;
   if (!isCommandSpec(command)) {
     return null;
@@ -252,6 +219,13 @@ export function getSessionAnalysisAction(
     .map((settings) => ({
       id: settings.targetId,
       label: settings.target.label ? String(settings.target.label) : settings.targetId,
+      artifacts: {
+        roots: Array.isArray(settings.target.artifactRoots) ? settings.target.artifactRoots : [],
+        files: Array.isArray(settings.target.artifactFiles) ? settings.target.artifactFiles : [],
+        fileExtensions: Array.isArray(settings.target.fileExtensions)
+          ? settings.target.fileExtensions
+          : DEFAULT_ANALYSIS_EXTENSIONS
+      },
       available: Boolean(resolveExecutable(settings.command.executable))
     }));
   const selectedTargets = targetId
@@ -461,7 +435,7 @@ function snapshotArtifacts(
   }
 
   const fileExtensions = new Set(
-    (target.fileExtensions || target.extensions || DEFAULT_TARGET.fileExtensions)
+    (target.fileExtensions || target.extensions || DEFAULT_ANALYSIS_TARGET.fileExtensions)
       .filter((entry) => typeof entry === "string")
       .map((entry) => entry.startsWith(".") ? entry.toLowerCase() : `.${entry.toLowerCase()}`)
   );

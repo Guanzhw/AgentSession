@@ -13,6 +13,15 @@ export const DEFAULT_ANALYSIS_EXTENSIONS = [
   ".ps1"
 ];
 
+export const DEFAULT_ANALYSIS_TARGET = {
+  label: "",
+  artifactRoots: [],
+  artifactFiles: [],
+  fileExtensions: DEFAULT_ANALYSIS_EXTENSIONS,
+  prompt: "",
+  promptFile: ""
+};
+
 export const BUILTIN_ANALYSIS_TARGETS = {
   skills: {
     label: "Analyze skills",
@@ -74,4 +83,50 @@ export const BUILTIN_ANALYSIS_TARGETS = {
 
 export function getBuiltinAnalysisTarget(targetId) {
   return BUILTIN_ANALYSIS_TARGETS[targetId] || null;
+}
+
+export function mergeAnalysisTarget(base, override) {
+  const left = base && typeof base === "object" ? base : {};
+  const right = override && typeof override === "object" ? override : {};
+  const defaultRoots = Array.isArray(left.artifactRoots)
+    ? left.artifactRoots
+    : DEFAULT_ANALYSIS_TARGET.artifactRoots;
+  const defaultFiles = Array.isArray(left.artifactFiles)
+    ? left.artifactFiles
+    : DEFAULT_ANALYSIS_TARGET.artifactFiles;
+  const defaultFileExtensions = Array.isArray(left.fileExtensions)
+    ? left.fileExtensions
+    : Array.isArray(left.extensions)
+      ? left.extensions
+      : DEFAULT_ANALYSIS_TARGET.fileExtensions;
+  return {
+    ...left,
+    ...right,
+    artifactRoots: Array.isArray(right.artifactRoots)
+      ? right.artifactRoots
+      : defaultRoots,
+    artifactFiles: Array.isArray(right.artifactFiles)
+      ? right.artifactFiles
+      : defaultFiles,
+    fileExtensions: Array.isArray(right.fileExtensions)
+      ? right.fileExtensions
+      : Array.isArray(right.extensions)
+        ? right.extensions
+        : defaultFileExtensions
+  };
+}
+
+export function getSharedAnalysisTarget(analysisConfig, targetId) {
+  const defaults = getBuiltinAnalysisTarget(targetId) || {
+    ...DEFAULT_ANALYSIS_TARGET,
+    label: `Analyze ${targetId}`
+  };
+  return mergeAnalysisTarget(defaults, analysisConfig?.targets?.[targetId]);
+}
+
+export function getProviderAnalysisTarget(analysisConfig, providerId, targetId) {
+  return mergeAnalysisTarget(
+    getSharedAnalysisTarget(analysisConfig, targetId),
+    analysisConfig?.providers?.[providerId]?.targets?.[targetId]
+  );
 }

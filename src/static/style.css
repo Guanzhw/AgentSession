@@ -2847,7 +2847,14 @@ mark {
   min-width: 0;
 }
 
-.settings-field > span {
+.settings-field-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.settings-field-heading > label {
   color: var(--text-primary);
   font-size: 13px;
   font-weight: 650;
@@ -2866,6 +2873,11 @@ mark {
 }
 
 .settings-choice-field legend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
   margin-bottom: 8px;
   color: var(--text-primary);
   font-size: 13px;
@@ -2942,6 +2954,31 @@ mark {
   gap: 16px;
   min-width: 280px;
   cursor: pointer;
+}
+
+.settings-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-reset-btn {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.settings-reset-btn:hover,
+.settings-reset-btn:focus-visible {
+  color: var(--accent-color);
+  border-color: var(--accent-color);
+  outline: none;
 }
 
 .settings-switch-copy {
@@ -3043,6 +3080,69 @@ mark {
 
 .settings-target-context code {
   color: var(--accent-color);
+  font-size: 11px;
+}
+
+.settings-artifact-summary {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1.3fr);
+  gap: 18px;
+  padding: 16px;
+  background: color-mix(in srgb, var(--accent-color) 4%, var(--bg-tertiary));
+  border: 1px solid color-mix(in srgb, var(--accent-color) 18%, var(--border-color));
+  border-radius: 8px;
+}
+
+.settings-artifact-summary h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.settings-artifact-summary p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.settings-artifact-summary dl {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.settings-artifact-summary dl > div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.settings-artifact-summary dt {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.settings-artifact-summary dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+  margin: 0;
+}
+
+.settings-artifact-summary dd code {
+  padding: 2px 5px;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.settings-artifact-summary dd span {
+  color: var(--text-muted);
   font-size: 11px;
 }
 
@@ -3248,6 +3348,19 @@ mark {
 
   .settings-target-toolbar {
     grid-template-columns: 1fr;
+  }
+
+  .settings-artifact-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-artifact-summary dl > div {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .settings-switch-row {
+    width: 100%;
   }
 
   .settings-switch {
@@ -3646,9 +3759,9 @@ pre code.hljs {
   top: calc(100% + 6px);
   left: 0;
   display: grid;
-  grid-template-columns: repeat(2, minmax(150px, 1fr));
+  grid-template-columns: 1fr;
   gap: 6px;
-  width: min(390px, calc(100vw - 32px));
+  width: min(560px, calc(100vw - 32px));
   padding: 10px;
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
@@ -3712,6 +3825,25 @@ pre code.hljs {
   border-radius: 5px;
   cursor: pointer;
   font-size: 12px;
+}
+
+.analysis-target-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.analysis-target-copy > strong {
+  font-weight: 650;
+}
+
+.analysis-target-copy > small {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .analysis-target-choice:hover {
