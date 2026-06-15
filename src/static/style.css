@@ -560,6 +560,7 @@ body::before {
   width: 100%;
   margin: 0 auto;
   padding: 18px 22px 64px;
+  overflow: visible;
 }
 
 .session-toc {
@@ -1583,6 +1584,11 @@ body.flow-panel-open {
 
 .session-header {
   margin-bottom: 16px;
+}
+
+.session-header:has(.analysis-target-picker[open]) {
+  position: relative;
+  z-index: var(--z-menu);
 }
 
 .session-header h1 {
@@ -3721,6 +3727,10 @@ pre code.hljs {
   position: relative;
 }
 
+.analysis-target-picker[open] {
+  z-index: var(--z-menu);
+}
+
 .analysis-target-picker > summary {
   display: flex;
   align-items: center;
@@ -3755,7 +3765,7 @@ pre code.hljs {
 
 .analysis-target-choices {
   position: absolute;
-  z-index: 20;
+  z-index: var(--z-menu);
   top: calc(100% + 6px);
   left: 0;
   display: grid;
@@ -3770,6 +3780,8 @@ pre code.hljs {
 }
 
 .analysis-runtime-choices {
+  right: 0;
+  left: auto;
   grid-template-columns: 1fr 1fr;
   width: min(620px, calc(100vw - 32px));
   max-height: min(520px, calc(100vh - 140px));
