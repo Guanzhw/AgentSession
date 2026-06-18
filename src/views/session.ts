@@ -1103,96 +1103,20 @@ export function renderSessionPage({
   const resumeActions = resumeCommand && terminalLaunchAllowed ? `
         <button class="action-btn" data-action="resume-session" data-id="${escapeHtml(session.id)}" ${resumeCommand.available ? "" : "disabled"}>${t("action.open_terminal")}</button>
   ` : "";
-  const analysisTargets = Array.isArray(analysisAction?.targets) ? analysisAction.targets : [];
-  const selectedAnalysisTargets = new Set(
-    Array.isArray(analysisAction?.selectedTargets)
-      ? analysisAction.selectedTargets
-      : analysisAction?.target
-        ? [analysisAction.target]
-        : []
-  );
-  const runtimeExtensions = Array.isArray(analysisAction?.runtimeEnvironment?.extensions)
-    ? analysisAction.runtimeEnvironment.extensions
-    : [];
-  const selectedRuntimeExtensions = new Set(
-    Array.isArray(analysisAction?.selectedRuntimeExtensionIds)
-      ? analysisAction.selectedRuntimeExtensionIds
-      : []
-  );
-  const runtimeExtensionGroups = ["project", "user"]
-    .map((scope) => ({
-      scope,
-      extensions: runtimeExtensions.filter((extension) => extension.scope === scope)
-    }))
-    .filter((group) => group.extensions.length);
-  const runtimePicker = runtimeExtensionGroups.length ? `
-          <details class="analysis-target-picker analysis-runtime-picker">
-            <summary>
-              <span>${t("analysis.runtime_label")}</span>
-              <strong data-runtime-selected-count>${escapeHtml(String(selectedRuntimeExtensions.size))}</strong>
-            </summary>
-            <div class="analysis-target-choices analysis-runtime-choices">
-              <p class="analysis-runtime-note">${t("analysis.runtime_help")}</p>
-              <p class="analysis-runtime-note">${escapeHtml(analysisAction.runtimeEnvironment.note || "")}</p>
-              ${runtimeExtensionGroups.map((group) => `
-                <section class="analysis-runtime-group">
-                  <h4>${t(`analysis.runtime_scope_${group.scope}`)}</h4>
-                  ${group.extensions.map((extension) => `
-                    <label class="analysis-target-choice analysis-runtime-choice">
-                      <input
-                        type="checkbox"
-                        class="analysis-runtime-extension-checkbox"
-                        value="${escapeHtml(extension.id)}"
-                        ${selectedRuntimeExtensions.has(extension.id) ? "checked" : ""}
-                        ${extension.available ? "" : "disabled"}
-                      >
-                      <span>
-                        <strong>${escapeHtml(extension.name)}</strong>
-                        <small>${escapeHtml(extension.kind)} · ${escapeHtml(extension.source)}</small>
-                      </span>
-                    </label>
-                  `).join("")}
-                </section>
-              `).join("")}
-            </div>
-          </details>
-  ` : "";
+  const analysisTarget = Array.isArray(analysisAction?.targets)
+    ? analysisAction.targets.find((target) => target.id === analysisAction.target)
+    : null;
+  const analysisTargetLabel = analysisTarget?.label || analysisAction?.label || analysisAction?.target || "skills";
   const analysisActions = analysisAction && terminalLaunchAllowed ? `
         <div class="analysis-launch-control">
-          <details class="analysis-target-picker">
-            <summary>
-              <span>${t("analysis.targets_label")}</span>
-              <strong data-analysis-selected-count>${escapeHtml(String(selectedAnalysisTargets.size))}</strong>
-            </summary>
-            <div class="analysis-target-choices">
-              <p class="analysis-runtime-note">${t("analysis.targets_help")}</p>
-              ${analysisTargets.map((target) => `
-                <label class="analysis-target-choice">
-                  <input
-                    type="checkbox"
-                    class="analysis-target-checkbox"
-                    value="${escapeHtml(target.id)}"
-                    ${selectedAnalysisTargets.has(target.id) ? "checked" : ""}
-                    ${target.available ? "" : "disabled"}
-                  >
-                  <span class="analysis-target-copy">
-                    <strong>${escapeHtml(target.label || target.id)}</strong>
-                    <small>
-                      ${t("analysis.artifact_roots")}: ${escapeHtml(target.artifacts?.roots?.join(", ") || t("analysis.artifact_none"))}
-                    </small>
-                    <small>
-                      ${t("analysis.artifact_files")}: ${escapeHtml(target.artifacts?.files?.join(", ") || t("analysis.artifact_none"))}
-                    </small>
-                    <small>
-                      ${t("analysis.artifact_extensions")}: ${escapeHtml(target.artifacts?.fileExtensions?.join(", ") || t("analysis.artifact_none"))}
-                    </small>
-                  </span>
-                </label>
-              `).join("")}
-            </div>
-          </details>
-          ${runtimePicker}
-          <button class="action-btn action-btn-primary" data-action="analyze-session" data-id="${escapeHtml(session.id)}" ${analysisAction.available ? "" : "disabled"}>${t("action.analyze_selected")}</button>
+          <span class="analysis-launch-target">${escapeHtml(analysisTargetLabel)}</span>
+          <button
+            class="action-btn action-btn-primary"
+            data-action="analyze-session"
+            data-id="${escapeHtml(session.id)}"
+            data-target="${escapeHtml(analysisAction.target || "skills")}"
+            ${analysisAction.available ? "" : "disabled"}
+          >${t("action.analyze_session")}</button>
         </div>
   ` : "";
   const actions = managementActions || resumeActions || analysisActions ? `

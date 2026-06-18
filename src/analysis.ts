@@ -38,6 +38,21 @@ import { resolveExecutable, resolveProjectDirectory } from "./resume.js";
 const MAX_ARTIFACT_FILES = 200;
 const MAX_ARTIFACT_BYTES = 256 * 1024;
 const MAX_TOTAL_ARTIFACT_BYTES = 5 * 1024 * 1024;
+export const SESSION_ANALYSIS_PROVIDER_ID = "opencode";
+export const OPENCODE_ANALYSIS_COMMAND = {
+  executable: "opencode",
+  args: [
+    "run",
+    "Read the attached analysis request and write the requested proposal files.",
+    "--model", "deepseek/deepseek-v4-flash",
+    "--dir", "{projectPath}",
+    "--file", "{promptPath}"
+  ]
+};
+
+function supportsSessionAnalysis(provider: ProviderAdapter) {
+  return provider?.id === SESSION_ANALYSIS_PROVIDER_ID;
+}
 
 function isCommandSpec(value): value is AnalysisCommandSpec {
   return Boolean(
@@ -146,13 +161,14 @@ function configuredDefaultTargetIds(provider: ProviderAdapter, analysisConfig): 
 
 export function getAnalysisTargetIds(provider: ProviderAdapter, analysisConfig): string[] {
   const providerConfig = analysisConfig?.providers?.[provider.id];
-  if (!analysisConfig || analysisConfig.enabled !== true || !providerConfig || providerConfig === false) {
+  if (!supportsSessionAnalysis(provider) || !analysisConfig || analysisConfig.enabled !== true || providerConfig === false) {
     return [];
   }
+  const providerSettings = providerConfig && typeof providerConfig === "object" ? providerConfig : {};
   return [...new Set([
     ...Object.keys(BUILTIN_ANALYSIS_TARGETS),
     ...Object.keys(analysisConfig.targets || {}),
-    ...Object.keys(providerConfig.targets || {}),
+    ...Object.keys(providerSettings.targets || {}),
     ...configuredDefaultTargetIds(provider, analysisConfig)
   ])].filter((targetId) => resolveAnalysisSettings(provider, analysisConfig, targetId));
 }
@@ -161,35 +177,36 @@ export function getDefaultAnalysisTargetIds(provider: ProviderAdapter, analysisC
   const configured = configuredDefaultTargetIds(provider, analysisConfig)
     .filter((targetId) => resolveAnalysisSettings(provider, analysisConfig, targetId));
   if (configured.length) {
-    return configured;
+    return configured.slice(0, 1);
   }
   return getAnalysisTargetIds(provider, analysisConfig).slice(0, 1);
 }
 
 export function resolveAnalysisSettings(provider: ProviderAdapter, analysisConfig, targetId = "") {
-  if (!analysisConfig || analysisConfig.enabled !== true) {
+  if (!supportsSessionAnalysis(provider) || !analysisConfig || analysisConfig.enabled !== true) {
     return null;
   }
 
   const providerConfig = analysisConfig.providers?.[provider.id];
-  if (!providerConfig || providerConfig === false) {
+  if (providerConfig === false) {
     return null;
   }
+  const providerSettings = providerConfig && typeof providerConfig === "object" ? providerConfig : {};
 
   const selectedTarget = targetId || configuredDefaultTargetIds(provider, analysisConfig)[0] || "skills";
   const configuredTarget = analysisConfig.targets?.[selectedTarget];
-  const providerTarget = providerConfig.targets?.[selectedTarget];
+  const providerTarget = providerSettings.targets?.[selectedTarget];
   if (configuredTarget === false || providerTarget === false) {
     return null;
   }
   const target = getProviderAnalysisTarget(analysisConfig, provider.id, selectedTarget);
-  const command = providerTarget?.command || providerConfig.command || target.command;
+  const command = providerTarget?.command || providerSettings.command || target.command || OPENCODE_ANALYSIS_COMMAND;
   if (!isCommandSpec(command)) {
     return null;
   }
 
   const shell = providerTarget?.shell
-    || providerConfig.shell
+    || providerSettings.shell
     || analysisConfig.shell
     || null;
   return {
@@ -228,33 +245,20 @@ export function getSessionAnalysisAction(
       },
       available: Boolean(resolveExecutable(settings.command.executable))
     }));
-  const selectedTargets = targetId
-    ? [targetId]
-    : getDefaultAnalysisTargetIds(provider, analysisConfig);
-  const selected = targets.filter(
-    (target) => selectedTargets.includes(target.id) && target.available
-  );
-  const effectiveSelection = selected.length
-    ? selected
-    : targets.filter((target) => target.available).slice(0, 1);
-  if (!targets.length || !effectiveSelection.length) {
+  const selectedTarget = targetId || getDefaultAnalysisTargetIds(provider, analysisConfig)[0] || "skills";
+  const effectiveTarget = targets.find((target) => target.id === selectedTarget && target.available)
+    || targets.find((target) => target.available);
+  if (!targets.length || !effectiveTarget) {
     return null;
   }
-  const runtimeEnvironment = resolveRuntimeEnvironment(provider, sessionId);
-  const selectedRuntimeExtensionIds = (runtimeEnvironment?.extensions || [])
-    .filter((extension) => extension.defaultSelected && extension.available)
-    .map((extension) => extension.id);
-
   return {
-    target: effectiveSelection[0].id,
+    target: effectiveTarget.id,
     targets,
-    selectedTargets: effectiveSelection.map((target) => target.id),
-    label: effectiveSelection.length === 1 ? effectiveSelection[0].label : null,
+    selectedTargets: [effectiveTarget.id],
+    label: effectiveTarget.label,
     available: true,
     sessionId,
-    projectPath,
-    runtimeEnvironment,
-    selectedRuntimeExtensionIds
+    projectPath
   };
 }
 
@@ -420,7 +424,6 @@ function snapshotArtifacts(
   snapshotDir,
   target,
   runtimeEnvironment: RuntimeEnvironmentView | null,
-  selectedRuntimeExtensionIds: string[],
   excludedRoots = []
 ) {
   const resolvedExcludedRoots = excludedRoots.map((root) => path.resolve(root));
@@ -446,9 +449,8 @@ function snapshotArtifacts(
     ".txt",
     ".mdx"
   ]);
-  const requestedRuntimeIds = new Set(selectedRuntimeExtensionIds);
   const selectedRuntimeExtensions = (runtimeEnvironment?.extensions || [])
-    .filter((extension) => requestedRuntimeIds.has(extension.id));
+    .filter((extension) => extension.defaultSelected && extension.available);
   const runtimeDirectoryExtensions = [];
   const runtimeFileExtensionsToCapture = [];
   for (const extension of selectedRuntimeExtensions) {
@@ -1008,8 +1010,7 @@ export function prepareSessionAnalysis({
   analysisConfig,
   metaDir,
   configPath = "",
-  targetId = "",
-  runtimeExtensionIds = null
+  targetId = ""
 }) {
   const settings = resolveAnalysisSettings(provider, analysisConfig, targetId);
   if (!settings) {
@@ -1036,25 +1037,11 @@ export function prepareSessionAnalysis({
   const files = getAnalysisRunPaths(runDir);
   ensureAnalysisRunDirectories(files, includeRawSnapshots);
   const runtimeEnvironment = resolveRuntimeEnvironment(provider, sessionId);
-  const availableRuntimeIds = new Set(
-    (runtimeEnvironment?.extensions || [])
-      .filter((extension) => extension.available)
-      .map((extension) => extension.id)
-  );
-  const selectedRuntimeIds = runtimeExtensionIds === null
-    ? (runtimeEnvironment?.extensions || [])
-      .filter((extension) => extension.defaultSelected && extension.available)
-      .map((extension) => extension.id)
-    : [...new Set(
-      (Array.isArray(runtimeExtensionIds) ? runtimeExtensionIds : [])
-        .filter((extensionId) => typeof extensionId === "string" && availableRuntimeIds.has(extensionId))
-    )];
   const artifacts = snapshotArtifacts(
     projectPath,
     files.artifactSnapshotsDir,
     settings.target,
     runtimeEnvironment,
-    selectedRuntimeIds,
     [outputRoot]
   );
 

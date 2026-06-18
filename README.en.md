@@ -175,10 +175,12 @@ with `--disable-terminal-launch` to turn it off for the current process.
 
 ## Session Analysis And Evaluation Proposals
 
-OpenSessionViewer can launch a configured agent non-interactively from a
-session detail page. The analysis run is proposal-only: it snapshots the
-session as indexed JSONL evidence, snapshots selected artifacts, creates an
-evaluation seed, and asks the agent to write:
+OpenSessionViewer can launch a configured analyzer non-interactively from an
+OpenCode session detail page. Other providers keep their read-only viewer
+features, but session analysis is intentionally OpenCode-only for now. The
+analysis run is proposal-only: it snapshots the session as indexed JSONL
+evidence, snapshots selected artifacts, creates an evaluation seed, and asks
+the analyzer to write:
 
 - `report.md`: the primary, human-readable analysis result
 - `evaluation-proposals.json`: the replay, held-out, and regression validation plan
@@ -201,13 +203,12 @@ Analysis inputs are intentionally separated:
   including files such as `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md`, plus
   skills, agents, commands, plugins, hooks, tools, and rules.
 
-Before launch, the session page also resolves the provider's current local
-runtime extensions and lets you select project-scoped and user-scoped skills,
-instructions, agents, commands, plugins, hooks, tools, rules, or provider
-extension bundles.
-The exact kinds and search paths remain provider-owned. Most provider
-transcripts do not contain an immutable historical extension manifest, so this
-picker is labeled as current local resolution rather than claiming to recreate
+Before launch, OpenSessionViewer resolves the current local OpenCode runtime
+extensions and automatically captures the default selected project/user skills,
+instructions, agents, commands, plugins, hooks, tools, rules, or extension
+bundles that are capturable. OpenCode still owns the exact kinds and search
+paths. Most transcripts do not contain an immutable historical extension
+manifest, so this is current local resolution rather than a claim to recreate
 the exact environment loaded when the session started. Each captured artifact
 records the runtime extension IDs that contributed it.
 
@@ -276,10 +277,10 @@ preserved for follow-up queries and validation:
 - `artifact_list`
 - `artifact_get`
 
-`extension_*` queries inspect selected provider runtime context. `artifact_*`
-queries inspect the bounded snapshots produced from both configured analysis
-materials and selected, capturable runtime extensions. The
-`runtimeExtensionIds` field identifies snapshots that came from runtime
+`extension_*` queries inspect the captured OpenCode runtime context.
+`artifact_*` queries inspect the bounded snapshots produced from both
+configured analysis materials and automatically captured runtime extensions.
+The `runtimeExtensionIds` field identifies snapshots that came from runtime
 context.
 
 Interruption signals come from explicit tool error reasons. High error rate is
@@ -290,13 +291,13 @@ edit.
 
 Analysis uses the same startup launch setting as resume commands. Launching is
 enabled by default and can be turned off with `--disable-terminal-launch`.
-Analysis must also be enabled and configured for each provider:
+Analysis must also be enabled. OpenCode has a built-in analyzer command that
+can be overridden:
 
 ```json
 {
   "analysis": {
     "enabled": true,
-    "defaultTargets": ["skills", "tests"],
     "defaultTarget": "skills",
     "outputDir": ".opensessionviewer/analysis",
     "includeRawSnapshots": false,
@@ -318,7 +319,6 @@ Analysis must also be enabled and configured for each provider:
     },
     "providers": {
       "opencode": {
-        "defaultTargets": ["skills", "tests"],
         "targets": {
           "skills": {
             "prompt": "Prioritize reusable skills that affected the selected session."
@@ -333,17 +333,6 @@ Analysis must also be enabled and configured for each provider:
             "--dir", "{projectPath}",
             "--file", "{promptPath}"
           ]
-        }
-      },
-      "claude-code": {
-        "command": {
-          "executable": "my-other-agent-cli",
-          "args": ["--non-interactive"],
-          "stdin": "prompt"
-        },
-        "shell": {
-          "executable": "pwsh.exe",
-          "args": ["-NoExit", "-NoLogo"]
         }
       }
     }
@@ -398,11 +387,11 @@ as placeholders.
 Built-in analysis targets are available without adding entries under
 `analysis.targets`:
 
-- `skills`: selected provider runtime skills
+- `skills`: selected OpenCode runtime skills
 - `prompts`: prompt files and templates
-- `agents`: selected provider runtime agent definitions and roles
+- `agents`: selected OpenCode runtime agent definitions and roles
 - `docs`: documentation directories
-- `rules`: selected provider runtime instructions and rules
+- `rules`: selected OpenCode runtime instructions and rules
 - `tests`: tests, specs, and fixtures
 - `workflows`: CI and repository automation
 - `scripts`: project scripts and command-line helpers
@@ -410,21 +399,16 @@ Built-in analysis targets are available without adding entries under
 The settings page exposes these as presets. Entries under `analysis.targets`
 can override a built-in target or define another custom target.
 
-`analysis.defaultTargets` controls which targets are checked initially on a
-session page. You can select any combination before launching analysis.
-OpenSessionViewer creates one independent run per selected target, each with
-its own report, evaluation proposals, artifact proposals, manifest, and
-validation result. It does not merge multiple targets into one output bundle.
-The older `defaultTarget` field remains supported as the first/default
-selection for existing configurations.
+`analysis.defaultTarget` controls the single target used when a session page
+launches analysis. Older `defaultTargets` arrays remain accepted for existing
+configuration, but only the first valid target is used.
 
-The provider settings page edits `analysis.providers.<provider>.defaultTargets`
-and `analysis.providers.<provider>.targets.<target>` overrides. Each target
-shows the effective provider-neutral analysis material roots, explicit files,
-and suffix filters that will be used by default. Provider runtime context is
-shown separately on the session page. **Reset to default** removes the
-provider-specific difference when possible so the value inherits from
-`analysis.targets` or the built-in target again.
+The settings page edits `analysis.providers.opencode.targets.<target>`
+overrides. Each target shows the effective provider-neutral analysis material
+roots, explicit files, and suffix filters that will be used by default.
+OpenCode runtime context is resolved automatically at launch. **Reset to
+default** removes the OpenCode-specific difference when possible so the value
+inherits from `analysis.targets` or the built-in target again.
 
 By default, analysis runs write `evidence/session-index.json`,
 `evidence/evidence-index.json`, and immutable `evidence/evidence.jsonl`;
@@ -432,10 +416,10 @@ the `diagnostics/` directory is omitted. Set `analysis.includeRawSnapshots`
 or a target-level `includeRawSnapshots` to `true` only when a legacy analyzer
 needs those bulk diagnostic files.
 
-Provider target overrides can be placed under
-`analysis.providers.<provider>.targets.<target>`. This allows different
-commands, prompts, shells, artifact roots, and file suffix filters for the same
-target. Additional custom targets can use the same structure.
+OpenCode target overrides can be placed under
+`analysis.providers.opencode.targets.<target>`. This allows different prompts,
+artifact roots, and file suffix filters for the same target. Additional custom
+targets can use the same structure.
 
 ## Claude Code History
 

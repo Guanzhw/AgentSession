@@ -82,26 +82,6 @@ function selectField({ id, label, options = [], help = "", reset = "" }) {
   `;
 }
 
-function checkboxGroup({ id, label, options = [], help = "", reset = "" }) {
-  return `
-    <fieldset class="settings-choice-field" id="${id}">
-      <legend>
-        <span>${escapeHtml(label)}</span>
-        ${resetButton(reset)}
-      </legend>
-      <div class="settings-choice-grid">
-        ${options.map((option) => `
-          <label class="settings-choice">
-            <input type="checkbox" name="settings-default-target" value="${escapeHtml(option.value)}" ${option.checked ? "checked" : ""}>
-            <span>${escapeHtml(option.label)}</span>
-          </label>
-        `).join("")}
-      </div>
-      ${help ? `<small>${escapeHtml(help)}</small>` : ""}
-    </fieldset>
-  `;
-}
-
 function textareaField({ id, label, values = [], help = "", placeholder = "", reset = "" }) {
   return `
     <div class="settings-field">
@@ -151,19 +131,19 @@ export function renderSettingsPage({
 }) {
   const config = asObject(configDocument.config);
   const analysis = asObject(config.analysis);
-  const sharedDefaultTargetIds = Array.isArray(analysis.defaultTargets) && analysis.defaultTargets.length
-    ? analysis.defaultTargets.filter((id) => typeof id === "string" && id)
+  const sharedDefaultTargetId = Array.isArray(analysis.defaultTargets) && analysis.defaultTargets.length
+    ? analysis.defaultTargets.find((id) => typeof id === "string" && id)
     : typeof analysis.defaultTarget === "string" && analysis.defaultTarget
-      ? [analysis.defaultTarget]
-      : ["skills"];
+      ? analysis.defaultTarget
+      : "skills";
   const analysisProviders = asObject(analysis.providers);
   const analysisProvider = asObject(analysisProviders[provider]);
-  const defaultTargetIds = Array.isArray(analysisProvider.defaultTargets) && analysisProvider.defaultTargets.length
-    ? analysisProvider.defaultTargets.filter((id) => typeof id === "string" && id)
+  const defaultTargetId = Array.isArray(analysisProvider.defaultTargets) && analysisProvider.defaultTargets.length
+    ? analysisProvider.defaultTargets.find((id) => typeof id === "string" && id)
     : typeof analysisProvider.defaultTarget === "string" && analysisProvider.defaultTarget
-      ? [analysisProvider.defaultTarget]
-      : sharedDefaultTargetIds;
-  const targetId = defaultTargetIds[0] || "skills";
+      ? analysisProvider.defaultTarget
+      : sharedDefaultTargetId;
+  const targetId = defaultTargetId || "skills";
   const targets = asObject(analysis.targets);
   const providerTargets = asObject(analysisProvider.targets);
   const target = getProviderAnalysisTarget(analysis, provider, targetId);
@@ -171,7 +151,6 @@ export function renderSettingsPage({
     ...Object.keys(builtinTargets),
     ...Object.keys(targets),
     ...Object.keys(providerTargets),
-    ...defaultTargetIds,
     targetId
   ])];
   const targetOptions = targetIds.map((id) => {
@@ -185,8 +164,7 @@ export function renderSettingsPage({
       label: builtin
         ? `${label} (${t("settings.target_builtin")})`
         : `${label} (${id})`,
-      selected: id === targetId,
-      checked: defaultTargetIds.includes(id)
+      selected: id === targetId
     };
   });
   const defaultAnalysisCommand = provider === "opencode" ? openCodeAnalysisCommand : { executable: "", args: [] };
@@ -277,12 +255,12 @@ export function renderSettingsPage({
               reset: "analysis-output"
             })}
           </div>
-          ${checkboxGroup({
-            id: "settings-default-targets",
-            label: t("settings.default_targets"),
+          ${selectField({
+            id: "settings-default-target",
+            label: t("settings.target_id"),
             options: targetOptions,
-            help: t("settings.default_targets_help"),
-            reset: "default-targets"
+            help: t("settings.target_id_help"),
+            reset: "default-target"
           })}
           ${switchField({
             id: "settings-raw-snapshots",

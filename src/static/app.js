@@ -34,9 +34,8 @@ const __I18N__ = {
     copied: "Copied",
     resume_opened: "Terminal opened",
     resume_disabled: "Terminal launch is unavailable",
-    analysis_opened: "Analysis launched for {count} target(s). Tracking status below.",
+    analysis_opened: "Analysis launched. Tracking status below.",
     analysis_disabled: "Session analysis is unavailable",
-    analysis_select_target: "Select at least one analysis target",
     analysis_status_prepared: "Preparing",
     analysis_status_launched: "Running",
     analysis_status_completed: "Completed",
@@ -121,9 +120,8 @@ const __I18N__ = {
     copied: "已复制",
     resume_opened: "终端已打开",
     resume_disabled: "无法启动终端",
-    analysis_opened: "已为 {count} 个目标启动分析，可在下方跟踪状态。",
+    analysis_opened: "已启动分析，可在下方跟踪状态。",
     analysis_disabled: "无法启动会话分析",
-    analysis_select_target: "请至少选择一个分析目标",
     analysis_status_prepared: "准备中",
     analysis_status_launched: "运行中",
     analysis_status_completed: "已完成",
@@ -255,6 +253,7 @@ if (settingsForm) {
   const promptPreviewPanel = document.getElementById("settings-prompt-preview-panel");
   const promptPreviewMeta = document.getElementById("settings-prompt-preview-meta");
   const promptPreviewContent = document.getElementById("settings-prompt-preview-content");
+  const defaultTargetSelect = document.getElementById("settings-default-target");
   const targetSelect = document.getElementById("settings-target-id");
   const targetLabelInput = document.getElementById("settings-target-label");
   const targetContextLabel = document.getElementById("settings-target-context-label");
@@ -308,7 +307,7 @@ if (settingsForm) {
   let sharedTargetConfigs = {};
   let targetDrafts = {};
   let currentTargetId = "skills";
-  let inheritedDefaultTargetIds = ["skills"];
+  let inheritedDefaultTargetId = "skills";
 
   const parseEditor = () => {
     const parsed = JSON.parse(editor.value);
@@ -367,12 +366,12 @@ if (settingsForm) {
     inheritedTargetDefaults(targetId),
     targetDrafts[targetId]
   );
-  const configDefaultTargetIds = (analysis) => (
+  const configDefaultTargetId = (analysis) => (
     Array.isArray(analysis.defaultTargets) && analysis.defaultTargets.length
-      ? analysis.defaultTargets.filter((targetId) => typeof targetId === "string" && targetId)
+      ? analysis.defaultTargets.find((targetId) => typeof targetId === "string" && targetId) || "skills"
       : typeof analysis.defaultTarget === "string" && analysis.defaultTarget
-        ? [analysis.defaultTarget]
-        : ["skills"]
+        ? analysis.defaultTarget
+        : "skills"
   );
 
   const setArtifactSummary = (node, values) => {
@@ -487,23 +486,23 @@ if (settingsForm) {
   };
 
   const populateTargetOptions = (analysis, providerSettings, selectedTargetId) => {
-    if (!targetSelect) return;
+    if (!targetSelect && !defaultTargetSelect) return;
     const targets = asObject(analysis.targets);
     const providerTargets = asObject(providerSettings.targets);
     const builtins = asObject(initialData.targetDefaults);
-    const defaultTargetIds = Array.isArray(providerSettings.defaultTargets) && providerSettings.defaultTargets.length
-      ? providerSettings.defaultTargets.filter((targetId) => typeof targetId === "string" && targetId)
+    const defaultTargetId = Array.isArray(providerSettings.defaultTargets) && providerSettings.defaultTargets.length
+      ? providerSettings.defaultTargets.find((targetId) => typeof targetId === "string" && targetId) || inheritedDefaultTargetId
       : typeof providerSettings.defaultTarget === "string" && providerSettings.defaultTarget
-        ? [providerSettings.defaultTarget]
-        : inheritedDefaultTargetIds;
+        ? providerSettings.defaultTarget
+        : inheritedDefaultTargetId;
     const targetIds = [...new Set([
       ...Object.keys(builtins),
       ...Object.keys(targets),
       ...Object.keys(providerTargets),
-      ...defaultTargetIds,
+      defaultTargetId,
       selectedTargetId
     ])];
-    targetSelect.replaceChildren(...targetIds.map((targetId) => {
+    const options = targetIds.map((targetId) => {
       const fallback = resolvedTargetDefaults(targetId);
       const option = document.createElement("option");
       option.value = targetId;
@@ -512,42 +511,24 @@ if (settingsForm) {
         ? `${label} (${ft("settings_target_builtin")})`
         : `${label} (${targetId})`;
       return option;
-    }));
-    targetSelect.value = selectedTargetId;
-
-    const choiceGrid = document.querySelector("#settings-default-targets .settings-choice-grid");
-    if (choiceGrid) {
-      choiceGrid.replaceChildren(...targetIds.map((targetId) => {
-        const fallback = resolvedTargetDefaults(targetId);
-        const choice = document.createElement("label");
-        choice.className = "settings-choice";
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.name = "settings-default-target";
-        checkbox.value = targetId;
-        checkbox.checked = defaultTargetIds.includes(targetId);
-        const label = document.createElement("span");
-        const targetLabel = fallback.label;
-        label.textContent = builtins[targetId]
-          ? `${targetLabel} (${ft("settings_target_builtin")})`
-          : `${targetLabel} (${targetId})`;
-        choice.append(checkbox, label);
-        return choice;
-      }));
-    }
+    });
+    targetSelect?.replaceChildren(...options.map((option) => option.cloneNode(true)));
+    defaultTargetSelect?.replaceChildren(...options.map((option) => option.cloneNode(true)));
+    if (targetSelect) targetSelect.value = selectedTargetId;
+    if (defaultTargetSelect) defaultTargetSelect.value = defaultTargetId;
   };
 
   const populateSettingsForm = (config) => {
     const analysis = asObject(config.analysis);
     const providerSettings = asObject(asObject(analysis.providers)[providerId]);
-    inheritedDefaultTargetIds = configDefaultTargetIds(analysis);
-    const providerDefaultTargetIds = Array.isArray(providerSettings.defaultTargets)
+    inheritedDefaultTargetId = configDefaultTargetId(analysis);
+    const providerDefaultTargetId = Array.isArray(providerSettings.defaultTargets)
       && providerSettings.defaultTargets.length
-      ? providerSettings.defaultTargets
+      ? providerSettings.defaultTargets.find((targetId) => typeof targetId === "string" && targetId) || inheritedDefaultTargetId
       : typeof providerSettings.defaultTarget === "string" && providerSettings.defaultTarget
-        ? [providerSettings.defaultTarget]
-        : inheritedDefaultTargetIds;
-    const targetId = providerDefaultTargetIds[0] || "skills";
+        ? providerSettings.defaultTarget
+        : inheritedDefaultTargetId;
+    const targetId = providerDefaultTargetId || "skills";
     sharedTargetConfigs = clone(asObject(analysis.targets));
     targetDrafts = clone(asObject(providerSettings.targets));
     currentTargetId = targetId;
@@ -604,21 +585,19 @@ if (settingsForm) {
 
     const targetId = value("settings-target-id") || "skills";
     captureTargetDraft(targetId);
-    const defaultTargets = [...document.querySelectorAll(
-      "#settings-default-targets input[name='settings-default-target']:checked"
-    )].map((input) => input.value);
-    if (!defaultTargets.length) {
+    const defaultTarget = value("settings-default-target") || targetId;
+    if (!defaultTarget) {
       throw new Error(ft("settings_select_target"));
     }
 
     const analysisProviders = { ...asObject(analysis.providers) };
     const providerSettings = { ...asObject(analysisProviders[providerId]) };
-    if (sameValue(defaultTargets, inheritedDefaultTargetIds)) {
+    if (defaultTarget === inheritedDefaultTargetId) {
       delete providerSettings.defaultTargets;
       delete providerSettings.defaultTarget;
     } else {
-      providerSettings.defaultTargets = defaultTargets;
-      providerSettings.defaultTarget = defaultTargets[0];
+      delete providerSettings.defaultTargets;
+      providerSettings.defaultTarget = defaultTarget;
     }
     if (Object.keys(targetDrafts).length) providerSettings.targets = targetDrafts;
     else delete providerSettings.targets;
@@ -734,13 +713,7 @@ if (settingsForm) {
     if (key === "analysis-enabled") setChecked("settings-analysis-enabled", false);
     if (key === "analysis-output") setValue("settings-analysis-output", ".opensessionviewer/analysis");
     if (key === "raw-snapshots") setChecked("settings-raw-snapshots", false);
-    if (key === "default-targets") {
-      for (const checkbox of document.querySelectorAll(
-        "#settings-default-targets input[name='settings-default-target']"
-      )) {
-        checkbox.checked = inheritedDefaultTargetIds.includes(checkbox.value);
-      }
-    }
+    if (key === "default-target") setValue("settings-default-target", inheritedDefaultTargetId);
     if (key === "target-label") {
       setValue("settings-target-label", inheritedTarget.label || `Analyze ${currentTargetId}`);
       if (targetContextLabel) {
@@ -800,6 +773,14 @@ if (settingsForm) {
 
   targetSelect?.addEventListener("change", () => {
     captureTargetDraft(currentTargetId);
+    currentTargetId = targetSelect.value || "skills";
+    loadTargetDraft(currentTargetId);
+  });
+
+  defaultTargetSelect?.addEventListener("change", () => {
+    if (!targetSelect) return;
+    captureTargetDraft(currentTargetId);
+    targetSelect.value = defaultTargetSelect.value || "skills";
     currentTargetId = targetSelect.value || "skills";
     loadTargetDraft(currentTargetId);
   });
@@ -1196,26 +1177,17 @@ document.addEventListener("click", async (e) => {
 
   if (action === "analyze-session") {
     try {
-      const launchControl = btn.closest(".analysis-launch-control");
-      const targets = [...(launchControl?.querySelectorAll(".analysis-target-checkbox:checked") || [])]
-        .map((checkbox) => checkbox.value);
-      const runtimeExtensionIds = [
-        ...(launchControl?.querySelectorAll(".analysis-runtime-extension-checkbox:checked") || [])
-      ].map((checkbox) => checkbox.value);
-      if (!targets.length) {
-        showToast(ft("analysis_select_target"), "error");
-        return;
-      }
+      const target = btn.dataset.target || "";
       const res = await fetch(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targets, runtimeExtensionIds })
+        body: JSON.stringify(target ? { target } : {})
       });
       const result = await res.json();
       if (!res.ok || !result.ok) {
         throw new Error(result.error || `HTTP ${res.status}`);
       }
-      showToast(formatText(ft("analysis_opened"), { count: result.runs?.length || targets.length }), "success");
+      showToast(ft("analysis_opened"), "success");
       await refreshAnalysisRuns(true);
       analysisStatusPanel?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     } catch {
@@ -1292,23 +1264,6 @@ document.addEventListener("click", async (e) => {
   if (action === "export-json") {
     window.open(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/export?format=json`, "_blank");
   }
-});
-
-document.addEventListener("change", (event) => {
-  const checkbox = event.target.closest?.(
-    ".analysis-target-checkbox, .analysis-runtime-extension-checkbox"
-  );
-  if (!checkbox) return;
-  const launchControl = checkbox.closest(".analysis-launch-control");
-  const selectedCount = launchControl?.querySelectorAll(".analysis-target-checkbox:checked").length || 0;
-  const runtimeSelectedCount = launchControl
-    ?.querySelectorAll(".analysis-runtime-extension-checkbox:checked").length || 0;
-  const count = launchControl?.querySelector("[data-analysis-selected-count]");
-  const runtimeCount = launchControl?.querySelector("[data-runtime-selected-count]");
-  const button = launchControl?.querySelector("[data-action='analyze-session']");
-  if (count) count.textContent = String(selectedCount);
-  if (runtimeCount) runtimeCount.textContent = String(runtimeSelectedCount);
-  if (button) button.disabled = selectedCount === 0;
 });
 
 const toggleBatchBtn = document.getElementById("toggle-batch");

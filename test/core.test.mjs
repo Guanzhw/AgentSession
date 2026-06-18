@@ -781,8 +781,7 @@ test("settings page exposes config location and startup-only launch status", () 
   assert.match(html, /id="settings-advanced"/);
   assert.match(html, /id="settings-json"/);
   assert.match(html, /id="settings-analysis-enabled"/);
-  assert.match(html, /id="settings-default-targets"/);
-  assert.match(html, /name="settings-default-target" value="skills" checked/);
+  assert.match(html, /id="settings-default-target"/);
   assert.match(html, /id="settings-target-id"/);
   assert.match(html, /id="settings-target-context-label"/);
   assert.match(html, /Target display name/);
@@ -863,8 +862,7 @@ test("settings page exposes config location and startup-only launch status", () 
   });
   assert.match(customTargetHtml, /<option value="skills"\s*>/);
   assert.match(customTargetHtml, /<option value="memories" selected>/);
-  assert.match(customTargetHtml, /name="settings-default-target" value="skills" checked/);
-  assert.match(customTargetHtml, /name="settings-default-target" value="memories" checked/);
+  assert.doesNotMatch(customTargetHtml, /name="settings-default-target"/);
   assert.match(customTargetHtml, /Analyze memories \(memories\)/);
   assert.match(customTargetHtml, /Look for stale operational knowledge\./);
   assert.match(customTargetHtml, /provider-memories/);
@@ -931,15 +929,15 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   writeFileSync(staleAnalysisReport, "# Generated analysis output\n");
 
   const provider = {
-    id: "codex",
-    name: "Codex CLI",
+    id: "opencode",
+    name: "OpenCode",
     icon: "",
     detect: () => true,
     getDataPath: () => null,
     scan: async function* () {},
     getSession: () => ({
       id: "session-analysis",
-      provider: "codex",
+      provider: "opencode",
       parentId: null,
       title: "Improve the review skill",
       directory: projectPath,
@@ -1011,8 +1009,8 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
       note: "Resolved current test runtime.",
       extensions: [
         {
-          id: "runtime:codex:project:skill:project",
-          provider: "codex",
+          id: "runtime:opencode:project:skill:project",
+          provider: "opencode",
           scope: "project",
           kind: "skill",
           name: "project-runtime",
@@ -1025,8 +1023,8 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
           note: "Project skill"
         },
         {
-          id: "runtime:codex:project:instruction:agents",
-          provider: "codex",
+          id: "runtime:opencode:project:instruction:agents",
+          provider: "opencode",
           scope: "project",
           kind: "instruction",
           name: "AGENTS.md",
@@ -1039,8 +1037,8 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
           note: "Project instructions"
         },
         {
-          id: "runtime:codex:user:hook:user",
-          provider: "codex",
+          id: "runtime:opencode:user:hook:user",
+          provider: "opencode",
           scope: "user",
           kind: "hook",
           name: "user hooks",
@@ -1053,8 +1051,8 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
           note: "User hooks"
         },
         {
-          id: "runtime:codex:user:plugin:metadata",
-          provider: "codex",
+          id: "runtime:opencode:user:plugin:metadata",
+          provider: "opencode",
           scope: "user",
           kind: "plugin",
           name: "metadata-only",
@@ -1099,7 +1097,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
       }
     },
     providers: {
-      codex: {
+      opencode: {
         command: {
           executable: process.execPath,
           args: ["--version", "{promptPath}", "{evaluationPath}"],
@@ -1117,7 +1115,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   );
   assert.equal(action.target, "skills");
   assert.equal(action.available, true);
-  assert.deepEqual(action.selectedTargets, ["skills", "tests"]);
+  assert.deepEqual(action.selectedTargets, ["skills"]);
   assert.deepEqual(
     action.targets.map((target) => target.id),
     Object.keys(BUILTIN_ANALYSIS_TARGETS)
@@ -1130,13 +1128,6 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
       fileExtensions: [".md"]
     }
   );
-  assert.equal(action.runtimeEnvironment.resolution, "current-local");
-  assert.deepEqual(action.selectedRuntimeExtensionIds, [
-    "runtime:codex:project:skill:project",
-    "runtime:codex:project:instruction:agents",
-    "runtime:codex:user:hook:user",
-    "runtime:codex:user:plugin:metadata"
-  ]);
 
   const run = prepareSessionAnalysis({
     provider,
@@ -1175,7 +1166,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     "module"
   );
   const preparedRuns = listSessionAnalysisRuns({
-    providerId: "codex",
+    providerId: "opencode",
     sessionId: "session-analysis",
     directory: projectPath,
     analysisConfig,
@@ -1202,7 +1193,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.match(analysisPrompt, /Never append descriptions, parentheses, quotes, line numbers, or filesystem paths/);
   assert.match(
     analysisPrompt,
-    /"sourceEvidence": \["ev:codex:session-analysis:session:session-analysis"\]/
+    /"sourceEvidence": \["ev:opencode:session-analysis:session:session-analysis"\]/
   );
 
   const artifacts = JSON.parse(readFileSync(run.files.artifactsPath, "utf-8"));
@@ -1210,7 +1201,12 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.equal(artifacts.runtimeEnvironment.extensions.length, 4);
   assert.deepEqual(
     artifacts.runtimeEnvironment.selectedExtensionIds,
-    action.selectedRuntimeExtensionIds
+    [
+      "runtime:opencode:project:skill:project",
+      "runtime:opencode:project:instruction:agents",
+      "runtime:opencode:user:hook:user",
+      "runtime:opencode:user:plugin:metadata"
+    ]
   );
   assert.equal(
     artifacts.files.some((file) => file.sourcePath.includes(`${path.sep}.opensessionviewer${path.sep}`)),
@@ -1229,15 +1225,15 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.equal(agentsArtifact.explicit, true);
   assert.deepEqual(
     agentsArtifact.runtimeExtensionIds,
-    ["runtime:codex:project:instruction:agents"]
+    ["runtime:opencode:project:instruction:agents"]
   );
   assert.deepEqual(
     projectRuntimeArtifact.runtimeExtensionIds,
-    ["runtime:codex:project:skill:project"]
+    ["runtime:opencode:project:skill:project"]
   );
   assert.deepEqual(
     userRuntimeArtifact.runtimeExtensionIds,
-    ["runtime:codex:user:hook:user"]
+    ["runtime:opencode:user:hook:user"]
   );
 
   const seed = JSON.parse(readFileSync(run.files.evaluationSeedPath, "utf-8"));
@@ -1259,11 +1255,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.match(bundledTool.stdout, /\*\*toolCalls:\*\* `2`/);
   assert.match(
     bundledTool.stdout,
-    /ev:codex:session-analysis:session:session-analysis/
-  );
-  assert.ok(
-    bundledTool.stdout.length < JSON.stringify(mainInfo, null, 2).length,
-    "compact Markdown should be shorter than pretty-printed JSON"
+    /ev:opencode:session-analysis:session:session-analysis/
   );
   assert.equal(
     bundledTool.stdout,
@@ -1312,12 +1304,12 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   const extensions = runAnalysisTool(run.runDir, "extension_list");
   assert.equal(extensions.total, 4);
   const extension = runAnalysisTool(run.runDir, "extension_get", {
-    extensionId: "runtime:codex:project:skill:project"
+    extensionId: "runtime:opencode:project:skill:project"
   });
   assert.equal(extension.extension.scope, "project");
   assert.equal(extension.artifacts[0].artifactId, projectRuntimeArtifact.artifactId);
   const instructionExtension = runAnalysisTool(run.runDir, "extension_get", {
-    extensionId: "runtime:codex:project:instruction:agents"
+    extensionId: "runtime:opencode:project:instruction:agents"
   });
   assert.equal(instructionExtension.extension.kind, "instruction");
   assert.equal(instructionExtension.artifacts[0].artifactId, agentsArtifact.artifactId);
@@ -1431,7 +1423,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.equal(validated.validation.evaluationCaseCount, 3);
   assert.equal(validated.validation.artifactProposalCount, 1);
   const completedRuns = listSessionAnalysisRuns({
-    providerId: "codex",
+    providerId: "opencode",
     sessionId: "session-analysis",
     directory: projectPath,
     analysisConfig,
@@ -1515,26 +1507,34 @@ test("analysis run listing preserves legacy metadata-directory runs", () => {
   assert.equal(runs[0].runDir, runDir);
 });
 
-test("session analysis requires enabled provider and target configuration", () => {
-  const provider = { id: "codex" };
-  assert.equal(resolveAnalysisSettings(provider, { enabled: false }), null);
-  assert.equal(resolveAnalysisSettings(provider, {
+test("session analysis is OpenCode-only and requires an enabled target", () => {
+  const opencode = { id: "opencode" };
+  const codex = { id: "codex" };
+  assert.equal(resolveAnalysisSettings(opencode, { enabled: false }), null);
+  assert.equal(resolveAnalysisSettings(opencode, {
     enabled: true,
-    providers: { codex: false }
+    providers: { opencode: false }
   }), null);
-  assert.equal(resolveAnalysisSettings(provider, {
+  assert.equal(resolveAnalysisSettings(opencode, {
     enabled: true,
     targets: { skills: false },
     providers: {
-      codex: {
+      opencode: {
+        command: { executable: "opencode", args: ["run"] }
+      }
+    }
+  }), null);
+  assert.equal(resolveAnalysisSettings(codex, {
+    enabled: true,
+    providers: {
+      opencode: {
         command: { executable: "codex", args: ["exec"] }
       }
     }
   }), null);
-  assert.equal(resolveAnalysisSettings(provider, {
-    enabled: true,
-    providers: { codex: {} }
-  }), null);
+  assert.equal(resolveAnalysisSettings(opencode, {
+    enabled: true
+  }).command.executable, "opencode");
 });
 
 test("terminal analysis passes the prompt through structured PowerShell input", () => {
@@ -1583,32 +1583,6 @@ test("session rendering shows configured analysis actions only when launch is al
         { id: "tests", label: "Analyze tests", available: true }
       ],
       selectedTargets: ["skills", "tests"],
-      selectedRuntimeExtensionIds: [
-        "runtime:codex:project:skill:project",
-        "runtime:codex:user:hook:user"
-      ],
-      runtimeEnvironment: {
-        resolution: "current-local",
-        note: "Current local runtime.",
-        extensions: [
-          {
-            id: "runtime:codex:project:skill:project",
-            scope: "project",
-            kind: "skill",
-            name: "project-runtime",
-            source: "D:\\project\\.agents\\skills\\project-runtime",
-            available: true
-          },
-          {
-            id: "runtime:codex:user:hook:user",
-            scope: "user",
-            kind: "hook",
-            name: "user hooks",
-            source: "C:\\Users\\me\\.codex\\config.toml#hooks",
-            available: true
-          }
-        ]
-      },
       label: null,
       available: true
     },
@@ -1630,14 +1604,10 @@ test("session rendering shows configured analysis actions only when launch is al
     terminalLaunchAllowed: true
   });
   assert.match(visible, /data-action="analyze-session"/);
-  assert.match(visible, /class="analysis-target-checkbox"/);
-  assert.match(visible, /value="skills"\s+checked/);
-  assert.match(visible, /value="tests"\s+checked/);
-  assert.match(visible, /class="analysis-runtime-extension-checkbox"/);
-  assert.match(visible, /project-runtime/);
-  assert.match(visible, /user hooks/);
-  assert.match(visible, /Project scope/);
-  assert.match(visible, /User scope/);
+  assert.match(visible, /data-target="skills"/);
+  assert.match(visible, /class="analysis-launch-target"/);
+  assert.doesNotMatch(visible, /class="analysis-target-checkbox"/);
+  assert.doesNotMatch(visible, /class="analysis-runtime-extension-checkbox"/);
   assert.match(visible, /data-action="resume-session"/);
   assert.doesNotMatch(visible, /data-action="copy-resume-command"/);
   assert.match(visible, /id="analysis-status-panel"/);
@@ -1664,7 +1634,7 @@ test("built-in analysis targets resolve without target-specific config", () => {
   );
   assert.deepEqual(
     getDefaultAnalysisTargetIds(provider, analysisConfig),
-    ["skills", "tests"]
+    ["skills"]
   );
   for (const [targetId, expected] of Object.entries(BUILTIN_ANALYSIS_TARGETS)) {
     const settings = resolveAnalysisSettings(provider, analysisConfig, targetId);
@@ -1707,8 +1677,7 @@ test("provider analysis targets override shared artifacts without changing other
   assert.deepEqual(openCode.target.artifactRoots, ["provider-materials"]);
   assert.deepEqual(openCode.target.artifactFiles, ["OPENCODE.md"]);
   assert.deepEqual(openCode.target.fileExtensions, [".md"]);
-  assert.deepEqual(codex.target.artifactRoots, ["shared-skills"]);
-  assert.deepEqual(codex.target.artifactFiles, ["REFERENCE.md"]);
+  assert.equal(codex, null);
 });
 
 test("analysis prompt preview uses the real builder and reports configured sources", () => {

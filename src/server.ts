@@ -52,11 +52,11 @@ import { renderSettingsPage } from "./views/settings.js";
 import { getResumeCommand, launchResumeCommand } from "./resume.js";
 import {
   buildAnalysisPromptPreview,
-  getDefaultAnalysisTargetIds,
   getSessionAnalysisAction,
   listSessionAnalysisRuns,
   launchSessionAnalysis,
-  prepareSessionAnalysis
+  prepareSessionAnalysis,
+  SESSION_ANALYSIS_PROVIDER_ID
 } from "./analysis.js";
 
 const staticDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "static");
@@ -739,6 +739,9 @@ export async function startServer(config = getConfig()) {
       }
 
       const providerId = analysisMatch[1];
+      if (providerId !== SESSION_ANALYSIS_PROVIDER_ID) {
+        return json(res, { ok: false, error: "Session analysis is currently supported for OpenCode only" }, 501);
+      }
       const sessionId = safeDecodeId(analysisMatch[2]);
       const adapter = providerMap.get(providerId);
       if (!sessionId || !adapter) {
@@ -751,93 +754,53 @@ export async function startServer(config = getConfig()) {
 
       try {
         const body = await readBody(req);
-        const requestedTargets: unknown[] = Array.isArray(body.targets)
-          ? body.targets
-          : typeof body.target === "string"
-            ? [body.target]
-            : [];
-        const targetIds: string[] = [...new Set<string>(
-          requestedTargets
-            .filter((target): target is string => typeof target === "string")
-            .map((target) => target.trim())
-            .filter(Boolean)
-        )];
-        const selectedTargets: string[] = targetIds.length
-          ? targetIds
-          : getDefaultAnalysisTargetIds(adapter, appConfig.analysis);
-        if (!selectedTargets.length) {
-          return json(res, { ok: false, error: "Select at least one analysis target" }, 400);
-        }
-        if (selectedTargets.length > 16) {
-          return json(res, { ok: false, error: "Too many analysis targets selected" }, 400);
-        }
         const action = getSessionAnalysisAction(
           adapter,
           sessionId,
           session.directory,
           appConfig.analysis
         );
-        const actionTargets = new Map((action?.targets || []).map((target) => [target.id, target]));
-        const unknownTarget = selectedTargets.find((targetId) => !actionTargets.has(targetId));
-        if (unknownTarget) {
-          return json(res, { ok: false, error: `Analysis target is unavailable: ${unknownTarget}` }, 400);
+        if (!action) {
+          return json(res, { ok: false, error: "Session analysis is not configured" }, 400);
         }
-        const unavailableTarget = selectedTargets.find((targetId) => !actionTargets.get(targetId)?.available);
-        if (unavailableTarget) {
+        const actionTargets = new Map((action?.targets || []).map((target) => [target.id, target]));
+        const requestedTarget = typeof body.target === "string"
+          ? body.target.trim()
+          : Array.isArray(body.targets)
+            ? String(body.targets.find((target) => typeof target === "string") || "").trim()
+            : "";
+        const targetId = requestedTarget || action.target;
+        const selectedTarget = actionTargets.get(targetId);
+        if (!selectedTarget) {
+          return json(res, { ok: false, error: `Analysis target is unavailable: ${targetId}` }, 400);
+        }
+        if (!selectedTarget.available) {
           return json(res, {
             ok: false,
             error: "Configured analysis executable was not found",
-            target: unavailableTarget
+            target: targetId
           }, 409);
         }
-        const requestedRuntimeExtensionIds: string[] = Array.isArray(body.runtimeExtensionIds)
-          ? [...new Set<string>(
-            (body.runtimeExtensionIds as unknown[])
-              .filter((extensionId: unknown): extensionId is string => typeof extensionId === "string")
-              .map((extensionId: string) => extensionId.trim())
-              .filter(Boolean)
-          )]
-          : action?.selectedRuntimeExtensionIds || [];
-        if (requestedRuntimeExtensionIds.length > 300) {
-          return json(res, { ok: false, error: "Too many runtime extensions selected" }, 400);
-        }
-        const availableRuntimeExtensions = new Set(
-          (action?.runtimeEnvironment?.extensions || [])
-            .filter((extension) => extension.available)
-            .map((extension) => extension.id)
-        );
-        const unknownRuntimeExtension = requestedRuntimeExtensionIds.find(
-          (extensionId) => !availableRuntimeExtensions.has(extensionId)
-        );
-        if (unknownRuntimeExtension) {
-          return json(res, {
-            ok: false,
-            error: `Runtime extension is unavailable: ${unknownRuntimeExtension}`
-          }, 400);
-        }
-        const runs = selectedTargets.map((targetId) => prepareSessionAnalysis({
+        const run = prepareSessionAnalysis({
           provider: adapter,
           sessionId,
           analysisConfig: appConfig.analysis,
           metaDir: appConfig.metaDir,
           configPath: appConfig.configPath,
-          targetId,
-          runtimeExtensionIds: requestedRuntimeExtensionIds
-        }));
-        for (const run of runs) {
-          launchSessionAnalysis(run, appConfig.resumeShell);
-        }
+          targetId
+        });
+        launchSessionAnalysis(run, appConfig.resumeShell);
         return json(res, {
           ok: true,
-          runId: runs[0].runId,
-          runDir: runs[0].runDir,
-          target: runs[0].target,
-          targets: runs.map((run) => run.target),
-          runs: runs.map((run) => ({
+          runId: run.runId,
+          runDir: run.runDir,
+          target: run.target,
+          targets: [run.target],
+          runs: [{
             runId: run.runId,
             runDir: run.runDir,
             target: run.target
-          }))
+          }]
         });
       } catch (error) {
         console.error("Session analysis launch error:", error?.message || error);
