@@ -24,7 +24,7 @@ function discoverSessionFiles() {
       const key = `${dirStat.dev}:${dirStat.ino}`;
       if (visited.has(key)) return;
       visited.add(key);
-      
+
       for (const entry of readdirSync(dir)) {
         const full = path.join(dir, entry);
         try {

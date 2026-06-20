@@ -35,7 +35,10 @@ const __I18N__ = {
     resume_opened: "Terminal opened",
     resume_disabled: "Terminal launch is unavailable",
     analysis_opened: "Analysis launched. Tracking status below.",
+    analysis_opened_many: "Launched {count} analysis runs. Tracking status below.",
     analysis_disabled: "Session analysis is unavailable",
+    analysis_select_target: "Select at least one analysis target",
+    analysis_launch_summary: "Targets {targets} · Runtime {runtime}",
     analysis_status_prepared: "Preparing",
     analysis_status_launched: "Running",
     analysis_status_completed: "Completed",
@@ -60,6 +63,14 @@ const __I18N__ = {
     analysis_output_proposals: "View artifact proposals",
     analysis_output_proposals_help: "Suggested target changes. This file can contain an empty proposal list.",
     analysis_output_download: "Download",
+    analysis_implementation_title: "Implementation",
+    analysis_implementation_ready: "The validated proposal set is ready for a user-approved implementation run.",
+    analysis_implementation_launch: "Implement accepted proposals",
+    analysis_implementation_confirm: "Launch an agent to implement all validated proposals from this run?",
+    analysis_implementation_opened: "Implementation launched. Review the terminal and resulting changes.",
+    analysis_implementation_disabled: "Could not launch proposal implementation",
+    analysis_implementation_launched: "Implementation launched {time}",
+    analysis_implementation_prepared: "Implementation request prepared",
     analysis_validation_errors: "Validation errors",
     analysis_status_error: "Could not refresh analysis status",
     settings_saved: "Settings saved",
@@ -121,7 +132,10 @@ const __I18N__ = {
     resume_opened: "终端已打开",
     resume_disabled: "无法启动终端",
     analysis_opened: "已启动分析，可在下方跟踪状态。",
+    analysis_opened_many: "已启动 {count} 个分析任务，可在下方跟踪状态。",
     analysis_disabled: "无法启动会话分析",
+    analysis_select_target: "请至少选择一个分析目标",
+    analysis_launch_summary: "目标 {targets} · 运行时 {runtime}",
     analysis_status_prepared: "准备中",
     analysis_status_launched: "运行中",
     analysis_status_completed: "已完成",
@@ -146,6 +160,14 @@ const __I18N__ = {
     analysis_output_proposals: "查看工件提案",
     analysis_output_proposals_help: "建议的目标修改；该文件可能包含空的提案列表。",
     analysis_output_download: "下载",
+    analysis_implementation_title: "实现",
+    analysis_implementation_ready: "已校验的提案集可由用户确认后启动实现。",
+    analysis_implementation_launch: "实现已接受的提案",
+    analysis_implementation_confirm: "启动 Agent 实现此运行中的全部已校验提案？",
+    analysis_implementation_opened: "已启动实现任务。请查看终端和后续变更。",
+    analysis_implementation_disabled: "无法启动提案实现",
+    analysis_implementation_launched: "实现已于 {time} 启动",
+    analysis_implementation_prepared: "已准备实现请求",
     analysis_validation_errors: "校验错误",
     analysis_status_error: "无法刷新分析状态",
     settings_saved: "设置已保存",
@@ -539,7 +561,7 @@ if (settingsForm) {
     const commandArgs = Array.isArray(command.args) ? command.args : [];
 
     setChecked("settings-analysis-enabled", analysis.enabled);
-    setValue("settings-analysis-output", analysis.outputDir || ".opensessionviewer/analysis");
+    setValue("settings-analysis-output", analysis.outputDir || ".codeagentsession/analysis");
     setChecked("settings-raw-snapshots", analysis.includeRawSnapshots);
     populateTargetOptions(analysis, providerSettings, targetId);
     loadTargetDraft(targetId);
@@ -577,8 +599,8 @@ if (settingsForm) {
     const analysis = asObject(config.analysis);
     if (isChecked("settings-analysis-enabled")) analysis.enabled = true;
     else delete analysis.enabled;
-    const outputDir = value("settings-analysis-output") || ".opensessionviewer/analysis";
-    if (outputDir === ".opensessionviewer/analysis") delete analysis.outputDir;
+    const outputDir = value("settings-analysis-output") || ".codeagentsession/analysis";
+    if (outputDir === ".codeagentsession/analysis") delete analysis.outputDir;
     else analysis.outputDir = outputDir;
     if (isChecked("settings-raw-snapshots")) analysis.includeRawSnapshots = true;
     else delete analysis.includeRawSnapshots;
@@ -711,7 +733,7 @@ if (settingsForm) {
     const resumeDefault = asObject(initialData.resumeDefault);
 
     if (key === "analysis-enabled") setChecked("settings-analysis-enabled", false);
-    if (key === "analysis-output") setValue("settings-analysis-output", ".opensessionviewer/analysis");
+    if (key === "analysis-output") setValue("settings-analysis-output", ".codeagentsession/analysis");
     if (key === "raw-snapshots") setChecked("settings-raw-snapshots", false);
     if (key === "default-target") setValue("settings-default-target", inheritedDefaultTargetId);
     if (key === "target-label") {
@@ -855,6 +877,44 @@ if (settingsForm) {
 const analysisStatusPanel = document.getElementById("analysis-status-panel");
 let analysisStatusTimer = null;
 
+function checkedAnalysisValues(root, selector) {
+  const scope = root || document;
+  return [...scope.querySelectorAll(selector)]
+    .filter((input) => input.checked && !input.disabled)
+    .map((input) => input.value)
+    .filter(Boolean);
+}
+
+function updateAnalysisLaunchControl(control) {
+  if (!control) return;
+  const targetCount = checkedAnalysisValues(control, ".analysis-target-checkbox").length;
+  const runtimeCount = checkedAnalysisValues(control, ".analysis-runtime-extension-checkbox").length;
+  const targetCountNode = control.querySelector("[data-analysis-selected-count]");
+  const runtimeCountNode = control.querySelector("[data-runtime-selected-count]");
+  const summary = control.querySelector("[data-analysis-launch-summary]");
+  const button = control.querySelector('[data-action="analyze-session"]');
+  if (targetCountNode) targetCountNode.textContent = String(targetCount);
+  if (runtimeCountNode) runtimeCountNode.textContent = String(runtimeCount);
+  if (summary) {
+    summary.textContent = formatText(ft("analysis_launch_summary"), {
+      targets: targetCount,
+      runtime: runtimeCount
+    });
+  }
+  if (button) {
+    button.disabled = button.dataset.unavailable === "true" || targetCount === 0;
+  }
+}
+
+document.querySelectorAll(".analysis-launch-control").forEach((control) => {
+  updateAnalysisLaunchControl(control);
+  control.addEventListener("change", (event) => {
+    if (event.target.matches(".analysis-target-checkbox, .analysis-runtime-extension-checkbox")) {
+      updateAnalysisLaunchControl(control);
+    }
+  });
+});
+
 function analysisStateLabel(state) {
   const known = ["prepared", "launched", "completed", "invalid", "failed"];
   return ft(`analysis_status_${known.includes(state) ? state : "unknown"}`);
@@ -996,6 +1056,39 @@ function renderAnalysisRuns(runs) {
       }
       outputs.appendChild(outputList);
       card.appendChild(outputs);
+    }
+
+    const terminalLaunchAllowed = analysisStatusPanel.dataset.terminalLaunch === "true";
+    if (run.implementation || (terminalLaunchAllowed && run.implementationAvailable)) {
+      const implementation = document.createElement("section");
+      implementation.className = "analysis-implementation";
+      const implementationCopy = document.createElement("div");
+      implementationCopy.className = "analysis-implementation-copy";
+      const implementationTitle = document.createElement("h3");
+      implementationTitle.textContent = ft("analysis_implementation_title");
+      const implementationHelp = document.createElement("p");
+      if (run.implementation?.state === "launched") {
+        implementationHelp.textContent = formatText(ft("analysis_implementation_launched"), {
+          time: analysisTimestamp(run.implementation.launchedAt)
+        });
+      } else if (run.implementation?.state === "prepared") {
+        implementationHelp.textContent = ft("analysis_implementation_prepared");
+      } else {
+        implementationHelp.textContent = ft("analysis_implementation_ready");
+      }
+      implementationCopy.append(implementationTitle, implementationHelp);
+      implementation.appendChild(implementationCopy);
+      if (terminalLaunchAllowed && run.implementationAvailable) {
+        const launchButton = document.createElement("button");
+        launchButton.type = "button";
+        launchButton.className = "action-btn action-btn-primary analysis-implementation-launch";
+        launchButton.dataset.action = "implement-analysis";
+        launchButton.dataset.id = analysisStatusPanel.dataset.sessionId;
+        launchButton.dataset.runId = run.runId || "";
+        launchButton.textContent = ft("analysis_implementation_launch");
+        implementation.appendChild(launchButton);
+      }
+      card.appendChild(implementation);
     }
 
     if (run.validation?.errors?.length) {
@@ -1176,22 +1269,78 @@ document.addEventListener("click", async (e) => {
   }
 
   if (action === "analyze-session") {
+    const control = btn.closest(".analysis-launch-control");
+    const targets = checkedAnalysisValues(control, ".analysis-target-checkbox");
+    if (!targets.length) {
+      const fallbackTarget = btn.dataset.target || "";
+      if (fallbackTarget) targets.push(fallbackTarget);
+    }
+    if (!targets.length) {
+      showToast(ft("analysis_select_target"), "error");
+      return;
+    }
+    const hasRuntimePicker = Boolean(control?.querySelector(".analysis-runtime-extension-checkbox"));
+    const runtimeExtensionIds = hasRuntimePicker
+      ? checkedAnalysisValues(control, ".analysis-runtime-extension-checkbox")
+      : null;
+    const wasDisabled = btn.disabled;
+    btn.disabled = true;
     try {
-      const target = btn.dataset.target || "";
-      const res = await fetch(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/analyze`, {
+      for (const target of targets) {
+        const body = { target };
+        if (runtimeExtensionIds) {
+          body.runtimeExtensionIds = runtimeExtensionIds;
+        }
+        const res = await fetch(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/analyze`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+        const result = await res.json();
+        if (!res.ok || !result.ok) {
+          throw new Error(result.error || `HTTP ${res.status}`);
+        }
+      }
+      showToast(
+        targets.length > 1
+          ? formatText(ft("analysis_opened_many"), { count: targets.length })
+          : ft("analysis_opened"),
+        "success"
+      );
+      await refreshAnalysisRuns(true);
+      analysisStatusPanel?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    } catch {
+      showToast(ft("analysis_disabled"), "error");
+    } finally {
+      btn.disabled = wasDisabled;
+      updateAnalysisLaunchControl(control);
+    }
+    return;
+  }
+
+  if (action === "implement-analysis") {
+    const runId = btn.dataset.runId || "";
+    if (!runId || !confirm(ft("analysis_implementation_confirm"))) {
+      return;
+    }
+    const wasDisabled = btn.disabled;
+    btn.disabled = true;
+    try {
+      const res = await fetch(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/analyses/${encodeURIComponent(runId)}/implement`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(target ? { target } : {})
+        body: "{}"
       });
       const result = await res.json();
       if (!res.ok || !result.ok) {
         throw new Error(result.error || `HTTP ${res.status}`);
       }
-      showToast(ft("analysis_opened"), "success");
+      showToast(ft("analysis_implementation_opened"), "success");
       await refreshAnalysisRuns(true);
-      analysisStatusPanel?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     } catch {
-      showToast(ft("analysis_disabled"), "error");
+      showToast(ft("analysis_implementation_disabled"), "error");
+    } finally {
+      btn.disabled = wasDisabled;
     }
     return;
   }

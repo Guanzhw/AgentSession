@@ -11,7 +11,7 @@ Every provider must export a default object matching this shape (see `src/provid
   id: "provider-id",           // Unique identifier (lowercase, used in URLs)
   name: "Display Name",        // Human-readable name for UI
   icon: "🔵",                  // Emoji or icon reference
-  
+
   detect() → boolean,          // Is this tool installed on this machine?
   getDataPath() → string|null, // Root path to session data
   scan() → AsyncIterable,      // Stream all session metadata

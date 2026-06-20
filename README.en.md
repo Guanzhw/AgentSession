@@ -299,11 +299,23 @@ can be overridden:
   "analysis": {
     "enabled": true,
     "defaultTarget": "skills",
-    "outputDir": ".opensessionviewer/analysis",
+    "outputDir": ".codeagentsession/analysis",
     "includeRawSnapshots": false,
     "shell": {
       "executable": "powershell.exe",
       "args": ["-NoExit", "-NoLogo", "-NoProfile"]
+    },
+    "implementation": {
+      "command": {
+        "executable": "opencode",
+        "args": [
+          "run",
+          "Read the attached implementation request and implement the accepted proposals.",
+          "--model", "deepseek/deepseek-v4-flash",
+          "--dir", "{projectPath}",
+          "--file", "{implementationPromptPath}"
+        ]
+      }
     },
     "targets": {
       "skills": {
@@ -344,7 +356,8 @@ Supported command placeholders are `{sessionId}`, `{projectPath}`, `{target}`,
 `{runId}`, `{runDir}`, `{sessionPath}`, `{sessionIndexPath}`,
 `{evidenceIndexPath}`, `{evidencePath}`, `{analysisToolPath}`, `{promptPath}`,
 `{reportPath}`, `{evaluationSeedPath}`, `{evaluationPath}`, `{proposalsPath}`,
-and `{artifactsPath}`. `{prompt}` is also available for agents that require the
+and `{artifactsPath}`. Implementation commands additionally support
+`{implementationPromptPath}`. `{prompt}` is also available for agents that require the
 complete prompt as one argument, although `{promptPath}` or `"stdin": "prompt"`
 is preferable for large sessions. `{messagesPath}` remains available when
 `includeRawSnapshots` is enabled for debugging or compatibility.
@@ -354,6 +367,14 @@ generated request as a file. Configure OpenCode permissions so it may write
 only inside the analysis output directory. `--dangerously-skip-permissions`
 can make unattended local testing easier, but should only be added for a
 trusted project and trusted prompt.
+
+After a run completes with `manifest.validation.ok === true` and at least one
+validated artifact proposal, the session page can launch an implementation run.
+Clicking **Implement accepted proposals** is the first-pass user approval gate:
+it writes `inputs/implementation-request.md`, points the configured implementation
+command at that file, and asks the agent to make only the accepted proposal
+changes, verify them, and leave the result for human review. It does not merge
+automatically.
 
 Relative `artifactRoots` and `outputDir` paths are resolved from the recorded
 session project directory. Absolute artifact roots are allowed when explicitly
@@ -370,11 +391,15 @@ are normalized on load and removed the next time settings are saved. Other
 custom paths are preserved.
 
 When `analysis.outputDir` is omitted, runs default to
-`.opensessionviewer/analysis` inside the session project. Each run carries the
-read-only evidence query tool and its local dependency in its own `tools/`
-directory, so the analyzer does not need access to the CodeagentSession
-installation directory. Explicit absolute output directories remain supported,
-but a project-scoped analyzer sandbox must also be able to access that path.
+`.codeagentsession/analysis` inside the session project. CodeagentSession writes
+`.codeagentsession/.gitignore` so generated runs stay out of source control even
+when the project does not already ignore that directory. Existing
+`.opensessionviewer/analysis` runs remain discoverable for compatibility. Each
+run carries the read-only evidence query tool and its local dependency in its
+own `tools/` directory, so the analyzer does not need access to the
+CodeagentSession installation directory. Explicit absolute output directories
+remain supported, but a project-scoped analyzer sandbox must also be able to
+access that path.
 
 Target-specific analyzer instructions can be edited directly on the settings
 page or configured as `analysis.targets.<target>.prompt`. `promptFile` is an

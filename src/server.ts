@@ -54,7 +54,9 @@ import {
   buildAnalysisPromptPreview,
   getSessionAnalysisAction,
   listSessionAnalysisRuns,
+  launchAnalysisImplementation,
   launchSessionAnalysis,
+  prepareAnalysisImplementation,
   prepareSessionAnalysis,
   SESSION_ANALYSIS_PROVIDER_ID
 } from "./analysis.js";
@@ -769,6 +771,12 @@ export async function startServer(config = getConfig()) {
           : Array.isArray(body.targets)
             ? String(body.targets.find((target) => typeof target === "string") || "").trim()
             : "";
+        const runtimeExtensionIds = Array.isArray(body.runtimeExtensionIds)
+          ? body.runtimeExtensionIds
+            .filter((id) => typeof id === "string")
+            .map((id) => id.trim())
+            .filter(Boolean)
+          : null;
         const targetId = requestedTarget || action.target;
         const selectedTarget = actionTargets.get(targetId);
         if (!selectedTarget) {
@@ -787,7 +795,8 @@ export async function startServer(config = getConfig()) {
           analysisConfig: appConfig.analysis,
           metaDir: appConfig.metaDir,
           configPath: appConfig.configPath,
-          targetId
+          targetId,
+          runtimeExtensionIds
         });
         launchSessionAnalysis(run, appConfig.resumeShell);
         return json(res, {
@@ -805,6 +814,53 @@ export async function startServer(config = getConfig()) {
       } catch (error) {
         console.error("Session analysis launch error:", error?.message || error);
         return json(res, { ok: false, error: error?.message || "Failed to launch session analysis" }, 500);
+      }
+    }
+
+    const analysisImplementationMatch = pathname.match(
+      /^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/analyses\/([^/]+)\/implement$/
+    );
+    if (req.method === "POST" && analysisImplementationMatch) {
+      if (!isTrustedLocalJsonRequest(req)) {
+        return json(res, { ok: false, error: "Implementation requests must be same-origin JSON from loopback" }, 403);
+      }
+      if (!appConfig.allowTerminalLaunch) {
+        return json(res, { ok: false, error: "Terminal launch is disabled" }, 403);
+      }
+
+      const providerId = analysisImplementationMatch[1];
+      if (providerId !== SESSION_ANALYSIS_PROVIDER_ID) {
+        return json(res, { ok: false, error: "Analysis implementation is currently supported for OpenCode only" }, 501);
+      }
+      const sessionId = safeDecodeId(analysisImplementationMatch[2]);
+      const runId = safeDecodeId(analysisImplementationMatch[3]);
+      const adapter = providerMap.get(providerId);
+      if (!sessionId || !runId || !adapter) {
+        return json(res, { ok: false, error: "Analysis run not found" }, 404);
+      }
+      const session = adapter.getSession(sessionId);
+      if (!session) {
+        return json(res, { ok: false, error: "Session not found" }, 404);
+      }
+
+      try {
+        await readBody(req);
+        const run = prepareAnalysisImplementation({
+          provider: adapter,
+          sessionId,
+          analysisConfig: appConfig.analysis,
+          metaDir: appConfig.metaDir,
+          runId
+        });
+        launchAnalysisImplementation(run, appConfig.resumeShell);
+        return json(res, {
+          ok: true,
+          runId: run.runId,
+          runDir: run.runDir
+        });
+      } catch (error) {
+        console.error("Analysis implementation launch error:", error?.message || error);
+        return json(res, { ok: false, error: error?.message || "Failed to launch analysis implementation" }, 500);
       }
     }
 

@@ -250,7 +250,7 @@ export function renderSettingsPage({
             ${field({
               id: "settings-analysis-output",
               label: t("settings.output_dir"),
-              value: typeof analysis.outputDir === "string" ? analysis.outputDir : ".opensessionviewer/analysis",
+              value: typeof analysis.outputDir === "string" ? analysis.outputDir : ".codeagentsession/analysis",
               help: t("settings.output_dir_help"),
               reset: "analysis-output"
             })}

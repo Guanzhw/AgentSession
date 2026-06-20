@@ -123,6 +123,9 @@ function sameStringArray(left, right) {
     && left.every((value, index) => value === right[index]);
 }
 
+const DEFAULT_ANALYSIS_OUTPUT_DIR = ".codeagentsession/analysis";
+const LEGACY_DEFAULT_ANALYSIS_OUTPUT_DIR = ".opensessionviewer/analysis";
+
 function migrateLegacyTargetMaterials(targetId, target) {
   if (!isObject(target)) return;
   const legacy = LEGACY_ANALYSIS_MATERIALS[targetId];
@@ -144,6 +147,15 @@ function migrateLegacyTargetMaterials(targetId, target) {
 function migrateLegacyAnalysisMaterials(config) {
   const analysis = isObject(config.analysis) ? config.analysis : null;
   if (!analysis) return config;
+  const outputDir = typeof analysis.outputDir === "string"
+    ? analysis.outputDir.replaceAll("\\", "/")
+    : "";
+  if (
+    outputDir === LEGACY_DEFAULT_ANALYSIS_OUTPUT_DIR
+    || outputDir === DEFAULT_ANALYSIS_OUTPUT_DIR
+  ) {
+    delete analysis.outputDir;
+  }
   const targetGroups = [analysis.targets];
   if (isObject(analysis.providers)) {
     for (const provider of Object.values(analysis.providers)) {
@@ -335,6 +347,18 @@ export function validateUserConfig(config) {
       if (config.analysis.shell !== undefined) {
         validateShell(config.analysis.shell, "analysis.shell", errors);
       }
+      if (config.analysis.implementation !== undefined) {
+        if (!isObject(config.analysis.implementation)) {
+          errors.push("analysis.implementation must be an object.");
+        } else {
+          if (config.analysis.implementation.command !== undefined) {
+            validateCommand(config.analysis.implementation.command, "analysis.implementation.command", errors);
+          }
+          if (config.analysis.implementation.shell !== undefined) {
+            validateShell(config.analysis.implementation.shell, "analysis.implementation.shell", errors);
+          }
+        }
+      }
       if (config.analysis.targets !== undefined) {
         validateAnalysisTargets(config.analysis.targets, "analysis.targets", errors);
       }
@@ -374,6 +398,26 @@ export function validateUserConfig(config) {
             }
             if (providerSettings.shell !== undefined) {
               validateShell(providerSettings.shell, `analysis.providers.${providerId}.shell`, errors);
+            }
+            if (providerSettings.implementation !== undefined) {
+              if (!isObject(providerSettings.implementation)) {
+                errors.push(`analysis.providers.${providerId}.implementation must be an object.`);
+              } else {
+                if (providerSettings.implementation.command !== undefined) {
+                  validateCommand(
+                    providerSettings.implementation.command,
+                    `analysis.providers.${providerId}.implementation.command`,
+                    errors
+                  );
+                }
+                if (providerSettings.implementation.shell !== undefined) {
+                  validateShell(
+                    providerSettings.implementation.shell,
+                    `analysis.providers.${providerId}.implementation.shell`,
+                    errors
+                  );
+                }
+              }
             }
             if (providerSettings.targets !== undefined) {
               validateAnalysisTargets(

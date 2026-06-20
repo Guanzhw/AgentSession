@@ -13,6 +13,7 @@ const CATEGORIZED_FILES = {
   evidenceIndexPath: "evidence/evidence-index.json",
   evidencePath: "evidence/evidence.jsonl",
   artifactsPath: "evidence/artifacts.json",
+  implementationPromptPath: "inputs/implementation-request.md",
   analysisToolPath: "tools/analysis-tools.js",
   analysisLayoutPath: "tools/analysis-layout.js",
   analysisToolPackagePath: "tools/package.json",

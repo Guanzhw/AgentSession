@@ -38,6 +38,9 @@ import { resolveExecutable, resolveProjectDirectory } from "./resume.js";
 const MAX_ARTIFACT_FILES = 200;
 const MAX_ARTIFACT_BYTES = 256 * 1024;
 const MAX_TOTAL_ARTIFACT_BYTES = 5 * 1024 * 1024;
+const PROJECT_ANALYSIS_DIR_NAME = ".codeagentsession";
+const LEGACY_PROJECT_ANALYSIS_DIR_NAME = ".opensessionviewer";
+const PROJECT_ANALYSIS_GITIGNORE = "*\n!.gitignore\n";
 export const SESSION_ANALYSIS_PROVIDER_ID = "opencode";
 export const OPENCODE_ANALYSIS_COMMAND = {
   executable: "opencode",
@@ -47,6 +50,16 @@ export const OPENCODE_ANALYSIS_COMMAND = {
     "--model", "deepseek/deepseek-v4-flash",
     "--dir", "{projectPath}",
     "--file", "{promptPath}"
+  ]
+};
+export const OPENCODE_IMPLEMENTATION_COMMAND = {
+  executable: "opencode",
+  args: [
+    "run",
+    "Read the attached implementation request and implement the accepted proposals.",
+    "--model", "deepseek/deepseek-v4-flash",
+    "--dir", "{projectPath}",
+    "--file", "{implementationPromptPath}"
   ]
 };
 
@@ -217,6 +230,39 @@ export function resolveAnalysisSettings(provider: ProviderAdapter, analysisConfi
   };
 }
 
+function objectOrNull(value) {
+  return value && typeof value === "object" ? value : null;
+}
+
+export function resolveAnalysisImplementationSettings(providerOrId, analysisConfig) {
+  const providerId = typeof providerOrId === "string" ? providerOrId : providerOrId?.id;
+  if (providerId !== SESSION_ANALYSIS_PROVIDER_ID || !analysisConfig || analysisConfig.enabled !== true) {
+    return null;
+  }
+  const providerConfig = analysisConfig.providers?.[providerId];
+  if (providerConfig === false) {
+    return null;
+  }
+  const providerSettings = objectOrNull(providerConfig) || {};
+  const sharedImplementation = objectOrNull(analysisConfig.implementation);
+  const providerImplementation = objectOrNull(providerSettings.implementation);
+  const command = providerImplementation?.command
+    || sharedImplementation?.command
+    || OPENCODE_IMPLEMENTATION_COMMAND;
+  if (!isCommandSpec(command)) {
+    return null;
+  }
+  const shell = providerImplementation?.shell
+    || sharedImplementation?.shell
+    || providerSettings.shell
+    || analysisConfig.shell
+    || null;
+  return {
+    command,
+    shell: isShellSpec(shell) ? shell : null
+  };
+}
+
 export function getSessionAnalysisAction(
   provider: ProviderAdapter,
   sessionId,
@@ -251,6 +297,21 @@ export function getSessionAnalysisAction(
   if (!targets.length || !effectiveTarget) {
     return null;
   }
+  const runtimeEnvironment = resolveRuntimeEnvironment(provider, sessionId);
+  const runtimeExtensions = (runtimeEnvironment?.extensions || []).map((extension) => ({
+    id: extension.id,
+    provider: extension.provider,
+    scope: extension.scope,
+    kind: extension.kind,
+    name: extension.name,
+    source: extension.source,
+    sourcePath: extension.sourcePath,
+    sourceType: extension.sourceType,
+    available: extension.available,
+    capturable: extension.capturable,
+    defaultSelected: extension.defaultSelected,
+    note: extension.note
+  }));
   return {
     target: effectiveTarget.id,
     targets,
@@ -258,7 +319,17 @@ export function getSessionAnalysisAction(
     label: effectiveTarget.label,
     available: true,
     sessionId,
-    projectPath
+    projectPath,
+    runtimeEnvironment: runtimeEnvironment
+      ? {
+        resolution: runtimeEnvironment.resolution,
+        note: runtimeEnvironment.note,
+        selectedExtensionIds: runtimeExtensions
+          .filter((extension) => extension.defaultSelected && extension.available)
+          .map((extension) => extension.id),
+        extensions: runtimeExtensions
+      }
+      : null
   };
 }
 
@@ -424,7 +495,8 @@ function snapshotArtifacts(
   snapshotDir,
   target,
   runtimeEnvironment: RuntimeEnvironmentView | null,
-  excludedRoots = []
+  excludedRoots = [],
+  selectedRuntimeExtensionIds = null
 ) {
   const resolvedExcludedRoots = excludedRoots.map((root) => path.resolve(root));
   const roots = [];
@@ -449,8 +521,16 @@ function snapshotArtifacts(
     ".txt",
     ".mdx"
   ]);
+  const selectedRuntimeExtensionSet = Array.isArray(selectedRuntimeExtensionIds)
+    ? new Set(selectedRuntimeExtensionIds.filter((id) => typeof id === "string" && id.trim()))
+    : null;
   const selectedRuntimeExtensions = (runtimeEnvironment?.extensions || [])
-    .filter((extension) => extension.defaultSelected && extension.available);
+    .filter((extension) => (
+      extension.available
+      && (selectedRuntimeExtensionSet
+        ? selectedRuntimeExtensionSet.has(extension.id)
+        : extension.defaultSelected)
+    ));
   const runtimeDirectoryExtensions = [];
   const runtimeFileExtensionsToCapture = [];
   for (const extension of selectedRuntimeExtensions) {
@@ -865,6 +945,32 @@ function writeJson(filePath, value) {
   writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
 }
 
+function getProjectAnalysisOutputRoot(projectPath) {
+  return path.join(projectPath, PROJECT_ANALYSIS_DIR_NAME, "analysis");
+}
+
+function getLegacyProjectAnalysisOutputRoot(projectPath) {
+  return path.join(projectPath, LEGACY_PROJECT_ANALYSIS_DIR_NAME, "analysis");
+}
+
+function ensureProjectAnalysisGitignore(outputRoot, projectPath) {
+  const projectRoot = path.resolve(projectPath);
+  const resolvedOutputRoot = path.resolve(outputRoot);
+  for (const directoryName of [PROJECT_ANALYSIS_DIR_NAME, LEGACY_PROJECT_ANALYSIS_DIR_NAME]) {
+    const directory = path.join(projectRoot, directoryName);
+    const analysisRoot = path.join(directory, "analysis");
+    if (resolvedOutputRoot !== path.resolve(analysisRoot)) {
+      continue;
+    }
+    mkdirSync(directory, { recursive: true });
+    const gitignorePath = path.join(directory, ".gitignore");
+    if (!existsSync(gitignorePath)) {
+      writeFileSync(gitignorePath, PROJECT_ANALYSIS_GITIGNORE, "utf-8");
+    }
+    return;
+  }
+}
+
 export function getAnalysisOutputRoot(directory, analysisConfig, metaDir) {
   const projectPath = resolveProjectDirectory(directory);
   if (!projectPath) {
@@ -875,7 +981,7 @@ export function getAnalysisOutputRoot(directory, analysisConfig, metaDir) {
     ? path.isAbsolute(configuredOutput)
       ? path.resolve(configuredOutput)
       : path.resolve(projectPath, configuredOutput)
-    : path.join(projectPath, ".opensessionviewer", "analysis");
+    : getProjectAnalysisOutputRoot(projectPath);
 }
 
 export function listSessionAnalysisRuns({
@@ -893,10 +999,19 @@ export function listSessionAnalysisRuns({
 
   const runs = [];
   const outputRoots = [outputRoot];
-  if (!analysisConfig?.outputDir && metaDir) {
-    const legacyOutputRoot = path.join(metaDir, "analysis");
-    if (path.resolve(legacyOutputRoot) !== path.resolve(outputRoot)) {
-      outputRoots.push(legacyOutputRoot);
+  if (!analysisConfig?.outputDir) {
+    const projectPath = resolveProjectDirectory(directory);
+    if (projectPath) {
+      const legacyProjectOutputRoot = getLegacyProjectAnalysisOutputRoot(projectPath);
+      if (path.resolve(legacyProjectOutputRoot) !== path.resolve(outputRoot)) {
+        outputRoots.push(legacyProjectOutputRoot);
+      }
+    }
+    if (metaDir) {
+      const legacyMetaOutputRoot = path.join(metaDir, "analysis");
+      if (!outputRoots.some((root) => path.resolve(root) === path.resolve(legacyMetaOutputRoot))) {
+        outputRoots.push(legacyMetaOutputRoot);
+      }
     }
   }
 
@@ -957,6 +1072,20 @@ export function listSessionAnalysisRuns({
             available: outputAvailable(proposalsPath)
           }
         };
+        const implementation = manifest.implementation && typeof manifest.implementation === "object"
+          ? manifest.implementation
+          : null;
+        const implementationSettings = resolveAnalysisImplementationSettings(providerId, analysisConfig);
+        const implementationState = implementation?.state ? String(implementation.state) : "";
+        const implementationAvailable = Boolean(
+          manifest.state === "completed"
+          && validation?.ok === true
+          && outputs.proposals.available
+          && Number(validation.artifactProposalCount) > 0
+          && implementationState !== "launched"
+          && implementationSettings
+          && resolveExecutable(implementationSettings.command.executable)
+        );
         runs.push({
           runId: String(manifest.runId || entry.name),
           state: String(manifest.state || "unknown"),
@@ -968,6 +1097,17 @@ export function listSessionAnalysisRuns({
           runDir,
           hasReport: outputs.report.available,
           outputs,
+          implementation: implementation
+            ? {
+              state: implementationState || "unknown",
+              acceptedAt: implementation.acceptedAt || null,
+              launchedAt: implementation.launchedAt || null,
+              promptPath: typeof implementation.promptPath === "string"
+                ? implementation.promptPath
+                : null
+            }
+            : null,
+          implementationAvailable,
           validation: validation
             ? {
               ok: Boolean(validation.ok),
@@ -1010,7 +1150,8 @@ export function prepareSessionAnalysis({
   analysisConfig,
   metaDir,
   configPath = "",
-  targetId = ""
+  targetId = "",
+  runtimeExtensionIds = null
 }) {
   const settings = resolveAnalysisSettings(provider, analysisConfig, targetId);
   if (!settings) {
@@ -1027,6 +1168,7 @@ export function prepareSessionAnalysis({
 
   const outputRoot = getAnalysisOutputRoot(session.directory, analysisConfig, metaDir);
   mkdirSync(outputRoot, { recursive: true });
+  ensureProjectAnalysisGitignore(outputRoot, projectPath);
   const runId = `${timestampSegment()}-${safeSegment(provider.id)}-${safeSegment(sessionId)}-${randomUUID().slice(0, 8)}`;
   const runDir = path.join(outputRoot, runId);
   mkdirSync(runDir, { recursive: false });
@@ -1042,7 +1184,12 @@ export function prepareSessionAnalysis({
     files.artifactSnapshotsDir,
     settings.target,
     runtimeEnvironment,
-    [outputRoot]
+    [...new Set([
+      outputRoot,
+      getProjectAnalysisOutputRoot(projectPath),
+      getLegacyProjectAnalysisOutputRoot(projectPath)
+    ].map((root) => path.resolve(root)))],
+    runtimeExtensionIds
   );
 
   const evidence = writeAnalysisEvidence({
@@ -1205,6 +1352,198 @@ export function prepareSessionAnalysis({
   };
 }
 
+function buildImplementationPrompt({
+  provider,
+  manifest,
+  projectPath,
+  files
+}) {
+  return `# OpenSessionViewer accepted-proposal implementation
+
+The user has reviewed and accepted the validated artifact proposals from an
+OpenSessionViewer analysis run. Implement the accepted proposal set, then verify
+the result.
+
+## Run context
+
+- Project: ${projectPath}
+- Provider: ${provider.id}
+- Session: ${manifest.sessionId}
+- Target: ${manifest.target || ""}
+- Analysis run: ${manifest.runId}
+- Analysis run directory: ${manifest.runDir || ""}
+
+## Inputs
+
+- Human report: ${files.reportPath}
+- Evaluation plan: ${files.evaluationPath}
+- Accepted artifact proposals: ${files.proposalsPath}
+- Captured artifact inventory: ${files.artifactsPath}
+- Original analysis request: ${files.promptPath}
+
+## Required behavior
+
+1. Treat the proposal file as accepted by the user, but still implement it
+   narrowly and preserve unrelated local changes.
+2. Inspect \`git status --short\` before editing. Do not revert or overwrite
+   changes that are unrelated to the accepted proposals.
+3. Implement only proposals listed in \`${files.proposalsPath}\`.
+4. Do not edit provider-owned databases, transcripts, or files inside
+   \`${manifest.runDir || ""}\`.
+5. Prefer focused source, test, documentation, or instruction changes that map
+   directly to the proposal descriptions.
+6. Use \`${files.evaluationPath}\` as the verification guide. Run the relevant
+   tests, type checks, or review checks available in the project.
+7. Do not merge automatically. If a PR or MR can be opened after verification,
+   open it for human review; otherwise leave the worktree ready for review and
+   summarize the changes and verification.
+8. If a proposal is unsafe, stale, impossible, or contradicted by current code,
+   stop and explain that instead of forcing an edit.
+
+## Completion report
+
+Before finishing, report:
+
+- Which proposal IDs were implemented.
+- Which files changed.
+- Which verification commands ran and their exact result.
+- Any proposal IDs skipped and why.
+`;
+}
+
+function readAnalysisManifest(runDir) {
+  const manifestPath = path.join(runDir, "manifest.json");
+  const stat = lstatSync(manifestPath);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024 * 1024) {
+    throw new Error("Analysis manifest is unavailable");
+  }
+  return JSON.parse(readFileSync(manifestPath, "utf-8"));
+}
+
+export function prepareAnalysisImplementation({
+  provider,
+  sessionId,
+  analysisConfig,
+  metaDir,
+  runId
+}) {
+  const settings = resolveAnalysisImplementationSettings(provider, analysisConfig);
+  if (!settings) {
+    throw new Error("Analysis implementation is not configured");
+  }
+  const session = provider.getSession(sessionId);
+  if (!session) {
+    throw new Error("Session not found");
+  }
+  const projectPath = resolveProjectDirectory(session.directory);
+  if (!projectPath) {
+    throw new Error("Session has no valid project directory");
+  }
+  const runs = listSessionAnalysisRuns({
+    providerId: provider.id,
+    sessionId,
+    directory: session.directory,
+    analysisConfig,
+    metaDir,
+    limit: 50
+  });
+  const run = runs.find((item) => item.runId === runId);
+  if (!run) {
+    throw new Error("Analysis run not found");
+  }
+  if (run.state !== "completed" || run.validation?.ok !== true) {
+    throw new Error("Only completed, validated analysis runs can be implemented");
+  }
+  if (!run.outputs?.proposals?.available || Number(run.validation.artifactProposalCount) <= 0) {
+    throw new Error("The analysis run has no validated artifact proposals to implement");
+  }
+  if (run.implementation?.state === "launched") {
+    throw new Error("Implementation has already been launched for this analysis run");
+  }
+
+  const manifest = readAnalysisManifest(run.runDir);
+  const files = {
+    ...getAnalysisRunPaths(run.runDir),
+    reportPath: resolveAnalysisRunPath(run.runDir, manifest, "reportPath"),
+    evaluationPath: resolveAnalysisRunPath(run.runDir, manifest, "evaluationPath"),
+    proposalsPath: resolveAnalysisRunPath(run.runDir, manifest, "proposalsPath"),
+    artifactsPath: resolveAnalysisRunPath(run.runDir, manifest, "artifactsPath"),
+    promptPath: resolveAnalysisRunPath(run.runDir, manifest, "promptPath")
+  };
+  mkdirSync(path.dirname(files.implementationPromptPath), { recursive: true });
+  const prompt = buildImplementationPrompt({
+    provider,
+    manifest,
+    projectPath,
+    files
+  });
+  writeFileSync(files.implementationPromptPath, prompt, "utf-8");
+
+  const replacements = {
+    sessionId,
+    projectPath,
+    target: manifest.target || "",
+    runId: manifest.runId || runId,
+    runDir: run.runDir,
+    reportPath: files.reportPath,
+    evaluationPath: files.evaluationPath,
+    proposalsPath: files.proposalsPath,
+    artifactsPath: files.artifactsPath,
+    analysisPromptPath: files.promptPath,
+    implementationPromptPath: files.implementationPromptPath,
+    promptPath: files.implementationPromptPath,
+    prompt
+  };
+  const cwd = resolveProjectDirectory(settings.command.cwd
+    ? replaceCommandValue(settings.command.cwd, replacements)
+    : projectPath);
+  if (!cwd) {
+    throw new Error("Configured implementation working directory is invalid");
+  }
+  const resolvedExecutable = resolveExecutable(settings.command.executable);
+  if (!resolvedExecutable) {
+    throw new Error("Configured implementation executable was not found");
+  }
+  const command = {
+    executable: settings.command.executable,
+    resolvedExecutable,
+    args: settings.command.args.map((arg) => replaceCommandValue(arg, replacements)),
+    cwd,
+    stdinPath: settings.command.stdin === "prompt" ? files.implementationPromptPath : null
+  };
+  const nextManifest = {
+    ...manifest,
+    files: {
+      ...(manifest.files || {}),
+      implementationPromptPath: files.implementationPromptPath
+    },
+    implementation: {
+      schemaVersion: 1,
+      state: "prepared",
+      acceptedAt: new Date().toISOString(),
+      acceptedBy: "user-action",
+      promptPath: analysisRunRelativePath(run.runDir, files.implementationPromptPath),
+      proposalsPath: analysisRunRelativePath(run.runDir, files.proposalsPath),
+      command: {
+        executable: command.executable,
+        args: command.args,
+        cwd: command.cwd,
+        stdin: command.stdinPath ? "prompt" : null
+      }
+    }
+  };
+  writeJson(files.manifestPath, nextManifest);
+
+  return {
+    runId: String(manifest.runId || runId),
+    runDir: run.runDir,
+    shell: settings.shell,
+    command,
+    files,
+    manifest: nextManifest
+  };
+}
+
 export function buildPowerShellAnalysisArgs(powershell, shellArgs = ["-NoExit", "-NoLogo"]) {
   const script = [
     "$json=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:OPENSESSIONVIEWER_ANALYSIS_SPEC))",
@@ -1214,6 +1553,23 @@ export function buildPowerShellAnalysisArgs(powershell, shellArgs = ["-NoExit", 
     "try{if($spec.stdinPath){$inputText=[IO.File]::ReadAllText($spec.stdinPath);$inputText|& $spec.executable @($spec.args)}else{& $spec.executable @($spec.args)};$agentExitCode=$LASTEXITCODE}catch{Write-Error $_;$agentExitCode=1}",
     "& $spec.nodeExecutable $spec.validatorPath $spec.runDir ([string]$agentExitCode) $spec.integrityBase64",
     "if($agentExitCode -ne 0){Write-Host \"Analysis command exited with code $agentExitCode\" -ForegroundColor Red}"
+  ].join(";");
+  return [
+    powershell,
+    ...shellArgs,
+    "-EncodedCommand",
+    Buffer.from(script, "utf16le").toString("base64")
+  ];
+}
+
+export function buildPowerShellImplementationArgs(powershell, shellArgs = ["-NoExit", "-NoLogo"]) {
+  const script = [
+    "$json=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:OPENSESSIONVIEWER_IMPLEMENTATION_SPEC))",
+    "$spec=$json|ConvertFrom-Json",
+    "Set-Location -LiteralPath $spec.cwd",
+    "$agentExitCode=0",
+    "try{if($spec.stdinPath){$inputText=[IO.File]::ReadAllText($spec.stdinPath);$inputText|& $spec.executable @($spec.args)}else{& $spec.executable @($spec.args)};$agentExitCode=$LASTEXITCODE}catch{Write-Error $_;$agentExitCode=1}",
+    "if($agentExitCode -ne 0){Write-Host \"Implementation command exited with code $agentExitCode\" -ForegroundColor Red}else{Write-Host \"Implementation command completed\" -ForegroundColor Green}"
   ].join(";");
   return [
     powershell,
@@ -1266,6 +1622,53 @@ export function launchSessionAnalysis(run, fallbackShell = null) {
     ...run.manifest,
     state: "launched",
     launchedAt: new Date().toISOString()
+  };
+  writeJson(run.files.manifestPath, launched);
+}
+
+export function launchAnalysisImplementation(run, fallbackShell = null) {
+  if (process.platform !== "win32") {
+    throw new Error("Terminal launching is currently supported on Windows only");
+  }
+  if (!run?.command?.resolvedExecutable || !run?.command?.cwd) {
+    throw new Error("Implementation command is not available");
+  }
+
+  const terminal = resolveExecutable("wt.exe");
+  const configuredShell = run.shell || fallbackShell;
+  const shellSpec = isShellSpec(configuredShell) ? configuredShell : null;
+  const powershell = shellSpec
+    ? resolveExecutable(shellSpec.executable)
+    : resolveExecutable("pwsh.exe") || resolveExecutable("powershell.exe");
+  if (!terminal || !powershell) {
+    throw new Error("Windows Terminal and PowerShell are required");
+  }
+  const shellArgs = shellSpec?.args || ["-NoExit", "-NoLogo"];
+  const payload = Buffer.from(JSON.stringify({
+    executable: run.command.resolvedExecutable,
+    args: run.command.args,
+    cwd: run.command.cwd,
+    stdinPath: run.command.stdinPath,
+    runDir: run.runDir
+  }), "utf-8").toString("base64");
+  const child = spawn(terminal, [
+    "-d", run.command.cwd,
+    ...buildPowerShellImplementationArgs(powershell, shellArgs)
+  ], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+    env: { ...process.env, OPENSESSIONVIEWER_IMPLEMENTATION_SPEC: payload }
+  });
+  child.unref();
+
+  const launched = {
+    ...run.manifest,
+    implementation: {
+      ...run.manifest.implementation,
+      state: "launched",
+      launchedAt: new Date().toISOString()
+    }
   };
   writeJson(run.files.manifestPath, launched);
 }

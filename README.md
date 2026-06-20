@@ -288,11 +288,23 @@ Analyzer 命令，也可以覆盖：
   "analysis": {
     "enabled": true,
     "defaultTarget": "skills",
-    "outputDir": ".opensessionviewer/analysis",
+    "outputDir": ".codeagentsession/analysis",
     "includeRawSnapshots": false,
     "shell": {
       "executable": "powershell.exe",
       "args": ["-NoExit", "-NoLogo", "-NoProfile"]
+    },
+    "implementation": {
+      "command": {
+        "executable": "opencode",
+        "args": [
+          "run",
+          "读取附加的实现请求并实现已接受的提案。",
+          "--model", "deepseek/deepseek-v4-flash",
+          "--dir", "{projectPath}",
+          "--file", "{implementationPromptPath}"
+        ]
+      }
     },
     "targets": {
       "skills": {
@@ -334,6 +346,7 @@ Analyzer 命令，也可以覆盖：
 `{evidenceIndexPath}`、`{evidencePath}`、`{analysisToolPath}`、
 `{promptPath}`、`{reportPath}`、`{evaluationSeedPath}`、
 `{evaluationPath}`、`{proposalsPath}` 和 `{artifactsPath}` 占位符。
+实现命令还支持 `{implementationPromptPath}`。
 也可以使用 `{prompt}` 将完整提示词作为一个参数传入，但大体积会话更适合
 使用 `{promptPath}` 或 `"stdin": "prompt"`。只有启用
 `includeRawSnapshots` 进行调试或兼容旧 Analyzer 时，才应使用
@@ -342,6 +355,12 @@ Analyzer 命令，也可以覆盖：
 OpenCode 示例使用非交互的 `run` 命令，并把生成的请求作为文件附加。应配置
 OpenCode 权限，使其只能写入分析输出目录。`--dangerously-skip-permissions`
 可简化受信任本地项目的无人值守测试，但只应在项目和提示词均可信时添加。
+
+当 run 以 `manifest.validation.ok === true` 完成且至少包含一个已校验的工件
+提案后，会话页可以启动实现 run。点击 **实现已接受的提案** 是第一版用户
+批准门：它会写入 `inputs/implementation-request.md`，把配置的实现命令指向
+该文件，并要求 Agent 只实现已接受的提案、完成验证、留下供人工 review 的
+结果；它不会自动合并。
 
 相对路径形式的 `artifactRoots` 和 `outputDir` 从会话记录的项目目录解析。
 显式配置时也允许使用绝对工件目录。`artifactFiles` 可以包含 `README.md`
@@ -355,10 +374,13 @@ OpenCode 权限，使其只能写入分析输出目录。`--dangerously-skip-per
 保存设置时移除；其他自定义路径保持不变。
 
 未配置 `analysis.outputDir` 时，run 默认写入会话项目下的
-`.opensessionviewer/analysis`。每个 run 都会在自己的 `tools/` 目录中携带
-只读 evidence 查询工具及其本地依赖，因此 Analyzer 不需要读取
-CodeagentSession 的安装目录。显式绝对 `outputDir` 仍受支持，但如果 Analyzer
-采用仅允许访问项目目录的 sandbox，该目录也必须对 Analyzer 可见。
+`.codeagentsession/analysis`。CodeagentSession 会写入
+`.codeagentsession/.gitignore`，即使目标项目尚未忽略该目录，生成的 run 也不会
+进入版本控制。已有的 `.opensessionviewer/analysis` run 仍会继续被发现以保持兼容。
+每个 run 都会在自己的 `tools/` 目录中携带只读 evidence 查询工具及其本地依赖，
+因此 Analyzer 不需要读取 CodeagentSession 的安装目录。显式绝对 `outputDir`
+仍受支持，但如果 Analyzer 采用仅允许访问项目目录的 sandbox，该目录也必须对
+Analyzer 可见。
 
 可以在设置页面直接编辑目标专用的 Analyzer 指令，也可以通过
 `analysis.targets.<target>.prompt` 配置。`promptFile` 只是对已有文本文件的

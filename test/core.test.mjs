@@ -43,11 +43,13 @@ import {
 import {
   buildAnalysisPromptPreview,
   buildPowerShellAnalysisArgs,
+  buildPowerShellImplementationArgs,
   getAnalysisTargetIds,
   getDefaultAnalysisTargetIds,
   getAnalysisOutputRoot,
   getSessionAnalysisAction,
   listSessionAnalysisRuns,
+  prepareAnalysisImplementation,
   prepareSessionAnalysis,
   resolveAnalysisSettings
 } from "../dist/src/analysis.js";
@@ -686,6 +688,28 @@ test("settings configuration validates, persists, and applies runtime fields", (
       "analysis.providers.opencode.targets.skills.artifactRoots must be an array of strings."
     ]
   );
+  assert.deepEqual(
+    validateUserConfig({
+      analysis: {
+        implementation: {
+          command: { executable: "", args: "run" }
+        },
+        providers: {
+          opencode: {
+            implementation: {
+              command: { executable: "", args: "run" }
+            }
+          }
+        }
+      }
+    }),
+    [
+      "analysis.implementation.command.executable must be a non-empty string.",
+      "analysis.implementation.command.args must be an array of strings.",
+      "analysis.providers.opencode.implementation.command.executable must be a non-empty string.",
+      "analysis.providers.opencode.implementation.command.args must be an array of strings."
+    ]
+  );
 });
 
 test("legacy analysis material defaults migrate without removing custom paths", () => {
@@ -693,6 +717,7 @@ test("legacy analysis material defaults migrate without removing custom paths", 
   const configPath = path.join(temp, "config.json");
   writeFileSync(configPath, JSON.stringify({
     analysis: {
+      outputDir: ".opensessionviewer/analysis",
       targets: {
         skills: {
           artifactRoots: ["skills", ".agents/skills", ".codex/skills"]
@@ -722,6 +747,7 @@ test("legacy analysis material defaults migrate without removing custom paths", 
   }));
 
   const document = readUserConfigDocument(configPath);
+  assert.equal(document.config.analysis.outputDir, undefined);
   assert.equal(document.config.analysis.targets.skills.artifactRoots, undefined);
   assert.deepEqual(document.config.analysis.targets.prompts.artifactRoots, ["custom-prompts"]);
   assert.equal(
@@ -741,6 +767,7 @@ test("legacy analysis material defaults migrate without removing custom paths", 
   const savedPath = path.join(temp, "saved.json");
   writeUserConfig(savedPath, JSON.parse(document.raw));
   const saved = JSON.parse(readFileSync(savedPath, "utf-8"));
+  assert.equal(saved.analysis.outputDir, undefined);
   assert.equal(saved.analysis.targets.skills.artifactRoots, undefined);
   assert.equal(saved.analysis.providers.opencode.targets.skills.artifactRoots, undefined);
   assert.equal(saved.analysis.providers.opencode.targets.skills.artifactFiles, undefined);
@@ -1088,6 +1115,13 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   const analysisConfig = {
     enabled: true,
     defaultTargets: ["skills", "tests"],
+    implementation: {
+      command: {
+        executable: process.execPath,
+        args: ["--version", "{implementationPromptPath}", "{proposalsPath}"],
+        stdin: "prompt"
+      }
+    },
     targets: {
       skills: {
         artifactRoots: ["skills"],
@@ -1116,6 +1150,12 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.equal(action.target, "skills");
   assert.equal(action.available, true);
   assert.deepEqual(action.selectedTargets, ["skills"]);
+  assert.deepEqual(action.runtimeEnvironment.selectedExtensionIds, [
+    "runtime:opencode:project:skill:project",
+    "runtime:opencode:project:instruction:agents",
+    "runtime:opencode:user:hook:user",
+    "runtime:opencode:user:plugin:metadata"
+  ]);
   assert.deepEqual(
     action.targets.map((target) => target.id),
     Object.keys(BUILTIN_ANALYSIS_TARGETS)
@@ -1174,7 +1214,11 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   });
   assert.equal(
     path.dirname(run.runDir),
-    path.join(projectPath, ".opensessionviewer", "analysis")
+    path.join(projectPath, ".codeagentsession", "analysis")
+  );
+  assert.equal(
+    readFileSync(path.join(projectPath, ".codeagentsession", ".gitignore"), "utf-8"),
+    "*\n!.gitignore\n"
   );
   assert.equal(preparedRuns.length, 1);
   assert.equal(preparedRuns[0].state, "prepared");
@@ -1209,7 +1253,10 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     ]
   );
   assert.equal(
-    artifacts.files.some((file) => file.sourcePath.includes(`${path.sep}.opensessionviewer${path.sep}`)),
+    artifacts.files.some((file) => (
+      file.sourcePath.includes(`${path.sep}.codeagentsession${path.sep}`)
+      || file.sourcePath.includes(`${path.sep}.opensessionviewer${path.sep}`)
+    )),
     false
   );
   const skillArtifact = artifacts.files.find(
@@ -1436,6 +1483,42 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.equal(completedRuns[0].outputs.evaluation.available, true);
   assert.equal(completedRuns[0].outputs.proposals.available, true);
   assert.equal(completedRuns[0].validation.evaluationCaseCount, 3);
+  assert.equal(completedRuns[0].implementationAvailable, true);
+
+  const implementationRun = prepareAnalysisImplementation({
+    provider,
+    sessionId: "session-analysis",
+    analysisConfig,
+    metaDir: path.join(temp, "meta"),
+    runId: run.runId
+  });
+  assert.equal(implementationRun.command.stdinPath, implementationRun.files.implementationPromptPath);
+  assert.equal(implementationRun.command.args[1], implementationRun.files.implementationPromptPath);
+  assert.equal(implementationRun.command.args[2], implementationRun.files.proposalsPath);
+  assert.ok(existsSync(implementationRun.files.implementationPromptPath));
+  const implementationPrompt = readFileSync(implementationRun.files.implementationPromptPath, "utf-8");
+  assert.match(implementationPrompt, /accepted the validated artifact proposals/);
+  assert.match(implementationPrompt, /git status --short/);
+  assert.match(implementationPrompt, /Do not merge automatically/);
+  assert.match(implementationPrompt, new RegExp(
+    implementationRun.files.proposalsPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  ));
+  const implementationManifest = JSON.parse(readFileSync(run.files.manifestPath, "utf-8"));
+  assert.equal(implementationManifest.implementation.state, "prepared");
+  assert.equal(implementationManifest.implementation.acceptedBy, "user-action");
+  assert.equal(
+    implementationManifest.implementation.promptPath,
+    path.join("inputs", "implementation-request.md").split(path.sep).join("/")
+  );
+  const preparedImplementationRuns = listSessionAnalysisRuns({
+    providerId: "opencode",
+    sessionId: "session-analysis",
+    directory: projectPath,
+    analysisConfig,
+    metaDir: path.join(temp, "meta")
+  });
+  assert.equal(preparedImplementationRuns[0].implementation.state, "prepared");
+  assert.equal(preparedImplementationRuns[0].implementationAvailable, true);
 
   const generatedTargetProposal = JSON.parse(readFileSync(run.files.proposalsPath, "utf-8"));
   generatedTargetProposal.proposals[0].artifactPath = path.relative(
@@ -1455,6 +1538,18 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   const tampered = validateAnalysisOutputs(run.runDir, 0, run.integrity);
   assert.equal(tampered.state, "invalid");
   assert.ok(tampered.validation.errors.some((error) => /integrity check/.test(error)));
+
+  const filteredRuntimeRun = prepareSessionAnalysis({
+    provider,
+    sessionId: "session-analysis",
+    analysisConfig,
+    metaDir: path.join(temp, "meta"),
+    runtimeExtensionIds: ["runtime:opencode:project:instruction:agents"]
+  });
+  const filteredArtifacts = JSON.parse(readFileSync(filteredRuntimeRun.files.artifactsPath, "utf-8"));
+  assert.deepEqual(filteredArtifacts.runtimeEnvironment.selectedExtensionIds, [
+    "runtime:opencode:project:instruction:agents"
+  ]);
 });
 
 test("analysis layout resolves legacy flat run files", () => {
@@ -1493,8 +1588,19 @@ test("analysis run listing preserves legacy metadata-directory runs", () => {
 
   assert.equal(
     getAnalysisOutputRoot(projectPath, {}, metaDir),
-    path.join(projectPath, ".opensessionviewer", "analysis")
+    path.join(projectPath, ".codeagentsession", "analysis")
   );
+  const legacyProjectRunDir = path.join(projectPath, ".opensessionviewer", "analysis", "legacy-project-run");
+  mkdirSync(legacyProjectRunDir, { recursive: true });
+  writeFileSync(path.join(legacyProjectRunDir, "manifest.json"), `${JSON.stringify({
+    schemaVersion: 1,
+    runId: "legacy-project-run",
+    provider: "codex",
+    sessionId: "legacy-session",
+    target: "skills",
+    state: "completed",
+    createdAt: "2026-06-02T00:00:00.000Z"
+  })}\n`);
   const runs = listSessionAnalysisRuns({
     providerId: "codex",
     sessionId: "legacy-session",
@@ -1502,9 +1608,16 @@ test("analysis run listing preserves legacy metadata-directory runs", () => {
     analysisConfig: {},
     metaDir
   });
-  assert.equal(runs.length, 1);
-  assert.equal(runs[0].runId, "legacy-run");
-  assert.equal(runs[0].runDir, runDir);
+  assert.equal(runs.length, 2);
+  assert.deepEqual(
+    runs.map((run) => run.runId).sort(),
+    ["legacy-project-run", "legacy-run"]
+  );
+  assert.equal(runs.find((run) => run.runId === "legacy-run")?.runDir, runDir);
+  assert.equal(
+    runs.find((run) => run.runId === "legacy-project-run")?.runDir,
+    legacyProjectRunDir
+  );
 });
 
 test("session analysis is OpenCode-only and requires an enabled target", () => {
@@ -1554,6 +1667,22 @@ test("terminal analysis passes the prompt through structured PowerShell input", 
   assert.match(script, /\$spec\.integrityBase64/);
 });
 
+test("terminal implementation passes the accepted proposal prompt through structured PowerShell input", () => {
+  const powershell = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
+  const args = buildPowerShellImplementationArgs(powershell, ["-NoProfile"]);
+
+  assert.deepEqual(args.slice(0, 3), [
+    powershell,
+    "-NoProfile",
+    "-EncodedCommand"
+  ]);
+  const script = Buffer.from(args[3], "base64").toString("utf16le");
+  assert.match(script, /OPENSESSIONVIEWER_IMPLEMENTATION_SPEC/);
+  assert.match(script, /\[IO\.File\]::ReadAllText\(\$spec\.stdinPath\)/);
+  assert.match(script, /& \$spec\.executable @\(\$spec\.args\)/);
+  assert.doesNotMatch(script, /\$spec\.validatorPath/);
+});
+
 test("session rendering shows configured analysis actions only when launch is allowed", () => {
   const session = {
     id: "analysis-session",
@@ -1584,6 +1713,25 @@ test("session rendering shows configured analysis actions only when launch is al
       ],
       selectedTargets: ["skills", "tests"],
       label: null,
+      runtimeEnvironment: {
+        resolution: "current-local",
+        note: "Resolved current runtime.",
+        selectedExtensionIds: ["runtime:opencode:project:instruction:agents"],
+        extensions: [{
+          id: "runtime:opencode:project:instruction:agents",
+          provider: "opencode",
+          scope: "project",
+          kind: "instruction",
+          name: "AGENTS.md",
+          source: "AGENTS.md",
+          sourcePath: "AGENTS.md",
+          sourceType: "file",
+          available: true,
+          capturable: true,
+          defaultSelected: true,
+          note: "Project instructions"
+        }]
+      },
       available: true
     },
     analysisRuns: [{
@@ -1605,12 +1753,15 @@ test("session rendering shows configured analysis actions only when launch is al
   });
   assert.match(visible, /data-action="analyze-session"/);
   assert.match(visible, /data-target="skills"/);
-  assert.match(visible, /class="analysis-launch-target"/);
-  assert.doesNotMatch(visible, /class="analysis-target-checkbox"/);
-  assert.doesNotMatch(visible, /class="analysis-runtime-extension-checkbox"/);
+  assert.match(visible, /class="analysis-launch-control"/);
+  assert.match(visible, /class="analysis-target-checkbox"/);
+  assert.match(visible, /class="analysis-runtime-extension-checkbox"/);
+  assert.match(visible, /Analyze selected/);
+  assert.match(visible, /Runtime extensions/);
   assert.match(visible, /data-action="resume-session"/);
   assert.doesNotMatch(visible, /data-action="copy-resume-command"/);
   assert.match(visible, /id="analysis-status-panel"/);
+  assert.match(visible, /data-terminal-launch="true"/);
   assert.match(visible, /report\.md is missing/);
 });
 

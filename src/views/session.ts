@@ -1071,6 +1071,158 @@ function renderRawMessageGroups(messages, partsByMessage, provider) {
     .join("\n");
 }
 
+function analysisList(values) {
+  const items = Array.isArray(values)
+    ? values.filter((value) => typeof value === "string" && value.trim())
+    : [];
+  return items.length ? items.join(", ") : t("analysis.none");
+}
+
+function renderAnalysisTargetMeta(label, values) {
+  return `<span class="analysis-target-meta"><span>${escapeHtml(label)}</span>${escapeHtml(analysisList(values))}</span>`;
+}
+
+function renderAnalysisTargetChoice(target, selectedTargets) {
+  const artifacts = target?.artifacts || {};
+  const checked = selectedTargets.has(target.id) && target.available;
+  const disabled = target.available ? "" : "disabled";
+  return `<label class="analysis-target-choice${target.available ? "" : " analysis-target-choice-disabled"}">
+    <input
+      type="checkbox"
+      class="analysis-target-checkbox"
+      value="${escapeHtml(target.id)}"
+      ${checked ? "checked" : ""}
+      ${disabled}
+    >
+    <span class="analysis-target-copy">
+      <strong>${escapeHtml(target.label || target.id)}</strong>
+      ${renderAnalysisTargetMeta(t("analysis.material_roots"), artifacts.roots)}
+      ${renderAnalysisTargetMeta(t("analysis.material_files"), artifacts.files)}
+      ${renderAnalysisTargetMeta(t("analysis.material_suffixes"), artifacts.fileExtensions)}
+    </span>
+  </label>`;
+}
+
+function runtimeScopeLabel(scope) {
+  return scope === "project"
+    ? t("analysis.project_scope")
+    : scope === "user"
+      ? t("analysis.user_scope")
+      : scope || "Runtime";
+}
+
+function renderRuntimeExtensionChoice(extension, selectedRuntimeIds) {
+  const checked = selectedRuntimeIds.has(extension.id) && extension.available;
+  const source = extension.source || extension.sourcePath || extension.sourceType || "";
+  return `<label class="analysis-target-choice analysis-runtime-choice${extension.available ? "" : " analysis-target-choice-disabled"}">
+    <input
+      type="checkbox"
+      class="analysis-runtime-extension-checkbox"
+      value="${escapeHtml(extension.id)}"
+      ${checked ? "checked" : ""}
+      ${extension.available ? "" : "disabled"}
+    >
+    <span class="analysis-target-copy">
+      <span class="analysis-runtime-title">
+        <strong>${escapeHtml(extension.name || extension.id)}</strong>
+        <span>${escapeHtml(extension.kind || "extension")}</span>
+      </span>
+      ${source ? `<small>${escapeHtml(source)}</small>` : ""}
+      ${extension.note ? `<small>${escapeHtml(extension.note)}</small>` : ""}
+    </span>
+  </label>`;
+}
+
+function renderRuntimeGroups(runtimeExtensions, selectedRuntimeIds) {
+  if (!runtimeExtensions.length) {
+    return `<p class="analysis-runtime-empty">${t("analysis.no_runtime")}</p>`;
+  }
+
+  const groups = new Map();
+  for (const extension of runtimeExtensions) {
+    const scope = extension.scope || "runtime";
+    if (!groups.has(scope)) {
+      groups.set(scope, []);
+    }
+    groups.get(scope).push(extension);
+  }
+
+  const scopes = [...groups.keys()].sort((a, b) => {
+    const order = { project: 0, user: 1 };
+    return (order[a] ?? 10) - (order[b] ?? 10) || a.localeCompare(b);
+  });
+
+  return scopes.map((scope) => `<section class="analysis-runtime-group">
+    <h4>${escapeHtml(runtimeScopeLabel(scope))}</h4>
+    ${groups.get(scope).map((extension) => renderRuntimeExtensionChoice(extension, selectedRuntimeIds)).join("\n")}
+  </section>`).join("\n");
+}
+
+function renderAnalysisLaunchControl(analysisAction, session, terminalLaunchAllowed) {
+  if (!analysisAction || !terminalLaunchAllowed) {
+    return "";
+  }
+
+  const targets = Array.isArray(analysisAction.targets) ? analysisAction.targets : [];
+  const selectedTargets = new Set(
+    (Array.isArray(analysisAction.selectedTargets) && analysisAction.selectedTargets.length
+      ? analysisAction.selectedTargets
+      : [analysisAction.target || "skills"])
+      .filter(Boolean)
+  );
+  const runtimeEnvironment = analysisAction.runtimeEnvironment || null;
+  const runtimeExtensions = Array.isArray(runtimeEnvironment?.extensions)
+    ? runtimeEnvironment.extensions
+    : [];
+  const selectedRuntimeIds = new Set(
+    Array.isArray(runtimeEnvironment?.selectedExtensionIds)
+      ? runtimeEnvironment.selectedExtensionIds
+      : runtimeExtensions
+        .filter((extension) => extension.defaultSelected && extension.available)
+        .map((extension) => extension.id)
+  );
+  const selectedTargetCount = targets.filter((target) => selectedTargets.has(target.id) && target.available).length;
+  const selectedRuntimeCount = runtimeExtensions.filter((extension) => selectedRuntimeIds.has(extension.id) && extension.available).length;
+  const launchSummary = t("analysis.launch_summary")
+    .replace("{targets}", String(selectedTargetCount))
+    .replace("{runtime}", String(selectedRuntimeCount));
+
+  return `<div class="analysis-launch-control">
+    <details class="analysis-target-picker" open>
+      <summary>
+        <span>${t("analysis.targets_title")}</span>
+        <strong data-analysis-selected-count>${escapeHtml(String(selectedTargetCount))}</strong>
+      </summary>
+      <div class="analysis-target-choices">
+        <p class="analysis-runtime-note">${t("analysis.targets_description")}</p>
+        ${targets.map((target) => renderAnalysisTargetChoice(target, selectedTargets)).join("\n")}
+      </div>
+    </details>
+    <details class="analysis-target-picker analysis-runtime-picker" open>
+      <summary>
+        <span>${t("analysis.runtime_title")}</span>
+        <strong data-runtime-selected-count>${escapeHtml(String(selectedRuntimeCount))}</strong>
+      </summary>
+      <div class="analysis-target-choices analysis-runtime-choices">
+        <p class="analysis-runtime-note">${t("analysis.runtime_description")}</p>
+        ${runtimeEnvironment?.note ? `<p class="analysis-runtime-note">${escapeHtml(runtimeEnvironment.note)}</p>` : ""}
+        ${renderRuntimeGroups(runtimeExtensions, selectedRuntimeIds)}
+      </div>
+    </details>
+    <div class="analysis-launch-submit">
+      <button
+        class="action-btn action-btn-primary"
+        data-action="analyze-session"
+        data-id="${escapeHtml(session.id)}"
+        data-target="${escapeHtml(analysisAction.target || "skills")}"
+        data-unavailable="${analysisAction.available ? "false" : "true"}"
+        ${analysisAction.available ? "" : "disabled"}
+      >${t("analysis.launch_selected")}</button>
+      <p data-analysis-launch-summary>${escapeHtml(launchSummary)}</p>
+    </div>
+  </div>`;
+}
+
 export function renderSessionPage({
   session,
   sessionTree = null,
@@ -1103,22 +1255,7 @@ export function renderSessionPage({
   const resumeActions = resumeCommand && terminalLaunchAllowed ? `
         <button class="action-btn" data-action="resume-session" data-id="${escapeHtml(session.id)}" ${resumeCommand.available ? "" : "disabled"}>${t("action.open_terminal")}</button>
   ` : "";
-  const analysisTarget = Array.isArray(analysisAction?.targets)
-    ? analysisAction.targets.find((target) => target.id === analysisAction.target)
-    : null;
-  const analysisTargetLabel = analysisTarget?.label || analysisAction?.label || analysisAction?.target || "skills";
-  const analysisActions = analysisAction && terminalLaunchAllowed ? `
-        <div class="analysis-launch-control">
-          <span class="analysis-launch-target">${escapeHtml(analysisTargetLabel)}</span>
-          <button
-            class="action-btn action-btn-primary"
-            data-action="analyze-session"
-            data-id="${escapeHtml(session.id)}"
-            data-target="${escapeHtml(analysisAction.target || "skills")}"
-            ${analysisAction.available ? "" : "disabled"}
-          >${t("action.analyze_session")}</button>
-        </div>
-  ` : "";
+  const analysisActions = renderAnalysisLaunchControl(analysisAction, session, terminalLaunchAllowed);
   const actions = managementActions || resumeActions || analysisActions ? `
       <div class="session-actions">
         ${managementActions}
@@ -1147,7 +1284,7 @@ ${actions}
   `;
   const showAnalysisStatus = Boolean(analysisAction) || analysisRuns.length > 0;
   const analysisStatus = showAnalysisStatus ? `
-    <section class="analysis-status-panel" id="analysis-status-panel" data-provider="${escapeHtml(provider)}" data-session-id="${escapeHtml(session.id)}">
+    <section class="analysis-status-panel" id="analysis-status-panel" data-provider="${escapeHtml(provider)}" data-session-id="${escapeHtml(session.id)}" data-terminal-launch="${terminalLaunchAllowed ? "true" : "false"}">
       <div class="analysis-status-header">
         <div>
           <h2>${t("analysis.status_title")}</h2>

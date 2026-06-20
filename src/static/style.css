@@ -18,14 +18,14 @@
   --success-bg: #ecfdf5;
   --success-border: #a7f3d0;
   --warning-border: #fde68a;
-  
+
   /* Typography */
   --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
-  
+
   /* Shadows */
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
   --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
-  
+
   /* Transitions */
   --transition-fast: 0.2s ease;
 
@@ -2446,7 +2446,7 @@ mark {
   .search-input {
     width: 200px;
   }
-  
+
   .session-summary {
     flex-direction: column;
     gap: 16px;
@@ -3659,23 +3659,187 @@ pre code.hljs {
 }
 
 .analysis-launch-control {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(320px, 1.15fr) minmax(170px, auto);
+  align-items: stretch;
+  gap: 12px;
+  flex-basis: 100%;
+  width: 100%;
+  margin-top: 6px;
+}
+
+.analysis-target-picker {
+  min-width: 0;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg-primary) 82%, var(--bg-secondary));
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+.analysis-target-picker > summary {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 38px;
+  padding: 8px 10px;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  list-style-position: inside;
+}
+
+.analysis-target-picker > summary strong {
+  display: inline-flex;
+  min-width: 28px;
+  justify-content: center;
+  padding: 2px 8px;
+  color: var(--accent-color);
+  background: color-mix(in srgb, var(--accent-color) 10%, var(--bg-tertiary));
+  border: 1px solid color-mix(in srgb, var(--accent-color) 25%, var(--border-color));
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.analysis-target-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 330px;
+  overflow: auto;
+  padding: 10px;
+  border-top: 1px solid var(--border-color);
+}
+
+.analysis-runtime-choices {
+  max-height: 330px;
+}
+
+.analysis-runtime-note,
+.analysis-runtime-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.analysis-target-choice {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 9px;
+  align-items: flex-start;
+  padding: 9px;
+  background: color-mix(in srgb, var(--bg-secondary) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.analysis-target-choice:hover {
+  background: var(--bg-secondary);
+  border-color: color-mix(in srgb, var(--accent-color) 35%, var(--border-color));
+}
+
+.analysis-target-choice-disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.analysis-target-choice input {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--accent-color);
+}
+
+.analysis-target-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.analysis-target-copy strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.analysis-target-copy small,
+.analysis-target-meta {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.analysis-target-meta span,
+.analysis-runtime-title span {
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
+.analysis-target-meta span::after {
+  content: ": ";
+}
+
+.analysis-runtime-group {
+  display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
-.analysis-launch-target {
-  display: inline-flex;
-  align-items: center;
-  min-height: 34px;
-  padding: 0 10px;
+.analysis-runtime-group h4 {
+  margin: 3px 0 0;
   color: var(--text-secondary);
-  background: var(--bg-primary);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.analysis-runtime-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.analysis-runtime-title span {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.analysis-launch-submit {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--accent-color) 5%, var(--bg-primary));
+  border: 1px solid color-mix(in srgb, var(--accent-color) 25%, var(--border-color));
+  border-radius: 8px;
+}
+
+.analysis-launch-submit .action-btn {
+  width: 100%;
+  min-height: 38px;
+  text-align: center;
+}
+
+.analysis-launch-submit p {
+  margin: 0;
+  color: var(--text-muted);
   font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-align: center;
 }
 
 .action-btn:disabled {
@@ -3909,6 +4073,37 @@ pre code.hljs {
   font-size: 11px;
 }
 
+.analysis-implementation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 11px;
+  background: var(--bg-primary);
+  border: 1px solid color-mix(in srgb, var(--success-color) 22%, var(--border-color));
+  border-left: 3px solid var(--success-color);
+  border-radius: 7px;
+}
+
+.analysis-implementation-copy {
+  min-width: 0;
+}
+
+.analysis-implementation h3 {
+  margin: 0 0 2px;
+  font-size: 13px;
+}
+
+.analysis-implementation p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.analysis-implementation-launch {
+  flex: 0 0 auto;
+}
+
 .analysis-run-errors {
   color: var(--error-color);
   font-size: 12px;
@@ -3936,15 +4131,28 @@ pre code.hljs {
   font-size: 12px;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 900px) {
   .analysis-launch-control {
-    width: 100%;
-    flex-direction: column;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 
-  .analysis-launch-target,
-  .analysis-launch-control > .action-btn {
-    width: 100%;
+  .analysis-launch-submit {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 640px) {
+  .analysis-launch-control {
+    grid-template-columns: 1fr;
+  }
+
+  .analysis-target-choices,
+  .analysis-runtime-choices {
+    max-height: 260px;
+  }
+
+  .analysis-launch-submit {
+    padding: 10px;
   }
 
   .analysis-status-header,
@@ -3957,6 +4165,11 @@ pre code.hljs {
     align-items: flex-start;
     flex-direction: column;
     gap: 5px;
+  }
+
+  .analysis-implementation {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 

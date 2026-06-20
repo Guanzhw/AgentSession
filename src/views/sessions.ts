@@ -121,7 +121,7 @@ export function renderSessionsPage({
       </a>` : ""}
     </section>
   `;
-  
+
   const body = `
     ${!hasActiveFilters && isAvailable ? dashboard : ""}
     <section class="page-header">
