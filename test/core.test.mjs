@@ -1258,15 +1258,22 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.match(analysisPrompt, /Analysis access manifest/);
   assert.match(analysisPrompt, /Analysis access interfaces/);
   assert.match(analysisPrompt, /provider-neutral interfaces/);
-  assert.match(analysisPrompt, /read-only access/);
+  assert.match(analysisPrompt, /direct file reads/);
+  assert.match(analysisPrompt, /Do not spend the run\s+debugging shell command execution/);
+  assert.match(analysisPrompt, /If command execution is unavailable or produces no output/);
   assert.match(analysisPrompt, new RegExp(
     run.files.accessManifestPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   ));
-  assert.match(analysisPrompt, /session_list/);
-  assert.match(analysisPrompt, /session_timeline/);
-  assert.match(analysisPrompt, /session_query_tools/);
-  assert.match(analysisPrompt, /artifact_get/);
-  assert.match(analysisPrompt, /extension_get/);
+  assert.match(analysisPrompt, new RegExp(
+    run.files.sessionIndexPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  ));
+  assert.match(analysisPrompt, new RegExp(
+    run.files.evidenceIndexPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  ));
+  assert.match(analysisPrompt, new RegExp(
+    run.files.evidencePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  ));
+  assert.doesNotMatch(analysisPrompt, /node ".+analysis-tools\.js"/);
   assert.doesNotMatch(analysisPrompt, /analysis-tool\.ps1/);
   assert.match(analysisPrompt, /Contrast successful and failed tool outcomes/);
   assert.match(analysisPrompt, /use only exact, unmodified `ev:\.\.\.` IDs/);
@@ -1364,7 +1371,9 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.equal(accessManifest.rootSessionId, "session-analysis");
   assert.equal(accessManifest.interfaceVersion, 1);
   assert.equal(accessManifest.backingStores.evidenceRecords, "evidence/evidence.jsonl");
+  assert.equal(accessManifest.accessTool.executable, process.execPath);
   assert.equal(accessManifest.accessTool.relativePath, "tools/analysis-tools.js");
+  assert.match(accessManifest.rules.join("\n"), /direct file reads/);
   assert.equal(
     accessManifest.interfaces.session.some((entry) => entry.method === "queryTools"
       && entry.command === "session_query_tools"),

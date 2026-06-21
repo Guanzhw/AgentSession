@@ -727,38 +727,27 @@ You are analyzing an existing ${provider.name} session as evidence for improving
 - Analysis access manifest: ${files.accessManifestPath}
 - Selected runtime extensions and artifact snapshots: ${files.artifactsPath}
 - Evaluation seed: ${files.evaluationSeedPath}
-- Read-only analysis access tool: ${files.analysisToolPath}
+- Optional read-only analysis access tool: ${files.analysisToolPath}
 ${rawSnapshotsIncluded ? `- Optional raw diagnostic snapshots: ${files.messagesPath}, ${files.treePath}, ${files.containerPath}, ${files.metricsPath}, ${files.flowPath}, ${files.tracePath}` : ""}
 
 ## Analysis access interfaces
 
 Do not begin by reading the complete session or JSONL evidence files. Start
-with \`${files.accessManifestPath}\`, then use the bundled read-only access
-tool. It implements three provider-neutral interfaces: session data access,
-artifact snapshot access, and runtime extension access. Commands return compact
-Markdown with exact evidence and artifact IDs preserved:
+with \`${files.accessManifestPath}\`, then read the bounded backing store files
+it names. The manifest describes three provider-neutral interfaces: session
+data access, artifact snapshot access, and runtime extension access. Prefer
+direct file reads of \`${files.sessionIndexPath}\`, \`${files.evidenceIndexPath}\`,
+\`${files.artifactsPath}\`, and selected records from \`${files.evidencePath}\`.
 
-\`\`\`text
-node "${files.analysisToolPath}" "${runDir}" session_main_info
-node "${files.analysisToolPath}" "${runDir}" session_list
-node "${files.analysisToolPath}" "${runDir}" session_timeline '{"limit":25}'
-node "${files.analysisToolPath}" "${runDir}" session_query_system_prompts
-node "${files.analysisToolPath}" "${runDir}" session_query_errors
-node "${files.analysisToolPath}" "${runDir}" session_query_tools '{"status":"completed"}'
-node "${files.analysisToolPath}" "${runDir}" session_find_anomalies
-node "${files.analysisToolPath}" "${runDir}" session_query_context '{"evidenceId":"..."}'
-node "${files.analysisToolPath}" "${runDir}" session_get_evidence '{"evidenceId":"..."}'
-node "${files.analysisToolPath}" "${runDir}" extension_list
-node "${files.analysisToolPath}" "${runDir}" extension_get '{"extensionId":"..."}'
-node "${files.analysisToolPath}" "${runDir}" artifact_list
-node "${files.analysisToolPath}" "${runDir}" artifact_get '{"artifactId":"..."}'
-\`\`\`
+The bundled access tool is optional convenience only. Do not spend the run
+debugging shell command execution, Node.js PATH issues, PowerShell encoding, or
+stdout capture. If command execution is unavailable or produces no output, keep
+going with direct file reads. The backing stores preserve the exact evidence
+and artifact IDs required for citations.
 
-\`session_find_anomalies\` reports explicit interruption reasons separately
-from the configurable high-error-rate heuristic. Its output includes the raw
-counts, minimum sample size, threshold, and ranked sessions. Use
-\`${files.evidenceIndexPath}\` and \`${files.evidencePath}\` only when an access
-method returns a specific \`evidenceId\` that needs raw detail.
+Use \`${files.evidenceIndexPath}\` to find specific \`ev:...\` IDs before
+opening \`${files.evidencePath}\`. Read raw evidence records only when a
+specific evidence ID needs detail beyond the index preview.
 
 ## Required behavior
 

@@ -190,13 +190,15 @@ export function buildAnalysisAccessManifest({
   providerName,
   rootSessionId,
   runDir,
-  files
+  files,
+  nodeExecutable = process.execPath
 }: {
   providerId: ProviderId;
   providerName: string;
   rootSessionId: string;
   runDir: string;
   files: Record<string, string>;
+  nodeExecutable?: string;
 }) {
   const relative = (filePath: string) => analysisRunRelativePath(runDir, filePath);
   return {
@@ -209,10 +211,10 @@ export function buildAnalysisAccessManifest({
     rootSessionId,
     generatedAt: new Date().toISOString(),
     accessTool: {
-      executable: "node",
+      executable: nodeExecutable,
       path: files.analysisToolPath,
       relativePath: relative(files.analysisToolPath),
-      invocation: `node "${files.analysisToolPath}" "${runDir}" <command> [argsJson]`
+      invocation: `"${nodeExecutable}" "${files.analysisToolPath}" "${runDir}" <command> [argsJson]`
     },
     interfaces: ANALYSIS_ACCESS_TOOLS,
     backingStores: {
@@ -222,10 +224,11 @@ export function buildAnalysisAccessManifest({
       artifacts: relative(files.artifactsPath)
     },
     rules: [
-      "Start with the session overview/list/timeline interface, not a complete raw session file.",
-      "Use exact ev:... and artifact:... IDs returned by access methods for citations.",
-      "Expand raw evidence only through getEvidence when a specific evidenceId is needed.",
-      "Use artifact and runtime-extension methods before proposing artifact changes."
+      "Start with the bounded backing store files listed here: session index, evidence index, artifacts, and selected evidence records.",
+      "The access tool is optional convenience. If command execution or node resolution is unavailable, use direct file reads instead.",
+      "Use exact ev:... and artifact:... IDs from the backing stores for citations.",
+      "Expand raw evidence records only when a specific evidenceId is needed.",
+      "Use artifact and runtime-extension backing data before proposing artifact changes."
     ]
   };
 }
