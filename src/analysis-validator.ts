@@ -66,6 +66,7 @@ export function validateAnalysisOutputs(runDir, processExitCode = 0, expectedInt
   const proposalsPath = resolveAnalysisRunPath(resolvedRunDir, manifest, "proposalsPath");
   const artifactsPath = resolveAnalysisRunPath(resolvedRunDir, manifest, "artifactsPath");
   const evidenceIndexPath = resolveAnalysisRunPath(resolvedRunDir, manifest, "evidenceIndexPath");
+  const analyzerStderrPath = resolveAnalysisRunPath(resolvedRunDir, manifest, "analyzerStderrPath");
 
   if (!existsSync(reportPath)) {
     errors.push("report.md is missing");
@@ -245,7 +246,7 @@ export function validateAnalysisOutputs(runDir, processExitCode = 0, expectedInt
           errors,
           label
         );
-        if (!["create", "replace", "delete"].includes(proposal.action)) {
+        if (!["create", "edit", "replace", "delete"].includes(proposal.action)) {
           errors.push(`${label} has invalid action ${proposal.action}`);
         }
         validateEvidenceRefs(proposal.evidence, `${label} evidence`);
@@ -283,6 +284,19 @@ export function validateAnalysisOutputs(runDir, processExitCode = 0, expectedInt
   }
 
   const numericExitCode = Number(processExitCode) || 0;
+  if (numericExitCode !== 0) {
+    errors.unshift(`analysis command exited with code ${numericExitCode}`);
+    try {
+      if (existsSync(analyzerStderrPath) && statSync(analyzerStderrPath).isFile()) {
+        const stderr = readFileSync(analyzerStderrPath, "utf-8").trim();
+        if (stderr) {
+          errors.unshift(`analysis stderr: ${stderr.slice(-2000)}`);
+        }
+      }
+    } catch {
+      // Best-effort diagnostic only; schema validation errors above are enough.
+    }
+  }
   const state = numericExitCode !== 0
     ? "failed"
     : errors.length

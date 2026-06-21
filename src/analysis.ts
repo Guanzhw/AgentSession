@@ -20,6 +20,7 @@ import type {
   ResumeShellSpec
 } from "./providers/interface.js";
 import { makeEvidenceId, writeAnalysisEvidence } from "./analysis-evidence.js";
+import { buildAnalysisAccessManifest } from "./analysis-access.js";
 import {
   BUILTIN_ANALYSIS_TARGETS,
   DEFAULT_ANALYSIS_TARGET,
@@ -706,7 +707,6 @@ function buildAnalysisPrompt({
   projectPath,
   customPrompt,
   files,
-  analysisToolPath,
   rawSnapshotsIncluded
 }) {
   const rootEvidenceId = makeEvidenceId(provider.id, session.id, "session", session.id);
@@ -724,34 +724,41 @@ You are analyzing an existing ${provider.name} session as evidence for improving
 - Session hierarchy: ${files.sessionIndexPath}
 - Evidence metadata index: ${files.evidenceIndexPath}
 - Immutable evidence records: ${files.evidencePath}
+- Analysis access manifest: ${files.accessManifestPath}
 - Selected runtime extensions and artifact snapshots: ${files.artifactsPath}
 - Evaluation seed: ${files.evaluationSeedPath}
-- Read-only analysis tool: ${analysisToolPath}
+- Read-only analysis access tool: ${files.analysisToolPath}
 ${rawSnapshotsIncluded ? `- Optional raw diagnostic snapshots: ${files.messagesPath}, ${files.treePath}, ${files.containerPath}, ${files.metricsPath}, ${files.flowPath}, ${files.tracePath}` : ""}
 
-## Evidence tools
+## Analysis access interfaces
 
-Do not begin by reading the complete JSONL evidence file. Use the read-only
-analysis tool and expand only the records needed for a conclusion. Commands
-return compact Markdown with exact evidence and artifact IDs preserved:
+Do not begin by reading the complete session or JSONL evidence files. Start
+with \`${files.accessManifestPath}\`, then use the bundled read-only access
+tool. It implements three provider-neutral interfaces: session data access,
+artifact snapshot access, and runtime extension access. Commands return compact
+Markdown with exact evidence and artifact IDs preserved:
 
 \`\`\`text
-node "${analysisToolPath}" "${runDir}" session_main_info
-node "${analysisToolPath}" "${runDir}" session_query_system_prompts
-node "${analysisToolPath}" "${runDir}" session_query_errors
-node "${analysisToolPath}" "${runDir}" session_query_tools '{"status":"completed"}'
-node "${analysisToolPath}" "${runDir}" session_find_anomalies
-node "${analysisToolPath}" "${runDir}" session_query_context '{"evidenceId":"..."}'
-node "${analysisToolPath}" "${runDir}" session_get_evidence '{"evidenceId":"..."}'
-node "${analysisToolPath}" "${runDir}" extension_list
-node "${analysisToolPath}" "${runDir}" extension_get '{"extensionId":"..."}'
-node "${analysisToolPath}" "${runDir}" artifact_list
-node "${analysisToolPath}" "${runDir}" artifact_get '{"artifactId":"..."}'
+node "${files.analysisToolPath}" "${runDir}" session_main_info
+node "${files.analysisToolPath}" "${runDir}" session_list
+node "${files.analysisToolPath}" "${runDir}" session_timeline '{"limit":25}'
+node "${files.analysisToolPath}" "${runDir}" session_query_system_prompts
+node "${files.analysisToolPath}" "${runDir}" session_query_errors
+node "${files.analysisToolPath}" "${runDir}" session_query_tools '{"status":"completed"}'
+node "${files.analysisToolPath}" "${runDir}" session_find_anomalies
+node "${files.analysisToolPath}" "${runDir}" session_query_context '{"evidenceId":"..."}'
+node "${files.analysisToolPath}" "${runDir}" session_get_evidence '{"evidenceId":"..."}'
+node "${files.analysisToolPath}" "${runDir}" extension_list
+node "${files.analysisToolPath}" "${runDir}" extension_get '{"extensionId":"..."}'
+node "${files.analysisToolPath}" "${runDir}" artifact_list
+node "${files.analysisToolPath}" "${runDir}" artifact_get '{"artifactId":"..."}'
 \`\`\`
 
 \`session_find_anomalies\` reports explicit interruption reasons separately
 from the configurable high-error-rate heuristic. Its output includes the raw
-counts, minimum sample size, threshold, and ranked sessions.
+counts, minimum sample size, threshold, and ranked sessions. Use
+\`${files.evidenceIndexPath}\` and \`${files.evidencePath}\` only when an access
+method returns a specific \`evidenceId\` that needs raw detail.
 
 ## Required behavior
 
@@ -780,6 +787,10 @@ The analysis inputs have three distinct roles:
 17. Include baseline-versus-candidate expectations and track task success, token cost, and runtime where measurable.
 18. Never append descriptions, parentheses, quotes, line numbers, or filesystem paths to an evidence ID. Never invent an ID. A valid array item is the ID string by itself.
 19. Held-out and regression cases may describe new tasks, but their \`sourceEvidence\` must still contain exact IDs captured in this run. Use \`${rootEvidenceId}\` when only session-level evidence applies.
+20. The validator treats \`metrics.taskSuccess\` as a required acceptance threshold. Set it to the literal JSON value \`true\` for every evaluation case, not \`null\` or \`false\`.
+21. Use only supported artifact proposal actions: \`create\`, \`edit\`, \`replace\`, or \`delete\`. Use \`edit\` or \`replace\` for bounded changes to existing artifacts.
+22. Do not cite raw session IDs or shortened evidence prefixes. If a related session is relevant, first retrieve an exact full \`ev:...\` ID from an access tool result or \`evidence-index.json\`. If you only know a prefix, cite \`${rootEvidenceId}\` instead.
+23. The validator rejects duplicate proposal targets. If several ideas target the same \`artifactRoot\` plus \`artifactPath\`, merge them into one proposal with a combined description, evidence list, risk list, and validation case list.
 
 ## Required outputs
 
@@ -851,7 +862,7 @@ Write valid JSON with this shape:
   "proposals": [
     {
       "id": "stable-id",
-      "action": "create|replace|delete",
+      "action": "create|edit|replace|delete",
       "artifactRoot": "An exact root path from artifacts.json",
       "artifactPath": "A path relative to artifactRoot",
       "description": "The bounded proposed change",
@@ -871,9 +882,13 @@ return an empty \`proposals\` array and explain why in \`report.md\`.
 Before finishing, verify all of the following:
 
 - Every \`sourceEvidence\` and \`evidence\` item is an exact ID copied from this run's indexes, with no annotation.
+- No \`sourceEvidence\` or \`evidence\` item is a shortened \`ev:...\` prefix or raw \`ses_...\` ID.
 - No evidence array contains a filesystem path or free-form observation.
 - Every evaluation case has at least one valid evidence ID.
 - Evaluation cases include exactly supported kinds and collectively cover replay, held-out, and regression.
+- Every evaluation case has \`metrics.taskSuccess\` set to \`true\`.
+- Every artifact proposal action is one of \`create\`, \`edit\`, \`replace\`, or \`delete\`.
+- No two artifact proposals use the same \`artifactRoot\` plus \`artifactPath\`.
 - Every proposal references declared evaluation case IDs and an exact captured artifact root.
 
 ${customPrompt ? `## Additional configured instructions\n\n${customPrompt}\n` : ""}`;
@@ -920,7 +935,6 @@ export function buildAnalysisPromptPreview({
     projectPath: "<session-project-directory>",
     customPrompt: configuredPrompt,
     files: previewFiles,
-    analysisToolPath: previewFiles.analysisToolPath,
     rawSnapshotsIncluded: analysisConfig.includeRawSnapshots === true
       || settings.target.includeRawSnapshots === true
   });
@@ -1072,6 +1086,14 @@ export function listSessionAnalysisRuns({
             available: outputAvailable(proposalsPath)
           }
         };
+        const launchedAtMs = manifest.launchedAt ? Date.parse(manifest.launchedAt) : NaN;
+        const waitingForOutput = manifest.state === "launched"
+          && !outputs.report.available
+          && !outputs.evaluation.available
+          && !outputs.proposals.available;
+        const waitingSeconds = waitingForOutput && Number.isFinite(launchedAtMs)
+          ? Math.max(0, Math.floor((Date.now() - launchedAtMs) / 1000))
+          : null;
         const implementation = manifest.implementation && typeof manifest.implementation === "object"
           ? manifest.implementation
           : null;
@@ -1097,6 +1119,9 @@ export function listSessionAnalysisRuns({
           runDir,
           hasReport: outputs.report.available,
           outputs,
+          waitingForOutput,
+          waitingSeconds,
+          stalled: waitingForOutput && Number(waitingSeconds) >= 30,
           implementation: implementation
             ? {
               state: implementationState || "unknown",
@@ -1218,7 +1243,13 @@ export function prepareSessionAnalysis({
     private: true,
     type: "module"
   });
-  const analysisToolPath = files.analysisToolPath;
+  writeJson(files.accessManifestPath, buildAnalysisAccessManifest({
+    providerId: provider.id,
+    providerName: provider.name,
+    rootSessionId: sessionId,
+    runDir,
+    files
+  }));
   const prompt = buildAnalysisPrompt({
     provider,
     session,
@@ -1227,7 +1258,6 @@ export function prepareSessionAnalysis({
     projectPath,
     customPrompt: configuredPrompt,
     files,
-    analysisToolPath,
     rawSnapshotsIncluded: includeRawSnapshots
   });
 
@@ -1258,6 +1288,7 @@ export function prepareSessionAnalysis({
         files.sessionIndexPath,
         files.evidenceIndexPath,
         files.evidencePath,
+        files.accessManifestPath,
         files.artifactsPath,
         files.analysisToolPath,
         files.analysisLayoutPath,
@@ -1291,10 +1322,11 @@ export function prepareSessionAnalysis({
     sessionIndexPath: files.sessionIndexPath,
     evidenceIndexPath: files.evidenceIndexPath,
     evidencePath: files.evidencePath,
+    accessManifestPath: files.accessManifestPath,
     messagesPath: files.messagesPath,
     promptPath: files.promptPath,
     prompt,
-    analysisToolPath,
+    analysisToolPath: files.analysisToolPath,
     reportPath: files.reportPath,
     evaluationSeedPath: files.evaluationSeedPath,
     evaluationPath: files.evaluationPath,
@@ -1549,8 +1581,22 @@ export function buildPowerShellAnalysisArgs(powershell, shellArgs = ["-NoExit", 
     "$json=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:OPENSESSIONVIEWER_ANALYSIS_SPEC))",
     "$spec=$json|ConvertFrom-Json",
     "Set-Location -LiteralPath $spec.cwd",
-    "$agentExitCode=0",
-    "try{if($spec.stdinPath){$inputText=[IO.File]::ReadAllText($spec.stdinPath);$inputText|& $spec.executable @($spec.args)}else{& $spec.executable @($spec.args)};$agentExitCode=$LASTEXITCODE}catch{Write-Error $_;$agentExitCode=1}",
+    "$diagnosticsDir=Split-Path -LiteralPath $spec.stdoutPath -Parent",
+    "if($diagnosticsDir){New-Item -ItemType Directory -Force -LiteralPath $diagnosticsDir|Out-Null}",
+    "$agentExitCode=0;$timedOut=$false",
+    "$timeoutSeconds=1800;if($null -ne $spec.agentTimeoutSeconds){$timeoutSeconds=[int]$spec.agentTimeoutSeconds};if($timeoutSeconds -le 0){$timeoutSeconds=1800}",
+    "try{$startInfo=@{FilePath=$spec.executable;ArgumentList=@($spec.args);WorkingDirectory=$spec.cwd;PassThru=$true;RedirectStandardOutput=$spec.stdoutPath;RedirectStandardError=$spec.stderrPath};if($spec.stdinPath){$startInfo['RedirectStandardInput']=$spec.stdinPath};$agentProcess=Start-Process @startInfo;$waitMs=$timeoutSeconds*1000;if(-not $agentProcess.WaitForExit($waitMs)){try{$agentProcess.Kill($true)}catch{try{$agentProcess.Kill()}catch{}};$timedOut=$true;$agentExitCode=124}else{$agentExitCode=[int]$agentProcess.ExitCode}}catch{Add-Content -LiteralPath $spec.stderrPath -Value ([string]$_);$agentExitCode=1}",
+    "if($timedOut){Add-Content -LiteralPath $spec.stderrPath -Value \"Analysis command timed out after $timeoutSeconds seconds\"}",
+    "$waitSeconds=600;if($null -ne $spec.outputWaitSeconds){$waitSeconds=[int]$spec.outputWaitSeconds}",
+    "$expectedOutputs=@($spec.reportPath,$spec.evaluationPath,$spec.proposalsPath)",
+    "$processNeedles=@($spec.runDir,$spec.promptPath)|Where-Object{![string]::IsNullOrWhiteSpace([string]$_)}",
+    "if($agentExitCode -eq 0 -and $processNeedles.Count -gt 0){$deadline=(Get-Date).AddSeconds($waitSeconds);do{$active=@(Get-CimInstance Win32_Process|Where-Object{$processInfo=$_;$processInfo.ProcessId -ne $PID -and $processInfo.CommandLine -and @(($processNeedles|Where-Object{$processInfo.CommandLine.Contains([string]$_)})).Count -gt 0});if($active.Count -eq 0){break};Start-Sleep -Milliseconds 1000}while((Get-Date) -lt $deadline)}",
+    "$stderrHasContent=(Test-Path -LiteralPath $spec.stderrPath) -and ((Get-Item -LiteralPath $spec.stderrPath).Length -gt 0)",
+    "$missingOutputCount=@($expectedOutputs|Where-Object{[string]::IsNullOrWhiteSpace([string]$_)-or -not [IO.File]::Exists([string]$_)}).Count",
+    "if($agentExitCode -eq 0 -and $stderrHasContent -and $missingOutputCount -eq $expectedOutputs.Count){$waitSeconds=[Math]::Min($waitSeconds,15)}",
+    "if($agentExitCode -eq 0){$deadline=(Get-Date).AddSeconds($waitSeconds);$lastSignature='';$stableCount=0;do{$ready=$true;$parts=@();foreach($outputPath in $expectedOutputs){if([string]::IsNullOrWhiteSpace([string]$outputPath)-or -not [IO.File]::Exists([string]$outputPath)){$ready=$false;break};$item=Get-Item -LiteralPath ([string]$outputPath) -ErrorAction SilentlyContinue;if($null -eq $item -or $item.Length -le 0){$ready=$false;break};$parts+=\"$($item.FullName)|$($item.Length)|$($item.LastWriteTimeUtc.Ticks)\"};if($ready){$signature=($parts -join '|');if($signature -eq $lastSignature){$stableCount++}else{$lastSignature=$signature;$stableCount=1};if($stableCount -ge 2){break}}else{$lastSignature='';$stableCount=0};Start-Sleep -Milliseconds 1000}while((Get-Date) -lt $deadline)}",
+    "$missingOutputCount=@($expectedOutputs|Where-Object{[string]::IsNullOrWhiteSpace([string]$_)-or -not [IO.File]::Exists([string]$_)}).Count",
+    "if($agentExitCode -eq 0 -and $stderrHasContent -and $missingOutputCount -gt 0){$agentExitCode=1}",
     "& $spec.nodeExecutable $spec.validatorPath $spec.runDir ([string]$agentExitCode) $spec.integrityBase64",
     "if($agentExitCode -ne 0){Write-Host \"Analysis command exited with code $agentExitCode\" -ForegroundColor Red}"
   ].join(";");
@@ -1568,7 +1614,7 @@ export function buildPowerShellImplementationArgs(powershell, shellArgs = ["-NoE
     "$spec=$json|ConvertFrom-Json",
     "Set-Location -LiteralPath $spec.cwd",
     "$agentExitCode=0",
-    "try{if($spec.stdinPath){$inputText=[IO.File]::ReadAllText($spec.stdinPath);$inputText|& $spec.executable @($spec.args)}else{& $spec.executable @($spec.args)};$agentExitCode=$LASTEXITCODE}catch{Write-Error $_;$agentExitCode=1}",
+    "try{if($spec.stdinPath){$inputText=[IO.File]::ReadAllText($spec.stdinPath);$inputText|& $spec.executable @($spec.args)}else{& $spec.executable @($spec.args)};$lastExitCode=$LASTEXITCODE;if($null -eq $lastExitCode){$agentExitCode=0}else{$agentExitCode=[int]$lastExitCode}}catch{Write-Error $_;$agentExitCode=1}",
     "if($agentExitCode -ne 0){Write-Host \"Implementation command exited with code $agentExitCode\" -ForegroundColor Red}else{Write-Host \"Implementation command completed\" -ForegroundColor Green}"
   ].join(";");
   return [
@@ -1602,8 +1648,16 @@ export function launchSessionAnalysis(run, fallbackShell = null) {
     args: run.command.args,
     cwd: run.command.cwd,
     stdinPath: run.command.stdinPath,
+    promptPath: run.files.promptPath,
     runDir: run.runDir,
     integrityBase64: Buffer.from(JSON.stringify(run.integrity), "utf-8").toString("base64"),
+    reportPath: run.files.reportPath,
+    evaluationPath: run.files.evaluationPath,
+    proposalsPath: run.files.proposalsPath,
+    stdoutPath: run.files.analyzerStdoutPath,
+    stderrPath: run.files.analyzerStderrPath,
+    agentTimeoutSeconds: 1800,
+    outputWaitSeconds: 600,
     nodeExecutable: process.execPath,
     validatorPath: path.join(path.dirname(fileURLToPath(import.meta.url)), "analysis-validator.js")
   }), "utf-8").toString("base64");

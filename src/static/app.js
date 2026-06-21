@@ -47,6 +47,7 @@ const __I18N__ = {
     analysis_status_unknown: "Unknown",
     analysis_no_runs: "No analysis runs yet.",
     analysis_waiting: "Waiting for analyzer output and validation.",
+    analysis_waiting_no_output: "No output files yet after {seconds}s. The analyzer may still be running or waiting in the terminal.",
     analysis_started_at: "Started {time}",
     analysis_finished_at: "Finished {time}",
     analysis_target: "Target: {target}",
@@ -144,6 +145,7 @@ const __I18N__ = {
     analysis_status_unknown: "未知",
     analysis_no_runs: "暂无分析记录。",
     analysis_waiting: "正在等待 Analyzer 输出和校验结果。",
+    analysis_waiting_no_output: "{seconds} 秒后仍未生成输出文件。Analyzer 可能仍在运行，或正在终端中等待。",
     analysis_started_at: "开始于 {time}",
     analysis_finished_at: "完成于 {time}",
     analysis_target: "目标：{target}",
@@ -968,8 +970,10 @@ function renderAnalysisRuns(runs) {
 
     if (run.active) {
       const waiting = document.createElement("p");
-      waiting.className = "analysis-run-waiting";
-      waiting.textContent = ft("analysis_waiting");
+      waiting.className = `analysis-run-waiting${run.stalled ? " analysis-run-waiting-stalled" : ""}`;
+      waiting.textContent = run.stalled
+        ? formatText(ft("analysis_waiting_no_output"), { seconds: run.waitingSeconds || 0 })
+        : ft("analysis_waiting");
       card.appendChild(waiting);
     }
 

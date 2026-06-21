@@ -34,6 +34,32 @@ function quoteDisplayArg(value) {
   return `"${value.replaceAll('"', '\\"')}"`;
 }
 
+const WINDOWS_EXECUTABLE_EXTENSIONS = [".exe", ".cmd", ".bat"];
+
+export function resolveWindowsExecutableCandidate(candidates, exists = existsSync) {
+  const direct = candidates.find((entry) => {
+    const lower = entry.toLowerCase();
+    return WINDOWS_EXECUTABLE_EXTENSIONS.some((extension) => lower.endsWith(extension));
+  });
+  if (direct) {
+    return direct;
+  }
+
+  for (const entry of candidates) {
+    if (path.win32.extname(entry)) {
+      continue;
+    }
+    for (const extension of WINDOWS_EXECUTABLE_EXTENSIONS) {
+      const sibling = `${entry}${extension}`;
+      if (exists(sibling)) {
+        return sibling;
+      }
+    }
+  }
+
+  return candidates[0] || null;
+}
+
 export function resolveExecutable(executable) {
   if (path.isAbsolute(executable)) {
     return existsSync(executable) ? executable : null;
@@ -52,7 +78,7 @@ export function resolveExecutable(executable) {
 
   // npm commands often expose both PowerShell and cmd wrappers. Prefer a
   // directly executable wrapper so user data is never evaluated as shell code.
-  return candidates.find((entry) => /\.(exe|cmd|bat)$/i.test(entry)) || candidates[0] || null;
+  return resolveWindowsExecutableCandidate(candidates);
 }
 
 export function resolveProjectDirectory(directory) {

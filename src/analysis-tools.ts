@@ -9,6 +9,11 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type {
+  AnalysisArtifactAccess,
+  AnalysisRuntimeExtensionAccess,
+  AnalysisSessionAccess
+} from "./analysis-access.js";
 import type { AnalysisEvidenceIndexEntry } from "./analysis-evidence.js";
 import { resolveAnalysisRunPath } from "./analysis-layout.js";
 
@@ -326,232 +331,305 @@ export function formatAnalysisToolOutput(result: Row) {
   return `${lines.join("\n")}\n`;
 }
 
+function createSessionAccess(
+  run: ReturnType<typeof loadRun>,
+  entries: AnalysisEvidenceIndexEntry[]
+): AnalysisSessionAccess {
+  return {
+    overview(args: Row = {}) {
+      const sessionId = typeof args.sessionId === "string"
+        ? args.sessionId
+        : run.sessionIndex.rootSessionId;
+      const timeline = entries
+        .filter((entry) => entry.sessionId === sessionId)
+        .filter((entry) => (
+          entry.kind === "message"
+          && ["user", "assistant", "agent"].includes(String(entry.role || "").toLowerCase())
+        ) || (
+          entry.kind === "tool"
+          && ["task", "subtask"].includes(String(entry.toolName || "").toLowerCase())
+        ))
+        .map(timelineEntry);
+      const session = run.sessionIndex.sessions.find((item) => item.sessionId === sessionId) || null;
+      const systemPrompts = entries
+        .filter((entry) => entry.sessionId === sessionId && entry.kind === "system-prompt")
+        .map(timelineEntry);
+      return {
+        provider: run.evidenceIndex.provider,
+        rootSessionId: run.sessionIndex.rootSessionId,
+        session,
+        sessionTree: run.sessionIndex.tree,
+        systemPrompts,
+        timeline: paginate(timeline, args)
+      };
+    },
+
+    listSessions(args: Row = {}) {
+      const hasParentFilter = Object.prototype.hasOwnProperty.call(args, "parentSessionId");
+      const sessions = (run.sessionIndex.sessions || [])
+        .filter((session) => !hasParentFilter || session.parentSessionId === args.parentSessionId);
+      return paginate(sessions, args) as any;
+    },
+
+    timeline(args: Row = {}) {
+      const kinds = Array.isArray(args.kinds)
+        ? new Set(args.kinds.map((kind) => String(kind)))
+        : null;
+      const matches = entries
+        .filter((entry) => !args.sessionId || entry.sessionId === args.sessionId)
+        .filter((entry) => !kinds || kinds.has(entry.kind))
+        .map(timelineEntry);
+      return paginate(matches, args);
+    },
+
+    querySystemPrompts(args: Row = {}) {
+      const prompts = entries
+        .filter((entry) => entry.kind === "system-prompt")
+        .filter((entry) => !args.sessionId || entry.sessionId === args.sessionId);
+      const page = paginate(prompts, args);
+      return {
+        ...page,
+        items: page.items.map((entry) => projectedRecord(run, entry, args))
+      };
+    },
+
+    queryErrors(args: Row = {}) {
+      const errors = entries
+        .filter((entry) => entry.kind === "tool" && entry.status === "error")
+        .filter((entry) => !args.sessionId || entry.sessionId === args.sessionId);
+      const page = paginate(errors, args);
+      return {
+        ...page,
+        items: page.items.map((entry) => projectedRecord(run, entry, args))
+      };
+    },
+
+    queryTools(args: Row = {}) {
+      const status = normalizeStatus(args.status);
+      const names = Array.isArray(args.names)
+        ? new Set(args.names.map((name) => String(name).toLowerCase()))
+        : null;
+      const matches = entries
+        .filter((entry) => entry.kind === "tool")
+        .filter((entry) => !args.sessionId || entry.sessionId === args.sessionId)
+        .filter((entry) => !names || names.has(String(entry.toolName || "").toLowerCase()))
+        .filter((entry) => {
+          const entryStatus = entry.status || "unknown";
+          return status === "all" || status === entryStatus;
+        });
+      const page = paginate(matches, args);
+      return {
+        status,
+        ...page,
+        items: page.items.map((entry) => projectedRecord(run, entry, args))
+      };
+    },
+
+    findAnomalies(args: Row = {}) {
+      const threshold = Math.min(1, Math.max(0, Number(args.errorRateThreshold ?? 0.25)));
+      const minToolCalls = boundedInteger(args.minToolCalls, 4, 1, 100000);
+      const interruptions = entries
+        .filter((entry) => entry.kind === "tool" && entry.status === "error")
+        .filter((entry) => isInterruptionReason(entry.errorReason))
+        .map((entry) => ({
+          ...timelineEntry(entry),
+          detector: "explicit-error-reason"
+        }));
+      const rankedSessions = run.sessionIndex.sessions
+        .map((session) => ({
+          sessionId: session.sessionId,
+          evidenceId: session.evidenceId,
+          title: session.title,
+          parentSessionId: session.parentSessionId,
+          toolCalls: Number(session.direct?.toolCalls) || 0,
+          errors: Number(session.direct?.errors) || 0,
+          errorRate: Number(session.direct?.errorRate) || 0
+        }))
+        .filter((session) => args.includeRoot === true || session.parentSessionId)
+        .filter((session) => session.toolCalls >= minToolCalls)
+        .sort((left, right) => right.errorRate - left.errorRate || right.errors - left.errors);
+      return {
+        interruptions,
+        highErrorRate: {
+          heuristic: true,
+          threshold,
+          minToolCalls,
+          flagged: rankedSessions.filter((session) => session.errorRate >= threshold),
+          rankedSessions
+        }
+      };
+    },
+
+    getContext(args: Row) {
+      if (typeof args.evidenceId !== "string" || !args.evidenceId) {
+        throw new Error("session_query_context requires args.evidenceId");
+      }
+      const conversation = entries.filter(isConversationEntry);
+      const target = entries.find((entry) => entry.evidenceId === args.evidenceId);
+      if (!target) {
+        throw new Error(`Unknown evidence ID: ${args.evidenceId}`);
+      }
+      let index = conversation.findIndex((entry) => entry.evidenceId === target.evidenceId);
+      if (index < 0) {
+        index = conversation.findIndex((entry) => entry.sequence >= target.sequence);
+        if (index < 0) index = conversation.length - 1;
+      }
+      const before = boundedInteger(args.before, 5, 0, 50);
+      const after = boundedInteger(args.after, 5, 0, 50);
+      return {
+        target: timelineEntry(target),
+        before,
+        after,
+        items: conversation
+          .slice(Math.max(0, index - before), Math.min(conversation.length, index + after + 1))
+          .map((entry) => projectedRecord(run, entry, args))
+      };
+    },
+
+    getEvidence(args: Row) {
+      if (typeof args.evidenceId !== "string" || !args.evidenceId) {
+        throw new Error("session_get_evidence requires args.evidenceId");
+      }
+      const entry = entries.find((candidate) => candidate.evidenceId === args.evidenceId);
+      if (!entry) {
+        throw new Error(`Unknown evidence ID: ${args.evidenceId}`);
+      }
+      const offset = boundedInteger(args.offset, 0, 0, entry.byteLength);
+      const maxBytes = boundedInteger(args.maxBytes, 64 * 1024, 1024, MAX_EVIDENCE_BYTES);
+      const remaining = entry.byteLength - offset;
+      const length = Math.min(maxBytes, remaining);
+      const handle = openSync(run.evidencePath, "r");
+      try {
+        const buffer = Buffer.alloc(length);
+        readSync(handle, buffer, 0, length, entry.offset + offset);
+        const complete = offset === 0 && length === entry.byteLength;
+        return {
+          evidence: timelineEntry(entry),
+          offset,
+          returnedBytes: length,
+          totalBytes: entry.byteLength,
+          nextOffset: offset + length < entry.byteLength ? offset + length : null,
+          complete,
+          record: complete ? JSON.parse(buffer.toString("utf-8")) : null,
+          content: complete ? null : buffer.toString("utf-8")
+        };
+      } finally {
+        closeSync(handle);
+      }
+    }
+  };
+}
+
+function createArtifactAccess(run: ReturnType<typeof loadRun>): AnalysisArtifactAccess {
+  return {
+    list(args: Row = {}) {
+      const inventory = artifactInventory(run);
+      const page = paginate(inventory.files || [], args);
+      return {
+        roots: inventory.roots || [],
+        limits: inventory.limits || null,
+        totalCapturedBytes: inventory.totalCapturedBytes || 0,
+        ...page
+      };
+    },
+
+    get(args: Row) {
+      const inventory = artifactInventory(run);
+      return readArtifactSnapshot(run, inventory, args, "artifact_get");
+    }
+  };
+}
+
+function createRuntimeExtensionAccess(run: ReturnType<typeof loadRun>): AnalysisRuntimeExtensionAccess {
+  return {
+    list(args: Row = {}) {
+      const inventory = artifactInventory(run);
+      if (!inventory.runtimeEnvironment) {
+        return {
+          legacyArtifactInventory: true,
+          roots: inventory.roots || [],
+          ...paginate(inventory.files || [], args)
+        };
+      }
+      return {
+        resolution: inventory.runtimeEnvironment.resolution,
+        note: inventory.runtimeEnvironment.note,
+        ...paginate(inventory.runtimeEnvironment.extensions || [], args)
+      };
+    },
+
+    get(args: Row) {
+      const inventory = artifactInventory(run);
+      if (!inventory.runtimeEnvironment || !args.extensionId) {
+        return readArtifactSnapshot(run, inventory, args, "extension_get");
+      }
+      const extension = (inventory.runtimeEnvironment.extensions || [])
+        .find((entry) => entry.id === args.extensionId);
+      if (!extension) {
+        throw new Error("extension_get requires a selected extensionId");
+      }
+      return {
+        extension,
+        artifacts: (inventory.files || [])
+          .filter((artifact) => (artifact.runtimeExtensionIds || []).includes(extension.id))
+      };
+    }
+  };
+}
+
+function withTool(toolName: string, result: unknown) {
+  const { tool: _tool, ...body } = (result && typeof result === "object" ? result : {}) as Row;
+  return {
+    tool: toolName,
+    ...body
+  };
+}
+
 export function runAnalysisTool(runDir: string, toolName: string, args: Row = {}) {
   const run = loadRun(runDir);
   const entries = run.evidenceIndex.entries as AnalysisEvidenceIndexEntry[];
+  const sessionAccess = createSessionAccess(run, entries);
+  const artifactAccess = createArtifactAccess(run);
+  const runtimeExtensionAccess = createRuntimeExtensionAccess(run);
 
-  if (toolName === "session_main_info") {
-    const sessionId = typeof args.sessionId === "string"
-      ? args.sessionId
-      : run.sessionIndex.rootSessionId;
-    const timeline = entries
-      .filter((entry) => entry.sessionId === sessionId)
-      .filter((entry) => (
-        entry.kind === "message"
-        && ["user", "assistant", "agent"].includes(String(entry.role || "").toLowerCase())
-      ) || (
-        entry.kind === "tool"
-        && ["task", "subtask"].includes(String(entry.toolName || "").toLowerCase())
-      ))
-      .map(timelineEntry);
-    const session = run.sessionIndex.sessions.find((item) => item.sessionId === sessionId) || null;
-    const systemPrompts = entries
-      .filter((entry) => entry.sessionId === sessionId && entry.kind === "system-prompt")
-      .map(timelineEntry);
-    return {
-      tool: toolName,
-      provider: run.evidenceIndex.provider,
-      rootSessionId: run.sessionIndex.rootSessionId,
-      session,
-      sessionTree: run.sessionIndex.tree,
-      systemPrompts,
-      timeline: paginate(timeline, args)
-    };
+  if (toolName === "session_main_info" || toolName === "session_overview") {
+    return withTool(toolName, sessionAccess.overview(args));
   }
-
+  if (toolName === "session_list") {
+    return withTool(toolName, sessionAccess.listSessions(args));
+  }
+  if (toolName === "session_timeline") {
+    return withTool(toolName, sessionAccess.timeline(args));
+  }
   if (toolName === "session_query_system_prompts") {
-    const prompts = entries
-      .filter((entry) => entry.kind === "system-prompt")
-      .filter((entry) => !args.sessionId || entry.sessionId === args.sessionId);
-    const page = paginate(prompts, args);
-    return {
-      tool: toolName,
-      ...page,
-      items: page.items.map((entry) => projectedRecord(run, entry, args))
-    };
+    return withTool(toolName, sessionAccess.querySystemPrompts(args));
   }
-
   if (toolName === "session_query_context") {
-    if (typeof args.evidenceId !== "string" || !args.evidenceId) {
-      throw new Error("session_query_context requires args.evidenceId");
-    }
-    const conversation = entries.filter(isConversationEntry);
-    const target = entries.find((entry) => entry.evidenceId === args.evidenceId);
-    if (!target) {
-      throw new Error(`Unknown evidence ID: ${args.evidenceId}`);
-    }
-    let index = conversation.findIndex((entry) => entry.evidenceId === target.evidenceId);
-    if (index < 0) {
-      index = conversation.findIndex((entry) => entry.sequence >= target.sequence);
-      if (index < 0) index = conversation.length - 1;
-    }
-    const before = boundedInteger(args.before, 5, 0, 50);
-    const after = boundedInteger(args.after, 5, 0, 50);
-    return {
-      tool: toolName,
-      target: timelineEntry(target),
-      before,
-      after,
-      items: conversation
-        .slice(Math.max(0, index - before), Math.min(conversation.length, index + after + 1))
-        .map((entry) => projectedRecord(run, entry, args))
-    };
+    return withTool(toolName, sessionAccess.getContext(args as any));
   }
-
   if (toolName === "session_query_errors") {
-    const errors = entries
-      .filter((entry) => entry.kind === "tool" && entry.status === "error")
-      .filter((entry) => !args.sessionId || entry.sessionId === args.sessionId);
-    const page = paginate(errors, args);
-    return {
-      tool: toolName,
-      ...page,
-      items: page.items.map((entry) => projectedRecord(run, entry, args))
-    };
+    return withTool(toolName, sessionAccess.queryErrors(args));
   }
-
   if (toolName === "session_query_tools") {
-    const status = normalizeStatus(args.status);
-    const names = Array.isArray(args.names)
-      ? new Set(args.names.map((name) => String(name).toLowerCase()))
-      : null;
-    const matches = entries
-      .filter((entry) => entry.kind === "tool")
-      .filter((entry) => !args.sessionId || entry.sessionId === args.sessionId)
-      .filter((entry) => !names || names.has(String(entry.toolName || "").toLowerCase()))
-      .filter((entry) => {
-        const entryStatus = entry.status || "unknown";
-        return status === "all" || status === entryStatus;
-      });
-    const page = paginate(matches, args);
-    return {
-      tool: toolName,
-      status,
-      ...page,
-      items: page.items.map((entry) => projectedRecord(run, entry, args))
-    };
+    return withTool(toolName, sessionAccess.queryTools(args));
   }
-
   if (toolName === "session_find_anomalies") {
-    const threshold = Math.min(1, Math.max(0, Number(args.errorRateThreshold ?? 0.25)));
-    const minToolCalls = boundedInteger(args.minToolCalls, 4, 1, 100000);
-    const interruptions = entries
-      .filter((entry) => entry.kind === "tool" && entry.status === "error")
-      .filter((entry) => isInterruptionReason(entry.errorReason))
-      .map((entry) => ({
-        ...timelineEntry(entry),
-        detector: "explicit-error-reason"
-      }));
-    const rankedSessions = run.sessionIndex.sessions
-      .map((session) => ({
-        sessionId: session.sessionId,
-        evidenceId: session.evidenceId,
-        title: session.title,
-        parentSessionId: session.parentSessionId,
-        toolCalls: Number(session.direct?.toolCalls) || 0,
-        errors: Number(session.direct?.errors) || 0,
-        errorRate: Number(session.direct?.errorRate) || 0
-      }))
-      .filter((session) => args.includeRoot === true || session.parentSessionId)
-      .filter((session) => session.toolCalls >= minToolCalls)
-      .sort((left, right) => right.errorRate - left.errorRate || right.errors - left.errors);
-    return {
-      tool: toolName,
-      interruptions,
-      highErrorRate: {
-        heuristic: true,
-        threshold,
-        minToolCalls,
-        flagged: rankedSessions.filter((session) => session.errorRate >= threshold),
-        rankedSessions
-      }
-    };
+    return withTool(toolName, sessionAccess.findAnomalies(args));
   }
-
   if (toolName === "session_get_evidence") {
-    if (typeof args.evidenceId !== "string" || !args.evidenceId) {
-      throw new Error("session_get_evidence requires args.evidenceId");
-    }
-    const entry = entries.find((candidate) => candidate.evidenceId === args.evidenceId);
-    if (!entry) {
-      throw new Error(`Unknown evidence ID: ${args.evidenceId}`);
-    }
-    const offset = boundedInteger(args.offset, 0, 0, entry.byteLength);
-    const maxBytes = boundedInteger(args.maxBytes, 64 * 1024, 1024, MAX_EVIDENCE_BYTES);
-    const remaining = entry.byteLength - offset;
-    const length = Math.min(maxBytes, remaining);
-    const handle = openSync(run.evidencePath, "r");
-    try {
-      const buffer = Buffer.alloc(length);
-      readSync(handle, buffer, 0, length, entry.offset + offset);
-      const complete = offset === 0 && length === entry.byteLength;
-      return {
-        tool: toolName,
-        evidence: timelineEntry(entry),
-        offset,
-        returnedBytes: length,
-        totalBytes: entry.byteLength,
-        nextOffset: offset + length < entry.byteLength ? offset + length : null,
-        complete,
-        record: complete ? JSON.parse(buffer.toString("utf-8")) : null,
-        content: complete ? null : buffer.toString("utf-8")
-      };
-    } finally {
-      closeSync(handle);
-    }
+    return withTool(toolName, sessionAccess.getEvidence(args as any));
   }
-
   if (toolName === "artifact_list") {
-    const inventory = artifactInventory(run);
-    const page = paginate(inventory.files || [], args);
-    return {
-      tool: toolName,
-      roots: inventory.roots || [],
-      limits: inventory.limits || null,
-      totalCapturedBytes: inventory.totalCapturedBytes || 0,
-      ...page
-    };
+    return withTool(toolName, artifactAccess.list(args));
   }
-
   if (toolName === "artifact_get") {
-    const inventory = artifactInventory(run);
-    return readArtifactSnapshot(run, inventory, args, toolName);
+    return withTool(toolName, artifactAccess.get(args));
   }
-
   if (toolName === "extension_list") {
-    const inventory = artifactInventory(run);
-    if (!inventory.runtimeEnvironment) {
-      return {
-        tool: toolName,
-        legacyArtifactInventory: true,
-        roots: inventory.roots || [],
-        ...paginate(inventory.files || [], args)
-      };
-    }
-    return {
-      tool: toolName,
-      resolution: inventory.runtimeEnvironment.resolution,
-      note: inventory.runtimeEnvironment.note,
-      ...paginate(inventory.runtimeEnvironment.extensions || [], args)
-    };
+    return withTool(toolName, runtimeExtensionAccess.list(args));
   }
-
   if (toolName === "extension_get") {
-    const inventory = artifactInventory(run);
-    if (!inventory.runtimeEnvironment || !args.extensionId) {
-      return readArtifactSnapshot(run, inventory, args, toolName);
-    }
-    const extension = (inventory.runtimeEnvironment.extensions || [])
-      .find((entry) => entry.id === args.extensionId);
-    if (!extension) {
-      throw new Error("extension_get requires a selected extensionId");
-    }
-    return {
-      tool: toolName,
-      extension,
-      artifacts: (inventory.files || [])
-        .filter((artifact) => (artifact.runtimeExtensionIds || []).includes(extension.id))
-    };
+    return withTool(toolName, runtimeExtensionAccess.get(args as any));
   }
 
   throw new Error(`Unknown analysis tool: ${toolName}`);

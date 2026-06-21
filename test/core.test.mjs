@@ -38,7 +38,8 @@ import { getAllProviders } from "../dist/src/providers/index.js";
 import {
   buildPowerShellResumeArgs,
   getResumeCommand,
-  resolveProjectDirectory
+  resolveProjectDirectory,
+  resolveWindowsExecutableCandidate
 } from "../dist/src/resume.js";
 import {
   buildAnalysisPromptPreview,
@@ -404,6 +405,27 @@ test("resume commands use structured placeholders and validated directories", ()
   assert.equal(providerDefault.executable, process.execPath);
   assert.deepEqual(providerDefault.args, ["--version", "default id"]);
   assert.equal(getResumeCommand(provider, "disabled", cwd, { codeagent: false }), null);
+});
+
+test("windows executable resolution prefers runnable command shims", () => {
+  assert.equal(
+    resolveWindowsExecutableCandidate(
+      ["D:\\npm\\node_global\\opencode"],
+      (candidate) => candidate === "D:\\npm\\node_global\\opencode.cmd"
+    ),
+    "D:\\npm\\node_global\\opencode.cmd"
+  );
+  assert.equal(
+    resolveWindowsExecutableCandidate([
+      "D:\\npm\\node_global\\opencode",
+      "D:\\npm\\node_global\\opencode.cmd"
+    ]),
+    "D:\\npm\\node_global\\opencode.cmd"
+  );
+  assert.equal(
+    resolveWindowsExecutableCandidate(["D:\\npm\\node_global\\opencode"]),
+    "D:\\npm\\node_global\\opencode"
+  );
 });
 
 test("every provider declares a configurable resume command", () => {
@@ -1183,6 +1205,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.ok(existsSync(run.files.sessionIndexPath));
   assert.ok(existsSync(run.files.evidenceIndexPath));
   assert.ok(existsSync(run.files.evidencePath));
+  assert.ok(existsSync(run.files.accessManifestPath));
   assert.ok(existsSync(run.files.analysisToolPath));
   assert.ok(existsSync(run.files.analysisLayoutPath));
   assert.ok(existsSync(run.files.analysisToolPackagePath));
@@ -1190,6 +1213,10 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.equal(path.relative(run.runDir, run.files.reportPath), path.join("outputs", "report.md"));
   assert.equal(path.relative(run.runDir, run.files.promptPath), path.join("inputs", "analysis-request.md"));
   assert.equal(path.relative(run.runDir, run.files.evidencePath), path.join("evidence", "evidence.jsonl"));
+  assert.equal(
+    path.relative(run.runDir, run.files.accessManifestPath),
+    path.join("inputs", "analysis-access.json")
+  );
   assert.equal(path.relative(run.runDir, run.files.messagesPath), path.join("diagnostics", "messages.json"));
   assert.deepEqual(
     readdirSync(run.runDir).sort(),
@@ -1198,6 +1225,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   const manifest = JSON.parse(readFileSync(run.files.manifestPath, "utf-8"));
   assert.equal(manifest.layoutVersion, 1);
   assert.equal(typeof manifest.integrity.files["inputs/session.json"], "string");
+  assert.equal(typeof manifest.integrity.files["inputs/analysis-access.json"], "string");
   assert.equal(typeof manifest.integrity.files["tools/analysis-tools.js"], "string");
   assert.equal(typeof manifest.integrity.files["tools/analysis-layout.js"], "string");
   assert.equal(typeof manifest.integrity.files["tools/package.json"], "string");
@@ -1227,14 +1255,24 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.match(analysisPrompt, /Focus on deterministic validation/);
   assert.match(analysisPrompt, /Never propose changes to those generated files/);
   assert.match(analysisPrompt, /artifactRoot/);
-  assert.match(analysisPrompt, /session_query_tools/);
-  assert.match(analysisPrompt, /return compact Markdown/);
+  assert.match(analysisPrompt, /Analysis access manifest/);
+  assert.match(analysisPrompt, /Analysis access interfaces/);
+  assert.match(analysisPrompt, /provider-neutral interfaces/);
+  assert.match(analysisPrompt, /read-only access/);
   assert.match(analysisPrompt, new RegExp(
-    run.files.analysisToolPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    run.files.accessManifestPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   ));
+  assert.match(analysisPrompt, /session_list/);
+  assert.match(analysisPrompt, /session_timeline/);
+  assert.match(analysisPrompt, /session_query_tools/);
+  assert.match(analysisPrompt, /artifact_get/);
+  assert.match(analysisPrompt, /extension_get/);
+  assert.doesNotMatch(analysisPrompt, /analysis-tool\.ps1/);
   assert.match(analysisPrompt, /Contrast successful and failed tool outcomes/);
   assert.match(analysisPrompt, /use only exact, unmodified `ev:\.\.\.` IDs/);
   assert.match(analysisPrompt, /Never append descriptions, parentheses, quotes, line numbers, or filesystem paths/);
+  assert.match(analysisPrompt, /metrics\.taskSuccess/);
+  assert.match(analysisPrompt, /create\|edit\|replace\|delete/);
   assert.match(
     analysisPrompt,
     /"sourceEvidence": \["ev:opencode:session-analysis:session:session-analysis"\]/
@@ -1321,7 +1359,34 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.match(formattedArtifact, /````text\n# Example/);
   assert.match(formattedArtifact, /Use compact output\./);
   assert.equal(mainInfo.session.direct.errors, 1);
+  const accessManifest = JSON.parse(readFileSync(run.files.accessManifestPath, "utf-8"));
+  assert.equal(accessManifest.provider.id, "opencode");
+  assert.equal(accessManifest.rootSessionId, "session-analysis");
+  assert.equal(accessManifest.interfaceVersion, 1);
+  assert.equal(accessManifest.backingStores.evidenceRecords, "evidence/evidence.jsonl");
+  assert.equal(accessManifest.accessTool.relativePath, "tools/analysis-tools.js");
+  assert.equal(
+    accessManifest.interfaces.session.some((entry) => entry.method === "queryTools"
+      && entry.command === "session_query_tools"),
+    true
+  );
+  assert.equal(
+    accessManifest.interfaces.artifacts.some((entry) => entry.command === "artifact_get"),
+    true
+  );
+  assert.equal(
+    accessManifest.interfaces.runtimeExtensions.some((entry) => entry.command === "extension_get"),
+    true
+  );
   assert.equal(mainInfo.systemPrompts.length, 1);
+  const sessionList = runAnalysisTool(run.runDir, "session_list");
+  assert.equal(sessionList.total, 1);
+  assert.equal(sessionList.items[0].sessionId, "session-analysis");
+  const timeline = runAnalysisTool(run.runDir, "session_timeline", {
+    kinds: ["tool"]
+  });
+  assert.equal(timeline.total, 2);
+  assert.equal(timeline.items[0].kind, "tool");
   const systemPrompts = runAnalysisTool(run.runDir, "session_query_system_prompts");
   assert.equal(systemPrompts.total, 1);
   assert.match(systemPrompts.items[0].output, /Run deterministic validation/);
@@ -1454,7 +1519,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     proposals: [
       {
         id: "update-agent-rules",
-        action: "replace",
+        action: "edit",
         artifactRoot: projectPath,
         artifactPath: "AGENTS.md",
         description: "Require executable verification.",
@@ -1538,6 +1603,16 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   const tampered = validateAnalysisOutputs(run.runDir, 0, run.integrity);
   assert.equal(tampered.state, "invalid");
   assert.ok(tampered.validation.errors.some((error) => /integrity check/.test(error)));
+  mkdirSync(path.dirname(run.files.analyzerStderrPath), { recursive: true });
+  writeFileSync(
+    run.files.analyzerStderrPath,
+    "Codex could not read the local image: No such file or directory\n"
+  );
+  const failedWithStderr = validateAnalysisOutputs(run.runDir, 1, run.integrity);
+  assert.equal(failedWithStderr.state, "failed");
+  assert.ok(
+    failedWithStderr.validation.errors.some((error) => /Codex could not read the local image/.test(error))
+  );
 
   const filteredRuntimeRun = prepareSessionAnalysis({
     provider,
@@ -1661,8 +1736,20 @@ test("terminal analysis passes the prompt through structured PowerShell input", 
   ]);
   const script = Buffer.from(args[3], "base64").toString("utf16le");
   assert.match(script, /OPENSESSIONVIEWER_ANALYSIS_SPEC/);
-  assert.match(script, /\[IO\.File\]::ReadAllText\(\$spec\.stdinPath\)/);
-  assert.match(script, /& \$spec\.executable @\(\$spec\.args\)/);
+  assert.match(script, /Start-Process @startInfo/);
+  assert.match(script, /\$startInfo\['RedirectStandardInput'\]=\$spec\.stdinPath/);
+  assert.match(script, /RedirectStandardOutput=\$spec\.stdoutPath/);
+  assert.match(script, /RedirectStandardError=\$spec\.stderrPath/);
+  assert.match(script, /\$agentProcess\.WaitForExit\(\$waitMs\)/);
+  assert.match(script, /\$agentProcess\.Kill\(\$true\)/);
+  assert.match(script, /Analysis command timed out after/);
+  assert.match(script, /\$spec\.reportPath/);
+  assert.match(script, /\$spec\.evaluationPath/);
+  assert.match(script, /\$spec\.proposalsPath/);
+  assert.match(script, /Get-CimInstance Win32_Process/);
+  assert.match(script, /\$processInfo\.CommandLine\.Contains/);
+  assert.match(script, /\$stderrHasContent/);
+  assert.match(script, /Start-Sleep -Milliseconds 1000/);
   assert.match(script, /\$spec\.validatorPath/);
   assert.match(script, /\$spec\.integrityBase64/);
 });
@@ -1680,6 +1767,8 @@ test("terminal implementation passes the accepted proposal prompt through struct
   assert.match(script, /OPENSESSIONVIEWER_IMPLEMENTATION_SPEC/);
   assert.match(script, /\[IO\.File\]::ReadAllText\(\$spec\.stdinPath\)/);
   assert.match(script, /& \$spec\.executable @\(\$spec\.args\)/);
+  assert.match(script, /\$lastExitCode=\$LASTEXITCODE/);
+  assert.match(script, /\$null -eq \$lastExitCode/);
   assert.doesNotMatch(script, /\$spec\.validatorPath/);
 });
 

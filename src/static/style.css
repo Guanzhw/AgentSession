@@ -3987,6 +3987,10 @@ pre code.hljs {
   font-size: 12px;
 }
 
+.analysis-run-waiting-stalled {
+  color: var(--warning-color);
+}
+
 .analysis-run-waiting::before {
   content: "";
   display: inline-block;

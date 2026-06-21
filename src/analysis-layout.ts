@@ -12,6 +12,7 @@ const CATEGORIZED_FILES = {
   sessionIndexPath: "evidence/session-index.json",
   evidenceIndexPath: "evidence/evidence-index.json",
   evidencePath: "evidence/evidence.jsonl",
+  accessManifestPath: "inputs/analysis-access.json",
   artifactsPath: "evidence/artifacts.json",
   implementationPromptPath: "inputs/implementation-request.md",
   analysisToolPath: "tools/analysis-tools.js",
@@ -23,6 +24,8 @@ const CATEGORIZED_FILES = {
   metricsPath: "diagnostics/metrics.json",
   flowPath: "diagnostics/flow.json",
   tracePath: "diagnostics/trace.json",
+  analyzerStdoutPath: "diagnostics/analyzer.stdout.log",
+  analyzerStderrPath: "diagnostics/analyzer.stderr.log",
   artifactSnapshotsDir: "evidence/artifact-snapshots"
 };
 
@@ -43,6 +46,8 @@ const LEGACY_FILES = {
   metricsPath: "metrics.json",
   flowPath: "flow.json",
   tracePath: "trace.json",
+  analyzerStdoutPath: "diagnostics/analyzer.stdout.log",
+  analyzerStderrPath: "diagnostics/analyzer.stderr.log",
   artifactSnapshotsDir: "artifacts"
 };
 
