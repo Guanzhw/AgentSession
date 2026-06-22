@@ -373,6 +373,8 @@ Supported analysis placeholders include:
 Implementation commands also support:
 
 - `{implementationPromptPath}`
+- `{acceptedProposalsPath}`
+- `{implementationResultPath}`
 - `{analysisPromptPath}`
 
 Commands are executable/argument arrays. Do not concatenate session IDs or paths
@@ -424,12 +426,14 @@ New runs use:
 |-- outputs/
 |   |-- report.md
 |   |-- evaluation-proposals.json
-|   `-- artifact-proposals.json
+|   |-- artifact-proposals.json
+|   `-- implementation-result.json
 |-- inputs/
 |   |-- session.json
 |   |-- evaluation-seed.json
 |   |-- analysis-access.json
-|   `-- analysis-request.md
+|   |-- analysis-request.md
+|   `-- accepted-proposals.json
 |-- evidence/
 |   |-- session-index.json
 |   |-- evidence-index.json
@@ -497,6 +501,7 @@ The validator checks at least:
 - every case has `metrics.taskSuccess === true`
 - every evidence and artifact reference resolves
 - proposal actions are `create`, `edit`, `replace`, or `delete`
+- proposal `kind`, when present, is `artifact-change` or `skill-evolution`
 - proposal targets stay inside captured artifact roots
 - generated analysis output is never targeted
 - integrity hashes for captured inputs still match
@@ -521,11 +526,17 @@ Implementation is intentionally separate from analysis:
 2. Validator marks the run completed or invalid.
 3. The user reviews the proposals.
 4. The session page can launch implementation only when the completed run has
-   valid artifact proposals and a configured implementation command.
+   valid proposals and a configured implementation command.
 
-The implementation request is written to `inputs/implementation-request.md`.
-It points back to the same report, proposal file, artifact inventory, and
-analysis access manifest. It does not bypass the human approval gate.
+The approval record is written to `inputs/accepted-proposals.json`. The first
+pass accepts the whole validated proposal set; future UI can narrow that list
+without changing the implementation contract. The implementation request is
+written to `inputs/implementation-request.md`. It points back to the accepted
+proposal file, original proposal file, report, artifact inventory, and analysis
+access manifest. The implementation agent is asked to write
+`outputs/implementation-result.json` with implemented proposal IDs, skipped
+proposal IDs, changed files, and verification results. None of this bypasses
+the human approval gate.
 
 ## Tests to Add or Update
 
@@ -549,8 +560,8 @@ Minimum coverage:
 - Validator success and failure paths are covered with valid and invalid output
   proposals.
 - `prepareAnalysisImplementation()` writes
-  `inputs/implementation-request.md` only for completed validated runs with
-  proposals.
+  `inputs/accepted-proposals.json` and `inputs/implementation-request.md` only
+  for completed validated runs with proposals.
 
 For complex providers, also test:
 

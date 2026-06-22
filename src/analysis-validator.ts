@@ -53,6 +53,8 @@ function hashFile(filePath) {
   return createHash("sha256").update(readFileSync(filePath)).digest("hex");
 }
 
+const ALLOWED_PROPOSAL_KINDS = new Set(["artifact-change", "skill-evolution"]);
+
 export function validateAnalysisOutputs(runDir, processExitCode = 0, expectedIntegrity = null) {
   const resolvedRunDir = path.resolve(runDir);
   const manifestPath = path.join(resolvedRunDir, "manifest.json");
@@ -248,6 +250,9 @@ export function validateAnalysisOutputs(runDir, processExitCode = 0, expectedInt
         );
         if (!["create", "edit", "replace", "delete"].includes(proposal.action)) {
           errors.push(`${label} has invalid action ${proposal.action}`);
+        }
+        if (proposal.kind !== undefined && !ALLOWED_PROPOSAL_KINDS.has(String(proposal.kind))) {
+          errors.push(`${label} has invalid kind ${proposal.kind}`);
         }
         validateEvidenceRefs(proposal.evidence, `${label} evidence`);
         const artifactRoot = path.resolve(String(proposal.artifactRoot || ""));

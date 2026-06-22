@@ -185,7 +185,10 @@ the analyzer to write:
 
 - `report.md`: the primary, human-readable analysis result
 - `evaluation-proposals.json`: the replay, held-out, and regression validation plan
-- `artifact-proposals.json`: proposed target changes, which may be an empty list
+- `artifact-proposals.json`: proposed target changes, which may be an empty list.
+  Individual proposals may use `kind: "skill-evolution"` when the proposal is
+  an evidence-backed update to future agent skills, instructions, or harness
+  guidance.
 
 These three files are the final analysis products. Files such as
 `session-index.json`, `evidence-index.json`, `evidence.jsonl`, `artifacts.json`,
@@ -221,11 +224,13 @@ New runs organize those files by purpose:
 ├── outputs/
 │   ├── report.md
 │   ├── evaluation-proposals.json
-│   └── artifact-proposals.json
+│   ├── artifact-proposals.json
+│   └── implementation-result.json # requested from implementation runs
 ├── inputs/
 │   ├── session.json
 │   ├── evaluation-seed.json
-│   └── analysis-request.md
+│   ├── analysis-request.md
+│   └── accepted-proposals.json    # written after user approval
 ├── evidence/
 │   ├── session-index.json
 │   ├── evidence-index.json
@@ -361,7 +366,8 @@ Supported command placeholders are `{sessionId}`, `{projectPath}`, `{target}`,
 `{analysisToolPath}`, `{promptPath}`, `{reportPath}`, `{evaluationSeedPath}`,
 `{evaluationPath}`, `{proposalsPath}`,
 and `{artifactsPath}`. Implementation commands additionally support
-`{implementationPromptPath}`. `{prompt}` is also available for agents that require the
+`{implementationPromptPath}`, `{acceptedProposalsPath}`, and
+`{implementationResultPath}`. `{prompt}` is also available for agents that require the
 complete prompt as one argument, although `{promptPath}` or `"stdin": "prompt"`
 is preferable for large sessions. `{messagesPath}` remains available when
 `includeRawSnapshots` is enabled for debugging or compatibility.
@@ -373,14 +379,16 @@ can make unattended local testing easier, but should only be added for a
 trusted project and trusted prompt.
 
 After a run completes with `manifest.validation.ok === true` and at least one
-validated artifact proposal, the session page can launch an implementation run.
+validated proposal, the session page can launch an implementation run.
 Clicking **Implement accepted proposals** is the first-pass user approval gate:
-it writes `inputs/implementation-request.md`, points the configured implementation
-command at that file, and asks the agent to make only the accepted proposal
-changes. The request also points the agent at `inputs/analysis-access.json`
-when the run has one, so implementation can follow the same bounded file-first
-interface for evidence context. The agent should verify the result and leave it
-for human review. It does not merge automatically.
+it writes `inputs/accepted-proposals.json` with the accepted proposal IDs and
+full proposal records, writes `inputs/implementation-request.md`, points the
+configured implementation command at that request, and asks the agent to make
+only the accepted proposal changes. The request also points the agent at
+`inputs/analysis-access.json` when the run has one, so implementation can follow
+the same bounded file-first interface for evidence context. The agent should
+write `outputs/implementation-result.json`, verify the result, and leave it for
+human review. It does not merge automatically.
 
 Relative `artifactRoots` and `outputDir` paths are resolved from the recorded
 session project directory. Absolute artifact roots are allowed when explicitly

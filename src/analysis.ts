@@ -784,6 +784,7 @@ The analysis inputs have three distinct roles:
 21. Use only supported artifact proposal actions: \`create\`, \`edit\`, \`replace\`, or \`delete\`. Use \`edit\` or \`replace\` for bounded changes to existing artifacts.
 22. Do not cite raw session IDs or shortened evidence prefixes. If a related session is relevant, first retrieve an exact full \`ev:...\` ID from an access tool result or \`evidence-index.json\`. If you only know a prefix, cite \`${rootEvidenceId}\` instead.
 23. The validator rejects duplicate proposal targets. If several ideas target the same \`artifactRoot\` plus \`artifactPath\`, merge them into one proposal with a combined description, evidence list, risk list, and validation case list.
+24. When a proposal updates skills, runtime instructions, or harness guidance to improve future agent behavior, set \`kind\` to \`skill-evolution\`. Use \`artifact-change\` or omit \`kind\` for ordinary artifact changes.
 
 ## Required outputs
 
@@ -855,6 +856,7 @@ Write valid JSON with this shape:
   "proposals": [
     {
       "id": "stable-id",
+      "kind": "artifact-change|skill-evolution",
       "action": "create|edit|replace|delete",
       "artifactRoot": "An exact root path from artifacts.json",
       "artifactPath": "A path relative to artifactRoot",
@@ -881,6 +883,7 @@ Before finishing, verify all of the following:
 - Evaluation cases include exactly supported kinds and collectively cover replay, held-out, and regression.
 - Every evaluation case has \`metrics.taskSuccess\` set to \`true\`.
 - Every artifact proposal action is one of \`create\`, \`edit\`, \`replace\`, or \`delete\`.
+- Every artifact proposal \`kind\`, when present, is either \`artifact-change\` or \`skill-evolution\`.
 - No two artifact proposals use the same \`artifactRoot\` plus \`artifactPath\`.
 - Every proposal references declared evaluation case IDs and an exact captured artifact root.
 
@@ -1064,6 +1067,8 @@ export function listSessionAnalysisRuns({
         const reportPath = resolveAnalysisRunPath(runDir, manifest, "reportPath");
         const evaluationPath = resolveAnalysisRunPath(runDir, manifest, "evaluationPath");
         const proposalsPath = resolveAnalysisRunPath(runDir, manifest, "proposalsPath");
+        const acceptedProposalsPath = resolveAnalysisRunPath(runDir, manifest, "acceptedProposalsPath");
+        const implementationResultPath = resolveAnalysisRunPath(runDir, manifest, "implementationResultPath");
         const outputs = {
           report: {
             fileName: "report.md",
@@ -1124,7 +1129,15 @@ export function listSessionAnalysisRuns({
               launchedAt: implementation.launchedAt || null,
               promptPath: typeof implementation.promptPath === "string"
                 ? implementation.promptPath
-                : null
+                : null,
+              acceptedProposalsPath: typeof implementation.acceptedProposalsPath === "string"
+                ? implementation.acceptedProposalsPath
+                : analysisRunRelativePath(runDir, acceptedProposalsPath),
+              resultPath: typeof implementation.resultPath === "string"
+                ? implementation.resultPath
+                : analysisRunRelativePath(runDir, implementationResultPath),
+              resultAvailable: outputAvailable(implementationResultPath),
+              acceptedProposalCount: Number(implementation.acceptedProposalCount) || 0
             }
             : null,
           implementationAvailable,
@@ -1390,8 +1403,8 @@ function buildImplementationPrompt({
     : `- Analysis access interface: ${files.accessManifestPath} (not available for this legacy run)`;
   return `# OpenSessionViewer accepted-proposal implementation
 
-The user has reviewed and accepted the validated artifact proposals from an
-OpenSessionViewer analysis run. Implement the accepted proposal set, then verify
+The user has reviewed and accepted the validated proposal set from an
+OpenSessionViewer analysis run. Implement only that accepted set, then verify
 the result.
 
 ## Run context
@@ -1407,18 +1420,20 @@ the result.
 
 - Human report: ${files.reportPath}
 - Evaluation plan: ${files.evaluationPath}
-- Accepted artifact proposals: ${files.proposalsPath}
+- Accepted proposals: ${files.acceptedProposalsPath}
+- Validated proposal source: ${files.proposalsPath}
 - Captured artifact inventory: ${files.artifactsPath}
 - Original analysis request: ${files.promptPath}
+- Implementation result file: ${files.implementationResultPath}
 ${accessManifestLine}
 
 ## Required behavior
 
-1. Treat the proposal file as accepted by the user, but still implement it
-   narrowly and preserve unrelated local changes.
+1. Treat the accepted-proposals file as the user's approval record, but still
+   implement it narrowly and preserve unrelated local changes.
 2. Inspect \`git status --short\` before editing. Do not revert or overwrite
    changes that are unrelated to the accepted proposals.
-3. Implement only proposals listed in \`${files.proposalsPath}\`.
+3. Implement only proposals listed in \`${files.acceptedProposalsPath}\`.
 4. When proposal context or evidence is needed, start with
    \`${files.accessManifestPath}\` if it is available. Follow its bounded
    backing-store interface and prefer direct reads of the session index,
@@ -1426,15 +1441,36 @@ ${accessManifestLine}
    broad reads of the complete evidence JSONL or raw diagnostics.
 5. Do not edit provider-owned databases, transcripts, or files inside
    \`${manifest.runDir || ""}\`.
-6. Prefer focused source, test, documentation, or instruction changes that map
+6. For \`skill-evolution\` proposals, edit only the named skill, instruction,
+   or harness artifacts. Do not broaden them into unrelated redesigns.
+7. Prefer focused source, test, documentation, or instruction changes that map
    directly to the proposal descriptions.
-7. Use \`${files.evaluationPath}\` as the verification guide. Run the relevant
+8. Use \`${files.evaluationPath}\` as the verification guide. Run the relevant
    tests, type checks, or review checks available in the project.
-8. Do not merge automatically. If a PR or MR can be opened after verification,
+9. Write \`${files.implementationResultPath}\` with the JSON result shape below.
+10. Do not merge automatically. If a PR or MR can be opened after verification,
    open it for human review; otherwise leave the worktree ready for review and
    summarize the changes and verification.
-9. If a proposal is unsafe, stale, impossible, or contradicted by current code,
+11. If a proposal is unsafe, stale, impossible, or contradicted by current code,
    stop and explain that instead of forcing an edit.
+
+## Implementation result JSON
+
+\`\`\`json
+{
+  "schemaVersion": 1,
+  "status": "completed|partial|blocked",
+  "implementedProposalIds": ["accepted proposal IDs implemented"],
+  "skippedProposals": [
+    { "id": "accepted proposal ID", "reason": "Why it was skipped" }
+  ],
+  "changedFiles": ["Project-relative paths changed"],
+  "verification": [
+    { "command": "Command or check", "result": "Exact outcome" }
+  ],
+  "notes": ["Any human-review notes"]
+}
+\`\`\`
 
 ## Completion report
 
@@ -1444,6 +1480,7 @@ Before finishing, report:
 - Which files changed.
 - Which verification commands ran and their exact result.
 - Any proposal IDs skipped and why.
+- The path to \`${files.implementationResultPath}\`.
 `;
 }
 
@@ -1454,6 +1491,48 @@ function readAnalysisManifest(runDir) {
     throw new Error("Analysis manifest is unavailable");
   }
   return JSON.parse(readFileSync(manifestPath, "utf-8"));
+}
+
+function readAnalysisJson(filePath, label) {
+  try {
+    return JSON.parse(readFileSync(filePath, "utf-8"));
+  } catch (error) {
+    throw new Error(`${label} is unavailable or invalid JSON: ${error.message}`);
+  }
+}
+
+function buildAcceptedProposals({
+  manifest,
+  runDir,
+  proposalsPath,
+  acceptedAt
+}) {
+  const source = readAnalysisJson(proposalsPath, "Validated artifact proposals");
+  if (!Array.isArray(source?.proposals) || source.proposals.length === 0) {
+    throw new Error("The analysis run has no validated artifact proposals to implement");
+  }
+  const acceptedProposalIds = [];
+  for (const [index, proposal] of source.proposals.entries()) {
+    const id = typeof proposal?.id === "string" ? proposal.id.trim() : "";
+    if (!id) {
+      throw new Error(`Validated artifact proposal ${index + 1} is missing id`);
+    }
+    acceptedProposalIds.push(id);
+  }
+  return {
+    schemaVersion: 1,
+    status: "accepted",
+    acceptedAt,
+    acceptedBy: "user-action",
+    selection: "all-validated-proposals",
+    runId: manifest.runId || "",
+    provider: manifest.provider || "",
+    target: source.target || manifest.target || "",
+    sourceSessionId: source.sourceSessionId || manifest.sessionId || "",
+    proposalSourcePath: analysisRunRelativePath(runDir, proposalsPath),
+    acceptedProposalIds,
+    proposals: source.proposals
+  };
 }
 
 export function prepareAnalysisImplementation({
@@ -1508,7 +1587,17 @@ export function prepareAnalysisImplementation({
     promptPath: resolveAnalysisRunPath(run.runDir, manifest, "promptPath"),
     accessManifestPath: resolveAnalysisRunPath(run.runDir, manifest, "accessManifestPath")
   };
+  const acceptedAt = new Date().toISOString();
+  const acceptedProposals = buildAcceptedProposals({
+    manifest,
+    runDir: run.runDir,
+    proposalsPath: files.proposalsPath,
+    acceptedAt
+  });
+  mkdirSync(path.dirname(files.acceptedProposalsPath), { recursive: true });
   mkdirSync(path.dirname(files.implementationPromptPath), { recursive: true });
+  mkdirSync(path.dirname(files.implementationResultPath), { recursive: true });
+  writeJson(files.acceptedProposalsPath, acceptedProposals);
   const prompt = buildImplementationPrompt({
     provider,
     manifest,
@@ -1526,10 +1615,12 @@ export function prepareAnalysisImplementation({
     reportPath: files.reportPath,
     evaluationPath: files.evaluationPath,
     proposalsPath: files.proposalsPath,
+    acceptedProposalsPath: files.acceptedProposalsPath,
     artifactsPath: files.artifactsPath,
     accessManifestPath: files.accessManifestPath,
     analysisPromptPath: files.promptPath,
     implementationPromptPath: files.implementationPromptPath,
+    implementationResultPath: files.implementationResultPath,
     promptPath: files.implementationPromptPath,
     prompt
   };
@@ -1554,15 +1645,21 @@ export function prepareAnalysisImplementation({
     ...manifest,
     files: {
       ...(manifest.files || {}),
-      implementationPromptPath: files.implementationPromptPath
+      acceptedProposalsPath: files.acceptedProposalsPath,
+      implementationPromptPath: files.implementationPromptPath,
+      implementationResultPath: files.implementationResultPath
     },
     implementation: {
       schemaVersion: 1,
       state: "prepared",
-      acceptedAt: new Date().toISOString(),
+      acceptedAt,
       acceptedBy: "user-action",
+      selection: "all-validated-proposals",
+      acceptedProposalCount: acceptedProposals.acceptedProposalIds.length,
       promptPath: analysisRunRelativePath(run.runDir, files.implementationPromptPath),
+      acceptedProposalsPath: analysisRunRelativePath(run.runDir, files.acceptedProposalsPath),
       proposalsPath: analysisRunRelativePath(run.runDir, files.proposalsPath),
+      resultPath: analysisRunRelativePath(run.runDir, files.implementationResultPath),
       command: {
         executable: command.executable,
         args: command.args,

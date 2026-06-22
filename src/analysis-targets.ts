@@ -27,7 +27,7 @@ export const BUILTIN_ANALYSIS_TARGETS = {
     label: "Analyze skills",
     artifactRoots: [],
     fileExtensions: DEFAULT_ANALYSIS_EXTENSIONS,
-    prompt: "Focus proposals on the selected provider runtime skills and their supporting files."
+    prompt: "Focus proposals on the selected provider runtime skills and their supporting files. Mark recurring harness or skill improvements as skill-evolution proposals when the session evidence shows they would improve future agent behavior."
   },
   prompts: {
     label: "Analyze prompts",

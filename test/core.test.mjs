@@ -1143,7 +1143,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     implementation: {
       command: {
         executable: process.execPath,
-        args: ["--version", "{implementationPromptPath}", "{proposalsPath}", "{accessManifestPath}"],
+        args: ["--version", "{implementationPromptPath}", "{acceptedProposalsPath}", "{implementationResultPath}", "{accessManifestPath}"],
         stdin: "prompt"
       }
     },
@@ -1534,6 +1534,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     proposals: [
       {
         id: "update-agent-rules",
+        kind: "skill-evolution",
         action: "edit",
         artifactRoot: projectPath,
         artifactPath: "AGENTS.md",
@@ -1575,16 +1576,28 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   });
   assert.equal(implementationRun.command.stdinPath, implementationRun.files.implementationPromptPath);
   assert.equal(implementationRun.command.args[1], implementationRun.files.implementationPromptPath);
-  assert.equal(implementationRun.command.args[2], implementationRun.files.proposalsPath);
-  assert.equal(implementationRun.command.args[3], implementationRun.files.accessManifestPath);
+  assert.equal(implementationRun.command.args[2], implementationRun.files.acceptedProposalsPath);
+  assert.equal(implementationRun.command.args[3], implementationRun.files.implementationResultPath);
+  assert.equal(implementationRun.command.args[4], implementationRun.files.accessManifestPath);
   assert.ok(existsSync(implementationRun.files.implementationPromptPath));
+  assert.ok(existsSync(implementationRun.files.acceptedProposalsPath));
+  const acceptedProposals = JSON.parse(readFileSync(implementationRun.files.acceptedProposalsPath, "utf-8"));
+  assert.equal(acceptedProposals.status, "accepted");
+  assert.equal(acceptedProposals.selection, "all-validated-proposals");
+  assert.deepEqual(acceptedProposals.acceptedProposalIds, ["update-agent-rules"]);
+  assert.equal(acceptedProposals.proposals[0].kind, "skill-evolution");
   const implementationPrompt = readFileSync(implementationRun.files.implementationPromptPath, "utf-8");
-  assert.match(implementationPrompt, /accepted the validated artifact proposals/);
+  assert.match(implementationPrompt, /accepted the validated proposal set/);
   assert.match(implementationPrompt, /git status --short/);
+  assert.match(implementationPrompt, /skill-evolution/);
   assert.match(implementationPrompt, /Analysis access interface/);
   assert.match(implementationPrompt, /bounded\s+backing-store interface/);
   assert.match(implementationPrompt, /complete evidence JSONL/);
+  assert.match(implementationPrompt, /implementation-result\.json/);
   assert.match(implementationPrompt, /Do not merge automatically/);
+  assert.match(implementationPrompt, new RegExp(
+    implementationRun.files.acceptedProposalsPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  ));
   assert.match(implementationPrompt, new RegExp(
     implementationRun.files.proposalsPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   ));
@@ -1598,6 +1611,15 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     implementationManifest.implementation.promptPath,
     path.join("inputs", "implementation-request.md").split(path.sep).join("/")
   );
+  assert.equal(
+    implementationManifest.implementation.acceptedProposalsPath,
+    path.join("inputs", "accepted-proposals.json").split(path.sep).join("/")
+  );
+  assert.equal(
+    implementationManifest.implementation.resultPath,
+    path.join("outputs", "implementation-result.json").split(path.sep).join("/")
+  );
+  assert.equal(implementationManifest.implementation.acceptedProposalCount, 1);
   const preparedImplementationRuns = listSessionAnalysisRuns({
     provider,
     providerId: "opencode",
@@ -1607,6 +1629,8 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     metaDir: path.join(temp, "meta")
   });
   assert.equal(preparedImplementationRuns[0].implementation.state, "prepared");
+  assert.equal(preparedImplementationRuns[0].implementation.acceptedProposalCount, 1);
+  assert.equal(preparedImplementationRuns[0].implementation.resultAvailable, false);
   assert.equal(preparedImplementationRuns[0].implementationAvailable, true);
 
   const generatedTargetProposal = JSON.parse(readFileSync(run.files.proposalsPath, "utf-8"));
@@ -1621,6 +1645,14 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     generatedTarget.validation.errors.some((error) => /generated analysis output/.test(error))
   );
   generatedTargetProposal.proposals[0].artifactPath = "AGENTS.md";
+  generatedTargetProposal.proposals[0].kind = "self-evolving-magic";
+  writeFileSync(run.files.proposalsPath, JSON.stringify(generatedTargetProposal));
+  const invalidKind = validateAnalysisOutputs(run.runDir, 0, run.integrity);
+  assert.equal(invalidKind.state, "invalid");
+  assert.ok(
+    invalidKind.validation.errors.some((error) => /invalid kind self-evolving-magic/.test(error))
+  );
+  generatedTargetProposal.proposals[0].kind = "skill-evolution";
   writeFileSync(run.files.proposalsPath, JSON.stringify(generatedTargetProposal));
 
   writeFileSync(run.files.evidencePath, `${readFileSync(run.files.evidencePath, "utf-8")}\n`);
@@ -2005,7 +2037,7 @@ test("analysis prompt preview uses the real builder and reports configured sourc
   assert.equal(builtInPreview.promptFile.configuredPath, "");
   assert.match(
     builtInPreview.prompt,
-    /Focus proposals on the selected provider runtime skills and their supporting files/
+    /Mark recurring harness or skill improvements as skill-evolution proposals/
   );
 });
 
