@@ -51,7 +51,8 @@ OpenCode 和 CodeAgent 使用独立的本地元数据库保存收藏、重命名
 - **Trace API**：暴露 step/span summary，聚合 tool、skill、agent、MCP、LSP 等调用。
 - **统计面板**：展示会话数量、消息数量、token 趋势、模型分布、每日会话。
 - **本地管理**：OpenCode/CodeAgent 支持收藏、重命名、批量操作、软删除、回收站恢复和永久删除。
-- **导出**：OpenCode/CodeAgent 支持 Markdown 与 JSON 导出，JSON 包含 session tree。
+- **导出**：OpenCode/CodeAgent 在详情页提供一个 Export 菜单，可选择 Markdown
+  或 JSON 导出，JSON 包含 session tree。
 - **中英双语**：通过 `--lang zh` 或 `--lang en` 指定界面语言。
 
 ## 安装
@@ -213,6 +214,11 @@ Tools、Rules 或扩展包中可采集的部分。扩展类型、搜索路径和
 Provider 负责。大多数 transcript 不包含不可变的历史扩展清单，因此这里表示
 “当前本地解析结果”，不会声称精确还原会话开始时加载的环境。每个捕获的工件
 都会记录其对应的运行时扩展 ID。
+
+会话详情页会把启动动作放在同一行：**在终端中继续** 和 **分析所选项** 并列
+显示。下方的分析选择器使用类似 inventory 的二维网格：行表示来源范围，例如
+分析目标、项目级运行时和用户级运行时；列表示材料类型，例如 Skills、Prompts、
+Agents、Rules 和其他输入。启动前，摘要会显示已选目标数量和运行时扩展数量。
 
 新运行会按用途组织这些文件：
 
@@ -417,9 +423,11 @@ Analyzer 可见。
 `defaultTargets` 数组仍会被接受，但只使用第一个有效目标。
 
 设置页面会编辑 `analysis.providers.<provider>.targets.<target>` 覆盖。每个目标
-会明确显示默认使用的 Provider 无关分析材料根目录、显式文件和后缀筛选；
-Provider 运行时上下文会在启动时自动解析。点击 **恢复默认值** 时，会尽可能
-删除 Provider 专用差异，使该值重新继承 `analysis.targets` 或内置目标。
+会明确显示默认使用的 Provider 无关分析材料根目录、显式文件和后缀筛选；会话
+页面会把这些目标和 Provider 解析出的运行时扩展一起放进 inventory 选择器中，
+但生成分析包时这两类输入仍保持分离。Provider 运行时上下文会在启动时自动解析。
+点击 **恢复默认值** 时，会尽可能删除 Provider 专用差异，使该值重新继承
+`analysis.targets` 或内置目标。
 
 默认情况下，分析任务写入 `evidence/session-index.json`、
 `evidence/evidence-index.json` 和不可变的 `evidence/evidence.jsonl`，

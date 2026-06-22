@@ -1103,6 +1103,25 @@ function renderAnalysisTargetChoice(target, selectedTargets) {
   </label>`;
 }
 
+const analysisInventoryColumns = ["skills", "prompts", "agents", "rules", "other"];
+
+function analysisInventoryColumnLabel(column) {
+  if (column === "skills") return t("analysis.inventory_skills");
+  if (column === "prompts") return t("analysis.inventory_prompts");
+  if (column === "agents") return t("analysis.inventory_agents");
+  if (column === "rules") return t("analysis.inventory_rules");
+  return t("analysis.inventory_other");
+}
+
+function analysisInventoryColumn(value) {
+  const key = String(value || "").toLowerCase();
+  if (key.includes("skill")) return "skills";
+  if (key.includes("prompt")) return "prompts";
+  if (key.includes("agent")) return "agents";
+  if (key.includes("rule") || key.includes("instruction")) return "rules";
+  return "other";
+}
+
 function runtimeScopeLabel(scope) {
   return scope === "project"
     ? t("analysis.project_scope")
@@ -1133,44 +1152,63 @@ function renderRuntimeExtensionChoice(extension, selectedRuntimeIds) {
   </label>`;
 }
 
-function renderRuntimeGroups(runtimeExtensions, selectedRuntimeIds) {
-  if (!runtimeExtensions.length) {
-    return `<p class="analysis-runtime-empty">${t("analysis.no_runtime")}</p>`;
+function addInventoryItem(groups, row, column, markup) {
+  if (!groups.has(row)) {
+    groups.set(row, new Map());
   }
+  const columns = groups.get(row);
+  if (!columns.has(column)) {
+    columns.set(column, []);
+  }
+  columns.get(column).push(markup);
+}
 
+function renderAnalysisInventoryCell(items) {
+  return `<div class="analysis-inventory-cell${items.length ? "" : " analysis-inventory-cell-empty"}">
+    ${items.length ? items.join("\n") : `<span>${t("analysis.none")}</span>`}
+  </div>`;
+}
+
+function renderAnalysisInventoryRow(label, columns) {
+  return `<section class="analysis-inventory-row">
+    <h4>${escapeHtml(label)}</h4>
+    ${analysisInventoryColumns.map((column) => renderAnalysisInventoryCell(columns.get(column) || [])).join("\n")}
+  </section>`;
+}
+
+function renderAnalysisInventory(targets, selectedTargets, runtimeExtensions, selectedRuntimeIds) {
   const groups = new Map();
+  for (const target of targets) {
+    addInventoryItem(groups, t("analysis.targets_title"), analysisInventoryColumn(target.id || target.label), renderAnalysisTargetChoice(target, selectedTargets));
+  }
   for (const extension of runtimeExtensions) {
     const scope = extension.scope || "runtime";
-    if (!groups.has(scope)) {
-      groups.set(scope, []);
-    }
-    groups.get(scope).push(extension);
+    const column = analysisInventoryColumn(extension.kind || extension.name || extension.id);
+    addInventoryItem(groups, runtimeScopeLabel(scope), column, renderRuntimeExtensionChoice(extension, selectedRuntimeIds));
   }
 
   const scopes = [...groups.keys()].sort((a, b) => {
-    const order = { project: 0, user: 1 };
+    const order = {
+      [t("analysis.targets_title")]: 0,
+      [t("analysis.project_scope")]: 1,
+      [t("analysis.user_scope")]: 2
+    };
     return (order[a] ?? 10) - (order[b] ?? 10) || a.localeCompare(b);
   });
 
-  return scopes.map((scope) => `<section class="analysis-runtime-group">
-    <h4>${escapeHtml(runtimeScopeLabel(scope))}</h4>
-    ${groups.get(scope).map((extension) => renderRuntimeExtensionChoice(extension, selectedRuntimeIds)).join("\n")}
-  </section>`).join("\n");
+  return `${scopes.map((scope) => renderAnalysisInventoryRow(scope, groups.get(scope))).join("\n")}
+    ${runtimeExtensions.length ? "" : `<p class="analysis-runtime-empty">${t("analysis.no_runtime")}</p>`}`;
 }
 
-function renderAnalysisLaunchControl(analysisAction, session, terminalLaunchAllowed) {
-  if (!analysisAction || !terminalLaunchAllowed) {
-    return "";
-  }
-
-  const targets = Array.isArray(analysisAction.targets) ? analysisAction.targets : [];
+function resolveAnalysisLaunchState(analysisAction) {
+  const targets = Array.isArray(analysisAction?.targets) ? analysisAction.targets : [];
   const selectedTargets = new Set(
-    (Array.isArray(analysisAction.selectedTargets) && analysisAction.selectedTargets.length
+    (Array.isArray(analysisAction?.selectedTargets) && analysisAction.selectedTargets.length
       ? analysisAction.selectedTargets
-      : [analysisAction.target || "skills"])
+      : [analysisAction?.target || "skills"])
       .filter(Boolean)
   );
-  const runtimeEnvironment = analysisAction.runtimeEnvironment || null;
+  const runtimeEnvironment = analysisAction?.runtimeEnvironment || null;
   const runtimeExtensions = Array.isArray(runtimeEnvironment?.extensions)
     ? runtimeEnvironment.extensions
     : [];
@@ -1183,44 +1221,87 @@ function renderAnalysisLaunchControl(analysisAction, session, terminalLaunchAllo
   );
   const selectedTargetCount = targets.filter((target) => selectedTargets.has(target.id) && target.available).length;
   const selectedRuntimeCount = runtimeExtensions.filter((extension) => selectedRuntimeIds.has(extension.id) && extension.available).length;
+  return {
+    runtimeEnvironment,
+    runtimeExtensions,
+    selectedRuntimeCount,
+    selectedRuntimeIds,
+    selectedTargetCount,
+    selectedTargets,
+    targets
+  };
+}
+
+function renderAnalysisLaunchButton(analysisAction, session) {
+  const { selectedTargetCount, selectedRuntimeCount } = resolveAnalysisLaunchState(analysisAction);
   const launchSummary = t("analysis.launch_summary")
     .replace("{targets}", String(selectedTargetCount))
     .replace("{runtime}", String(selectedRuntimeCount));
+  return `<button
+    class="action-btn action-btn-primary analysis-launch-button"
+    data-action="analyze-session"
+    data-id="${escapeHtml(session.id)}"
+    data-target="${escapeHtml(analysisAction.target || "skills")}"
+    data-unavailable="${analysisAction.available ? "false" : "true"}"
+    title="${escapeHtml(launchSummary)}"
+    ${analysisAction.available ? "" : "disabled"}
+  >${t("analysis.launch_selected")}</button>`;
+}
 
-  return `<div class="analysis-launch-control">
-    <details class="analysis-target-picker" open>
-      <summary>
-        <span>${t("analysis.targets_title")}</span>
+function renderAnalysisLaunchControl(analysisAction, terminalLaunchAllowed) {
+  if (!analysisAction || !terminalLaunchAllowed) {
+    return "";
+  }
+
+  const {
+    runtimeEnvironment,
+    runtimeExtensions,
+    selectedRuntimeCount,
+    selectedRuntimeIds,
+    selectedTargetCount,
+    selectedTargets,
+    targets
+  } = resolveAnalysisLaunchState(analysisAction);
+
+  return `<details class="analysis-materials-panel" open>
+    <summary>
+      <span>
+        <strong>${t("analysis.materials_title")}</strong>
+        <small data-analysis-launch-summary>${escapeHtml(t("analysis.launch_summary")
+    .replace("{targets}", String(selectedTargetCount))
+    .replace("{runtime}", String(selectedRuntimeCount)))}</small>
+      </span>
+      <span class="analysis-materials-counts">
         <strong data-analysis-selected-count>${escapeHtml(String(selectedTargetCount))}</strong>
-      </summary>
-      <div class="analysis-target-choices">
-        <p class="analysis-runtime-note">${t("analysis.targets_description")}</p>
-        ${targets.map((target) => renderAnalysisTargetChoice(target, selectedTargets)).join("\n")}
-      </div>
-    </details>
-    <details class="analysis-target-picker analysis-runtime-picker" open>
-      <summary>
-        <span>${t("analysis.runtime_title")}</span>
         <strong data-runtime-selected-count>${escapeHtml(String(selectedRuntimeCount))}</strong>
-      </summary>
-      <div class="analysis-target-choices analysis-runtime-choices">
-        <p class="analysis-runtime-note">${t("analysis.runtime_description")}</p>
-        ${runtimeEnvironment?.note ? `<p class="analysis-runtime-note">${escapeHtml(runtimeEnvironment.note)}</p>` : ""}
-        ${renderRuntimeGroups(runtimeExtensions, selectedRuntimeIds)}
+      </span>
+    </summary>
+    <div class="analysis-materials-body">
+      <p class="analysis-runtime-note">${t("analysis.materials_description")}</p>
+      <div class="analysis-inventory-scroll">
+        <div class="analysis-inventory-header" aria-hidden="true">
+          <span></span>
+          ${analysisInventoryColumns.map((column) => `<span>${escapeHtml(analysisInventoryColumnLabel(column))}</span>`).join("\n")}
+        </div>
+        <div class="analysis-inventory-grid">
+          ${renderAnalysisInventory(targets, selectedTargets, runtimeExtensions, selectedRuntimeIds)}
+        </div>
       </div>
-    </details>
-    <div class="analysis-launch-submit">
-      <button
-        class="action-btn action-btn-primary"
-        data-action="analyze-session"
-        data-id="${escapeHtml(session.id)}"
-        data-target="${escapeHtml(analysisAction.target || "skills")}"
-        data-unavailable="${analysisAction.available ? "false" : "true"}"
-        ${analysisAction.available ? "" : "disabled"}
-      >${t("analysis.launch_selected")}</button>
-      <p data-analysis-launch-summary>${escapeHtml(launchSummary)}</p>
+      ${runtimeEnvironment?.note ? `<p class="analysis-runtime-note">${escapeHtml(runtimeEnvironment.note)}</p>` : ""}
     </div>
-  </div>`;
+  </details>`;
+}
+
+function renderExportMenu(provider, sessionId) {
+  const encodedProvider = encodeURIComponent(provider);
+  const encodedSessionId = encodeURIComponent(sessionId);
+  return `<details class="action-menu">
+    <summary class="action-btn">${t("action.export")}</summary>
+    <div class="action-menu-list">
+      <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=md">${t("action.export_md")}</a>
+      <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=json">${t("action.export_json")}</a>
+    </div>
+  </details>`;
 }
 
 export function renderSessionPage({
@@ -1248,19 +1329,27 @@ export function renderSessionPage({
           ${starred ? t("action.starred") : t("action.star")}
         </button>
         <button class="action-btn" data-action="rename" data-id="${escapeHtml(session.id)}">${t("action.rename")}</button>
-        <a href="/api/${provider}/session/${encodeURIComponent(session.id)}/export?format=md" class="action-btn">${t("action.export_md")}</a>
-        <a href="/api/${provider}/session/${encodeURIComponent(session.id)}/export?format=json" class="action-btn">${t("action.export_json")}</a>
+        ${renderExportMenu(provider, session.id)}
         <button class="action-btn btn-danger" data-action="delete" data-id="${escapeHtml(session.id)}">${t("action.delete")}</button>
   ` : "";
   const resumeActions = resumeCommand && terminalLaunchAllowed ? `
         <button class="action-btn" data-action="resume-session" data-id="${escapeHtml(session.id)}" ${resumeCommand.available ? "" : "disabled"}>${t("action.open_terminal")}</button>
   ` : "";
-  const analysisActions = renderAnalysisLaunchControl(analysisAction, session, terminalLaunchAllowed);
-  const actions = managementActions || resumeActions || analysisActions ? `
-      <div class="session-actions">
-        ${managementActions}
-        ${resumeActions}
-        ${analysisActions}
+  const analysisButton = analysisAction && terminalLaunchAllowed
+    ? renderAnalysisLaunchButton(analysisAction, session)
+    : "";
+  const analysisMaterials = renderAnalysisLaunchControl(analysisAction, terminalLaunchAllowed);
+  const actionShellClass = analysisMaterials
+    ? "session-actions-shell analysis-launch-control"
+    : "session-actions-shell";
+  const actions = managementActions || resumeActions || analysisButton || analysisMaterials ? `
+      <div class="${actionShellClass}">
+        <div class="session-actions">
+          ${managementActions}
+          ${resumeActions}
+          ${analysisButton}
+        </div>
+        ${analysisMaterials}
       </div>
   ` : "";
   const header = `

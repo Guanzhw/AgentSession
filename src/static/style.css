@@ -3630,20 +3630,33 @@ pre code.hljs {
 }
 
 /* 详情页操作栏 */
-.session-actions {
+.session-actions-shell {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-direction: column;
+  gap: 10px;
   margin-top: 16px;
 }
 
+.session-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 .action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
   padding: 6px 14px;
   border-radius: 6px;
   border: 1px solid var(--border-color);
   background: var(--bg-primary);
   cursor: pointer;
+  font-family: inherit;
   font-size: 13px;
+  line-height: 1.2;
   color: var(--text-primary);
   text-decoration: none;
   transition: all var(--transition-fast);
@@ -3659,38 +3672,92 @@ pre code.hljs {
 }
 
 .analysis-launch-control {
-  display: grid;
-  grid-template-columns: minmax(260px, 0.9fr) minmax(320px, 1.15fr) minmax(170px, auto);
-  align-items: stretch;
-  gap: 12px;
-  flex-basis: 100%;
   width: 100%;
-  margin-top: 6px;
 }
 
-.analysis-target-picker {
-  min-width: 0;
+.action-menu {
+  position: relative;
+}
+
+.action-menu > summary {
+  list-style: none;
+}
+
+.action-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.action-menu-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  padding: 6px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
+}
+
+.action-menu-list a {
+  padding: 7px 9px;
+  border-radius: 5px;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.action-menu-list a:hover {
+  background: var(--bg-secondary);
+}
+
+.analysis-materials-panel {
   overflow: hidden;
+  width: 100%;
   background: color-mix(in srgb, var(--bg-primary) 82%, var(--bg-secondary));
   border: 1px solid var(--border-color);
   border-radius: 8px;
 }
 
-.analysis-target-picker > summary {
+.analysis-materials-panel > summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  min-height: 38px;
-  padding: 8px 10px;
+  gap: 12px;
+  min-height: 42px;
+  padding: 8px 12px;
   color: var(--text-primary);
   cursor: pointer;
   font-size: 13px;
-  font-weight: 700;
   list-style-position: inside;
 }
 
-.analysis-target-picker > summary strong {
+.analysis-materials-panel > summary > span:first-child {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.analysis-materials-panel > summary strong {
+  font-weight: 700;
+}
+
+.analysis-materials-panel > summary small {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.analysis-materials-counts {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.analysis-materials-counts strong {
   display: inline-flex;
   min-width: 28px;
   justify-content: center;
@@ -3702,18 +3769,12 @@ pre code.hljs {
   font-size: 12px;
 }
 
-.analysis-target-choices {
+.analysis-materials-body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-height: 330px;
-  overflow: auto;
-  padding: 10px;
+  gap: 10px;
+  padding: 11px;
   border-top: 1px solid var(--border-color);
-}
-
-.analysis-runtime-choices {
-  max-height: 330px;
 }
 
 .analysis-runtime-note,
@@ -3724,15 +3785,82 @@ pre code.hljs {
   line-height: 1.45;
 }
 
+.analysis-inventory-scroll {
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.analysis-inventory-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.analysis-inventory-header,
+.analysis-inventory-row {
+  display: grid;
+  grid-template-columns: minmax(128px, 0.55fr) repeat(5, minmax(135px, 1fr));
+  gap: 8px;
+  min-width: 880px;
+}
+
+.analysis-inventory-header {
+  padding-right: 2px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.analysis-inventory-header span {
+  padding: 0 8px;
+}
+
+.analysis-inventory-row {
+  align-items: stretch;
+}
+
+.analysis-inventory-row h4 {
+  display: flex;
+  align-items: flex-start;
+  margin: 0;
+  padding: 8px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-secondary) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.analysis-inventory-cell {
+  display: flex;
+  min-width: 0;
+  min-height: 64px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  background: color-mix(in srgb, var(--bg-secondary) 52%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-color) 65%, transparent);
+  border-radius: 7px;
+}
+
+.analysis-inventory-cell-empty {
+  align-items: center;
+  justify-content: center;
+  color: color-mix(in srgb, var(--text-muted) 58%, transparent);
+  font-size: 11px;
+}
+
 .analysis-target-choice {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: 9px;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
   align-items: flex-start;
-  padding: 9px;
+  padding: 7px;
   background: color-mix(in srgb, var(--bg-secondary) 82%, transparent);
   border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
-  border-radius: 7px;
+  border-radius: 6px;
   cursor: pointer;
   transition: border-color var(--transition-fast), background var(--transition-fast);
 }
@@ -3740,6 +3868,11 @@ pre code.hljs {
 .analysis-target-choice:hover {
   background: var(--bg-secondary);
   border-color: color-mix(in srgb, var(--accent-color) 35%, var(--border-color));
+}
+
+.analysis-target-choice:has(input:checked) {
+  background: color-mix(in srgb, var(--accent-color) 8%, var(--bg-secondary));
+  border-color: color-mix(in srgb, var(--accent-color) 50%, var(--border-color));
 }
 
 .analysis-target-choice-disabled {
@@ -3750,7 +3883,7 @@ pre code.hljs {
 .analysis-target-choice input {
   width: 16px;
   height: 16px;
-  margin: 2px 0 0;
+  margin: 1px 0 0;
   accent-color: var(--accent-color);
 }
 
@@ -3763,8 +3896,9 @@ pre code.hljs {
 
 .analysis-target-copy strong {
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
 .analysis-target-copy small,
@@ -3785,21 +3919,6 @@ pre code.hljs {
   content: ": ";
 }
 
-.analysis-runtime-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.analysis-runtime-group h4 {
-  margin: 3px 0 0;
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
 .analysis-runtime-title {
   display: flex;
   align-items: center;
@@ -3815,31 +3934,6 @@ pre code.hljs {
   border-radius: 999px;
   font-size: 10px;
   text-transform: uppercase;
-}
-
-.analysis-launch-submit {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  justify-content: center;
-  gap: 8px;
-  padding: 12px;
-  background: color-mix(in srgb, var(--accent-color) 5%, var(--bg-primary));
-  border: 1px solid color-mix(in srgb, var(--accent-color) 25%, var(--border-color));
-  border-radius: 8px;
-}
-
-.analysis-launch-submit .action-btn {
-  width: 100%;
-  min-height: 38px;
-  text-align: center;
-}
-
-.analysis-launch-submit p {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 12px;
-  text-align: center;
 }
 
 .action-btn:disabled {
@@ -4136,27 +4230,35 @@ pre code.hljs {
 }
 
 @media (max-width: 900px) {
-  .analysis-launch-control {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  }
-
-  .analysis-launch-submit {
-    grid-column: 1 / -1;
+  .analysis-inventory-header,
+  .analysis-inventory-row {
+    grid-template-columns: minmax(116px, 0.5fr) repeat(5, minmax(125px, 1fr));
+    min-width: 800px;
   }
 }
 
 @media (max-width: 640px) {
-  .analysis-launch-control {
-    grid-template-columns: 1fr;
+  .session-actions {
+    gap: 6px;
   }
 
-  .analysis-target-choices,
-  .analysis-runtime-choices {
-    max-height: 260px;
+  .action-btn {
+    padding: 6px 10px;
   }
 
-  .analysis-launch-submit {
-    padding: 10px;
+  .analysis-materials-panel > summary {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .analysis-materials-counts {
+    align-self: flex-start;
+  }
+
+  .analysis-inventory-header,
+  .analysis-inventory-row {
+    grid-template-columns: minmax(108px, 0.5fr) repeat(5, minmax(118px, 1fr));
+    min-width: 730px;
   }
 
   .analysis-status-header,

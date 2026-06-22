@@ -895,16 +895,18 @@ function updateAnalysisLaunchControl(control) {
   const runtimeCountNode = control.querySelector("[data-runtime-selected-count]");
   const summary = control.querySelector("[data-analysis-launch-summary]");
   const button = control.querySelector('[data-action="analyze-session"]');
+  const summaryText = formatText(ft("analysis_launch_summary"), {
+    targets: targetCount,
+    runtime: runtimeCount
+  });
   if (targetCountNode) targetCountNode.textContent = String(targetCount);
   if (runtimeCountNode) runtimeCountNode.textContent = String(runtimeCount);
   if (summary) {
-    summary.textContent = formatText(ft("analysis_launch_summary"), {
-      targets: targetCount,
-      runtime: runtimeCount
-    });
+    summary.textContent = summaryText;
   }
   if (button) {
     button.disabled = button.dataset.unavailable === "true" || targetCount === 0;
+    button.title = summaryText;
   }
 }
 

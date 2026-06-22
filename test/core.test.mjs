@@ -1854,6 +1854,7 @@ test("session rendering shows configured analysis actions only when launch is al
 
   const visible = renderSessionPage({
     session,
+    manageable: true,
     analysisAction: {
       target: "skills",
       targets: [
@@ -1902,11 +1903,15 @@ test("session rendering shows configured analysis actions only when launch is al
   });
   assert.match(visible, /data-action="analyze-session"/);
   assert.match(visible, /data-target="skills"/);
-  assert.match(visible, /class="analysis-launch-control"/);
+  assert.match(visible, /class="session-actions-shell analysis-launch-control"/);
+  assert.match(visible, /class="action-menu"/);
+  assert.match(visible, /Export MD/);
+  assert.match(visible, /Export JSON/);
   assert.match(visible, /class="analysis-target-checkbox"/);
   assert.match(visible, /class="analysis-runtime-extension-checkbox"/);
   assert.match(visible, /Analyze selected/);
-  assert.match(visible, /Runtime extensions/);
+  assert.match(visible, /Analysis materials/);
+  assert.match(visible, /Project scope/);
   assert.match(visible, /data-action="resume-session"/);
   assert.doesNotMatch(visible, /data-action="copy-resume-command"/);
   assert.match(visible, /id="analysis-status-panel"/);

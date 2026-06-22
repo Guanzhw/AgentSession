@@ -49,7 +49,7 @@ OpenCode and CodeAgent store stars, custom titles, soft deletes, and trash state
 - **Trace API**: step/span summaries classify tools, skills, agents, MCP calls, and LSP activity.
 - **Statistics**: total sessions, total messages, token trends, model distribution, and daily session activity.
 - **Local management**: OpenCode/CodeAgent support starring, renaming, batch actions, soft delete, restore, and permanent delete.
-- **Export**: OpenCode/CodeAgent sessions can be exported as Markdown or JSON, with JSON including the session tree.
+- **Export**: OpenCode/CodeAgent sessions expose one Export menu for Markdown or JSON, with JSON including the session tree.
 - **Bilingual UI**: use `--lang en` or `--lang zh`.
 
 ## Quick Start
@@ -215,6 +215,13 @@ paths. Most transcripts do not contain an immutable historical extension
 manifest, so this is current local resolution rather than a claim to recreate
 the exact environment loaded when the session started. Each captured artifact
 records the runtime extension IDs that contributed it.
+
+The session detail page keeps launch actions together: **Continue in terminal**
+and **Analyze selected** sit in the same action row. The analysis selector below
+them is an inventory-style grid. Rows represent the source scope, such as
+analysis targets, project runtime, and user runtime. Columns represent material
+kinds, such as skills, prompts, agents, rules, and other inputs. The summary
+shows selected target and runtime counts before launch.
 
 New runs organize those files by purpose:
 
@@ -444,10 +451,12 @@ configuration, but only the first valid target is used.
 
 The settings page edits `analysis.providers.<provider>.targets.<target>`
 overrides. Each target shows the effective provider-neutral analysis material
-roots, explicit files, and suffix filters that will be used by default.
-Provider runtime context is resolved automatically at launch. **Reset to
-default** removes the provider-specific difference when possible so the value
-inherits from `analysis.targets` or the built-in target again.
+roots, explicit files, and suffix filters that will be used by default. The
+session page presents those targets next to provider-resolved runtime extensions
+in the inventory selector, but the two inputs remain separate in the generated
+analysis bundle. Provider runtime context is resolved automatically at launch.
+**Reset to default** removes the provider-specific difference when possible so
+the value inherits from `analysis.targets` or the built-in target again.
 
 By default, analysis runs write `evidence/session-index.json`,
 `evidence/evidence-index.json`, and immutable `evidence/evidence.jsonl`;
