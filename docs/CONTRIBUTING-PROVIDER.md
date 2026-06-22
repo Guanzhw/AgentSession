@@ -356,3 +356,4 @@ Refer to:
 - `src/providers/interface.ts` — Full type definitions
 - `src/providers/gemini/` — Simplest working example
 - `src/server.ts` — How adapters are used in routing
+- `docs/ANALYSIS-PROVIDER-IMPLEMENTATION.md` — How to make a provider support session analysis

@@ -30,9 +30,9 @@ The focus is no longer just “list my chats.” The goal is to help you reconst
 
 | Provider | Status | Default Source | Capabilities |
 |:---|:---:|:---|:---|
-| OpenCode | Full | `$XDG_DATA_HOME/opencode/opencode.db` or `~/.local/share/opencode/opencode.db` | Browse, search, star, rename, delete, trash, export, stats, trace, nested sessions |
+| OpenCode | Full | `$XDG_DATA_HOME/opencode/opencode.db` or `~/.local/share/opencode/opencode.db` | Browse, search, star, rename, delete, trash, export, stats, trace, nested sessions, analysis |
 | CodeAgent | Full | `$XDG_DATA_HOME/opencode/db/ngagent.db` or `~/.local/share/opencode/db/ngagent.db` | OpenCode fork with the same viewer capabilities |
-| Claude Code | Read-only | `~/.claude/transcripts/` + `~/.claude/projects/` | Browse, search, token stats |
+| Claude Code | Read-only | `~/.claude/transcripts/` + `~/.claude/projects/` | Browse, search, token stats, analysis |
 | Codex CLI | Read-only | `~/.codex/sessions/**/*.jsonl` | Browse, search, token stats |
 | Gemini CLI | Read-only | `~/.gemini/tmp/*/chats/*.json` | Browse, search, token stats |
 
@@ -232,8 +232,10 @@ New runs organize those files by purpose:
 │   ├── evidence.jsonl
 │   ├── artifacts.json
 │   └── artifact-snapshots/
-└── diagnostics/                 # only with includeRawSnapshots
-    ├── messages.json
+└── diagnostics/
+    ├── analyzer.stdout.log
+    ├── analyzer.stderr.log
+    ├── messages.json            # raw snapshots only with includeRawSnapshots
     ├── tree.json
     ├── container.json
     ├── metrics.json
@@ -432,23 +434,25 @@ can override a built-in target or define another custom target.
 launches analysis. Older `defaultTargets` arrays remain accepted for existing
 configuration, but only the first valid target is used.
 
-The settings page edits `analysis.providers.opencode.targets.<target>`
+The settings page edits `analysis.providers.<provider>.targets.<target>`
 overrides. Each target shows the effective provider-neutral analysis material
 roots, explicit files, and suffix filters that will be used by default.
-OpenCode runtime context is resolved automatically at launch. **Reset to
-default** removes the OpenCode-specific difference when possible so the value
+Provider runtime context is resolved automatically at launch. **Reset to
+default** removes the provider-specific difference when possible so the value
 inherits from `analysis.targets` or the built-in target again.
 
 By default, analysis runs write `evidence/session-index.json`,
 `evidence/evidence-index.json`, and immutable `evidence/evidence.jsonl`;
-the `diagnostics/` directory is omitted. Set `analysis.includeRawSnapshots`
-or a target-level `includeRawSnapshots` to `true` only when a legacy analyzer
-needs those bulk diagnostic files.
+the `diagnostics/` directory always includes analyzer stdout/stderr logs. Set
+`analysis.includeRawSnapshots` or a target-level `includeRawSnapshots` to
+`true` only when a legacy analyzer needs bulk diagnostic snapshots.
 
-OpenCode target overrides can be placed under
-`analysis.providers.opencode.targets.<target>`. This allows different prompts,
+Provider target overrides can be placed under
+`analysis.providers.<provider>.targets.<target>`. This allows different prompts,
 artifact roots, and file suffix filters for the same target. Additional custom
-targets can use the same structure.
+targets can use the same structure. See
+[`docs/ANALYSIS-PROVIDER-IMPLEMENTATION.md`](./docs/ANALYSIS-PROVIDER-IMPLEMENTATION.md)
+for the agent-oriented implementation guide for other providers.
 
 ## Claude Code History
 
