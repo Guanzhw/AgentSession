@@ -343,9 +343,10 @@ Analyzer 命令，也可以覆盖：
 
 命令支持 `{sessionId}`、`{projectPath}`、`{target}`、`{runId}`、
 `{runDir}`、`{sessionPath}`、`{sessionIndexPath}`、
-`{evidenceIndexPath}`、`{evidencePath}`、`{analysisToolPath}`、
-`{promptPath}`、`{reportPath}`、`{evaluationSeedPath}`、
-`{evaluationPath}`、`{proposalsPath}` 和 `{artifactsPath}` 占位符。
+`{evidenceIndexPath}`、`{evidencePath}`、`{accessManifestPath}`、
+`{analysisToolPath}`、`{promptPath}`、`{reportPath}`、
+`{evaluationSeedPath}`、`{evaluationPath}`、`{proposalsPath}` 和
+`{artifactsPath}` 占位符。
 实现命令还支持 `{implementationPromptPath}`。
 也可以使用 `{prompt}` 将完整提示词作为一个参数传入，但大体积会话更适合
 使用 `{promptPath}` 或 `"stdin": "prompt"`。只有启用
@@ -359,8 +360,10 @@ OpenCode 权限，使其只能写入分析输出目录。`--dangerously-skip-per
 当 run 以 `manifest.validation.ok === true` 完成且至少包含一个已校验的工件
 提案后，会话页可以启动实现 run。点击 **实现已接受的提案** 是第一版用户
 批准门：它会写入 `inputs/implementation-request.md`，把配置的实现命令指向
-该文件，并要求 Agent 只实现已接受的提案、完成验证、留下供人工 review 的
-结果；它不会自动合并。
+该文件，并要求 Agent 只实现已接受的提案。若该 run 带有
+`inputs/analysis-access.json`，请求也会指向它，让实现阶段沿用相同的有界
+文件优先证据接口。Agent 应完成验证并留下供人工 review 的结果；它不会自动
+合并。
 
 相对路径形式的 `artifactRoots` 和 `outputDir` 从会话记录的项目目录解析。
 显式配置时也允许使用绝对工件目录。`artifactFiles` 可以包含 `README.md`

@@ -1140,7 +1140,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     implementation: {
       command: {
         executable: process.execPath,
-        args: ["--version", "{implementationPromptPath}", "{proposalsPath}"],
+        args: ["--version", "{implementationPromptPath}", "{proposalsPath}", "{accessManifestPath}"],
         stdin: "prompt"
       }
     },
@@ -1569,13 +1569,20 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.equal(implementationRun.command.stdinPath, implementationRun.files.implementationPromptPath);
   assert.equal(implementationRun.command.args[1], implementationRun.files.implementationPromptPath);
   assert.equal(implementationRun.command.args[2], implementationRun.files.proposalsPath);
+  assert.equal(implementationRun.command.args[3], implementationRun.files.accessManifestPath);
   assert.ok(existsSync(implementationRun.files.implementationPromptPath));
   const implementationPrompt = readFileSync(implementationRun.files.implementationPromptPath, "utf-8");
   assert.match(implementationPrompt, /accepted the validated artifact proposals/);
   assert.match(implementationPrompt, /git status --short/);
+  assert.match(implementationPrompt, /Analysis access interface/);
+  assert.match(implementationPrompt, /bounded\s+backing-store interface/);
+  assert.match(implementationPrompt, /complete evidence JSONL/);
   assert.match(implementationPrompt, /Do not merge automatically/);
   assert.match(implementationPrompt, new RegExp(
     implementationRun.files.proposalsPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  ));
+  assert.match(implementationPrompt, new RegExp(
+    implementationRun.files.accessManifestPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   ));
   const implementationManifest = JSON.parse(readFileSync(run.files.manifestPath, "utf-8"));
   assert.equal(implementationManifest.implementation.state, "prepared");

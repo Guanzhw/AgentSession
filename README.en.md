@@ -354,8 +354,9 @@ can be overridden:
 
 Supported command placeholders are `{sessionId}`, `{projectPath}`, `{target}`,
 `{runId}`, `{runDir}`, `{sessionPath}`, `{sessionIndexPath}`,
-`{evidenceIndexPath}`, `{evidencePath}`, `{analysisToolPath}`, `{promptPath}`,
-`{reportPath}`, `{evaluationSeedPath}`, `{evaluationPath}`, `{proposalsPath}`,
+`{evidenceIndexPath}`, `{evidencePath}`, `{accessManifestPath}`,
+`{analysisToolPath}`, `{promptPath}`, `{reportPath}`, `{evaluationSeedPath}`,
+`{evaluationPath}`, `{proposalsPath}`,
 and `{artifactsPath}`. Implementation commands additionally support
 `{implementationPromptPath}`. `{prompt}` is also available for agents that require the
 complete prompt as one argument, although `{promptPath}` or `"stdin": "prompt"`
@@ -373,8 +374,10 @@ validated artifact proposal, the session page can launch an implementation run.
 Clicking **Implement accepted proposals** is the first-pass user approval gate:
 it writes `inputs/implementation-request.md`, points the configured implementation
 command at that file, and asks the agent to make only the accepted proposal
-changes, verify them, and leave the result for human review. It does not merge
-automatically.
+changes. The request also points the agent at `inputs/analysis-access.json`
+when the run has one, so implementation can follow the same bounded file-first
+interface for evidence context. The agent should verify the result and leave it
+for human review. It does not merge automatically.
 
 Relative `artifactRoots` and `outputDir` paths are resolved from the recorded
 session project directory. Absolute artifact roots are allowed when explicitly

@@ -1379,6 +1379,9 @@ function buildImplementationPrompt({
   projectPath,
   files
 }) {
+  const accessManifestLine = existsSync(files.accessManifestPath)
+    ? `- Analysis access interface: ${files.accessManifestPath}`
+    : `- Analysis access interface: ${files.accessManifestPath} (not available for this legacy run)`;
   return `# OpenSessionViewer accepted-proposal implementation
 
 The user has reviewed and accepted the validated artifact proposals from an
@@ -1401,6 +1404,7 @@ the result.
 - Accepted artifact proposals: ${files.proposalsPath}
 - Captured artifact inventory: ${files.artifactsPath}
 - Original analysis request: ${files.promptPath}
+${accessManifestLine}
 
 ## Required behavior
 
@@ -1409,16 +1413,21 @@ the result.
 2. Inspect \`git status --short\` before editing. Do not revert or overwrite
    changes that are unrelated to the accepted proposals.
 3. Implement only proposals listed in \`${files.proposalsPath}\`.
-4. Do not edit provider-owned databases, transcripts, or files inside
+4. When proposal context or evidence is needed, start with
+   \`${files.accessManifestPath}\` if it is available. Follow its bounded
+   backing-store interface and prefer direct reads of the session index,
+   evidence index, artifact inventory, and selected evidence records over
+   broad reads of the complete evidence JSONL or raw diagnostics.
+5. Do not edit provider-owned databases, transcripts, or files inside
    \`${manifest.runDir || ""}\`.
-5. Prefer focused source, test, documentation, or instruction changes that map
+6. Prefer focused source, test, documentation, or instruction changes that map
    directly to the proposal descriptions.
-6. Use \`${files.evaluationPath}\` as the verification guide. Run the relevant
+7. Use \`${files.evaluationPath}\` as the verification guide. Run the relevant
    tests, type checks, or review checks available in the project.
-7. Do not merge automatically. If a PR or MR can be opened after verification,
+8. Do not merge automatically. If a PR or MR can be opened after verification,
    open it for human review; otherwise leave the worktree ready for review and
    summarize the changes and verification.
-8. If a proposal is unsafe, stale, impossible, or contradicted by current code,
+9. If a proposal is unsafe, stale, impossible, or contradicted by current code,
    stop and explain that instead of forcing an edit.
 
 ## Completion report
@@ -1489,7 +1498,8 @@ export function prepareAnalysisImplementation({
     evaluationPath: resolveAnalysisRunPath(run.runDir, manifest, "evaluationPath"),
     proposalsPath: resolveAnalysisRunPath(run.runDir, manifest, "proposalsPath"),
     artifactsPath: resolveAnalysisRunPath(run.runDir, manifest, "artifactsPath"),
-    promptPath: resolveAnalysisRunPath(run.runDir, manifest, "promptPath")
+    promptPath: resolveAnalysisRunPath(run.runDir, manifest, "promptPath"),
+    accessManifestPath: resolveAnalysisRunPath(run.runDir, manifest, "accessManifestPath")
   };
   mkdirSync(path.dirname(files.implementationPromptPath), { recursive: true });
   const prompt = buildImplementationPrompt({
@@ -1510,6 +1520,7 @@ export function prepareAnalysisImplementation({
     evaluationPath: files.evaluationPath,
     proposalsPath: files.proposalsPath,
     artifactsPath: files.artifactsPath,
+    accessManifestPath: files.accessManifestPath,
     analysisPromptPath: files.promptPath,
     implementationPromptPath: files.implementationPromptPath,
     promptPath: files.implementationPromptPath,
