@@ -75,6 +75,8 @@ export function ensureAnalysisRunDirectories(
     files.sessionPath,
     files.sessionIndexPath,
     files.analysisToolPath,
+    files.analyzerStdoutPath,
+    files.analyzerStderrPath,
     files.artifactSnapshotsDir,
     ...(includeDiagnostics ? [files.messagesPath] : [])
   ];

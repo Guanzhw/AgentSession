@@ -35,6 +35,7 @@ import {
   resolveAnalysisRunPath
 } from "./analysis-layout.js";
 import { resolveExecutable, resolveProjectDirectory } from "./resume.js";
+import { supportsSessionAnalysis as providerSupportsSessionAnalysis } from "./providers/kinds.js";
 
 const MAX_ARTIFACT_FILES = 200;
 const MAX_ARTIFACT_BYTES = 256 * 1024;
@@ -64,8 +65,11 @@ export const OPENCODE_IMPLEMENTATION_COMMAND = {
   ]
 };
 
-function supportsSessionAnalysis(provider: ProviderAdapter) {
-  return provider?.id === SESSION_ANALYSIS_PROVIDER_ID;
+function supportsConfiguredSessionAnalysis(providerOrId: ProviderAdapter | string | null | undefined) {
+  if (typeof providerOrId === "string") {
+    return providerOrId === SESSION_ANALYSIS_PROVIDER_ID;
+  }
+  return providerSupportsSessionAnalysis(providerOrId);
 }
 
 function isCommandSpec(value): value is AnalysisCommandSpec {
@@ -175,7 +179,7 @@ function configuredDefaultTargetIds(provider: ProviderAdapter, analysisConfig): 
 
 export function getAnalysisTargetIds(provider: ProviderAdapter, analysisConfig): string[] {
   const providerConfig = analysisConfig?.providers?.[provider.id];
-  if (!supportsSessionAnalysis(provider) || !analysisConfig || analysisConfig.enabled !== true || providerConfig === false) {
+  if (!providerSupportsSessionAnalysis(provider) || !analysisConfig || analysisConfig.enabled !== true || providerConfig === false) {
     return [];
   }
   const providerSettings = providerConfig && typeof providerConfig === "object" ? providerConfig : {};
@@ -197,7 +201,7 @@ export function getDefaultAnalysisTargetIds(provider: ProviderAdapter, analysisC
 }
 
 export function resolveAnalysisSettings(provider: ProviderAdapter, analysisConfig, targetId = "") {
-  if (!supportsSessionAnalysis(provider) || !analysisConfig || analysisConfig.enabled !== true) {
+  if (!providerSupportsSessionAnalysis(provider) || !analysisConfig || analysisConfig.enabled !== true) {
     return null;
   }
 
@@ -237,7 +241,7 @@ function objectOrNull(value) {
 
 export function resolveAnalysisImplementationSettings(providerOrId, analysisConfig) {
   const providerId = typeof providerOrId === "string" ? providerOrId : providerOrId?.id;
-  if (providerId !== SESSION_ANALYSIS_PROVIDER_ID || !analysisConfig || analysisConfig.enabled !== true) {
+  if (!supportsConfiguredSessionAnalysis(providerOrId) || !analysisConfig || analysisConfig.enabled !== true) {
     return null;
   }
   const providerConfig = analysisConfig.providers?.[providerId];
@@ -988,6 +992,7 @@ export function getAnalysisOutputRoot(directory, analysisConfig, metaDir) {
 }
 
 export function listSessionAnalysisRuns({
+  provider = null,
   providerId,
   sessionId,
   directory,
@@ -995,6 +1000,7 @@ export function listSessionAnalysisRuns({
   metaDir,
   limit = 10
 }) {
+  const resolvedProviderId = provider?.id || providerId;
   const outputRoot = getAnalysisOutputRoot(directory, analysisConfig, metaDir);
   if (!outputRoot) {
     return [];
@@ -1041,7 +1047,7 @@ export function listSessionAnalysisRuns({
           continue;
         }
         const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
-        if (manifest?.provider !== providerId || manifest?.sessionId !== sessionId) {
+        if (manifest?.provider !== resolvedProviderId || manifest?.sessionId !== sessionId) {
           continue;
         }
         const validation = manifest.validation && typeof manifest.validation === "object"
@@ -1086,7 +1092,7 @@ export function listSessionAnalysisRuns({
         const implementation = manifest.implementation && typeof manifest.implementation === "object"
           ? manifest.implementation
           : null;
-        const implementationSettings = resolveAnalysisImplementationSettings(providerId, analysisConfig);
+        const implementationSettings = resolveAnalysisImplementationSettings(provider || resolvedProviderId, analysisConfig);
         const implementationState = implementation?.state ? String(implementation.state) : "";
         const implementationAvailable = Boolean(
           manifest.state === "completed"
@@ -1470,6 +1476,7 @@ export function prepareAnalysisImplementation({
     throw new Error("Session has no valid project directory");
   }
   const runs = listSessionAnalysisRuns({
+    provider,
     providerId: provider.id,
     sessionId,
     directory: session.directory,

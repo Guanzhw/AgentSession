@@ -184,9 +184,9 @@ PowerShell 兼容程序的绝对路径。`args` 会插入到自动生成的
 
 ## 会话分析与评估提案
 
-OpenSessionViewer 可以从 OpenCode 会话详情页以非交互方式启动已配置的
-Analyzer。其他 Provider 继续保留只读浏览能力，但会话分析目前只面向
-OpenCode。分析任务只生成提案：它会把会话保存为带索引的 JSONL 证据、保存
+OpenSessionViewer 可以从声明支持会话分析的 Provider 详情页以非交互方式启动
+已配置的 Analyzer，目前包括 OpenCode 和 Claude Code。其他 Provider 在适配器
+声明同等能力前继续保留只读浏览能力。分析任务只生成提案：它会把会话保存为带索引的 JSONL 证据、保存
 选定工件快照、创建评估种子，并要求 Analyzer 输出：
 
 - `report.md`：主要的、面向人的分析结果
@@ -205,10 +205,10 @@ OpenCode。分析任务只生成提案：它会把会话保存为带索引的 JS
 - **运行时扩展**：由 Provider 解析的指令和行为，包括 `AGENTS.md`、
   `CLAUDE.md`、`GEMINI.md`，以及技能、Agent、命令、插件、Hook、工具和规则。
 
-启动前，OpenSessionViewer 会解析当前本地 OpenCode 运行时扩展，并自动采集
+启动前，OpenSessionViewer 会解析当前本地 Provider 运行时扩展，并自动采集
 默认选中的项目级和用户级指令、Skills、Agents、Commands、Plugins、Hooks、
-Tools、Rules 或扩展包中可采集的部分。扩展类型、搜索路径和优先级仍由
-OpenCode 负责。大多数 transcript 不包含不可变的历史扩展清单，因此这里表示
+Tools、Rules 或扩展包中可采集的部分。扩展类型、搜索路径和优先级仍由各
+Provider 负责。大多数 transcript 不包含不可变的历史扩展清单，因此这里表示
 “当前本地解析结果”，不会声称精确还原会话开始时加载的环境。每个捕获的工件
 都会记录其对应的运行时扩展 ID。
 

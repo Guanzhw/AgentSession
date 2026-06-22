@@ -34,6 +34,7 @@ const baseAdapter = createSqliteSessionAdapter({
   capabilities: {
     localManagement: true,
     sqliteSessionStore: true,
+    sessionAnalysis: true,
     structuredSessionViews: true
   }
 });

@@ -116,6 +116,7 @@ export interface ProviderAdapter {
   capabilities?: {
     localManagement?: boolean;
     sqliteSessionStore?: boolean;
+    sessionAnalysis?: boolean;
     structuredSessionViews?: boolean;
   };
   detect(): boolean;

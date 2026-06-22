@@ -175,10 +175,11 @@ with `--disable-terminal-launch` to turn it off for the current process.
 
 ## Session Analysis And Evaluation Proposals
 
-OpenSessionViewer can launch a configured analyzer non-interactively from an
-OpenCode session detail page. Other providers keep their read-only viewer
-features, but session analysis is intentionally OpenCode-only for now. The
-analysis run is proposal-only: it snapshots the session as indexed JSONL
+OpenSessionViewer can launch a configured analyzer non-interactively from
+provider detail pages that declare session-analysis support, currently OpenCode
+and Claude Code. Other providers keep their read-only viewer features until
+their adapters declare the same capability. The analysis run is proposal-only:
+it snapshots the session as indexed JSONL
 evidence, snapshots selected artifacts, creates an evaluation seed, and asks
 the analyzer to write:
 
@@ -203,10 +204,10 @@ Analysis inputs are intentionally separated:
   including files such as `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md`, plus
   skills, agents, commands, plugins, hooks, tools, and rules.
 
-Before launch, OpenSessionViewer resolves the current local OpenCode runtime
+Before launch, OpenSessionViewer resolves the current local provider runtime
 extensions and automatically captures the default selected project/user skills,
 instructions, agents, commands, plugins, hooks, tools, rules, or extension
-bundles that are capturable. OpenCode still owns the exact kinds and search
+bundles that are capturable. Each provider still owns the exact kinds and search
 paths. Most transcripts do not contain an immutable historical extension
 manifest, so this is current local resolution rather than a claim to recreate
 the exact environment loaded when the session started. Each captured artifact

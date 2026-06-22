@@ -67,6 +67,7 @@ const claudeCode = {
     args: ["--resume", "{sessionId}"]
   },
   capabilities: {
+    sessionAnalysis: true,
     structuredSessionViews: true
   },
 

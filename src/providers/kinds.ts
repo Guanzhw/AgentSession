@@ -8,6 +8,10 @@ export function usesSqliteSessionStore(adapter: ProviderAdapter | null | undefin
   return adapter?.capabilities?.sqliteSessionStore === true;
 }
 
+export function supportsSessionAnalysis(adapter: ProviderAdapter | null | undefined) {
+  return adapter?.capabilities?.sessionAnalysis === true;
+}
+
 export function supportsStructuredSessionViews(adapter: ProviderAdapter | null | undefined) {
   return adapter?.capabilities?.structuredSessionViews === true;
 }

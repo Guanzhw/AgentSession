@@ -981,6 +981,9 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     id: "opencode",
     name: "OpenCode",
     icon: "",
+    capabilities: {
+      sessionAnalysis: true
+    },
     detect: () => true,
     getDataPath: () => null,
     scan: async function* () {},
@@ -1213,6 +1216,8 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.equal(path.relative(run.runDir, run.files.reportPath), path.join("outputs", "report.md"));
   assert.equal(path.relative(run.runDir, run.files.promptPath), path.join("inputs", "analysis-request.md"));
   assert.equal(path.relative(run.runDir, run.files.evidencePath), path.join("evidence", "evidence.jsonl"));
+  assert.equal(path.relative(run.runDir, run.files.analyzerStdoutPath), path.join("diagnostics", "analyzer.stdout.log"));
+  assert.equal(path.relative(run.runDir, run.files.analyzerStderrPath), path.join("diagnostics", "analyzer.stderr.log"));
   assert.equal(
     path.relative(run.runDir, run.files.accessManifestPath),
     path.join("inputs", "analysis-access.json")
@@ -1220,7 +1225,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.equal(path.relative(run.runDir, run.files.messagesPath), path.join("diagnostics", "messages.json"));
   assert.deepEqual(
     readdirSync(run.runDir).sort(),
-    ["evidence", "inputs", "manifest.json", "outputs", "tools"].sort()
+    ["diagnostics", "evidence", "inputs", "manifest.json", "outputs", "tools"].sort()
   );
   const manifest = JSON.parse(readFileSync(run.files.manifestPath, "utf-8"));
   assert.equal(manifest.layoutVersion, 1);
@@ -1234,6 +1239,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     "module"
   );
   const preparedRuns = listSessionAnalysisRuns({
+    provider,
     providerId: "opencode",
     sessionId: "session-analysis",
     directory: projectPath,
@@ -1544,6 +1550,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.equal(validated.validation.evaluationCaseCount, 3);
   assert.equal(validated.validation.artifactProposalCount, 1);
   const completedRuns = listSessionAnalysisRuns({
+    provider,
     providerId: "opencode",
     sessionId: "session-analysis",
     directory: projectPath,
@@ -1592,6 +1599,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     path.join("inputs", "implementation-request.md").split(path.sep).join("/")
   );
   const preparedImplementationRuns = listSessionAnalysisRuns({
+    provider,
     providerId: "opencode",
     sessionId: "session-analysis",
     directory: projectPath,
@@ -1711,9 +1719,10 @@ test("analysis run listing preserves legacy metadata-directory runs", () => {
   );
 });
 
-test("session analysis is OpenCode-only and requires an enabled target", () => {
-  const opencode = { id: "opencode" };
-  const codex = { id: "codex" };
+test("session analysis requires a provider capability and an enabled target", () => {
+  const opencode = { id: "opencode", capabilities: { sessionAnalysis: true } };
+  const claude = { id: "claude-code", capabilities: { sessionAnalysis: true } };
+  const codex = { id: "codex", capabilities: { structuredSessionViews: true } };
   assert.equal(resolveAnalysisSettings(opencode, { enabled: false }), null);
   assert.equal(resolveAnalysisSettings(opencode, {
     enabled: true,
@@ -1737,6 +1746,9 @@ test("session analysis is OpenCode-only and requires an enabled target", () => {
     }
   }), null);
   assert.equal(resolveAnalysisSettings(opencode, {
+    enabled: true
+  }).command.executable, "opencode");
+  assert.equal(resolveAnalysisSettings(claude, {
     enabled: true
   }).command.executable, "opencode");
 });
@@ -1871,7 +1883,7 @@ test("session rendering shows configured analysis actions only when launch is al
 });
 
 test("built-in analysis targets resolve without target-specific config", () => {
-  const provider = { id: "opencode" };
+  const provider = { id: "opencode", capabilities: { sessionAnalysis: true } };
   const analysisConfig = {
     enabled: true,
     defaultTargets: ["skills", "tests"],
@@ -1928,8 +1940,8 @@ test("provider analysis targets override shared artifacts without changing other
     }
   };
 
-  const openCode = resolveAnalysisSettings({ id: "opencode" }, analysisConfig, "skills");
-  const codex = resolveAnalysisSettings({ id: "codex" }, analysisConfig, "skills");
+  const openCode = resolveAnalysisSettings({ id: "opencode", capabilities: { sessionAnalysis: true } }, analysisConfig, "skills");
+  const codex = resolveAnalysisSettings({ id: "codex", capabilities: { structuredSessionViews: true } }, analysisConfig, "skills");
   assert.deepEqual(openCode.target.artifactRoots, ["provider-materials"]);
   assert.deepEqual(openCode.target.artifactFiles, ["OPENCODE.md"]);
   assert.deepEqual(openCode.target.fileExtensions, [".md"]);
@@ -1942,7 +1954,7 @@ test("analysis prompt preview uses the real builder and reports configured sourc
   const promptPath = path.join(temp, "prompts", "analyze-skills.md");
   mkdirSync(path.dirname(promptPath), { recursive: true });
   writeFileSync(promptPath, "Inspect successful and failed executions contrastively.\n");
-  const provider = { id: "opencode", name: "OpenCode" };
+  const provider = { id: "opencode", name: "OpenCode", capabilities: { sessionAnalysis: true } };
   const analysisConfig = {
     enabled: true,
     defaultTarget: "skills",

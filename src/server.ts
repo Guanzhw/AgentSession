@@ -26,6 +26,7 @@ import {
 } from "./db.js";
 import {
   supportsLocalManagement,
+  supportsSessionAnalysis,
   supportsStructuredSessionViews,
   usesSqliteSessionStore
 } from "./providers/kinds.js";
@@ -57,8 +58,7 @@ import {
   launchAnalysisImplementation,
   launchSessionAnalysis,
   prepareAnalysisImplementation,
-  prepareSessionAnalysis,
-  SESSION_ANALYSIS_PROVIDER_ID
+  prepareSessionAnalysis
 } from "./analysis.js";
 
 const staticDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "static");
@@ -741,13 +741,13 @@ export async function startServer(config = getConfig()) {
       }
 
       const providerId = analysisMatch[1];
-      if (providerId !== SESSION_ANALYSIS_PROVIDER_ID) {
-        return json(res, { ok: false, error: "Session analysis is currently supported for OpenCode only" }, 501);
-      }
       const sessionId = safeDecodeId(analysisMatch[2]);
       const adapter = providerMap.get(providerId);
       if (!sessionId || !adapter) {
         return json(res, { ok: false, error: "Session not found" }, 404);
+      }
+      if (!supportsSessionAnalysis(adapter)) {
+        return json(res, { ok: false, error: "Session analysis is not supported for this provider" }, 501);
       }
       const session = adapter.getSession(sessionId);
       if (!session) {
@@ -829,14 +829,14 @@ export async function startServer(config = getConfig()) {
       }
 
       const providerId = analysisImplementationMatch[1];
-      if (providerId !== SESSION_ANALYSIS_PROVIDER_ID) {
-        return json(res, { ok: false, error: "Analysis implementation is currently supported for OpenCode only" }, 501);
-      }
       const sessionId = safeDecodeId(analysisImplementationMatch[2]);
       const runId = safeDecodeId(analysisImplementationMatch[3]);
       const adapter = providerMap.get(providerId);
       if (!sessionId || !runId || !adapter) {
         return json(res, { ok: false, error: "Analysis run not found" }, 404);
+      }
+      if (!supportsSessionAnalysis(adapter)) {
+        return json(res, { ok: false, error: "Analysis implementation is not supported for this provider" }, 501);
       }
       const session = adapter.getSession(sessionId);
       if (!session) {
@@ -882,6 +882,7 @@ export async function startServer(config = getConfig()) {
           return json(res, { ok: false, error: "Analysis output not found" }, 404);
         }
         const runs = listSessionAnalysisRuns({
+          provider: adapter,
           providerId,
           sessionId,
           directory: session.directory,
@@ -930,6 +931,7 @@ export async function startServer(config = getConfig()) {
           return json(res, { ok: false, error: "Session not found" }, 404);
         }
         const runs = listSessionAnalysisRuns({
+          provider: adapter,
           providerId,
           sessionId,
           directory: session.directory,
@@ -1485,6 +1487,7 @@ export async function startServer(config = getConfig()) {
           const resumeCommand = getResumeCommand(adapter, sessionId, enrichedSession.directory, appConfig.resumeCommands);
           const analysisAction = getSessionAnalysisAction(adapter, sessionId, enrichedSession.directory, appConfig.analysis);
           const analysisRuns = listSessionAnalysisRuns({
+            provider: adapter,
             providerId: providerSegment,
             sessionId,
             directory: enrichedSession.directory,
@@ -1523,6 +1526,7 @@ export async function startServer(config = getConfig()) {
         const resumeCommand = getResumeCommand(adapter, sessionId, normalizedSession.directory, appConfig.resumeCommands);
         const analysisAction = getSessionAnalysisAction(adapter, sessionId, normalizedSession.directory, appConfig.analysis);
         const analysisRuns = listSessionAnalysisRuns({
+          provider: adapter,
           providerId: providerSegment,
           sessionId,
           directory: normalizedSession.directory,
