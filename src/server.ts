@@ -1,8 +1,17 @@
-import { createServer } from "node:http";
 import { lstatSync, readFileSync } from "node:fs";
+import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  buildAnalysisPromptPreview,
+  getSessionAnalysisAction,
+  launchAnalysisImplementation,
+  launchSessionAnalysis,
+  listSessionAnalysisRuns,
+  prepareAnalysisImplementation,
+  prepareSessionAnalysis
+} from "./analysis.js";
 import {
   applyRuntimeUserConfig,
   getConfig,
@@ -11,56 +20,47 @@ import {
   writeUserConfig
 } from "./config.js";
 import {
+  getDailySessionCounts,
   getMessages,
+  getModelDistribution,
   getOverviewStats,
   getParts,
   getSession,
+  getSessionsByIds,
   getStats,
   getTodos,
-  listSessions,
-  searchMessages,
   getTokenStats,
-  getModelDistribution,
-  getDailySessionCounts,
-  getSessionsByIds,
-  listSessionProjects
+  listSessionProjects,
+  listSessions,
+  searchMessages
 } from "./db.js";
+import { getLocale, setLocale } from "./i18n.js";
+import { clearIndex, getIndexDb, getIndexedOverview, getIndexedSessionProjects, getIndexedSessions, upsertIndex } from "./index-db.js";
+import {
+  batchAction,
+  getAllMeta,
+  getDeletedIds,
+  getExcludedIds,
+  getMeta,
+  permanentDelete,
+  renameSession,
+  restoreSession,
+  softDelete,
+  toggleStar
+} from "./meta.js";
+import { getAllProviders, getAvailableProviders, getProvider } from "./providers/index.js";
 import {
   supportsLocalManagement,
   supportsSessionAnalysis,
   supportsStructuredSessionViews,
   usesSqliteSessionStore
 } from "./providers/kinds.js";
-import { getAvailableProviders, getAllProviders, getProvider } from "./providers/index.js";
-import { getIndexDb, upsertIndex, getIndexedSessions, getIndexedSessionProjects, getIndexedOverview, clearIndex } from "./index-db.js";
-import { setLocale, getLocale } from "./i18n.js";
-import {
-  toggleStar,
-  renameSession,
-  softDelete,
-  restoreSession,
-  permanentDelete,
-  batchAction,
-  getMeta,
-  getDeletedIds,
-  getAllMeta,
-  getExcludedIds
-} from "./meta.js";
+import { getResumeCommand, launchResumeCommand } from "./resume.js";
 import { renderCanonicalFlowPanelContent, renderSessionPage } from "./views/session.js";
 import { renderSessionsPage } from "./views/sessions.js";
+import { renderSettingsPage } from "./views/settings.js";
 import { renderStatsPage } from "./views/stats.js";
 import { renderTrashPage } from "./views/trash.js";
-import { renderSettingsPage } from "./views/settings.js";
-import { getResumeCommand, launchResumeCommand } from "./resume.js";
-import {
-  buildAnalysisPromptPreview,
-  getSessionAnalysisAction,
-  listSessionAnalysisRuns,
-  launchAnalysisImplementation,
-  launchSessionAnalysis,
-  prepareAnalysisImplementation,
-  prepareSessionAnalysis
-} from "./analysis.js";
 
 const staticDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "static");
 
@@ -1617,12 +1617,10 @@ export async function startServer(config = getConfig()) {
     const statsProvider = availableProviders.find((provider) => provider.id === "opencode")
       || availableProviders.find((provider) => usesSqliteSessionStore(provider));
     const stats = statsProvider ? getStats(statsProvider.getDataPath()) : { totalSessions: 0, totalMessages: 0 };
-    const dbLog = statsProvider ? statsProvider.getDataPath() : appConfig.dbPath;
     const server = createServer(requestHandler);
     server.listen(PORT, "127.0.0.1", () => {
       console.log(`OpenSessionViewer running at http://localhost:${PORT}`);
       console.log(`Language: ${getLocale()}`);
-      console.log(`DB: ${dbLog}`);
       console.log(`${stats.totalSessions} sessions, ${stats.totalMessages} messages.`);
     });
 
