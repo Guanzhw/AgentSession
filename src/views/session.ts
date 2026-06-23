@@ -1090,22 +1090,82 @@ function renderRawMessageGroups(messages, partsByMessage, provider) {
     .join("\n");
 }
 
-function analysisList(values) {
-  const items = Array.isArray(values)
+function analysisItems(values) {
+  return Array.isArray(values)
     ? values.filter((value) => typeof value === "string" && value.trim())
     : [];
+}
+
+function analysisList(values) {
+  const items = analysisItems(values);
   return items.length ? items.join(", ") : t("analysis.none");
 }
 
-function renderAnalysisTargetMeta(label, values) {
-  return `<span class="analysis-target-meta"><span>${escapeHtml(label)}</span>${escapeHtml(analysisList(values))}</span>`;
+function renderAnalysisValuePills(values, limit = 4) {
+  const items = analysisItems(values);
+  if (!items.length) {
+    return `<span class="analysis-target-pill analysis-target-pill-muted">${t("analysis.none")}</span>`;
+  }
+  const visible = items.slice(0, limit).map((item) => (
+    `<span class="analysis-target-pill">${escapeHtml(item)}</span>`
+  ));
+  const overflow = items.length - visible.length;
+  if (overflow > 0) {
+    visible.push(`<span class="analysis-target-pill analysis-target-pill-more" title="${escapeHtml(analysisList(items))}">+${escapeHtml(String(overflow))}</span>`);
+  }
+  return visible.join("");
+}
+
+function renderAnalysisTargetMeta(label, values, limit = 4) {
+  return `<span class="analysis-target-meta">
+    <span class="analysis-target-meta-label">${escapeHtml(label)}</span>
+    <span class="analysis-target-pills">${renderAnalysisValuePills(values, limit)}</span>
+  </span>`;
+}
+
+const analysisMaterialKinds = ["skills", "prompts", "agents", "rules", "other"];
+const runtimeInventoryKinds = ["skill", "agent", "plugin", "instruction", "command", "hook", "rule", "tool", "extension"];
+
+function analysisMaterialKindLabel(kind) {
+  if (kind === "skills") return t("analysis.inventory_skills");
+  if (kind === "prompts") return t("analysis.inventory_prompts");
+  if (kind === "agents") return t("analysis.inventory_agents");
+  if (kind === "rules") return t("analysis.inventory_rules");
+  return t("analysis.inventory_other");
+}
+
+function analysisMaterialKind(value) {
+  const key = String(value || "").toLowerCase();
+  if (key.includes("skill")) return "skills";
+  if (key.includes("prompt")) return "prompts";
+  if (key.includes("agent")) return "agents";
+  if (key.includes("rule") || key.includes("instruction")) return "rules";
+  return "other";
+}
+
+function runtimeInventoryKindLabel(kind) {
+  if (kind === "skill") return t("analysis.inventory_skills");
+  if (kind === "agent") return t("analysis.inventory_agents");
+  if (kind === "plugin") return t("analysis.inventory_plugins");
+  if (kind === "instruction") return t("analysis.inventory_instructions");
+  if (kind === "command") return t("analysis.inventory_commands");
+  if (kind === "hook") return t("analysis.inventory_hooks");
+  if (kind === "rule") return t("analysis.inventory_rules");
+  if (kind === "tool") return t("analysis.inventory_tools");
+  return t("analysis.inventory_other");
+}
+
+function runtimeInventoryKind(value) {
+  const kind = String(value || "").toLowerCase();
+  return runtimeInventoryKinds.includes(kind) ? kind : "extension";
 }
 
 function renderAnalysisTargetChoice(target, selectedTargets) {
   const artifacts = target?.artifacts || {};
   const checked = selectedTargets.has(target.id) && target.available;
   const disabled = target.available ? "" : "disabled";
-  return `<label class="analysis-target-choice${target.available ? "" : " analysis-target-choice-disabled"}">
+  const kind = analysisMaterialKind(target.id || target.label);
+  return `<label class="analysis-target-choice analysis-target-choice-compact${target.available ? "" : " analysis-target-choice-disabled"}">
     <input
       type="checkbox"
       class="analysis-target-checkbox"
@@ -1113,32 +1173,16 @@ function renderAnalysisTargetChoice(target, selectedTargets) {
       ${checked ? "checked" : ""}
       ${disabled}
     >
-    <span class="analysis-target-copy">
+    <span class="analysis-target-compact-title">
       <strong>${escapeHtml(target.label || target.id)}</strong>
-      ${renderAnalysisTargetMeta(t("analysis.material_roots"), artifacts.roots)}
-      ${renderAnalysisTargetMeta(t("analysis.material_files"), artifacts.files)}
-      ${renderAnalysisTargetMeta(t("analysis.material_suffixes"), artifacts.fileExtensions)}
+      <span class="analysis-kind-pill">${escapeHtml(analysisMaterialKindLabel(kind))}</span>
+    </span>
+    <span class="analysis-target-detail-popover" role="tooltip">
+      ${renderAnalysisTargetMeta(t("analysis.material_roots"), artifacts.roots, 3)}
+      ${renderAnalysisTargetMeta(t("analysis.material_files"), artifacts.files, 2)}
+      ${renderAnalysisTargetMeta(t("analysis.material_suffixes"), artifacts.fileExtensions, 5)}
     </span>
   </label>`;
-}
-
-const analysisInventoryColumns = ["skills", "prompts", "agents", "rules", "other"];
-
-function analysisInventoryColumnLabel(column) {
-  if (column === "skills") return t("analysis.inventory_skills");
-  if (column === "prompts") return t("analysis.inventory_prompts");
-  if (column === "agents") return t("analysis.inventory_agents");
-  if (column === "rules") return t("analysis.inventory_rules");
-  return t("analysis.inventory_other");
-}
-
-function analysisInventoryColumn(value) {
-  const key = String(value || "").toLowerCase();
-  if (key.includes("skill")) return "skills";
-  if (key.includes("prompt")) return "prompts";
-  if (key.includes("agent")) return "agents";
-  if (key.includes("rule") || key.includes("instruction")) return "rules";
-  return "other";
 }
 
 function runtimeScopeLabel(scope) {
@@ -1152,7 +1196,9 @@ function runtimeScopeLabel(scope) {
 function renderRuntimeExtensionChoice(extension, selectedRuntimeIds) {
   const checked = selectedRuntimeIds.has(extension.id) && extension.available;
   const source = extension.source || extension.sourcePath || extension.sourceType || "";
-  return `<label class="analysis-target-choice analysis-runtime-choice${extension.available ? "" : " analysis-target-choice-disabled"}">
+  const kind = runtimeInventoryKind(extension.kind);
+  const scope = runtimeScopeLabel(extension.scope);
+  return `<label class="analysis-runtime-choice${extension.available ? "" : " analysis-target-choice-disabled"}">
     <input
       type="checkbox"
       class="analysis-runtime-extension-checkbox"
@@ -1161,9 +1207,12 @@ function renderRuntimeExtensionChoice(extension, selectedRuntimeIds) {
       ${extension.available ? "" : "disabled"}
     >
     <span class="analysis-target-copy">
-      <span class="analysis-runtime-title">
+      <span class="analysis-choice-heading analysis-runtime-title">
         <strong>${escapeHtml(extension.name || extension.id)}</strong>
-        <span>${escapeHtml(extension.kind || "extension")}</span>
+        <span class="analysis-choice-tags">
+          <span class="analysis-kind-pill">${escapeHtml(runtimeInventoryKindLabel(kind))}</span>
+          <span class="analysis-scope-pill">${escapeHtml(scope)}</span>
+        </span>
       </span>
       ${source ? `<small>${escapeHtml(source)}</small>` : ""}
       ${extension.note ? `<small>${escapeHtml(extension.note)}</small>` : ""}
@@ -1171,52 +1220,93 @@ function renderRuntimeExtensionChoice(extension, selectedRuntimeIds) {
   </label>`;
 }
 
-function addInventoryItem(groups, row, column, markup) {
-  if (!groups.has(row)) {
-    groups.set(row, new Map());
-  }
-  const columns = groups.get(row);
-  if (!columns.has(column)) {
-    columns.set(column, []);
-  }
-  columns.get(column).push(markup);
-}
-
-function renderAnalysisInventoryCell(items) {
-  return `<div class="analysis-inventory-cell${items.length ? "" : " analysis-inventory-cell-empty"}">
-    ${items.length ? items.join("\n") : `<span>${t("analysis.none")}</span>`}
-  </div>`;
-}
-
-function renderAnalysisInventoryRow(label, columns) {
-  return `<section class="analysis-inventory-row">
-    <h4>${escapeHtml(label)}</h4>
-    ${analysisInventoryColumns.map((column) => renderAnalysisInventoryCell(columns.get(column) || [])).join("\n")}
-  </section>`;
+function runtimeTabDomId(kind) {
+  return `analysis-runtime-tab-${String(kind || "extension").replace(/[^a-z0-9_-]/gi, "-")}`;
 }
 
 function renderAnalysisInventory(targets, selectedTargets, runtimeExtensions, selectedRuntimeIds) {
-  const groups = new Map();
-  for (const target of targets) {
-    addInventoryItem(groups, t("analysis.targets_title"), analysisInventoryColumn(target.id || target.label), renderAnalysisTargetChoice(target, selectedTargets));
-  }
+  const targetChoices = targets
+    .slice()
+    .sort((a, b) => {
+      const kindDelta = analysisMaterialKinds.indexOf(analysisMaterialKind(a.id || a.label))
+        - analysisMaterialKinds.indexOf(analysisMaterialKind(b.id || b.label));
+      return kindDelta || String(a.label || a.id).localeCompare(String(b.label || b.id));
+    })
+    .map((target) => renderAnalysisTargetChoice(target, selectedTargets));
+
+  const runtimeGroups = new Map();
   for (const extension of runtimeExtensions) {
-    const scope = extension.scope || "runtime";
-    const column = analysisInventoryColumn(extension.kind || extension.name || extension.id);
-    addInventoryItem(groups, runtimeScopeLabel(scope), column, renderRuntimeExtensionChoice(extension, selectedRuntimeIds));
+    const kind = runtimeInventoryKind(extension.kind);
+    if (!runtimeGroups.has(kind)) {
+      runtimeGroups.set(kind, []);
+    }
+    runtimeGroups.get(kind).push(renderRuntimeExtensionChoice(extension, selectedRuntimeIds));
   }
 
-  const scopes = [...groups.keys()].sort((a, b) => {
-    const order = {
-      [t("analysis.targets_title")]: 0,
-      [t("analysis.project_scope")]: 1,
-      [t("analysis.user_scope")]: 2
-    };
-    return (order[a] ?? 10) - (order[b] ?? 10) || a.localeCompare(b);
-  });
+  const runtimeKinds = [...runtimeGroups.keys()].sort((a, b) => (
+    runtimeInventoryKinds.indexOf(a) - runtimeInventoryKinds.indexOf(b)
+  ));
 
-  return `${scopes.map((scope) => renderAnalysisInventoryRow(scope, groups.get(scope))).join("\n")}
-    ${runtimeExtensions.length ? "" : `<p class="analysis-runtime-empty">${t("analysis.no_runtime")}</p>`}`;
+  const runtimeMarkup = runtimeExtensions.length
+    ? `<div class="analysis-runtime-tabs" data-analysis-runtime-tabs>
+      <div class="analysis-runtime-tab-list" role="tablist">
+      ${runtimeKinds.map((kind, index) => {
+        const items = runtimeGroups.get(kind);
+        const tabId = runtimeTabDomId(kind);
+        return `<button
+          type="button"
+          class="analysis-runtime-tab${index === 0 ? " is-active" : ""}"
+          role="tab"
+          data-runtime-tab="${escapeHtml(kind)}"
+          aria-selected="${index === 0 ? "true" : "false"}"
+          aria-controls="${escapeHtml(`${tabId}-panel`)}"
+          id="${escapeHtml(tabId)}"
+          tabindex="${index === 0 ? "0" : "-1"}"
+        >
+          <span>${escapeHtml(runtimeInventoryKindLabel(kind))}</span>
+          <strong>${escapeHtml(String(items.length))}</strong>
+        </button>`;
+      }).join("\n")}
+      </div>
+      <div class="analysis-runtime-tab-panels">
+      ${runtimeKinds.map((kind, index) => {
+        const items = runtimeGroups.get(kind);
+        const tabId = runtimeTabDomId(kind);
+        return `<section
+          class="analysis-runtime-tab-panel${index === 0 ? " is-active" : ""}"
+          role="tabpanel"
+          data-runtime-panel="${escapeHtml(kind)}"
+          aria-labelledby="${escapeHtml(tabId)}"
+          id="${escapeHtml(`${tabId}-panel`)}"
+          ${index === 0 ? "" : "hidden"}
+        >
+          <div class="analysis-runtime-panel-heading">
+            <span>${escapeHtml(runtimeInventoryKindLabel(kind))}</span>
+            <strong>${escapeHtml(String(items.length))}</strong>
+          </div>
+          <div class="analysis-runtime-list">${items.join("\n")}</div>
+        </section>`;
+      }).join("\n")}
+      </div>
+    </div>`
+    : `<p class="analysis-runtime-empty">${t("analysis.no_runtime")}</p>`;
+
+  return `<div class="analysis-material-sections">
+    <section class="analysis-material-section">
+      <div class="analysis-section-heading">
+        <h4>${t("analysis.targets_title")}</h4>
+        <p>${t("analysis.targets_description")}</p>
+      </div>
+      <div class="analysis-choice-grid">${targetChoices.join("\n")}</div>
+    </section>
+    <section class="analysis-material-section analysis-runtime-section">
+      <div class="analysis-section-heading">
+        <h4>${t("analysis.runtime_title")}</h4>
+        <p>${t("analysis.runtime_description")}</p>
+      </div>
+      ${runtimeMarkup}
+    </section>
+  </div>`;
 }
 
 function resolveAnalysisLaunchState(analysisAction) {
@@ -1291,21 +1381,13 @@ function renderAnalysisLaunchControl(analysisAction, terminalLaunchAllowed) {
     .replace("{runtime}", String(selectedRuntimeCount)))}</small>
       </span>
       <span class="analysis-materials-counts">
-        <strong data-analysis-selected-count>${escapeHtml(String(selectedTargetCount))}</strong>
-        <strong data-runtime-selected-count>${escapeHtml(String(selectedRuntimeCount))}</strong>
+        <span><span>${t("analysis.targets_title")}</span><strong data-analysis-selected-count>${escapeHtml(String(selectedTargetCount))}</strong></span>
+        <span><span>${t("analysis.runtime_title")}</span><strong data-runtime-selected-count>${escapeHtml(String(selectedRuntimeCount))}</strong></span>
       </span>
     </summary>
     <div class="analysis-materials-body">
       <p class="analysis-runtime-note">${t("analysis.materials_description")}</p>
-      <div class="analysis-inventory-scroll">
-        <div class="analysis-inventory-header" aria-hidden="true">
-          <span></span>
-          ${analysisInventoryColumns.map((column) => `<span>${escapeHtml(analysisInventoryColumnLabel(column))}</span>`).join("\n")}
-        </div>
-        <div class="analysis-inventory-grid">
-          ${renderAnalysisInventory(targets, selectedTargets, runtimeExtensions, selectedRuntimeIds)}
-        </div>
-      </div>
+      ${renderAnalysisInventory(targets, selectedTargets, runtimeExtensions, selectedRuntimeIds)}
       ${runtimeEnvironment?.note ? `<p class="analysis-runtime-note">${escapeHtml(runtimeEnvironment.note)}</p>` : ""}
     </div>
   </details>`;

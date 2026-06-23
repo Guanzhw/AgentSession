@@ -919,6 +919,50 @@ document.querySelectorAll(".analysis-launch-control").forEach((control) => {
   });
 });
 
+function selectAnalysisRuntimeTab(tabSet, tab, focus = false) {
+  if (!tabSet || !tab) return;
+  const selected = tab.dataset.runtimeTab;
+  const tabs = [...tabSet.querySelectorAll("[data-runtime-tab]")];
+  const panels = [...tabSet.querySelectorAll("[data-runtime-panel]")];
+  for (const item of tabs) {
+    const active = item === tab;
+    item.classList.toggle("is-active", active);
+    item.setAttribute("aria-selected", active ? "true" : "false");
+    item.tabIndex = active ? 0 : -1;
+  }
+  for (const panel of panels) {
+    const active = panel.dataset.runtimePanel === selected;
+    panel.classList.toggle("is-active", active);
+    panel.hidden = !active;
+  }
+  if (focus) tab.focus();
+}
+
+document.querySelectorAll("[data-analysis-runtime-tabs]").forEach((tabSet) => {
+  const tabs = [...tabSet.querySelectorAll("[data-runtime-tab]")];
+  selectAnalysisRuntimeTab(tabSet, tabs.find((tab) => tab.classList.contains("is-active")) || tabs[0]);
+  tabSet.addEventListener("click", (event) => {
+    const tab = event.target.closest("[data-runtime-tab]");
+    if (tab && tabSet.contains(tab)) {
+      selectAnalysisRuntimeTab(tabSet, tab);
+    }
+  });
+  tabSet.addEventListener("keydown", (event) => {
+    const tab = event.target.closest("[data-runtime-tab]");
+    if (!tab || !tabSet.contains(tab)) return;
+    const index = tabs.indexOf(tab);
+    if (index < 0) return;
+    let nextIndex = index;
+    if (event.key === "ArrowRight") nextIndex = (index + 1) % tabs.length;
+    else if (event.key === "ArrowLeft") nextIndex = (index - 1 + tabs.length) % tabs.length;
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = tabs.length - 1;
+    else return;
+    event.preventDefault();
+    selectAnalysisRuntimeTab(tabSet, tabs[nextIndex], true);
+  });
+});
+
 function analysisStateLabel(state) {
   const known = ["prepared", "launched", "completed", "invalid", "failed"];
   return ft(`analysis_status_${known.includes(state) ? state : "unknown"}`);

@@ -2036,6 +2036,19 @@ test("session rendering shows configured analysis actions only when launch is al
           capturable: true,
           defaultSelected: true,
           note: "Project instructions"
+        }, {
+          id: "runtime:opencode:user:plugin:notifier",
+          provider: "opencode",
+          scope: "user",
+          kind: "plugin",
+          name: "opencode-notifier",
+          source: "opencode.json#plugin:opencode-notifier",
+          sourcePath: "opencode.json",
+          sourceType: "package",
+          available: true,
+          capturable: true,
+          defaultSelected: false,
+          note: "User plugin"
         }]
       },
       available: true
@@ -2067,7 +2080,13 @@ test("session rendering shows configured analysis actions only when launch is al
   assert.match(visible, /class="analysis-runtime-extension-checkbox"/);
   assert.match(visible, /Analyze selected/);
   assert.match(visible, /Analysis materials/);
+  assert.match(visible, /class="analysis-target-choice analysis-target-choice-compact/);
+  assert.match(visible, /class="analysis-runtime-tab is-active"/);
+  assert.match(visible, /role="tabpanel"/);
+  assert.match(visible, /Instructions/);
+  assert.match(visible, /Plugins/);
   assert.match(visible, /Project scope/);
+  assert.match(visible, /User scope/);
   assert.match(visible, /data-action="resume-session"/);
   assert.doesNotMatch(visible, /data-action="copy-resume-command"/);
   assert.match(visible, /id="analysis-status-panel"/);
