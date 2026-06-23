@@ -275,20 +275,7 @@ export function searchMessages(query, limit = 20, pathOverride = undefined) {
 
 export function getStats(pathOverride = undefined) {
   const db = getDb(pathOverride);
-  const totalSessions = db.prepare(`
-    SELECT COUNT(*) AS count
-    FROM session
-    WHERE time_archived IS NULL
-      AND parent_id IS NULL
-  `).get()?.count ?? 0;
-
-  const totalMessages = db.prepare(`
-    SELECT COUNT(*) AS count
-    FROM message
-    JOIN session ON session.id = message.session_id
-    WHERE session.time_archived IS NULL
-      AND session.parent_id IS NULL
-  `).get()?.count ?? 0;
+  const overview = getOverviewStats(pathOverride);
 
   const modelDistribution = db.prepare(`
     SELECT
@@ -313,9 +300,31 @@ export function getStats(pathOverride = undefined) {
   }));
 
   return {
-    totalSessions,
-    totalMessages,
+    ...overview,
     modelDistribution
+  };
+}
+
+export function getOverviewStats(pathOverride = undefined) {
+  const db = getDb(pathOverride);
+  const totalSessions = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM session
+    WHERE time_archived IS NULL
+      AND parent_id IS NULL
+  `).get()?.count ?? 0;
+
+  const totalMessages = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM message
+    JOIN session ON session.id = message.session_id
+    WHERE session.time_archived IS NULL
+      AND session.parent_id IS NULL
+  `).get()?.count ?? 0;
+
+  return {
+    totalSessions,
+    totalMessages
   };
 }
 

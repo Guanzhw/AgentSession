@@ -12,6 +12,7 @@ import {
 } from "./config.js";
 import {
   getMessages,
+  getOverviewStats,
   getParts,
   getSession,
   getStats,
@@ -31,7 +32,7 @@ import {
   usesSqliteSessionStore
 } from "./providers/kinds.js";
 import { getAvailableProviders, getAllProviders, getProvider } from "./providers/index.js";
-import { getIndexDb, upsertIndex, getIndexedSessions, getIndexedSessionProjects, clearIndex } from "./index-db.js";
+import { getIndexDb, upsertIndex, getIndexedSessions, getIndexedSessionProjects, getIndexedOverview, clearIndex } from "./index-db.js";
 import { setLocale, getLocale } from "./i18n.js";
 import {
   toggleStar,
@@ -45,7 +46,7 @@ import {
   getAllMeta,
   getExcludedIds
 } from "./meta.js";
-import { renderSessionPage } from "./views/session.js";
+import { renderCanonicalFlowPanelContent, renderSessionPage } from "./views/session.js";
 import { renderSessionsPage } from "./views/sessions.js";
 import { renderStatsPage } from "./views/stats.js";
 import { renderTrashPage } from "./views/trash.js";
@@ -1173,6 +1174,32 @@ export async function startServer(config = getConfig()) {
       }
     }
 
+    const apiSessionFlowPanelMatch = pathname.match(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/flow-panel$/);
+    if (apiSessionFlowPanelMatch) {
+      const providerId = apiSessionFlowPanelMatch[1];
+      const sessionId = decodeURIComponent(apiSessionFlowPanelMatch[2]);
+      const adapter = providerMap.get(providerId);
+      if (!adapter) {
+        const missing = missingProviderResponse(providerId);
+        return json(res, missing.body, missing.status);
+      }
+
+      if (!supportsStructuredSessionViews(adapter)) {
+        return send(res, 200, renderCanonicalFlowPanelContent(null));
+      }
+
+      try {
+        const flow = adapter.getSessionFlow?.(sessionId);
+        if (!flow) {
+          return send(res, 200, renderCanonicalFlowPanelContent(null));
+        }
+        return send(res, 200, renderCanonicalFlowPanelContent(flow));
+      } catch (err) {
+        console.error(`Route error: ${err.message}`);
+        return json(res, { error: "Internal server error" }, 500);
+      }
+    }
+
     const apiSessionFlowMatch = pathname.match(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/flow$/);
     if (apiSessionFlowMatch) {
       const providerId = apiSessionFlowMatch[1];
@@ -1328,7 +1355,7 @@ export async function startServer(config = getConfig()) {
           const metaMap = getAllMeta(providerSegment);
           const excludedIds = getExcludedIds(providerSegment);
           const enrichedSessions = enrichSessionList(sessions, metaMap, excludedIds).map((session) => normalizeSessionRecord(session));
-          const overviewStats = getStats(dbPath);
+          const overviewStats = getOverviewStats(dbPath);
           const deletedCount = getDeletedIds(providerSegment).length;
           const projectOptions = listSessionProjects(query, range, dbPath);
           send(res, 200, renderSessionsPage({
@@ -1349,8 +1376,7 @@ export async function startServer(config = getConfig()) {
         }
 
         const indexed = getIndexedSessions(providerSegment, limit, offset, range, query, project);
-        const allIndexed = getIndexedSessions(providerSegment, 100000, 0, "").sessions;
-        const totalMessages = allIndexed.reduce((sum, session) => sum + (Number(session.message_count) || 0), 0);
+        const overviewStats = getIndexedOverview(providerSegment);
         const projectOptions = getIndexedSessionProjects(providerSegment, range, query);
         send(res, 200, renderSessionsPage({
           sessions: indexed.sessions.map((session) => normalizeSessionRecord(session)),
@@ -1362,7 +1388,7 @@ export async function startServer(config = getConfig()) {
           project,
           projectOptions,
           searchMode: "list",
-          totalMessages,
+          totalMessages: overviewStats.totalMessages,
           deletedCount: 0,
           ...renderContext
         }));
@@ -1480,7 +1506,6 @@ export async function startServer(config = getConfig()) {
           const partsByMessage = loadPartsByMessage(messages, dbPath);
           const sessionTree = adapter.getSessionTree?.(sessionId) || null;
           const sessionMetrics = adapter.getSessionMetrics?.(sessionId) || null;
-          const sessionFlow = adapter.getSessionFlow?.(sessionId) || null;
           const todos = getTodos(sessionId, dbPath);
           const { sessions: recentSessions } = listSessions(30, 0, "", "", dbPath);
           const enrichedRecentSessions = enrichSessionList(recentSessions, metaMap, excludedIds).map((item) => normalizeSessionRecord(item));
@@ -1498,7 +1523,6 @@ export async function startServer(config = getConfig()) {
             session: enrichedSession,
             sessionTree,
             sessionMetrics,
-            sessionFlow,
             messages,
             partsByMessage,
             todos,
@@ -1508,6 +1532,7 @@ export async function startServer(config = getConfig()) {
             analysisAction,
             analysisRuns,
             terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),
+            flowLazyUrl: adapter.getSessionFlow ? `/api/${providerSegment}/session/${encodeURIComponent(sessionId)}/flow-panel` : "",
             ...renderContext
           }));
           return;
@@ -1537,7 +1562,6 @@ export async function startServer(config = getConfig()) {
           session: normalizedSession,
           sessionTree: adapter.getSessionTree?.(sessionId) || null,
           sessionMetrics: adapter.getSessionMetrics?.(sessionId) || null,
-          sessionFlow: adapter.getSessionFlow?.(sessionId) || null,
           messages,
           partsByMessage,
           todos: [],
@@ -1547,6 +1571,7 @@ export async function startServer(config = getConfig()) {
           analysisAction,
           analysisRuns,
           terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),
+          flowLazyUrl: adapter.getSessionFlow ? `/api/${providerSegment}/session/${encodeURIComponent(sessionId)}/flow-panel` : "",
           ...renderContext
         }));
         return;

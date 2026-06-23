@@ -114,6 +114,21 @@ export function getIndexedSessionProjects(provider, timeRange = "", search = "")
   }));
 }
 
+export function getIndexedOverview(provider, timeRange = "", search = "", project = "") {
+  const { db, whereClause, params } = indexedFilter(timeRange, search, project);
+  const row = db.prepare(`
+    SELECT COUNT(*) AS totalSessions,
+           COALESCE(SUM(COALESCE(message_count, 0)), 0) AS totalMessages
+    FROM session_index
+    ${whereClause}
+  `).get(provider, ...params);
+
+  return {
+    totalSessions: Number(row?.totalSessions) || 0,
+    totalMessages: Number(row?.totalMessages) || 0
+  };
+}
+
 /**
  * Run a full index for a provider using its scan() method.
  * @param {import('./providers/interface.js').ProviderAdapter} adapter

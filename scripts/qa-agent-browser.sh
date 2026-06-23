@@ -263,6 +263,26 @@ if [[ "$flow_panel_hidden" != "1" ]]; then
   exit 1
 fi
 
+flow_open_state="$(read_ab "open lazy flow panel" eval "(() => { const btn = document.querySelector('.flow-open-btn'); if (!btn) return 'missing'; btn.click(); return btn.getAttribute('aria-expanded') || ''; })()")"
+if [[ "$flow_open_state" != "true" && "$flow_open_state" != '"true"' ]]; then
+  echo "Flow button should open the panel, got state $flow_open_state" >&2
+  exit 1
+fi
+
+flow_loaded="0"
+for _ in $(seq 1 40); do
+  flow_loaded="$(read_ab "wait for flow root line" get count "#session-flow-panel .flow-map-root-session > .flow-map-line")"
+  if [[ "$flow_loaded" != "0" ]]; then
+    break
+  fi
+  sleep 0.25
+done
+flow_state="$(read_ab "read flow lazy state" get attr "#session-flow-panel" data-flow-state)"
+if [[ "$flow_loaded" == "0" && "$flow_state" == "error" ]]; then
+  echo "Flow panel failed to lazy-load" >&2
+  exit 1
+fi
+
 flow_user_count="$(read_ab "count flow user nodes" get count "#session-flow-panel .flow-map-node-user")"
 assert_positive_count "flow user nodes" "$flow_user_count"
 

@@ -22,7 +22,7 @@ import { buildClaudeCodeRuntimeEnvironment } from "../dist/src/providers/claude-
 import { buildCodexRuntimeEnvironment } from "../dist/src/providers/codex/runtime-environment.js";
 import { buildGeminiRuntimeEnvironment } from "../dist/src/providers/gemini/runtime-environment.js";
 import { buildFlowTreeFromContainer } from "../dist/src/providers/shared/flow-tree.js";
-import { renderSessionPage } from "../dist/src/views/session.js";
+import { renderCanonicalFlowPanelContent, renderSessionPage } from "../dist/src/views/session.js";
 import { renderSettingsPage } from "../dist/src/views/settings.js";
 import {
   extractSessionMeta,
@@ -2238,6 +2238,34 @@ test("conversation flow renders recursive subagents as fork-and-join pairs", () 
   assert.equal(invocation.branches[0].line[2].branches[0].id, "session:grandchild");
   assert.equal(flow.summary.subagents, 3);
   assert.equal(flow.root.line[4].emphasis, "final");
+});
+
+test("session page can defer flow markup until the panel is opened", () => {
+  const container = flowSession("root", [
+    flowMessage("u1", "user", 1000),
+    flowMessage("a1", "assistant", 1100)
+  ]);
+  const flow = buildFlowTreeFromContainer(container);
+  const sessionTree = {
+    session: { id: "root", title: "Lazy flow" },
+    detachedChildren: [],
+    metrics: flowMetrics(),
+    messages: container.messages
+  };
+
+  const html = renderSessionPage({
+    session: { id: "root", title: "Lazy flow", time_created: 1000 },
+    sessionTree,
+    provider: "opencode",
+    flowLazyUrl: "/api/opencode/session/root/flow-panel"
+  });
+  const flowFragment = renderCanonicalFlowPanelContent(flow);
+
+  assert.match(html, /data-flow-lazy-url="\/api\/opencode\/session\/root\/flow-panel"/);
+  assert.match(html, /Flow loads when opened/);
+  assert.doesNotMatch(html, /flow-map-root-session/);
+  assert.match(flowFragment, /flow-map-root-session/);
+  assert.match(flowFragment, /flow-map-node-user/);
 });
 
 test("conversation flow inserts detached sessions as inferred branches", () => {

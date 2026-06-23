@@ -1630,22 +1630,48 @@ if (scrollSentinel && sessionList && "IntersectionObserver" in window) {
 
 const sessionWorkbench = document.querySelector(".session-workbench");
 if (sessionWorkbench) {
-  const navLinks = [...document.querySelectorAll(".session-toc a[href^='#'], .session-flow-panel a[href^='#']")];
   const tocGroups = [...document.querySelectorAll(".session-toc .toc-group")];
-  const flowPanel = document.getElementById("session-flow-panel");
   const tocResizeHandle = document.querySelector(".toc-resize-handle");
-  const flowScroll = flowPanel?.querySelector(".flow-map-scroll");
-  const flowOverview = flowPanel?.querySelector("[data-flow-overview]");
-  const flowOverviewWindow = flowPanel?.querySelector("[data-flow-overview-window]");
-  const flowRootLine = flowPanel?.querySelector(".flow-map-root-session > .flow-map-line");
-  const flowMap = flowPanel?.querySelector(".flow-map");
-  const flowBranchDrawer = flowPanel?.querySelector("[data-flow-branch-drawer]");
-  const flowBranchBody = flowPanel?.querySelector("[data-flow-branch-body]");
-  const targets = [...new Set(navLinks
-    .map((link) => document.getElementById(decodeURIComponent(link.getAttribute("href").slice(1))))
-    .filter(Boolean))];
   let lastManualNav = 0;
   let scrollTicking = false;
+  let flowLoadPromise = null;
+  let flowResizeTimer = null;
+  let navLinksCache = [];
+  let linkedTargetsCache = [];
+  let navigationCacheDirty = true;
+
+  const getFlowPanel = () => document.getElementById("session-flow-panel");
+  const getFlowScroll = () => getFlowPanel()?.querySelector(".flow-map-scroll");
+  const getFlowOverview = () => getFlowPanel()?.querySelector("[data-flow-overview]");
+  const getFlowOverviewWindow = () => getFlowPanel()?.querySelector("[data-flow-overview-window]");
+  const getFlowRootLine = () => getFlowPanel()?.querySelector(".flow-map-root-session > .flow-map-line");
+  const getFlowMap = () => getFlowPanel()?.querySelector(".flow-map");
+  const getFlowBranchDrawer = () => getFlowPanel()?.querySelector("[data-flow-branch-drawer]");
+  const getFlowBranchBody = () => getFlowPanel()?.querySelector("[data-flow-branch-body]");
+  const getNavLinks = () => {
+    if (navigationCacheDirty) {
+      navLinksCache = [...document.querySelectorAll(".session-toc a[href^='#'], .session-flow-panel a[href^='#']")];
+      linkedTargetsCache = [...new Set(navLinksCache.map(targetFromLink).filter(Boolean))];
+      navigationCacheDirty = false;
+    }
+    return navLinksCache;
+  };
+  const getLinkedTargets = () => {
+    getNavLinks();
+    return linkedTargetsCache;
+  };
+  const invalidateNavigationCache = () => {
+    navigationCacheDirty = true;
+  };
+  const targetFromLink = (link) => {
+    const href = link.getAttribute("href") || "";
+    if (!href.startsWith("#")) return null;
+    try {
+      return document.getElementById(decodeURIComponent(href.slice(1)));
+    } catch {
+      return null;
+    }
+  };
 
   try {
     const storedTocWidth = Number(localStorage.getItem("opensessionviewer.tocWidth"));
@@ -1687,6 +1713,9 @@ if (sessionWorkbench) {
   }
 
   const updateFlowOverview = () => {
+    const flowScroll = getFlowScroll();
+    const flowOverviewWindow = getFlowOverviewWindow();
+    const flowRootLine = getFlowRootLine();
     if (!flowScroll || !flowOverviewWindow) return;
     const wrapped = flowRootLine?.classList.contains("flow-map-line-wrapped");
     const viewport = wrapped ? flowScroll.clientHeight : flowScroll.clientWidth;
@@ -1700,6 +1729,9 @@ if (sessionWorkbench) {
   };
 
   const seekFlowOverview = (clientX) => {
+    const flowScroll = getFlowScroll();
+    const flowOverview = getFlowOverview();
+    const flowRootLine = getFlowRootLine();
     if (!flowScroll || !flowOverview) return;
     const rect = flowOverview.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(rect.width, 1)));
@@ -1711,6 +1743,7 @@ if (sessionWorkbench) {
   };
 
   const unwrapFlowRows = () => {
+    const flowRootLine = getFlowRootLine();
     if (!flowRootLine) return [];
     const rows = [...flowRootLine.querySelectorAll(":scope > .flow-map-row")];
     if (!rows.length) {
@@ -1723,6 +1756,7 @@ if (sessionWorkbench) {
   };
 
   const updateFlowTurnAnchors = () => {
+    const flowRootLine = getFlowRootLine();
     if (!flowRootLine) return;
     const rows = [...flowRootLine.querySelectorAll(":scope > .flow-map-row-continues")];
     rows.forEach((row) => {
@@ -1743,6 +1777,9 @@ if (sessionWorkbench) {
   };
 
   const layoutFlowRows = () => {
+    const flowPanel = getFlowPanel();
+    const flowScroll = getFlowScroll();
+    const flowRootLine = getFlowRootLine();
     if (!flowRootLine || !flowScroll || flowPanel?.classList.contains("hidden")) return;
     const steps = unwrapFlowRows();
     if (steps.length < 2) {
@@ -1795,6 +1832,8 @@ if (sessionWorkbench) {
   };
 
   const clearFlowFocus = () => {
+    const flowPanel = getFlowPanel();
+    const flowMap = getFlowMap();
     flowMap?.classList.remove("flow-focus-active");
     flowPanel?.classList.remove("flow-branch-detail-open");
     flowPanel?.querySelectorAll(".flow-focused, .flow-focus-context").forEach((node) => {
@@ -1803,6 +1842,8 @@ if (sessionWorkbench) {
   };
 
   const closeFlowBranch = () => {
+    const flowBranchDrawer = getFlowBranchDrawer();
+    const flowBranchBody = getFlowBranchBody();
     if (!flowBranchDrawer || !flowBranchBody) return;
     flowBranchDrawer.classList.add("hidden");
     flowBranchDrawer.setAttribute("aria-hidden", "true");
@@ -1812,6 +1853,11 @@ if (sessionWorkbench) {
   };
 
   const openFlowBranch = (button) => {
+    const flowPanel = getFlowPanel();
+    const flowMap = getFlowMap();
+    const flowRootLine = getFlowRootLine();
+    const flowBranchDrawer = getFlowBranchDrawer();
+    const flowBranchBody = getFlowBranchBody();
     if (!flowBranchDrawer || !flowBranchBody) return;
     const templateId = button.dataset.flowBranchOpen;
     const template = templateId ? document.getElementById(templateId) : null;
@@ -1836,13 +1882,15 @@ if (sessionWorkbench) {
     requestAnimationFrame(layoutFlowRows);
   };
 
-  if (flowScroll && flowOverview) {
-    flowScroll.addEventListener("scroll", updateFlowOverview, { passive: true });
-    let flowResizeTimer = null;
-    window.addEventListener("resize", () => {
-      clearTimeout(flowResizeTimer);
-      flowResizeTimer = setTimeout(layoutFlowRows, 120);
-    });
+  const bindFlowPanelControls = () => {
+    const flowScroll = getFlowScroll();
+    const flowOverview = getFlowOverview();
+    if (!flowScroll || !flowOverview) return;
+    if (!flowScroll.dataset.flowScrollBound) {
+      flowScroll.addEventListener("scroll", updateFlowOverview, { passive: true });
+      flowScroll.dataset.flowScrollBound = "true";
+    }
+    if (flowOverview.dataset.flowOverviewBound) return;
     flowOverview.addEventListener("pointerdown", (event) => {
       event.preventDefault();
       seekFlowOverview(event.clientX);
@@ -1855,7 +1903,53 @@ if (sessionWorkbench) {
       document.addEventListener("pointermove", onMove);
       document.addEventListener("pointerup", onUp, { once: true });
     });
-  }
+    flowOverview.dataset.flowOverviewBound = "true";
+  };
+
+  const setFlowLazyStatus = (text) => {
+    const status = getFlowPanel()?.querySelector("[data-flow-lazy-status]");
+    if (status) status.textContent = text;
+  };
+
+  const ensureFlowLoaded = async () => {
+    const flowPanel = getFlowPanel();
+    if (!flowPanel) return false;
+    const lazyUrl = flowPanel.dataset.flowLazyUrl;
+    if (!lazyUrl) {
+      bindFlowPanelControls();
+      return true;
+    }
+    if (flowLoadPromise) return flowLoadPromise;
+
+    flowPanel.dataset.flowState = "loading";
+    setFlowLazyStatus("Loading flow...");
+    flowLoadPromise = (async () => {
+      const response = await fetch(lazyUrl);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const html = await response.text();
+      flowPanel.innerHTML = html;
+      delete flowPanel.dataset.flowLazyUrl;
+      flowPanel.dataset.flowState = "loaded";
+      invalidateNavigationCache();
+      bindFlowPanelControls();
+      return true;
+    })().catch(() => {
+      flowLoadPromise = null;
+      flowPanel.dataset.flowState = "error";
+      setFlowLazyStatus("Flow could not be loaded.");
+      showToast(ft("toast_error"), "error");
+      return false;
+    });
+    return flowLoadPromise;
+  };
+
+  window.addEventListener("resize", () => {
+    clearTimeout(flowResizeTimer);
+    flowResizeTimer = setTimeout(layoutFlowRows, 120);
+  });
+  bindFlowPanelControls();
 
   const updateTocActivePath = (id) => {
     const activeTocLink = document.querySelector(`.session-toc .toc-link[href="#${CSS.escape(id)}"]`);
@@ -1876,7 +1970,7 @@ if (sessionWorkbench) {
   };
 
   const setActiveTarget = (id) => {
-    navLinks.forEach((link) => {
+    getNavLinks().forEach((link) => {
       link.classList.toggle("active", link.getAttribute("href") === `#${id}`);
     });
     updateTocActivePath(id);
@@ -1890,7 +1984,7 @@ if (sessionWorkbench) {
 
     let best = null;
     let bestDistance = Number.POSITIVE_INFINITY;
-    targets.forEach((target) => {
+    getLinkedTargets().forEach((target) => {
       const rect = target.getBoundingClientRect();
       if (rect.bottom < 48 || rect.top > window.innerHeight) {
         return;
@@ -1907,7 +2001,7 @@ if (sessionWorkbench) {
     }
   };
 
-  document.addEventListener("click", (event) => {
+  document.addEventListener("click", async (event) => {
     const exportLink = event.target.closest(".subagent-export-btn");
     if (exportLink) {
       event.stopPropagation();
@@ -1915,6 +2009,7 @@ if (sessionWorkbench) {
     }
 
     const flowClose = event.target.closest("[data-flow-close]");
+    const flowPanel = getFlowPanel();
     if (flowClose && flowPanel) {
       closeFlowBranch();
       flowPanel.classList.add("hidden");
@@ -1935,6 +2030,8 @@ if (sessionWorkbench) {
     const flowBranchOpen = event.target.closest("[data-flow-branch-open]");
     if (flowBranchOpen) {
       event.preventDefault();
+      const loaded = await ensureFlowLoaded();
+      if (!loaded) return;
       openFlowBranch(flowBranchOpen);
       return;
     }
@@ -1952,10 +2049,12 @@ if (sessionWorkbench) {
         flowPanel.classList.remove("hidden");
         flowPanel.setAttribute("aria-hidden", "false");
         document.body.classList.add("flow-panel-open");
+        const loaded = await ensureFlowLoaded();
+        if (!loaded) return;
         const anchor = flowButton.dataset.flowAnchor;
         const flowLink = anchor ? flowPanel.querySelector(`a[href="#${CSS.escape(anchor)}"]`) : null;
         if (flowLink) {
-          navLinks.forEach((link) => link.classList.remove("active"));
+          getNavLinks().forEach((link) => link.classList.remove("active"));
           flowLink.classList.add("active");
           flowLink.scrollIntoView({ block: "nearest", inline: "center" });
         }
@@ -1992,7 +2091,7 @@ if (sessionWorkbench) {
     setTimeout(() => target.classList.remove("anchor-flash"), 900);
   });
 
-  if (targets.length) {
+  if (getLinkedTargets().length) {
     window.addEventListener("scroll", () => {
       if (scrollTicking) {
         return;

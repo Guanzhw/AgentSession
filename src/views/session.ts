@@ -515,13 +515,19 @@ function renderToc(tree: SessionTree | null) {
   </aside>`;
 }
 
-function renderFlowPanel(_tree: SessionTree | null) {
-  return `<section id="session-flow-panel" class="session-flow-panel hidden" tabindex="-1" aria-hidden="true">
+function renderFlowPanel(_tree: SessionTree | null, lazyUrl = "") {
+  const lazyAttrs = lazyUrl
+    ? ` data-flow-lazy-url="${escapeHtml(lazyUrl)}" data-flow-state="idle"`
+    : "";
+  const body = lazyUrl
+    ? `<p class="toc-empty" data-flow-lazy-status>Flow loads when opened.</p>`
+    : `<p class="toc-empty">No flow data.</p>`;
+  return `<section id="session-flow-panel" class="session-flow-panel hidden" tabindex="-1" aria-hidden="true"${lazyAttrs}>
     <div class="flow-panel-header">
       <h2>Conversation Flow</h2>
       <button type="button" class="flow-close-btn" data-flow-close aria-label="Close flow">x</button>
     </div>
-    <p class="toc-empty">No flow data.</p>
+    ${body}
   </section>`;
 }
 
@@ -710,13 +716,16 @@ function renderFlowMapOverview(root) {
   </div>`;
 }
 
-function renderCanonicalFlowPanel(sessionFlow) {
+export function renderCanonicalFlowPanelContent(sessionFlow) {
   if (!sessionFlow?.root) {
-    return "";
+    return `<div class="flow-panel-header">
+      <h2>Conversation Flow</h2>
+      <button type="button" class="flow-close-btn" data-flow-close aria-label="Close flow">x</button>
+    </div>
+    <p class="toc-empty">No flow data.</p>`;
   }
 
-  return `<section id="session-flow-panel" class="session-flow-panel hidden" tabindex="-1" aria-hidden="true">
-    <div class="flow-panel-header">
+  return `<div class="flow-panel-header">
       <div>
         <h2>Conversation Flow</h2>
         <p>Conversation order with subagent forks and returns</p>
@@ -738,6 +747,16 @@ function renderCanonicalFlowPanel(sessionFlow) {
       </div>
       <div class="flow-branch-drawer-body" data-flow-branch-body></div>
     </aside>
+  `;
+}
+
+function renderCanonicalFlowPanel(sessionFlow) {
+  if (!sessionFlow?.root) {
+    return "";
+  }
+
+  return `<section id="session-flow-panel" class="session-flow-panel hidden" tabindex="-1" aria-hidden="true">
+    ${renderCanonicalFlowPanelContent(sessionFlow)}
   </section>`;
 }
 
@@ -1320,7 +1339,8 @@ export function renderSessionPage({
   resumeCommand = null,
   analysisAction = null,
   analysisRuns = [],
-  terminalLaunchAllowed = false
+  terminalLaunchAllowed = false,
+  flowLazyUrl = ""
 }) {
   const title = session.title || session.slug || session.id;
   const starred = meta?.starred ? 1 : 0;
@@ -1401,7 +1421,7 @@ ${actions}
     <section class="messages">
       ${messageMarkup || `<p class="empty-state">${t("detail.no_messages")}</p>`}
     </section>
-    ${sessionFlow ? renderCanonicalFlowPanel(sessionFlow) : renderFlowPanel(sessionTree)}
+    ${sessionFlow ? renderCanonicalFlowPanel(sessionFlow) : renderFlowPanel(sessionTree, flowLazyUrl)}
   </main>
 </div>
   `;
