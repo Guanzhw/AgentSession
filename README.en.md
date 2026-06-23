@@ -32,7 +32,7 @@ The focus is no longer just “list my chats.” The goal is to help you reconst
 |:---|:---:|:---|:---|
 | OpenCode | Full | `$XDG_DATA_HOME/opencode/opencode.db` or `~/.local/share/opencode/opencode.db` | Browse, search, star, rename, delete, trash, export, stats, trace, nested sessions, analysis |
 | CodeAgent | Full | `$XDG_DATA_HOME/opencode/db/ngagent.db` or `~/.local/share/opencode/db/ngagent.db` | OpenCode fork with the same viewer capabilities |
-| Claude Code | Read-only | `~/.claude/transcripts/` + `~/.claude/projects/` | Browse, search, token stats, analysis |
+| Claude Code | Read-only | `~/.claude/transcripts/` + `~/.claude/projects/` | Browse, search, token stats, trace, flow, analysis prompt evidence |
 | Codex CLI | Read-only | `~/.codex/sessions/**/*.jsonl` | Browse, search, token stats |
 | Gemini CLI | Read-only | `~/.gemini/tmp/*/chats/*.json` | Browse, search, token stats |
 

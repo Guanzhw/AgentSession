@@ -5,8 +5,8 @@ import { getConfig } from "../../config.js";
 import { parseTranscript, extractSessionMeta, recordsToMessages } from "./parser.js";
 import { icons } from "../../icons.js";
 import type { ProviderAdapter } from "../interface.js";
-import { buildMessageSessionViews } from "../shared/message-session.js";
 import { buildClaudeCodeRuntimeEnvironment } from "./runtime-environment.js";
+import { buildClaudeCodeSessionViews, buildClaudeCodeSystemPrompts } from "./views.js";
 
 function getClaudeDir() {
   return getConfig().claudeDir;
@@ -16,9 +16,9 @@ function getClaudeDir() {
  * Discover session files from both legacy and project-scoped layouts.
  * @returns {{ sessionId: string, filePath: string }[]}
  */
-function discoverSessionFiles() {
+function discoverSessionFiles(): Array<{ sessionId: string; filePath: string }> {
   const claudeDir = getClaudeDir();
-  const files = [];
+  const files: Array<{ sessionId: string; filePath: string }> = [];
 
   // Legacy layout: ~/.claude/transcripts/{session-id}.jsonl
   const transcriptsDir = path.join(claudeDir, "transcripts");
@@ -58,6 +58,29 @@ function discoverSessionFiles() {
   return files;
 }
 
+function findSessionFile(sessionId: string) {
+  return discoverSessionFiles().find((file) => file.sessionId === sessionId) || null;
+}
+
+function readSessionBundle(sessionId: string) {
+  const entry = findSessionFile(sessionId);
+  if (!entry) return null;
+  try {
+    const records = parseTranscript(entry.filePath);
+    const session = extractSessionMeta(records, sessionId);
+    const messages = recordsToMessages(records, sessionId);
+    return { records, session, messages };
+  } catch {
+    return null;
+  }
+}
+
+function buildRuntimeEnvironmentForSession(sessionId: string, directory: string | null | undefined) {
+  return directory
+    ? buildClaudeCodeRuntimeEnvironment(sessionId, directory, getClaudeDir())
+    : null;
+}
+
 const claudeCode = {
   id: "claude-code",
   name: "Claude Code",
@@ -93,34 +116,16 @@ const claudeCode = {
   },
 
   getSession(sessionId) {
-    const files = discoverSessionFiles();
-    const entry = files.find((f) => f.sessionId === sessionId);
-    if (!entry) return null;
-    try {
-      const records = parseTranscript(entry.filePath);
-      return extractSessionMeta(records, sessionId);
-    } catch {
-      return null;
-    }
+    return readSessionBundle(sessionId)?.session || null;
   },
 
   getRuntimeEnvironment(sessionId) {
     const session = this.getSession(sessionId);
-    return session?.directory
-      ? buildClaudeCodeRuntimeEnvironment(sessionId, session.directory, getClaudeDir())
-      : null;
+    return buildRuntimeEnvironmentForSession(sessionId, session?.directory);
   },
 
   getMessages(sessionId) {
-    const files = discoverSessionFiles();
-    const entry = files.find((f) => f.sessionId === sessionId);
-    if (!entry) return [];
-    try {
-      const records = parseTranscript(entry.filePath);
-      return recordsToMessages(records, sessionId);
-    } catch {
-      return [];
-    }
+    return readSessionBundle(sessionId)?.messages || [];
   },
 
   getTokenStats(days = 30) {
@@ -217,6 +222,17 @@ const claudeCode = {
     return getStructuredViews(sessionId)?.flow || null;
   },
 
+  getSystemPrompts(sessionId) {
+    const bundle = readSessionBundle(sessionId);
+    if (!bundle) return null;
+    const runtimeEnvironment = buildRuntimeEnvironmentForSession(sessionId, bundle.session.directory);
+    return buildClaudeCodeSystemPrompts(bundle.session, bundle.records, runtimeEnvironment);
+  },
+
+  getTrace(sessionId) {
+    return getStructuredViews(sessionId)?.trace || null;
+  },
+
   getUnavailableReason() {
     const metadataPath = path.join(os.homedir(), ".claude.json");
     if (!existsSync(metadataPath)) {
@@ -238,9 +254,9 @@ const claudeCode = {
 } satisfies ProviderAdapter;
 
 function getStructuredViews(sessionId) {
-  const session = claudeCode.getSession(sessionId);
-  if (!session) return null;
-  return buildMessageSessionViews(session, claudeCode.getMessages(sessionId));
+  const bundle = readSessionBundle(sessionId);
+  if (!bundle) return null;
+  return buildClaudeCodeSessionViews(bundle.session, bundle.messages);
 }
 
 function extractTextFromRecord(r) {

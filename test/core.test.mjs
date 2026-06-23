@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  rmSync,
   writeFileSync
 } from "node:fs";
 import os from "node:os";
@@ -19,6 +20,10 @@ import { enrichCodeAgentSession } from "../dist/src/providers/codeagent/schema.j
 import { buildOpenCodeSessionTree } from "../dist/src/providers/opencode/session-tree.js";
 import { buildOpenCodeRuntimeEnvironment } from "../dist/src/providers/opencode/runtime-environment.js";
 import { buildClaudeCodeRuntimeEnvironment } from "../dist/src/providers/claude-code/runtime-environment.js";
+import {
+  buildClaudeCodeSessionViews,
+  buildClaudeCodeSystemPrompts
+} from "../dist/src/providers/claude-code/views.js";
 import { buildCodexRuntimeEnvironment } from "../dist/src/providers/codex/runtime-environment.js";
 import { buildGeminiRuntimeEnvironment } from "../dist/src/providers/gemini/runtime-environment.js";
 import { buildFlowTreeFromContainer } from "../dist/src/providers/shared/flow-tree.js";
@@ -161,6 +166,157 @@ test("normalized message providers build structured tree, metrics, flow, and mod
     views.tree.messages.find((message) => message.data.tokens)?.data.model.modelID,
     "claude-sonnet"
   );
+});
+
+test("Claude Code views reconstruct trace and metrics steps from transcript tools", () => {
+  const records = parseTranscript(fixture("claude-current.jsonl"));
+  const session = extractSessionMeta(records, "session-current");
+  const messages = recordsToMessages(records, "session-current");
+  const views = buildClaudeCodeSessionViews(session, messages);
+  const trace = views.trace;
+
+  assert.equal(trace.summary.totalSteps, 1);
+  assert.equal(trace.summary.totalSpans, 3);
+  assert.equal(trace.summary.totalTokens, 44);
+  assert.equal(views.metrics.totals.steps, 1);
+  assert.equal(views.metrics.steps[0].reason, "tool-calls");
+  assert.equal(views.metrics.steps[0].inputTokens, 14);
+  assert.equal(views.metrics.steps[0].cacheReadTokens, 20);
+  assert.deepEqual(
+    trace.steps[0].spans.map((span) => [span.name, span.category, span.status]),
+    [
+      ["reasoning", "reasoning", null],
+      ["Read", "tool", "completed"],
+      ["text", "text", null]
+    ]
+  );
+  assert.equal(trace.steps[0].spans.find((span) => span.name === "Read")?.output, "OpenSessionViewer");
+});
+
+test("Claude Code trace splits independent turns and classifies MCP tools", () => {
+  const records = [
+    {
+      type: "user",
+      uuid: "user-1",
+      timestamp: "2026-06-06T00:00:00.000Z",
+      message: { content: [{ type: "text", text: "First prompt" }] }
+    },
+    {
+      type: "assistant",
+      uuid: "assistant-1",
+      timestamp: "2026-06-06T00:00:01.000Z",
+      message: {
+        model: "claude-sonnet",
+        usage: { input_tokens: 3, output_tokens: 2 },
+        content: [{ type: "text", text: "First answer" }]
+      }
+    },
+    {
+      type: "user",
+      uuid: "user-2",
+      timestamp: "2026-06-06T00:00:02.000Z",
+      message: { content: [{ type: "text", text: "Search the issue tracker" }] }
+    },
+    {
+      type: "assistant",
+      uuid: "assistant-2",
+      timestamp: "2026-06-06T00:00:03.000Z",
+      message: {
+        model: "claude-sonnet",
+        usage: { input_tokens: 5, output_tokens: 1 },
+        content: [{
+          type: "tool_use",
+          id: "mcp-tool-1",
+          name: "mcp__github__search_issues",
+          input: { query: "cache miss" }
+        }]
+      }
+    },
+    {
+      type: "user",
+      uuid: "tool-result",
+      timestamp: "2026-06-06T00:00:04.000Z",
+      message: {
+        content: [{
+          type: "tool_result",
+          tool_use_id: "mcp-tool-1",
+          content: "issue #123",
+          is_error: false
+        }]
+      }
+    }
+  ];
+  const session = extractSessionMeta(records, "claude-multiturn");
+  const views = buildClaudeCodeSessionViews(session, recordsToMessages(records, "claude-multiturn"));
+  const mcpSpan = views.trace.steps[1].spans.find((span) => span.name === "mcp__github__search_issues");
+
+  assert.equal(views.trace.summary.totalSteps, 2);
+  assert.equal(views.metrics.steps.length, 2);
+  assert.equal(views.metrics.steps[0].reason, "message");
+  assert.equal(views.metrics.steps[1].reason, "tool-calls");
+  assert.equal(mcpSpan?.category, "mcp");
+  assert.equal(mcpSpan?.mcpServer, "github");
+  assert.equal(mcpSpan?.output, "issue #123");
+});
+
+test("Claude Code system prompt evidence resolves local runtime sources without hidden prompt claims", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-claude-prompts-"));
+  try {
+    const projectPath = path.join(temp, "project");
+    const claudeDir = path.join(temp, "claude");
+    mkdirSync(path.join(projectPath, ".git"), { recursive: true });
+    mkdirSync(path.join(projectPath, ".claude", "rules"), { recursive: true });
+    mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(path.join(claudeDir, "CLAUDE.md"), "# User Claude instructions\n");
+    writeFileSync(path.join(projectPath, "CLAUDE.md"), "# Project Claude instructions\n");
+    writeFileSync(path.join(projectPath, ".claude", "rules", "review.md"), "# Review rules\n");
+
+    const runtime = buildClaudeCodeRuntimeEnvironment("claude-session", projectPath, claudeDir);
+    const prompts = buildClaudeCodeSystemPrompts(
+      {
+        id: "claude-session",
+        provider: "claude-code",
+        parentId: null,
+        title: "Claude session",
+        directory: projectPath,
+        timeCreated: 1780000000000,
+        timeUpdated: 1780000001000,
+        messageCount: 2,
+        tokenCount: null
+      },
+      [
+        {
+          type: "system",
+          uuid: "system-1",
+          timestamp: "2026-06-01T00:00:00.000Z",
+          cwd: projectPath,
+          version: "1.0.0",
+          tools: ["Read", "Bash"]
+        },
+        {
+          type: "user",
+          uuid: "user-1",
+          timestamp: "2026-06-01T00:00:01.000Z",
+          message: { content: [{ type: "text", text: "Review this repository" }] }
+        }
+      ],
+      runtime
+    );
+
+    const instructionItems = prompts.sections.find((section) => section.title === "Claude Instruction Files")?.items || [];
+    assert.equal(prompts.hiddenPromptStored, false);
+    assert.match(prompts.note, /do not store the hidden provider prompt/);
+    assert.ok(instructionItems.some((entry) => entry.source.endsWith("CLAUDE.md") && /Project Claude instructions/.test(entry.preview)));
+    assert.ok(instructionItems.some((entry) => entry.source.endsWith(path.join(".claude", "rules", "review.md")) && /Review rules/.test(entry.preview)));
+    assert.equal(prompts.firstUserMessage.preview, "Review this repository");
+    assert.ok(
+      prompts.sections
+        .find((section) => section.title === "Stored Transcript Envelope")
+        ?.items.some((entry) => entry.title === "System record 1" && /Read/.test(entry.preview))
+    );
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
 });
 
 test("Codex token_count records attach request usage to the preceding assistant output", () => {
