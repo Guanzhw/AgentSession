@@ -326,6 +326,8 @@ if (settingsForm) {
     .filter(Boolean);
   const setLines = (id, values) => setValue(id, Array.isArray(values) ? values.join("\n") : "");
   const asObject = (next) => next && typeof next === "object" && !Array.isArray(next) ? next : {};
+  const defaultAnalysisCommand = asObject(initialData.analysisDefaultCommand);
+  const usesOpenCodeAnalyzerPreset = defaultAnalysisCommand.executable === "opencode";
   const clone = (next) => JSON.parse(JSON.stringify(next || {}));
   const sameValue = (left, right) => JSON.stringify(left) === JSON.stringify(right);
   let sharedTargetConfigs = {};
@@ -567,9 +569,9 @@ if (settingsForm) {
     setChecked("settings-raw-snapshots", analysis.includeRawSnapshots);
     populateTargetOptions(analysis, providerSettings, targetId);
     loadTargetDraft(targetId);
-    setChecked("settings-analyzer-enabled", Boolean(providerSettings.command) || providerId === "opencode");
+    setChecked("settings-analyzer-enabled", Boolean(providerSettings.command) || Boolean(defaultAnalysisCommand.executable));
     setValue("settings-analyzer-executable", command.executable || "");
-    if (providerId === "opencode") {
+    if (usesOpenCodeAnalyzerPreset) {
       setValue("settings-analyzer-model", extractModel(commandArgs));
       setLines("settings-analyzer-args", withoutModel(commandArgs));
     } else {
@@ -631,7 +633,7 @@ if (settingsForm) {
         throw new Error("Analyzer executable is required when provider analysis is enabled.");
       }
       let args = readLines("settings-analyzer-args");
-      if (providerId === "opencode") {
+      if (usesOpenCodeAnalyzerPreset) {
         const model = value("settings-analyzer-model");
         if (model) {
           const insertAt = args[0] === "run" ? 1 : 0;
@@ -728,9 +730,8 @@ if (settingsForm) {
     if (!reset) return;
     const key = reset.dataset.resetSetting;
     const inheritedTarget = inheritedTargetDefaults(currentTargetId);
-    const analysisDefaultCommand = asObject(initialData.analysisDefaultCommand);
-    const analysisDefaultArgs = Array.isArray(analysisDefaultCommand.args)
-      ? analysisDefaultCommand.args
+    const analysisDefaultArgs = Array.isArray(defaultAnalysisCommand.args)
+      ? defaultAnalysisCommand.args
       : [];
     const resumeDefault = asObject(initialData.resumeDefault);
 
@@ -752,11 +753,11 @@ if (settingsForm) {
       setLines("settings-file-extensions", inheritedTarget.fileExtensions || inheritedTarget.extensions);
     }
     if (key === "analyzer-enabled") {
-      setChecked("settings-analyzer-enabled", Boolean(analysisDefaultCommand.executable));
+      setChecked("settings-analyzer-enabled", Boolean(defaultAnalysisCommand.executable));
     }
     if (key === "analyzer-executable") {
-      setValue("settings-analyzer-executable", analysisDefaultCommand.executable || "");
-      if (!analysisDefaultCommand.executable) {
+      setValue("settings-analyzer-executable", defaultAnalysisCommand.executable || "");
+      if (!defaultAnalysisCommand.executable) {
         setChecked("settings-analyzer-enabled", false);
       }
     }
@@ -766,7 +767,7 @@ if (settingsForm) {
     if (key === "analyzer-args") {
       setLines(
         "settings-analyzer-args",
-        providerId === "opencode" ? withoutModel(analysisDefaultArgs) : analysisDefaultArgs
+        usesOpenCodeAnalyzerPreset ? withoutModel(analysisDefaultArgs) : analysisDefaultArgs
       );
     }
     if (key === "resume-enabled") {

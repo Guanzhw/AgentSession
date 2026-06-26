@@ -126,6 +126,8 @@ codeagent-session [options]
 会话记录中的项目目录有效时，页面可以在终端中打开该命令。命令启动默认
 启用；使用 `--disable-terminal-launch` 启动服务可隐藏并禁用继续会话和分析
 操作。
+启动时优先使用 Windows Terminal（`wt.exe`）；如果不可用，则直接打开已配置的
+PowerShell Host。
 
 所有已注册 Provider 都声明了默认继续命令：
 
@@ -186,7 +188,7 @@ PowerShell 兼容程序的绝对路径。`args` 会插入到自动生成的
 ## 会话分析与评估提案
 
 OpenSessionViewer 可以从声明支持会话分析的 Provider 详情页以非交互方式启动
-已配置的 Analyzer，目前包括 OpenCode 和 Claude Code。其他 Provider 在适配器
+已配置的 Analyzer，目前包括 OpenCode、CodeAgent 和 Claude Code。其他 Provider 在适配器
 声明同等能力前继续保留只读浏览能力。分析任务只生成提案：它会把会话保存为带索引的 JSONL 证据、保存
 选定工件快照、创建评估种子，并要求 Analyzer 输出：
 

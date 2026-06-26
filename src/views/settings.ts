@@ -10,17 +10,6 @@ import { layout } from "./layout.js";
 
 const builtinTargets = BUILTIN_ANALYSIS_TARGETS;
 
-const openCodeAnalysisCommand = {
-  executable: "opencode",
-  args: [
-    "run",
-    "Read the attached analysis request and write the requested proposal files.",
-    "--model", "deepseek/deepseek-v4-flash",
-    "--dir", "{projectPath}",
-    "--file", "{promptPath}"
-  ]
-};
-
 function asObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -125,6 +114,7 @@ export function renderSettingsPage({
   provider = "opencode",
   providerName = provider,
   resumeDefault = null,
+  analysisDefaultCommand = null,
   providers = [],
   providerAvailable = true,
   manageable = false
@@ -167,7 +157,12 @@ export function renderSettingsPage({
       selected: id === targetId
     };
   });
-  const defaultAnalysisCommand = provider === "opencode" ? openCodeAnalysisCommand : { executable: "", args: [] };
+  const defaultAnalysisCommand = {
+    executable: typeof analysisDefaultCommand?.executable === "string" ? analysisDefaultCommand.executable : "",
+    args: stringList(analysisDefaultCommand?.args)
+  };
+  const hasDefaultAnalysisCommand = Boolean(defaultAnalysisCommand.executable);
+  const usesOpenCodeAnalyzerPreset = defaultAnalysisCommand.executable === "opencode";
   const analysisCommand = {
     ...defaultAnalysisCommand,
     ...asObject(analysisProvider.command)
@@ -384,7 +379,7 @@ export function renderSettingsPage({
               id: "settings-analyzer-enabled",
               label: t("settings.provider_enabled"),
               description: t("settings.provider_enabled_help"),
-              enabled: Boolean(analysisProvider.command) || provider === "opencode",
+              enabled: Boolean(analysisProvider.command) || hasDefaultAnalysisCommand,
               reset: "analyzer-enabled"
             })}
           </div>
@@ -393,10 +388,10 @@ export function renderSettingsPage({
               id: "settings-analyzer-executable",
               label: t("settings.executable"),
               value: typeof analysisCommand.executable === "string" ? analysisCommand.executable : "",
-              placeholder: provider === "opencode" ? "opencode" : "",
+              placeholder: defaultAnalysisCommand.executable,
               reset: "analyzer-executable"
             })}
-            ${provider === "opencode" ? field({
+            ${usesOpenCodeAnalyzerPreset ? field({
               id: "settings-analyzer-model",
               label: t("settings.model"),
               value: extractModel(analysisArgs),
@@ -406,12 +401,12 @@ export function renderSettingsPage({
             ${textareaField({
               id: "settings-analyzer-args",
               label: t("settings.arguments"),
-              values: provider === "opencode" ? withoutModelArgs(analysisArgs) : analysisArgs,
+              values: usesOpenCodeAnalyzerPreset ? withoutModelArgs(analysisArgs) : analysisArgs,
               help: t("settings.arguments_help"),
               reset: "analyzer-args"
             })}
           </div>
-          ${provider === "opencode" ? `
+          ${usesOpenCodeAnalyzerPreset ? `
             <button type="button" class="btn settings-preset-btn" id="settings-analysis-preset">${t("settings.use_opencode_preset")}</button>
           ` : ""}
         </section>

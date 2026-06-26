@@ -41,8 +41,10 @@ import {
 import { buildMessageSessionViews } from "../dist/src/providers/shared/message-session.js";
 import { getAllProviders } from "../dist/src/providers/index.js";
 import {
+  buildPowerShellLaunchSpec,
   buildPowerShellResumeArgs,
   getResumeCommand,
+  resolvePowerShellLaunch,
   resolveProjectDirectory,
   resolveWindowsExecutableCandidate
 } from "../dist/src/resume.js";
@@ -55,6 +57,7 @@ import {
   getAnalysisOutputRoot,
   getSessionAnalysisAction,
   listSessionAnalysisRuns,
+  OPENCODE_ANALYSIS_COMMAND,
   prepareAnalysisImplementation,
   prepareSessionAnalysis,
   resolveAnalysisSettings
@@ -579,7 +582,7 @@ test("windows executable resolution prefers runnable command shims", () => {
     "D:\\npm\\node_global\\opencode.cmd"
   );
   assert.equal(
-    resolveWindowsExecutableCandidate(["D:\\npm\\node_global\\opencode"]),
+    resolveWindowsExecutableCandidate(["D:\\npm\\node_global\\opencode"], () => false),
     "D:\\npm\\node_global\\opencode"
   );
 });
@@ -963,6 +966,7 @@ test("settings page exposes config location and startup-only launch status", () 
     terminalLaunchAllowed: true,
     provider: "opencode",
     providerName: "OpenCode",
+    analysisDefaultCommand: OPENCODE_ANALYSIS_COMMAND,
     resumeDefault: {
       executable: "opencode",
       args: ["--session", "{sessionId}"]
@@ -1072,6 +1076,38 @@ test("settings page exposes config location and startup-only launch status", () 
   assert.match(customTargetHtml, /Look for stale operational knowledge\./);
   assert.match(customTargetHtml, /provider-memories/);
   assert.match(customTargetHtml, /MEMORY\.md/);
+
+  const codeAgentHtml = renderSettingsPage({
+    configPath: "C:\\Users\\tester\\config.json",
+    configDocument: {
+      exists: false,
+      raw: "{}\n",
+      config: {},
+      error: ""
+    },
+    terminalLaunchAllowed: true,
+    provider: "codeagent",
+    providerName: "CodeAgent",
+    analysisDefaultCommand: OPENCODE_ANALYSIS_COMMAND,
+    resumeDefault: {
+      executable: "codeagent",
+      args: ["--session", "{sessionId}"]
+    },
+    providers: [{
+      id: "codeagent",
+      name: "CodeAgent",
+      icon: "CA",
+      available: true
+    }]
+  });
+  assert.match(codeAgentHtml, /id="settings-analyzer-enabled"[^>]+checked/);
+  assert.match(codeAgentHtml, /id="settings-analyzer-model"/);
+  assert.match(codeAgentHtml, /id="settings-analysis-preset"/);
+  assert.match(codeAgentHtml, /deepseek\/deepseek-v4-flash/);
+  const codeAgentInitialData = JSON.parse(
+    codeAgentHtml.match(/<script type="application\/json" id="settings-initial-data">([\s\S]*?)<\/script>/)[1]
+  );
+  assert.equal(codeAgentInitialData.analysisDefaultCommand.executable, "opencode");
 });
 
 test("built-in analysis materials do not claim provider runtime paths", () => {
@@ -1099,6 +1135,63 @@ test("terminal launch encodes the complete PowerShell resume script", () => {
   assert.match(script, /ConvertFrom-Json/);
   assert.match(script, /Set-Location -LiteralPath \$spec\.cwd/);
   assert.match(script, /& \$spec\.executable @\(\$spec\.args\)$/);
+});
+
+test("terminal launch prefers Windows Terminal when available", () => {
+  const cwd = "C:\\project";
+  const powershell = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
+  const terminal = "C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps\\wt.exe";
+  const host = resolvePowerShellLaunch(null, (executable) => {
+    if (executable === "wt.exe") return terminal;
+    if (executable === "pwsh.exe") return powershell;
+    return null;
+  });
+
+  assert.deepEqual(host, {
+    terminal,
+    powershell,
+    shellArgs: ["-NoExit", "-NoLogo"]
+  });
+  const args = buildPowerShellResumeArgs(host.powershell, host.shellArgs);
+  const launch = buildPowerShellLaunchSpec({ cwd, terminal: host.terminal, powershellArgs: args });
+  assert.equal(launch.executable, terminal);
+  assert.deepEqual(launch.args.slice(0, 3), ["-d", cwd, powershell]);
+  assert.equal(launch.cwd, undefined);
+  assert.equal(launch.detached, true);
+  assert.equal(launch.windowsHide, true);
+  assert.deepEqual(launch.env, {});
+});
+
+test("terminal launch falls back to direct PowerShell without Windows Terminal", () => {
+  const cwd = "C:\\project";
+  const powershell = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+  const host = resolvePowerShellLaunch(null, (executable) => {
+    if (executable === "powershell.exe") return powershell;
+    return null;
+  });
+
+  assert.deepEqual(host, {
+    terminal: null,
+    powershell,
+    shellArgs: ["-NoExit", "-NoLogo"]
+  });
+  const args = buildPowerShellResumeArgs(host.powershell, host.shellArgs);
+  const launch = buildPowerShellLaunchSpec({ cwd, terminal: host.terminal, powershellArgs: args });
+  assert.equal(launch.executable, powershell);
+  assert.deepEqual(launch.args.slice(0, 3), ["-NoLogo", "-NoProfile", "-EncodedCommand"]);
+  assert.equal(launch.cwd, undefined);
+  assert.equal(launch.detached, false);
+  assert.equal(launch.windowsHide, true);
+  const directSpec = JSON.parse(
+    Buffer.from(launch.env.OPENSESSIONVIEWER_DIRECT_POWERSHELL_LAUNCH_SPEC, "base64").toString("utf-8")
+  );
+  assert.deepEqual(directSpec, {
+    executable: powershell,
+    args: args.slice(1),
+    cwd
+  });
+  const wrapperScript = Buffer.from(launch.args[3], "base64").toString("utf16le");
+  assert.match(wrapperScript, /Start-Process @startInfo/);
 });
 
 test("session analysis snapshots artifacts and generates evaluation inputs", () => {
@@ -2124,6 +2217,21 @@ test("built-in analysis targets resolve without target-specific config", () => {
     assert.deepEqual(settings.target.fileExtensions, expected.fileExtensions);
     assert.match(settings.target.prompt, /\S/);
   }
+});
+
+test("CodeAgent opts into session analysis with the shared analyzer default", () => {
+  const codeAgent = getAllProviders().find((provider) => provider.id === "codeagent");
+  assert.equal(codeAgent?.capabilities?.sessionAnalysis, true);
+  const analysisConfig = { enabled: true };
+
+  assert.deepEqual(
+    getAnalysisTargetIds(codeAgent, analysisConfig),
+    Object.keys(BUILTIN_ANALYSIS_TARGETS)
+  );
+  assert.equal(
+    resolveAnalysisSettings(codeAgent, analysisConfig, "skills").command.executable,
+    "opencode"
+  );
 });
 
 test("provider analysis targets override shared artifacts without changing other providers", () => {

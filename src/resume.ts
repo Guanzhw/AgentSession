@@ -35,6 +35,7 @@ function quoteDisplayArg(value) {
 }
 
 const WINDOWS_EXECUTABLE_EXTENSIONS = [".exe", ".cmd", ".bat"];
+const DIRECT_POWERSHELL_LAUNCH_ENV = "OPENSESSIONVIEWER_DIRECT_POWERSHELL_LAUNCH_SPEC";
 
 export function resolveWindowsExecutableCandidate(candidates, exists = existsSync) {
   const direct = candidates.find((entry) => {
@@ -138,6 +139,90 @@ export function buildPowerShellResumeArgs(powershell, shellArgs = ["-NoExit", "-
   ];
 }
 
+export function resolvePowerShellLaunch(configuredShell = null, resolve = resolveExecutable) {
+  const shellSpec = isShellSpec(configuredShell) ? configuredShell : null;
+  const powershell = shellSpec
+    ? resolve(shellSpec.executable)
+    : resolve("pwsh.exe") || resolve("powershell.exe");
+  if (!powershell) {
+    throw new Error("PowerShell is required");
+  }
+
+  return {
+    terminal: resolve("wt.exe") || null,
+    powershell,
+    shellArgs: shellSpec?.args || ["-NoExit", "-NoLogo"]
+  };
+}
+
+function buildPowerShellStartProcessArgs(powershell) {
+  const script = [
+    `$json=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:${DIRECT_POWERSHELL_LAUNCH_ENV}))`,
+    "$spec=$json|ConvertFrom-Json",
+    "$startInfo=@{FilePath=$spec.executable;ArgumentList=@($spec.args);WorkingDirectory=$spec.cwd;WindowStyle='Normal'}",
+    "Start-Process @startInfo|Out-Null"
+  ].join(";");
+
+  return [
+    powershell,
+    "-NoLogo",
+    "-NoProfile",
+    "-EncodedCommand",
+    Buffer.from(script, "utf16le").toString("base64")
+  ];
+}
+
+export function buildPowerShellLaunchSpec({ cwd, terminal, powershellArgs }) {
+  if (!cwd || typeof cwd !== "string") {
+    throw new Error("Working directory is required");
+  }
+  if (!Array.isArray(powershellArgs) || !powershellArgs[0]) {
+    throw new Error("PowerShell launch arguments are required");
+  }
+
+  if (terminal) {
+    return {
+      executable: terminal,
+      args: ["-d", cwd, ...powershellArgs],
+      cwd: undefined,
+      detached: true,
+      windowsHide: true,
+      env: {}
+    };
+  }
+
+  const directLaunchSpec = Buffer.from(JSON.stringify({
+    executable: powershellArgs[0],
+    args: powershellArgs.slice(1),
+    cwd
+  }), "utf-8").toString("base64");
+
+  return {
+    executable: powershellArgs[0],
+    args: buildPowerShellStartProcessArgs(powershellArgs[0]).slice(1),
+    cwd: undefined,
+    // Direct detached PowerShell can exit without running the encoded command
+    // from hidden server hosts. Use a short-lived wrapper that starts the
+    // visible PowerShell process and then exits.
+    detached: false,
+    windowsHide: true,
+    env: { [DIRECT_POWERSHELL_LAUNCH_ENV]: directLaunchSpec }
+  };
+}
+
+export function spawnPowerShellLaunch({ cwd, terminal, powershellArgs, env }) {
+  const launch = buildPowerShellLaunchSpec({ cwd, terminal, powershellArgs });
+  const child = spawn(launch.executable, launch.args, {
+    detached: launch.detached,
+    stdio: "ignore",
+    windowsHide: launch.windowsHide,
+    cwd: launch.cwd,
+    env: { ...process.env, ...env, ...launch.env }
+  });
+  child.unref();
+  return child;
+}
+
 export function launchResumeCommand(command, configuredShell = null) {
   if (process.platform !== "win32") {
     throw new Error("Terminal launching is currently supported on Windows only");
@@ -146,15 +231,7 @@ export function launchResumeCommand(command, configuredShell = null) {
     throw new Error("Resume command is not available");
   }
 
-  const terminal = resolveExecutable("wt.exe");
-  const shellSpec = isShellSpec(configuredShell) ? configuredShell : null;
-  const powershell = shellSpec
-    ? resolveExecutable(shellSpec.executable)
-    : resolveExecutable("pwsh.exe") || resolveExecutable("powershell.exe");
-  if (!terminal || !powershell) {
-    throw new Error("Windows Terminal and PowerShell are required");
-  }
-  const shellArgs = shellSpec?.args || ["-NoExit", "-NoLogo"];
+  const launchHost = resolvePowerShellLaunch(configuredShell);
 
   // The fixed PowerShell program reads data from the environment. Session IDs,
   // command arguments, and project paths never become PowerShell source text.
@@ -163,14 +240,10 @@ export function launchResumeCommand(command, configuredShell = null) {
     args: command.args,
     cwd: command.cwd
   }), "utf-8").toString("base64");
-  const child = spawn(terminal, [
-    "-d", command.cwd,
-    ...buildPowerShellResumeArgs(powershell, shellArgs)
-  ], {
-    detached: true,
-    stdio: "ignore",
-    windowsHide: true,
-    env: { ...process.env, OPENSESSIONVIEWER_RESUME_SPEC: payload }
+  spawnPowerShellLaunch({
+    cwd: command.cwd,
+    terminal: launchHost.terminal,
+    powershellArgs: buildPowerShellResumeArgs(launchHost.powershell, launchHost.shellArgs),
+    env: { OPENSESSIONVIEWER_RESUME_SPEC: payload }
   });
-  child.unref();
 }

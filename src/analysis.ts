@@ -10,7 +10,6 @@ import {
   writeFileSync
 } from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import type {
@@ -34,7 +33,12 @@ import {
   getAnalysisRunPaths,
   resolveAnalysisRunPath
 } from "./analysis-layout.js";
-import { resolveExecutable, resolveProjectDirectory } from "./resume.js";
+import {
+  resolveExecutable,
+  resolvePowerShellLaunch,
+  resolveProjectDirectory,
+  spawnPowerShellLaunch
+} from "./resume.js";
 import { supportsSessionAnalysis as providerSupportsSessionAnalysis } from "./providers/kinds.js";
 
 const MAX_ARTIFACT_FILES = 200;
@@ -1737,16 +1741,7 @@ export function launchSessionAnalysis(run, fallbackShell = null) {
     throw new Error("Analysis command is not available");
   }
 
-  const terminal = resolveExecutable("wt.exe");
-  const configuredShell = run.shell || fallbackShell;
-  const shellSpec = isShellSpec(configuredShell) ? configuredShell : null;
-  const powershell = shellSpec
-    ? resolveExecutable(shellSpec.executable)
-    : resolveExecutable("pwsh.exe") || resolveExecutable("powershell.exe");
-  if (!terminal || !powershell) {
-    throw new Error("Windows Terminal and PowerShell are required");
-  }
-  const shellArgs = shellSpec?.args || ["-NoExit", "-NoLogo"];
+  const launchHost = resolvePowerShellLaunch(run.shell || fallbackShell);
   const payload = Buffer.from(JSON.stringify({
     executable: run.command.resolvedExecutable,
     args: run.command.args,
@@ -1765,16 +1760,12 @@ export function launchSessionAnalysis(run, fallbackShell = null) {
     nodeExecutable: process.execPath,
     validatorPath: path.join(path.dirname(fileURLToPath(import.meta.url)), "analysis-validator.js")
   }), "utf-8").toString("base64");
-  const child = spawn(terminal, [
-    "-d", run.command.cwd,
-    ...buildPowerShellAnalysisArgs(powershell, shellArgs)
-  ], {
-    detached: true,
-    stdio: "ignore",
-    windowsHide: true,
-    env: { ...process.env, OPENSESSIONVIEWER_ANALYSIS_SPEC: payload }
+  spawnPowerShellLaunch({
+    cwd: run.command.cwd,
+    terminal: launchHost.terminal,
+    powershellArgs: buildPowerShellAnalysisArgs(launchHost.powershell, launchHost.shellArgs),
+    env: { OPENSESSIONVIEWER_ANALYSIS_SPEC: payload }
   });
-  child.unref();
 
   const launched = {
     ...run.manifest,
@@ -1792,16 +1783,7 @@ export function launchAnalysisImplementation(run, fallbackShell = null) {
     throw new Error("Implementation command is not available");
   }
 
-  const terminal = resolveExecutable("wt.exe");
-  const configuredShell = run.shell || fallbackShell;
-  const shellSpec = isShellSpec(configuredShell) ? configuredShell : null;
-  const powershell = shellSpec
-    ? resolveExecutable(shellSpec.executable)
-    : resolveExecutable("pwsh.exe") || resolveExecutable("powershell.exe");
-  if (!terminal || !powershell) {
-    throw new Error("Windows Terminal and PowerShell are required");
-  }
-  const shellArgs = shellSpec?.args || ["-NoExit", "-NoLogo"];
+  const launchHost = resolvePowerShellLaunch(run.shell || fallbackShell);
   const payload = Buffer.from(JSON.stringify({
     executable: run.command.resolvedExecutable,
     args: run.command.args,
@@ -1809,16 +1791,12 @@ export function launchAnalysisImplementation(run, fallbackShell = null) {
     stdinPath: run.command.stdinPath,
     runDir: run.runDir
   }), "utf-8").toString("base64");
-  const child = spawn(terminal, [
-    "-d", run.command.cwd,
-    ...buildPowerShellImplementationArgs(powershell, shellArgs)
-  ], {
-    detached: true,
-    stdio: "ignore",
-    windowsHide: true,
-    env: { ...process.env, OPENSESSIONVIEWER_IMPLEMENTATION_SPEC: payload }
+  spawnPowerShellLaunch({
+    cwd: run.command.cwd,
+    terminal: launchHost.terminal,
+    powershellArgs: buildPowerShellImplementationArgs(launchHost.powershell, launchHost.shellArgs),
+    env: { OPENSESSIONVIEWER_IMPLEMENTATION_SPEC: payload }
   });
-  child.unref();
 
   const launched = {
     ...run.manifest,

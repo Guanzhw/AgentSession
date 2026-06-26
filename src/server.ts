@@ -9,6 +9,7 @@ import {
   launchAnalysisImplementation,
   launchSessionAnalysis,
   listSessionAnalysisRuns,
+  OPENCODE_ANALYSIS_COMMAND,
   prepareAnalysisImplementation,
   prepareSessionAnalysis
 } from "./analysis.js";
@@ -1325,6 +1326,7 @@ export async function startServer(config = getConfig()) {
         terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),
         providerName: currentProvider.name,
         resumeDefault: currentProvider.resumeCommand || null,
+        analysisDefaultCommand: supportsSessionAnalysis(currentProvider) ? OPENCODE_ANALYSIS_COMMAND : null,
         providerAvailable: Boolean(adapter),
         ...renderContext
       }));

@@ -113,6 +113,8 @@ Session detail pages always show a copyable session ID. When a provider has a
 known resume command and a valid recorded project directory, the page can open
 the command in a terminal. Command launching is enabled by default; start with
 `--disable-terminal-launch` to hide and disable resume and analysis launches.
+Launch prefers Windows Terminal (`wt.exe`) when available and falls back to
+opening the configured PowerShell host directly.
 
 All registered providers declare a default resume command:
 
@@ -176,8 +178,8 @@ with `--disable-terminal-launch` to turn it off for the current process.
 ## Session Analysis And Evaluation Proposals
 
 OpenSessionViewer can launch a configured analyzer non-interactively from
-provider detail pages that declare session-analysis support, currently OpenCode
-and Claude Code. Other providers keep their read-only viewer features until
+provider detail pages that declare session-analysis support, currently OpenCode,
+CodeAgent, and Claude Code. Other providers keep their read-only viewer features until
 their adapters declare the same capability. The analysis run is proposal-only:
 it snapshots the session as indexed JSONL
 evidence, snapshots selected artifacts, creates an evaluation seed, and asks
