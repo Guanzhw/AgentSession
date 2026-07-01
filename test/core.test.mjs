@@ -76,6 +76,15 @@ import {
   validateUserConfig,
   writeUserConfig
 } from "../dist/src/config.js";
+import {
+  buildRuntimeEvent,
+  getRuntimeRouteContext,
+  getRuntimeLogPath,
+  recordRuntimeEvent,
+  runtimeErrorMessage,
+  runtimeExecutableName,
+  runtimeLevelForStatus
+} from "../dist/src/runtime-log.js";
 
 const fixture = (name) => path.join(process.cwd(), "test", "fixtures", name);
 
@@ -636,6 +645,138 @@ test("terminal launch is enabled by default and supports an explicit startup opt
     parseArgs(["--config", configPath, "--disable-terminal-launch"]).allowTerminalLaunch,
     false
   );
+});
+
+test("runtime events write JSONL under meta logs with redaction", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-runtime-log-"));
+  const now = new Date("2026-07-01T02:40:00.000Z");
+  const longValue = "x".repeat(700);
+
+  const record = recordRuntimeEvent(temp, {
+    event: "analysis.launch",
+    level: "info",
+    provider: "opencode",
+    sessionId: "ses_test",
+    runId: "run_test",
+    prompt: "do not persist",
+    details: {
+      route: "/api/:provider/session/:sessionId/analyze",
+      authorization: "Bearer secret"
+    },
+    note: longValue
+  }, { now });
+
+  assert.equal(record.event, "analysis.launch");
+  assert.equal(record.provider, "opencode");
+  assert.equal(record.prompt, "[redacted]");
+  assert.equal(record.details.authorization, "[redacted]");
+  assert.equal(record.note.endsWith("..."), true);
+
+  const logPath = getRuntimeLogPath(temp, now);
+  const lines = readFileSync(logPath, "utf-8").trim().split(/\r?\n/);
+  assert.equal(lines.length, 1);
+  assert.deepEqual(JSON.parse(lines[0]), record);
+});
+
+test("runtime event normalization keeps logs small and predictable", () => {
+  const event = buildRuntimeEvent({
+    event: "bad event name!",
+    level: "verbose",
+    command: {
+      executable: "opencode",
+      args: ["secret prompt"]
+    },
+    nested: {
+      output: "raw provider output",
+      safe: "kept"
+    }
+  }, new Date("2026-07-01T02:41:00.000Z"));
+
+  assert.equal(event.event, "bad_event_name_");
+  assert.equal(event.level, "info");
+  assert.equal(event.command, "[redacted]");
+  assert.deepEqual(event.nested, {
+    output: "[redacted]",
+    safe: "kept"
+  });
+});
+
+test("runtime route context logs patterns instead of raw session paths", () => {
+  assert.deepEqual(
+    getRuntimeRouteContext("GET", "/api/providers"),
+    {
+      method: "GET",
+      route: "/api/:resource",
+      provider: undefined,
+      sessionId: undefined,
+      runId: undefined,
+      action: "providers"
+    }
+  );
+  assert.deepEqual(
+    getRuntimeRouteContext("GET", "/api/opencode/sessions"),
+    {
+      method: "GET",
+      route: "/api/:provider/:resource",
+      provider: "opencode",
+      sessionId: undefined,
+      runId: undefined,
+      action: "sessions"
+    }
+  );
+  assert.deepEqual(
+    getRuntimeRouteContext("POST", "/api/opencode/session/ses_123/analyze"),
+    {
+      method: "POST",
+      route: "/api/:provider/session/:sessionId/:action",
+      provider: "opencode",
+      sessionId: "ses_123",
+      runId: undefined,
+      action: "analyze"
+    }
+  );
+  assert.deepEqual(
+    getRuntimeRouteContext("GET", "/api/opencode/session/ses_123/metrics"),
+    {
+      method: "GET",
+      route: "/api/:provider/session/:sessionId/:action",
+      provider: "opencode",
+      sessionId: "ses_123",
+      runId: undefined,
+      action: "metrics"
+    }
+  );
+  assert.deepEqual(
+    getRuntimeRouteContext("GET", "/api/opencode/session/ses_123/analyses/run_456/outputs/report"),
+    {
+      method: "GET",
+      route: "/api/:provider/session/:sessionId/analyses/:runId/outputs/:output",
+      provider: "opencode",
+      sessionId: "ses_123",
+      runId: "run_456",
+      action: "report"
+    }
+  );
+  assert.equal(getRuntimeRouteContext("GET", "/static/app.js"), null);
+  assert.deepEqual(
+    getRuntimeRouteContext("GET", "/unexpected/ses_secret"),
+    { method: "GET", route: "/unmatched" }
+  );
+});
+
+test("runtime helper utilities classify status, errors, and executables", () => {
+  assert.equal(runtimeLevelForStatus(200), "info");
+  assert.equal(runtimeLevelForStatus(404), "warn");
+  assert.equal(runtimeLevelForStatus(500), "error");
+  assert.equal(runtimeErrorMessage(new Error("boom")), "boom");
+  assert.equal(runtimeErrorMessage(null), "Unknown error");
+  assert.equal(
+    runtimeExecutableName({ resolvedExecutable: "C:\\Tools\\opencode.cmd", executable: "opencode" }),
+    "opencode.cmd"
+  );
+  assert.equal(runtimeExecutableName({ executable: "/usr/bin/node" }), "node");
+  assert.equal(runtimeExecutableName(null), "");
+  assert.equal(recordRuntimeEvent(null, { event: "ignored" }), null);
 });
 
 test("OpenCode runtime environment resolves project and user agent extensions", () => {

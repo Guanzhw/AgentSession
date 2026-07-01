@@ -175,6 +175,23 @@ persisted but require a restart. `allowTerminalLaunch` is intentionally not
 web-configurable. Command launching is enabled by default; start OpenSessionViewer
 with `--disable-terminal-launch` to turn it off for the current process.
 
+## Runtime Logs
+
+OpenSessionViewer writes append-only JSONL runtime events under the metadata
+directory:
+
+```text
+<metadata-dir>/logs/runtime-YYYY-MM-DD.jsonl
+```
+
+The log records server startup, provider indexing, HTTP route patterns and
+statuses, metadata mutations, settings saves, terminal launches, and analysis
+prepare/launch events. Launch events may include the working directory path for
+local diagnosis. The log intentionally avoids request bodies, transcript
+content, prompts, tool output, full command arguments, cookies, tokens, and
+secrets. Analysis-run stdout/stderr and evidence snapshots remain in each run's
+own `diagnostics/` directory.
+
 ## Session Analysis And Evaluation Proposals
 
 OpenSessionViewer can launch a configured analyzer non-interactively from

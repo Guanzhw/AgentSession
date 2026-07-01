@@ -57,6 +57,13 @@ import {
   usesSqliteSessionStore
 } from "./providers/kinds.js";
 import { getResumeCommand, launchResumeCommand } from "./resume.js";
+import {
+  getRuntimeRouteContext,
+  recordRuntimeEvent,
+  runtimeErrorMessage,
+  runtimeExecutableName,
+  runtimeLevelForStatus
+} from "./runtime-log.js";
 import { renderCanonicalFlowPanelContent, renderSessionPage } from "./views/session.js";
 import { renderSessionsPage } from "./views/sessions.js";
 import { renderSettingsPage } from "./views/settings.js";
@@ -475,6 +482,20 @@ export async function startServer(config = getConfig()) {
     const pathname = url.pathname;
     const limit = 30;
     const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
+    const requestStart = Date.now();
+    const requestContext = getRuntimeRouteContext(req.method || "GET", pathname);
+    if (requestContext) {
+      res.once("finish", () => {
+        recordRuntimeEvent(appConfig.metaDir, {
+          event: "http.request",
+          level: runtimeLevelForStatus(res.statusCode),
+          ...requestContext,
+          status: res.statusCode,
+          durationMs: Date.now() - requestStart,
+          ok: res.statusCode < 400
+        });
+      });
+    }
 
     // Extract provider from URL: /:provider/...
     const providerMatch = pathname.match(/^\/([a-z][a-z0-9-]*)(?:\/(.*))?$/);
@@ -581,6 +602,16 @@ export async function startServer(config = getConfig()) {
         const restartRequiredKeys = getRestartRequiredKeys(previousDocument.config, nextConfig);
         writeUserConfig(appConfig.configPath, nextConfig);
         applyRuntimeUserConfig(appConfig, nextConfig);
+        recordRuntimeEvent(appConfig.metaDir, {
+          event: "settings.save",
+          level: "info",
+          changedKeys: Object.keys(nextConfig || {}).sort(),
+          restartRequiredKeys,
+          ignoredKeys: Object.prototype.hasOwnProperty.call(nextConfig, "allowTerminalLaunch")
+            ? ["allowTerminalLaunch"]
+            : [],
+          ok: true
+        });
         return json(res, {
           ok: true,
           configPath: appConfig.configPath,
@@ -592,6 +623,12 @@ export async function startServer(config = getConfig()) {
         });
       } catch (error) {
         console.error("Settings save error:", error?.message || error);
+        recordRuntimeEvent(appConfig.metaDir, {
+          event: "settings.save",
+          level: "error",
+          ok: false,
+          error: runtimeErrorMessage(error)
+        });
         return json(res, {
           ok: false,
           error: error?.message || "Failed to save settings",
@@ -619,27 +656,72 @@ export async function startServer(config = getConfig()) {
       try {
         if (action === "star") {
           const starred = toggleStar(providerId, id);
+          recordRuntimeEvent(appConfig.metaDir, {
+            event: "session.meta.update",
+            provider: providerId,
+            sessionId: id,
+            action,
+            starred,
+            ok: true
+          });
           return json(res, { ok: true, starred });
         }
         if (action === "rename") {
           const body = await readBody(req);
           renameSession(providerId, id, body.title || "");
+          recordRuntimeEvent(appConfig.metaDir, {
+            event: "session.meta.update",
+            provider: providerId,
+            sessionId: id,
+            action,
+            ok: true
+          });
           return json(res, { ok: true });
         }
         if (action === "delete") {
           softDelete(providerId, id);
+          recordRuntimeEvent(appConfig.metaDir, {
+            event: "session.meta.update",
+            provider: providerId,
+            sessionId: id,
+            action,
+            ok: true
+          });
           return json(res, { ok: true });
         }
         if (action === "restore") {
           restoreSession(providerId, id);
+          recordRuntimeEvent(appConfig.metaDir, {
+            event: "session.meta.update",
+            provider: providerId,
+            sessionId: id,
+            action,
+            ok: true
+          });
           return json(res, { ok: true });
         }
         if (action === "permanent-delete") {
           permanentDelete(providerId, id);
+          recordRuntimeEvent(appConfig.metaDir, {
+            event: "session.meta.update",
+            provider: providerId,
+            sessionId: id,
+            action,
+            ok: true
+          });
           return json(res, { ok: true });
         }
       } catch (error) {
         console.error("Mutation error:", error?.message || error);
+        recordRuntimeEvent(appConfig.metaDir, {
+          event: "session.meta.update",
+          level: "error",
+          provider: providerId,
+          sessionId: id,
+          action,
+          ok: false,
+          error: runtimeErrorMessage(error)
+        });
         return json(res, { ok: false, error: "Internal server error" }, 500);
       }
     }
@@ -660,9 +742,24 @@ export async function startServer(config = getConfig()) {
           return json(res, { ok: false, error: "Invalid action" }, 400);
         }
         const affected = batchAction(providerId, ids, body.action);
+        recordRuntimeEvent(appConfig.metaDir, {
+          event: "session.meta.batch",
+          provider: providerId,
+          action: body.action,
+          requestedCount: ids.length,
+          affected,
+          ok: true
+        });
         return json(res, { ok: true, affected });
       } catch (error) {
         console.error("Mutation error:", error?.message || error);
+        recordRuntimeEvent(appConfig.metaDir, {
+          event: "session.meta.batch",
+          level: "error",
+          provider: providerId,
+          ok: false,
+          error: runtimeErrorMessage(error)
+        });
         return json(res, { ok: false, error: "Internal server error" }, 500);
       }
     }
@@ -671,6 +768,10 @@ export async function startServer(config = getConfig()) {
       try {
         getIndexDb();
         const results = [];
+        recordRuntimeEvent(appConfig.metaDir, {
+          event: "provider.reindex.start",
+          providerCount: availableProviders.length
+        });
         for (const provider of availableProviders) {
           const startTime = Date.now();
           const sessions = [];
@@ -681,9 +782,21 @@ export async function startServer(config = getConfig()) {
           upsertIndex(provider.id, sessions);
           results.push({ provider: provider.id, indexed: sessions.length, tookMs: Date.now() - startTime });
         }
+        recordRuntimeEvent(appConfig.metaDir, {
+          event: "provider.reindex.complete",
+          providerCount: results.length,
+          results,
+          ok: true
+        });
         return json(res, { ok: true, results });
       } catch (error) {
         console.error("Mutation error:", error?.message || error);
+        recordRuntimeEvent(appConfig.metaDir, {
+          event: "provider.reindex.failed",
+          level: "error",
+          ok: false,
+          error: runtimeErrorMessage(error)
+        });
         return json(res, { ok: false, error: "Internal server error" }, 500);
       }
     }
@@ -726,9 +839,25 @@ export async function startServer(config = getConfig()) {
           return json(res, { ok: false, error: "Configured resume executable was not found" }, 409);
         }
         launchResumeCommand(command, appConfig.resumeShell);
+        recordRuntimeEvent(appConfig.metaDir, {
+          event: "terminal.resume.launch",
+          provider: providerId,
+          sessionId,
+          executable: runtimeExecutableName(command),
+          cwd: command.cwd,
+          ok: true
+        });
         return json(res, { ok: true });
       } catch (error) {
         console.error("Resume launch error:", error?.message || error);
+        recordRuntimeEvent(appConfig.metaDir, {
+          event: "terminal.resume.launch",
+          level: "error",
+          provider: providerId,
+          sessionId,
+          ok: false,
+          error: runtimeErrorMessage(error)
+        });
         return json(res, { ok: false, error: error?.message || "Failed to launch terminal" }, 500);
       }
     }
@@ -756,6 +885,9 @@ export async function startServer(config = getConfig()) {
         return json(res, { ok: false, error: "Session not found" }, 404);
       }
 
+      let analysisPhase = "prepare";
+      let analysisTargetId = "";
+      let preparedAnalysisRun = null;
       try {
         const body = await readBody(req);
         const action = getSessionAnalysisAction(
@@ -779,16 +911,16 @@ export async function startServer(config = getConfig()) {
             .map((id) => id.trim())
             .filter(Boolean)
           : null;
-        const targetId = requestedTarget || action.target;
-        const selectedTarget = actionTargets.get(targetId);
+        analysisTargetId = requestedTarget || action.target;
+        const selectedTarget = actionTargets.get(analysisTargetId);
         if (!selectedTarget) {
-          return json(res, { ok: false, error: `Analysis target is unavailable: ${targetId}` }, 400);
+          return json(res, { ok: false, error: `Analysis target is unavailable: ${analysisTargetId}` }, 400);
         }
         if (!selectedTarget.available) {
           return json(res, {
             ok: false,
             error: "Configured analysis executable was not found",
-            target: targetId
+            target: analysisTargetId
           }, 409);
         }
         const run = prepareSessionAnalysis({
@@ -797,10 +929,32 @@ export async function startServer(config = getConfig()) {
           analysisConfig: appConfig.analysis,
           metaDir: appConfig.metaDir,
           configPath: appConfig.configPath,
-          targetId,
+          targetId: analysisTargetId,
           runtimeExtensionIds
         });
+        preparedAnalysisRun = run;
+        recordRuntimeEvent(appConfig.metaDir, {
+          event: "analysis.prepare",
+          provider: providerId,
+          sessionId,
+          runId: run.runId,
+          target: run.target,
+          runtimeExtensionCount: runtimeExtensionIds?.length ?? null,
+          runDir: run.runDir,
+          ok: true
+        });
+        analysisPhase = "launch";
         launchSessionAnalysis(run, appConfig.resumeShell);
+        recordRuntimeEvent(appConfig.metaDir, {
+          event: "analysis.launch",
+          provider: providerId,
+          sessionId,
+          runId: run.runId,
+          target: run.target,
+          executable: runtimeExecutableName(run.command),
+          cwd: run.command?.cwd,
+          ok: true
+        });
         return json(res, {
           ok: true,
           runId: run.runId,
@@ -815,6 +969,16 @@ export async function startServer(config = getConfig()) {
         });
       } catch (error) {
         console.error("Session analysis launch error:", error?.message || error);
+        recordRuntimeEvent(appConfig.metaDir, {
+          event: analysisPhase === "launch" ? "analysis.launch" : "analysis.prepare",
+          level: "error",
+          provider: analysisMatch[1],
+          sessionId: safeDecodeId(analysisMatch[2]),
+          runId: preparedAnalysisRun?.runId,
+          target: preparedAnalysisRun?.target || analysisTargetId || undefined,
+          ok: false,
+          error: runtimeErrorMessage(error)
+        });
         return json(res, { ok: false, error: error?.message || "Failed to launch session analysis" }, 500);
       }
     }
@@ -845,6 +1009,8 @@ export async function startServer(config = getConfig()) {
         return json(res, { ok: false, error: "Session not found" }, 404);
       }
 
+      let implementationPhase = "prepare";
+      let preparedImplementationRun = null;
       try {
         await readBody(req);
         const run = prepareAnalysisImplementation({
@@ -854,7 +1020,26 @@ export async function startServer(config = getConfig()) {
           metaDir: appConfig.metaDir,
           runId
         });
+        preparedImplementationRun = run;
+        recordRuntimeEvent(appConfig.metaDir, {
+          event: "analysis.implementation.prepare",
+          provider: providerId,
+          sessionId,
+          runId: run.runId,
+          runDir: run.runDir,
+          ok: true
+        });
+        implementationPhase = "launch";
         launchAnalysisImplementation(run, appConfig.resumeShell);
+        recordRuntimeEvent(appConfig.metaDir, {
+          event: "analysis.implementation.launch",
+          provider: providerId,
+          sessionId,
+          runId: run.runId,
+          executable: runtimeExecutableName(run.command),
+          cwd: run.command?.cwd,
+          ok: true
+        });
         return json(res, {
           ok: true,
           runId: run.runId,
@@ -862,6 +1047,17 @@ export async function startServer(config = getConfig()) {
         });
       } catch (error) {
         console.error("Analysis implementation launch error:", error?.message || error);
+        recordRuntimeEvent(appConfig.metaDir, {
+          event: implementationPhase === "launch"
+            ? "analysis.implementation.launch"
+            : "analysis.implementation.prepare",
+          level: "error",
+          provider: providerId,
+          sessionId,
+          runId: preparedImplementationRun?.runId || runId,
+          ok: false,
+          error: runtimeErrorMessage(error)
+        });
         return json(res, { ok: false, error: error?.message || "Failed to launch analysis implementation" }, 500);
       }
     }
@@ -1587,20 +1783,46 @@ export async function startServer(config = getConfig()) {
   };
 
   try {
+    recordRuntimeEvent(appConfig.metaDir, {
+      event: "server.start",
+      port: PORT,
+      lang: appConfig.lang,
+      terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch)
+    });
+
     // Index all providers
     const providers = getAvailableProviders();
     getIndexDb();
     for (const provider of providers) {
       try {
         const startTime = Date.now();
+        recordRuntimeEvent(appConfig.metaDir, {
+          event: "provider.index.start",
+          provider: provider.id
+        });
         const sessions = [];
         for await (const session of provider.scan()) {
           sessions.push(session);
         }
         upsertIndex(provider.id, sessions);
-        console.log(`Indexed ${sessions.length} sessions for ${provider.id} in ${Date.now() - startTime}ms`);
+        const durationMs = Date.now() - startTime;
+        recordRuntimeEvent(appConfig.metaDir, {
+          event: "provider.index.complete",
+          provider: provider.id,
+          indexed: sessions.length,
+          durationMs,
+          ok: true
+        });
+        console.log(`Indexed ${sessions.length} sessions for ${provider.id} in ${durationMs}ms`);
       } catch (err) {
         console.error(`Failed to index ${provider.id}: ${err.message}`);
+        recordRuntimeEvent(appConfig.metaDir, {
+          event: "provider.index.failed",
+          level: "error",
+          provider: provider.id,
+          ok: false,
+          error: runtimeErrorMessage(err)
+        });
       }
     }
 
@@ -1624,6 +1846,14 @@ export async function startServer(config = getConfig()) {
       console.log(`OpenSessionViewer running at http://localhost:${PORT}`);
       console.log(`Language: ${getLocale()}`);
       console.log(`${stats.totalSessions} sessions, ${stats.totalMessages} messages.`);
+      recordRuntimeEvent(appConfig.metaDir, {
+        event: "server.ready",
+        port: PORT,
+        providerCount: availableProviders.length,
+        totalSessions: stats.totalSessions,
+        totalMessages: stats.totalMessages,
+        ok: true
+      });
     });
 
     if (appConfig.open) {
@@ -1632,6 +1862,13 @@ export async function startServer(config = getConfig()) {
     }
   } catch (error) {
     console.error("Failed to start:", error.message);
+    recordRuntimeEvent(appConfig.metaDir, {
+      event: "server.start.failed",
+      level: "error",
+      port: PORT,
+      ok: false,
+      error: runtimeErrorMessage(error)
+    });
     process.exit(1);
   }
 }

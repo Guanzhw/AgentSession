@@ -185,6 +185,20 @@ PowerShell 兼容程序的绝对路径。`args` 会插入到自动生成的
 `allowTerminalLaunch` 有意保留为非 Web 配置权限。命令启动默认启用；使用
 `--disable-terminal-launch` 启动 OpenSessionViewer 可对当前进程关闭该能力。
 
+## 运行时日志
+
+OpenSessionViewer 会在 metadata 目录下写入 append-only JSONL 运行时事件：
+
+```text
+<metadata-dir>/logs/runtime-YYYY-MM-DD.jsonl
+```
+
+日志记录服务器启动、Provider 索引、HTTP 路由模式与状态码、元数据修改、设置保存、
+终端启动，以及分析任务 prepare/launch 事件。为了本地诊断，启动事件可能包含工作
+目录路径。日志有意不记录请求体、会话全文、prompt、工具输出、完整命令参数、
+cookie、token 或 secret。单个分析任务的 stdout/stderr 与证据快照仍保存在该 run
+自己的 `diagnostics/` 目录中。
+
 ## 会话分析与评估提案
 
 OpenSessionViewer 可以从声明支持会话分析的 Provider 详情页以非交互方式启动
