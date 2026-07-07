@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   buildAnalysisPromptPreview,
+  findActiveSessionAnalysisRun,
   getSessionAnalysisAction,
   launchAnalysisImplementation,
   launchSessionAnalysis,
@@ -921,6 +922,28 @@ export async function startServer(config = getConfig()) {
             ok: false,
             error: "Configured analysis executable was not found",
             target: analysisTargetId
+          }, 409);
+        }
+        const activeRun = findActiveSessionAnalysisRun({
+          provider: adapter,
+          providerId,
+          sessionId,
+          directory: session.directory,
+          analysisConfig: appConfig.analysis,
+          metaDir: appConfig.metaDir,
+          targetId: analysisTargetId
+        });
+        if (activeRun) {
+          return json(res, {
+            ok: false,
+            error: `Analysis is already running for target: ${analysisTargetId}`,
+            target: analysisTargetId,
+            activeRun: {
+              runId: activeRun.runId,
+              runDir: activeRun.runDir,
+              target: activeRun.target,
+              state: activeRun.state
+            }
           }, 409);
         }
         const run = prepareSessionAnalysis({

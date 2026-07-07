@@ -39,6 +39,10 @@
   --trace-invalid: #475569;
   --trace-error: #ef4444;
   --flow-user: #0284c7;
+  --topbar-height: 48px;
+  /* Fixed topbar height plus reading gap for TOC and Flow anchor jumps. */
+  --session-anchor-offset: 80px;
+  --settings-anchor-offset: 108px;
   --z-topbar: 100;
   --z-menu: 99;
   --z-trace: 98;
@@ -156,7 +160,7 @@ body {
 .topbar {
   position: fixed;
   top: 0; left: 0; right: 0;
-  height: 48px;
+  height: var(--topbar-height);
   background-color: var(--bg-primary);
   border-bottom: 1px solid var(--border-color);
   display: grid;
@@ -272,12 +276,12 @@ body {
 .content {
   max-width: 1000px;
   margin: 0 auto;
-  padding: 72px 24px 48px;
+  padding: calc(var(--topbar-height) + 24px) 24px 48px;
 }
 
 .content:has(.session-workbench) {
   max-width: none;
-  padding: 52px 0 0;
+  padding: calc(var(--topbar-height) + 16px) 0 0;
 }
 
 body::before {
@@ -550,7 +554,7 @@ body::before {
   display: grid;
   grid-template-columns: var(--toc-width) minmax(0, 1fr);
   gap: 0;
-  min-height: calc(100vh - 48px);
+  min-height: calc(100vh - var(--topbar-height));
   background: var(--bg-secondary);
 }
 
@@ -565,11 +569,11 @@ body::before {
 
 .session-toc {
   position: sticky;
-  top: 48px;
+  top: var(--topbar-height);
   display: flex;
   flex-direction: column;
   min-width: 144px;
-  height: calc(100vh - 48px);
+  height: calc(100vh - var(--topbar-height));
   overflow: hidden;
   background: color-mix(in srgb, var(--bg-primary) 88%, var(--bg-secondary));
   border-color: var(--border-color);
@@ -845,7 +849,7 @@ body::before {
 .session-flow-panel {
   position: fixed;
   z-index: 90;
-  inset: 58px 16px 16px;
+  inset: calc(var(--topbar-height) + 10px) 16px 16px;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -855,7 +859,7 @@ body::before {
   border-radius: 8px;
   background: color-mix(in srgb, var(--bg-primary) 90%, var(--bg-secondary));
   box-shadow: var(--shadow-sm);
-  scroll-margin-top: 64px;
+  scroll-margin-top: var(--session-anchor-offset);
 }
 
 .session-flow-panel.hidden {
@@ -866,7 +870,7 @@ body::before {
   content: "";
   position: fixed;
   z-index: -1;
-  inset: 48px 0 0;
+  inset: var(--topbar-height) 0 0;
   background: color-mix(in srgb, var(--bg-primary) 76%, transparent);
   backdrop-filter: blur(3px);
 }
@@ -1657,7 +1661,7 @@ body.flow-panel-open {
   flex-direction: column;
   gap: 12px;
   position: relative;
-  scroll-margin-top: 64px;
+  scroll-margin-top: var(--session-anchor-offset);
 }
 
 .message-turn-assistant {
@@ -1717,7 +1721,7 @@ body.flow-panel-open {
 .session-part-anchor,
 .session-event-anchor {
   display: block;
-  scroll-margin-top: 64px;
+  scroll-margin-top: var(--session-anchor-offset);
 }
 
 .session-event-anchor {
@@ -1903,7 +1907,7 @@ body.flow-panel-open {
   border-radius: 7px;
   margin: 8px 0;
   overflow: hidden;
-  scroll-margin-top: 64px;
+  scroll-margin-top: var(--session-anchor-offset);
 }
 
 .message-reasoning,
@@ -1982,7 +1986,7 @@ code {
   border-radius: 7px;
   margin: 8px 0;
   overflow: hidden;
-  scroll-margin-top: 64px;
+  scroll-margin-top: var(--session-anchor-offset);
 }
 
 .tool-call summary {
@@ -2050,7 +2054,7 @@ details[open] summary {
   margin: 8px 0 16px 14px;
   padding-left: 14px;
   border-left: 2px solid var(--trace-agent);
-  scroll-margin-top: 64px;
+  scroll-margin-top: var(--session-anchor-offset);
 }
 
 .subagent-branch {
@@ -2060,7 +2064,7 @@ details[open] summary {
   border-radius: 8px;
   overflow: hidden;
   background: color-mix(in srgb, var(--trace-agent) 5%, var(--bg-primary));
-  scroll-margin-top: 64px;
+  scroll-margin-top: var(--session-anchor-offset);
 }
 
 .subagent-summary {
@@ -2277,7 +2281,7 @@ details[open] summary {
   border-radius: 8px;
   margin: 10px 0;
   overflow: hidden;
-  scroll-margin-top: 64px;
+  scroll-margin-top: var(--session-anchor-offset);
 }
 
 .subsession-summary {
@@ -2814,7 +2818,7 @@ mark {
   border: 1px solid var(--border-color);
   border-radius: 12px;
   box-shadow: var(--shadow-sm);
-  scroll-margin-top: 108px;
+  scroll-margin-top: var(--settings-anchor-offset);
 }
 
 .settings-section-header {
@@ -3146,7 +3150,7 @@ mark {
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: 12px;
-  scroll-margin-top: 108px;
+  scroll-margin-top: var(--settings-anchor-offset);
 }
 
 .settings-advanced summary {
@@ -4666,12 +4670,12 @@ pre code.hljs {
   }
 
   .session-flow-panel {
-    inset: 54px 8px 8px;
+    inset: calc(var(--topbar-height) + 6px) 8px 8px;
     padding: 12px;
   }
 
   .flow-branch-drawer {
-    top: 108px;
+    top: calc(var(--topbar-height) + 60px);
     right: 8px;
     bottom: 8px;
     left: 8px;

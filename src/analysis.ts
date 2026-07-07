@@ -1169,6 +1169,28 @@ export function listSessionAnalysisRuns({
     .slice(0, Math.max(1, Math.min(Number(limit) || 10, 50)));
 }
 
+export function findActiveSessionAnalysisRun({
+  provider = null,
+  providerId,
+  sessionId,
+  directory,
+  analysisConfig,
+  metaDir,
+  targetId
+}) {
+  const target = String(targetId || "").trim();
+  if (!target) return null;
+  return listSessionAnalysisRuns({
+    provider,
+    providerId,
+    sessionId,
+    directory,
+    analysisConfig,
+    metaDir,
+    limit: 50
+  }).find((run) => run.active && run.target === target) || null;
+}
+
 function hashFile(filePath) {
   return createHash("sha256").update(readFileSync(filePath)).digest("hex");
 }

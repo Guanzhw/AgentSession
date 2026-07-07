@@ -1346,15 +1346,22 @@ function renderAnalysisLaunchButton(analysisAction, session) {
   const launchSummary = t("analysis.launch_summary")
     .replace("{targets}", String(selectedTargetCount))
     .replace("{runtime}", String(selectedRuntimeCount));
+  const launchLabel = selectedTargetCount <= 0
+    ? t("analysis.launch_select_target")
+    : selectedTargetCount === 1
+      ? t("analysis.launch_one")
+      : t("analysis.launch_many").replace("{targets}", String(selectedTargetCount));
   return `<button
+    type="button"
     class="action-btn action-btn-primary analysis-launch-button"
     data-action="analyze-session"
     data-id="${escapeHtml(session.id)}"
     data-target="${escapeHtml(analysisAction.target || "skills")}"
     data-unavailable="${analysisAction.available ? "false" : "true"}"
     title="${escapeHtml(launchSummary)}"
+    aria-label="${escapeHtml(launchSummary)}"
     ${analysisAction.available ? "" : "disabled"}
-  >${t("analysis.launch_selected")}</button>`;
+  >${escapeHtml(launchLabel)}</button>`;
 }
 
 function renderAnalysisLaunchControl(analysisAction, terminalLaunchAllowed) {
@@ -1372,7 +1379,7 @@ function renderAnalysisLaunchControl(analysisAction, terminalLaunchAllowed) {
     targets
   } = resolveAnalysisLaunchState(analysisAction);
 
-  return `<details class="analysis-materials-panel" open>
+  return `<details class="analysis-materials-panel">
     <summary>
       <span>
         <strong>${t("analysis.materials_title")}</strong>

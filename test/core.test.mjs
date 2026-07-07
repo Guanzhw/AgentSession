@@ -29,6 +29,7 @@ import { buildGeminiRuntimeEnvironment } from "../dist/src/providers/gemini/runt
 import { buildFlowTreeFromContainer } from "../dist/src/providers/shared/flow-tree.js";
 import { renderCanonicalFlowPanelContent, renderSessionPage } from "../dist/src/views/session.js";
 import { renderSettingsPage } from "../dist/src/views/settings.js";
+import { t } from "../dist/src/i18n.js";
 import {
   extractSessionMeta,
   parseTranscript,
@@ -52,6 +53,7 @@ import {
   buildAnalysisPromptPreview,
   buildPowerShellAnalysisArgs,
   buildPowerShellImplementationArgs,
+  findActiveSessionAnalysisRun,
   getAnalysisTargetIds,
   getDefaultAnalysisTargetIds,
   getAnalysisOutputRoot,
@@ -87,6 +89,7 @@ import {
 } from "../dist/src/runtime-log.js";
 
 const fixture = (name) => path.join(process.cwd(), "test", "fixtures", name);
+const regexEscape = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 test("Claude current transcripts preserve tools, thinking, titles, and cache tokens", () => {
   const records = parseTranscript(fixture("claude-current.jsonl"));
@@ -1117,10 +1120,19 @@ test("settings page exposes config location and startup-only launch status", () 
       name: "OpenCode",
       icon: "OC",
       available: true
+    }, {
+      id: "codeagent",
+      name: "CodeAgent",
+      icon: "CA",
+      available: false
     }]
   });
 
   assert.match(html, /data-page="settings"/);
+  assert.match(html, /class="logo"[^>]+title="OpenSessionViewer"[^>]+aria-label="OpenSessionViewer"/);
+  assert.match(html, /class="provider-tab active"[^>]+title="OpenCode"[^>]+aria-label="OpenCode"[^>]+aria-current="page"/);
+  assert.match(html, new RegExp(`class="provider-tab disabled"[^>]+aria-label="CodeAgent - ${regexEscape(t("provider.not_detected"))}"[^>]+aria-disabled="true"`));
+  assert.match(html, /id="theme-toggle"[^>]+aria-label="Toggle theme"/);
   assert.match(html, /id="settings-form"/);
   assert.match(html, /class="settings-section-nav"/);
   assert.match(html, /href="#settings-target"/);
@@ -1647,6 +1659,25 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.equal(preparedRuns.length, 1);
   assert.equal(preparedRuns[0].state, "prepared");
   assert.equal(preparedRuns[0].active, true);
+  const activeRun = findActiveSessionAnalysisRun({
+    provider,
+    providerId: "opencode",
+    sessionId: "session-analysis",
+    directory: projectPath,
+    analysisConfig,
+    metaDir: path.join(temp, "meta"),
+    targetId: "skills"
+  });
+  assert.equal(activeRun.runId, run.runId);
+  assert.equal(findActiveSessionAnalysisRun({
+    provider,
+    providerId: "opencode",
+    sessionId: "session-analysis",
+    directory: projectPath,
+    analysisConfig,
+    metaDir: path.join(temp, "meta"),
+    targetId: "prompts"
+  }), null);
   const analysisPrompt = readFileSync(run.files.promptPath, "utf-8");
   assert.match(analysisPrompt, /Focus on deterministic validation/);
   assert.match(analysisPrompt, /Never propose changes to those generated files/);
@@ -2312,8 +2343,10 @@ test("session rendering shows configured analysis actions only when launch is al
   assert.match(visible, /Export JSON/);
   assert.match(visible, /class="analysis-target-checkbox"/);
   assert.match(visible, /class="analysis-runtime-extension-checkbox"/);
-  assert.match(visible, /Analyze selected/);
+  assert.match(visible, /Analyze 2 targets/);
   assert.match(visible, /Analysis materials/);
+  assert.match(visible, /<details class="analysis-materials-panel">/);
+  assert.doesNotMatch(visible, /<details class="analysis-materials-panel" open>/);
   assert.match(visible, /class="analysis-target-choice analysis-target-choice-compact/);
   assert.match(visible, /class="analysis-runtime-tab is-active"/);
   assert.match(visible, /role="tabpanel"/);

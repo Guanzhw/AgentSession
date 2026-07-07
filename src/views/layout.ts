@@ -3,20 +3,22 @@ import { t, getLocale } from "../i18n.js";
 import { icons } from "../icons.js";
 
 export function layout(title, body, page = "home", { provider = null, providers = [], providerAvailable = true, manageable = false } = {}) {
-  const providerPrefix = provider ? `/${provider}` : "";
+  const providerPrefix = provider ? `/${encodeURIComponent(provider)}` : "";
 
   const providerTabs = providers.map((p) => {
     const isActive = p.id === provider;
     const isDisabled = p.available === false;
+    const providerName = escapeHtml(p.name);
     if (isDisabled) {
-      return `<span class="provider-tab disabled" title="${p.name} — ${t("provider.not_detected")}">
+      const disabledLabel = escapeHtml(`${p.name} - ${t("provider.not_detected")}`);
+      return `<span class="provider-tab disabled" title="${disabledLabel}" aria-label="${disabledLabel}" aria-disabled="true">
         <span class="provider-icon">${p.icon}</span>
-        <span class="provider-name">${p.name}</span>
+        <span class="provider-name">${providerName}</span>
       </span>`;
     }
-    return `<a href="/${p.id}" class="provider-tab ${isActive ? "active" : ""}" data-provider="${p.id}">
+    return `<a href="/${encodeURIComponent(p.id)}" class="provider-tab ${isActive ? "active" : ""}" data-provider="${escapeHtml(p.id)}" title="${providerName}" aria-label="${providerName}"${isActive ? ` aria-current="page"` : ""}>
       <span class="provider-icon">${p.icon}</span>
-      <span class="provider-name">${p.name}</span>
+      <span class="provider-name">${providerName}</span>
     </a>`;
   }).join("");
 
@@ -30,9 +32,9 @@ export function layout(title, body, page = "home", { provider = null, providers 
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css">
 </head>
-<body data-page="${page}" data-provider="${provider || ""}" data-manageable="${manageable ? "true" : "false"}">
+<body data-page="${escapeHtml(page)}" data-provider="${escapeHtml(provider || "")}" data-manageable="${manageable ? "true" : "false"}">
   <nav class="topbar">
-    <a href="${providerPrefix || "/"}" class="logo">${icons.opensession}<span class="logo-text">OpenSessionViewer</span></a>
+    <a href="${providerPrefix || "/"}" class="logo" title="OpenSessionViewer" aria-label="OpenSessionViewer">${icons.opensession}<span class="logo-text">OpenSessionViewer</span></a>
     <div class="topbar-tabs">${providerTabs}</div>
     <div class="topbar-actions">
       <a href="${providerPrefix}/stats" class="nav-link ${page === "stats" ? "active" : ""}">${t("nav.stats")}</a>
@@ -41,7 +43,7 @@ export function layout(title, body, page = "home", { provider = null, providers 
       <form class="search-form" action="${providerPrefix}/search" method="GET">
         <input type="text" name="q" placeholder="${t("nav.search_placeholder")}" class="search-input" id="search-input">
       </form>
-      <button id="theme-toggle" class="theme-toggle" title="Toggle theme">🌙</button>
+      <button id="theme-toggle" class="theme-toggle" title="Toggle theme" aria-label="Toggle theme">🌙</button>
     </div>
   </nav>
   <main class="content">

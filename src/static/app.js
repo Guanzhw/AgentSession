@@ -38,6 +38,11 @@ const __I18N__ = {
     analysis_opened_many: "Launched {count} analysis runs. Tracking status below.",
     analysis_disabled: "Session analysis is unavailable",
     analysis_select_target: "Select at least one analysis target",
+    analysis_launch_select_target: "Select a target",
+    analysis_launch_one: "Analyze 1 target",
+    analysis_launch_many: "Analyze {targets} targets",
+    analysis_launch_running: "Analysis running",
+    analysis_launch_running_title: "Running analyses: {targets}. Unselect those targets or wait for completion.",
     analysis_launch_summary: "Targets {targets} · Runtime {runtime}",
     analysis_status_prepared: "Preparing",
     analysis_status_launched: "Running",
@@ -97,6 +102,8 @@ const __I18N__ = {
     settings_artifact_none: "None",
     settings_all_saved: "All changes saved",
     settings_unsaved: "Unsaved changes",
+    theme_to_light: "Switch to light theme",
+    theme_to_dark: "Switch to dark theme",
     scroll_all_loaded: "All sessions loaded",
     scroll_loading: "Loading..."
   },
@@ -136,6 +143,11 @@ const __I18N__ = {
     analysis_opened_many: "已启动 {count} 个分析任务，可在下方跟踪状态。",
     analysis_disabled: "无法启动会话分析",
     analysis_select_target: "请至少选择一个分析目标",
+    analysis_launch_select_target: "选择分析目标",
+    analysis_launch_one: "分析 1 个目标",
+    analysis_launch_many: "分析 {targets} 个目标",
+    analysis_launch_running: "分析运行中",
+    analysis_launch_running_title: "正在运行的分析：{targets}。请取消选择这些目标，或等待完成。",
     analysis_launch_summary: "目标 {targets} · 运行时 {runtime}",
     analysis_status_prepared: "准备中",
     analysis_status_launched: "运行中",
@@ -195,6 +207,8 @@ const __I18N__ = {
     settings_artifact_none: "无",
     settings_all_saved: "所有更改均已保存",
     settings_unsaved: "有未保存的更改",
+    theme_to_light: "切换到浅色主题",
+    theme_to_dark: "切换到深色主题",
     scroll_all_loaded: "已全部加载",
     scroll_loading: "加载中..."
   }
@@ -214,7 +228,11 @@ function formatText(template, values = {}) {
 const themeToggle = document.getElementById('theme-toggle');
 if (themeToggle) {
   function updateToggleIcon() {
-    themeToggle.textContent = document.documentElement.dataset.theme === 'dark' ? '☀️' : '🌙';
+    const isDark = document.documentElement.dataset.theme === 'dark';
+    const label = isDark ? ft("theme_to_light") : ft("theme_to_dark");
+    themeToggle.textContent = isDark ? '☀️' : '🌙';
+    themeToggle.setAttribute("aria-label", label);
+    themeToggle.setAttribute("title", label);
   }
   updateToggleIcon();
   themeToggle.addEventListener('click', () => {
@@ -879,6 +897,7 @@ if (settingsForm) {
 
 const analysisStatusPanel = document.getElementById("analysis-status-panel");
 let analysisStatusTimer = null;
+let analysisRunsState = [];
 
 function checkedAnalysisValues(root, selector) {
   const scope = root || document;
@@ -888,26 +907,49 @@ function checkedAnalysisValues(root, selector) {
     .filter(Boolean);
 }
 
+function activeAnalysisTargets() {
+  return new Set(
+    analysisRunsState
+      .filter((run) => run?.active && run.target)
+      .map((run) => String(run.target))
+  );
+}
+
+function analysisLaunchLabel(targetCount, runningTargets) {
+  if (targetCount <= 0) return ft("analysis_launch_select_target");
+  if (runningTargets.length) return ft("analysis_launch_running");
+  if (targetCount === 1) return ft("analysis_launch_one");
+  return formatText(ft("analysis_launch_many"), { targets: targetCount });
+}
+
 function updateAnalysisLaunchControl(control) {
   if (!control) return;
-  const targetCount = checkedAnalysisValues(control, ".analysis-target-checkbox").length;
+  const selectedTargets = checkedAnalysisValues(control, ".analysis-target-checkbox");
+  const targetCount = selectedTargets.length;
   const runtimeCount = checkedAnalysisValues(control, ".analysis-runtime-extension-checkbox").length;
   const targetCountNode = control.querySelector("[data-analysis-selected-count]");
   const runtimeCountNode = control.querySelector("[data-runtime-selected-count]");
   const summary = control.querySelector("[data-analysis-launch-summary]");
   const button = control.querySelector('[data-action="analyze-session"]');
+  const activeTargets = activeAnalysisTargets();
+  const runningTargets = selectedTargets.filter((target) => activeTargets.has(target));
   const summaryText = formatText(ft("analysis_launch_summary"), {
     targets: targetCount,
     runtime: runtimeCount
   });
+  const titleText = runningTargets.length
+    ? `${formatText(ft("analysis_launch_running_title"), { targets: runningTargets.join(", ") })} ${summaryText}`
+    : summaryText;
   if (targetCountNode) targetCountNode.textContent = String(targetCount);
   if (runtimeCountNode) runtimeCountNode.textContent = String(runtimeCount);
   if (summary) {
     summary.textContent = summaryText;
   }
   if (button) {
-    button.disabled = button.dataset.unavailable === "true" || targetCount === 0;
-    button.title = summaryText;
+    button.disabled = button.dataset.unavailable === "true" || targetCount === 0 || runningTargets.length > 0;
+    button.textContent = analysisLaunchLabel(targetCount, runningTargets);
+    button.title = titleText;
+    button.setAttribute("aria-label", titleText);
   }
 }
 
@@ -976,6 +1018,10 @@ function analysisTimestamp(value) {
 }
 
 function renderAnalysisRuns(runs) {
+  analysisRunsState = Array.isArray(runs) ? runs : [];
+  document.querySelectorAll(".analysis-launch-control").forEach((control) => {
+    updateAnalysisLaunchControl(control);
+  });
   if (!analysisStatusPanel) return;
   const container = document.getElementById("analysis-runs");
   container.replaceChildren();
@@ -1330,11 +1376,16 @@ document.addEventListener("click", async (e) => {
       showToast(ft("analysis_select_target"), "error");
       return;
     }
+    const runningTargets = targets.filter((target) => activeAnalysisTargets().has(target));
+    if (runningTargets.length) {
+      showToast(formatText(ft("analysis_launch_running_title"), { targets: runningTargets.join(", ") }), "error");
+      updateAnalysisLaunchControl(control);
+      return;
+    }
     const hasRuntimePicker = Boolean(control?.querySelector(".analysis-runtime-extension-checkbox"));
     const runtimeExtensionIds = hasRuntimePicker
       ? checkedAnalysisValues(control, ".analysis-runtime-extension-checkbox")
       : null;
-    const wasDisabled = btn.disabled;
     btn.disabled = true;
     try {
       for (const target of targets) {
@@ -1349,7 +1400,9 @@ document.addEventListener("click", async (e) => {
         });
         const result = await res.json();
         if (!res.ok || !result.ok) {
-          throw new Error(result.error || `HTTP ${res.status}`);
+          const requestError = new Error(result.error || `HTTP ${res.status}`);
+          requestError.status = res.status;
+          throw requestError;
         }
       }
       showToast(
@@ -1360,10 +1413,15 @@ document.addEventListener("click", async (e) => {
       );
       await refreshAnalysisRuns(true);
       analysisStatusPanel?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    } catch {
-      showToast(ft("analysis_disabled"), "error");
+    } catch (error) {
+      if (error?.status === 409) {
+        await refreshAnalysisRuns(true);
+      }
+      const message = error?.status >= 400 && error.status < 500 && error.message
+        ? error.message
+        : ft("analysis_disabled");
+      showToast(message, "error");
     } finally {
-      btn.disabled = wasDisabled;
       updateAnalysisLaunchControl(control);
     }
     return;
@@ -2021,20 +2079,28 @@ if (sessionWorkbench) {
     updateTocActivePath(id);
   };
 
+  const cssPixelValue = (name, fallback) => {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
   const updateActiveFromScroll = () => {
     scrollTicking = false;
     if (Date.now() - lastManualNav < 1200) {
       return;
     }
 
+    const topbarHeight = cssPixelValue("--topbar-height", 48);
+    const anchorOffset = cssPixelValue("--session-anchor-offset", 80);
     let best = null;
     let bestDistance = Number.POSITIVE_INFINITY;
     getLinkedTargets().forEach((target) => {
       const rect = target.getBoundingClientRect();
-      if (rect.bottom < 48 || rect.top > window.innerHeight) {
+      if (rect.bottom < topbarHeight || rect.top > window.innerHeight) {
         return;
       }
-      const distance = Math.abs(rect.top - 64);
+      const distance = Math.abs(rect.top - anchorOffset);
       if (distance < bestDistance) {
         best = target;
         bestDistance = distance;
