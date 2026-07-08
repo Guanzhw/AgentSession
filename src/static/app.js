@@ -7,6 +7,11 @@ const __I18N__ = {
     rename_label: "Session title",
     rename_save: "Save",
     rename_cancel: "Cancel",
+    confirm_title: "Confirm action",
+    confirm_accept: "Confirm",
+    confirm_cancel: "Cancel",
+    confirm_delete: "Delete",
+    confirm_permanent_delete: "Permanently delete",
     delete_confirm: "Delete this session? You can restore it from Trash.",
     permanent_delete_confirm: "Permanently delete? This cannot be undone.",
     batch_delete_confirm: "Delete {count} sessions?",
@@ -118,6 +123,11 @@ const __I18N__ = {
     rename_label: "会话标题",
     rename_save: "保存",
     rename_cancel: "取消",
+    confirm_title: "确认操作",
+    confirm_accept: "确认",
+    confirm_cancel: "取消",
+    confirm_delete: "删除",
+    confirm_permanent_delete: "永久删除",
     delete_confirm: "确定要删除此会话？可在回收站恢复。",
     permanent_delete_confirm: "永久删除后无法恢复，确定？",
     batch_delete_confirm: "确定删除 {count} 个会话？",
@@ -280,6 +290,35 @@ function queueToast(message, type = "success") {
   sessionStorage.setItem("pendingToast", JSON.stringify({ message, type }));
 }
 
+function focusableDialogElements(dialog) {
+  return [...dialog.querySelectorAll("button, input, select, textarea, [href], [tabindex]:not([tabindex='-1'])")]
+    .filter((element) => element instanceof HTMLElement && !element.disabled);
+}
+
+function trapDialogFocus(dialog, event) {
+  if (event.key !== "Tab") {
+    return;
+  }
+  const focusable = focusableDialogElements(dialog);
+  if (!focusable.length) {
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable.at(-1);
+  if (!dialog.contains(document.activeElement)) {
+    event.preventDefault();
+    first.focus();
+    return;
+  }
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 function openRenameDialog(currentTitle = "", restoreFocusTarget = null) {
   return new Promise((resolve) => {
     const previousActive = restoreFocusTarget instanceof HTMLElement
@@ -339,27 +378,7 @@ function openRenameDialog(currentTitle = "", restoreFocusTarget = null) {
         close(null);
         return;
       }
-      if (event.key === "Tab") {
-        const focusable = [...dialog.querySelectorAll("button, input, select, textarea, [href], [tabindex]:not([tabindex='-1'])")]
-          .filter((element) => element instanceof HTMLElement && !element.disabled);
-        if (!focusable.length) {
-          return;
-        }
-        const first = focusable[0];
-        const last = focusable.at(-1);
-        if (!dialog.contains(document.activeElement)) {
-          event.preventDefault();
-          first.focus();
-          return;
-        }
-        if (event.shiftKey && document.activeElement === first) {
-          event.preventDefault();
-          last.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first.focus();
-        }
-      }
+      trapDialogFocus(dialog, event);
     };
 
     backdrop.addEventListener("click", (event) => {
@@ -377,6 +396,88 @@ function openRenameDialog(currentTitle = "", restoreFocusTarget = null) {
     document.body.appendChild(backdrop);
     input.focus();
     input.select();
+  });
+}
+
+function openConfirmDialog(message, {
+  confirmLabel = ft("confirm_accept"),
+  cancelLabel = ft("confirm_cancel"),
+  title = ft("confirm_title"),
+  danger = false,
+  restoreFocusTarget = null
+} = {}) {
+  return new Promise((resolve) => {
+    const previousActive = restoreFocusTarget instanceof HTMLElement
+      ? restoreFocusTarget
+      : document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const backdrop = document.createElement("div");
+    backdrop.className = "confirm-dialog-backdrop";
+
+    const dialog = document.createElement("form");
+    dialog.className = "confirm-dialog";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "confirm-dialog-title");
+    dialog.setAttribute("aria-describedby", "confirm-dialog-message");
+
+    const heading = document.createElement("h2");
+    heading.id = "confirm-dialog-title";
+    heading.textContent = title;
+
+    const body = document.createElement("p");
+    body.id = "confirm-dialog-message";
+    body.className = "confirm-dialog-message";
+    body.textContent = message || "";
+
+    const actions = document.createElement("div");
+    actions.className = "confirm-dialog-actions";
+
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "btn btn-secondary";
+    cancel.textContent = cancelLabel;
+
+    const confirm = document.createElement("button");
+    confirm.type = "submit";
+    confirm.className = danger ? "btn btn-danger" : "btn";
+    confirm.textContent = confirmLabel;
+
+    actions.append(cancel, confirm);
+    dialog.append(heading, body, actions);
+    backdrop.appendChild(dialog);
+
+    const close = (value) => {
+      document.removeEventListener("keydown", onKeydown, true);
+      backdrop.remove();
+      previousActive?.focus?.();
+      resolve(value);
+    };
+    const onKeydown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        close(false);
+        return;
+      }
+      trapDialogFocus(dialog, event);
+    };
+
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) {
+        close(false);
+      }
+    });
+    cancel.addEventListener("click", () => close(false));
+    dialog.addEventListener("submit", (event) => {
+      event.preventDefault();
+      close(true);
+    });
+    document.addEventListener("keydown", onKeydown, true);
+
+    document.body.appendChild(backdrop);
+    cancel.focus();
   });
 }
 
@@ -1539,7 +1640,14 @@ document.addEventListener("click", async (e) => {
 
   if (action === "implement-analysis") {
     const runId = btn.dataset.runId || "";
-    if (!runId || !confirm(ft("analysis_implementation_confirm"))) {
+    if (!runId) {
+      return;
+    }
+    const confirmed = await openConfirmDialog(ft("analysis_implementation_confirm"), {
+      confirmLabel: ft("analysis_implementation_launch"),
+      restoreFocusTarget: btn
+    });
+    if (!confirmed) {
       return;
     }
     const wasDisabled = btn.disabled;
@@ -1590,7 +1698,17 @@ document.addEventListener("click", async (e) => {
   }
 
   if (action === "delete") {
-    if (!confirm(ft("delete_confirm"))) return;
+    const card = btn.closest(".session-card");
+    const restoreFocusTarget = card?.querySelector(".card-menu-trigger") || btn;
+    document.querySelectorAll(".card-menu:not(.hidden)").forEach((menu) => {
+      menu.classList.add("hidden");
+    });
+    const confirmed = await openConfirmDialog(ft("delete_confirm"), {
+      confirmLabel: ft("confirm_delete"),
+      danger: true,
+      restoreFocusTarget
+    });
+    if (!confirmed) return;
     try {
       await fetch(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/delete`, { method: "POST" });
       queueToast(ft("toast_deleted"), "success");
@@ -1617,7 +1735,12 @@ document.addEventListener("click", async (e) => {
   }
 
   if (action === "permanent-delete") {
-    if (!confirm(ft("permanent_delete_confirm"))) return;
+    const confirmed = await openConfirmDialog(ft("permanent_delete_confirm"), {
+      confirmLabel: ft("confirm_permanent_delete"),
+      danger: true,
+      restoreFocusTarget: btn
+    });
+    if (!confirmed) return;
     try {
       await fetch(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/permanent-delete`, { method: "POST" });
       queueToast(ft("toast_permanent_deleted"), "success");
@@ -1695,10 +1818,17 @@ document.addEventListener("click", async (e) => {
   if (!action) return;
   const ids = [...document.querySelectorAll(".card-checkbox:checked")].map((cb) => cb.dataset.id);
   if (!ids.length) {
-    alert(ft("select_first"));
+    showToast(ft("select_first"), "error");
     return;
   }
-  if (action === "delete" && !confirm(ft("batch_delete_confirm").replace("{count}", ids.length))) return;
+  if (action === "delete") {
+    const confirmed = await openConfirmDialog(ft("batch_delete_confirm").replace("{count}", ids.length), {
+      confirmLabel: ft("confirm_delete"),
+      danger: true,
+      restoreFocusTarget: btn
+    });
+    if (!confirmed) return;
+  }
 
   try {
     await fetch(`/api/${PROVIDER}/batch`, {

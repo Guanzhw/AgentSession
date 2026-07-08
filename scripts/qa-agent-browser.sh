@@ -110,6 +110,29 @@ if [[ "$rename_focus_restored" != "trigger" && "$rename_focus_restored" != '"tri
   echo "Rename dialog should restore focus to the visible menu trigger, got $rename_focus_restored" >&2
   exit 1
 fi
+delete_confirm_count="$(read_ab "open delete confirmation" eval "(() => { const card = document.querySelector('.session-card'); const trigger = card?.querySelector('.card-menu-trigger'); trigger?.click(); card?.querySelector('[data-action=\"delete\"]')?.click(); return document.querySelectorAll('.confirm-dialog[role=\"dialog\"][aria-modal=\"true\"][aria-describedby=\"confirm-dialog-message\"] #confirm-dialog-message').length; })()")"
+if [[ "$delete_confirm_count" != "1" ]]; then
+  echo "Delete should open one in-page confirmation dialog, got $delete_confirm_count" >&2
+  exit 1
+fi
+delete_tab_result="$(read_ab "verify delete confirmation focus wrap" eval "(() => { const confirm = document.querySelector('.confirm-dialog button[type=\"submit\"]'); const cancel = document.querySelector('.confirm-dialog button[type=\"button\"]'); confirm?.focus(); confirm?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })); return document.activeElement === cancel ? 'wrapped' : (document.activeElement?.textContent || document.activeElement?.tagName || ''); })()")"
+if [[ "$delete_tab_result" != "wrapped" && "$delete_tab_result" != '"wrapped"' ]]; then
+  echo "Delete confirmation should wrap focus from Delete back to Cancel, got $delete_tab_result" >&2
+  exit 1
+fi
+ab "dismiss delete confirmation" press Escape >/dev/null
+delete_confirm_closed="$(read_ab "count dismissed delete confirmation" get count ".confirm-dialog")"
+if [[ "$delete_confirm_closed" != "0" ]]; then
+  echo "Delete confirmation should close on Escape, got $delete_confirm_closed" >&2
+  exit 1
+fi
+delete_focus_restored="$(read_ab "check delete focus restore" eval "document.activeElement?.classList.contains('card-menu-trigger') ? 'trigger' : (document.activeElement?.tagName || '')")"
+if [[ "$delete_focus_restored" != "trigger" && "$delete_focus_restored" != '"trigger"' ]]; then
+  echo "Delete confirmation should restore focus to the visible menu trigger, got $delete_focus_restored" >&2
+  exit 1
+fi
+post_delete_dashboard_count="$(read_ab "count dashboard sessions after dismissed delete" get count ".session-card .session-id")"
+assert_positive_count "dashboard sessions after dismissed delete" "$post_delete_dashboard_count"
 
 ab "open stats" open "$BASE/opencode/stats" >/dev/null
 ab "wait for stats" wait --text "Statistics Overview" >/dev/null

@@ -836,12 +836,15 @@ test("session cards expose accessible action buttons", () => {
   assert.match(html, /aria-label="Copy session ID"/);
 });
 
-test("session management rename uses an in-page dialog", () => {
+test("session management uses in-page dialogs", () => {
   const appJs = readFileSync(path.join(process.cwd(), "dist", "src", "static", "app.js"), "utf-8");
 
-  assert.doesNotMatch(appJs, /\bprompt\s*\(/);
+  assert.doesNotMatch(appJs, /\b(prompt|confirm|alert)\s*\(/);
   assert.match(appJs, /openRenameDialog/);
+  assert.match(appJs, /openConfirmDialog/);
   assert.match(appJs, /rename-dialog/);
+  assert.match(appJs, /confirm-dialog/);
+  assert.match(appJs, /aria-describedby/);
 });
 
 test("OpenCode runtime environment resolves project and user agent extensions", () => {

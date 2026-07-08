@@ -3536,7 +3536,8 @@ pre code.hljs {
   color: var(--error-color);
 }
 
-.rename-dialog-backdrop {
+.rename-dialog-backdrop,
+.confirm-dialog-backdrop {
   position: fixed;
   inset: 0;
   z-index: 150;
@@ -3548,7 +3549,8 @@ pre code.hljs {
   backdrop-filter: blur(2px);
 }
 
-.rename-dialog {
+.rename-dialog,
+.confirm-dialog {
   width: min(420px, 100%);
   display: flex;
   flex-direction: column;
@@ -3560,9 +3562,16 @@ pre code.hljs {
   box-shadow: var(--shadow-lg);
 }
 
-.rename-dialog h2 {
+.rename-dialog h2,
+.confirm-dialog h2 {
   margin: 0;
   font-size: 18px;
+}
+
+.confirm-dialog-message {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.5;
 }
 
 .rename-dialog-field {
@@ -3589,7 +3598,8 @@ pre code.hljs {
   background: var(--bg-primary);
 }
 
-.rename-dialog-actions {
+.rename-dialog-actions,
+.confirm-dialog-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
