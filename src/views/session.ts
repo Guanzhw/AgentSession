@@ -1434,12 +1434,12 @@ export function renderSessionPage({
   const title = session.title || session.slug || session.id;
   const starred = meta?.starred ? 1 : 0;
   const managementActions = manageable ? `
-        <button class="star-btn action-btn ${starred ? "starred" : ""}" data-id="${escapeHtml(session.id)}">
+        <button class="star-btn action-btn ${starred ? "starred" : ""}" type="button" data-star-format="label" data-id="${escapeHtml(session.id)}" title="${starred ? t("action.starred") : t("action.star")}" aria-label="${starred ? t("action.starred") : t("action.star")}">
           ${starred ? t("action.starred") : t("action.star")}
         </button>
-        <button class="action-btn" data-action="rename" data-id="${escapeHtml(session.id)}">${t("action.rename")}</button>
+        <button class="action-btn" type="button" data-action="rename" data-id="${escapeHtml(session.id)}">${t("action.rename")}</button>
         ${renderExportMenu(provider, session.id)}
-        <button class="action-btn btn-danger" data-action="delete" data-id="${escapeHtml(session.id)}">${t("action.delete")}</button>
+        <button class="action-btn btn-danger" type="button" data-action="delete" data-id="${escapeHtml(session.id)}">${t("action.delete")}</button>
   ` : "";
   const resumeActions = resumeCommand && terminalLaunchAllowed ? `
         <button class="action-btn" data-action="resume-session" data-id="${escapeHtml(session.id)}" ${resumeCommand.available ? "" : "disabled"}>${t("action.open_terminal")}</button>

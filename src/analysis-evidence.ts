@@ -347,9 +347,42 @@ export function writeAnalysisEvidence({
   for (const record of records) {
     const content = Buffer.from(JSON.stringify(record), "utf-8");
     const newline = Buffer.from("\n");
-    const { raw: _raw, ...metadata } = record;
+    const {
+      raw: _raw,
+      evidenceId,
+      kind,
+      preview,
+      schemaVersion,
+      provider: recordProvider,
+      sessionId: recordSessionId,
+      parentSessionId,
+      messageId,
+      partId,
+      role,
+      toolName,
+      status,
+      timestamp,
+      timeEnd,
+      sequence: recordSequence,
+      errorReason
+    } = record;
     entries.push({
-      ...metadata,
+      evidenceId,
+      kind,
+      preview,
+      schemaVersion,
+      provider: recordProvider,
+      sessionId: recordSessionId,
+      parentSessionId,
+      messageId,
+      partId,
+      role,
+      toolName,
+      status,
+      timestamp,
+      timeEnd,
+      sequence: recordSequence,
+      errorReason,
       offset,
       byteLength: content.length
     });

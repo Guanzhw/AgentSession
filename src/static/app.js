@@ -30,6 +30,7 @@ const __I18N__ = {
     menu_export_md: "Export MD",
     menu_export_json: "Export JSON",
     menu_delete: "Delete",
+    menu_more: "More actions",
     copy: "Copy",
     copied: "Copied",
     resume_opened: "Terminal opened",
@@ -104,6 +105,7 @@ const __I18N__ = {
     settings_unsaved: "Unsaved changes",
     theme_to_light: "Switch to light theme",
     theme_to_dark: "Switch to dark theme",
+    scroll_load_more: "Load more sessions",
     scroll_all_loaded: "All sessions loaded",
     scroll_loading: "Loading..."
   },
@@ -135,6 +137,7 @@ const __I18N__ = {
     menu_export_md: "导出 MD",
     menu_export_json: "导出 JSON",
     menu_delete: "删除",
+    menu_more: "更多操作",
     copy: "复制",
     copied: "已复制",
     resume_opened: "终端已打开",
@@ -209,6 +212,7 @@ const __I18N__ = {
     settings_unsaved: "有未保存的更改",
     theme_to_light: "切换到浅色主题",
     theme_to_dark: "切换到深色主题",
+    scroll_load_more: "加载更多会话",
     scroll_all_loaded: "已全部加载",
     scroll_loading: "加载中..."
   }
@@ -1293,12 +1297,10 @@ document.addEventListener("click", async (e) => {
     const res = await fetch(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/star`, { method: "POST" });
     const data = await res.json();
     btn.classList.toggle("starred", data.starred);
-    if (!btn.textContent.includes(ft("star_check"))) {
-      btn.textContent = data.starred ? "★" : "☆";
-    }
-    if (btn.textContent.includes(ft("star_check"))) {
-      btn.innerHTML = data.starred ? ft("starred_label") : ft("star_label");
-    }
+    const label = data.starred ? ft("starred_label") : ft("star_label");
+    btn.textContent = btn.dataset.starFormat === "icon" ? (data.starred ? "★" : "☆") : label;
+    btn.setAttribute("aria-label", label);
+    btn.title = label;
     const card = btn.closest(".session-card");
     if (card) card.classList.toggle("starred", data.starred);
     showToast(data.starred ? ft("toast_starred") : ft("toast_unstarred"), data.starred ? "success" : "info");
@@ -1629,15 +1631,15 @@ function renderSessionCard(s) {
 
   const actionsHtml = IS_MANAGEABLE_PROVIDER ? `
     <div class="card-actions">
-      <button class="star-btn ${s.starred ? "starred" : ""}" data-id="${id}" title="${ft("star_check")}">
+      <button class="star-btn ${s.starred ? "starred" : ""}" type="button" data-star-format="icon" data-id="${id}" title="${escapeHtmlClient(s.starred ? ft("starred_label") : ft("star_label"))}" aria-label="${escapeHtmlClient(s.starred ? ft("starred_label") : ft("star_label"))}">
         ${s.starred ? "★" : "☆"}
       </button>
-      <button class="card-menu-trigger" data-id="${id}" title="More">⋮</button>
+      <button class="card-menu-trigger" type="button" data-id="${id}" title="${escapeHtmlClient(ft("menu_more"))}" aria-label="${escapeHtmlClient(ft("menu_more"))}">⋮</button>
       <div class="card-menu hidden" data-id="${id}">
-        <button data-action="rename" data-id="${id}">${ft("menu_rename")}</button>
-        <button data-action="export-md" data-id="${id}">${ft("menu_export_md")}</button>
-        <button data-action="export-json" data-id="${id}">${ft("menu_export_json")}</button>
-        <button data-action="delete" data-id="${id}" class="menu-danger">${ft("menu_delete")}</button>
+        <button type="button" data-action="rename" data-id="${id}">${ft("menu_rename")}</button>
+        <button type="button" data-action="export-md" data-id="${id}">${ft("menu_export_md")}</button>
+        <button type="button" data-action="export-json" data-id="${id}">${ft("menu_export_json")}</button>
+        <button type="button" data-action="delete" data-id="${id}" class="menu-danger">${ft("menu_delete")}</button>
       </div>
     </div>
   ` : "";
@@ -1667,7 +1669,7 @@ function renderSessionCard(s) {
 }
 
 const scrollSentinel = document.getElementById("scroll-sentinel");
-if (scrollSentinel && sessionList && "IntersectionObserver" in window) {
+if (scrollSentinel && sessionList) {
   let scrollOffset = Number(scrollSentinel.dataset.offset) || 0;
   const scrollTotal = Number(scrollSentinel.dataset.total) || 0;
   const scrollRange = scrollSentinel.dataset.range || "";
@@ -1675,20 +1677,21 @@ if (scrollSentinel && sessionList && "IntersectionObserver" in window) {
   const scrollProject = scrollSentinel.dataset.project || "";
   const scrollMode = scrollSentinel.dataset.mode || "list";
   let isLoading = false;
+  let observer = null;
 
-  const setSentinelState = (className, text) => {
+  const setSentinelState = (className, text, disabled = false) => {
     scrollSentinel.className = className;
     scrollSentinel.textContent = text;
+    scrollSentinel.disabled = disabled;
   };
 
-  const observer = new IntersectionObserver(async (entries) => {
-    const entry = entries[0];
-    if (!entry?.isIntersecting || isLoading) {
+  const loadMoreSessions = async () => {
+    if (isLoading || scrollOffset >= scrollTotal) {
       return;
     }
 
     isLoading = true;
-    setSentinelState("scroll-loading", ft("scroll_loading"));
+    setSentinelState("scroll-loading", ft("scroll_loading"), true);
 
     try {
       const params = new URLSearchParams({
@@ -1711,23 +1714,34 @@ if (scrollSentinel && sessionList && "IntersectionObserver" in window) {
       scrollOffset = (Number(data.offset) || 0) + (Array.isArray(data.sessions) ? data.sessions.length : 0);
 
       if (!data.hasMore || scrollOffset >= scrollTotal) {
-        observer.disconnect();
-        setSentinelState("scroll-done", ft("scroll_all_loaded"));
+        observer?.disconnect();
+        setSentinelState("scroll-done", ft("scroll_all_loaded"), true);
       } else {
-        setSentinelState("", "");
+        setSentinelState("scroll-load-more", ft("scroll_load_more"));
       }
     } catch {
-      setSentinelState("", "");
+      setSentinelState("scroll-load-more", ft("scroll_load_more"));
       showToast(ft("toast_error"), "error");
     } finally {
       isLoading = false;
     }
-  }, { rootMargin: "200px" });
+  };
+
+  scrollSentinel.addEventListener("click", loadMoreSessions);
 
   if (scrollOffset < scrollTotal) {
-    observer.observe(scrollSentinel);
+    setSentinelState("scroll-load-more", ft("scroll_load_more"));
+    if ("IntersectionObserver" in window) {
+      observer = new IntersectionObserver(async (entries) => {
+        const entry = entries[0];
+        if (entry?.isIntersecting) {
+          await loadMoreSessions();
+        }
+      }, { rootMargin: "200px" });
+      observer.observe(scrollSentinel);
+    }
   } else {
-    setSentinelState("scroll-done", ft("scroll_all_loaded"));
+    setSentinelState("scroll-done", ft("scroll_all_loaded"), true);
   }
 }
 

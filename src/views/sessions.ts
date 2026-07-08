@@ -149,9 +149,15 @@ export function renderSessionsPage({
     <section class="session-list" id="session-list">
       ${cards}
     </section>
-    ${total > limit ? `<div id="scroll-sentinel" data-offset="${offset + sessions.length}" data-total="${total}" data-range="${escapeHtml(range)}" data-project="${escapeHtml(project)}" data-query="${escapeHtml(query)}" data-mode="${escapeHtml(searchMode)}" data-provider="${provider}"></div>` : ""}
+    ${total > offset + sessions.length ? `<button id="scroll-sentinel" class="scroll-load-more" type="button" data-offset="${offset + sessions.length}" data-total="${total}" data-range="${escapeHtml(range)}" data-project="${escapeHtml(project)}" data-query="${escapeHtml(query)}" data-mode="${escapeHtml(searchMode)}" data-provider="${provider}">${t("sessions.load_more")}</button>` : ""}
   `;
 
   const isContentSearch = searchMode === "content" && query;
-  return layout(isContentSearch ? t("sessions.search_title").replace("{query}", query) : t("sessions.title"), body, isContentSearch ? "search" : "home", { provider, providers, providerAvailable: isAvailable, manageable: isManageableProvider });
+  return layout(isContentSearch ? t("sessions.search_title").replace("{query}", query) : t("sessions.title"), body, isContentSearch ? "search" : "home", {
+    provider,
+    providers,
+    providerAvailable: isAvailable,
+    manageable: isManageableProvider,
+    searchQuery: isContentSearch ? query : ""
+  });
 }

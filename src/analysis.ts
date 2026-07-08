@@ -757,6 +757,14 @@ Use \`${files.evidenceIndexPath}\` to find specific \`ev:...\` IDs before
 opening \`${files.evidencePath}\`. Read raw evidence records only when a
 specific evidence ID needs detail beyond the index preview.
 
+Each evidence-index entry has a literal \`evidenceId\` field. Copy that field
+exactly. The index lists \`evidenceId\` before \`sequence\`; \`sequence\` is only
+display order, not a citation key. Do not reconstruct evidence IDs from
+\`sequence\`, \`kind\`, \`sourceKey\`, titles, labels, decoded system-prompt
+parts, or visible file paths. For example, an entry with \`sequence: 7\` and title
+\`session.permission\` does not make \`...:system-prompt:7...session.permission\`
+valid unless that exact string appears as the entry's \`evidenceId\`.
+
 ## Required behavior
 
 The analysis inputs have three distinct roles:
@@ -881,6 +889,8 @@ return an empty \`proposals\` array and explain why in \`report.md\`.
 Before finishing, verify all of the following:
 
 - Every \`sourceEvidence\` and \`evidence\` item is an exact ID copied from this run's indexes, with no annotation.
+- Every copied evidence ID matches a literal \`evidenceId\` field from \`${files.evidenceIndexPath}\` or a literal \`artifactId\` field from \`${files.artifactsPath}\`; pattern-shaped IDs are not enough.
+- No ID was reconstructed from \`sequence\`, \`kind\`, \`sourceKey\`, title, label, or decoded system-prompt fields instead of copied literally.
 - No \`sourceEvidence\` or \`evidence\` item is a shortened \`ev:...\` prefix or raw \`ses_...\` ID.
 - No evidence array contains a filesystem path or free-form observation.
 - Every evaluation case has at least one valid evidence ID.

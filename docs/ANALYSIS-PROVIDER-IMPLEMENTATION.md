@@ -484,6 +484,10 @@ Analyzer outputs must cite exact IDs from the run:
 
 Never cite raw session IDs, shortened prefixes, paths, line numbers, or
 annotated IDs in `sourceEvidence` or `evidence` arrays.
+Analyzers must copy the literal `evidenceId` or `artifactId` field value; they
+must not reconstruct IDs from `sequence`, `kind`, titles, source labels, decoded
+system-prompt parts, or filename-like text in the index. `sequence` is display
+order only, not a citation key.
 
 ### 9. Validate Proposal Outputs
 

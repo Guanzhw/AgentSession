@@ -185,15 +185,15 @@ export function sessionCard(s, active = false, { showCheckbox = false, provider 
 
   const actionsHtml = manageable ? `
     <div class="card-actions">
-      <button class="star-btn ${s.starred ? "starred" : ""}" data-id="${escapeHtml(s.id)}" title="${t("batch.star")}">
+      <button class="star-btn ${s.starred ? "starred" : ""}" type="button" data-star-format="icon" data-id="${escapeHtml(s.id)}" title="${s.starred ? t("action.starred") : t("action.star")}" aria-label="${s.starred ? t("action.starred") : t("action.star")}">
         ${s.starred ? "★" : "☆"}
       </button>
-      <button class="card-menu-trigger" data-id="${escapeHtml(s.id)}" title="More">⋮</button>
+      <button class="card-menu-trigger" type="button" data-id="${escapeHtml(s.id)}" title="${t("action.more")}" aria-label="${t("action.more")}">⋮</button>
       <div class="card-menu hidden" data-id="${escapeHtml(s.id)}">
-        <button data-action="rename" data-id="${escapeHtml(s.id)}">${t("menu.rename")}</button>
-        <button data-action="export-md" data-id="${escapeHtml(s.id)}">${t("menu.export_md")}</button>
-        <button data-action="export-json" data-id="${escapeHtml(s.id)}">${t("menu.export_json")}</button>
-        <button data-action="delete" data-id="${escapeHtml(s.id)}" class="menu-danger">${t("menu.delete")}</button>
+        <button type="button" data-action="rename" data-id="${escapeHtml(s.id)}">${t("menu.rename")}</button>
+        <button type="button" data-action="export-md" data-id="${escapeHtml(s.id)}">${t("menu.export_md")}</button>
+        <button type="button" data-action="export-json" data-id="${escapeHtml(s.id)}">${t("menu.export_json")}</button>
+        <button type="button" data-action="delete" data-id="${escapeHtml(s.id)}" class="menu-danger">${t("menu.delete")}</button>
       </div>
     </div>
   ` : "";

@@ -29,6 +29,8 @@ import { buildGeminiRuntimeEnvironment } from "../dist/src/providers/gemini/runt
 import { buildFlowTreeFromContainer } from "../dist/src/providers/shared/flow-tree.js";
 import { renderCanonicalFlowPanelContent, renderSessionPage } from "../dist/src/views/session.js";
 import { renderSettingsPage } from "../dist/src/views/settings.js";
+import { sessionCard } from "../dist/src/views/components.js";
+import { renderSessionsPage } from "../dist/src/views/sessions.js";
 import { t } from "../dist/src/i18n.js";
 import {
   extractSessionMeta,
@@ -780,6 +782,56 @@ test("runtime helper utilities classify status, errors, and executables", () => 
   assert.equal(runtimeExecutableName({ executable: "/usr/bin/node" }), "node");
   assert.equal(runtimeExecutableName(null), "");
   assert.equal(recordRuntimeEvent(null, { event: "ignored" }), null);
+});
+
+test("sessions search page preserves query and exposes content pagination", () => {
+  const html = renderSessionsPage({
+    sessions: Array.from({ length: 30 }, (_, index) => ({
+      id: `ses_${index}`,
+      title: `Session ${index}`,
+      directory: "D:\\WorkSpace\\OpenSession",
+      time_updated: 1_700_000_000_000 + index,
+      summary_files: 0,
+      summary_additions: 0,
+      summary_deletions: 0
+    })),
+    total: 40,
+    limit: 30,
+    offset: 0,
+    query: "analysis",
+    searchMode: "content",
+    provider: "opencode",
+    providerAvailable: true,
+    manageable: true,
+    providers: []
+  });
+
+  assert.match(html, /<input type="text" name="q" value="analysis"/);
+  assert.match(html, /id="scroll-sentinel"/);
+  assert.match(html, /data-offset="30"/);
+  assert.match(html, /data-total="40"/);
+  assert.match(html, /data-query="analysis"/);
+  assert.match(html, /data-mode="content"/);
+  assert.match(html, />Load more sessions<\/button>/);
+});
+
+test("session cards expose accessible action buttons", () => {
+  const html = sessionCard({
+    id: "ses_accessible",
+    title: "Accessible session",
+    directory: "D:\\WorkSpace\\OpenSession",
+    time_updated: 1_700_000_000_000,
+    summary_files: 1,
+    summary_additions: 2,
+    summary_deletions: 0,
+    starred: false
+  }, false, { showCheckbox: true, provider: "opencode", manageable: true });
+
+  assert.match(html, /class="star-btn "/);
+  assert.match(html, /type="button" data-star-format="icon"/);
+  assert.match(html, /aria-label="☆ Star"/);
+  assert.match(html, /class="card-menu-trigger" type="button"/);
+  assert.match(html, /aria-label="More actions"/);
 });
 
 test("OpenCode runtime environment resolves project and user agent extensions", () => {
@@ -1640,6 +1692,8 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     JSON.parse(readFileSync(run.files.analysisToolPackagePath, "utf-8")).type,
     "module"
   );
+  const evidenceIndexText = readFileSync(run.files.evidenceIndexPath, "utf-8");
+  assert.ok(evidenceIndexText.indexOf('"evidenceId"') < evidenceIndexText.indexOf('"sequence"'));
   const preparedRuns = listSessionAnalysisRuns({
     provider,
     providerId: "opencode",
@@ -1705,6 +1759,10 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.match(analysisPrompt, /Contrast successful and failed tool outcomes/);
   assert.match(analysisPrompt, /use only exact, unmodified `ev:\.\.\.` IDs/);
   assert.match(analysisPrompt, /Never append descriptions, parentheses, quotes, line numbers, or filesystem paths/);
+  assert.match(analysisPrompt, /Do not reconstruct evidence IDs from\s+`sequence`, `kind`/);
+  assert.match(analysisPrompt, /`sequence` is only\s+display order, not a citation key/);
+  assert.match(analysisPrompt, /matches a literal `evidenceId` field/);
+  assert.match(analysisPrompt, /No ID was reconstructed from `sequence`, `kind`, `sourceKey`/);
   assert.match(analysisPrompt, /metrics\.taskSuccess/);
   assert.match(analysisPrompt, /create\|edit\|replace\|delete/);
   assert.match(
@@ -1876,6 +1934,48 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     run.files.reportPath,
     "# Session Analysis\n\nA sufficiently detailed analysis report with evidence, risks, proposed updates, and a concrete validation strategy for replay, held-out, and regression tasks.\n"
   );
+  const unknownEvidenceId = `${rootEvidenceId}:extra`;
+  writeFileSync(run.files.evaluationPath, JSON.stringify({
+    schemaVersion: 1,
+    status: "proposed",
+    target: "skills",
+    sourceSessionId: "session-analysis",
+    cases: ["replay", "held-out", "regression"].map((kind) => ({
+      id: `${kind}-invalid-evidence`,
+      title: `${kind} invalid evidence`,
+      kind,
+      status: "proposed",
+      task: "Exercise validator evidence suggestions",
+      setup: [],
+      sourceEvidence: [unknownEvidenceId],
+      expectedOutcome: ["Validator reports the nearest valid evidence ID"],
+      comparison: {
+        baseline: "Unknown evidence ID",
+        candidate: "Exact evidence ID",
+        acceptance: ["Validator suggests a copied ID"]
+      },
+      verifier: { kind: "assertions", assertions: ["error includes closest valid IDs"] },
+      metrics: {
+        taskSuccess: true,
+        maxTokenIncreasePercent: null,
+        maxRuntimeIncreasePercent: null
+      }
+    }))
+  }));
+  writeFileSync(run.files.proposalsPath, JSON.stringify({
+    schemaVersion: 1,
+    status: "proposed",
+    target: "skills",
+    sourceSessionId: "session-analysis",
+    proposals: []
+  }));
+  const invalidEvidenceResult = validateAnalysisOutputs(run.runDir, 0, run.integrity);
+  assert.equal(invalidEvidenceResult.state, "invalid");
+  assert.ok(invalidEvidenceResult.validation.errors.some((error) => (
+    error.includes(`references unknown evidence ${unknownEvidenceId}`)
+    && error.includes(`closest valid IDs: ${rootEvidenceId}`)
+  )));
+
   writeFileSync(run.files.evaluationPath, JSON.stringify({
     schemaVersion: 1,
     status: "proposed",

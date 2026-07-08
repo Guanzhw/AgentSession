@@ -55,6 +55,45 @@ function hashFile(filePath) {
 
 const ALLOWED_PROPOSAL_KINDS = new Set(["artifact-change", "skill-evolution"]);
 
+function normalizeEvidenceRef(value) {
+  try {
+    return decodeURIComponent(String(value));
+  } catch {
+    return String(value);
+  }
+}
+
+function evidenceTokens(value) {
+  return normalizeEvidenceRef(value)
+    .toLowerCase()
+    .split(/[^a-z0-9._-]+/)
+    .filter((token) => token.length > 2);
+}
+
+function suggestEvidenceRefs(ref, allowedRefs, limit = 3) {
+  const normalizedRef = normalizeEvidenceRef(ref).toLowerCase();
+  const refTail = normalizedRef.split(":").pop() || "";
+  const refTokens = new Set(evidenceTokens(ref));
+  return [...allowedRefs]
+    .filter((candidate) => candidate !== ref)
+    .map((candidate) => {
+      const normalizedCandidate = normalizeEvidenceRef(candidate).toLowerCase();
+      const candidateTokens = new Set(evidenceTokens(candidate));
+      let score = 0;
+      if (refTail && normalizedCandidate.endsWith(`:${refTail}`)) score += 8;
+      if (normalizedRef.includes(":system-prompt:") && normalizedCandidate.includes(":system-prompt:")) score += 4;
+      if (normalizedRef.includes(":session:") && normalizedCandidate.includes(":session:")) score += 4;
+      for (const token of refTokens) {
+        if (candidateTokens.has(token)) score += 1;
+      }
+      return { candidate, score };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || a.candidate.localeCompare(b.candidate))
+    .slice(0, limit)
+    .map((entry) => entry.candidate);
+}
+
 export function validateAnalysisOutputs(runDir, processExitCode = 0, expectedIntegrity = null) {
   const resolvedRunDir = path.resolve(runDir);
   const manifestPath = path.join(resolvedRunDir, "manifest.json");
@@ -99,7 +138,8 @@ export function validateAnalysisOutputs(runDir, processExitCode = 0, expectedInt
     }
     for (const ref of refs) {
       if (!allowedEvidenceRefs.has(ref) && !allowedArtifactRefs.has(ref)) {
-        errors.push(`${label} references unknown evidence ${ref}`);
+        const suggestions = suggestEvidenceRefs(ref, new Set([...allowedEvidenceRefs, ...allowedArtifactRefs]));
+        errors.push(`${label} references unknown evidence ${ref}${suggestions.length ? `; closest valid IDs: ${suggestions.join(", ")}` : ""}`);
       }
     }
   };

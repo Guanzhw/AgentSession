@@ -2,7 +2,7 @@ import { escapeHtml } from "../markdown.js";
 import { t, getLocale } from "../i18n.js";
 import { icons } from "../icons.js";
 
-export function layout(title, body, page = "home", { provider = null, providers = [], providerAvailable = true, manageable = false } = {}) {
+export function layout(title, body, page = "home", { provider = null, providers = [], providerAvailable = true, manageable = false, searchQuery = "" } = {}) {
   const providerPrefix = provider ? `/${encodeURIComponent(provider)}` : "";
 
   const providerTabs = providers.map((p) => {
@@ -41,7 +41,7 @@ export function layout(title, body, page = "home", { provider = null, providers 
       ${providerAvailable !== false && manageable ? `<a href="${providerPrefix}/trash" class="nav-link ${page === "trash" ? "active" : ""}">${t("nav.trash")}</a>` : ""}
       <a href="${providerPrefix}/settings" class="nav-link ${page === "settings" ? "active" : ""}">${t("nav.settings")}</a>
       <form class="search-form" action="${providerPrefix}/search" method="GET">
-        <input type="text" name="q" placeholder="${t("nav.search_placeholder")}" class="search-input" id="search-input">
+        <input type="text" name="q" value="${escapeHtml(searchQuery)}" placeholder="${t("nav.search_placeholder")}" class="search-input" id="search-input">
       </form>
       <button id="theme-toggle" class="theme-toggle" title="Toggle theme" aria-label="Toggle theme">🌙</button>
     </div>

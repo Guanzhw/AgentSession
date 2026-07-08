@@ -4579,13 +4579,31 @@ pre code.hljs {
 }
 
 #scroll-sentinel {
-  padding: 24px;
+  display: block;
+  width: 100%;
+  margin: 8px 0 0;
+  padding: 18px 24px;
   text-align: center;
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font: inherit;
+}
+
+.scroll-load-more {
+  cursor: pointer;
+}
+
+.scroll-load-more:hover {
+  border-color: var(--accent-color);
+  color: var(--accent-color);
 }
 
 .scroll-loading {
   color: var(--text-muted);
   font-size: 14px;
+  cursor: wait;
 }
 
 .scroll-loading::before {
@@ -4608,7 +4626,7 @@ pre code.hljs {
 .scroll-done {
   color: var(--text-muted);
   font-size: 14px;
-  padding: 16px 0;
+  cursor: default;
 }
 
 @media (max-width: 768px) {

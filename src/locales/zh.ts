@@ -15,6 +15,7 @@ export const zh = {
   "sessions.empty_filter": "没有符合筛选条件的会话",
   "sessions.manage": "管理",
   "sessions.cancel_manage": "取消",
+  "sessions.load_more": "加载更多会话",
 
   // Range filter
   "range.all": "全部",
@@ -70,6 +71,7 @@ export const zh = {
   "action.copy_session_id": "复制会话 ID",
   "action.open_terminal": "在终端中继续",
   "action.analyze_session": "分析会话",
+  "action.more": "更多操作",
 
   // Analysis status
   "analysis.status_title": "分析活动",

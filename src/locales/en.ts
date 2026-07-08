@@ -15,6 +15,7 @@ export const en = {
   "sessions.empty_filter": "No sessions match these filters",
   "sessions.manage": "Manage",
   "sessions.cancel_manage": "Cancel",
+  "sessions.load_more": "Load more sessions",
 
   // Range filter
   "range.all": "All",
@@ -70,6 +71,7 @@ export const en = {
   "action.copy_session_id": "Copy session ID",
   "action.open_terminal": "Continue in terminal",
   "action.analyze_session": "Analyze session",
+  "action.more": "More actions",
 
   // Analysis status
   "analysis.status_title": "Analysis activity",
