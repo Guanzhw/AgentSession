@@ -1297,12 +1297,14 @@ test("settings page exposes config location and startup-only launch status", () 
   assert.match(html, /id="settings-form"/);
   assert.match(html, /class="settings-section-nav"/);
   assert.match(html, /href="#settings-target"/);
+  assert.match(html, /href="#settings-advanced" data-open-settings-advanced/);
   assert.match(html, /id="settings-analysis"/);
   assert.match(html, /id="settings-target"/);
   assert.match(html, /id="settings-analyzer"/);
   assert.match(html, /id="settings-resume"/);
   assert.match(html, /id="settings-advanced"/);
-  assert.match(html, /id="settings-json"/);
+  assert.match(html, /id="settings-json"[^>]+aria-describedby="settings-json-feedback"/);
+  assert.match(html, /id="settings-json-feedback"[^>]+class="settings-json-feedback"/);
   assert.match(html, /id="settings-analysis-enabled"/);
   assert.match(html, /id="settings-default-target"/);
   assert.match(html, /id="settings-target-id"/);

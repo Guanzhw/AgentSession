@@ -3197,6 +3197,21 @@ mark {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 18%, transparent);
 }
 
+.settings-advanced > p.settings-json-feedback {
+  min-height: 20px;
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.settings-json-feedback-success {
+  color: var(--success-color);
+}
+
+.settings-json-feedback-error {
+  color: var(--error-color);
+}
+
 .settings-feedback {
   min-height: 20px;
   margin: 0;

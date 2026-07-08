@@ -501,8 +501,11 @@ const settingsForm = document.getElementById("settings-form");
 if (settingsForm) {
   const editor = document.getElementById("settings-json");
   const feedback = document.getElementById("settings-feedback");
+  const jsonFeedback = document.getElementById("settings-json-feedback");
   const formatButton = document.getElementById("settings-format");
   const applyJsonButton = document.getElementById("settings-apply-json");
+  const advancedDetails = document.getElementById("settings-advanced");
+  const advancedNavLink = document.querySelector("[data-open-settings-advanced]");
   const presetButton = document.getElementById("settings-analysis-preset");
   const promptPreviewButton = document.getElementById("settings-prompt-preview-button");
   const promptPreviewPanel = document.getElementById("settings-prompt-preview-panel");
@@ -528,6 +531,12 @@ if (settingsForm) {
   const setSettingsFeedback = (message, type = "") => {
     feedback.textContent = message;
     feedback.className = `settings-feedback ${type ? `settings-feedback-${type}` : ""}`;
+  };
+
+  const setJsonFeedback = (message, type = "") => {
+    if (!jsonFeedback) return;
+    jsonFeedback.textContent = message;
+    jsonFeedback.className = `settings-json-feedback ${type ? `settings-json-feedback-${type}` : ""}`;
   };
 
   const setSettingsDirty = (dirty) => {
@@ -926,12 +935,21 @@ if (settingsForm) {
     populateSettingsForm(parseEditor());
   } catch {}
 
+  advancedNavLink?.addEventListener("click", () => {
+    if (advancedDetails) {
+      advancedDetails.open = true;
+    }
+  });
+
   formatButton?.addEventListener("click", () => {
     try {
       editor.value = `${JSON.stringify(parseEditor(), null, 2)}\n`;
       setSettingsFeedback("");
+      setJsonFeedback("");
     } catch (error) {
-      setSettingsFeedback(`${ft("settings_invalid_json")}: ${error.message}`, "error");
+      const message = `${ft("settings_invalid_json")}: ${error.message}`;
+      setSettingsFeedback(message, "error");
+      setJsonFeedback(message, "error");
     }
   });
 
@@ -940,8 +958,11 @@ if (settingsForm) {
       populateSettingsForm(parseEditor());
       setSettingsDirty(true);
       setSettingsFeedback(ft("settings_json_applied"), "success");
+      setJsonFeedback(ft("settings_json_applied"), "success");
     } catch (error) {
-      setSettingsFeedback(`${ft("settings_invalid_json")}: ${error.message}`, "error");
+      const message = `${ft("settings_invalid_json")}: ${error.message}`;
+      setSettingsFeedback(message, "error");
+      setJsonFeedback(message, "error");
     }
   });
 
@@ -1058,12 +1079,14 @@ if (settingsForm) {
   settingsForm.addEventListener("input", () => {
     setSettingsDirty(true);
     setSettingsFeedback("");
+    setJsonFeedback("");
   });
 
   settingsForm.addEventListener("change", (event) => {
     if (event.target !== targetSelect) {
       setSettingsDirty(true);
       setSettingsFeedback("");
+      setJsonFeedback("");
     }
   });
 
@@ -1073,6 +1096,7 @@ if (settingsForm) {
       const config = collectStructuredSettings(parseEditor());
       submitButton.disabled = true;
       setSettingsFeedback("");
+      setJsonFeedback("");
       const response = await fetch("/api/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1089,6 +1113,7 @@ if (settingsForm) {
       }
 
       editor.value = `${JSON.stringify(config, null, 2)}\n`;
+      setJsonFeedback("");
       const messages = [ft("settings_saved")];
       if (result.restartRequiredKeys?.length) {
         messages.push(formatText(ft("settings_restart"), { keys: result.restartRequiredKeys.join(", ") }));

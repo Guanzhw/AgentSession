@@ -223,7 +223,7 @@ export function renderSettingsPage({
         <a href="#settings-target">${t("settings.target_title")}</a>
         <a href="#settings-analyzer">${t("settings.analyzer_title")}</a>
         <a href="#settings-resume">${t("settings.resume_title")}</a>
-        <a href="#settings-advanced">${t("settings.advanced_title")}</a>
+        <a href="#settings-advanced" data-open-settings-advanced>${t("settings.advanced_title")}</a>
       </nav>
 
       <form id="settings-form" class="settings-form" data-provider="${escapeHtml(provider)}">
@@ -479,11 +479,12 @@ export function renderSettingsPage({
         <details class="settings-advanced" id="settings-advanced">
           <summary>${t("settings.advanced_title")}</summary>
           <p>${t("settings.advanced_help")}</p>
-          <textarea id="settings-json" class="settings-json-editor" spellcheck="false" aria-label="${escapeHtml(t("settings.json_title"))}">${escapeHtml(editorValue)}</textarea>
           <div class="settings-actions">
             <button type="button" class="btn" id="settings-format">${t("settings.format")}</button>
             <button type="button" class="btn" id="settings-apply-json">${t("settings.apply_json")}</button>
           </div>
+          <p id="settings-json-feedback" class="settings-json-feedback" role="status" aria-live="polite"></p>
+          <textarea id="settings-json" class="settings-json-editor" spellcheck="false" aria-label="${escapeHtml(t("settings.json_title"))}" aria-describedby="settings-json-feedback">${escapeHtml(editorValue)}</textarea>
         </details>
 
         <div class="settings-save-bar">
