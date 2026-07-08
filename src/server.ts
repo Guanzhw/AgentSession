@@ -221,20 +221,31 @@ function enrichSession(session, metaMap) {
   };
 }
 
-function enrichSessionList(sessions, metaMap, excludedIds) {
-  return sessions
-    .filter((session) => !excludedIds.has(session.id))
-    .map((session) => enrichSession(session, metaMap));
+function getVisibleListResults({
+  dbPath,
+  metaMap,
+  excludedIds,
+  limit,
+  offset,
+  query = "",
+  range = "",
+  project = ""
+}) {
+  const results = listSessions(limit, offset, query, range, dbPath, project, excludedIds);
+  return {
+    sessions: results.sessions.map((session) => enrichSession(session, metaMap)),
+    total: results.total
+  };
 }
 
-function getSearchResults(query, limit, offset, dbPath = undefined) {
+export function getSearchResults(query, limit, offset, dbPath = undefined, excludedIds = new Set()) {
   const term = (query || "").trim();
   if (!term) {
     return { sessions: [], total: 0, note: "Enter a search query to find sessions." };
   }
 
-  const titleMatches = listSessions(1000, 0, term, "", dbPath).sessions;
-  const contentMatches = searchMessages(term, 500, dbPath);
+  const titleMatches = listSessions(1000, 0, term, "", dbPath, "", excludedIds).sessions;
+  const contentMatches = searchMessages(term, 500, dbPath, excludedIds);
   const orderedIds = [];
   const sessionMap = new Map();
 
@@ -255,9 +266,10 @@ function getSearchResults(query, limit, offset, dbPath = undefined) {
     }
   }
 
+  const visibleIds = orderedIds.filter((id) => !excludedIds.has(id));
   return {
-    sessions: orderedIds.slice(offset, offset + limit).map((id) => sessionMap.get(id)).filter(Boolean),
-    total: orderedIds.length,
+    sessions: visibleIds.slice(offset, offset + limit).map((id) => sessionMap.get(id)).filter(Boolean),
+    total: visibleIds.length,
     note: `Showing title and message-content matches for “${term}”.`
   };
 }
@@ -1197,12 +1209,21 @@ export async function startServer(config = getConfig()) {
           let sessions;
           let total;
           if (query && searchMode === "content") {
-            const results = getSearchResults(query, apiLimit, apiOffset, dbPath);
-            sessions = enrichSessionList(results.sessions, metaMap, excludedIds);
+            const results = getSearchResults(query, apiLimit, apiOffset, dbPath, excludedIds);
+            sessions = results.sessions.map((session) => enrichSession(session, metaMap));
             total = results.total;
           } else {
-            const results = listSessions(apiLimit, apiOffset, query, range, dbPath, project);
-            sessions = enrichSessionList(results.sessions, metaMap, excludedIds);
+            const results = getVisibleListResults({
+              dbPath,
+              metaMap,
+              excludedIds,
+              limit: apiLimit,
+              offset: apiOffset,
+              query,
+              range,
+              project
+            });
+            sessions = results.sessions;
             total = results.total;
           }
 
@@ -1572,13 +1593,22 @@ export async function startServer(config = getConfig()) {
         const project = url.searchParams.get("project") || "";
         if (usesSqliteSessionStore(adapter)) {
           const dbPath = adapter.getDataPath();
-          const { sessions, total } = listSessions(limit, offset, query, range, dbPath, project);
           const metaMap = getAllMeta(providerSegment);
           const excludedIds = getExcludedIds(providerSegment);
-          const enrichedSessions = enrichSessionList(sessions, metaMap, excludedIds).map((session) => normalizeSessionRecord(session));
+          const { sessions, total } = getVisibleListResults({
+            dbPath,
+            metaMap,
+            excludedIds,
+            limit,
+            offset,
+            query,
+            range,
+            project
+          });
+          const enrichedSessions = sessions.map((session) => normalizeSessionRecord(session));
           const overviewStats = getOverviewStats(dbPath);
           const deletedCount = getDeletedIds(providerSegment).length;
-          const projectOptions = listSessionProjects(query, range, dbPath);
+          const projectOptions = listSessionProjects(query, range, dbPath, excludedIds);
           send(res, 200, renderSessionsPage({
             sessions: enrichedSessions,
             total,
@@ -1625,10 +1655,10 @@ export async function startServer(config = getConfig()) {
         const query = url.searchParams.get("q") || "";
         if (usesSqliteSessionStore(adapter)) {
           const dbPath = adapter.getDataPath();
-          const results = getSearchResults(query, limit, offset, dbPath);
           const metaMap = getAllMeta(providerSegment);
           const excludedIds = getExcludedIds(providerSegment);
-          const enrichedSessions = enrichSessionList(results.sessions, metaMap, excludedIds).map((session) => normalizeSessionRecord(session));
+          const results = getSearchResults(query, limit, offset, dbPath, excludedIds);
+          const enrichedSessions = results.sessions.map((session) => normalizeSessionRecord(enrichSession(session, metaMap)));
           send(res, 200, renderSessionsPage({ ...results, sessions: enrichedSessions, limit, offset, query, searchMode: "content", ...renderContext }));
           return;
         }
@@ -1728,8 +1758,14 @@ export async function startServer(config = getConfig()) {
           const sessionTree = adapter.getSessionTree?.(sessionId) || null;
           const sessionMetrics = adapter.getSessionMetrics?.(sessionId) || null;
           const todos = getTodos(sessionId, dbPath);
-          const { sessions: recentSessions } = listSessions(30, 0, "", "", dbPath);
-          const enrichedRecentSessions = enrichSessionList(recentSessions, metaMap, excludedIds).map((item) => normalizeSessionRecord(item));
+          const recentSessions = getVisibleListResults({
+            dbPath,
+            metaMap,
+            excludedIds,
+            limit: 30,
+            offset: 0
+          }).sessions;
+          const enrichedRecentSessions = recentSessions.map((item) => normalizeSessionRecord(item));
           const resumeCommand = getResumeCommand(adapter, sessionId, enrichedSession.directory, appConfig.resumeCommands);
           const analysisAction = getSessionAnalysisAction(adapter, sessionId, enrichedSession.directory, appConfig.analysis);
           const analysisRuns = listSessionAnalysisRuns({

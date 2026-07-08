@@ -35,6 +35,10 @@ export function closeDb(pathOverride = undefined) {
   }
 }
 
+function normalizeExcludedIds(excludedIds = undefined) {
+  return excludedIds ? Array.from(excludedIds).filter(Boolean) : [];
+}
+
 function timeRangeCutoff(timeRange) {
   const now = Date.now();
   if (timeRange === "today") {
@@ -51,11 +55,12 @@ function timeRangeCutoff(timeRange) {
   return null;
 }
 
-function sessionFilter(search = "", timeRange = "", project = "") {
+function sessionFilter(search = "", timeRange = "", project = "", excludedIds = undefined) {
   const where = ["time_archived IS NULL", "parent_id IS NULL"];
   const params = [];
   const searchTerm = search ? `%${search}%` : null;
   const cutoff = timeRangeCutoff(timeRange);
+  const excluded = normalizeExcludedIds(excludedIds);
 
   if (searchTerm) {
     where.push("(COALESCE(title, '') LIKE ? OR COALESCE(slug, '') LIKE ? OR COALESCE(directory, '') LIKE ?)");
@@ -72,12 +77,17 @@ function sessionFilter(search = "", timeRange = "", project = "") {
     params.push(project);
   }
 
+  if (excluded.length > 0) {
+    where.push(`session.id NOT IN (${excluded.map(() => "?").join(", ")})`);
+    params.push(...excluded);
+  }
+
   return { whereClause: `WHERE ${where.join(" AND ")}`, params };
 }
 
-export function listSessions(limit = 50, offset = 0, search = "", timeRange = "", pathOverride = undefined, project = "") {
+export function listSessions(limit = 50, offset = 0, search = "", timeRange = "", pathOverride = undefined, project = "", excludedIds = undefined) {
   const db = getDb(pathOverride);
-  const { whereClause, params } = sessionFilter(search, timeRange, project);
+  const { whereClause, params } = sessionFilter(search, timeRange, project, excludedIds);
 
   const sessions = db.prepare(`
     SELECT id, project_id, slug, title, directory, time_created, time_updated,
@@ -97,9 +107,9 @@ export function listSessions(limit = 50, offset = 0, search = "", timeRange = ""
   return { sessions, total: totalRow?.total ?? 0 };
 }
 
-export function listSessionProjects(search = "", timeRange = "", pathOverride = undefined) {
+export function listSessionProjects(search = "", timeRange = "", pathOverride = undefined, excludedIds = undefined) {
   const db = getDb(pathOverride);
-  const { whereClause, params } = sessionFilter(search, timeRange, "");
+  const { whereClause, params } = sessionFilter(search, timeRange, "", excludedIds);
   const rows = db.prepare(`
     SELECT
       COALESCE(session.project_id, '') AS id,
@@ -224,7 +234,7 @@ export function getTodos(sessionId, pathOverride = undefined) {
   `).all(sessionId);
 }
 
-export function searchMessages(query, limit = 20, pathOverride = undefined) {
+export function searchMessages(query, limit = 20, pathOverride = undefined, excludedIds = undefined) {
   const db = getDb(pathOverride);
   const term = query?.trim();
 
@@ -233,6 +243,10 @@ export function searchMessages(query, limit = 20, pathOverride = undefined) {
   }
 
   const searchTerm = `%${term}%`;
+  const excluded = normalizeExcludedIds(excludedIds);
+  const excludedClause = excluded.length
+    ? `AND session.id NOT IN (${excluded.map(() => "?").join(", ")})`
+    : "";
   const rows = db.prepare(`
     SELECT part.id AS part_id,
            part.message_id,
@@ -248,11 +262,12 @@ export function searchMessages(query, limit = 20, pathOverride = undefined) {
     WHERE session.time_archived IS NULL
       AND session.parent_id IS NULL
       AND COALESCE(json_extract(part.data, '$.text'), '') LIKE ?
+      ${excludedClause}
     ORDER BY session.time_updated DESC,
              COALESCE(CAST(json_extract(message.data, '$.time.created') AS INTEGER), 0) DESC,
              part.id DESC
     LIMIT ?
-  `).all(searchTerm, limit);
+  `).all(searchTerm, ...excluded, limit);
 
   return rows.map((row) => {
     const partData = parseJson(row.part_data) || {};

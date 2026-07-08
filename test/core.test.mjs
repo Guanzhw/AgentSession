@@ -14,7 +14,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 
-import { closeDb, getTokenStats } from "../dist/src/db.js";
+import { closeDb, getTokenStats, listSessionProjects, listSessions, searchMessages } from "../dist/src/db.js";
 import { buildCodeAgentSessionTree } from "../dist/src/providers/codeagent/session-tree.js";
 import { enrichCodeAgentSession } from "../dist/src/providers/codeagent/schema.js";
 import { buildOpenCodeSessionTree } from "../dist/src/providers/opencode/session-tree.js";
@@ -31,6 +31,7 @@ import { renderCanonicalFlowPanelContent, renderSessionPage } from "../dist/src/
 import { renderSettingsPage } from "../dist/src/views/settings.js";
 import { sessionCard } from "../dist/src/views/components.js";
 import { renderSessionsPage } from "../dist/src/views/sessions.js";
+import { getSearchResults } from "../dist/src/server.js";
 import { t } from "../dist/src/i18n.js";
 import {
   extractSessionMeta,
@@ -813,6 +814,101 @@ test("sessions search page preserves query and exposes content pagination", () =
   assert.match(html, /data-query="analysis"/);
   assert.match(html, /data-mode="content"/);
   assert.match(html, />Load more sessions<\/button>/);
+});
+
+test("sqlite session queries exclude viewer-deleted sessions from paging, projects, and search", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-visible-sessions-"));
+  const dbPath = path.join(temp, "sessions.db");
+  const db = new DatabaseSync(dbPath);
+
+  try {
+    db.exec(`
+      CREATE TABLE project (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        worktree TEXT
+      );
+      CREATE TABLE session (
+        id TEXT PRIMARY KEY,
+        project_id TEXT,
+        parent_id TEXT,
+        slug TEXT,
+        title TEXT,
+        directory TEXT,
+        time_created INTEGER,
+        time_updated INTEGER,
+        summary_additions INTEGER,
+        summary_deletions INTEGER,
+        summary_files INTEGER,
+        time_archived INTEGER
+      );
+      CREATE TABLE message (
+        id TEXT PRIMARY KEY,
+        session_id TEXT,
+        data TEXT
+      );
+      CREATE TABLE part (
+        id TEXT PRIMARY KEY,
+        message_id TEXT,
+        session_id TEXT,
+        data TEXT
+      );
+    `);
+
+    db.prepare("INSERT INTO project (id, name, worktree) VALUES (?, ?, ?)").run("p1", "Project One", "/p1");
+    db.prepare("INSERT INTO project (id, name, worktree) VALUES (?, ?, ?)").run("p2", "Project Two", "/p2");
+
+    const insertSession = db.prepare(`
+      INSERT INTO session (
+        id, project_id, parent_id, slug, title, directory, time_created, time_updated,
+        summary_additions, summary_deletions, summary_files, time_archived
+      ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 0, 0, 0, NULL)
+    `);
+    insertSession.run("a", "p1", "a", "needle title", "/p1", 100, 300);
+    insertSession.run("b", "p1", "b", "deleted content", "/p1", 100, 200);
+    insertSession.run("c", "p2", "c", "active content", "/p2", 100, 100);
+
+    const insertMessage = db.prepare("INSERT INTO message (id, session_id, data) VALUES (?, ?, ?)");
+    const insertPart = db.prepare("INSERT INTO part (id, message_id, session_id, data) VALUES (?, ?, ?, ?)");
+    for (const id of ["b", "c"]) {
+      insertMessage.run(`m-${id}`, id, JSON.stringify({ role: "assistant", time: { created: 100 } }));
+      insertPart.run(`p-${id}`, `m-${id}`, id, JSON.stringify({ text: "needle in content" }));
+    }
+  } finally {
+    db.close();
+  }
+
+  try {
+    const excluded = new Set(["b"]);
+    const firstPage = listSessions(1, 0, "", "", dbPath, "", excluded);
+    const secondPage = listSessions(1, 1, "", "", dbPath, "", excluded);
+
+    assert.equal(firstPage.total, 2);
+    assert.deepEqual(firstPage.sessions.map((session) => session.id), ["a"]);
+    assert.deepEqual(secondPage.sessions.map((session) => session.id), ["c"]);
+    assert.deepEqual(
+      listSessionProjects("", "", dbPath, excluded).map((project) => ({
+        id: project.id,
+        label: project.label,
+        count: project.count
+      })),
+      [
+        { id: "p1", label: "Project One", count: 1 },
+        { id: "p2", label: "Project Two", count: 1 }
+      ]
+    );
+    assert.deepEqual(
+      searchMessages("needle", 1, dbPath, excluded).map((match) => match.sessionId),
+      ["c"]
+    );
+
+    const search = getSearchResults("needle", 10, 0, dbPath, excluded);
+    assert.equal(search.total, 2);
+    assert.deepEqual(search.sessions.map((session) => session.id), ["a", "c"]);
+  } finally {
+    closeDb(dbPath);
+    rmSync(temp, { recursive: true, force: true });
+  }
 });
 
 test("session cards expose accessible action buttons", () => {
