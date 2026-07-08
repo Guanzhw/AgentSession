@@ -3,7 +3,10 @@ const PROVIDER = document.body.dataset.provider || "opencode";
 const IS_MANAGEABLE_PROVIDER = document.body.dataset.manageable === "true";
 const __I18N__ = {
   en: {
-    rename_prompt: "Enter new title:",
+    rename_title: "Rename session",
+    rename_label: "Session title",
+    rename_save: "Save",
+    rename_cancel: "Cancel",
     delete_confirm: "Delete this session? You can restore it from Trash.",
     permanent_delete_confirm: "Permanently delete? This cannot be undone.",
     batch_delete_confirm: "Delete {count} sessions?",
@@ -111,7 +114,10 @@ const __I18N__ = {
     scroll_loading: "Loading..."
   },
   zh: {
-    rename_prompt: "输入新标题：",
+    rename_title: "重命名会话",
+    rename_label: "会话标题",
+    rename_save: "保存",
+    rename_cancel: "取消",
     delete_confirm: "确定要删除此会话？可在回收站恢复。",
     permanent_delete_confirm: "永久删除后无法恢复，确定？",
     batch_delete_confirm: "确定删除 {count} 个会话？",
@@ -272,6 +278,106 @@ try {
 
 function queueToast(message, type = "success") {
   sessionStorage.setItem("pendingToast", JSON.stringify({ message, type }));
+}
+
+function openRenameDialog(currentTitle = "", restoreFocusTarget = null) {
+  return new Promise((resolve) => {
+    const previousActive = restoreFocusTarget instanceof HTMLElement
+      ? restoreFocusTarget
+      : document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const backdrop = document.createElement("div");
+    backdrop.className = "rename-dialog-backdrop";
+
+    const dialog = document.createElement("form");
+    dialog.className = "rename-dialog";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "rename-dialog-title");
+
+    const title = document.createElement("h2");
+    title.id = "rename-dialog-title";
+    title.textContent = ft("rename_title");
+
+    const label = document.createElement("label");
+    label.className = "rename-dialog-field";
+    label.textContent = ft("rename_label");
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = currentTitle || "";
+    label.appendChild(input);
+
+    const actions = document.createElement("div");
+    actions.className = "rename-dialog-actions";
+
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "btn btn-secondary";
+    cancel.textContent = ft("rename_cancel");
+
+    const save = document.createElement("button");
+    save.type = "submit";
+    save.className = "btn";
+    save.textContent = ft("rename_save");
+
+    actions.append(cancel, save);
+    dialog.append(title, label, actions);
+    backdrop.appendChild(dialog);
+
+    const close = (value) => {
+      document.removeEventListener("keydown", onKeydown, true);
+      backdrop.remove();
+      previousActive?.focus?.();
+      resolve(value);
+    };
+    const onKeydown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        close(null);
+        return;
+      }
+      if (event.key === "Tab") {
+        const focusable = [...dialog.querySelectorAll("button, input, select, textarea, [href], [tabindex]:not([tabindex='-1'])")]
+          .filter((element) => element instanceof HTMLElement && !element.disabled);
+        if (!focusable.length) {
+          return;
+        }
+        const first = focusable[0];
+        const last = focusable.at(-1);
+        if (!dialog.contains(document.activeElement)) {
+          event.preventDefault();
+          first.focus();
+          return;
+        }
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) {
+        close(null);
+      }
+    });
+    cancel.addEventListener("click", () => close(null));
+    dialog.addEventListener("submit", (event) => {
+      event.preventDefault();
+      close(input.value);
+    });
+    document.addEventListener("keydown", onKeydown, true);
+
+    document.body.appendChild(backdrop);
+    input.focus();
+    input.select();
+  });
 }
 
 async function copyText(value) {
@@ -1460,10 +1566,14 @@ document.addEventListener("click", async (e) => {
 
   if (action === "rename") {
     const card = btn.closest(".session-card");
+    const restoreFocusTarget = card?.querySelector(".card-menu-trigger") || btn;
+    document.querySelectorAll(".card-menu:not(.hidden)").forEach((menu) => {
+      menu.classList.add("hidden");
+    });
     const current = card
       ? card.querySelector(".session-card-title")?.textContent || ""
       : document.querySelector(".session-header h1")?.textContent || "";
-    const newTitle = prompt(ft("rename_prompt"), current);
+    const newTitle = await openRenameDialog(current, restoreFocusTarget);
     if (newTitle === null) return;
     try {
       await fetch(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/rename`, {

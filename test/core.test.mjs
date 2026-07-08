@@ -836,6 +836,14 @@ test("session cards expose accessible action buttons", () => {
   assert.match(html, /aria-label="Copy session ID"/);
 });
 
+test("session management rename uses an in-page dialog", () => {
+  const appJs = readFileSync(path.join(process.cwd(), "dist", "src", "static", "app.js"), "utf-8");
+
+  assert.doesNotMatch(appJs, /\bprompt\s*\(/);
+  assert.match(appJs, /openRenameDialog/);
+  assert.match(appJs, /rename-dialog/);
+});
+
 test("OpenCode runtime environment resolves project and user agent extensions", () => {
   const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-runtime-"));
   const projectPath = path.join(temp, "project");

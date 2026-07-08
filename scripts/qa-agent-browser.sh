@@ -89,6 +89,27 @@ dashboard_session_ids="$(read_ab "count dashboard session ids" get count ".sessi
 assert_positive_count "dashboard session ids" "$dashboard_session_ids"
 dashboard_copy_buttons="$(read_ab "count dashboard copy buttons" get count ".session-card [data-action='copy-session-id']")"
 assert_positive_count "dashboard session ID copy buttons" "$dashboard_copy_buttons"
+rename_dialog_count="$(read_ab "open rename dialog" eval "(() => { const card = document.querySelector('.session-card'); const trigger = card?.querySelector('.card-menu-trigger'); trigger?.click(); card?.querySelector('[data-action=\"rename\"]')?.click(); return document.querySelectorAll('.rename-dialog[role=\"dialog\"][aria-modal=\"true\"]').length; })()")"
+if [[ "$rename_dialog_count" != "1" ]]; then
+  echo "Rename should open one in-page dialog, got $rename_dialog_count" >&2
+  exit 1
+fi
+rename_tab_result="$(read_ab "verify rename dialog focus wrap" eval "(() => { const save = document.querySelector('.rename-dialog button[type=\"submit\"]'); const input = document.querySelector('.rename-dialog input'); save?.focus(); save?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })); return document.activeElement === input ? 'wrapped' : (document.activeElement?.textContent || document.activeElement?.tagName || ''); })()")"
+if [[ "$rename_tab_result" != "wrapped" && "$rename_tab_result" != '"wrapped"' ]]; then
+  echo "Rename dialog should wrap focus from Save back to the input, got $rename_tab_result" >&2
+  exit 1
+fi
+ab "dismiss rename dialog" press Escape >/dev/null
+rename_dialog_closed="$(read_ab "count dismissed rename dialog" get count ".rename-dialog")"
+if [[ "$rename_dialog_closed" != "0" ]]; then
+  echo "Rename dialog should close on Escape, got $rename_dialog_closed" >&2
+  exit 1
+fi
+rename_focus_restored="$(read_ab "check rename focus restore" eval "document.activeElement?.classList.contains('card-menu-trigger') ? 'trigger' : (document.activeElement?.tagName || '')")"
+if [[ "$rename_focus_restored" != "trigger" && "$rename_focus_restored" != '"trigger"' ]]; then
+  echo "Rename dialog should restore focus to the visible menu trigger, got $rename_focus_restored" >&2
+  exit 1
+fi
 
 ab "open stats" open "$BASE/opencode/stats" >/dev/null
 ab "wait for stats" wait --text "Statistics Overview" >/dev/null
