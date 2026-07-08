@@ -32,6 +32,7 @@ const __I18N__ = {
     menu_delete: "Delete",
     menu_more: "More actions",
     copy: "Copy",
+    copy_session_id: "Copy session ID",
     copied: "Copied",
     resume_opened: "Terminal opened",
     resume_disabled: "Terminal launch is unavailable",
@@ -139,6 +140,7 @@ const __I18N__ = {
     menu_delete: "删除",
     menu_more: "更多操作",
     copy: "复制",
+    copy_session_id: "复制会话 ID",
     copied: "已复制",
     resume_opened: "终端已打开",
     resume_disabled: "无法启动终端",
@@ -1655,7 +1657,7 @@ function renderSessionCard(s) {
       </header>
       <div class="session-id-row">
         <code class="session-id">${id}</code>
-        <button class="copy-btn" type="button" data-action="copy-session-id" data-id="${id}" title="${ft("copy")}">${ft("copy")}</button>
+        <button class="copy-btn" type="button" data-action="copy-session-id" data-id="${id}" title="${ft("copy_session_id")}" aria-label="${ft("copy_session_id")}">${ft("copy")}</button>
       </div>
       <p class="session-card-directory">${directory}</p>
       <footer class="session-card-stats">

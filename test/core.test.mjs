@@ -832,6 +832,8 @@ test("session cards expose accessible action buttons", () => {
   assert.match(html, /aria-label="☆ Star"/);
   assert.match(html, /class="card-menu-trigger" type="button"/);
   assert.match(html, /aria-label="More actions"/);
+  assert.match(html, /class="copy-btn" type="button" data-action="copy-session-id"/);
+  assert.match(html, /aria-label="Copy session ID"/);
 });
 
 test("OpenCode runtime environment resolves project and user agent extensions", () => {

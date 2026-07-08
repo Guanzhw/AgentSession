@@ -209,7 +209,7 @@ export function sessionCard(s, active = false, { showCheckbox = false, provider 
       </header>
       <div class="session-id-row">
         <code class="session-id">${escapeHtml(s.id)}</code>
-        <button class="copy-btn" type="button" data-action="copy-session-id" data-id="${escapeHtml(s.id)}" title="${t("action.copy_session_id")}">${t("action.copy")}</button>
+        <button class="copy-btn" type="button" data-action="copy-session-id" data-id="${escapeHtml(s.id)}" title="${t("action.copy_session_id")}" aria-label="${t("action.copy_session_id")}">${t("action.copy")}</button>
       </div>
       <p class="session-card-directory">${escapeHtml(s.directory || "")}</p>
       <footer class="session-card-stats">

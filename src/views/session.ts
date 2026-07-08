@@ -1466,7 +1466,7 @@ export function renderSessionPage({
       <h1>${escapeHtml(title)}</h1>
       <div class="session-id-row session-detail-id">
         <code class="session-id">${escapeHtml(session.id)}</code>
-        <button class="copy-btn" type="button" data-action="copy-session-id" data-id="${escapeHtml(session.id)}" title="${t("action.copy_session_id")}">${t("action.copy")}</button>
+        <button class="copy-btn" type="button" data-action="copy-session-id" data-id="${escapeHtml(session.id)}" title="${t("action.copy_session_id")}" aria-label="${t("action.copy_session_id")}">${t("action.copy")}</button>
       </div>
       <div class="session-meta-row">
         <span class="session-directory">${escapeHtml(session.directory || "")}</span>
