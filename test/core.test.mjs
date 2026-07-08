@@ -31,7 +31,7 @@ import { renderCanonicalFlowPanelContent, renderSessionPage } from "../dist/src/
 import { renderSettingsPage } from "../dist/src/views/settings.js";
 import { sessionCard } from "../dist/src/views/components.js";
 import { renderSessionsPage } from "../dist/src/views/sessions.js";
-import { getSearchResults } from "../dist/src/server.js";
+import { getSearchResults, resolveSessionSearchMode } from "../dist/src/server.js";
 import { t } from "../dist/src/i18n.js";
 import {
   extractSessionMeta,
@@ -814,6 +814,15 @@ test("sessions search page preserves query and exposes content pagination", () =
   assert.match(html, /data-query="analysis"/);
   assert.match(html, /data-mode="content"/);
   assert.match(html, />Load more sessions<\/button>/);
+});
+
+test("session API search mode accepts explicit and compatible parameter names", () => {
+  assert.equal(resolveSessionSearchMode(new URLSearchParams()), "list");
+  assert.equal(resolveSessionSearchMode(new URLSearchParams("mode=content")), "content");
+  assert.equal(resolveSessionSearchMode(new URLSearchParams("searchMode=content")), "content");
+  assert.equal(resolveSessionSearchMode(new URLSearchParams("searchMode=list")), "list");
+  assert.equal(resolveSessionSearchMode(new URLSearchParams("mode=list&searchMode=content")), "list");
+  assert.equal(resolveSessionSearchMode(new URLSearchParams("mode=unexpected")), "list");
 });
 
 test("sqlite session queries exclude viewer-deleted sessions from paging, projects, and search", () => {

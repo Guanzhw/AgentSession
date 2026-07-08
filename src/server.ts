@@ -238,6 +238,10 @@ function getVisibleListResults({
   };
 }
 
+export function resolveSessionSearchMode(params) {
+  return (params.get("mode") || params.get("searchMode")) === "content" ? "content" : "list";
+}
+
 export function getSearchResults(query, limit, offset, dbPath = undefined, excludedIds = new Set()) {
   const term = (query || "").trim();
   if (!term) {
@@ -1199,7 +1203,7 @@ export async function startServer(config = getConfig()) {
         const range = url.searchParams.get("range") || "";
         const query = url.searchParams.get("q") || "";
         const project = url.searchParams.get("project") || "";
-        const searchMode = url.searchParams.get("mode") || "list";
+        const searchMode = resolveSessionSearchMode(url.searchParams);
 
         if (usesSqliteSessionStore(adapter)) {
           const dbPath = adapter.getDataPath();
