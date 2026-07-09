@@ -1840,9 +1840,16 @@ const batchCancelBtn = document.getElementById("batch-cancel");
 let batchMode = false;
 
 function updateBatchCount() {
-  if (!batchCountNum) return;
+  const checkboxes = [...document.querySelectorAll(".card-checkbox")];
   const checked = document.querySelectorAll(".card-checkbox:checked").length;
-  batchCountNum.textContent = checked;
+  if (batchCountNum) batchCountNum.textContent = checked;
+  if (selectAllCheckbox) {
+    selectAllCheckbox.checked = checkboxes.length > 0 && checked === checkboxes.length;
+    selectAllCheckbox.indeterminate = checked > 0 && checked < checkboxes.length;
+  }
+  document.querySelectorAll(".batch-action[data-action]").forEach((btn) => {
+    btn.disabled = checked === 0;
+  });
 }
 
 function setBatchMode(on) {
@@ -1854,9 +1861,8 @@ function setBatchMode(on) {
     document.querySelectorAll(".card-checkbox:checked").forEach((cb) => {
       cb.checked = false;
     });
-    if (selectAllCheckbox) selectAllCheckbox.checked = false;
-    updateBatchCount();
   }
+  updateBatchCount();
 }
 
 if (toggleBatchBtn) {
@@ -2025,6 +2031,7 @@ if (scrollSentinel && sessionList) {
       const data = await res.json();
       const markup = Array.isArray(data.sessions) ? data.sessions.map(renderSessionCard).join("") : "";
       sessionList.insertAdjacentHTML("beforeend", markup);
+      updateBatchCount();
       scrollOffset = (Number(data.offset) || 0) + (Array.isArray(data.sessions) ? data.sessions.length : 0);
 
       if (!data.hasMore || scrollOffset >= scrollTotal) {

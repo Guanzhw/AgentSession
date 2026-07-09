@@ -816,6 +816,31 @@ test("sessions search page preserves query and exposes content pagination", () =
   assert.match(html, />Load more sessions<\/button>/);
 });
 
+test("session batch actions are disabled until a session is selected", () => {
+  const html = renderSessionsPage({
+    sessions: [{
+      id: "ses_batch",
+      title: "Batch session",
+      directory: "D:\\WorkSpace\\OpenSession",
+      time_updated: 1_700_000_000_000,
+      summary_files: 0,
+      summary_additions: 0,
+      summary_deletions: 0
+    }],
+    total: 1,
+    limit: 30,
+    offset: 0,
+    provider: "opencode",
+    providerAvailable: true,
+    manageable: true,
+    providers: []
+  });
+
+  assert.match(html, /<button class="btn batch-action" data-action="star" disabled>/);
+  assert.match(html, /<button class="btn batch-action" data-action="unstar" disabled>/);
+  assert.match(html, /<button class="btn batch-action btn-danger" data-action="delete" disabled>/);
+});
+
 test("session API search mode accepts explicit and compatible parameter names", () => {
   assert.equal(resolveSessionSearchMode(new URLSearchParams()), "list");
   assert.equal(resolveSessionSearchMode(new URLSearchParams("mode=content")), "content");
@@ -975,6 +1000,11 @@ test("session management uses in-page dialogs", () => {
   assert.match(appJs, /rename-dialog/);
   assert.match(appJs, /confirm-dialog/);
   assert.match(appJs, /aria-describedby/);
+  assert.match(appJs, /selectAllCheckbox\.indeterminate = checked > 0 && checked < checkboxes\.length/);
+  assert.match(appJs, /btn\.disabled = checked === 0/);
+  const style = readFileSync(path.join(process.cwd(), "dist", "src", "static", "style.css"), "utf-8");
+  assert.match(style, /\.btn:disabled \{/);
+  assert.match(style, /cursor: not-allowed;/);
 });
 
 test("OpenCode runtime environment resolves project and user agent extensions", () => {

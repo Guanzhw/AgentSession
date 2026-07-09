@@ -3691,6 +3691,17 @@ pre code.hljs {
   background: var(--bg-secondary);
 }
 
+.btn:disabled {
+  cursor: not-allowed;
+  color: var(--text-muted);
+  background: var(--bg-secondary);
+  opacity: 0.65;
+}
+
+.btn:disabled:hover {
+  background: var(--bg-secondary);
+}
+
 .btn-manage {
   background: var(--bg-secondary);
   font-size: 13px;

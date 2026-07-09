@@ -141,9 +141,9 @@ export function renderSessionsPage({
         <input type="checkbox" id="select-all"> ${t("batch.select_all")}
       </label>
       <span class="batch-count">${t("batch.selected").replace("<strong>{count}</strong>", '<strong id="batch-count-num">0</strong>')}</span>
-      <button class="btn batch-action" data-action="star">${t("batch.star")}</button>
-      <button class="btn batch-action" data-action="unstar">${t("batch.unstar")}</button>
-      <button class="btn batch-action btn-danger" data-action="delete">${t("batch.delete")}</button>
+      <button class="btn batch-action" data-action="star" disabled>${t("batch.star")}</button>
+      <button class="btn batch-action" data-action="unstar" disabled>${t("batch.unstar")}</button>
+      <button class="btn batch-action btn-danger" data-action="delete" disabled>${t("batch.delete")}</button>
       <button class="btn batch-action" id="batch-cancel">${t("batch.cancel")}</button>
     </div>` : ""}
     <section class="session-list" id="session-list">
