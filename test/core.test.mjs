@@ -825,6 +825,25 @@ test("session API search mode accepts explicit and compatible parameter names", 
   assert.equal(resolveSessionSearchMode(new URLSearchParams("mode=unexpected")), "list");
 });
 
+test("mobile topbar keeps settings reachable when utility links collapse", () => {
+  const html = renderSessionsPage({
+    sessions: [],
+    total: 0,
+    limit: 30,
+    offset: 0,
+    provider: "opencode",
+    providerAvailable: true,
+    manageable: true,
+    providers: []
+  });
+  const style = readFileSync(path.join(process.cwd(), "dist", "src", "static", "style.css"), "utf8");
+
+  assert.match(html, /href="\/opencode\/stats" class="nav-link nav-link-stats /);
+  assert.match(html, /href="\/opencode\/trash" class="nav-link nav-link-trash /);
+  assert.match(html, /href="\/opencode\/settings" class="nav-link nav-link-settings [^"]*" title="Settings" aria-label="Settings"/);
+  assert.match(style, /@media \(max-width: 480px\)[\s\S]*\.topbar-actions \.nav-link \{\s*display: none;[\s\S]*\.topbar-actions \.nav-link-settings \{\s*display: inline-flex;/);
+});
+
 test("sqlite session queries exclude viewer-deleted sessions from paging, projects, and search", () => {
   const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-visible-sessions-"));
   const dbPath = path.join(temp, "sessions.db");

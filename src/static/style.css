@@ -4739,6 +4739,20 @@ pre code.hljs {
   .topbar-actions .nav-link {
     display: none;
   }
+  .topbar-actions .nav-link-settings {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    height: 32px;
+    padding: 4px 8px;
+    font-size: 0;
+  }
+  .topbar-actions .nav-link-settings::before {
+    content: "\2699";
+    font-size: 16px;
+    line-height: 1;
+  }
   .search-input {
     width: 80px;
   }
