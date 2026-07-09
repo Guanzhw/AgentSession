@@ -13,6 +13,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
+import { runInNewContext } from "node:vm";
 
 import { closeDb, getTokenStats, listSessionProjects, listSessions, searchMessages } from "../dist/src/db.js";
 import { buildCodeAgentSessionTree } from "../dist/src/providers/codeagent/session-tree.js";
@@ -841,6 +842,24 @@ test("session batch actions are disabled until a session is selected", () => {
   assert.match(html, /<button class="btn batch-action btn-danger" data-action="delete" disabled>/);
 });
 
+test("empty session result pages hide batch management controls", () => {
+  const html = renderSessionsPage({
+    sessions: [],
+    total: 0,
+    limit: 30,
+    offset: 0,
+    query: "missing",
+    provider: "opencode",
+    providerAvailable: true,
+    manageable: true,
+    providers: []
+  });
+
+  assert.match(html, /No sessions found for keyword: <strong>missing<\/strong>/);
+  assert.doesNotMatch(html, /id="toggle-batch"/);
+  assert.doesNotMatch(html, /id="batch-bar"/);
+});
+
 test("session API search mode accepts explicit and compatible parameter names", () => {
   assert.equal(resolveSessionSearchMode(new URLSearchParams()), "list");
   assert.equal(resolveSessionSearchMode(new URLSearchParams("mode=content")), "content");
@@ -1002,9 +1021,37 @@ test("session management uses in-page dialogs", () => {
   assert.match(appJs, /aria-describedby/);
   assert.match(appJs, /selectAllCheckbox\.indeterminate = checked > 0 && checked < checkboxes\.length/);
   assert.match(appJs, /btn\.disabled = checked === 0/);
+  assert.match(appJs, /function isEditableShortcutTarget/);
+  assert.match(appJs, /tagName === "TEXTAREA"/);
+  assert.match(appJs, /!isEditableShortcutTarget\(e\.target\)/);
+  assert.match(appJs, /document\.getElementById\("search-input"\)\?\.focus\(\)/);
   const style = readFileSync(path.join(process.cwd(), "dist", "src", "static", "style.css"), "utf-8");
   assert.match(style, /\.btn:disabled \{/);
   assert.match(style, /cursor: not-allowed;/);
+});
+
+test("global search shortcut ignores editable targets", () => {
+  const appJs = readFileSync(path.join(process.cwd(), "dist", "src", "static", "app.js"), "utf-8");
+  const helperSource = appJs.match(/function isEditableShortcutTarget\(target\) \{[\s\S]*?target\.isContentEditable;\n\}/)?.[0];
+  assert.ok(helperSource);
+
+  class FakeHTMLElement {
+    constructor(tagName, isContentEditable = false) {
+      this.tagName = tagName;
+      this.isContentEditable = isContentEditable;
+    }
+  }
+  const isEditableShortcutTarget = runInNewContext(
+    `${helperSource}\nisEditableShortcutTarget;`,
+    { HTMLElement: FakeHTMLElement }
+  );
+
+  assert.equal(isEditableShortcutTarget(new FakeHTMLElement("INPUT")), true);
+  assert.equal(isEditableShortcutTarget(new FakeHTMLElement("TEXTAREA")), true);
+  assert.equal(isEditableShortcutTarget(new FakeHTMLElement("SELECT")), true);
+  assert.equal(isEditableShortcutTarget(new FakeHTMLElement("DIV", true)), true);
+  assert.equal(isEditableShortcutTarget(new FakeHTMLElement("DIV")), false);
+  assert.equal(isEditableShortcutTarget({ tagName: "TEXTAREA" }), false);
 });
 
 test("OpenCode runtime environment resolves project and user agent extensions", () => {

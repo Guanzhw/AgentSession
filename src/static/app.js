@@ -1544,10 +1544,21 @@ if (analysisStatusPanel) {
   });
 }
 
+function isEditableShortcutTarget(target) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  const tagName = target.tagName;
+  return tagName === "INPUT"
+    || tagName === "TEXTAREA"
+    || tagName === "SELECT"
+    || target.isContentEditable;
+}
+
 document.addEventListener("keydown", (e) => {
-  if (e.key === "/" && document.activeElement.tagName !== "INPUT") {
+  if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey && !isEditableShortcutTarget(e.target)) {
     e.preventDefault();
-    document.getElementById("search-input").focus();
+    document.getElementById("search-input")?.focus();
   }
   if (e.key === "Escape") {
     const flowPanel = document.getElementById("session-flow-panel");

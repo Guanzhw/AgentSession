@@ -23,6 +23,7 @@ export function renderSessionsPage({
 } = {}) {
   const isAvailable = providerAvailable !== false;
   const isManageableProvider = isAvailable && manageable;
+  const hasVisibleSessions = sessions.length > 0;
   const hasActiveFilters = Boolean(query || range || project);
   const cards = !isAvailable
     ? `<p class="empty-state">${t("provider.not_detected")}</p>`
@@ -130,12 +131,12 @@ export function renderSessionsPage({
           <h1>${searchMode === "content" && query ? t("sessions.search_title").replace("{query}", escapeHtml(query)) : t("sessions.title")}</h1>
           <p>${t("sessions.count").replace("{count}", total)}</p>
         </div>
-        ${searchMode !== "content" && isManageableProvider ? `<button class="btn btn-manage" id="toggle-batch">${t("sessions.manage")}</button>` : ""}
+        ${searchMode !== "content" && isManageableProvider && hasVisibleSessions ? `<button class="btn btn-manage" id="toggle-batch">${t("sessions.manage")}</button>` : ""}
       </div>
       ${searchNote}
       ${searchMode !== "content" ? filterBar : ""}
     </section>
-    ${isManageableProvider ? `
+    ${isManageableProvider && hasVisibleSessions ? `
     <div class="batch-bar hidden" id="batch-bar">
       <label class="batch-select-all">
         <input type="checkbox" id="select-all"> ${t("batch.select_all")}
