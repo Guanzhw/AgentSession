@@ -1454,6 +1454,15 @@ test("settings page exposes config location and startup-only launch status", () 
   assert.equal(codeAgentInitialData.analysisDefaultCommand.executable, "opencode");
 });
 
+test("settings browser script blocks save while advanced JSON is invalid", () => {
+  const appScript = readFileSync(path.join(process.cwd(), "dist", "src", "static", "app.js"), "utf8");
+
+  assert.match(appScript, /let settingsJsonValid = true;/);
+  assert.match(appScript, /submitButton\.disabled = !settingsDirty \|\| !settingsJsonValid;/);
+  assert.match(appScript, /const invalidJsonMessage = \(error\) => `\$\{ft\("settings_invalid_json"\)\}: \$\{error\.message\}`;/);
+  assert.match(appScript, /if \(event\.target === editor\) \{\s*updateEditorJsonState\(\{ showMessage: true \}\);/);
+});
+
 test("built-in analysis materials do not claim provider runtime paths", () => {
   const providerRuntimePath = /(^|[\\/])\.(agents|codex|claude|opencode|gemini)([\\/]|$)/;
   const instructionFile = /^(AGENTS(?:\.override)?|CLAUDE(?:\.local)?|GEMINI)\.md$/i;

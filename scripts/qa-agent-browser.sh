@@ -163,6 +163,18 @@ if ! [[ "$settings_switch_count" =~ ^[0-9]+$ ]] || (( settings_switch_count < 4 
   echo "Settings page should render at least four switches, got $settings_switch_count" >&2
   exit 1
 fi
+ab "open advanced settings JSON" click "[data-open-settings-advanced]" >/dev/null
+ab "enter invalid settings JSON" fill "#settings-json" "{" >/dev/null
+invalid_settings_save_disabled="$(read_ab "read invalid settings save disabled" eval "document.querySelector('.settings-save')?.disabled")"
+if [[ "$invalid_settings_save_disabled" != "true" ]]; then
+  echo "Settings save should be disabled while advanced JSON is invalid, got $invalid_settings_save_disabled" >&2
+  exit 1
+fi
+invalid_settings_feedback="$(read_ab "read invalid settings JSON feedback" eval "document.getElementById('settings-json-feedback')?.innerText.includes('Enter valid JSON before saving')")"
+if [[ "$invalid_settings_feedback" != "true" ]]; then
+  echo "Settings invalid JSON feedback should explain the save blocker, got $invalid_settings_feedback" >&2
+  exit 1
+fi
 
 ab "open search" open "$BASE/opencode/search?q=assistant" >/dev/null
 ab "wait for search" wait --text "Search" >/dev/null

@@ -527,6 +527,7 @@ if (settingsForm) {
   const submitButton = settingsForm.querySelector("button[type='submit']");
   const dirtyState = document.getElementById("settings-dirty-state");
   let settingsDirty = false;
+  let settingsJsonValid = true;
 
   const setSettingsFeedback = (message, type = "") => {
     feedback.textContent = message;
@@ -539,14 +540,9 @@ if (settingsForm) {
     jsonFeedback.className = `settings-json-feedback ${type ? `settings-json-feedback-${type}` : ""}`;
   };
 
-  const setSettingsDirty = (dirty) => {
-    settingsDirty = Boolean(dirty);
-    if (dirtyState) {
-      dirtyState.dataset.dirty = String(settingsDirty);
-      dirtyState.textContent = ft(settingsDirty ? "settings_unsaved" : "settings_all_saved");
-    }
+  const updateSubmitState = () => {
     if (submitButton) {
-      submitButton.disabled = !settingsDirty;
+      submitButton.disabled = !settingsDirty || !settingsJsonValid;
     }
   };
 
@@ -581,6 +577,36 @@ if (settingsForm) {
       throw new Error("Configuration root must be a JSON object.");
     }
     return parsed;
+  };
+  const invalidJsonMessage = (error) => `${ft("settings_invalid_json")}: ${error.message}`;
+  const setSettingsDirty = (dirty) => {
+    settingsDirty = Boolean(dirty);
+    if (dirtyState) {
+      dirtyState.dataset.dirty = String(settingsDirty);
+      dirtyState.textContent = ft(settingsDirty ? "settings_unsaved" : "settings_all_saved");
+    }
+    updateSubmitState();
+  };
+  const updateEditorJsonState = ({ showMessage = false } = {}) => {
+    try {
+      parseEditor();
+      settingsJsonValid = true;
+      updateSubmitState();
+      if (showMessage) {
+        setSettingsFeedback("");
+        setJsonFeedback("");
+      }
+      return true;
+    } catch (error) {
+      settingsJsonValid = false;
+      updateSubmitState();
+      if (showMessage) {
+        const message = invalidJsonMessage(error);
+        setSettingsFeedback(message, "error");
+        setJsonFeedback(message, "error");
+      }
+      return false;
+    }
   };
 
   const extractModel = (args) => {
@@ -944,10 +970,14 @@ if (settingsForm) {
   formatButton?.addEventListener("click", () => {
     try {
       editor.value = `${JSON.stringify(parseEditor(), null, 2)}\n`;
+      settingsJsonValid = true;
+      updateSubmitState();
       setSettingsFeedback("");
       setJsonFeedback("");
     } catch (error) {
-      const message = `${ft("settings_invalid_json")}: ${error.message}`;
+      settingsJsonValid = false;
+      updateSubmitState();
+      const message = invalidJsonMessage(error);
       setSettingsFeedback(message, "error");
       setJsonFeedback(message, "error");
     }
@@ -956,11 +986,14 @@ if (settingsForm) {
   applyJsonButton?.addEventListener("click", () => {
     try {
       populateSettingsForm(parseEditor());
+      settingsJsonValid = true;
       setSettingsDirty(true);
       setSettingsFeedback(ft("settings_json_applied"), "success");
       setJsonFeedback(ft("settings_json_applied"), "success");
     } catch (error) {
-      const message = `${ft("settings_invalid_json")}: ${error.message}`;
+      settingsJsonValid = false;
+      updateSubmitState();
+      const message = invalidJsonMessage(error);
       setSettingsFeedback(message, "error");
       setJsonFeedback(message, "error");
     }
@@ -1076,24 +1109,34 @@ if (settingsForm) {
     shellCustomField?.classList.toggle("hidden", shellMode.value !== "custom");
   });
 
-  settingsForm.addEventListener("input", () => {
+  settingsForm.addEventListener("input", (event) => {
     setSettingsDirty(true);
-    setSettingsFeedback("");
-    setJsonFeedback("");
+    if (event.target === editor) {
+      updateEditorJsonState({ showMessage: true });
+    } else {
+      setSettingsFeedback("");
+      if (settingsJsonValid) {
+        setJsonFeedback("");
+      }
+    }
   });
 
   settingsForm.addEventListener("change", (event) => {
     if (event.target !== targetSelect) {
       setSettingsDirty(true);
       setSettingsFeedback("");
-      setJsonFeedback("");
+      if (settingsJsonValid) {
+        setJsonFeedback("");
+      }
     }
   });
 
   settingsForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
-      const config = collectStructuredSettings(parseEditor());
+      const parsedEditor = parseEditor();
+      settingsJsonValid = true;
+      const config = collectStructuredSettings(parsedEditor);
       submitButton.disabled = true;
       setSettingsFeedback("");
       setJsonFeedback("");
@@ -1125,10 +1168,19 @@ if (settingsForm) {
       setSettingsDirty(false);
       showToast(ft("settings_saved"), "success");
     } catch (error) {
-      setSettingsFeedback(error.message || ft("settings_validation_error"), "error");
+      try {
+        parseEditor();
+        settingsJsonValid = true;
+        setSettingsFeedback(error.message || ft("settings_validation_error"), "error");
+      } catch (jsonError) {
+        settingsJsonValid = false;
+        const message = invalidJsonMessage(jsonError);
+        setSettingsFeedback(message, "error");
+        setJsonFeedback(message, "error");
+      }
       showToast(ft("toast_error"), "error");
     } finally {
-      submitButton.disabled = !settingsDirty;
+      updateSubmitState();
     }
   });
 }
