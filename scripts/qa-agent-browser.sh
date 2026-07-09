@@ -180,10 +180,9 @@ ab "open search" open "$BASE/opencode/search?q=assistant" >/dev/null
 ab "wait for search" wait --text "Search" >/dev/null
 
 ab "open session detail" open "$BASE/opencode/session/$SAMPLE_SESSION_ID" >/dev/null
-ab "wait for reasoning" wait --text "Reasoning" >/dev/null
+ab "wait for reasoning" wait ".reasoning-block" >/dev/null
 detail="$(read_ab "read session detail" get text body)"
 assert_not_contains "detail" "$detail" "System Prompts"
-assert_contains "detail" "$detail" "Reasoning"
 assert_contains "detail" "$detail" "Flow"
 assert_contains "detail" "$detail" "TOOL"
 assert_contains "detail session ID" "$detail" "$SAMPLE_SESSION_ID"

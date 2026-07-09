@@ -175,6 +175,9 @@ export function formatDuration(startMs, endMs) {
 
 export function sessionCard(s, active = false, { showCheckbox = false, provider = "opencode", manageable = false } = {}) {
   const title = s.title || s.slug || s.id;
+  const encodedProvider = encodeURIComponent(provider);
+  const encodedSessionId = encodeURIComponent(s.id);
+  const exportFilePrefix = `session-${String(s.id).slice(0, 8)}`;
   const classes = ["session-card"];
   if (active) classes.push("active");
   if (s.starred) classes.push("starred");
@@ -191,8 +194,8 @@ export function sessionCard(s, active = false, { showCheckbox = false, provider 
       <button class="card-menu-trigger" type="button" data-id="${escapeHtml(s.id)}" title="${t("action.more")}" aria-label="${t("action.more")}">⋮</button>
       <div class="card-menu hidden" data-id="${escapeHtml(s.id)}">
         <button type="button" data-action="rename" data-id="${escapeHtml(s.id)}">${t("menu.rename")}</button>
-        <button type="button" data-action="export-md" data-id="${escapeHtml(s.id)}">${t("menu.export_md")}</button>
-        <button type="button" data-action="export-json" data-id="${escapeHtml(s.id)}">${t("menu.export_json")}</button>
+        <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=md" download="${escapeHtml(exportFilePrefix)}.md">${t("menu.export_md")}</a>
+        <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=json" download="${escapeHtml(exportFilePrefix)}.json">${t("menu.export_json")}</a>
         <button type="button" data-action="delete" data-id="${escapeHtml(s.id)}" class="menu-danger">${t("menu.delete")}</button>
       </div>
     </div>

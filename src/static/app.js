@@ -1828,14 +1828,6 @@ document.addEventListener("click", async (e) => {
     return;
   }
 
-  if (action === "export-md") {
-    window.open(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/export?format=md`, "_blank");
-    return;
-  }
-
-  if (action === "export-json") {
-    window.open(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/export?format=json`, "_blank");
-  }
 });
 
 const toggleBatchBtn = document.getElementById("toggle-batch");
@@ -1942,6 +1934,9 @@ function escapeHtmlClient(str) {
 
 function renderSessionCard(s) {
   const id = escapeHtmlClient(s.id);
+  const encodedProvider = encodeURIComponent(PROVIDER);
+  const encodedSessionId = encodeURIComponent(s.id || "");
+  const exportFilePrefix = escapeHtmlClient(`session-${String(s.id || "").slice(0, 8)}`);
   const title = escapeHtmlClient(s.title || s.id);
   const directory = escapeHtmlClient(s.directory || "");
   const timeUpdated = Number(s.time_updated) || Date.now();
@@ -1956,8 +1951,8 @@ function renderSessionCard(s) {
       <button class="card-menu-trigger" type="button" data-id="${id}" title="${escapeHtmlClient(ft("menu_more"))}" aria-label="${escapeHtmlClient(ft("menu_more"))}">⋮</button>
       <div class="card-menu hidden" data-id="${id}">
         <button type="button" data-action="rename" data-id="${id}">${ft("menu_rename")}</button>
-        <button type="button" data-action="export-md" data-id="${id}">${ft("menu_export_md")}</button>
-        <button type="button" data-action="export-json" data-id="${id}">${ft("menu_export_json")}</button>
+        <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=md" download="${exportFilePrefix}.md">${ft("menu_export_md")}</a>
+        <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=json" download="${exportFilePrefix}.json">${ft("menu_export_json")}</a>
         <button type="button" data-action="delete" data-id="${id}" class="menu-danger">${ft("menu_delete")}</button>
       </div>
     </div>

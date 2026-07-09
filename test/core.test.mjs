@@ -958,6 +958,12 @@ test("session cards expose accessible action buttons", () => {
   assert.match(html, /aria-label="More actions"/);
   assert.match(html, /class="copy-btn" type="button" data-action="copy-session-id"/);
   assert.match(html, /aria-label="Copy session ID"/);
+  assert.match(html, /href="\/api\/opencode\/session\/ses_accessible\/export\?format=md"/);
+  assert.match(html, /href="\/api\/opencode\/session\/ses_accessible\/export\?format=json"/);
+  assert.match(html, /download="session-ses_acce\.md"/);
+  assert.match(html, /download="session-ses_acce\.json"/);
+  assert.doesNotMatch(html, /data-action="export-md"/);
+  assert.doesNotMatch(html, /data-action="export-json"/);
 });
 
 test("session management uses in-page dialogs", () => {
