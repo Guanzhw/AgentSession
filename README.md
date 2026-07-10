@@ -42,7 +42,7 @@ OpenCode 和 CodeAgent 使用独立的本地元数据库保存收藏、重命名
 ## 主要功能
 
 - **统一仪表盘**：所有已检测 Provider 都显示在顶栏，未检测的 Provider 会灰显。
-- **会话列表与搜索**：支持时间范围筛选、无限滚动、标题与内容搜索。
+- **会话列表与搜索**：支持项目/时间/收藏筛选、排序、无限滚动、标题与内容搜索。
 - **详情页复盘**：按消息、工具调用、todo、subsession 展开完整会话。
 - **递归 Session Tree**：OpenCode/CodeAgent 的 child session 会被组织成嵌套结构，而不是散落在平铺消息里。
 - **Tool Flow Tree**：右侧 Flow 视图按时间和层级展示 root、message、tool、subagent 分支。
@@ -128,6 +128,9 @@ codeagent-session [options]
 操作。
 启动时优先使用 Windows Terminal（`wt.exe`）；如果不可用，则直接打开已配置的
 PowerShell Host。
+API 会等待终端 Host 或 PowerShell wrapper 确认启动后才返回成功；如果 Host
+无法启动，页面会显示错误，而不是弹出成功提示。运行时启动日志会记录所选 Host、
+fallback 信息，以及可用时的 launcher PID。
 
 所有已注册 Provider 都声明了默认继续命令：
 

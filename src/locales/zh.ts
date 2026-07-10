@@ -30,8 +30,17 @@ export const zh = {
   "filter.all_projects": "全部项目",
   "filter.unknown_project": "未知项目",
   "filter.time": "时间",
+  "filter.sort": "排序",
+  "filter.view": "视图",
+  "filter.starred_only": "仅看收藏",
   "filter.apply": "应用",
   "filter.clear": "清除",
+
+  // Sort filter
+  "sort.updated_desc": "最近更新",
+  "sort.updated_asc": "最早更新",
+  "sort.title_asc": "标题 A-Z",
+  "sort.title_desc": "标题 Z-A",
 
   // Session card
   "card.files": "{count} 个文件",

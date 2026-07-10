@@ -37,7 +37,7 @@ import {
   resolveExecutable,
   resolvePowerShellLaunch,
   resolveProjectDirectory,
-  spawnPowerShellLaunch
+  launchPowerShellWithFallback
 } from "./resume.js";
 import { supportsSessionAnalysis as providerSupportsSessionAnalysis } from "./providers/kinds.js";
 
@@ -1765,7 +1765,7 @@ export function buildPowerShellImplementationArgs(powershell, shellArgs = ["-NoE
   ];
 }
 
-export function launchSessionAnalysis(run, fallbackShell = null) {
+export async function launchSessionAnalysis(run, fallbackShell = null) {
   if (process.platform !== "win32") {
     throw new Error("Terminal launching is currently supported on Windows only");
   }
@@ -1792,7 +1792,7 @@ export function launchSessionAnalysis(run, fallbackShell = null) {
     nodeExecutable: process.execPath,
     validatorPath: path.join(path.dirname(fileURLToPath(import.meta.url)), "analysis-validator.js")
   }), "utf-8").toString("base64");
-  spawnPowerShellLaunch({
+  const launchResult = await launchPowerShellWithFallback({
     cwd: run.command.cwd,
     terminal: launchHost.terminal,
     powershellArgs: buildPowerShellAnalysisArgs(launchHost.powershell, launchHost.shellArgs),
@@ -1805,9 +1805,10 @@ export function launchSessionAnalysis(run, fallbackShell = null) {
     launchedAt: new Date().toISOString()
   };
   writeJson(run.files.manifestPath, launched);
+  return launchResult;
 }
 
-export function launchAnalysisImplementation(run, fallbackShell = null) {
+export async function launchAnalysisImplementation(run, fallbackShell = null) {
   if (process.platform !== "win32") {
     throw new Error("Terminal launching is currently supported on Windows only");
   }
@@ -1823,7 +1824,7 @@ export function launchAnalysisImplementation(run, fallbackShell = null) {
     stdinPath: run.command.stdinPath,
     runDir: run.runDir
   }), "utf-8").toString("base64");
-  spawnPowerShellLaunch({
+  const launchResult = await launchPowerShellWithFallback({
     cwd: run.command.cwd,
     terminal: launchHost.terminal,
     powershellArgs: buildPowerShellImplementationArgs(launchHost.powershell, launchHost.shellArgs),
@@ -1839,4 +1840,5 @@ export function launchAnalysisImplementation(run, fallbackShell = null) {
     }
   };
   writeJson(run.files.manifestPath, launched);
+  return launchResult;
 }

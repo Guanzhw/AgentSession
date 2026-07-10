@@ -14,6 +14,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { runInNewContext } from "node:vm";
+import { EventEmitter } from "node:events";
 
 import { closeDb, getTokenStats, listSessionProjects, listSessions, searchMessages } from "../dist/src/db.js";
 import { buildCodeAgentSessionTree } from "../dist/src/providers/codeagent/session-tree.js";
@@ -32,7 +33,7 @@ import { renderCanonicalFlowPanelContent, renderSessionPage } from "../dist/src/
 import { renderSettingsPage } from "../dist/src/views/settings.js";
 import { sessionCard } from "../dist/src/views/components.js";
 import { renderSessionsPage } from "../dist/src/views/sessions.js";
-import { getSearchResults, resolveSessionSearchMode } from "../dist/src/server.js";
+import { getSearchResults, resolveSessionSearchMode, resolveSessionSort, resolveStarredFilter } from "../dist/src/server.js";
 import { t } from "../dist/src/i18n.js";
 import {
   extractSessionMeta,
@@ -49,9 +50,11 @@ import {
   buildPowerShellLaunchSpec,
   buildPowerShellResumeArgs,
   getResumeCommand,
+  launchPowerShellWithFallback,
   resolvePowerShellLaunch,
   resolveProjectDirectory,
-  resolveWindowsExecutableCandidate
+  resolveWindowsExecutableCandidate,
+  spawnPowerShellLaunch
 } from "../dist/src/resume.js";
 import {
   buildAnalysisPromptPreview,
@@ -842,6 +845,37 @@ test("session batch actions are disabled until a session is selected", () => {
   assert.match(html, /<button class="btn batch-action btn-danger" data-action="delete" disabled>/);
 });
 
+test("session list exposes sort and starred filters through pagination", () => {
+  const html = renderSessionsPage({
+    sessions: Array.from({ length: 30 }, (_, index) => ({
+      id: `ses_filter_${index}`,
+      title: `Session ${index}`,
+      directory: "D:\\WorkSpace\\OpenSession",
+      time_updated: 1_700_000_000_000 + index,
+      summary_files: 0,
+      summary_additions: 0,
+      summary_deletions: 0,
+      starred: index === 0
+    })),
+    total: 40,
+    limit: 30,
+    offset: 0,
+    sort: "title-asc",
+    starredOnly: true,
+    provider: "opencode",
+    providerAvailable: true,
+    manageable: true,
+    providers: []
+  });
+
+  assert.match(html, /<select name="sort">/);
+  assert.match(html, /<option value="title-asc" selected>Title A-Z<\/option>/);
+  assert.match(html, /<input type="checkbox" name="starred" value="1" checked>/);
+  assert.match(html, /data-sort="title-asc"/);
+  assert.match(html, /data-starred="1"/);
+  assert.match(html, /href="\/opencode">Clear<\/a>/);
+});
+
 test("empty session result pages hide batch management controls", () => {
   const html = renderSessionsPage({
     sessions: [],
@@ -867,6 +901,18 @@ test("session API search mode accepts explicit and compatible parameter names", 
   assert.equal(resolveSessionSearchMode(new URLSearchParams("searchMode=list")), "list");
   assert.equal(resolveSessionSearchMode(new URLSearchParams("mode=list&searchMode=content")), "list");
   assert.equal(resolveSessionSearchMode(new URLSearchParams("mode=unexpected")), "list");
+});
+
+test("session list query options accept known sort and starred values only", () => {
+  assert.equal(resolveSessionSort(new URLSearchParams()), "updated-desc");
+  assert.equal(resolveSessionSort(new URLSearchParams("sort=updated-asc")), "updated-asc");
+  assert.equal(resolveSessionSort(new URLSearchParams("sort=title-asc")), "title-asc");
+  assert.equal(resolveSessionSort(new URLSearchParams("sort=title-desc")), "title-desc");
+  assert.equal(resolveSessionSort(new URLSearchParams("sort=random")), "updated-desc");
+  assert.equal(resolveStarredFilter(new URLSearchParams()), false);
+  assert.equal(resolveStarredFilter(new URLSearchParams("starred=1")), true);
+  assert.equal(resolveStarredFilter(new URLSearchParams("starred=true")), true);
+  assert.equal(resolveStarredFilter(new URLSearchParams("starred=false")), false);
 });
 
 test("mobile topbar keeps settings reachable when utility links collapse", () => {
@@ -970,6 +1016,17 @@ test("sqlite session queries exclude viewer-deleted sessions from paging, projec
     assert.deepEqual(firstPage.sessions.map((session) => session.id), ["a"]);
     assert.deepEqual(secondPage.sessions.map((session) => session.id), ["c"]);
     assert.deepEqual(
+      listSessions(10, 0, "", "", dbPath, "", excluded, "updated-asc").sessions.map((session) => session.id),
+      ["c", "a"]
+    );
+    assert.deepEqual(
+      listSessions(10, 0, "", "", dbPath, "", excluded, "title-asc").sessions.map((session) => session.id),
+      ["c", "a"]
+    );
+    const starredOnly = listSessions(10, 0, "", "", dbPath, "", excluded, "updated-desc", ["c"]);
+    assert.equal(starredOnly.total, 1);
+    assert.deepEqual(starredOnly.sessions.map((session) => session.id), ["c"]);
+    assert.deepEqual(
       listSessionProjects("", "", dbPath, excluded).map((project) => ({
         id: project.id,
         label: project.label,
@@ -977,6 +1034,16 @@ test("sqlite session queries exclude viewer-deleted sessions from paging, projec
       })),
       [
         { id: "p1", label: "Project One", count: 1 },
+        { id: "p2", label: "Project Two", count: 1 }
+      ]
+    );
+    assert.deepEqual(
+      listSessionProjects("", "", dbPath, excluded, ["c"]).map((project) => ({
+        id: project.id,
+        label: project.label,
+        count: project.count
+      })),
+      [
         { id: "p2", label: "Project Two", count: 1 }
       ]
     );
@@ -1639,6 +1706,88 @@ test("terminal launch falls back to direct PowerShell without Windows Terminal",
   });
   const wrapperScript = Buffer.from(launch.args[3], "base64").toString("utf16le");
   assert.match(wrapperScript, /Start-Process @startInfo/);
+});
+
+function fakeSpawnSequence(sequence) {
+  const calls = [];
+  const spawnImpl = (executable, args, options) => {
+    const next = sequence.shift() || {};
+    const child = new EventEmitter();
+    child.pid = next.pid ?? (1000 + calls.length);
+    child.unrefCalled = false;
+    child.unref = () => {
+      child.unrefCalled = true;
+    };
+    calls.push({ executable, args, options, child });
+    setTimeout(() => {
+      if (next.error) {
+        child.emit("error", new Error(next.error));
+        return;
+      }
+      child.emit("spawn");
+      if (next.exitCode !== undefined || next.signal !== undefined) {
+        setTimeout(() => child.emit("exit", next.exitCode ?? null, next.signal ?? null), next.exitDelay ?? 0);
+      }
+    }, next.delay ?? 0);
+    return child;
+  };
+  return { spawnImpl, calls };
+}
+
+test("terminal launch reports direct PowerShell wrapper failures", async () => {
+  const cwd = "C:\\project";
+  const powershell = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+  const { spawnImpl } = fakeSpawnSequence([{ exitCode: 1 }]);
+
+  await assert.rejects(
+    spawnPowerShellLaunch({
+      cwd,
+      terminal: null,
+      powershellArgs: buildPowerShellResumeArgs(powershell),
+      env: { OPENSESSIONVIEWER_RESUME_SPEC: "e30=" }
+    }, spawnImpl),
+    /Terminal launch failed for powershell\.exe: Terminal launch wrapper exited with exit code 1/
+  );
+});
+
+test("terminal launch reports synchronous spawn failures with context", async () => {
+  const cwd = "C:\\project";
+  const powershell = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+
+  await assert.rejects(
+    spawnPowerShellLaunch({
+      cwd,
+      terminal: null,
+      powershellArgs: buildPowerShellResumeArgs(powershell),
+      env: { OPENSESSIONVIEWER_RESUME_SPEC: "e30=" }
+    }, () => {
+      throw new Error("spawn EINVAL");
+    }),
+    /Terminal launch failed for powershell\.exe: spawn EINVAL/
+  );
+});
+
+test("terminal launch falls back when Windows Terminal fails to start", async () => {
+  const cwd = "C:\\project";
+  const terminal = "C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps\\wt.exe";
+  const powershell = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
+  const { spawnImpl, calls } = fakeSpawnSequence([
+    { error: "wt failed" },
+    { exitCode: 0 }
+  ]);
+
+  const result = await launchPowerShellWithFallback({
+    cwd,
+    terminal,
+    powershellArgs: buildPowerShellResumeArgs(powershell),
+    env: { OPENSESSIONVIEWER_RESUME_SPEC: "e30=" }
+  }, spawnImpl);
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].executable, terminal);
+  assert.equal(calls[1].executable, powershell);
+  assert.equal(result.fallbackFrom, terminal);
+  assert.equal(result.usedTerminal, false);
 });
 
 test("session analysis snapshots artifacts and generates evaluation inputs", () => {

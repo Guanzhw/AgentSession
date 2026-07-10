@@ -41,7 +41,7 @@ OpenCode and CodeAgent store stars, custom titles, soft deletes, and trash state
 ## Features
 
 - **Unified dashboard**: detected and undetected providers are shown in the top bar, with unavailable providers disabled.
-- **Session list and search**: time-range filtering, infinite scroll, title search, and message-content search.
+- **Session list and search**: project/time/starred filtering, sorting, infinite scroll, title search, and message-content search.
 - **Session detail review**: messages, tool calls, todos, and subsessions render in one review surface.
 - **Recursive session tree**: OpenCode/CodeAgent child sessions are organized as nested session containers instead of flat message rows.
 - **Tool Flow Tree**: the right-side Flow view shows root sessions, messages, tools, and subagent branches by hierarchy.
@@ -115,6 +115,10 @@ the command in a terminal. Command launching is enabled by default; start with
 `--disable-terminal-launch` to hide and disable resume and analysis launches.
 Launch prefers Windows Terminal (`wt.exe`) when available and falls back to
 opening the configured PowerShell host directly.
+The API waits for the terminal host or PowerShell wrapper to confirm startup
+before returning success. If the host cannot start, the page shows an error
+instead of a success toast. Runtime launch logs include the selected host,
+fallback information, and the launcher PID when available.
 
 All registered providers declare a default resume command:
 

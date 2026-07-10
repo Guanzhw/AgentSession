@@ -221,6 +221,46 @@ function enrichSession(session, metaMap) {
   };
 }
 
+const SESSION_SORTS = new Set(["updated-desc", "updated-asc", "title-asc", "title-desc"]);
+const ALL_SESSIONS_LIMIT = 100000;
+
+export function resolveSessionSort(params) {
+  const sort = params.get("sort") || "updated-desc";
+  return SESSION_SORTS.has(sort) ? sort : "updated-desc";
+}
+
+export function resolveStarredFilter(params) {
+  const value = params.get("starred") || "";
+  return value === "1" || value === "true";
+}
+
+function getStarredIds(metaMap) {
+  return [...metaMap.entries()]
+    .filter(([, meta]) => Boolean(meta?.starred))
+    .map(([id]) => id);
+}
+
+function isTitleSort(sort) {
+  return sort === "title-asc" || sort === "title-desc";
+}
+
+function sortSessionsForDisplay(sessions, sort) {
+  if (!isTitleSort(sort)) {
+    return sessions;
+  }
+
+  const direction = sort === "title-desc" ? -1 : 1;
+  return [...sessions].sort((a, b) => {
+    const titleA = String(a?.title || a?.slug || a?.id || "");
+    const titleB = String(b?.title || b?.slug || b?.id || "");
+    const titleDelta = titleA.localeCompare(titleB, undefined, { sensitivity: "base" });
+    if (titleDelta !== 0) {
+      return titleDelta * direction;
+    }
+    return (Number(b?.time_updated) || 0) - (Number(a?.time_updated) || 0);
+  });
+}
+
 function getVisibleListResults({
   dbPath,
   metaMap,
@@ -229,9 +269,54 @@ function getVisibleListResults({
   offset,
   query = "",
   range = "",
-  project = ""
+  project = "",
+  sort = "updated-desc",
+  starredOnly = false
 }) {
-  const results = listSessions(limit, offset, query, range, dbPath, project, excludedIds);
+  const includedIds = starredOnly ? getStarredIds(metaMap) : undefined;
+  if (isTitleSort(sort)) {
+    const results = listSessions(ALL_SESSIONS_LIMIT, 0, query, range, dbPath, project, excludedIds, "updated-desc", includedIds);
+    const sessions = sortSessionsForDisplay(
+      results.sessions.map((session) => enrichSession(session, metaMap)),
+      sort
+    );
+    return {
+      sessions: sessions.slice(offset, offset + limit),
+      total: results.total
+    };
+  }
+
+  const results = listSessions(limit, offset, query, range, dbPath, project, excludedIds, sort, includedIds);
+  return {
+    sessions: results.sessions.map((session) => enrichSession(session, metaMap)),
+    total: results.total
+  };
+}
+
+function getIndexedListResults({
+  providerId,
+  metaMap,
+  limit,
+  offset,
+  range = "",
+  query = "",
+  project = "",
+  sort = "updated-desc",
+  includedIds = undefined
+}) {
+  if (isTitleSort(sort)) {
+    const results = getIndexedSessions(providerId, ALL_SESSIONS_LIMIT, 0, range, query, project, "updated-desc", includedIds);
+    const sessions = sortSessionsForDisplay(
+      results.sessions.map((session) => enrichSession(session, metaMap)),
+      sort
+    );
+    return {
+      sessions: sessions.slice(offset, offset + limit),
+      total: results.total
+    };
+  }
+
+  const results = getIndexedSessions(providerId, limit, offset, range, query, project, sort, includedIds);
   return {
     sessions: results.sessions.map((session) => enrichSession(session, metaMap)),
     total: results.total
@@ -855,13 +940,16 @@ export async function startServer(config = getConfig()) {
         if (!command.available) {
           return json(res, { ok: false, error: "Configured resume executable was not found" }, 409);
         }
-        launchResumeCommand(command, appConfig.resumeShell);
+        const launchResult = await launchResumeCommand(command, appConfig.resumeShell);
         recordRuntimeEvent(appConfig.metaDir, {
           event: "terminal.resume.launch",
           provider: providerId,
           sessionId,
           executable: runtimeExecutableName(command),
           cwd: command.cwd,
+          launchPid: launchResult?.pid ?? null,
+          launchHost: launchResult?.usedTerminal ? "terminal" : "powershell",
+          fallbackFrom: launchResult?.fallbackFrom,
           ok: true
         });
         return json(res, { ok: true });
@@ -983,7 +1071,7 @@ export async function startServer(config = getConfig()) {
           ok: true
         });
         analysisPhase = "launch";
-        launchSessionAnalysis(run, appConfig.resumeShell);
+        const launchResult = await launchSessionAnalysis(run, appConfig.resumeShell);
         recordRuntimeEvent(appConfig.metaDir, {
           event: "analysis.launch",
           provider: providerId,
@@ -992,6 +1080,9 @@ export async function startServer(config = getConfig()) {
           target: run.target,
           executable: runtimeExecutableName(run.command),
           cwd: run.command?.cwd,
+          launchPid: launchResult?.pid ?? null,
+          launchHost: launchResult?.usedTerminal ? "terminal" : "powershell",
+          fallbackFrom: launchResult?.fallbackFrom,
           ok: true
         });
         return json(res, {
@@ -1069,7 +1160,7 @@ export async function startServer(config = getConfig()) {
           ok: true
         });
         implementationPhase = "launch";
-        launchAnalysisImplementation(run, appConfig.resumeShell);
+        const launchResult = await launchAnalysisImplementation(run, appConfig.resumeShell);
         recordRuntimeEvent(appConfig.metaDir, {
           event: "analysis.implementation.launch",
           provider: providerId,
@@ -1077,6 +1168,9 @@ export async function startServer(config = getConfig()) {
           runId: run.runId,
           executable: runtimeExecutableName(run.command),
           cwd: run.command?.cwd,
+          launchPid: launchResult?.pid ?? null,
+          launchHost: launchResult?.usedTerminal ? "terminal" : "powershell",
+          fallbackFrom: launchResult?.fallbackFrom,
           ok: true
         });
         return json(res, {
@@ -1204,6 +1298,8 @@ export async function startServer(config = getConfig()) {
         const query = url.searchParams.get("q") || "";
         const project = url.searchParams.get("project") || "";
         const searchMode = resolveSessionSearchMode(url.searchParams);
+        const sort = resolveSessionSort(url.searchParams);
+        const starredOnly = resolveStarredFilter(url.searchParams);
 
         if (usesSqliteSessionStore(adapter)) {
           const dbPath = adapter.getDataPath();
@@ -1225,7 +1321,9 @@ export async function startServer(config = getConfig()) {
               offset: apiOffset,
               query,
               range,
-              project
+              project,
+              sort,
+              starredOnly
             });
             sessions = results.sessions;
             total = results.total;
@@ -1239,6 +1337,8 @@ export async function startServer(config = getConfig()) {
           });
         }
 
+        const metaMap = getAllMeta(providerId);
+        const includedIds = starredOnly ? getStarredIds(metaMap) : undefined;
         let sessions;
         let total;
         if (query && searchMode === "content") {
@@ -1246,9 +1346,19 @@ export async function startServer(config = getConfig()) {
           sessions = results.sessions;
           total = results.total;
         } else {
-          const indexed = getIndexedSessions(providerId, apiLimit, apiOffset, range, query, project);
-          sessions = indexed.sessions.map((session) => normalizeSessionRecord(session));
-          total = indexed.total;
+          const results = getIndexedListResults({
+            providerId,
+            metaMap,
+            limit: apiLimit,
+            offset: apiOffset,
+            range,
+            query,
+            project,
+            sort,
+            includedIds
+          });
+          sessions = results.sessions.map((session) => normalizeSessionRecord(session));
+          total = results.total;
         }
 
         return json(res, {
@@ -1595,6 +1705,8 @@ export async function startServer(config = getConfig()) {
         const range = url.searchParams.get("range") || "";
         const query = url.searchParams.get("q") || "";
         const project = url.searchParams.get("project") || "";
+        const sort = resolveSessionSort(url.searchParams);
+        const starredOnly = resolveStarredFilter(url.searchParams);
         if (usesSqliteSessionStore(adapter)) {
           const dbPath = adapter.getDataPath();
           const metaMap = getAllMeta(providerSegment);
@@ -1607,12 +1719,15 @@ export async function startServer(config = getConfig()) {
             offset,
             query,
             range,
-            project
+            project,
+            sort,
+            starredOnly
           });
           const enrichedSessions = sessions.map((session) => normalizeSessionRecord(session));
           const overviewStats = getOverviewStats(dbPath);
           const deletedCount = getDeletedIds(providerSegment).length;
-          const projectOptions = listSessionProjects(query, range, dbPath, excludedIds);
+          const includedIds = starredOnly ? getStarredIds(metaMap) : undefined;
+          const projectOptions = listSessionProjects(query, range, dbPath, excludedIds, includedIds);
           send(res, 200, renderSessionsPage({
             sessions: enrichedSessions,
             total,
@@ -1621,6 +1736,8 @@ export async function startServer(config = getConfig()) {
             query,
             range,
             project,
+            sort,
+            starredOnly,
             projectOptions,
             searchMode: "list",
             totalMessages: overviewStats.totalMessages,
@@ -1630,9 +1747,21 @@ export async function startServer(config = getConfig()) {
           return;
         }
 
-        const indexed = getIndexedSessions(providerSegment, limit, offset, range, query, project);
+        const metaMap = getAllMeta(providerSegment);
+        const includedIds = starredOnly ? getStarredIds(metaMap) : undefined;
+        const indexed = getIndexedListResults({
+          providerId: providerSegment,
+          metaMap,
+          limit,
+          offset,
+          range,
+          query,
+          project,
+          sort,
+          includedIds
+        });
         const overviewStats = getIndexedOverview(providerSegment);
-        const projectOptions = getIndexedSessionProjects(providerSegment, range, query);
+        const projectOptions = getIndexedSessionProjects(providerSegment, range, query, includedIds);
         send(res, 200, renderSessionsPage({
           sessions: indexed.sessions.map((session) => normalizeSessionRecord(session)),
           total: indexed.total,
@@ -1641,6 +1770,8 @@ export async function startServer(config = getConfig()) {
           query,
           range,
           project,
+          sort,
+          starredOnly,
           projectOptions,
           searchMode: "list",
           totalMessages: overviewStats.totalMessages,

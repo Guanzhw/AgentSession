@@ -30,8 +30,17 @@ export const en = {
   "filter.all_projects": "All projects",
   "filter.unknown_project": "Unknown project",
   "filter.time": "Time",
+  "filter.sort": "Sort",
+  "filter.view": "View",
+  "filter.starred_only": "Starred only",
   "filter.apply": "Apply",
   "filter.clear": "Clear",
+
+  // Sort filter
+  "sort.updated_desc": "Newest updated",
+  "sort.updated_asc": "Oldest updated",
+  "sort.title_asc": "Title A-Z",
+  "sort.title_desc": "Title Z-A",
 
   // Session card
   "card.files": "{count} files",

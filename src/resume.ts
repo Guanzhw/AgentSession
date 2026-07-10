@@ -36,6 +36,8 @@ function quoteDisplayArg(value) {
 
 const WINDOWS_EXECUTABLE_EXTENSIONS = [".exe", ".cmd", ".bat"];
 const DIRECT_POWERSHELL_LAUNCH_ENV = "OPENSESSIONVIEWER_DIRECT_POWERSHELL_LAUNCH_SPEC";
+const TERMINAL_LAUNCH_CONFIRM_TIMEOUT_MS = 5000;
+const DETACHED_TERMINAL_OBSERVE_MS = 500;
 
 export function resolveWindowsExecutableCandidate(candidates, exists = existsSync) {
   const direct = candidates.find((entry) => {
@@ -210,20 +212,121 @@ export function buildPowerShellLaunchSpec({ cwd, terminal, powershellArgs }) {
   };
 }
 
-export function spawnPowerShellLaunch({ cwd, terminal, powershellArgs, env }) {
-  const launch = buildPowerShellLaunchSpec({ cwd, terminal, powershellArgs });
-  const child = spawn(launch.executable, launch.args, {
-    detached: launch.detached,
-    stdio: "ignore",
-    windowsHide: launch.windowsHide,
-    cwd: launch.cwd,
-    env: { ...process.env, ...env, ...launch.env }
+function waitForLaunchConfirmation(child, { waitForExit = false, timeoutMs = TERMINAL_LAUNCH_CONFIRM_TIMEOUT_MS } = {}) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let spawned = false;
+    let observeTimer = null;
+    const cleanup = () => {
+      clearTimeout(timeout);
+      if (observeTimer) {
+        clearTimeout(observeTimer);
+      }
+      child.off?.("spawn", onSpawn);
+      child.off?.("error", onError);
+      child.off?.("exit", onExit);
+    };
+    const settle = (fn, value) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      fn(value);
+    };
+    const launchResult = () => ({ pid: typeof child.pid === "number" ? child.pid : null });
+    const onSpawn = () => {
+      spawned = true;
+      if (!waitForExit) {
+        observeTimer = setTimeout(() => settle(resolve, launchResult()), DETACHED_TERMINAL_OBSERVE_MS);
+      }
+    };
+    const onError = (error) => {
+      settle(reject, error instanceof Error ? error : new Error(String(error || "Terminal process failed to start")));
+    };
+    const onExit = (code, signal) => {
+      if (waitForExit) {
+        if (code === 0) {
+          settle(resolve, launchResult());
+          return;
+        }
+        const detail = signal ? `signal ${signal}` : `exit code ${code}`;
+        settle(reject, new Error(`Terminal launch wrapper exited with ${detail}`));
+        return;
+      }
+      if (!spawned && code !== 0) {
+        const detail = signal ? `signal ${signal}` : `exit code ${code}`;
+        settle(reject, new Error(`Terminal process exited before startup with ${detail}`));
+      }
+    };
+    const timeout = setTimeout(() => {
+      if (waitForExit) {
+        settle(reject, new Error("Terminal launch wrapper did not confirm startup before timeout"));
+      } else if (spawned) {
+        settle(resolve, launchResult());
+      } else {
+        settle(reject, new Error("Terminal process did not report startup before timeout"));
+      }
+    }, timeoutMs);
+
+    child.once?.("spawn", onSpawn);
+    child.once?.("error", onError);
+    child.once?.("exit", onExit);
   });
-  child.unref();
-  return child;
 }
 
-export function launchResumeCommand(command, configuredShell = null) {
+export async function spawnPowerShellLaunch({ cwd, terminal, powershellArgs, env }, spawnImpl = spawn) {
+  const launch = buildPowerShellLaunchSpec({ cwd, terminal, powershellArgs });
+  let child;
+  try {
+    child = spawnImpl(launch.executable, launch.args, {
+      detached: launch.detached,
+      stdio: "ignore",
+      windowsHide: launch.windowsHide,
+      cwd: launch.cwd,
+      env: { ...process.env, ...env, ...launch.env }
+    });
+  } catch (error) {
+    throw new Error(`Terminal launch failed for ${path.basename(launch.executable)}: ${error?.message || error}`);
+  }
+  let result;
+  try {
+    result = await waitForLaunchConfirmation(child, { waitForExit: !launch.detached }) as { pid: number | null };
+  } catch (error) {
+    throw new Error(`Terminal launch failed for ${path.basename(launch.executable)}: ${error?.message || error}`);
+  }
+  child.unref?.();
+  return {
+    ...result,
+    executable: launch.executable,
+    detached: launch.detached,
+    usedTerminal: Boolean(terminal)
+  };
+}
+
+export async function launchPowerShellWithFallback({ cwd, terminal, powershellArgs, env }, spawnImpl = spawn) {
+  if (terminal) {
+    try {
+      return await spawnPowerShellLaunch({ cwd, terminal, powershellArgs, env }, spawnImpl);
+    } catch (terminalError) {
+      try {
+        const fallbackResult = await spawnPowerShellLaunch({ cwd, terminal: null, powershellArgs, env }, spawnImpl);
+        return {
+          ...fallbackResult,
+          fallbackFrom: terminal
+        };
+      } catch (fallbackError) {
+        throw new Error(
+          `Failed to launch terminal via ${path.basename(terminal)} (${terminalError?.message || terminalError}) or direct PowerShell (${fallbackError?.message || fallbackError})`
+        );
+      }
+    }
+  }
+
+  return spawnPowerShellLaunch({ cwd, terminal: null, powershellArgs, env }, spawnImpl);
+}
+
+export async function launchResumeCommand(command, configuredShell = null) {
   if (process.platform !== "win32") {
     throw new Error("Terminal launching is currently supported on Windows only");
   }
@@ -240,7 +343,7 @@ export function launchResumeCommand(command, configuredShell = null) {
     args: command.args,
     cwd: command.cwd
   }), "utf-8").toString("base64");
-  spawnPowerShellLaunch({
+  return launchPowerShellWithFallback({
     cwd: command.cwd,
     terminal: launchHost.terminal,
     powershellArgs: buildPowerShellResumeArgs(launchHost.powershell, launchHost.shellArgs),

@@ -12,6 +12,8 @@ export function renderSessionsPage({
   note = "",
   range = "",
   project = "",
+  sort = "updated-desc",
+  starredOnly = false,
   projectOptions = [],
   searchMode = "list",
   totalMessages = 0,
@@ -24,7 +26,7 @@ export function renderSessionsPage({
   const isAvailable = providerAvailable !== false;
   const isManageableProvider = isAvailable && manageable;
   const hasVisibleSessions = sessions.length > 0;
-  const hasActiveFilters = Boolean(query || range || project);
+  const hasActiveFilters = Boolean(query || range || project || starredOnly || sort !== "updated-desc");
   const cards = !isAvailable
     ? `<p class="empty-state">${t("provider.not_detected")}</p>`
   : sessions.length
@@ -50,6 +52,14 @@ export function renderSessionsPage({
   const rangeOptions = ranges.map((item) => (
     `<option value="${escapeHtml(item.key)}" ${item.key === range ? "selected" : ""}>${escapeHtml(item.label)}</option>`
   )).join("");
+  const sortOptions = [
+    { key: "updated-desc", label: t("sort.updated_desc") },
+    { key: "updated-asc", label: t("sort.updated_asc") },
+    { key: "title-asc", label: t("sort.title_asc") },
+    { key: "title-desc", label: t("sort.title_desc") }
+  ].map((item) => (
+    `<option value="${escapeHtml(item.key)}" ${item.key === sort ? "selected" : ""}>${escapeHtml(item.label)}</option>`
+  )).join("");
   const projectSelectOptions = [
     `<option value="">${t("filter.all_projects")}</option>`,
     ...projectOptions.map((item) => {
@@ -70,6 +80,17 @@ export function renderSessionsPage({
       <span>${t("filter.time")}</span>
       <select name="range">${rangeOptions}</select>
     </label>
+    <label class="filter-field">
+      <span>${t("filter.sort")}</span>
+      <select name="sort">${sortOptions}</select>
+    </label>
+    ${isManageableProvider ? `<div class="filter-field filter-check">
+      <span>${t("filter.view")}</span>
+      <label class="filter-checkbox">
+        <input type="checkbox" name="starred" value="1" ${starredOnly ? "checked" : ""}>
+        <span>${t("filter.starred_only")}</span>
+      </label>
+    </div>` : ""}
     <div class="filter-actions">
       <button class="btn" type="submit">${t("filter.apply")}</button>
       ${hasActiveFilters ? `<a class="btn btn-secondary" href="/${provider}">${t("filter.clear")}</a>` : ""}
@@ -150,7 +171,7 @@ export function renderSessionsPage({
     <section class="session-list" id="session-list">
       ${cards}
     </section>
-    ${total > offset + sessions.length ? `<button id="scroll-sentinel" class="scroll-load-more" type="button" data-offset="${offset + sessions.length}" data-total="${total}" data-range="${escapeHtml(range)}" data-project="${escapeHtml(project)}" data-query="${escapeHtml(query)}" data-mode="${escapeHtml(searchMode)}" data-provider="${provider}">${t("sessions.load_more")}</button>` : ""}
+    ${total > offset + sessions.length ? `<button id="scroll-sentinel" class="scroll-load-more" type="button" data-offset="${offset + sessions.length}" data-total="${total}" data-range="${escapeHtml(range)}" data-project="${escapeHtml(project)}" data-query="${escapeHtml(query)}" data-mode="${escapeHtml(searchMode)}" data-sort="${escapeHtml(sort)}" data-starred="${starredOnly ? "1" : ""}" data-provider="${provider}">${t("sessions.load_more")}</button>` : ""}
   `;
 
   const isContentSearch = searchMode === "content" && query;

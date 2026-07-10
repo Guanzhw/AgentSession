@@ -2007,6 +2007,8 @@ if (scrollSentinel && sessionList) {
   const scrollQuery = scrollSentinel.dataset.query || "";
   const scrollProject = scrollSentinel.dataset.project || "";
   const scrollMode = scrollSentinel.dataset.mode || "list";
+  const scrollSort = scrollSentinel.dataset.sort || "";
+  const scrollStarred = scrollSentinel.dataset.starred || "";
   let isLoading = false;
   let observer = null;
 
@@ -2033,6 +2035,8 @@ if (scrollSentinel && sessionList) {
       if (scrollQuery) params.set("q", scrollQuery);
       if (scrollProject) params.set("project", scrollProject);
       if (scrollMode) params.set("mode", scrollMode);
+      if (scrollSort) params.set("sort", scrollSort);
+      if (scrollStarred) params.set("starred", scrollStarred);
 
       const res = await fetch(`/api/${PROVIDER}/sessions?${params.toString()}`);
       if (!res.ok) {

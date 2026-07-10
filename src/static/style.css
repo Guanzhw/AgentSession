@@ -3357,7 +3357,7 @@ mark {
 /* Session filters */
 .session-filter {
   display: grid;
-  grid-template-columns: minmax(220px, 1.4fr) minmax(180px, 1fr) minmax(140px, 0.7fr) auto;
+  grid-template-columns: minmax(220px, 1.4fr) minmax(180px, 1fr) minmax(140px, 0.7fr) minmax(150px, 0.8fr) minmax(130px, 0.6fr) auto;
   gap: 10px;
   align-items: end;
   margin-top: 18px;
@@ -3401,6 +3401,32 @@ mark {
   outline: none;
   border-color: var(--accent-color);
   box-shadow: var(--focus-ring);
+}
+
+.filter-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.filter-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin: 0;
+  accent-color: var(--accent-color);
+}
+
+.filter-checkbox span {
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.2;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .filter-actions {

@@ -55,12 +55,33 @@ function timeRangeCutoff(timeRange) {
   return null;
 }
 
-function sessionFilter(search = "", timeRange = "", project = "", excludedIds = undefined) {
+function normalizeIncludedIds(includedIds = undefined) {
+  if (includedIds === undefined) {
+    return undefined;
+  }
+  return Array.from(includedIds).filter(Boolean);
+}
+
+function sessionSortOrder(sort = "updated-desc") {
+  if (sort === "updated-asc") {
+    return "time_updated ASC, time_created ASC, id ASC";
+  }
+  if (sort === "title-asc") {
+    return "COALESCE(NULLIF(title, ''), NULLIF(slug, ''), id) COLLATE NOCASE ASC, time_updated DESC, id ASC";
+  }
+  if (sort === "title-desc") {
+    return "COALESCE(NULLIF(title, ''), NULLIF(slug, ''), id) COLLATE NOCASE DESC, time_updated DESC, id ASC";
+  }
+  return "time_updated DESC, time_created DESC, id ASC";
+}
+
+function sessionFilter(search = "", timeRange = "", project = "", excludedIds = undefined, includedIds = undefined) {
   const where = ["time_archived IS NULL", "parent_id IS NULL"];
   const params = [];
   const searchTerm = search ? `%${search}%` : null;
   const cutoff = timeRangeCutoff(timeRange);
   const excluded = normalizeExcludedIds(excludedIds);
+  const included = normalizeIncludedIds(includedIds);
 
   if (searchTerm) {
     where.push("(COALESCE(title, '') LIKE ? OR COALESCE(slug, '') LIKE ? OR COALESCE(directory, '') LIKE ?)");
@@ -82,19 +103,29 @@ function sessionFilter(search = "", timeRange = "", project = "", excludedIds = 
     params.push(...excluded);
   }
 
+  if (included !== undefined) {
+    if (included.length === 0) {
+      where.push("0 = 1");
+    } else {
+      where.push(`session.id IN (${included.map(() => "?").join(", ")})`);
+      params.push(...included);
+    }
+  }
+
   return { whereClause: `WHERE ${where.join(" AND ")}`, params };
 }
 
-export function listSessions(limit = 50, offset = 0, search = "", timeRange = "", pathOverride = undefined, project = "", excludedIds = undefined) {
+export function listSessions(limit = 50, offset = 0, search = "", timeRange = "", pathOverride = undefined, project = "", excludedIds = undefined, sort = "updated-desc", includedIds = undefined) {
   const db = getDb(pathOverride);
-  const { whereClause, params } = sessionFilter(search, timeRange, project, excludedIds);
+  const { whereClause, params } = sessionFilter(search, timeRange, project, excludedIds, includedIds);
+  const orderBy = sessionSortOrder(sort);
 
   const sessions = db.prepare(`
     SELECT id, project_id, slug, title, directory, time_created, time_updated,
            summary_additions, summary_deletions, summary_files, time_archived
     FROM session
     ${whereClause}
-    ORDER BY time_updated DESC, time_created DESC
+    ORDER BY ${orderBy}
     LIMIT ? OFFSET ?
   `).all(...params, limit, offset);
 
@@ -107,9 +138,9 @@ export function listSessions(limit = 50, offset = 0, search = "", timeRange = ""
   return { sessions, total: totalRow?.total ?? 0 };
 }
 
-export function listSessionProjects(search = "", timeRange = "", pathOverride = undefined, excludedIds = undefined) {
+export function listSessionProjects(search = "", timeRange = "", pathOverride = undefined, excludedIds = undefined, includedIds = undefined) {
   const db = getDb(pathOverride);
-  const { whereClause, params } = sessionFilter(search, timeRange, "", excludedIds);
+  const { whereClause, params } = sessionFilter(search, timeRange, "", excludedIds, includedIds);
   const rows = db.prepare(`
     SELECT
       COALESCE(session.project_id, '') AS id,
