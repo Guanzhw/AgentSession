@@ -885,7 +885,18 @@ test("mobile topbar keeps settings reachable when utility links collapse", () =>
   assert.match(html, /href="\/opencode\/stats" class="nav-link nav-link-stats /);
   assert.match(html, /href="\/opencode\/trash" class="nav-link nav-link-trash /);
   assert.match(html, /href="\/opencode\/settings" class="nav-link nav-link-settings [^"]*" title="Settings" aria-label="Settings"/);
-  assert.match(style, /@media \(max-width: 480px\)[\s\S]*\.topbar-actions \.nav-link \{\s*display: none;[\s\S]*\.topbar-actions \.nav-link-settings \{\s*display: inline-flex;/);
+  const mobileTopbarStart = style.indexOf("@media (max-width: 480px)");
+  const nextResponsiveBlock = style.indexOf("@media (max-width: 1180px)", mobileTopbarStart);
+  assert.notEqual(mobileTopbarStart, -1);
+  assert.notEqual(nextResponsiveBlock, -1);
+  const mobileTopbarCss = style.slice(mobileTopbarStart, nextResponsiveBlock);
+
+  assert.match(mobileTopbarCss, /\.topbar-actions \.nav-link \{\s*display: none;[\s\S]*\.topbar-actions \.nav-link-settings \{\s*display: inline-flex;/);
+  assert.match(mobileTopbarCss, /--topbar-height: 104px;/);
+  assert.match(mobileTopbarCss, /--session-anchor-offset: 136px;/);
+  assert.match(mobileTopbarCss, /--settings-anchor-offset: 164px;/);
+  assert.match(mobileTopbarCss, /\.topbar-actions \{\s*grid-column: 1 \/ -1;[\s\S]*grid-template-columns: auto minmax\(0, 1fr\) auto;/);
+  assert.match(mobileTopbarCss, /\.search-input \{\s*width: 100%;\s*min-width: 0;/);
 });
 
 test("sqlite session queries exclude viewer-deleted sessions from paging, projects, and search", () => {

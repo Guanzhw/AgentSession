@@ -4751,6 +4751,30 @@ pre code.hljs {
 }
 
 @media (max-width: 480px) {
+  :root {
+    --topbar-height: 104px;
+    --session-anchor-offset: 136px;
+    --settings-anchor-offset: 164px;
+  }
+  .topbar {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: 48px 40px;
+    row-gap: 4px;
+    padding-bottom: 8px;
+  }
+  .topbar-tabs {
+    justify-self: stretch;
+    min-width: 0;
+  }
+  .topbar-actions {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+  }
   .topbar-actions .nav-link {
     display: none;
   }
@@ -4769,7 +4793,8 @@ pre code.hljs {
     line-height: 1;
   }
   .search-input {
-    width: 80px;
+    width: 100%;
+    min-width: 0;
   }
 }
 
