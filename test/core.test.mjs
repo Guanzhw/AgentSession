@@ -2857,6 +2857,11 @@ test("session rendering shows configured analysis actions only when launch is al
   };
   const hidden = renderSessionPage({
     session,
+    resumeCommand: {
+      display: "opencode --session analysis-session",
+      cwd: "C:\\WorkSpace\\OpenSession",
+      available: true
+    },
     analysisAction: {
       target: "skills",
       targets: [{ id: "skills", label: "Analyze skills", available: true }],
@@ -2867,6 +2872,7 @@ test("session rendering shows configured analysis actions only when launch is al
     terminalLaunchAllowed: false
   });
   assert.doesNotMatch(hidden, /data-action="analyze-session"/);
+  assert.doesNotMatch(hidden, /resume-command-preview/);
 
   const visible = renderSessionPage({
     session,
@@ -2927,7 +2933,11 @@ test("session rendering shows configured analysis actions only when launch is al
         artifactProposalCount: 0
       }
     }],
-    resumeCommand: { display: "opencode --session analysis-session", available: true },
+    resumeCommand: {
+      display: "opencode --session analysis-session",
+      cwd: "C:\\WorkSpace\\OpenSession",
+      available: true
+    },
     terminalLaunchAllowed: true
   });
   assert.match(visible, /data-action="analyze-session"/);
@@ -2950,7 +2960,11 @@ test("session rendering shows configured analysis actions only when launch is al
   assert.match(visible, /Project scope/);
   assert.match(visible, /User scope/);
   assert.match(visible, /data-action="resume-session"/);
-  assert.doesNotMatch(visible, /data-action="copy-resume-command"/);
+  assert.match(visible, /<details class="resume-command-preview">/);
+  assert.match(visible, /Terminal command/);
+  assert.match(visible, /opencode --session analysis-session/);
+  assert.match(visible, /C:\\WorkSpace\\OpenSession/);
+  assert.match(visible, /data-action="copy-resume-command"/);
   assert.match(visible, /id="analysis-status-panel"/);
   assert.match(visible, /data-terminal-launch="true"/);
   assert.match(visible, /report\.md is missing/);

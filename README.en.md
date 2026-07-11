@@ -111,7 +111,9 @@ opensessionviewer [options]
 
 Session detail pages always show a copyable session ID. When a provider has a
 known resume command and a valid recorded project directory, the page can open
-the command in a terminal. Command launching is enabled by default; start with
+the command in a terminal. Before launching, the page exposes the resolved
+command and working directory in a copyable disclosure. Command launching is
+enabled by default; start with
 `--disable-terminal-launch` to hide and disable resume and analysis launches.
 Launch prefers Windows Terminal (`wt.exe`) when available and falls back to
 opening the configured PowerShell host directly.

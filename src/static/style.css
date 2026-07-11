@@ -696,12 +696,16 @@ body::before {
   list-style: none;
   margin: 0;
   padding: 1px 2px 8px 0;
+  min-width: 0;
+  max-width: 100%;
   min-height: 0;
   overflow: auto;
 }
 
 .toc-group {
   margin: 0;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .toc-list > .toc-group-user {
@@ -747,6 +751,8 @@ body::before {
   gap: 0;
   margin: 1px 0 0 11px;
   padding-left: 5px;
+  min-width: 0;
+  max-width: 100%;
   border-left: 1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color));
 }
 
@@ -755,6 +761,8 @@ body::before {
   grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
   gap: 2px 5px;
+  min-width: 0;
+  max-width: 100%;
   min-height: 22px;
   padding: 2px 4px;
   border-radius: 5px;
@@ -1772,17 +1780,23 @@ body.flow-panel-open {
   flex-direction: column;
   gap: 12px;
   margin-top: 20px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .message-group {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
+  max-width: 100%;
   position: relative;
   scroll-margin-top: var(--session-anchor-offset);
 }
 
 .message-turn-assistant {
+  min-width: 0;
+  max-width: 100%;
   padding: 16px;
   border: 1px solid var(--border-color);
   border-left: 4px solid var(--border-color);
@@ -1839,6 +1853,8 @@ body.flow-panel-open {
 .session-part-anchor,
 .session-event-anchor {
   display: block;
+  min-width: 0;
+  max-width: 100%;
   scroll-margin-top: var(--session-anchor-offset);
 }
 
@@ -1863,6 +1879,11 @@ body.flow-panel-open {
 
 .message-assistant {
   border-left-color: var(--border-color);
+}
+
+.message {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .message-meta {
@@ -1945,6 +1966,9 @@ body.flow-panel-open {
 }
 
 .message-body.markdown {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
   font-size: 14px;
   line-height: 1.65;
   color: var(--text-primary);
@@ -2111,6 +2135,8 @@ code {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+  max-width: 100%;
   padding: 9px 12px;
   cursor: pointer;
   background-color: var(--bg-secondary);
@@ -2190,6 +2216,8 @@ details[open] summary {
   grid-template-columns: auto minmax(0, 1fr) auto auto auto;
   gap: 10px;
   align-items: center;
+  min-width: 0;
+  max-width: 100%;
   padding: 10px 12px;
   cursor: pointer;
   background: color-mix(in srgb, var(--trace-agent) 12%, var(--bg-secondary));
@@ -3918,6 +3946,59 @@ pre code.hljs {
   color: var(--accent-color);
 }
 
+.resume-command-preview {
+  width: 100%;
+  overflow: visible;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+}
+
+.resume-command-preview > summary {
+  min-height: 38px;
+  padding: 8px 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.resume-command-preview-body {
+  display: grid;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border-color);
+}
+
+.resume-command-item {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.resume-command-label {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.resume-command-item code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.resume-command-value {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.resume-command-value code {
+  flex: 1 1 auto;
+}
+
 .analysis-launch-control {
   width: 100%;
 }
@@ -4746,6 +4827,15 @@ pre code.hljs {
     flex-direction: column;
   }
 
+  .resume-command-value {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .resume-command-value .copy-btn {
+    align-self: flex-start;
+  }
+
   .analysis-materials-counts {
     align-self: flex-start;
   }
@@ -5010,6 +5100,42 @@ pre code.hljs {
 
   .session-workbench .main-content {
     padding: 16px 12px 48px;
+  }
+
+  .subagent-summary {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 5px 8px;
+  }
+
+  .subsession-kicker {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .subsession-title {
+    grid-column: 2 / -1;
+    grid-row: 1;
+  }
+
+  .subsession-meta {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .subagent-tokens {
+    grid-column: 1 / span 2;
+    grid-row: 3;
+    justify-self: start;
+    min-width: 0;
+  }
+
+  .subagent-actions {
+    grid-column: 3;
+    grid-row: 3;
+    justify-self: end;
   }
 
   .session-flow-panel {

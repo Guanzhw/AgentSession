@@ -91,6 +91,10 @@ export const en = {
   "action.copy": "Copy",
   "action.copy_session_id": "Copy session ID",
   "action.open_terminal": "Continue in terminal",
+  "action.resume_preview": "Terminal command",
+  "action.resume_command": "Command",
+  "action.resume_directory": "Working directory",
+  "action.copy_resume_command": "Copy terminal command",
   "action.analyze_session": "Analyze session",
   "action.more": "More actions",
 

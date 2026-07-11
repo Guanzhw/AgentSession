@@ -124,7 +124,7 @@ codeagent-session [options]
 
 会话详情页始终显示可复制的 session ID。当 Provider 有已知的继续命令，且
 会话记录中的项目目录有效时，页面可以在终端中打开该命令。命令启动默认
-启用；使用 `--disable-terminal-launch` 启动服务可隐藏并禁用继续会话和分析
+启用。启动前，页面会在可复制的折叠面板中展示解析后的命令和工作目录；使用 `--disable-terminal-launch` 启动服务可隐藏并禁用继续会话和分析
 操作。
 启动时优先使用 Windows Terminal（`wt.exe`）；如果不可用，则直接打开已配置的
 PowerShell Host。

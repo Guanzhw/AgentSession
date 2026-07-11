@@ -91,6 +91,10 @@ export const zh = {
   "action.copy": "复制",
   "action.copy_session_id": "复制会话 ID",
   "action.open_terminal": "在终端中继续",
+  "action.resume_preview": "终端命令",
+  "action.resume_command": "命令",
+  "action.resume_directory": "工作目录",
+  "action.copy_resume_command": "复制终端命令",
   "action.analyze_session": "分析会话",
   "action.more": "更多操作",
 

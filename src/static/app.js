@@ -1715,6 +1715,20 @@ document.addEventListener("click", async (e) => {
     return;
   }
 
+  if (action === "copy-resume-command") {
+    const command = btn.dataset.command || "";
+    if (!command) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      await copyText(command);
+      showToast(ft("copied"), "success");
+    } catch {
+      showToast(ft("toast_error"), "error");
+    }
+    return;
+  }
+
   const id = btn.dataset.id;
   if (!id) return;
 

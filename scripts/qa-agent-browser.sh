@@ -203,21 +203,18 @@ if [[ "$detail_session_id_count" != "1" ]]; then
   exit 1
 fi
 
-resume_copy_count="$(read_ab "count resume command buttons" get count ".session-actions [data-action='copy-resume-command']")"
-if [[ "$resume_copy_count" != "0" ]]; then
-  echo "Copy resume command button should not be rendered" >&2
-  exit 1
-fi
+resume_preview_count="$(read_ab "count resume command previews" get count ".resume-command-preview")"
+resume_copy_count="$(read_ab "count resume command copy buttons" get count ".resume-command-preview [data-action='copy-resume-command']")"
 resume_launch_count="$(read_ab "count terminal launch buttons" get count ".session-actions [data-action='resume-session']")"
 analysis_launch_count="$(read_ab "count analysis launch buttons" get count ".session-actions [data-action='analyze-session']")"
 if [[ "$TERMINAL_LAUNCH" == "disabled" ]]; then
-  if [[ "$resume_launch_count" != "0" || "$analysis_launch_count" != "0" ]]; then
-    echo "Terminal and analysis launch buttons should be hidden with --disable-terminal-launch" >&2
+  if [[ "$resume_launch_count" != "0" || "$resume_preview_count" != "0" || "$resume_copy_count" != "0" || "$analysis_launch_count" != "0" ]]; then
+    echo "Terminal controls and analysis launch buttons should be hidden with --disable-terminal-launch" >&2
     exit 1
   fi
 else
-  if [[ "$resume_launch_count" != "1" || "$analysis_launch_count" != "1" ]]; then
-    echo "Terminal and analysis launch buttons should be visible by default" >&2
+  if [[ "$resume_launch_count" != "1" || "$resume_preview_count" != "1" || "$resume_copy_count" != "1" || "$analysis_launch_count" != "1" ]]; then
+    echo "Terminal launch, preview, copy, and analysis buttons should be visible by default" >&2
     exit 1
   fi
 fi

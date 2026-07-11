@@ -1458,6 +1458,24 @@ export function renderSessionPage({
   const resumeActions = resumeCommand && terminalLaunchAllowed ? `
         <button class="action-btn" data-action="resume-session" data-id="${escapeHtml(session.id)}" ${resumeCommand.available ? "" : "disabled"}>${t("action.open_terminal")}</button>
   ` : "";
+  const resumePreview = resumeCommand && terminalLaunchAllowed ? `
+        <details class="resume-command-preview">
+          <summary>${t("action.resume_preview")}</summary>
+          <div class="resume-command-preview-body">
+            <div class="resume-command-item">
+              <span class="resume-command-label">${t("action.resume_command")}</span>
+              <div class="resume-command-value">
+                <code>${escapeHtml(resumeCommand.display || "")}</code>
+                <button class="copy-btn" type="button" data-action="copy-resume-command" data-command="${escapeHtml(resumeCommand.display || "")}" title="${t("action.copy_resume_command")}" aria-label="${t("action.copy_resume_command")}">${t("action.copy")}</button>
+              </div>
+            </div>
+            <div class="resume-command-item">
+              <span class="resume-command-label">${t("action.resume_directory")}</span>
+              <code>${escapeHtml(resumeCommand.cwd || "")}</code>
+            </div>
+          </div>
+        </details>
+  ` : "";
   const analysisButton = analysisAction && terminalLaunchAllowed
     ? renderAnalysisLaunchButton(analysisAction, session)
     : "";
@@ -1465,13 +1483,14 @@ export function renderSessionPage({
   const actionShellClass = analysisMaterials
     ? "session-actions-shell analysis-launch-control"
     : "session-actions-shell";
-  const actions = managementActions || resumeActions || analysisButton || analysisMaterials ? `
+  const actions = managementActions || resumeActions || resumePreview || analysisButton || analysisMaterials ? `
       <div class="${actionShellClass}">
         <div class="session-actions">
           ${managementActions}
           ${resumeActions}
           ${analysisButton}
         </div>
+        ${resumePreview}
         ${analysisMaterials}
       </div>
   ` : "";
