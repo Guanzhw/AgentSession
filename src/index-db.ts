@@ -1,6 +1,7 @@
 // src/index-db.js
 import { DatabaseSync } from "node:sqlite";
 import { getConfig } from "./config.js";
+import { analysisTitleSqlCondition, analysisTitleSqlParams, normalizeSessionKindFilter } from "./session-kind.js";
 
 let indexDb;
 
@@ -74,7 +75,7 @@ function indexedSortOrder(sort = "updated-desc") {
   return "time_updated DESC, time_created DESC, id ASC";
 }
 
-function indexedFilter(timeRange = "", search = "", project = "", includedIds = undefined) {
+function indexedFilter(timeRange = "", search = "", project = "", includedIds = undefined, sessionKind = "all") {
   const where = ["provider = ?"];
   const params = [];
   const db = getIndexDb();
@@ -112,11 +113,18 @@ function indexedFilter(timeRange = "", search = "", project = "", includedIds = 
     }
   }
 
+  const kind = normalizeSessionKindFilter(sessionKind);
+  if (kind !== "all") {
+    const titleCondition = analysisTitleSqlCondition("LOWER(COALESCE(NULLIF(title, ''), id))");
+    where.push(kind === "analysis" ? `(${titleCondition})` : `NOT (${titleCondition})`);
+    params.push(...analysisTitleSqlParams());
+  }
+
   return { db, whereClause: `WHERE ${where.join(" AND ")}`, params };
 }
 
-export function getIndexedSessions(provider, limit = 50, offset = 0, timeRange = "", search = "", project = "", sort = "updated-desc", includedIds = undefined) {
-  const { db, whereClause, params } = indexedFilter(timeRange, search, project, includedIds);
+export function getIndexedSessions(provider, limit = 50, offset = 0, timeRange = "", search = "", project = "", sort = "updated-desc", includedIds = undefined, sessionKind = "all") {
+  const { db, whereClause, params } = indexedFilter(timeRange, search, project, includedIds, sessionKind);
   const orderBy = indexedSortOrder(sort);
   const total = db.prepare(`SELECT COUNT(*) as c FROM session_index ${whereClause}`).get(provider, ...params).c;
   const sessions = db.prepare(`
@@ -127,8 +135,8 @@ export function getIndexedSessions(provider, limit = 50, offset = 0, timeRange =
   return { sessions, total };
 }
 
-export function getIndexedSessionProjects(provider, timeRange = "", search = "", includedIds = undefined) {
-  const { db, whereClause, params } = indexedFilter(timeRange, search, "", includedIds);
+export function getIndexedSessionProjects(provider, timeRange = "", search = "", includedIds = undefined, sessionKind = "all") {
+  const { db, whereClause, params } = indexedFilter(timeRange, search, "", includedIds, sessionKind);
   return db.prepare(`
     SELECT COALESCE(directory, '') AS id,
            COALESCE(NULLIF(directory, ''), 'Unknown project') AS label,
@@ -145,8 +153,8 @@ export function getIndexedSessionProjects(provider, timeRange = "", search = "",
   }));
 }
 
-export function getIndexedOverview(provider, timeRange = "", search = "", project = "") {
-  const { db, whereClause, params } = indexedFilter(timeRange, search, project);
+export function getIndexedOverview(provider, timeRange = "", search = "", project = "", sessionKind = "all") {
+  const { db, whereClause, params } = indexedFilter(timeRange, search, project, undefined, sessionKind);
   const row = db.prepare(`
     SELECT COUNT(*) AS totalSessions,
            COALESCE(SUM(COALESCE(message_count, 0)), 0) AS totalMessages

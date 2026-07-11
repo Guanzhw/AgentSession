@@ -41,7 +41,7 @@ OpenCode and CodeAgent store stars, custom titles, soft deletes, and trash state
 ## Features
 
 - **Unified dashboard**: detected and undetected providers are shown in the top bar, with unavailable providers disabled.
-- **Session list and search**: project/time/starred filtering, sorting, infinite scroll, title search, and message-content search.
+- **Session list and search**: project/time/starred filtering, sorting, infinite scroll, title search, and message-content search. A reversible title-type filter can separate titles containing analysis/analyze signals from other sessions; it is a viewer heuristic, not provider metadata.
 - **Session detail review**: messages, tool calls, todos, and subsessions render in one review surface.
 - **Recursive session tree**: OpenCode/CodeAgent child sessions are organized as nested session containers instead of flat message rows.
 - **Tool Flow Tree**: the right-side Flow view shows root sessions, messages, tools, and subagent branches by hierarchy.
@@ -217,7 +217,8 @@ These three files are the final analysis products. Files such as
 `session-index.json`, `evidence-index.json`, `evidence.jsonl`, `artifacts.json`,
 and `manifest.json` are supporting evidence and diagnostics. Completed runs
 expose direct open and download links in the session's **Analysis activity**
-panel.
+panel. Active, failed, and invalid runs expose available analyzer stdout/stderr
+logs there as well, together with a copyable PowerShell analyzer command.
 
 Analysis inputs are intentionally separated:
 

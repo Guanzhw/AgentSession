@@ -31,6 +31,10 @@ export const zh = {
   "filter.unknown_project": "未知项目",
   "filter.time": "时间",
   "filter.sort": "排序",
+  "filter.title_type": "标题类型",
+  "filter.title_all": "全部标题",
+  "filter.title_work": "非分析标题",
+  "filter.title_analysis": "分析标题",
   "filter.view": "视图",
   "filter.starred_only": "仅看收藏",
   "filter.apply": "应用",
@@ -44,6 +48,7 @@ export const zh = {
 
   // Session card
   "card.files": "{count} 个文件",
+  "session.analysis_badge": "分析标题",
 
   // Batch operations
   "batch.select_all": "全选",
@@ -67,6 +72,12 @@ export const zh = {
   "detail.deletions": "删除",
   "detail.no_messages": "此会话暂无可显示的消息。",
   "detail.sidebar_title": "最近会话",
+  "detail.search_messages": "在会话中查找",
+  "detail.search_placeholder": "搜索消息和工具调用",
+  "detail.search_previous": "上一个",
+  "detail.search_next": "下一个",
+  "detail.search_results": "第 {current} / {total} 个匹配回合",
+  "detail.search_no_results": "没有匹配的会话回合",
 
   // Session actions
   "action.starred": "★ 已收藏",
@@ -118,6 +129,10 @@ export const zh = {
   "analysis.implementation_title": "实现",
   "analysis.implementation_launch": "实现已接受的提案",
   "analysis.implementation_ready": "已校验的提案可由用户确认后启动实现。",
+  "analysis.recovery_title": "运行恢复",
+  "analysis.diagnostics_stdout": "打开标准输出",
+  "analysis.diagnostics_stderr": "打开标准错误",
+  "analysis.copy_command": "复制 Analyzer 命令",
 
   // Settings
   "settings.title": "设置",

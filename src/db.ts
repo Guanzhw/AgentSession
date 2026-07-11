@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { getConfig } from "./config.js";
 import { parseJson, createSnippet, mapDataRow } from "./providers/shared/parser.js";
+import { analysisTitleSqlCondition, analysisTitleSqlParams, normalizeSessionKindFilter } from "./session-kind.js";
 
 let dbInstance;
 let dbPath;
@@ -75,7 +76,7 @@ function sessionSortOrder(sort = "updated-desc") {
   return "time_updated DESC, time_created DESC, id ASC";
 }
 
-function sessionFilter(search = "", timeRange = "", project = "", excludedIds = undefined, includedIds = undefined) {
+function sessionFilter(search = "", timeRange = "", project = "", excludedIds = undefined, includedIds = undefined, sessionKind = "all") {
   const where = ["time_archived IS NULL", "parent_id IS NULL"];
   const params = [];
   const searchTerm = search ? `%${search}%` : null;
@@ -112,12 +113,19 @@ function sessionFilter(search = "", timeRange = "", project = "", excludedIds = 
     }
   }
 
+  const kind = normalizeSessionKindFilter(sessionKind);
+  if (kind !== "all") {
+    const titleCondition = analysisTitleSqlCondition("LOWER(COALESCE(NULLIF(session.title, ''), NULLIF(session.slug, ''), session.id))");
+    where.push(kind === "analysis" ? `(${titleCondition})` : `NOT (${titleCondition})`);
+    params.push(...analysisTitleSqlParams());
+  }
+
   return { whereClause: `WHERE ${where.join(" AND ")}`, params };
 }
 
-export function listSessions(limit = 50, offset = 0, search = "", timeRange = "", pathOverride = undefined, project = "", excludedIds = undefined, sort = "updated-desc", includedIds = undefined) {
+export function listSessions(limit = 50, offset = 0, search = "", timeRange = "", pathOverride = undefined, project = "", excludedIds = undefined, sort = "updated-desc", includedIds = undefined, sessionKind = "all") {
   const db = getDb(pathOverride);
-  const { whereClause, params } = sessionFilter(search, timeRange, project, excludedIds, includedIds);
+  const { whereClause, params } = sessionFilter(search, timeRange, project, excludedIds, includedIds, sessionKind);
   const orderBy = sessionSortOrder(sort);
 
   const sessions = db.prepare(`
@@ -138,9 +146,9 @@ export function listSessions(limit = 50, offset = 0, search = "", timeRange = ""
   return { sessions, total: totalRow?.total ?? 0 };
 }
 
-export function listSessionProjects(search = "", timeRange = "", pathOverride = undefined, excludedIds = undefined, includedIds = undefined) {
+export function listSessionProjects(search = "", timeRange = "", pathOverride = undefined, excludedIds = undefined, includedIds = undefined, sessionKind = "all") {
   const db = getDb(pathOverride);
-  const { whereClause, params } = sessionFilter(search, timeRange, "", excludedIds, includedIds);
+  const { whereClause, params } = sessionFilter(search, timeRange, "", excludedIds, includedIds, sessionKind);
   const rows = db.prepare(`
     SELECT
       COALESCE(session.project_id, '') AS id,

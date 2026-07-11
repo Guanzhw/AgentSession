@@ -31,6 +31,10 @@ export const en = {
   "filter.unknown_project": "Unknown project",
   "filter.time": "Time",
   "filter.sort": "Sort",
+  "filter.title_type": "Title type",
+  "filter.title_all": "All titles",
+  "filter.title_work": "Non-analysis titles",
+  "filter.title_analysis": "Analysis titles",
   "filter.view": "View",
   "filter.starred_only": "Starred only",
   "filter.apply": "Apply",
@@ -44,6 +48,7 @@ export const en = {
 
   // Session card
   "card.files": "{count} files",
+  "session.analysis_badge": "Analysis title",
 
   // Batch operations
   "batch.select_all": "Select All",
@@ -67,6 +72,12 @@ export const en = {
   "detail.deletions": "Deletions",
   "detail.no_messages": "No messages to display in this session.",
   "detail.sidebar_title": "Recent Sessions",
+  "detail.search_messages": "Find in conversation",
+  "detail.search_placeholder": "Search messages and tools",
+  "detail.search_previous": "Previous",
+  "detail.search_next": "Next",
+  "detail.search_results": "{current} of {total} matching turns",
+  "detail.search_no_results": "No matching turns",
 
   // Session actions
   "action.starred": "★ Starred",
@@ -118,6 +129,10 @@ export const en = {
   "analysis.implementation_title": "Implementation",
   "analysis.implementation_launch": "Implement accepted proposals",
   "analysis.implementation_ready": "Validated proposals are ready for user-approved implementation.",
+  "analysis.recovery_title": "Run recovery",
+  "analysis.diagnostics_stdout": "Open stdout",
+  "analysis.diagnostics_stderr": "Open stderr",
+  "analysis.copy_command": "Copy analyzer command",
 
   // Settings
   "settings.title": "Settings",

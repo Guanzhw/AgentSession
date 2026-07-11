@@ -455,7 +455,10 @@ New runs use:
     `-- trace.json
 ```
 
-Analyzer stdout/stderr logs live in `diagnostics/` for every run. The large raw
+Analyzer stdout/stderr logs live in `diagnostics/` for every run. The session
+detail's **Analysis activity** panel exposes available logs for active, failed,
+and invalid runs, and provides a copyable PowerShell analyzer command for local
+recovery. The large raw
 diagnostic snapshots are written only when `analysis.includeRawSnapshots` or the
 target-level `includeRawSnapshots` is true.
 

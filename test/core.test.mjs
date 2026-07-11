@@ -33,7 +33,14 @@ import { renderCanonicalFlowPanelContent, renderSessionPage } from "../dist/src/
 import { renderSettingsPage } from "../dist/src/views/settings.js";
 import { sessionCard } from "../dist/src/views/components.js";
 import { renderSessionsPage } from "../dist/src/views/sessions.js";
-import { getSearchResults, resolveSessionSearchMode, resolveSessionSort, resolveStarredFilter } from "../dist/src/server.js";
+import {
+  getSearchResults,
+  resolveSessionKindFilter,
+  resolveSessionSearchMode,
+  resolveSessionSort,
+  resolveStarredFilter
+} from "../dist/src/server.js";
+import { isAnalysisTitledSession, matchesSessionKind } from "../dist/src/session-kind.js";
 import { t } from "../dist/src/i18n.js";
 import {
   extractSessionMeta,
@@ -767,6 +774,17 @@ test("runtime route context logs patterns instead of raw session paths", () => {
       action: "report"
     }
   );
+  assert.deepEqual(
+    getRuntimeRouteContext("GET", "/api/opencode/session/ses_123/analyses/run_456/diagnostics/stderr"),
+    {
+      method: "GET",
+      route: "/api/:provider/session/:sessionId/analyses/:runId/diagnostics/:diagnostic",
+      provider: "opencode",
+      sessionId: "ses_123",
+      runId: "run_456",
+      action: "stderr"
+    }
+  );
   assert.equal(getRuntimeRouteContext("GET", "/static/app.js"), null);
   assert.deepEqual(
     getRuntimeRouteContext("GET", "/unexpected/ses_secret"),
@@ -845,7 +863,7 @@ test("session batch actions are disabled until a session is selected", () => {
   assert.match(html, /<button class="btn batch-action btn-danger" data-action="delete" disabled>/);
 });
 
-test("session list exposes sort and starred filters through pagination", () => {
+test("session list exposes sort, title type, and starred filters through pagination", () => {
   const html = renderSessionsPage({
     sessions: Array.from({ length: 30 }, (_, index) => ({
       id: `ses_filter_${index}`,
@@ -862,6 +880,7 @@ test("session list exposes sort and starred filters through pagination", () => {
     offset: 0,
     sort: "title-asc",
     starredOnly: true,
+    sessionKind: "analysis",
     provider: "opencode",
     providerAvailable: true,
     manageable: true,
@@ -870,8 +889,11 @@ test("session list exposes sort and starred filters through pagination", () => {
 
   assert.match(html, /<select name="sort">/);
   assert.match(html, /<option value="title-asc" selected>Title A-Z<\/option>/);
+  assert.match(html, /<select name="kind">/);
+  assert.match(html, /<option value="analysis" selected>Analysis titles<\/option>/);
   assert.match(html, /<input type="checkbox" name="starred" value="1" checked>/);
   assert.match(html, /data-sort="title-asc"/);
+  assert.match(html, /data-kind="analysis"/);
   assert.match(html, /data-starred="1"/);
   assert.match(html, /href="\/opencode">Clear<\/a>/);
 });
@@ -913,6 +935,19 @@ test("session list query options accept known sort and starred values only", () 
   assert.equal(resolveStarredFilter(new URLSearchParams("starred=1")), true);
   assert.equal(resolveStarredFilter(new URLSearchParams("starred=true")), true);
   assert.equal(resolveStarredFilter(new URLSearchParams("starred=false")), false);
+  assert.equal(resolveSessionKindFilter(new URLSearchParams()), "all");
+  assert.equal(resolveSessionKindFilter(new URLSearchParams("kind=analysis")), "analysis");
+  assert.equal(resolveSessionKindFilter(new URLSearchParams("sessionKind=work")), "work");
+  assert.equal(resolveSessionKindFilter(new URLSearchParams("kind=unknown")), "all");
+});
+
+test("analysis title classification remains an explicit title heuristic", () => {
+  assert.equal(isAnalysisTitledSession({ title: "OpenCode session analysis proposals" }), true);
+  assert.equal(isAnalysisTitledSession({ title: "Analyze current session" }), true);
+  assert.equal(isAnalysisTitledSession({ title: "Implement authentication" }), false);
+  assert.equal(matchesSessionKind({ title: "Analyze current session" }, "analysis"), true);
+  assert.equal(matchesSessionKind({ title: "Analyze current session" }, "work"), false);
+  assert.equal(matchesSessionKind({ title: "Implement authentication" }, "work"), true);
 });
 
 test("mobile topbar keeps settings reachable when utility links collapse", () => {
@@ -993,7 +1028,7 @@ test("sqlite session queries exclude viewer-deleted sessions from paging, projec
         summary_additions, summary_deletions, summary_files, time_archived
       ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 0, 0, 0, NULL)
     `);
-    insertSession.run("a", "p1", "a", "needle title", "/p1", 100, 300);
+    insertSession.run("a", "p1", "a", "needle analysis", "/p1", 100, 300);
     insertSession.run("b", "p1", "b", "deleted content", "/p1", 100, 200);
     insertSession.run("c", "p2", "c", "active content", "/p2", 100, 100);
 
@@ -1027,6 +1062,14 @@ test("sqlite session queries exclude viewer-deleted sessions from paging, projec
     assert.equal(starredOnly.total, 1);
     assert.deepEqual(starredOnly.sessions.map((session) => session.id), ["c"]);
     assert.deepEqual(
+      listSessions(10, 0, "", "", dbPath, "", excluded, "updated-desc", undefined, "analysis").sessions.map((session) => session.id),
+      ["a"]
+    );
+    assert.deepEqual(
+      listSessions(10, 0, "", "", dbPath, "", excluded, "updated-desc", undefined, "work").sessions.map((session) => session.id),
+      ["c"]
+    );
+    assert.deepEqual(
       listSessionProjects("", "", dbPath, excluded).map((project) => ({
         id: project.id,
         label: project.label,
@@ -1048,6 +1091,10 @@ test("sqlite session queries exclude viewer-deleted sessions from paging, projec
       ]
     );
     assert.deepEqual(
+      listSessionProjects("", "", dbPath, excluded, undefined, "analysis").map((project) => project.id),
+      ["p1"]
+    );
+    assert.deepEqual(
       searchMessages("needle", 1, dbPath, excluded).map((match) => match.sessionId),
       ["c"]
     );
@@ -1055,6 +1102,14 @@ test("sqlite session queries exclude viewer-deleted sessions from paging, projec
     const search = getSearchResults("needle", 10, 0, dbPath, excluded);
     assert.equal(search.total, 2);
     assert.deepEqual(search.sessions.map((session) => session.id), ["a", "c"]);
+    assert.deepEqual(
+      getSearchResults("needle", 10, 0, dbPath, excluded, "analysis").sessions.map((session) => session.id),
+      ["a"]
+    );
+    assert.deepEqual(
+      getSearchResults("needle", 10, 0, dbPath, excluded, "work").sessions.map((session) => session.id),
+      ["c"]
+    );
   } finally {
     closeDb(dbPath);
     rmSync(temp, { recursive: true, force: true });
@@ -1086,6 +1141,32 @@ test("session cards expose accessible action buttons", () => {
   assert.match(html, /download="session-ses_acce\.json"/);
   assert.doesNotMatch(html, /data-action="export-md"/);
   assert.doesNotMatch(html, /data-action="export-json"/);
+});
+
+test("session cards omit zero-value change metrics", () => {
+  const emptyStats = sessionCard({
+    id: "ses_empty_stats",
+    title: "No file changes",
+    time_updated: 1_700_000_000_000,
+    summary_files: 0,
+    summary_additions: 0,
+    summary_deletions: 0
+  });
+  assert.doesNotMatch(emptyStats, /session-card-stats/);
+  assert.doesNotMatch(emptyStats, /\+0|\-0|0 files/);
+
+  const changed = sessionCard({
+    id: "ses_changed",
+    title: "Changed files",
+    time_updated: 1_700_000_000_000,
+    summary_files: 2,
+    summary_additions: 3,
+    summary_deletions: 0
+  });
+  assert.match(changed, /session-card-stats/);
+  assert.match(changed, /2 files/);
+  assert.match(changed, /\+3/);
+  assert.doesNotMatch(changed, /\-0/);
 });
 
 test("session management uses in-page dialogs", () => {
@@ -2085,6 +2166,8 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   );
   const evidenceIndexText = readFileSync(run.files.evidenceIndexPath, "utf-8");
   assert.ok(evidenceIndexText.indexOf('"evidenceId"') < evidenceIndexText.indexOf('"sequence"'));
+  writeFileSync(run.files.analyzerStdoutPath, "Analyzer started\n");
+  writeFileSync(run.files.analyzerStderrPath, "Waiting for input\n");
   const preparedRuns = listSessionAnalysisRuns({
     provider,
     providerId: "opencode",
@@ -2104,6 +2187,11 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   assert.equal(preparedRuns.length, 1);
   assert.equal(preparedRuns[0].state, "prepared");
   assert.equal(preparedRuns[0].active, true);
+  assert.equal(preparedRuns[0].diagnostics.stdout.available, true);
+  assert.equal(preparedRuns[0].diagnostics.stderr.available, true);
+  assert.equal(preparedRuns[0].diagnostics.stdout.relativePath, "diagnostics/analyzer.stdout.log");
+  assert.equal(preparedRuns[0].command.stdin, "prompt");
+  assert.equal(preparedRuns[0].command.promptPath, run.files.promptPath);
   const activeRun = findActiveSessionAnalysisRun({
     provider,
     providerId: "opencode",
@@ -2850,6 +2938,18 @@ test("session rendering shows configured analysis actions only when launch is al
   assert.match(visible, /id="analysis-status-panel"/);
   assert.match(visible, /data-terminal-launch="true"/);
   assert.match(visible, /report\.md is missing/);
+});
+
+test("session rendering includes in-conversation search controls", () => {
+  const html = renderSessionPage({
+    session: { id: "searchable", title: "Searchable session", time_created: 1000 }
+  });
+
+  assert.match(html, /data-session-search/);
+  assert.match(html, /data-session-search-input/);
+  assert.match(html, /data-session-search-previous/);
+  assert.match(html, /data-session-search-next/);
+  assert.match(html, /id="session-messages"/);
 });
 
 test("built-in analysis targets resolve without target-specific config", () => {

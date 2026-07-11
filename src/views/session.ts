@@ -1412,6 +1412,20 @@ function renderExportMenu(provider, sessionId) {
   </details>`;
 }
 
+function renderTranscriptSearch() {
+  return `<section class="session-search" data-session-search>
+    <label class="session-search-field" for="session-transcript-search">
+      <span>${t("detail.search_messages")}</span>
+      <input id="session-transcript-search" type="search" autocomplete="off" data-session-search-input placeholder="${t("detail.search_placeholder")}" aria-describedby="session-transcript-search-status">
+    </label>
+    <div class="session-search-navigation">
+      <button class="session-search-nav-btn" type="button" data-session-search-previous disabled>${t("detail.search_previous")}</button>
+      <output id="session-transcript-search-status" class="session-search-status" data-session-search-status aria-live="polite"></output>
+      <button class="session-search-nav-btn" type="button" data-session-search-next disabled>${t("detail.search_next")}</button>
+    </div>
+  </section>`;
+}
+
 export function renderSessionPage({
   session,
   sessionTree = null,
@@ -1507,7 +1521,8 @@ ${actions}
     ${analysisStatus}
     ${renderSessionMetricsPanel(sessionMetrics)}
     ${todoList(todos)}
-    <section class="messages">
+    ${renderTranscriptSearch()}
+    <section id="session-messages" class="messages">
       ${messageMarkup || `<p class="empty-state">${t("detail.no_messages")}</p>`}
     </section>
     ${sessionFlow ? renderCanonicalFlowPanel(sessionFlow) : renderFlowPanel(sessionTree, flowLazyUrl)}

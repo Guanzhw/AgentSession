@@ -34,6 +34,7 @@ const __I18N__ = {
     time_hours_ago: "{n}h ago",
     time_days_ago: "{n}d ago",
     card_files: "{count} files",
+    session_analysis_badge: "Analysis title",
     menu_rename: "Rename",
     menu_export_md: "Export MD",
     menu_export_json: "Export JSON",
@@ -89,6 +90,10 @@ const __I18N__ = {
     analysis_implementation_prepared: "Implementation request prepared",
     analysis_validation_errors: "Validation errors",
     analysis_status_error: "Could not refresh analysis status",
+    analysis_recovery_title: "Run recovery",
+    analysis_diagnostics_stdout: "Open stdout",
+    analysis_diagnostics_stderr: "Open stderr",
+    analysis_copy_command: "Copy analyzer command",
     settings_saved: "Settings saved",
     settings_restart: "Restart required for: {keys}",
     settings_invalid_json: "Enter valid JSON before saving",
@@ -116,7 +121,9 @@ const __I18N__ = {
     theme_to_dark: "Switch to dark theme",
     scroll_load_more: "Load more sessions",
     scroll_all_loaded: "All sessions loaded",
-    scroll_loading: "Loading..."
+    scroll_loading: "Loading...",
+    "detail.search_results": "{current} of {total} matching turns",
+    "detail.search_no_results": "No matching turns"
   },
   zh: {
     rename_title: "重命名会话",
@@ -150,6 +157,7 @@ const __I18N__ = {
     time_hours_ago: "{n}小时前",
     time_days_ago: "{n}天前",
     card_files: "{count} 个文件",
+    session_analysis_badge: "分析标题",
     menu_rename: "重命名",
     menu_export_md: "导出 MD",
     menu_export_json: "导出 JSON",
@@ -205,6 +213,10 @@ const __I18N__ = {
     analysis_implementation_prepared: "已准备实现请求",
     analysis_validation_errors: "校验错误",
     analysis_status_error: "无法刷新分析状态",
+    analysis_recovery_title: "运行恢复",
+    analysis_diagnostics_stdout: "打开标准输出",
+    analysis_diagnostics_stderr: "打开标准错误",
+    analysis_copy_command: "复制 Analyzer 命令",
     settings_saved: "设置已保存",
     settings_restart: "以下配置需要重启后生效：{keys}",
     settings_invalid_json: "请先输入有效的 JSON",
@@ -232,7 +244,9 @@ const __I18N__ = {
     theme_to_dark: "切换到深色主题",
     scroll_load_more: "加载更多会话",
     scroll_all_loaded: "已全部加载",
-    scroll_loading: "加载中..."
+    scroll_loading: "加载中...",
+    "detail.search_results": "第 {current} / {total} 个匹配回合",
+    "detail.search_no_results": "没有匹配的会话回合"
   }
 };
 
@@ -1307,6 +1321,22 @@ function analysisTimestamp(value) {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 }
 
+function powerShellQuote(value) {
+  return `'${String(value || "").replaceAll("'", "''")}'`;
+}
+
+function formatAnalysisCommand(command) {
+  if (!command?.executable) return "";
+  const invoke = `& ${[command.executable, ...(command.args || [])].map(powerShellQuote).join(" ")}`;
+  const workingDirectory = command.cwd
+    ? `Set-Location -LiteralPath ${powerShellQuote(command.cwd)}; `
+    : "";
+  if (command.stdin === "prompt" && command.promptPath) {
+    return `${workingDirectory}Get-Content -LiteralPath ${powerShellQuote(command.promptPath)} -Raw | ${invoke}`;
+  }
+  return `${workingDirectory}${invoke}`;
+}
+
 function renderAnalysisRuns(runs) {
   analysisRunsState = Array.isArray(runs) ? runs : [];
   document.querySelectorAll(".analysis-launch-control").forEach((control) => {
@@ -1443,6 +1473,46 @@ function renderAnalysisRuns(runs) {
       }
       outputs.appendChild(outputList);
       card.appendChild(outputs);
+    }
+
+    const diagnosticDefinitions = [
+      { id: "stdout", label: ft("analysis_diagnostics_stdout") },
+      { id: "stderr", label: ft("analysis_diagnostics_stderr") }
+    ];
+    const availableDiagnostics = diagnosticDefinitions.filter(
+      (definition) => run.diagnostics?.[definition.id]?.available
+    );
+    const canRecoverRun = run.active || run.state === "failed" || run.state === "invalid";
+    if (canRecoverRun && (availableDiagnostics.length || run.command?.executable)) {
+      const recovery = document.createElement("section");
+      recovery.className = `analysis-run-recovery${run.stalled ? " analysis-run-recovery-stalled" : ""}`;
+      const recoveryTitle = document.createElement("h3");
+      recoveryTitle.textContent = ft("analysis_recovery_title");
+      const recoveryActions = document.createElement("div");
+      recoveryActions.className = "analysis-run-recovery-actions";
+      const diagnosticBase = `/api/${analysisStatusPanel.dataset.provider}/session/${encodeURIComponent(analysisStatusPanel.dataset.sessionId)}/analyses/${encodeURIComponent(run.runId)}/diagnostics`;
+      for (const definition of availableDiagnostics) {
+        const link = document.createElement("a");
+        link.className = "action-btn analysis-run-recovery-action";
+        link.href = `${diagnosticBase}/${definition.id}`;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.textContent = definition.label;
+        recoveryActions.appendChild(link);
+      }
+      const commandText = formatAnalysisCommand(run.command);
+      if (commandText) {
+        const copyCommand = document.createElement("button");
+        copyCommand.type = "button";
+        copyCommand.className = "action-btn analysis-run-recovery-action";
+        copyCommand.dataset.action = "copy-analysis-command";
+        copyCommand.dataset.id = analysisStatusPanel.dataset.sessionId;
+        copyCommand.dataset.command = commandText;
+        copyCommand.textContent = ft("analysis_copy_command");
+        recoveryActions.appendChild(copyCommand);
+      }
+      recovery.append(recoveryTitle, recoveryActions);
+      card.appendChild(recovery);
     }
 
     const terminalLaunchAllowed = analysisStatusPanel.dataset.terminalLaunch === "true";
@@ -1629,8 +1699,24 @@ document.addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-action]");
   if (!btn) return;
   const action = btn.dataset.action;
+  if (!action) return;
+
+  if (action === "copy-analysis-command") {
+    const command = btn.dataset.command || "";
+    if (!command) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      await copyText(command);
+      showToast(ft("copied"), "success");
+    } catch {
+      showToast(ft("toast_error"), "error");
+    }
+    return;
+  }
+
   const id = btn.dataset.id;
-  if (!id || !action) return;
+  if (!id) return;
 
   if (btn.classList.contains("batch-action")) return;
 
@@ -1959,6 +2045,15 @@ function renderSessionCard(s) {
   const timeUpdated = Number(s.time_updated) || Date.now();
   const classes = ["session-card"];
   if (s.starred) classes.push("starred");
+  const changedFiles = Number(s.summary_files) || 0;
+  const additions = Number(s.summary_additions) || 0;
+  const deletions = Number(s.summary_deletions) || 0;
+  const stats = [
+    changedFiles > 0 ? `<span>${ft("card_files").replace("{count}", String(changedFiles))}</span>` : "",
+    additions > 0 ? `<span class="additions">+${additions}</span>` : "",
+    deletions > 0 ? `<span class="deletions">-${deletions}</span>` : ""
+  ].filter(Boolean).join("");
+  const analysisBadge = s.analysisTitled ? `<span class="session-kind-badge">${escapeHtmlClient(ft("session_analysis_badge"))}</span>` : "";
 
   const actionsHtml = IS_MANAGEABLE_PROVIDER ? `
     <div class="card-actions">
@@ -1979,9 +2074,12 @@ function renderSessionCard(s) {
     <input type="checkbox" class="card-checkbox" data-id="${id}">
     <div class="session-card-content">
       <header class="session-card-header">
-        <a href="/${PROVIDER}/session/${encodeURIComponent(s.id)}" class="session-card-title-link">
-          <h2 class="session-card-title">${title}</h2>
-        </a>
+        <div class="session-card-title-stack">
+          <a href="/${PROVIDER}/session/${encodeURIComponent(s.id)}" class="session-card-title-link">
+            <h2 class="session-card-title">${title}</h2>
+          </a>
+          ${analysisBadge}
+        </div>
         <time class="session-card-time" datetime="${new Date(timeUpdated).toISOString()}">${escapeHtmlClient(formatTimeClient(timeUpdated))}</time>
       </header>
       <div class="session-id-row">
@@ -1989,11 +2087,7 @@ function renderSessionCard(s) {
         <button class="copy-btn" type="button" data-action="copy-session-id" data-id="${id}" title="${ft("copy_session_id")}" aria-label="${ft("copy_session_id")}">${ft("copy")}</button>
       </div>
       <p class="session-card-directory">${directory}</p>
-      <footer class="session-card-stats">
-        <span>${ft("card_files").replace("{count}", String(Number(s.summary_files) || 0))}</span>
-        <span class="additions">+${Number(s.summary_additions) || 0}</span>
-        <span class="deletions">-${Number(s.summary_deletions) || 0}</span>
-      </footer>
+      ${stats ? `<footer class="session-card-stats">${stats}</footer>` : ""}
     </div>
     ${actionsHtml}
   </article>`;
@@ -2008,6 +2102,7 @@ if (scrollSentinel && sessionList) {
   const scrollProject = scrollSentinel.dataset.project || "";
   const scrollMode = scrollSentinel.dataset.mode || "list";
   const scrollSort = scrollSentinel.dataset.sort || "";
+  const scrollKind = scrollSentinel.dataset.kind || "";
   const scrollStarred = scrollSentinel.dataset.starred || "";
   let isLoading = false;
   let observer = null;
@@ -2036,6 +2131,7 @@ if (scrollSentinel && sessionList) {
       if (scrollProject) params.set("project", scrollProject);
       if (scrollMode) params.set("mode", scrollMode);
       if (scrollSort) params.set("sort", scrollSort);
+      if (scrollKind) params.set("kind", scrollKind);
       if (scrollStarred) params.set("starred", scrollStarred);
 
       const res = await fetch(`/api/${PROVIDER}/sessions?${params.toString()}`);
@@ -2083,6 +2179,98 @@ if (scrollSentinel && sessionList) {
 
 const sessionWorkbench = document.querySelector(".session-workbench");
 if (sessionWorkbench) {
+  const transcriptSearch = sessionWorkbench.querySelector("[data-session-search]");
+  const transcriptSearchInput = transcriptSearch?.querySelector("[data-session-search-input]");
+  const transcriptSearchStatus = transcriptSearch?.querySelector("[data-session-search-status]");
+  const transcriptSearchPrevious = transcriptSearch?.querySelector("[data-session-search-previous]");
+  const transcriptSearchNext = transcriptSearch?.querySelector("[data-session-search-next]");
+  let transcriptEntries = null;
+  let transcriptMatches = [];
+  let transcriptMatchIndex = -1;
+
+  const getTranscriptEntries = () => {
+    if (transcriptEntries) return transcriptEntries;
+    transcriptEntries = [...sessionWorkbench.querySelectorAll(".messages .message-turn")].map((turn) => {
+      const text = [];
+      const walker = document.createTreeWalker(turn, NodeFilter.SHOW_TEXT);
+      let node = walker.nextNode();
+      while (node) {
+        if (node.parentElement?.closest(".message-turn") === turn) {
+          text.push(node.nodeValue || "");
+        }
+        node = walker.nextNode();
+      }
+      return { turn, text: text.join(" ").toLocaleLowerCase() };
+    });
+    return transcriptEntries;
+  };
+
+  const updateTranscriptSearchControls = () => {
+    const disabled = transcriptMatches.length === 0;
+    if (transcriptSearchPrevious) transcriptSearchPrevious.disabled = disabled;
+    if (transcriptSearchNext) transcriptSearchNext.disabled = disabled;
+    if (!transcriptSearchStatus) return;
+    if (!transcriptSearchInput?.value.trim()) {
+      transcriptSearchStatus.textContent = "";
+      return;
+    }
+    transcriptSearchStatus.textContent = disabled
+      ? ft("detail.search_no_results")
+      : formatText(ft("detail.search_results"), {
+        current: transcriptMatchIndex + 1,
+        total: transcriptMatches.length
+      });
+  };
+
+  const revealTranscriptMatch = (turn, query) => {
+    turn.querySelectorAll("details:not([open])").forEach((detail) => {
+      if (detail.textContent.toLocaleLowerCase().includes(query)) {
+        detail.open = true;
+      }
+    });
+  };
+
+  const selectTranscriptMatch = (index, scroll = true) => {
+    if (!transcriptMatches.length) return;
+    transcriptMatchIndex = (index + transcriptMatches.length) % transcriptMatches.length;
+    transcriptMatches.forEach((entry, entryIndex) => {
+      entry.classList.toggle("session-search-current", entryIndex === transcriptMatchIndex);
+    });
+    const current = transcriptMatches[transcriptMatchIndex];
+    revealTranscriptMatch(current, transcriptSearchInput?.value.trim().toLocaleLowerCase() || "");
+    if (scroll) {
+      current.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+    updateTranscriptSearchControls();
+  };
+
+  const updateTranscriptMatches = (scroll = false) => {
+    const query = transcriptSearchInput?.value.trim().toLocaleLowerCase() || "";
+    transcriptMatches.forEach((entry) => entry.classList.remove("session-search-match", "session-search-current"));
+    transcriptMatches = [];
+    transcriptMatchIndex = -1;
+    if (query) {
+      transcriptMatches = getTranscriptEntries()
+        .filter((entry) => entry.text.includes(query))
+        .map((entry) => entry.turn);
+      transcriptMatches.forEach((entry) => entry.classList.add("session-search-match"));
+      if (transcriptMatches.length) {
+        selectTranscriptMatch(0, scroll);
+        return;
+      }
+    }
+    updateTranscriptSearchControls();
+  };
+
+  transcriptSearchInput?.addEventListener("input", () => updateTranscriptMatches(true));
+  transcriptSearchInput?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || !transcriptMatches.length) return;
+    event.preventDefault();
+    selectTranscriptMatch(transcriptMatchIndex + (event.shiftKey ? -1 : 1));
+  });
+  transcriptSearchPrevious?.addEventListener("click", () => selectTranscriptMatch(transcriptMatchIndex - 1));
+  transcriptSearchNext?.addEventListener("click", () => selectTranscriptMatch(transcriptMatchIndex + 1));
+
   const tocGroups = [...document.querySelectorAll(".session-toc .toc-group")];
   const tocResizeHandle = document.querySelector(".toc-resize-handle");
   let lastManualNav = 0;

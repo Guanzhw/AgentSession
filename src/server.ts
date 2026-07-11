@@ -59,6 +59,11 @@ import {
 } from "./providers/kinds.js";
 import { getResumeCommand, launchResumeCommand } from "./resume.js";
 import {
+  isAnalysisTitledSession,
+  matchesSessionKind,
+  normalizeSessionKindFilter
+} from "./session-kind.js";
+import {
   getRuntimeRouteContext,
   recordRuntimeEvent,
   runtimeErrorMessage,
@@ -213,7 +218,7 @@ function enrichSession(session, metaMap) {
     return session;
   }
 
-  const meta = metaMap.get(session.id);
+  const meta = metaMap?.get(session.id);
   return {
     ...session,
     starred: Boolean(meta?.starred),
@@ -271,18 +276,22 @@ function getVisibleListResults({
   range = "",
   project = "",
   sort = "updated-desc",
-  starredOnly = false
+  starredOnly = false,
+  sessionKind = "all"
 }) {
   const includedIds = starredOnly ? getStarredIds(metaMap) : undefined;
-  if (isTitleSort(sort)) {
+  const kind = normalizeSessionKindFilter(sessionKind);
+  if (isTitleSort(sort) || kind !== "all") {
     const results = listSessions(ALL_SESSIONS_LIMIT, 0, query, range, dbPath, project, excludedIds, "updated-desc", includedIds);
     const sessions = sortSessionsForDisplay(
-      results.sessions.map((session) => enrichSession(session, metaMap)),
+      results.sessions
+        .map((session) => enrichSession(session, metaMap))
+        .filter((session) => matchesSessionKind(session, kind)),
       sort
     );
     return {
       sessions: sessions.slice(offset, offset + limit),
-      total: results.total
+      total: sessions.length
     };
   }
 
@@ -302,17 +311,21 @@ function getIndexedListResults({
   query = "",
   project = "",
   sort = "updated-desc",
-  includedIds = undefined
+  includedIds = undefined,
+  sessionKind = "all"
 }) {
-  if (isTitleSort(sort)) {
+  const kind = normalizeSessionKindFilter(sessionKind);
+  if (isTitleSort(sort) || kind !== "all") {
     const results = getIndexedSessions(providerId, ALL_SESSIONS_LIMIT, 0, range, query, project, "updated-desc", includedIds);
     const sessions = sortSessionsForDisplay(
-      results.sessions.map((session) => enrichSession(session, metaMap)),
+      results.sessions
+        .map((session) => enrichSession(session, metaMap))
+        .filter((session) => matchesSessionKind(session, kind)),
       sort
     );
     return {
       sessions: sessions.slice(offset, offset + limit),
-      total: results.total
+      total: sessions.length
     };
   }
 
@@ -327,8 +340,13 @@ export function resolveSessionSearchMode(params) {
   return (params.get("mode") || params.get("searchMode")) === "content" ? "content" : "list";
 }
 
-export function getSearchResults(query, limit, offset, dbPath = undefined, excludedIds = new Set()) {
+export function resolveSessionKindFilter(params) {
+  return normalizeSessionKindFilter(params.get("kind") || params.get("sessionKind"));
+}
+
+export function getSearchResults(query, limit, offset, dbPath = undefined, excludedIds = new Set(), sessionKind = "all", metaMap = undefined) {
   const term = (query || "").trim();
+  const kind = normalizeSessionKindFilter(sessionKind);
   if (!term) {
     return { sessions: [], total: 0, note: "Enter a search query to find sessions." };
   }
@@ -339,18 +357,20 @@ export function getSearchResults(query, limit, offset, dbPath = undefined, exclu
   const sessionMap = new Map();
 
   for (const session of titleMatches) {
-    if (!sessionMap.has(session.id)) {
-      orderedIds.push(session.id);
-      sessionMap.set(session.id, session);
+    const enriched = enrichSession(session, metaMap);
+    if (!sessionMap.has(enriched.id) && matchesSessionKind(enriched, kind)) {
+      orderedIds.push(enriched.id);
+      sessionMap.set(enriched.id, enriched);
     }
   }
 
   for (const match of contentMatches) {
     if (!sessionMap.has(match.sessionId)) {
       const session = getSession(match.sessionId, dbPath);
-      if (session) {
-        orderedIds.push(session.id);
-        sessionMap.set(session.id, session);
+      const enriched = enrichSession(session, metaMap);
+      if (enriched && matchesSessionKind(enriched, kind)) {
+        orderedIds.push(enriched.id);
+        sessionMap.set(enriched.id, enriched);
       }
     }
   }
@@ -392,7 +412,8 @@ function normalizeSessionRecord(session) {
     summary_files: Number(session.summary_files) || 0,
     summary_additions: Number(session.summary_additions) || 0,
     summary_deletions: Number(session.summary_deletions) || 0,
-    starred: Boolean(session.starred)
+    starred: Boolean(session.starred),
+    analysisTitled: isAnalysisTitledSession(session)
   };
 }
 
@@ -443,8 +464,9 @@ function buildPartsFromProviderMessages(providerMessages = []) {
   return { messages, partsByMessage };
 }
 
-function getProviderSearchResults(adapter, query, limit, offset) {
+function getProviderSearchResults(adapter, query, limit, offset, sessionKind = "all", metaMap = undefined) {
   const term = (query || "").trim();
+  const kind = normalizeSessionKindFilter(sessionKind);
   if (!term) {
     return { sessions: [], total: 0, note: "Enter a search query to find sessions." };
   }
@@ -457,8 +479,8 @@ function getProviderSearchResults(adapter, query, limit, offset) {
     if (sessionMap.has(match.sessionId)) {
       continue;
     }
-    const session = adapter.getSession(match.sessionId);
-    if (!session) {
+    const session = enrichSession(adapter.getSession(match.sessionId), metaMap);
+    if (!session || !matchesSessionKind(session, kind)) {
       continue;
     }
     orderedIds.push(match.sessionId);
@@ -481,7 +503,8 @@ function toApiSessionShape(session) {
     summary_files: Number(session.summary_files) || 0,
     summary_additions: Number(session.summary_additions) || 0,
     summary_deletions: Number(session.summary_deletions) || 0,
-    starred: Boolean(session.starred)
+    starred: Boolean(session.starred),
+    analysisTitled: Boolean(session.analysisTitled)
   };
 }
 
@@ -1195,6 +1218,60 @@ export async function startServer(config = getConfig()) {
       }
     }
 
+    const analysisDiagnosticMatch = pathname.match(
+      /^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/analyses\/([^/]+)\/diagnostics\/(stdout|stderr)$/
+    );
+    if (req.method === "GET" && analysisDiagnosticMatch) {
+      const providerId = analysisDiagnosticMatch[1];
+      const sessionId = safeDecodeId(analysisDiagnosticMatch[2]);
+      const runId = safeDecodeId(analysisDiagnosticMatch[3]);
+      const diagnosticId = analysisDiagnosticMatch[4];
+      const adapter = providerMap.get(providerId);
+      if (!sessionId || !runId || !adapter) {
+        return json(res, { ok: false, error: "Analysis diagnostic not found" }, 404);
+      }
+      try {
+        const session = adapter.getSession(sessionId);
+        if (!session) {
+          return json(res, { ok: false, error: "Analysis diagnostic not found" }, 404);
+        }
+        const runs = listSessionAnalysisRuns({
+          provider: adapter,
+          providerId,
+          sessionId,
+          directory: session.directory,
+          analysisConfig: appConfig.analysis,
+          metaDir: appConfig.metaDir,
+          limit: 50
+        });
+        const run = runs.find((item) => item.runId === runId);
+        const diagnostic = run?.diagnostics?.[diagnosticId];
+        if (!run || !diagnostic?.available) {
+          return json(res, { ok: false, error: "Analysis diagnostic not found" }, 404);
+        }
+        const resolvedRunDir = path.resolve(run.runDir);
+        const diagnosticPath = path.resolve(run.runDir, diagnostic.relativePath || diagnostic.fileName);
+        if (!diagnosticPath.startsWith(`${resolvedRunDir}${path.sep}`)) {
+          return json(res, { ok: false, error: "Analysis diagnostic not found" }, 404);
+        }
+        const diagnosticStat = lstatSync(diagnosticPath);
+        if (!diagnosticStat.isFile() || diagnosticStat.isSymbolicLink() || diagnosticStat.size > 16 * 1024 * 1024) {
+          return json(res, { ok: false, error: "Analysis diagnostic not found" }, 404);
+        }
+        const disposition = url.searchParams.get("download") === "1" ? "attachment" : "inline";
+        res.writeHead(200, {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Content-Disposition": `${disposition}; filename="${diagnostic.fileName}"`,
+          "X-Content-Type-Options": "nosniff"
+        });
+        res.end(readFileSync(diagnosticPath));
+        return;
+      } catch (error) {
+        console.error("Analysis diagnostic error:", error?.message || error);
+        return json(res, { ok: false, error: "Failed to read analysis diagnostic" }, 500);
+      }
+    }
+
     const analysisOutputMatch = pathname.match(
       /^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/analyses\/([^/]+)\/outputs\/(report|evaluation|proposals)$/
     );
@@ -1300,6 +1377,7 @@ export async function startServer(config = getConfig()) {
         const searchMode = resolveSessionSearchMode(url.searchParams);
         const sort = resolveSessionSort(url.searchParams);
         const starredOnly = resolveStarredFilter(url.searchParams);
+        const sessionKind = resolveSessionKindFilter(url.searchParams);
 
         if (usesSqliteSessionStore(adapter)) {
           const dbPath = adapter.getDataPath();
@@ -1309,7 +1387,7 @@ export async function startServer(config = getConfig()) {
           let sessions;
           let total;
           if (query && searchMode === "content") {
-            const results = getSearchResults(query, apiLimit, apiOffset, dbPath, excludedIds);
+            const results = getSearchResults(query, apiLimit, apiOffset, dbPath, excludedIds, sessionKind, metaMap);
             sessions = results.sessions.map((session) => enrichSession(session, metaMap));
             total = results.total;
           } else {
@@ -1323,7 +1401,8 @@ export async function startServer(config = getConfig()) {
               range,
               project,
               sort,
-              starredOnly
+              starredOnly,
+              sessionKind
             });
             sessions = results.sessions;
             total = results.total;
@@ -1342,7 +1421,7 @@ export async function startServer(config = getConfig()) {
         let sessions;
         let total;
         if (query && searchMode === "content") {
-          const results = getProviderSearchResults(adapter, query, apiLimit, apiOffset);
+          const results = getProviderSearchResults(adapter, query, apiLimit, apiOffset, sessionKind, metaMap);
           sessions = results.sessions;
           total = results.total;
         } else {
@@ -1355,7 +1434,8 @@ export async function startServer(config = getConfig()) {
             query,
             project,
             sort,
-            includedIds
+            includedIds,
+            sessionKind
           });
           sessions = results.sessions.map((session) => normalizeSessionRecord(session));
           total = results.total;
@@ -1707,6 +1787,7 @@ export async function startServer(config = getConfig()) {
         const project = url.searchParams.get("project") || "";
         const sort = resolveSessionSort(url.searchParams);
         const starredOnly = resolveStarredFilter(url.searchParams);
+        const sessionKind = resolveSessionKindFilter(url.searchParams);
         if (usesSqliteSessionStore(adapter)) {
           const dbPath = adapter.getDataPath();
           const metaMap = getAllMeta(providerSegment);
@@ -1721,13 +1802,28 @@ export async function startServer(config = getConfig()) {
             range,
             project,
             sort,
-            starredOnly
+            starredOnly,
+            sessionKind
           });
           const enrichedSessions = sessions.map((session) => normalizeSessionRecord(session));
           const overviewStats = getOverviewStats(dbPath);
           const deletedCount = getDeletedIds(providerSegment).length;
           const includedIds = starredOnly ? getStarredIds(metaMap) : undefined;
-          const projectOptions = listSessionProjects(query, range, dbPath, excludedIds, includedIds);
+          const projectSessionIds = sessionKind === "all"
+            ? includedIds
+            : getVisibleListResults({
+              dbPath,
+              metaMap,
+              excludedIds,
+              limit: ALL_SESSIONS_LIMIT,
+              offset: 0,
+              query,
+              range,
+              project: "",
+              starredOnly,
+              sessionKind
+            }).sessions.map((session) => session.id);
+          const projectOptions = listSessionProjects(query, range, dbPath, excludedIds, projectSessionIds);
           send(res, 200, renderSessionsPage({
             sessions: enrichedSessions,
             total,
@@ -1738,6 +1834,7 @@ export async function startServer(config = getConfig()) {
             project,
             sort,
             starredOnly,
+            sessionKind,
             projectOptions,
             searchMode: "list",
             totalMessages: overviewStats.totalMessages,
@@ -1758,10 +1855,24 @@ export async function startServer(config = getConfig()) {
           query,
           project,
           sort,
-          includedIds
+          includedIds,
+          sessionKind
         });
-        const overviewStats = getIndexedOverview(providerSegment);
-        const projectOptions = getIndexedSessionProjects(providerSegment, range, query, includedIds);
+        const overviewStats = getIndexedOverview(providerSegment, range, query, project, sessionKind);
+        const projectSessionIds = sessionKind === "all"
+          ? includedIds
+          : getIndexedListResults({
+            providerId: providerSegment,
+            metaMap,
+            limit: ALL_SESSIONS_LIMIT,
+            offset: 0,
+            range,
+            query,
+            project: "",
+            includedIds,
+            sessionKind
+          }).sessions.map((session) => session.id);
+        const projectOptions = getIndexedSessionProjects(providerSegment, range, query, projectSessionIds);
         send(res, 200, renderSessionsPage({
           sessions: indexed.sessions.map((session) => normalizeSessionRecord(session)),
           total: indexed.total,
@@ -1772,6 +1883,7 @@ export async function startServer(config = getConfig()) {
           project,
           sort,
           starredOnly,
+          sessionKind,
           projectOptions,
           searchMode: "list",
           totalMessages: overviewStats.totalMessages,

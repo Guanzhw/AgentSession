@@ -14,6 +14,7 @@ export function renderSessionsPage({
   project = "",
   sort = "updated-desc",
   starredOnly = false,
+  sessionKind = "all",
   projectOptions = [],
   searchMode = "list",
   totalMessages = 0,
@@ -26,7 +27,7 @@ export function renderSessionsPage({
   const isAvailable = providerAvailable !== false;
   const isManageableProvider = isAvailable && manageable;
   const hasVisibleSessions = sessions.length > 0;
-  const hasActiveFilters = Boolean(query || range || project || starredOnly || sort !== "updated-desc");
+  const hasActiveFilters = Boolean(query || range || project || starredOnly || sort !== "updated-desc" || sessionKind !== "all");
   const cards = !isAvailable
     ? `<p class="empty-state">${t("provider.not_detected")}</p>`
   : sessions.length
@@ -60,6 +61,13 @@ export function renderSessionsPage({
   ].map((item) => (
     `<option value="${escapeHtml(item.key)}" ${item.key === sort ? "selected" : ""}>${escapeHtml(item.label)}</option>`
   )).join("");
+  const sessionKindOptions = [
+    { key: "all", label: t("filter.title_all") },
+    { key: "work", label: t("filter.title_work") },
+    { key: "analysis", label: t("filter.title_analysis") }
+  ].map((item) => (
+    `<option value="${escapeHtml(item.key)}" ${item.key === sessionKind ? "selected" : ""}>${escapeHtml(item.label)}</option>`
+  )).join("");
   const projectSelectOptions = [
     `<option value="">${t("filter.all_projects")}</option>`,
     ...projectOptions.map((item) => {
@@ -83,6 +91,10 @@ export function renderSessionsPage({
     <label class="filter-field">
       <span>${t("filter.sort")}</span>
       <select name="sort">${sortOptions}</select>
+    </label>
+    <label class="filter-field">
+      <span>${t("filter.title_type")}</span>
+      <select name="kind">${sessionKindOptions}</select>
     </label>
     ${isManageableProvider ? `<div class="filter-field filter-check">
       <span>${t("filter.view")}</span>
@@ -171,7 +183,7 @@ export function renderSessionsPage({
     <section class="session-list" id="session-list">
       ${cards}
     </section>
-    ${total > offset + sessions.length ? `<button id="scroll-sentinel" class="scroll-load-more" type="button" data-offset="${offset + sessions.length}" data-total="${total}" data-range="${escapeHtml(range)}" data-project="${escapeHtml(project)}" data-query="${escapeHtml(query)}" data-mode="${escapeHtml(searchMode)}" data-sort="${escapeHtml(sort)}" data-starred="${starredOnly ? "1" : ""}" data-provider="${provider}">${t("sessions.load_more")}</button>` : ""}
+    ${total > offset + sessions.length ? `<button id="scroll-sentinel" class="scroll-load-more" type="button" data-offset="${offset + sessions.length}" data-total="${total}" data-range="${escapeHtml(range)}" data-project="${escapeHtml(project)}" data-query="${escapeHtml(query)}" data-mode="${escapeHtml(searchMode)}" data-sort="${escapeHtml(sort)}" data-kind="${escapeHtml(sessionKind)}" data-starred="${starredOnly ? "1" : ""}" data-provider="${provider}">${t("sessions.load_more")}</button>` : ""}
   `;
 
   const isContentSearch = searchMode === "content" && query;

@@ -108,6 +108,14 @@ export function getRuntimeRouteContext(method, pathname) {
       actionLiteral: "prompt-preview"
     },
     {
+      pattern: /^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/analyses\/([^/]+)\/diagnostics\/([^/]+)$/,
+      route: "/api/:provider/session/:sessionId/analyses/:runId/diagnostics/:diagnostic",
+      providerIndex: 1,
+      sessionIndex: 2,
+      runIndex: 3,
+      actionIndex: 4
+    },
+    {
       pattern: /^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/analyses\/([^/]+)\/outputs\/([^/]+)$/,
       route: "/api/:provider/session/:sessionId/analyses/:runId/outputs/:output",
       providerIndex: 1,

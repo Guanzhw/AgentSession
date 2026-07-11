@@ -1081,6 +1081,9 @@ export function listSessionAnalysisRuns({
         const reportPath = resolveAnalysisRunPath(runDir, manifest, "reportPath");
         const evaluationPath = resolveAnalysisRunPath(runDir, manifest, "evaluationPath");
         const proposalsPath = resolveAnalysisRunPath(runDir, manifest, "proposalsPath");
+        const promptPath = resolveAnalysisRunPath(runDir, manifest, "promptPath");
+        const analyzerStdoutPath = resolveAnalysisRunPath(runDir, manifest, "analyzerStdoutPath");
+        const analyzerStderrPath = resolveAnalysisRunPath(runDir, manifest, "analyzerStderrPath");
         const acceptedProposalsPath = resolveAnalysisRunPath(runDir, manifest, "acceptedProposalsPath");
         const implementationResultPath = resolveAnalysisRunPath(runDir, manifest, "implementationResultPath");
         const outputs = {
@@ -1100,6 +1103,32 @@ export function listSessionAnalysisRuns({
             available: outputAvailable(proposalsPath)
           }
         };
+        const diagnostics = {
+          stdout: {
+            fileName: "analyzer.stdout.log",
+            relativePath: analysisRunRelativePath(runDir, analyzerStdoutPath),
+            available: outputAvailable(analyzerStdoutPath)
+          },
+          stderr: {
+            fileName: "analyzer.stderr.log",
+            relativePath: analysisRunRelativePath(runDir, analyzerStderrPath),
+            available: outputAvailable(analyzerStderrPath)
+          }
+        };
+        const manifestCommand = manifest.command && typeof manifest.command === "object"
+          ? manifest.command
+          : null;
+        const command = typeof manifestCommand?.executable === "string" && manifestCommand.executable.trim()
+          ? {
+            executable: manifestCommand.executable.trim(),
+            args: Array.isArray(manifestCommand.args)
+              ? manifestCommand.args.map((arg) => String(arg))
+              : [],
+            cwd: typeof manifestCommand.cwd === "string" ? manifestCommand.cwd : "",
+            stdin: manifestCommand.stdin === "prompt" ? "prompt" : null,
+            promptPath: manifestCommand.stdin === "prompt" ? promptPath : null
+          }
+          : null;
         const launchedAtMs = manifest.launchedAt ? Date.parse(manifest.launchedAt) : NaN;
         const waitingForOutput = manifest.state === "launched"
           && !outputs.report.available
@@ -1133,6 +1162,8 @@ export function listSessionAnalysisRuns({
           runDir,
           hasReport: outputs.report.available,
           outputs,
+          diagnostics,
+          command,
           waitingForOutput,
           waitingSeconds,
           stalled: waitingForOutput && Number(waitingSeconds) >= 30,

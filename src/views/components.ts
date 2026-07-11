@@ -182,6 +182,17 @@ export function sessionCard(s, active = false, { showCheckbox = false, provider 
   if (active) classes.push("active");
   if (s.starred) classes.push("starred");
 
+  const changedFiles = Number(s.summary_files) || 0;
+  const additions = Number(s.summary_additions) || 0;
+  const deletions = Number(s.summary_deletions) || 0;
+  const stats = [
+    changedFiles > 0 ? `<span>${t("card.files").replace("{count}", formatCount(changedFiles))}</span>` : "",
+    additions > 0 ? `<span class="additions">+${formatCount(additions)}</span>` : "",
+    deletions > 0 ? `<span class="deletions">-${formatCount(deletions)}</span>` : ""
+  ].filter(Boolean).join("");
+  const statsHtml = stats ? `<footer class="session-card-stats">${stats}</footer>` : "";
+  const analysisBadge = s.analysisTitled ? `<span class="session-kind-badge">${t("session.analysis_badge")}</span>` : "";
+
   const checkboxHtml = showCheckbox
     ? `<input type="checkbox" class="card-checkbox" data-id="${escapeHtml(s.id)}">`
     : "";
@@ -205,9 +216,12 @@ export function sessionCard(s, active = false, { showCheckbox = false, provider 
     ${checkboxHtml}
     <div class="session-card-content">
       <header class="session-card-header">
-        <a href="/${provider}/session/${encodeURIComponent(s.id)}" class="session-card-title-link">
-          <h2 class="session-card-title">${escapeHtml(title)}</h2>
-        </a>
+        <div class="session-card-title-stack">
+          <a href="/${provider}/session/${encodeURIComponent(s.id)}" class="session-card-title-link">
+            <h2 class="session-card-title">${escapeHtml(title)}</h2>
+          </a>
+          ${analysisBadge}
+        </div>
         <time class="session-card-time" datetime="${new Date(Number(s.time_updated) || Date.now()).toISOString()}">${escapeHtml(formatTime(s.time_updated))}</time>
       </header>
       <div class="session-id-row">
@@ -215,11 +229,7 @@ export function sessionCard(s, active = false, { showCheckbox = false, provider 
         <button class="copy-btn" type="button" data-action="copy-session-id" data-id="${escapeHtml(s.id)}" title="${t("action.copy_session_id")}" aria-label="${t("action.copy_session_id")}">${t("action.copy")}</button>
       </div>
       <p class="session-card-directory">${escapeHtml(s.directory || "")}</p>
-      <footer class="session-card-stats">
-        <span>${t("card.files").replace("{count}", formatCount(s.summary_files))}</span>
-        <span class="additions">+${formatCount(s.summary_additions)}</span>
-        <span class="deletions">-${formatCount(s.summary_deletions)}</span>
-      </footer>
+      ${statsHtml}
     </div>
     ${actionsHtml}
   </article>`;
