@@ -42,7 +42,7 @@ OpenCode 和 CodeAgent 使用独立的本地元数据库保存收藏、重命名
 ## 主要功能
 
 - **统一仪表盘**：所有已检测 Provider 都显示在顶栏，未检测的 Provider 会灰显。
-- **会话列表与搜索**：支持项目/时间/收藏筛选、排序、无限滚动、标题与内容搜索。标题类型筛选可将带有 analysis/analyze 信号的标题与其他会话分开；它是可逆的查看器启发式，不是 Provider 元数据。
+- **会话列表与搜索**：支持项目/时间/收藏筛选、排序、无限滚动，以及仅筛选标题、slug 和目录的列表筛选。顶栏搜索会合并标题和消息内容命中。标题类型筛选可将带有 analysis/analyze 信号的标题与其他会话分开；它是可逆的查看器启发式，不是 Provider 元数据。
 - **详情页复盘**：按消息、工具调用、todo、subsession 展开完整会话。
 - **递归 Session Tree**：OpenCode/CodeAgent 的 child session 会被组织成嵌套结构，而不是散落在平铺消息里。
 - **Tool Flow Tree**：右侧 Flow 视图按时间和层级展示 root、message、tool、subagent 分支。

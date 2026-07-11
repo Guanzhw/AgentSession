@@ -40,8 +40,8 @@ export function layout(title, body, page = "home", { provider = null, providers 
       <a href="${providerPrefix}/stats" class="nav-link nav-link-stats ${page === "stats" ? "active" : ""}" title="${escapeHtml(t("nav.stats"))}" aria-label="${escapeHtml(t("nav.stats"))}">${t("nav.stats")}</a>
       ${providerAvailable !== false && manageable ? `<a href="${providerPrefix}/trash" class="nav-link nav-link-trash ${page === "trash" ? "active" : ""}" title="${escapeHtml(t("nav.trash"))}" aria-label="${escapeHtml(t("nav.trash"))}">${t("nav.trash")}</a>` : ""}
       <a href="${providerPrefix}/settings" class="nav-link nav-link-settings ${page === "settings" ? "active" : ""}" title="${escapeHtml(t("nav.settings"))}" aria-label="${escapeHtml(t("nav.settings"))}">${t("nav.settings")}</a>
-      <form class="search-form" action="${providerPrefix}/search" method="GET">
-        <input type="text" name="q" value="${escapeHtml(searchQuery)}" placeholder="${t("nav.search_placeholder")}" class="search-input" id="search-input">
+      <form class="search-form" action="${providerPrefix}/search" method="GET" role="search" aria-label="${escapeHtml(t("nav.search_label"))}">
+        <input type="search" name="q" value="${escapeHtml(searchQuery)}" placeholder="${t("nav.search_placeholder")}" class="search-input" id="search-input" aria-label="${escapeHtml(t("nav.search_label"))}">
       </form>
       <button id="theme-toggle" class="theme-toggle" title="Toggle theme" aria-label="Toggle theme">🌙</button>
     </div>

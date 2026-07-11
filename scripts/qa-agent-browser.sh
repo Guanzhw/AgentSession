@@ -89,6 +89,16 @@ dashboard_session_ids="$(read_ab "count dashboard session ids" get count ".sessi
 assert_positive_count "dashboard session ids" "$dashboard_session_ids"
 dashboard_copy_buttons="$(read_ab "count dashboard copy buttons" get count ".session-card [data-action='copy-session-id']")"
 assert_positive_count "dashboard session ID copy buttons" "$dashboard_copy_buttons"
+global_search_placeholder="$(read_ab "read global search placeholder" get attr "#search-input" placeholder)"
+if [[ "$global_search_placeholder" != "Search titles and messages... ( / )" ]]; then
+  echo "Global search should identify title and message coverage, got $global_search_placeholder" >&2
+  exit 1
+fi
+list_filter_label="$(read_ab "read list filter label" get text ".filter-keyword > span")"
+if [[ "${list_filter_label,,}" != "filter list" ]]; then
+  echo "List filter should identify its scoped behavior, got $list_filter_label" >&2
+  exit 1
+fi
 rename_dialog_count="$(read_ab "open rename dialog" eval "(() => { const card = document.querySelector('.session-card'); const trigger = card?.querySelector('.card-menu-trigger'); trigger?.click(); card?.querySelector('[data-action=\"rename\"]')?.click(); return document.querySelectorAll('.rename-dialog[role=\"dialog\"][aria-modal=\"true\"]').length; })()")"
 if [[ "$rename_dialog_count" != "1" ]]; then
   echo "Rename should open one in-page dialog, got $rename_dialog_count" >&2

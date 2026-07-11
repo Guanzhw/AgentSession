@@ -829,7 +829,7 @@ test("sessions search page preserves query and exposes content pagination", () =
     providers: []
   });
 
-  assert.match(html, /<input type="text" name="q" value="analysis"/);
+  assert.match(html, /<input type="search" name="q" value="analysis"/);
   assert.match(html, /id="scroll-sentinel"/);
   assert.match(html, /data-offset="30"/);
   assert.match(html, /data-total="40"/);
@@ -896,6 +896,22 @@ test("session list exposes sort, title type, and starred filters through paginat
   assert.match(html, /data-kind="analysis"/);
   assert.match(html, /data-starred="1"/);
   assert.match(html, /href="\/opencode">Clear<\/a>/);
+});
+
+test("global search distinguishes title and message search from list filtering", () => {
+  const html = renderSessionsPage({
+    sessions: [],
+    total: 0,
+    provider: "opencode",
+    providerAvailable: true,
+    manageable: true,
+    providers: []
+  });
+
+  assert.match(html, /action="\/opencode\/search" method="GET" role="search" aria-label="Search titles and message content"/);
+  assert.match(html, /placeholder="Search titles and messages\.\.\. \( \/ \)"/);
+  assert.match(html, /<span>Filter list<\/span>/);
+  assert.match(html, /placeholder="Title, slug, or directory"/);
 });
 
 test("empty session result pages hide batch management controls", () => {

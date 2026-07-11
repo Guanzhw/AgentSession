@@ -4,7 +4,8 @@ export const zh = {
   "nav.stats": "Token",
   "nav.trash": "回收站",
   "nav.settings": "设置",
-  "nav.search_placeholder": "搜索会话... ( / )",
+  "nav.search_placeholder": "搜索标题和消息... ( / )",
+  "nav.search_label": "搜索标题和消息内容",
 
   // Sessions list
   "sessions.title": "最近会话",
@@ -24,7 +25,7 @@ export const zh = {
   "range.month": "本月",
 
   // Home filters
-  "filter.keyword": "关键词",
+  "filter.keyword": "筛选列表",
   "filter.keyword_placeholder": "标题、slug 或目录",
   "filter.project": "项目",
   "filter.all_projects": "全部项目",

@@ -4,7 +4,8 @@ export const en = {
   "nav.stats": "Token",
   "nav.trash": "Trash",
   "nav.settings": "Settings",
-  "nav.search_placeholder": "Search sessions... ( / )",
+  "nav.search_placeholder": "Search titles and messages... ( / )",
+  "nav.search_label": "Search titles and message content",
 
   // Sessions list
   "sessions.title": "Recent Sessions",
@@ -24,7 +25,7 @@ export const en = {
   "range.month": "This Month",
 
   // Home filters
-  "filter.keyword": "Keyword",
+  "filter.keyword": "Filter list",
   "filter.keyword_placeholder": "Title, slug, or directory",
   "filter.project": "Project",
   "filter.all_projects": "All projects",

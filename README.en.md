@@ -41,7 +41,7 @@ OpenCode and CodeAgent store stars, custom titles, soft deletes, and trash state
 ## Features
 
 - **Unified dashboard**: detected and undetected providers are shown in the top bar, with unavailable providers disabled.
-- **Session list and search**: project/time/starred filtering, sorting, infinite scroll, title search, and message-content search. A reversible title-type filter can separate titles containing analysis/analyze signals from other sessions; it is a viewer heuristic, not provider metadata.
+- **Session list and search**: project/time/starred filtering, sorting, infinite scroll, and a scoped list filter for titles, slugs, and directories. The top-bar search combines title and message-content matches. A reversible title-type filter can separate titles containing analysis/analyze signals from other sessions; it is a viewer heuristic, not provider metadata.
 - **Session detail review**: messages, tool calls, todos, and subsessions render in one review surface.
 - **Recursive session tree**: OpenCode/CodeAgent child sessions are organized as nested session containers instead of flat message rows.
 - **Tool Flow Tree**: the right-side Flow view shows root sessions, messages, tools, and subagent branches by hierarchy.
