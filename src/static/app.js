@@ -36,6 +36,7 @@ const __I18N__ = {
     card_files: "{count} files",
     session_analysis_badge: "Analysis title",
     menu_rename: "Rename",
+    menu_copy_session_id: "Copy session ID",
     menu_export_md: "Export MD",
     menu_export_json: "Export JSON",
     menu_delete: "Delete",
@@ -43,6 +44,12 @@ const __I18N__ = {
     copy: "Copy",
     copy_session_id: "Copy session ID",
     copied: "Copied",
+    more_actions: "More",
+    detail_tab_conversation: "Conversation",
+    detail_tab_overview: "Overview",
+    detail_tab_flow: "Flow",
+    detail_tab_analysis: "Analysis",
+    detail_tab_raw: "Raw data",
     resume_opened: "Terminal opened",
     resume_disabled: "Terminal launch is unavailable",
     analysis_opened: "Analysis launched. Tracking status below.",
@@ -129,7 +136,19 @@ const __I18N__ = {
     scroll_loading: "Loading...",
     "detail.search_results": "{current} / {total} turns · {occurrences} hits",
     "detail.search_no_results": "No matching turns",
-    "detail.search_indexing": "Indexing conversation…"
+    "detail.search_indexing": "Indexing conversation…",
+    "stats.legend_total": "Total",
+    "stats.legend_output": "Output",
+    "stats.legend_input": "Input",
+    "stats.legend_reasoning": "Reasoning",
+    "stats.legend_cache_read": "Cache Read",
+    "stats.legend_cache_write": "Cache Write",
+    "stats.tooltip_series": "{series}: {val}",
+    "stats.tooltip_total": "Total: {total}",
+    saved_views_name_prompt: "Saved view name",
+    saved_views_max: "Maximum saved views reached (20).",
+    saved_views_save: "Save",
+    saved_views_cancel: "Cancel"
   },
   zh: {
     rename_title: "重命名会话",
@@ -165,6 +184,7 @@ const __I18N__ = {
     card_files: "{count} 个文件",
     session_analysis_badge: "分析标题",
     menu_rename: "重命名",
+    menu_copy_session_id: "复制会话 ID",
     menu_export_md: "导出 MD",
     menu_export_json: "导出 JSON",
     menu_delete: "删除",
@@ -172,6 +192,12 @@ const __I18N__ = {
     copy: "复制",
     copy_session_id: "复制会话 ID",
     copied: "已复制",
+    more_actions: "更多",
+    detail_tab_conversation: "对话",
+    detail_tab_overview: "概览",
+    detail_tab_flow: "流程",
+    detail_tab_analysis: "分析",
+    detail_tab_raw: "原始数据",
     resume_opened: "终端已打开",
     resume_disabled: "无法启动终端",
     analysis_opened: "已启动分析，可在下方跟踪状态。",
@@ -258,7 +284,19 @@ const __I18N__ = {
     scroll_loading: "加载中...",
     "detail.search_results": "第 {current} / {total} 个回合 · {occurrences} 处命中",
     "detail.search_no_results": "没有匹配的会话回合",
-    "detail.search_indexing": "正在索引会话…"
+    "detail.search_indexing": "正在索引会话…",
+    "stats.legend_total": "总量",
+    "stats.legend_output": "输出",
+    "stats.legend_input": "输入",
+    "stats.legend_reasoning": "推理",
+    "stats.legend_cache_read": "缓存读取",
+    "stats.legend_cache_write": "缓存写入",
+    "stats.tooltip_series": "{series}：{val}",
+    "stats.tooltip_total": "总计：{total}",
+    saved_views_name_prompt: "已保存视图名称",
+    saved_views_max: "已保存视图达到上限（20 个）。",
+    saved_views_save: "保存",
+    saved_views_cancel: "取消"
   }
 };
 
@@ -2142,6 +2180,7 @@ function renderSessionCard(s) {
       <button class="card-menu-trigger" type="button" data-id="${id}" title="${escapeHtmlClient(ft("menu_more"))}" aria-label="${escapeHtmlClient(ft("menu_more"))}">⋮</button>
       <div class="card-menu hidden" data-id="${id}">
         <button type="button" data-action="rename" data-id="${id}">${ft("menu_rename")}</button>
+        <button type="button" data-action="copy-session-id" data-id="${id}" title="${escapeHtmlClient(ft("copy_session_id"))}" aria-label="${escapeHtmlClient(ft("copy_session_id"))}">${ft("menu_copy_session_id")}</button>
         <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=md" download="${exportFilePrefix}.md">${ft("menu_export_md")}</a>
         <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=json" download="${exportFilePrefix}.json">${ft("menu_export_json")}</a>
         <button type="button" data-action="delete" data-id="${id}" class="menu-danger">${ft("menu_delete")}</button>
@@ -2161,10 +2200,6 @@ function renderSessionCard(s) {
         </div>
         <time class="session-card-time" datetime="${new Date(timeUpdated).toISOString()}">${escapeHtmlClient(formatTimeClient(timeUpdated))}</time>
       </header>
-      <div class="session-id-row">
-        <code class="session-id">${id}</code>
-        <button class="copy-btn" type="button" data-action="copy-session-id" data-id="${id}" title="${ft("copy_session_id")}" aria-label="${ft("copy_session_id")}">${ft("copy")}</button>
-      </div>
       <p class="session-card-directory">${directory}</p>
       ${stats ? `<footer class="session-card-stats">${stats}</footer>` : ""}
     </div>
@@ -2780,6 +2815,19 @@ if (sessionWorkbench) {
     return flowLoadPromise;
   };
 
+  document.addEventListener("session-flow-tab-open", async () => {
+    const flowPanel = getFlowPanel();
+    if (!flowPanel) return;
+    flowPanel.classList.remove("hidden");
+    flowPanel.setAttribute("aria-hidden", "false");
+    const loaded = await ensureFlowLoaded();
+    if (!loaded) return;
+    requestAnimationFrame(() => {
+      layoutFlowRows();
+      updateFlowOverview();
+    });
+  });
+
   window.addEventListener("resize", () => {
     clearTimeout(flowResizeTimer);
     flowResizeTimer = setTimeout(layoutFlowRows, 120);
@@ -2950,3 +2998,371 @@ if (sessionWorkbench) {
     }
   }
 }
+
+// ── Tab bar navigation ──────────────────────────────────────────────
+
+(function initTabBar() {
+  const tabBar = document.querySelector(".tab-bar");
+  if (!tabBar) return;
+
+  // Enable tabs: show tab bar, hide inactive panels
+  tabBar.removeAttribute("hidden");
+  const tabButtons = tabBar.querySelectorAll("[role='tab']");
+  const tabPanels = document.querySelectorAll("[role='tabpanel']");
+
+  const initiallySelected = tabBar.querySelector("[role='tab'][aria-selected='true']") || tabButtons[0];
+
+  // JavaScript progressively enhances the no-JS stacked content into tabs.
+  tabPanels.forEach(function (panel) {
+    if (panel.id === initiallySelected?.getAttribute("aria-controls")) {
+      panel.removeAttribute("hidden");
+    } else {
+      panel.setAttribute("hidden", "");
+    }
+  });
+
+  function switchTab(tabButton) {
+    // Deactivate all tabs
+    tabButtons.forEach(function (btn) {
+      btn.setAttribute("aria-selected", "false");
+      btn.setAttribute("tabindex", "-1");
+    });
+    // Activate selected tab
+    tabButton.setAttribute("aria-selected", "true");
+    tabButton.setAttribute("tabindex", "0");
+    tabButton.focus();
+    const targetPanelId = tabButton.getAttribute("aria-controls");
+    document.querySelector(".session-workbench")?.classList.toggle("session-conversation-tab-active", targetPanelId === "tab-conversation");
+    // Show/hide panels
+    tabPanels.forEach(function (panel) {
+      if (panel.id === targetPanelId) {
+        panel.removeAttribute("hidden");
+        // Auto-open analysis details if switching to analysis tab
+        if (panel.id === "tab-analysis") {
+          var details = panel.querySelector(".analysis-activity-details");
+          if (details && !details.open) {
+            var hasActive = details.querySelector(".analysis-activity-badge");
+            if (hasActive) details.open = true;
+          }
+        }
+        if (panel.id === "tab-flow") {
+          document.dispatchEvent(new CustomEvent("session-flow-tab-open"));
+        }
+      } else {
+        panel.setAttribute("hidden", "");
+      }
+    });
+  }
+
+  // Click handler
+  tabBar.addEventListener("click", function (e) {
+    var tab = e.target.closest("[role='tab']");
+    if (!tab) return;
+    e.preventDefault();
+    switchTab(tab);
+  });
+
+  // Keyboard navigation: roving tabindex
+  tabBar.addEventListener("keydown", function (e) {
+    var tabs = Array.from(tabBar.querySelectorAll("[role='tab']"));
+    var current = document.activeElement;
+    var currentIndex = tabs.indexOf(current);
+    if (currentIndex === -1) return;
+
+    var nextIndex = currentIndex;
+    if (e.key === "ArrowRight") {
+      e.preventDefault();
+      nextIndex = (currentIndex + 1) % tabs.length;
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      nextIndex = 0;
+    } else if (e.key === "End") {
+      e.preventDefault();
+      nextIndex = tabs.length - 1;
+    } else {
+      return;
+    }
+
+    tabs[nextIndex].focus();
+    switchTab(tabs[nextIndex]);
+  });
+
+  document.querySelector(".session-workbench")?.classList.add("session-conversation-tab-active");
+  document.addEventListener("click", function (e) {
+    if (!e.target.closest("#tab-flow [data-flow-close]")) return;
+    const conversationTab = document.getElementById("tab-btn-conversation");
+    if (conversationTab) switchTab(conversationTab);
+  }, true);
+})();
+
+// ── Analysis activity collapse ─────────────────────────────────────────
+
+(function initAnalysisActivity() {
+  var details = document.getElementById("analysis-activity-details");
+  if (!details) return;
+
+  // Server may have already added "open" for active runs; JS handles refresh
+  // Listen for analysis status panel refreshes to auto-open if needed
+  var panel = document.getElementById("analysis-status-panel");
+  if (!panel) return;
+
+  var observer = new MutationObserver(function () {
+    // If any analysis run is active/waiting/failed/needs_attention, open the details
+    var badge = details.querySelector(".analysis-activity-badge");
+    if (badge && !details.open) {
+      details.open = true;
+    }
+  });
+  observer.observe(panel, { childList: true, subtree: true, characterData: true });
+})();
+
+// ── Token Explorer interactivity ───────────────────────────────────────
+
+(function initTokenExplorer() {
+  if (document.body.dataset.page !== "stats") return;
+
+  const statsForm = document.querySelector(".stats-filter-bar");
+  const customDates = document.querySelector(".stats-filter-custom-dates");
+  const customRadio = document.querySelector(".stats-preset-radio[value='custom']");
+
+  if (statsForm) {
+    document.querySelectorAll(".stats-preset-radio").forEach((radio) => {
+      radio.addEventListener("change", function () {
+        if (this.value === "custom") {
+          if (customDates) customDates.classList.remove("hidden");
+        } else {
+          if (customDates) customDates.classList.add("hidden");
+          statsForm.submit();
+        }
+      });
+    });
+
+    if (customRadio?.checked && customDates) {
+      customDates.classList.remove("hidden");
+    } else if (customDates) {
+      customDates.classList.add("hidden");
+    }
+  }
+
+  document.querySelectorAll(".trend-legend-toggle").forEach((toggle) => {
+    toggle.addEventListener("change", function () {
+      const series = this.dataset.series;
+      document.querySelectorAll(".trend-band-" + series).forEach((band) => {
+        band.classList.toggle("hidden", !this.checked);
+      });
+      document.querySelectorAll(`.trend-hit[data-series="${CSS.escape(series)}"]`).forEach((hit) => {
+        hit.classList.toggle("hidden", !this.checked);
+        hit.setAttribute("aria-hidden", this.checked ? "false" : "true");
+        if (hit.hasAttribute("tabindex")) hit.setAttribute("tabindex", this.checked ? "0" : "-1");
+      });
+    });
+  });
+
+  const tooltip = document.getElementById("trend-tooltip");
+  if (tooltip) {
+    const chartSvg = document.querySelector(".trend-chart");
+    if (chartSvg) {
+      const seriesLabels = {
+        total: ft("stats.legend_total"),
+        output: ft("stats.legend_output"),
+        input: ft("stats.legend_input"),
+        reasoning: ft("stats.legend_reasoning"),
+        cacheRead: ft("stats.legend_cache_read"),
+        cacheWrite: ft("stats.legend_cache_write"),
+      };
+      const showTrendTooltip = function (hit, clientX, clientY) {
+        if (!hit) {
+          tooltip.hidden = true;
+          return;
+        }
+        const day = hit.dataset.day;
+        const series = hit.dataset.series;
+        const val = Number(hit.dataset.val) || 0;
+        const total = Number(hit.dataset.total) || 0;
+        const seriesLabel = seriesLabels[series] || series;
+        tooltip.innerHTML = "<strong>" + day + "</strong><br>" +
+          formatText(ft("stats.tooltip_series"), { series: seriesLabel, val: val.toLocaleString() }) + "<br>" +
+          formatText(ft("stats.tooltip_total"), { total: total.toLocaleString() });
+        tooltip.hidden = false;
+
+        const svgRect = chartSvg.getBoundingClientRect();
+        const hitRect = hit.getBoundingClientRect();
+        const x = Number.isFinite(clientX) ? clientX - svgRect.left + 12 : hitRect.left - svgRect.left + hitRect.width / 2 + 12;
+        const y = Number.isFinite(clientY) ? clientY - svgRect.top - 40 : hitRect.top - svgRect.top - 44;
+        tooltip.style.left = Math.max(0, x) + "px";
+        tooltip.style.top = Math.max(0, y) + "px";
+      };
+
+      chartSvg.addEventListener("mousemove", function (e) {
+        showTrendTooltip(e.target.closest(".trend-hit"), e.clientX, e.clientY);
+      });
+      chartSvg.addEventListener("click", function (e) {
+        const hit = e.target.closest(".trend-hit");
+        const href = hit?.getAttribute("href");
+        if (href) {
+          e.preventDefault();
+          window.location.assign(href);
+        }
+      });
+      chartSvg.addEventListener("focusin", function (e) {
+        showTrendTooltip(e.target.closest(".trend-hit"));
+      });
+      chartSvg.addEventListener("focusout", function (e) {
+        if (!e.relatedTarget || !chartSvg.contains(e.relatedTarget)) tooltip.hidden = true;
+      });
+      chartSvg.addEventListener("mouseleave", function () {
+        tooltip.hidden = true;
+      });
+    }
+
+    const chartBody = document.querySelector(".trend-chart")?.closest(".stats-chart-body");
+    if (chartBody) chartBody.style.position = "relative";
+  }
+
+  document.querySelectorAll(".stats-filter-scope-label input[type='radio']").forEach((radio) => {
+    radio.addEventListener("change", function () {
+      document.querySelectorAll(".stats-filter-scope-label").forEach(l => l.classList.remove("active"));
+      if (this.checked && this.closest(".stats-filter-scope-label")) {
+        this.closest(".stats-filter-scope-label").classList.add("active");
+      }
+    });
+  });
+
+  // ── Token Explorer: Saved Views ──────────────────────────────────────────
+  function initSavedViews() {
+    const container = document.querySelector(".stats-saved-views");
+    if (!container) return;
+    const provider = container.dataset.provider;
+    const storageKey = `osv-saved-views-${provider}`;
+    const listEl = document.getElementById("saved-views-list");
+    const template = document.getElementById("saved-view-template");
+    const maxViews = 20;
+    const expectedPath = `/${encodeURIComponent(provider)}/stats`;
+
+    function normalizeViews(raw) {
+      if (!Array.isArray(raw)) return [];
+      return raw.flatMap((view) => {
+        if (!view || typeof view !== "object") return [];
+        const name = typeof view.name === "string" ? view.name.trim().slice(0, 80) : "";
+        const url = typeof view.url === "string" ? view.url : "";
+        if (!name || !url) return [];
+        try {
+          const parsed = new URL(url, window.location.origin);
+          if (parsed.origin !== window.location.origin || parsed.pathname !== expectedPath) return [];
+          return [{ name, url: parsed.pathname + parsed.search }];
+        } catch {
+          return [];
+        }
+      }).slice(0, maxViews);
+    }
+
+    function loadViews() {
+      try {
+        return normalizeViews(JSON.parse(localStorage.getItem(storageKey) || "[]"));
+      } catch { return []; }
+    }
+
+    function saveViews(views) {
+      localStorage.setItem(storageKey, JSON.stringify(views));
+    }
+
+    function render() {
+      if (!listEl) return;
+      const views = loadViews();
+      listEl.innerHTML = "";
+      views.forEach((v, i) => {
+        const clone = template.content.cloneNode(true);
+        const link = clone.querySelector(".saved-view-link");
+        const delBtn = clone.querySelector(".saved-view-delete");
+        link.href = v.url;
+        link.textContent = v.name;
+        delBtn.addEventListener("click", () => {
+          const current = loadViews();
+          current.splice(i, 1);
+          saveViews(current);
+          render();
+        });
+        listEl.appendChild(clone);
+      });
+    }
+
+    const saveBtn = document.getElementById("save-view-btn");
+    if (saveBtn) {
+      saveBtn.addEventListener("click", () => {
+        const views = loadViews();
+        if (views.length >= maxViews) {
+          showToast(__I18N__[__LOCALE__]?.saved_views_max || "Maximum saved views reached (20).");
+          return;
+        }
+        const dialog = document.createElement("dialog");
+        dialog.className = "saved-view-dialog";
+        dialog.setAttribute("aria-labelledby", "saved-view-dialog-title");
+        const label = ft("saved_views_name_prompt");
+        dialog.innerHTML = `<form method="dialog">
+          <label id="saved-view-dialog-title" for="saved-view-name">${escapeHtmlClient(label)}</label>
+          <input id="saved-view-name" type="text" class="saved-view-input" maxlength="80" autocomplete="off">
+          <div class="saved-view-dialog-actions">
+            <button type="button" class="saved-view-dialog-save">${escapeHtmlClient(ft("saved_views_save"))}</button>
+            <button type="button" class="saved-view-dialog-cancel">${escapeHtmlClient(ft("saved_views_cancel"))}</button>
+          </div>
+        </form>`;
+        document.body.appendChild(dialog);
+        const input = dialog.querySelector(".saved-view-input");
+        const closeDialog = () => {
+          if (dialog.open) dialog.close();
+          dialog.remove();
+        };
+        dialog.addEventListener("close", () => dialog.remove(), { once: true });
+        dialog.querySelector(".saved-view-dialog-cancel").addEventListener("click", closeDialog);
+        dialog.querySelector(".saved-view-dialog-save").addEventListener("click", () => {
+          const name = input.value.trim();
+          closeDialog();
+          if (!name) return;
+          const url = window.location.pathname + window.location.search;
+          views.push({ name, url });
+          saveViews(views);
+          render();
+        });
+        dialog.querySelector("form").addEventListener("submit", (event) => {
+          event.preventDefault();
+          dialog.querySelector(".saved-view-dialog-save").click();
+        });
+        dialog.showModal();
+        input.focus();
+      });
+    }
+
+    render();
+  }
+
+  // ── Token Explorer: Compare Selectors ────────────────────────────────────
+  function initCompareSelectors() {
+    const form = document.querySelector(".stats-filter-bar");
+    if (!form) return;
+    const selectA = form.querySelector("select[name='comparea']");
+    const selectB = form.querySelector("select[name='compareb']");
+    if (!selectA || !selectB) return;
+
+    function update() {
+      const valA = selectA.value;
+      const valB = selectB.value;
+      Array.from(selectA.options).forEach(opt => {
+        opt.disabled = opt.value !== "" && opt.value === valB && valB !== "";
+      });
+      Array.from(selectB.options).forEach(opt => {
+        opt.disabled = opt.value !== "" && opt.value === valA && valA !== "";
+      });
+    }
+
+    selectA.addEventListener("change", update);
+    selectB.addEventListener("change", update);
+    update();
+  }
+
+  initSavedViews();
+
+  initCompareSelectors();
+})();

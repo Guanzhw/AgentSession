@@ -16,7 +16,7 @@ import { DatabaseSync } from "node:sqlite";
 import { runInNewContext } from "node:vm";
 import { EventEmitter } from "node:events";
 
-import { closeDb, getModelDistribution, getTokenStats, listSessionProjects, listSessions, searchMessages } from "../dist/src/db.js";
+import { closeDb, getFilteredSessionCount, getModelDistribution, getModelPairs, getStatsProjects, getTokenCoverage, getTokenStats, getTopTokenSessions, listSessionProjects, listSessions, searchMessages } from "../dist/src/db.js";
 import { buildCodeAgentSessionTree } from "../dist/src/providers/codeagent/session-tree.js";
 import { enrichCodeAgentSession } from "../dist/src/providers/codeagent/schema.js";
 import { buildOpenCodeSessionTree } from "../dist/src/providers/opencode/session-tree.js";
@@ -34,6 +34,7 @@ import { renderSettingsPage } from "../dist/src/views/settings.js";
 import { renderStatsPage } from "../dist/src/views/stats.js";
 import { sessionCard } from "../dist/src/views/components.js";
 import { renderSessionsPage } from "../dist/src/views/sessions.js";
+import { EMPTY_PROJECT_FILTER } from "../dist/src/project-filter.js";
 import {
   getSearchResults,
   resolveSessionKindFilter,
@@ -595,6 +596,69 @@ test("resume commands use structured placeholders and validated directories", ()
   assert.equal(providerDefault.executable, process.execPath);
   assert.deepEqual(providerDefault.args, ["--version", "default id"]);
   assert.equal(getResumeCommand(provider, "disabled", cwd, { codeagent: false }), null);
+});
+
+test("Token Explorer database queries share the usable assistant-token dataset", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-token-explorer-"));
+  const dbPath = path.join(temp, "sessions.db");
+  try {
+    const db = new DatabaseSync(dbPath);
+    db.exec(`
+      CREATE TABLE project (id TEXT PRIMARY KEY, name TEXT, worktree TEXT);
+      CREATE TABLE session (
+        id TEXT PRIMARY KEY, parent_id TEXT, project_id TEXT, title TEXT, slug TEXT,
+        directory TEXT, time_created INTEGER, time_updated INTEGER, time_archived INTEGER
+      );
+      CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT);
+    `);
+    db.prepare("INSERT INTO project (id, name, worktree) VALUES (?, ?, ?)").run("p1", "Readable Project", "/projects/readable");
+    const created = Date.now() - 1000;
+    db.prepare("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)")
+      .run("s1", null, "p1", "Mixed model session", "mixed", "/projects/readable", created, created);
+    db.prepare("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)")
+      .run("s2", null, "p1", "No token session", "no-token", "/projects/readable", created, created);
+    db.prepare("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)")
+      .run("s3", null, null, "Global usage", "global", "/global", created, created);
+    const insert = db.prepare("INSERT INTO message (id, session_id, data) VALUES (?, ?, ?)");
+    insert.run("a1", "s1", JSON.stringify({
+      role: "assistant", providerID: "provider-a", modelID: "model-a", time: { created },
+      tokens: { input: 5, output: 3, reasoning: 0, cache: { read: 2, write: 0 } }
+    }));
+    insert.run("a2", "s1", JSON.stringify({
+      role: "assistant", providerID: "provider-b", modelID: "model-b", time: { created },
+      tokens: { input: 1, output: 3, reasoning: 2, cache: { read: 9, write: 0 }, total: 13 }
+    }));
+    insert.run("u1", "s1", JSON.stringify({
+      role: "user", providerID: "provider-a", modelID: "model-a", time: { created }, tokens: { total: 999 }
+    }));
+    insert.run("a3", "s1", JSON.stringify({ role: "assistant", time: { created }, content: "no usage" }));
+    insert.run("a4", "s2", JSON.stringify({ role: "assistant", time: { created }, content: "no usage" }));
+    insert.run("a5", "s3", JSON.stringify({ role: "assistant", time: { created }, tokens: { total: 5 } }));
+    db.close();
+
+    assert.equal(getTokenStats(30, dbPath)[0].total_tokens, 28);
+    assert.equal(getTokenStats(30, dbPath, { project: EMPTY_PROJECT_FILTER })[0].total_tokens, 5);
+    assert.equal(getFilteredSessionCount(dbPath, { days: 30 }), 2);
+    assert.deepEqual(getModelPairs(dbPath, { days: 30 }).map((row) => row.key).sort(), ["provider-a/model-a", "provider-b/model-b"]);
+    assert.equal(getStatsProjects(dbPath, { days: 30 }).find((row) => row.projectId === "p1").label, "Readable Project");
+
+    const top = getTopTokenSessions(dbPath, { days: 30 });
+    assert.equal(top[0].total_tokens, 23);
+    assert.equal(top[0].message_count, 2);
+    assert.equal(top[0].provider_model, "__multiple__");
+    assert.equal(top[0].model_count, 2);
+
+    const coverage = getTokenCoverage(dbPath, { days: 30 });
+    assert.equal(coverage.messagesWithTokens, 3);
+    assert.equal(coverage.totalAssistantMessages, 5);
+    assert.equal(coverage.totalSessions, 3);
+    assert.deepEqual(coverage.dimensions, {
+      input: true, output: true, reasoning: true, cacheRead: true, cacheWrite: true
+    });
+  } finally {
+    closeDb(dbPath);
+    rmSync(temp, { recursive: true, force: true });
+  }
 });
 
 test("Codex preserves canonical subagent identity and groups each response as a ReACT turn", () => {
@@ -1214,6 +1278,7 @@ test("session list exposes sort, title type, and starred filters through paginat
     sort: "title-asc",
     starredOnly: true,
     sessionKind: "analysis",
+    projectOptions: [{ id: "global", label: "/", worktree: "/", count: 4 }],
     provider: "opencode",
     providerAvailable: true,
     manageable: true,
@@ -1225,10 +1290,17 @@ test("session list exposes sort, title type, and starred filters through paginat
   assert.match(html, /<select name="kind">/);
   assert.match(html, /<option value="analysis" selected>Analysis titles<\/option>/);
   assert.match(html, /<input type="checkbox" name="starred" value="1" checked>/);
+  assert.match(html, /<option value="global"\s+title="\/">Global sessions \(4\)<\/option>/);
   assert.match(html, /data-sort="title-asc"/);
   assert.match(html, /data-kind="analysis"/);
   assert.match(html, /data-starred="1"/);
   assert.match(html, /href="\/opencode">Clear<\/a>/);
+
+  const style = readFileSync(path.join(process.cwd(), "dist", "src", "static", "style.css"), "utf8");
+  assert.match(
+    style,
+    /\.session-filter \{\s*display: grid;\s*grid-template-columns: minmax\(0, 1\.5fr\) minmax\(0, 1\.15fr\) minmax\(0, 0\.75fr\) minmax\(0, 0\.95fr\) minmax\(0, 0\.85fr\) max-content max-content;/
+  );
 });
 
 test("global search distinguishes title and message search from list filtering", () => {
@@ -1243,7 +1315,7 @@ test("global search distinguishes title and message search from list filtering",
 
   assert.match(html, /action="\/opencode\/search" method="GET" role="search" aria-label="Search titles and message content"/);
   assert.match(html, /placeholder="Search titles and messages\.\.\. \( \/ \)"/);
-  assert.match(html, /<span>Filter list<\/span>/);
+  assert.match(html, /<span>Filter current list<\/span>/);
   assert.match(html, /placeholder="Title, slug, or directory"/);
 });
 
@@ -1482,7 +1554,7 @@ test("session cards expose accessible action buttons", () => {
   assert.match(html, /aria-label="☆ Star"/);
   assert.match(html, /class="card-menu-trigger" type="button"/);
   assert.match(html, /aria-label="More actions"/);
-  assert.match(html, /class="copy-btn" type="button" data-action="copy-session-id"/);
+  assert.match(html, /data-action="copy-session-id" data-id="ses_accessible"/);
   assert.match(html, /aria-label="Copy session ID"/);
   assert.match(html, /href="\/api\/opencode\/session\/ses_accessible\/export\?format=md"/);
   assert.match(html, /href="\/api\/opencode\/session\/ses_accessible\/export\?format=json"/);
@@ -1549,8 +1621,8 @@ test("session management uses in-page dialogs", () => {
 test("analysis launch accessible name follows selected target labels and runtime count", () => {
   const appJs = readFileSync(path.join(process.cwd(), "dist", "src", "static", "app.js"), "utf-8");
   const helperSource = appJs
-    .match(/function analysisLaunchAccessibleLabel\([\s\S]*?\n\}\n\nfunction updateAnalysisLaunchControl/)?.[0]
-    ?.replace(/\n\nfunction updateAnalysisLaunchControl$/, "");
+    .match(/function analysisLaunchAccessibleLabel\([\s\S]*?\r?\n\}\r?\n\r?\nfunction updateAnalysisLaunchControl/)?.[0]
+    ?.replace(/\r?\n\r?\nfunction updateAnalysisLaunchControl$/, "");
   assert.ok(helperSource);
   const analysisLaunchAccessibleLabel = runInNewContext(
     `${helperSource}\nanalysisLaunchAccessibleLabel;`,
@@ -1580,23 +1652,513 @@ test("analysis launch accessible name follows selected target labels and runtime
 test("model distribution legend distinguishes equal model names by provider", () => {
   const html = renderStatsPage({
     tokenStats: [],
-    modelDistribution: [
-      { model: "shared-model", provider: "provider-a", count: 2, total_tokens: 20 },
-      { model: "shared-model", provider: "provider-b", count: 1, total_tokens: 10 }
+    modelRanking: [
+      { modelId: "shared-model", providerId: "provider-a", key: "provider-a/shared-model", totalTokens: 20, sessionCount: 2, messageCount: 2 },
+      { modelId: "shared-model", providerId: "provider-b", key: "provider-b/shared-model", totalTokens: 10, sessionCount: 1, messageCount: 1 }
     ],
-    dailySessions: [],
-    overview: { totalSessions: 0, totalMessages: 0 },
+    topSessions: [],
+    coverage: { messagesWithTokens: 0, totalAssistantMessages: 0, availableDimensions: [], missingDimensions: [] },
+    overview: { totalSessions: 0, totalMessages: 0, totalTokens: 30, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, peakDay: "", peakDayTokens: 0, avgTokensPerSession: 0 },
+    filters: { days: 30, from: null, to: null, project: "", modelPair: null, scope: "all" },
     provider: "opencode",
     providers: []
   });
 
-  assert.match(html, /shared-model · Provider: provider-a — 2 \(66\.7%\)/);
-  assert.match(html, /shared-model · Provider: provider-b — 1 \(33\.3%\)/);
+  assert.match(html, /shared-model · provider-a/);
+  assert.match(html, /shared-model · provider-b/);
+  assert.match(html, /Model Ranking/);
+});
+
+// ── Token Explorer tests ───────────────────────────────────────────────
+
+test("Token Explorer renders filter bar with preset ranges and scope toggles", () => {
+  const html = renderStatsPage({
+    tokenStats: [],
+    modelRanking: [],
+    topSessions: [],
+    coverage: { messagesWithTokens: 0, totalAssistantMessages: 0, availableDimensions: [], missingDimensions: [] },
+    overview: { totalSessions: 0, totalMessages: 0, totalTokens: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, peakDay: "", peakDayTokens: 0, avgTokensPerSession: 0 },
+    filters: { days: 30, from: null, to: null, project: "", modelPair: null, scope: "all" },
+    provider: "opencode",
+    providers: [{ id: "opencode", name: "OpenCode", icon: "OC", available: true }]
+  });
+
+  // Filter bar present
+  assert.match(html, /stats-filter-bar/);
+  // Preset ranges
+  assert.match(html, /value="7"/);
+  assert.match(html, /value="30"/);
+  assert.match(html, /value="90"/);
+  assert.match(html, /value="custom"/);
+  // Scope toggles
+  assert.match(html, /value="all"/);
+  assert.match(html, /value="root"/);
+  // Apply and Clear
+  assert.match(html, /stats-filter-apply/);
+  assert.match(html, /stats-filter-clear/);
+});
+
+test("Token Explorer KPI cards show token breakdown", () => {
+  const html = renderStatsPage({
+    tokenStats: [
+      { day: "2026-07-10", input_tokens: 500, output_tokens: 300, reasoning_tokens: 100, cache_read_tokens: 50, cache_write_tokens: 25, total_tokens: 975, message_count: 5 },
+      { day: "2026-07-11", input_tokens: 600, output_tokens: 400, reasoning_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, total_tokens: 1000, message_count: 3 },
+    ],
+    modelRanking: [],
+    topSessions: [],
+    coverage: { messagesWithTokens: 2, totalAssistantMessages: 2, availableDimensions: ["reasoning", "cache"], missingDimensions: [] },
+    overview: { totalSessions: 10, totalMessages: 8, totalTokens: 1975, inputTokens: 1100, outputTokens: 700, reasoningTokens: 100, cacheReadTokens: 50, cacheWriteTokens: 25, peakDay: "2026-07-11", peakDayTokens: 1000, avgTokensPerSession: 198 },
+    filters: { days: 30, from: null, to: null, project: "", modelPair: null, scope: "all" },
+    provider: "opencode",
+    providers: []
+  });
+
+  assert.match(html, /2\.0K/); // total tokens
+  assert.match(html, /10/); // sessions
+  assert.match(html, /8/); // messages
+  assert.match(html, /2026-07-11/); // peak day
+});
+
+test("Token Explorer trend chart includes multi-series SVG bands", () => {
+  const html = renderStatsPage({
+    tokenStats: [
+      { day: "2026-07-10", input_tokens: 500, output_tokens: 300, reasoning_tokens: 100, cache_read_tokens: 50, cache_write_tokens: 25, total_tokens: 975, message_count: 5 },
+    ],
+    modelRanking: [],
+    topSessions: [],
+    coverage: { messagesWithTokens: 1, totalAssistantMessages: 1, availableDimensions: ["reasoning", "cache"], missingDimensions: [] },
+    overview: { totalSessions: 1, totalMessages: 1, totalTokens: 975, inputTokens: 500, outputTokens: 300, reasoningTokens: 100, cacheReadTokens: 50, cacheWriteTokens: 25, peakDay: "2026-07-10", peakDayTokens: 975, avgTokensPerSession: 975 },
+    filters: { days: 30, from: null, to: null, project: "", modelPair: null, scope: "all" },
+    provider: "opencode",
+    providers: []
+  });
+
+  // Trend bands for each series
+  assert.match(html, /trend-band-output/);
+  assert.match(html, /trend-band-input/);
+  assert.match(html, /trend-band-reasoning/);
+  assert.match(html, /trend-band-cacheRead/);
+  assert.match(html, /trend-band-cacheWrite/);
+  // Legend toggles
+  assert.match(html, /trend-legend-toggle/);
+  assert.match(html, /data-series="output"/);
+  assert.match(html, /data-series="input"/);
+});
+
+test("Token Explorer shows missing dimensions with unavailable markers", () => {
+  const html = renderStatsPage({
+    tokenStats: [
+      { day: "2026-07-10", input_tokens: 500, output_tokens: 300, reasoning_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, total_tokens: 800, message_count: 3 },
+    ],
+    modelRanking: [],
+    topSessions: [],
+    coverage: { messagesWithTokens: 1, totalAssistantMessages: 1, availableDimensions: [], missingDimensions: ["reasoning", "cache"] },
+    overview: { totalSessions: 1, totalMessages: 1, totalTokens: 800, inputTokens: 500, outputTokens: 300, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, peakDay: "2026-07-10", peakDayTokens: 800, avgTokensPerSession: 800 },
+    filters: { days: 30, from: null, to: null, project: "", modelPair: null, scope: "all" },
+    provider: "opencode",
+    providers: []
+  });
+
+  // Missing dimensions shown in legend
+  assert.match(html, /unavailable/);
+  // Coverage section
+  assert.match(html, /Data Coverage/);
+});
+
+test("Token Explorer model ranking renders horizontal bars with filter links", () => {
+  const html = renderStatsPage({
+    tokenStats: [],
+    modelRanking: [
+      { modelId: "claude-4", providerId: "anthropic", key: "anthropic/claude-4", totalTokens: 50000, sessionCount: 10, messageCount: 100 },
+      { modelId: "gpt-5", providerId: "openai", key: "openai/gpt-5", totalTokens: 30000, sessionCount: 5, messageCount: 50 },
+    ],
+    topSessions: [],
+    coverage: { messagesWithTokens: 0, totalAssistantMessages: 0, availableDimensions: [], missingDimensions: [] },
+    overview: { totalSessions: 15, totalMessages: 150, totalTokens: 80000, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, peakDay: "", peakDayTokens: 0, avgTokensPerSession: 5333 },
+    filters: { days: 30, from: null, to: null, project: "", modelPair: null, scope: "all" },
+    provider: "opencode",
+    providers: []
+  });
+
+  assert.match(html, /claude-4 · anthropic/);
+  assert.match(html, /gpt-5 · openai/);
+  assert.match(html, /tokens/); // metric label
+  assert.match(html, /model-rank-row/);
+});
+
+test("Token Explorer top sessions table links to canonical session URLs", () => {
+  const html = renderStatsPage({
+    tokenStats: [],
+    modelRanking: [],
+    topSessions: [
+      { sessionId: "ses_abc123", title: "Fix auth bug", directory: "/home/user/projects/app", providerModel: "anthropic/claude-4", totalTokens: 15000, messageCount: 45, timeUpdated: 1750000000000 },
+    ],
+    coverage: { messagesWithTokens: 1, totalAssistantMessages: 1, availableDimensions: [], missingDimensions: [] },
+    overview: { totalSessions: 1, totalMessages: 45, totalTokens: 15000, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, peakDay: "", peakDayTokens: 0, avgTokensPerSession: 15000 },
+    filters: { days: 30, from: null, to: null, project: "", modelPair: null, scope: "all" },
+    provider: "opencode",
+    providers: []
+  });
+
+  assert.match(html, /href="\/opencode\/session\/ses_abc123"/);
+  assert.match(html, /Fix auth bug/);
+  assert.match(html, /anthropic\/claude-4/);
+  assert.match(html, /15\.0K/);
+});
+
+test("Token Explorer coverage bar shows percentage when data is partial", () => {
+  const html = renderStatsPage({
+    tokenStats: [],
+    modelRanking: [],
+    topSessions: [],
+    coverage: { messagesWithTokens: 75, totalAssistantMessages: 100, availableDimensions: ["reasoning"], missingDimensions: ["cache"] },
+    overview: { totalSessions: 0, totalMessages: 0, totalTokens: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, peakDay: "", peakDayTokens: 0, avgTokensPerSession: 0 },
+    filters: { days: 30, from: null, to: null, project: "", modelPair: null, scope: "all" },
+    provider: "opencode",
+    providers: []
+  });
+
+  assert.match(html, /Data Coverage/);
+  assert.match(html, /75%/);
+  assert.match(html, /75 \/ 100/);
+  assert.match(html, /reasoning/);
+  assert.match(html, /cache/);
+});
+
+test("Token Explorer day drill-down shows filtered info", () => {
+  const html = renderStatsPage({
+    tokenStats: [],
+    modelRanking: [],
+    topSessions: [],
+    coverage: { messagesWithTokens: 0, totalAssistantMessages: 0, availableDimensions: [], missingDimensions: [] },
+    overview: { totalSessions: 0, totalMessages: 0, totalTokens: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, peakDay: "", peakDayTokens: 0, avgTokensPerSession: 0 },
+    filters: { days: 30, from: null, to: null, project: "", modelPair: null, scope: "all" },
+    dayDrill: "2026-07-11",
+    provider: "opencode",
+    providers: []
+  });
+
+  assert.match(html, /Filtered to 2026-07-11/);
+  assert.match(html, /Show all days/);
+});
+
+test("Token Explorer renders with no data without crashing", () => {
+  const html = renderStatsPage({
+    tokenStats: [],
+    modelRanking: [],
+    topSessions: [],
+    coverage: { messagesWithTokens: 0, totalAssistantMessages: 0, availableDimensions: [], missingDimensions: [] },
+    overview: { totalSessions: 0, totalMessages: 0, totalTokens: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, peakDay: "", peakDayTokens: 0, avgTokensPerSession: 0 },
+    filters: { days: 30, from: null, to: null, project: "", modelPair: null, scope: "all" },
+    provider: "opencode",
+    providers: []
+  });
+
+  assert.match(html, /Token Explorer/);
+  assert.match(html, /No data/);
+});
+
+test("Token Explorer JS interactivity hooks are present", () => {
+  const appJs = readFileSync(path.join(process.cwd(), "dist", "src", "static", "app.js"), "utf8");
+
+  assert.match(appJs, /initTokenExplorer/);
+  assert.match(appJs, /trend-legend-toggle/);
+  assert.match(appJs, /trend-hit/);
+  assert.match(appJs, /trend-tooltip/);
+  assert.match(appJs, /stats-preset-radio/);
+  assert.match(appJs, /stats-filter-custom-dates/);
+});
+
+test("stats filters parse days presets and custom ranges from URL params", async () => {
+  const { padTokenStats, parseStatsDay, parseStatsFilters } = await import("../dist/src/stats-data.js");
+
+  const f1 = parseStatsFilters(new URLSearchParams(""));
+  assert.equal(f1.days, 30);
+  assert.equal(f1.scope, "all");
+
+  const f2 = parseStatsFilters(new URLSearchParams("days=7"));
+  assert.equal(f2.days, 7);
+
+  const f3 = parseStatsFilters(new URLSearchParams("days=90&scope=root"));
+  assert.equal(f3.days, 90);
+  assert.equal(f3.scope, "root");
+
+  const f4 = parseStatsFilters(new URLSearchParams("days=custom&from=2026-01-01&to=2026-01-15"));
+  assert.equal(f4.from, "2026-01-01");
+  assert.equal(f4.to, "2026-01-15");
+  assert.equal(f4.days, 15);
+
+  const f5 = parseStatsFilters(new URLSearchParams("days=custom&from=invalid&to=2026-01-15"));
+  assert.equal(f5.days, 30);
+  assert.equal(f5.rangePreset, "custom");
+  assert.equal(f5.requestedFrom, "invalid");
+  assert.equal(f5.validationError, "invalid_custom_range");
+
+  assert.equal(parseStatsDay("2026-02-30"), null);
+  assert.equal(parseStatsDay("2026-02-28"), "2026-02-28");
+  const tooLong = parseStatsFilters(new URLSearchParams("days=custom&from=2024-01-01&to=2026-01-01"));
+  assert.equal(tooLong.days, 30);
+  assert.equal(tooLong.validationError, "custom_range_too_long");
+
+  const historical = padTokenStats([], 3, new Date("2030-01-01T00:00:00Z"), "2020-01-01", "2020-01-03");
+  assert.deepEqual(historical.map((row) => row.day), ["2020-01-01", "2020-01-02", "2020-01-03"]);
+});
+
+test("Token Explorer day drill clear link preserves a custom range", () => {
+  const html = renderStatsPage({
+    tokenStats: [], modelRanking: [], topSessions: [],
+    coverage: { messagesWithTokens: 0, totalAssistantMessages: 0, availableDimensions: [], missingDimensions: [] },
+    overview: { totalSessions: 0, totalMessages: 0, totalTokens: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, peakDay: "", peakDayTokens: 0, avgTokensPerSession: 0 },
+    filters: { days: 15, from: "2026-06-01", to: "2026-06-15", project: "", modelPair: null, scope: "all" },
+    dayDrill: "2026-06-05", provider: "opencode", providers: []
+  });
+
+  assert.match(html, /href="\/opencode\/stats\?days=custom&from=2026-06-01&to=2026-06-15"/);
+});
+
+test("file-backed Token Explorer exposes aggregate-only capabilities", () => {
+  const html = renderStatsPage({
+    tokenStats: [{ day: "2026-07-10", input_tokens: 1, output_tokens: 1, reasoning_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, total_tokens: 2, message_count: 1 }],
+    modelRanking: [], topSessions: [], coverage: null,
+    overview: { totalSessions: 1, totalMessages: 1, totalTokens: 2, inputTokens: 1, outputTokens: 1, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, peakDay: "2026-07-10", peakDayTokens: 2, avgTokensPerSession: 2 },
+    filters: { days: 30, from: null, to: null, project: "", modelPair: null, scope: "all" },
+    capabilities: { customRange: false, project: false, model: false, scope: false, dayDrill: false, composition: false, modelRanking: false, sessionBreakdown: false, coverage: false },
+    projects: null, provider: "codex", providers: []
+  });
+
+  assert.match(html, /aggregate token data only/);
+  assert.doesNotMatch(html, /name="model"/);
+  assert.doesNotMatch(html, /Model Ranking/);
+  assert.doesNotMatch(html, /Top Token Sessions/);
+  assert.doesNotMatch(html, /Data Coverage/);
+  assert.match(html, /data-series="total"/);
+  assert.doesNotMatch(html, /day=2026-07-10/);
+});
+
+test("Token Explorer keeps global-project filtering distinct from all projects", () => {
+  const html = renderStatsPage({
+    tokenStats: [], modelRanking: [], topSessions: [], coverage: null,
+    overview: { totalSessions: 0, totalMessages: 0, totalTokens: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, peakDay: "", peakDayTokens: 0, avgTokensPerSession: 0 },
+    filters: { days: 30, from: null, to: null, project: EMPTY_PROJECT_FILTER, modelPair: null, scope: "all", rangePreset: "30", requestedFrom: "", requestedTo: "", validationError: null },
+    capabilities: { customRange: true, project: true, model: true, scope: true, dayDrill: true, composition: true, modelRanking: true, sessionBreakdown: true, coverage: true },
+    projects: [{ projectId: "", label: "/", count: 2 }], provider: "opencode", providers: []
+  });
+
+  assert.match(html, new RegExp(`<option value="${EMPTY_PROJECT_FILTER}" selected>Global sessions \\(2\\)</option>`));
+  assert.match(html, /<option value="">All projects<\/option>/);
+});
+
+test("Token Explorer shows invalid custom ranges instead of silently presenting 30 days", async () => {
+  const { parseStatsFilters } = await import("../dist/src/stats-data.js");
+  const filters = parseStatsFilters(new URLSearchParams("days=custom&from=2026-02-30&to=2026-03-01"));
+  const html = renderStatsPage({
+    tokenStats: [], modelRanking: [], topSessions: [], coverage: null,
+    overview: { totalSessions: 0, totalMessages: 0, totalTokens: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, peakDay: "", peakDayTokens: 0, avgTokensPerSession: 0 },
+    filters, provider: "opencode", providers: []
+  });
+
+  assert.match(html, /role="alert"/);
+  assert.match(html, /Enter a valid UTC start and end date/);
+  assert.match(html, /value="custom" checked/);
+  assert.doesNotMatch(html, /value="30" checked/);
+});
+
+test("stats filters to params round-trips basic values", async () => {
+  const { parseStatsFilters, statsFiltersToParams } = await import("../dist/src/stats-data.js");
+
+  const filters = parseStatsFilters(new URLSearchParams("days=7&project=myproj&model=openai/gpt-5&scope=root"));
+  const p = statsFiltersToParams(filters);
+  assert.equal(p.get("days"), "7");
+  assert.equal(p.get("project"), "myproj");
+  assert.equal(p.get("model"), "openai/gpt-5");
+  assert.equal(p.get("scope"), "root");
+});
+
+test("padTokenStats fills missing days with zero rows", async () => {
+  const { padTokenStats } = await import("../dist/src/stats-data.js");
+
+  const rows = [{ day: "2026-07-10", input_tokens: 10, output_tokens: 5, reasoning_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, total_tokens: 15, message_count: 1 }];
+  const padded = padTokenStats(rows, 3, new Date("2026-07-12T00:00:00Z"));
+  assert.equal(padded.length, 3);
+  assert.equal(padded[0].day, "2026-07-10");
+  assert.equal(padded[0].total_tokens, 15);
+  assert.equal(padded[1].day, "2026-07-11");
+  assert.equal(padded[1].total_tokens, 0);
+  assert.equal(padded[2].day, "2026-07-12");
+  assert.equal(padded[2].total_tokens, 0);
+});
+
+test("detectAvailableDimensions reports each token component independently", async () => {
+  const { detectAvailableDimensions } = await import("../dist/src/stats-data.js");
+
+  const rows = [
+    { day: "2026-07-10", input_tokens: 10, output_tokens: 5, reasoning_tokens: 3, cache_read_tokens: 0, cache_write_tokens: 0, total_tokens: 18, message_count: 1 },
+  ];
+  const result = detectAvailableDimensions(rows);
+  assert.deepEqual(result.available, ["input", "output", "reasoning"]);
+  assert.ok(result.missing.includes("cache-read"));
+  assert.ok(result.missing.includes("cache-write"));
+});
+
+// ── Stats insights unit tests ──────────────────────────────────────────
+
+test("detectDailySpike returns empty for insufficient data", async () => {
+  const { detectDailySpike } = await import("../dist/src/stats-insights.js");
+  const result = detectDailySpike({ dailyTotals: [100, 200], topSessions: [], totalTokens: 300, messagesWithTokens: null, totalAssistantMessages: null });
+  assert.strictEqual(result.length, 0);
+});
+
+test("detectDailySpike returns empty for flat data", async () => {
+  const { detectDailySpike } = await import("../dist/src/stats-insights.js");
+  const result = detectDailySpike({ dailyTotals: [1000, 1100, 1050, 1020], topSessions: [], totalTokens: 4170, messagesWithTokens: null, totalAssistantMessages: null });
+  assert.strictEqual(result.length, 0);
+});
+
+test("detectDailySpike detects a significant spike", async () => {
+  const { detectDailySpike } = await import("../dist/src/stats-insights.js");
+  const result = detectDailySpike({ dailyTotals: [1000, 1100, 1050, 10000], topSessions: [], totalTokens: 13150, messagesWithTokens: null, totalAssistantMessages: null });
+  assert.strictEqual(result.length, 1);
+  assert.strictEqual(result[0].key, "daily_spike");
+  assert.strictEqual(result[0].severity, "medium");
+});
+
+test("detectDominantSession returns empty for balanced sessions", async () => {
+  const { detectDominantSession } = await import("../dist/src/stats-insights.js");
+  const result = detectDominantSession({ dailyTotals: [], topSessions: [{ sessionId: "a", title: "A", totalTokens: 3000 }, { sessionId: "b", title: "B", totalTokens: 3000 }], totalTokens: 10000, messagesWithTokens: null, totalAssistantMessages: null });
+  assert.strictEqual(result.length, 0);
+});
+
+test("detectDominantSession detects a dominant session", async () => {
+  const { detectDominantSession } = await import("../dist/src/stats-insights.js");
+  const result = detectDominantSession({ dailyTotals: [], topSessions: [{ sessionId: "a", title: "A", totalTokens: 7000 }, { sessionId: "b", title: "B", totalTokens: 3000 }], totalTokens: 10000, messagesWithTokens: null, totalAssistantMessages: null });
+  assert.strictEqual(result.length, 1);
+  assert.strictEqual(result[0].key, "dominant_session");
+});
+
+test("detectLowCoverage returns empty when coverage data is null", async () => {
+  const { detectLowCoverage } = await import("../dist/src/stats-insights.js");
+  const result = detectLowCoverage({ dailyTotals: [], topSessions: [], totalTokens: 0, messagesWithTokens: null, totalAssistantMessages: null });
+  assert.strictEqual(result.length, 0);
+});
+
+test("detectLowCoverage detects low coverage", async () => {
+  const { detectLowCoverage } = await import("../dist/src/stats-insights.js");
+  const result = detectLowCoverage({ dailyTotals: [], topSessions: [], totalTokens: 0, messagesWithTokens: 30, totalAssistantMessages: 100 });
+  assert.strictEqual(result.length, 1);
+  assert.strictEqual(result[0].key, "low_coverage");
+});
+
+test("detectLowCoverage returns empty for high coverage", async () => {
+  const { detectLowCoverage } = await import("../dist/src/stats-insights.js");
+  const result = detectLowCoverage({ dailyTotals: [], topSessions: [], totalTokens: 0, messagesWithTokens: 80, totalAssistantMessages: 100 });
+  assert.strictEqual(result.length, 0);
+});
+
+// ── Stats comparison unit tests ──────────────────────────────────────────
+
+test("computePreviousRange returns correct previous period for 7-day range", async () => {
+  const { computePreviousRange } = await import("../dist/src/stats-comparison.js");
+  const result = computePreviousRange("2025-03-08", "2025-03-14");
+  assert.strictEqual(result.from, "2025-03-01");
+  assert.strictEqual(result.to, "2025-03-07");
+  assert.strictEqual(result.days, 7);
+});
+
+test("computePreviousRange works for 1-day range", async () => {
+  const { computePreviousRange } = await import("../dist/src/stats-comparison.js");
+  const result = computePreviousRange("2025-03-14", "2025-03-14");
+  assert.strictEqual(result.from, "2025-03-13");
+  assert.strictEqual(result.to, "2025-03-13");
+  assert.strictEqual(result.days, 1);
+});
+
+test("buildComparison produces correct deltas", async () => {
+  const { buildComparison } = await import("../dist/src/stats-comparison.js");
+  const result = buildComparison({ tokens: 15000, sessions: 10, records: 100 }, { tokens: 10000, sessions: 8, records: 80 }, "2025-03-01", "2025-03-07", 7);
+  assert.strictEqual(result.totalDelta, 5000);
+  assert.strictEqual(result.totalDeltaPercent, 50.0);
+});
+
+test("buildComparison handles zero previous", async () => {
+  const { buildComparison } = await import("../dist/src/stats-comparison.js");
+  const result = buildComparison({ tokens: 5000, sessions: 3, records: 30 }, { tokens: 0, sessions: 0, records: 0 }, "2025-03-01", "2025-03-07", 7);
+  assert.strictEqual(result.totalDelta, 5000);
+  assert.strictEqual(result.totalDeltaPercent, null);
+});
+
+// ── Stats cost unit tests ────────────────────────────────────────────────
+
+test("validateTokenPricing rejects non-object", async () => {
+  const { validateTokenPricing } = await import("../dist/src/stats-cost.js");
+  const errors = validateTokenPricing("not an object");
+  assert.ok(errors.length > 0);
+});
+
+test("validateTokenPricing accepts valid entry", async () => {
+  const { validateTokenPricing } = await import("../dist/src/stats-cost.js");
+  const errors = validateTokenPricing({ "openai/gpt-4": { currency: "USD", inputPerMillion: 30, outputPerMillion: 60 } });
+  assert.strictEqual(errors.length, 0);
+});
+
+test("validateTokenPricing rejects negative rate", async () => {
+  const { validateTokenPricing } = await import("../dist/src/stats-cost.js");
+  const errors = validateTokenPricing({ "x/y": { currency: "USD", inputPerMillion: -1, outputPerMillion: 60 } });
+  assert.ok(errors.length > 0);
+});
+
+test("validateTokenPricing rejects unsafe sources and malformed model keys", async () => {
+  const { validateTokenPricing } = await import("../dist/src/stats-cost.js");
+  assert.ok(validateTokenPricing({ "missing-separator": { currency: "USD", inputPerMillion: 1, outputPerMillion: 2 } }).length > 0);
+  assert.ok(validateTokenPricing({ "x/y": { currency: "US", inputPerMillion: 1, outputPerMillion: 2 } }).length > 0);
+  assert.ok(validateTokenPricing({ "x/y": { currency: "USD", inputPerMillion: 1, outputPerMillion: 2, sourceUrl: "javascript:alert(1)" } }).length > 0);
+});
+
+test("computeCostEstimate produces correct output", async () => {
+  const { computeCostEstimate } = await import("../dist/src/stats-cost.js");
+  const result = computeCostEstimate({ currency: "USD", inputPerMillion: 10, outputPerMillion: 30 }, { inputTokens: 1000000, outputTokens: 2000000, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
+  assert.strictEqual(result.currency, "USD");
+  // 1M input @ $10/M = $10, 2M output @ $30/M = $60 → $70
+  assert.ok(Math.abs(result.totalCost - 70) < 0.01);
+});
+
+test("stats advanced modules are capability-gated and export URLs are canonical", () => {
+  const base = {
+    tokenStats: [], modelRanking: [], topSessions: [], coverage: null,
+    overview: { totalSessions: 0, totalMessages: 0, totalTokens: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, peakDay: "", peakDayTokens: 0, avgTokensPerSession: 0 },
+    filters: { days: 7, from: null, to: null, project: "", modelPair: null, scope: "all", compareA: null, compareB: null, rangePreset: "7", requestedFrom: "", requestedTo: "", validationError: null },
+    provider: "codex", providers: [{ id: "codex", name: "Codex", available: true }, { id: "gemini", name: "Gemini", available: false }], manageable: true,
+  };
+  const limited = renderStatsPage({ ...base, capabilities: { customRange: false, project: false, model: false, scope: false, dayDrill: false, composition: false, modelRanking: false, sessionBreakdown: false, coverage: false } });
+  assert.match(limited, /href="\/api\/codex\/stats\/export\.json\?days=7"/);
+  assert.match(limited, /stats-provider-item disabled/);
+  assert.doesNotMatch(limited, /stats-advanced-details/);
+
+  const full = renderStatsPage({ ...base, capabilities: { customRange: true, project: true, model: true, scope: true, dayDrill: true, composition: true, modelRanking: true, sessionBreakdown: true, coverage: true } });
+  assert.match(full, /stats-advanced-details/);
+  assert.match(full, /Advanced insights and estimates/);
+});
+
+test("navigate Token to Usage", () => {
+  // The nav label should be "Usage" not "Token"
+  const html = renderStatsPage({
+    tokenStats: [],
+    modelRanking: [],
+    topSessions: [],
+    coverage: { messagesWithTokens: 0, totalAssistantMessages: 0, availableDimensions: [], missingDimensions: [] },
+    overview: { totalSessions: 0, totalMessages: 0, totalTokens: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, peakDay: "", peakDayTokens: 0, avgTokensPerSession: 0 },
+    filters: { days: 30, from: null, to: null, project: "", modelPair: null, scope: "all" },
+    provider: "opencode",
+    providers: []
+  });
+
+  // Nav label should no longer be "Token"
+  assert.match(html, />Usage</);
+  assert.doesNotMatch(html, />Token</);
 });
 
 test("global search shortcut ignores editable targets", () => {
   const appJs = readFileSync(path.join(process.cwd(), "dist", "src", "static", "app.js"), "utf-8");
-  const helperSource = appJs.match(/function isEditableShortcutTarget\(target\) \{[\s\S]*?target\.isContentEditable;\n\}/)?.[0];
+  const helperSource = appJs.match(/function isEditableShortcutTarget\(target\) \{[\s\S]*?target\.isContentEditable;\r?\n\}/)?.[0];
   assert.ok(helperSource);
 
   class FakeHTMLElement {
@@ -3332,7 +3894,7 @@ test("session rendering shows configured analysis actions only when launch is al
   assert.match(visible, /data-action="analyze-session"/);
   assert.match(visible, /data-target="skills"/);
   assert.match(visible, /class="session-actions-shell analysis-launch-control"/);
-  assert.match(visible, /class="action-menu"/);
+  assert.match(visible, /class="more-actions"/);
   assert.match(visible, /Export MD/);
   assert.match(visible, /Export JSON/);
   assert.match(visible, /class="analysis-target-checkbox"/);
@@ -3381,6 +3943,38 @@ test("session rendering includes in-conversation search controls", () => {
   assert.match(appJs, /requestIdleCallback/);
   assert.match(appJs, /data-session-search-highlight/);
   assert.match(appJs, /highlightTranscriptMatches/);
+});
+
+test("session detail uses progressive, accessible tabs without duplicating analysis controls", () => {
+  const html = renderSessionPage({
+    session: { id: "tabbed", title: "Tabbed session", time_created: 1000, time_updated: 2000 },
+    analysisAction: {
+      target: "skills",
+      targets: [{ id: "skills", label: "Skills", available: true }],
+      selectedTargets: ["skills"],
+      runtimeEnvironment: { selectedExtensionIds: [], extensions: [] },
+      available: true
+    },
+    analysisRuns: [{ runId: "done", state: "completed", active: false }],
+    terminalLaunchAllowed: true
+  });
+
+  assert.match(html, /class="tab-bar" role="tablist"/);
+  assert.ok(html.indexOf("tab-btn-overview") < html.indexOf("tab-btn-conversation"));
+  assert.ok(html.indexOf("tab-btn-conversation") < html.indexOf("tab-btn-flow"));
+  assert.ok(html.indexOf("tab-btn-flow") < html.indexOf("tab-btn-analysis"));
+  assert.ok(html.indexOf("tab-btn-analysis") < html.indexOf("tab-btn-raw"));
+  assert.match(html, /id="tab-btn-conversation" tabindex="0"/);
+  assert.match(html, /id="tab-conversation" aria-labelledby="tab-btn-conversation"/);
+  assert.doesNotMatch(html, /id="tab-overview"[^>]* hidden/);
+  assert.equal((html.match(/class="analysis-materials-panel"/g) || []).length, 1);
+  assert.match(html, /<details class="analysis-activity-details" id="analysis-activity-details" >/);
+  assert.doesNotMatch(html, /session-detail-id/);
+
+  const appJs = readFileSync(path.join(process.cwd(), "dist", "src", "static", "app.js"), "utf-8");
+  assert.match(appJs, /session-flow-tab-open/);
+  assert.match(appJs, /ArrowRight/);
+  assert.match(appJs, /ArrowLeft/);
 });
 
 test("built-in analysis targets resolve without target-specific config", () => {

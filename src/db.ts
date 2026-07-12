@@ -435,31 +435,87 @@ export function getOverviewStats(pathOverride: string | undefined = undefined) {
   };
 }
 
-export function getTokenStats(days = 30, pathOverride = undefined) {
+function statsTokenComponentSql(dataColumn = "message.data") {
+  return `COALESCE(json_extract(${dataColumn}, '$.tokens.input'), 0)
+    + COALESCE(json_extract(${dataColumn}, '$.tokens.output'), 0)
+    + COALESCE(json_extract(${dataColumn}, '$.tokens.reasoning'), 0)
+    + COALESCE(json_extract(${dataColumn}, '$.tokens.cache.read'), 0)
+    + COALESCE(json_extract(${dataColumn}, '$.tokens.cache.write'), 0)`;
+}
+
+function statsUsableTokenSql(dataColumn = "message.data") {
+  return `(COALESCE(json_extract(${dataColumn}, '$.tokens.total'), 0) > 0 OR (${statsTokenComponentSql(dataColumn)}) > 0)`;
+}
+
+function statsTokenValueSql(dataColumn = "message.data") {
+  return `CASE WHEN COALESCE(json_extract(${dataColumn}, '$.tokens.total'), 0) > 0
+    THEN COALESCE(json_extract(${dataColumn}, '$.tokens.total'), 0)
+    ELSE (${statsTokenComponentSql(dataColumn)}) END`;
+}
+
+function appendStatsProjectFilter(conds: string[], params: any[], project: string | undefined) {
+  if (isEmptyProjectFilter(project)) {
+    conds.push("COALESCE(session.project_id, '') = ''");
+  } else if (project) {
+    conds.push("COALESCE(session.project_id, '') = ?");
+    params.push(project);
+  }
+}
+
+function statsDayStartMs(value: string | undefined): number | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [year, month, day] = value.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) {
+    return null;
+  }
+  return parsed.getTime();
+}
+
+export function getTokenStats(days = 30, pathOverride = undefined, opts: { project?: string; modelPair?: string; scope?: "root" | "all"; fromDate?: string; toDate?: string } = {}) {
   const d = getDb(pathOverride);
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
-  const cutoff = today.getTime() - (Math.max(1, days) - 1) * 86400000;
-  // Token consumption happens inside child/subagent sessions as well as roots.
-  // Filtering to parent_id IS NULL makes the dashboard materially under-report
-  // provider usage, so this query intentionally includes the full active tree.
+  const cutoffMs = today.getTime() - (Math.max(1, days) - 1) * 86400000;
+
+  const conds: string[] = [
+    "json_extract(message.data, '$.role') = 'assistant'",
+    statsUsableTokenSql(),
+    "session.time_archived IS NULL",
+  ];
+  const params: any[] = [];
+
+  // Date range
+  if (opts.fromDate && opts.toDate) {
+    const fromMs = new Date(opts.fromDate + "T00:00:00Z").getTime();
+    const toMs = new Date(opts.toDate + "T23:59:59.999Z").getTime();
+    conds.push("json_extract(message.data, '$.time.created') >= ?");
+    conds.push("json_extract(message.data, '$.time.created') <= ?");
+    params.push(fromMs, toMs);
+  } else {
+    conds.push("json_extract(message.data, '$.time.created') >= ?");
+    params.push(cutoffMs);
+  }
+
+  // Scope
+  if (opts.scope === "root") {
+    conds.push("session.parent_id IS NULL");
+  }
+
+  // Project
+  appendStatsProjectFilter(conds, params, opts.project);
+
+  // Model/provider pair
+  if (opts.modelPair) {
+    conds.push("(json_extract(message.data, '$.providerID') || '/' || json_extract(message.data, '$.modelID')) = ?");
+    params.push(opts.modelPair);
+  }
+
+  const where = conds.join(" AND ");
+
   return d.prepare(`
     SELECT date(json_extract(message.data, '$.time.created') / 1000, 'unixepoch') as day,
-           SUM(
-             CASE
-               WHEN COALESCE(json_extract(message.data, '$.tokens.input'), 0)
-                  + COALESCE(json_extract(message.data, '$.tokens.output'), 0)
-                  + COALESCE(json_extract(message.data, '$.tokens.reasoning'), 0)
-                  + COALESCE(json_extract(message.data, '$.tokens.cache.read'), 0)
-                  + COALESCE(json_extract(message.data, '$.tokens.cache.write'), 0) > 0
-               THEN COALESCE(json_extract(message.data, '$.tokens.input'), 0)
-                  + COALESCE(json_extract(message.data, '$.tokens.output'), 0)
-                  + COALESCE(json_extract(message.data, '$.tokens.reasoning'), 0)
-                  + COALESCE(json_extract(message.data, '$.tokens.cache.read'), 0)
-                  + COALESCE(json_extract(message.data, '$.tokens.cache.write'), 0)
-               ELSE COALESCE(json_extract(message.data, '$.tokens.total'), 0)
-             END
-           ) as total_tokens,
+           SUM(${statsTokenValueSql()}) as total_tokens,
            SUM(COALESCE(json_extract(message.data, '$.tokens.input'), 0)) as input_tokens,
            SUM(COALESCE(json_extract(message.data, '$.tokens.output'), 0)) as output_tokens,
            SUM(COALESCE(json_extract(message.data, '$.tokens.reasoning'), 0)) as reasoning_tokens,
@@ -468,41 +524,94 @@ export function getTokenStats(days = 30, pathOverride = undefined) {
            COUNT(*) as message_count
     FROM message
     JOIN session ON session.id = message.session_id
-    WHERE json_extract(message.data, '$.role') = 'assistant'
-      AND json_extract(message.data, '$.time.created') > ?
-      AND json_extract(message.data, '$.tokens.total') > 0
-      AND session.time_archived IS NULL
+    WHERE ${where}
     GROUP BY day ORDER BY day ASC
-  `).all(cutoff);
+  `).all(...params);
 }
 
-export function getModelDistribution(pathOverride = undefined) {
+export function getModelDistribution(pathOverride = undefined, opts: { days?: number; fromDate?: string; toDate?: string; project?: string; modelPair?: string; scope?: "root" | "all" } = {}) {
   const d = getDb(pathOverride);
+  const conds: string[] = [
+    "json_extract(message.data, '$.role') = 'assistant'",
+    "json_extract(message.data, '$.modelID') IS NOT NULL",
+    statsUsableTokenSql(),
+    "session.time_archived IS NULL",
+  ];
+  const params: any[] = [];
+
+  // Only apply date filter when explicitly requested
+  if (opts.fromDate && opts.toDate) {
+    const fromMs = new Date(opts.fromDate + "T00:00:00Z").getTime();
+    const toMs = new Date(opts.toDate + "T23:59:59.999Z").getTime();
+    conds.push("json_extract(message.data, '$.time.created') >= ?");
+    conds.push("json_extract(message.data, '$.time.created') <= ?");
+    params.push(fromMs, toMs);
+  } else if (opts.days) {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const cutoffMs = today.getTime() - (Math.max(1, opts.days) - 1) * 86400000;
+    conds.push("json_extract(message.data, '$.time.created') >= ?");
+    params.push(cutoffMs);
+  }
+
+  if (opts.scope === "root") {
+    conds.push("session.parent_id IS NULL");
+  }
+  appendStatsProjectFilter(conds, params, opts.project);
+  if (opts.modelPair) {
+    conds.push("(json_extract(message.data, '$.providerID') || '/' || json_extract(message.data, '$.modelID')) = ?");
+    params.push(opts.modelPair);
+  }
+
+  const where = conds.join(" AND ");
+
   return d.prepare(`
     SELECT json_extract(message.data, '$.modelID') as model,
            json_extract(message.data, '$.providerID') as provider,
            COUNT(*) as count,
-           SUM(json_extract(message.data, '$.tokens.total')) as total_tokens
+           SUM(${statsTokenValueSql()}) as total_tokens
     FROM message
     JOIN session ON session.id = message.session_id
-    WHERE json_extract(message.data, '$.role') = 'assistant'
-      AND json_extract(message.data, '$.modelID') IS NOT NULL
-      AND session.time_archived IS NULL
+    WHERE ${where}
     GROUP BY 1, 2
-    ORDER BY count DESC
-  `).all();
+    ORDER BY total_tokens DESC
+  `).all(...params);
 }
 
-export function getDailySessionCounts(days = 30, pathOverride = undefined) {
+export function getDailySessionCounts(days = 30, pathOverride = undefined, opts: { fromDate?: string; toDate?: string; project?: string; scope?: "root" | "all" } = {}) {
   const d = getDb(pathOverride);
-  const cutoff = Date.now() - days * 86400000;
+  const conds: string[] = ["time_archived IS NULL"];
+  const params: any[] = [];
+
+  if (opts.fromDate && opts.toDate) {
+    const fromMs = new Date(opts.fromDate + "T00:00:00Z").getTime();
+    const toMs = new Date(opts.toDate + "T23:59:59.999Z").getTime();
+    conds.push("time_created >= ?");
+    conds.push("time_created <= ?");
+    params.push(fromMs, toMs);
+  } else {
+    const cutoff = Date.now() - days * 86400000;
+    conds.push("time_created >= ?");
+    params.push(cutoff);
+  }
+
+  if (opts.scope === "root") {
+    conds.push("parent_id IS NULL");
+  }
+  if (opts.project) {
+    conds.push("COALESCE(project_id, '') = ?");
+    params.push(opts.project);
+  }
+
+  const where = conds.join(" AND ");
+
   return d.prepare(`
     SELECT date(time_created / 1000, 'unixepoch') as day,
            COUNT(*) as count
     FROM session
-     WHERE time_created > ?
+     WHERE ${where}
      GROUP BY day ORDER BY day ASC
-  `).all(cutoff);
+  `).all(...params);
 }
 
 export function getSessionsByIds(ids: any, pathOverride = undefined) {
@@ -516,4 +625,467 @@ export function getSessionsByIds(ids: any, pathOverride = undefined) {
     WHERE id IN (${placeholders})
     ORDER BY time_updated DESC
   `).all(...ids);
+}
+
+/**
+ * Get top token-consuming sessions for the Token Explorer table.
+ * Aggregates tokens across all messages in each session.
+ */
+export function getTopTokenSessions(pathOverride = undefined, opts: {
+  days?: number; fromDate?: string; toDate?: string;
+  project?: string; modelPair?: string; scope?: "root" | "all";
+  day?: string; limit?: number;
+} = {}): any[] {
+  const d = getDb(pathOverride);
+  const conds: string[] = [
+    "json_extract(message.data, '$.role') = 'assistant'",
+    statsUsableTokenSql(),
+    "session.time_archived IS NULL",
+  ];
+  const params: any[] = [];
+  const days = opts.days || 30;
+
+  // Day drill-down takes priority over all other date filters
+  if (opts.day) {
+    const dayMs = statsDayStartMs(opts.day);
+    if (dayMs === null) {
+      // Invalid day; fall through to default behavior
+      const today = new Date();
+      today.setUTCHours(0, 0, 0, 0);
+      const cutoffMs = today.getTime() - (Math.max(1, days) - 1) * 86400000;
+      conds.push("json_extract(message.data, '$.time.created') >= ?");
+      params.push(cutoffMs);
+    } else {
+      const dayStart = dayMs;
+      const dayEnd = dayMs + 86400000 - 1;
+      conds.push("json_extract(message.data, '$.time.created') >= ?");
+      conds.push("json_extract(message.data, '$.time.created') <= ?");
+      params.push(dayStart, dayEnd);
+    }
+  } else if (opts.fromDate && opts.toDate) {
+    const fromMs = new Date(opts.fromDate + "T00:00:00Z").getTime();
+    const toMs = new Date(opts.toDate + "T23:59:59.999Z").getTime();
+    conds.push("json_extract(message.data, '$.time.created') >= ?");
+    conds.push("json_extract(message.data, '$.time.created') <= ?");
+    params.push(fromMs, toMs);
+  } else {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const cutoffMs = today.getTime() - (Math.max(1, days) - 1) * 86400000;
+    conds.push("json_extract(message.data, '$.time.created') >= ?");
+    params.push(cutoffMs);
+  }
+
+  if (opts.scope === "root") {
+    conds.push("session.parent_id IS NULL");
+  }
+  appendStatsProjectFilter(conds, params, opts.project);
+  if (opts.modelPair) {
+    conds.push("(json_extract(message.data, '$.providerID') || '/' || json_extract(message.data, '$.modelID')) = ?");
+    params.push(opts.modelPair);
+  }
+
+  const where = conds.join(" AND ");
+  const limit = Math.min(opts.limit || 20, 100);
+
+  return d.prepare(`
+    SELECT session.id as session_id,
+           COALESCE(NULLIF(session.title, ''), NULLIF(session.slug, ''), session.id) as title,
+           COALESCE(session.directory, '') as directory,
+           COALESCE(session.project_id, '') as project_id,
+           session.time_updated,
+           CASE
+             WHEN COUNT(DISTINCT CASE
+               WHEN json_extract(message.data, '$.modelID') IS NOT NULL
+               THEN COALESCE(json_extract(message.data, '$.providerID'), 'unknown') || '/' || json_extract(message.data, '$.modelID')
+             END) > 1 THEN '__multiple__'
+             WHEN COUNT(DISTINCT CASE
+               WHEN json_extract(message.data, '$.modelID') IS NOT NULL
+               THEN COALESCE(json_extract(message.data, '$.providerID'), 'unknown') || '/' || json_extract(message.data, '$.modelID')
+             END) = 1 THEN MIN(CASE
+               WHEN json_extract(message.data, '$.modelID') IS NOT NULL
+               THEN COALESCE(json_extract(message.data, '$.providerID'), 'unknown') || '/' || json_extract(message.data, '$.modelID')
+             END)
+             ELSE '__unknown__'
+           END as provider_model,
+           COUNT(DISTINCT CASE
+             WHEN json_extract(message.data, '$.modelID') IS NOT NULL
+             THEN COALESCE(json_extract(message.data, '$.providerID'), 'unknown') || '/' || json_extract(message.data, '$.modelID')
+           END) as model_count,
+           SUM(${statsTokenValueSql()}) as total_tokens,
+           COUNT(DISTINCT message.id) as message_count
+    FROM message
+    JOIN session ON session.id = message.session_id
+    WHERE ${where}
+    GROUP BY session.id
+    ORDER BY total_tokens DESC
+    LIMIT ?
+  `).all(...params, limit);
+}
+
+/**
+ * Get coverage information: how many messages/sessions have usable token data
+ * and which token dimensions are available.
+ */
+export function getTokenCoverage(pathOverride = undefined, opts: {
+  days?: number; fromDate?: string; toDate?: string;
+  project?: string; modelPair?: string; scope?: "root" | "all";
+} = {}): { messagesWithTokens: number; totalAssistantMessages: number; sessionsWithTokens: number; totalSessions: number; dimensions: { input: boolean; output: boolean; reasoning: boolean; cacheRead: boolean; cacheWrite: boolean } } {
+  const d = getDb(pathOverride);
+  const conds: string[] = [
+    "json_extract(message.data, '$.role') = 'assistant'",
+    "session.time_archived IS NULL",
+  ];
+  const params: any[] = [];
+  const days = opts.days || 30;
+
+  if (opts.fromDate && opts.toDate) {
+    const fromMs = new Date(opts.fromDate + "T00:00:00Z").getTime();
+    const toMs = new Date(opts.toDate + "T23:59:59.999Z").getTime();
+    conds.push("json_extract(message.data, '$.time.created') >= ?");
+    conds.push("json_extract(message.data, '$.time.created') <= ?");
+    params.push(fromMs, toMs);
+  } else {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const cutoffMs = today.getTime() - (Math.max(1, days) - 1) * 86400000;
+    conds.push("json_extract(message.data, '$.time.created') >= ?");
+    params.push(cutoffMs);
+  }
+
+  if (opts.scope === "root") {
+    conds.push("session.parent_id IS NULL");
+  }
+  appendStatsProjectFilter(conds, params, opts.project);
+  if (opts.modelPair) {
+    conds.push("(json_extract(message.data, '$.providerID') || '/' || json_extract(message.data, '$.modelID')) = ?");
+    params.push(opts.modelPair);
+  }
+
+  const where = conds.join(" AND ");
+
+  // Check for token data: total > 0 OR any component > 0
+  const withTokens = d.prepare(`
+    SELECT COUNT(*) as cnt
+    FROM message
+    JOIN session ON session.id = message.session_id
+    WHERE ${where}
+      AND (
+        json_extract(message.data, '$.tokens.total') > 0
+        OR (
+          COALESCE(json_extract(message.data, '$.tokens.input'), 0)
+          + COALESCE(json_extract(message.data, '$.tokens.output'), 0)
+          + COALESCE(json_extract(message.data, '$.tokens.reasoning'), 0)
+          + COALESCE(json_extract(message.data, '$.tokens.cache.read'), 0)
+          + COALESCE(json_extract(message.data, '$.tokens.cache.write'), 0) > 0
+        )
+      )
+  `).get(...params);
+
+  const total = d.prepare(`
+    SELECT COUNT(*) as cnt
+    FROM message
+    JOIN session ON session.id = message.session_id
+    WHERE ${where}
+  `).get(...params);
+
+  const sessionsWithTokens = d.prepare(`
+    SELECT COUNT(DISTINCT session.id) as cnt
+    FROM message
+    JOIN session ON session.id = message.session_id
+    WHERE ${where}
+      AND (
+        json_extract(message.data, '$.tokens.total') > 0
+        OR (
+          COALESCE(json_extract(message.data, '$.tokens.input'), 0)
+          + COALESCE(json_extract(message.data, '$.tokens.output'), 0)
+          + COALESCE(json_extract(message.data, '$.tokens.reasoning'), 0)
+          + COALESCE(json_extract(message.data, '$.tokens.cache.read'), 0)
+          + COALESCE(json_extract(message.data, '$.tokens.cache.write'), 0) > 0
+        )
+      )
+  `).get(...params);
+
+  const totalSessions = d.prepare(`
+    SELECT COUNT(DISTINCT session.id) as cnt
+    FROM message
+    JOIN session ON session.id = message.session_id
+    WHERE ${where}
+  `).get(...params);
+
+  // A dimension is available when the provider records the field, even when
+  // every value in the selected range happens to be zero.
+  const dimChecks = d.prepare(`
+    SELECT
+      MAX(CASE WHEN json_type(message.data, '$.tokens.input') IS NOT NULL THEN 1 ELSE 0 END) as has_input,
+      MAX(CASE WHEN json_type(message.data, '$.tokens.output') IS NOT NULL THEN 1 ELSE 0 END) as has_output,
+      MAX(CASE WHEN json_type(message.data, '$.tokens.reasoning') IS NOT NULL THEN 1 ELSE 0 END) as has_reasoning,
+      MAX(CASE WHEN json_type(message.data, '$.tokens.cache.read') IS NOT NULL THEN 1 ELSE 0 END) as has_cache_read,
+      MAX(CASE WHEN json_type(message.data, '$.tokens.cache.write') IS NOT NULL THEN 1 ELSE 0 END) as has_cache_write
+    FROM message
+    JOIN session ON session.id = message.session_id
+    WHERE ${where}
+  `).get(...params);
+
+  return {
+    messagesWithTokens: Number(withTokens?.cnt) || 0,
+    totalAssistantMessages: Number(total?.cnt) || 0,
+    sessionsWithTokens: Number(sessionsWithTokens?.cnt) || 0,
+    totalSessions: Number(totalSessions?.cnt) || 0,
+    dimensions: {
+      input: Boolean(dimChecks?.has_input),
+      output: Boolean(dimChecks?.has_output),
+      reasoning: Boolean(dimChecks?.has_reasoning),
+      cacheRead: Boolean(dimChecks?.has_cache_read),
+      cacheWrite: Boolean(dimChecks?.has_cache_write),
+    },
+  };
+}
+
+/**
+ * Get distinct model/provider pairs that appear in the data.
+ */
+export function getModelPairs(pathOverride = undefined, opts: {
+  days?: number; fromDate?: string; toDate?: string;
+  project?: string; scope?: "root" | "all";
+} = {}): Array<{ key: string; model: string; provider: string; totalTokens: number }> {
+  const d = getDb(pathOverride);
+  const conds: string[] = [
+    "json_extract(message.data, '$.role') = 'assistant'",
+    "json_extract(message.data, '$.modelID') IS NOT NULL",
+    statsUsableTokenSql(),
+    "session.time_archived IS NULL",
+  ];
+  const params: any[] = [];
+  const days = opts.days || 30;
+
+  if (opts.fromDate && opts.toDate) {
+    const fromMs = new Date(opts.fromDate + "T00:00:00Z").getTime();
+    const toMs = new Date(opts.toDate + "T23:59:59.999Z").getTime();
+    conds.push("json_extract(message.data, '$.time.created') >= ?");
+    conds.push("json_extract(message.data, '$.time.created') <= ?");
+    params.push(fromMs, toMs);
+  } else {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const cutoffMs = today.getTime() - (Math.max(1, days) - 1) * 86400000;
+    conds.push("json_extract(message.data, '$.time.created') >= ?");
+    params.push(cutoffMs);
+  }
+
+  if (opts.scope === "root") {
+    conds.push("session.parent_id IS NULL");
+  }
+  appendStatsProjectFilter(conds, params, opts.project);
+
+  const where = conds.join(" AND ");
+
+  return d.prepare(`
+    SELECT
+      (json_extract(message.data, '$.providerID') || '/' || json_extract(message.data, '$.modelID')) as key,
+      json_extract(message.data, '$.modelID') as model,
+      json_extract(message.data, '$.providerID') as provider,
+      SUM(${statsTokenValueSql()}) as total_tokens
+    FROM message
+    JOIN session ON session.id = message.session_id
+    WHERE ${where}
+    GROUP BY 1
+    ORDER BY total_tokens DESC
+  `).all(...params);
+}
+
+/**
+ * Get distinct project_id values from sessions that have messages for stats filtering.
+ */
+export function getStatsProjects(pathOverride = undefined, opts: {
+  days?: number; fromDate?: string; toDate?: string;
+  scope?: "root" | "all";
+} = {}): Array<{ projectId: string; label: string; count: number }> {
+  const d = getDb(pathOverride);
+  const conds: string[] = [
+    "json_extract(message.data, '$.role') = 'assistant'",
+    statsUsableTokenSql(),
+    "session.time_archived IS NULL",
+  ];
+  const params: any[] = [];
+  const days = opts.days || 30;
+
+  if (opts.fromDate && opts.toDate) {
+    const fromMs = new Date(opts.fromDate + "T00:00:00Z").getTime();
+    const toMs = new Date(opts.toDate + "T23:59:59.999Z").getTime();
+    conds.push("json_extract(message.data, '$.time.created') >= ?");
+    conds.push("json_extract(message.data, '$.time.created') <= ?");
+    params.push(fromMs, toMs);
+  } else {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const cutoffMs = today.getTime() - (Math.max(1, days) - 1) * 86400000;
+    conds.push("json_extract(message.data, '$.time.created') >= ?");
+    params.push(cutoffMs);
+  }
+
+  if (opts.scope === "root") {
+    conds.push("session.parent_id IS NULL");
+  }
+
+  const where = conds.join(" AND ");
+
+  return d.prepare(`
+    SELECT COALESCE(session.project_id, '') as project_id,
+           COALESCE(NULLIF(project.name, ''), NULLIF(project.worktree, ''), NULLIF(session.directory, ''), NULLIF(session.project_id, ''), '') as label,
+           COUNT(DISTINCT session.id) as count
+    FROM message
+    JOIN session ON session.id = message.session_id
+    LEFT JOIN project ON project.id = session.project_id
+    WHERE ${where}
+    GROUP BY COALESCE(session.project_id, ''), label
+    ORDER BY count DESC, project_id ASC
+  `).all(...params).map((row: any) => ({
+    projectId: String(row.project_id || ""),
+    label: String(row.label || row.project_id || ""),
+    count: Number(row.count) || 0,
+  }));
+}
+
+/**
+ * Get filtered session count for overview using message timestamps.
+ */
+export function getFilteredSessionCount(pathOverride = undefined, opts: {
+  days?: number; fromDate?: string; toDate?: string;
+  project?: string; modelPair?: string; scope?: "root" | "all";
+} = {}): number {
+  const d = getDb(pathOverride);
+  const conds: string[] = [
+    "json_extract(message.data, '$.role') = 'assistant'",
+    statsUsableTokenSql(),
+    "session.time_archived IS NULL",
+  ];
+  const params: any[] = [];
+  const days = opts.days || 30;
+
+  if (opts.fromDate && opts.toDate) {
+    const fromMs = new Date(opts.fromDate + "T00:00:00Z").getTime();
+    const toMs = new Date(opts.toDate + "T23:59:59.999Z").getTime();
+    conds.push("json_extract(message.data, '$.time.created') >= ?");
+    conds.push("json_extract(message.data, '$.time.created') <= ?");
+    params.push(fromMs, toMs);
+  } else {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const cutoffMs = today.getTime() - (Math.max(1, days) - 1) * 86400000;
+    conds.push("json_extract(message.data, '$.time.created') >= ?");
+    params.push(cutoffMs);
+  }
+
+  if (opts.scope === "root") {
+    conds.push("session.parent_id IS NULL");
+  }
+  appendStatsProjectFilter(conds, params, opts.project);
+  if (opts.modelPair) {
+    conds.push("(json_extract(message.data, '$.providerID') || '/' || json_extract(message.data, '$.modelID')) = ?");
+    params.push(opts.modelPair);
+  }
+
+  const where = conds.join(" AND ");
+  return d.prepare(`SELECT COUNT(DISTINCT session.id) as cnt FROM message JOIN session ON session.id = message.session_id WHERE ${where}`).get(...params)?.cnt ?? 0;
+}
+
+/**
+ * Get aggregate tokens, sessions, and message records for an exact date range.
+ * Used by the period comparison feature.
+ */
+export function getPreviousPeriodAggregates(pathOverride = undefined, opts: {
+  fromDate: string; toDate: string;
+  project?: string; modelPair?: string; scope?: "root" | "all";
+}) {
+  const d = getDb(pathOverride);
+  const conds: string[] = [
+    "json_extract(message.data, '$.role') = 'assistant'",
+    statsUsableTokenSql(),
+    "session.time_archived IS NULL",
+  ];
+  const params: any[] = [];
+  const fromMs = new Date(opts.fromDate + "T00:00:00Z").getTime();
+  const toMs = new Date(opts.toDate + "T23:59:59.999Z").getTime();
+  conds.push("json_extract(message.data, '$.time.created') >= ?");
+  conds.push("json_extract(message.data, '$.time.created') <= ?");
+  params.push(fromMs, toMs);
+
+  if (opts.scope === "root") conds.push("session.parent_id IS NULL");
+  appendStatsProjectFilter(conds, params, opts.project);
+  if (opts.modelPair) {
+    conds.push("(json_extract(message.data, '$.providerID') || '/' || json_extract(message.data, '$.modelID')) = ?");
+    params.push(opts.modelPair);
+  }
+  const where = conds.join(" AND ");
+
+  const row = d.prepare(`SELECT COUNT(DISTINCT session.id) as sessions, COUNT(*) as records, SUM(${statsTokenValueSql()}) as tokens FROM message JOIN session ON session.id = message.session_id WHERE ${where}`).get(...params);
+  return { tokens: Number(row?.tokens) || 0, sessions: Number(row?.sessions) || 0, records: Number(row?.records) || 0 };
+}
+
+/**
+ * Get stats for a specific model within the current filter context,
+ * including share of total tokens.
+ */
+export function getCompareModelStats(pathOverride = undefined, opts: {
+  days?: number; fromDate?: string; toDate?: string;
+  project?: string; scope?: "root" | "all";
+  modelKey: string;
+}) {
+  const d = getDb(pathOverride);
+
+  // Build date conditions once, shared by both total and model-specific queries
+  const dateConds: string[] = [];
+  const dateParams: any[] = [];
+  if (opts.fromDate && opts.toDate) {
+    const fromMs = new Date(opts.fromDate + "T00:00:00Z").getTime();
+    const toMs = new Date(opts.toDate + "T23:59:59.999Z").getTime();
+    dateConds.push("json_extract(message.data, '$.time.created') >= ?");
+    dateConds.push("json_extract(message.data, '$.time.created') <= ?");
+    dateParams.push(fromMs, toMs);
+  } else {
+    const days = opts.days || 30;
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const cutoffMs = today.getTime() - (Math.max(1, days) - 1) * 86400000;
+    dateConds.push("json_extract(message.data, '$.time.created') >= ?");
+    dateParams.push(cutoffMs);
+  }
+
+  // Base conditions (no model filter) for total aggregation
+  const baseConds = [
+    "json_extract(message.data, '$.role') = 'assistant'",
+    statsUsableTokenSql(),
+    "session.time_archived IS NULL",
+    ...dateConds,
+  ];
+  const baseParams = [...dateParams];
+  if (opts.scope === "root") baseConds.push("session.parent_id IS NULL");
+  appendStatsProjectFilter(baseConds, baseParams, opts.project);
+  const baseWhere = baseConds.join(" AND ");
+  const totalRow = d.prepare(`SELECT SUM(${statsTokenValueSql()}) as total FROM message JOIN session ON session.id = message.session_id WHERE ${baseWhere}`).get(...baseParams);
+
+  // Model-specific conditions
+  const modelConds = [
+    "json_extract(message.data, '$.role') = 'assistant'",
+    statsUsableTokenSql(),
+    "session.time_archived IS NULL",
+    ...dateConds,
+    "(json_extract(message.data, '$.providerID') || '/' || json_extract(message.data, '$.modelID')) = ?",
+  ];
+  const modelParams = [...dateParams, opts.modelKey];
+  if (opts.scope === "root") modelConds.push("session.parent_id IS NULL");
+  appendStatsProjectFilter(modelConds, modelParams, opts.project);
+  const modelWhere = modelConds.join(" AND ");
+  const row = d.prepare(`SELECT SUM(${statsTokenValueSql()}) as total_tokens, COUNT(*) as record_count FROM message JOIN session ON session.id = message.session_id WHERE ${modelWhere}`).get(...modelParams);
+
+  const totalTokens = Number(row?.total_tokens) || 0;
+  const recordCount = Number(row?.record_count) || 0;
+  const allTokens = Number(totalRow?.total) || 0;
+  return {
+    totalTokens,
+    recordCount,
+    tokensPerRecord: recordCount > 0 ? Math.round(totalTokens / recordCount) : null,
+    share: allTokens > 0 ? totalTokens / allTokens : 0,
+  };
 }

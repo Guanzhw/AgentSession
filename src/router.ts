@@ -4,6 +4,7 @@ export interface RouteResult {
   status: number;
   body: string;
   contentType?: string;
+  headers?: Record<string, string>;
 }
 
 export type RouteHandler = (
@@ -52,7 +53,7 @@ export class Router {
     if (!isRouteResult(result)) {
       throw new TypeError("Route handler returned an invalid response");
     }
-    send(res, result.status, result.body, result.contentType || "text/html; charset=utf-8");
+    send(res, result.status, result.body, result.contentType || "text/html; charset=utf-8", result.headers);
   }
 
   async dispatch(req: any, res: any, url: URL): Promise<boolean> {

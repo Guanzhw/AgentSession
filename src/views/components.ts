@@ -206,6 +206,7 @@ export function sessionCard(s: any, active = false, { showCheckbox = false, prov
       <button class="card-menu-trigger" type="button" data-id="${escapeHtml(s.id)}" title="${t("action.more")}" aria-label="${t("action.more")}">⋮</button>
       <div class="card-menu hidden" data-id="${escapeHtml(s.id)}">
         <button type="button" data-action="rename" data-id="${escapeHtml(s.id)}">${t("menu.rename")}</button>
+        <button type="button" data-action="copy-session-id" data-id="${escapeHtml(s.id)}" title="${t("action.copy_session_id")}" aria-label="${t("action.copy_session_id")}">${t("menu.copy_session_id")}</button>
         <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=md" download="${escapeHtml(exportFilePrefix)}.md">${t("menu.export_md")}</a>
         <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=json" download="${escapeHtml(exportFilePrefix)}.json">${t("menu.export_json")}</a>
         <button type="button" data-action="delete" data-id="${escapeHtml(s.id)}" class="menu-danger">${t("menu.delete")}</button>
@@ -225,10 +226,6 @@ export function sessionCard(s: any, active = false, { showCheckbox = false, prov
         </div>
         <time class="session-card-time" datetime="${new Date(Number(s.time_updated) || Date.now()).toISOString()}">${escapeHtml(formatTime(s.time_updated))}</time>
       </header>
-      <div class="session-id-row">
-        <code class="session-id">${escapeHtml(s.id)}</code>
-        <button class="copy-btn" type="button" data-action="copy-session-id" data-id="${escapeHtml(s.id)}" title="${t("action.copy_session_id")}" aria-label="${t("action.copy_session_id")}">${t("action.copy")}</button>
-      </div>
       <p class="session-card-directory">${escapeHtml(s.directory || "")}</p>
       ${statsHtml}
     </div>

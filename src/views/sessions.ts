@@ -39,7 +39,8 @@ export function renderSessionsPage({
 
   const searchNote = note ? `<p class="search-note">${escapeHtml(note)}</p>` : "";
 
-  const shortProjectLabel = (value: any) => {
+  const shortProjectLabel = (value: any, id: any = "") => {
+    if (String(id) === "global") return t("filter.global_project");
     const text = String(value || "");
     const parts = text.split(/[\\/]/).filter(Boolean);
     return parts.at(-1) || text || t("filter.unknown_project");
@@ -73,7 +74,7 @@ export function renderSessionsPage({
     `<option value="">${t("filter.all_projects")}</option>`,
     ...projectOptions.map((item) => {
       const optionValue = projectFilterValue(item.id);
-      const label = `${shortProjectLabel(item.label)} (${Number(item.count) || 0})`;
+      const label = `${shortProjectLabel(item.label, item.id)} (${Number(item.count) || 0})`;
       return `<option value="${escapeHtml(optionValue)}" ${optionValue === String(project) ? "selected" : ""} title="${escapeHtml(item.worktree || item.label || "")}">${escapeHtml(label)}</option>`;
     })
   ].join("");
@@ -111,50 +112,11 @@ export function renderSessionsPage({
     </div>
   </form>` : "";
   const dashboard = `
-    <section class="dashboard-grid">
-      <a href="#session-list" class="dash-card">
-        <div class="dash-card-header">
-          <span class="dash-file">sessions/</span>
-          <span class="dash-badge">db</span>
-        </div>
-        <div class="dash-card-body">
-          <div class="dash-line"><span class="ck">"name"</span>: <span class="cs">"${t("sessions.title")}"</span>,</div>
-          <div class="dash-line"><span class="ck">"count"</span>: <span class="cn">${total}</span><span class="cc"> // ${t("sessions.count").replace("{count}", total)}</span></div>
-        </div>
-        <div class="dash-card-footer">
-          <span class="dash-cmd">$ ls sessions</span>
-          <span class="dash-arrow">\u2192</span>
-        </div>
-      </a>
-      <a href="/${provider}/stats" class="dash-card">
-        <div class="dash-card-header">
-          <span class="dash-file">stats.json</span>
-          <span class="dash-badge">api</span>
-        </div>
-        <div class="dash-card-body">
-          <div class="dash-line"><span class="ck">"name"</span>: <span class="cs">"${t("nav.stats")}"</span>,</div>
-          <div class="dash-line"><span class="ck">"messages"</span>: <span class="cn">${totalMessages}</span><span class="cc"> // ${t("stats.total_messages")}</span></div>
-        </div>
-        <div class="dash-card-footer">
-          <span class="dash-cmd">$ watch stats</span>
-          <span class="dash-arrow">\u2192</span>
-        </div>
-      </a>
-      ${isManageableProvider ? `
-      <a href="/${provider}/trash" class="dash-card">
-        <div class="dash-card-header">
-          <span class="dash-file">trash/</span>
-          <span class="dash-badge">sys</span>
-        </div>
-        <div class="dash-card-body">
-          <div class="dash-line"><span class="ck">"name"</span>: <span class="cs">"${t("nav.trash")}"</span>,</div>
-          <div class="dash-line"><span class="ck">"count"</span>: <span class="cn">${deletedCount}</span><span class="cc"> // ${t("trash.count").replace("{count}", deletedCount)}</span></div>
-        </div>
-        <div class="dash-card-footer">
-          <span class="dash-cmd">$ ls trash</span>
-          <span class="dash-arrow">\u2192</span>
-        </div>
-      </a>` : ""}
+    <section class="provider-summary">
+      <span>${t("sessions.provider_summary").replace("{total}", String(total)).replace("{messages}", String(totalMessages))}</span>
+      ${isManageableProvider ? `<span>${t("sessions.provider_summary_trash").replace("{count}", String(deletedCount))}</span>` : ""}
+      <a href="/${provider}/stats">${t("nav.stats")} →</a>
+      ${isManageableProvider ? `<a href="/${provider}/trash">${t("nav.trash")} →</a>` : ""}
     </section>
   `;
 
@@ -163,6 +125,7 @@ export function renderSessionsPage({
     <section class="page-header">
       <div class="page-header-row">
         <div>
+          ${searchMode === "content" && query ? `<a class="back-to-filter" href="/${provider}">${t("sessions.back_to_filter")}</a>` : ""}
           <h1>${searchMode === "content" && query ? t("sessions.search_title").replace("{query}", escapeHtml(query)) : t("sessions.title")}</h1>
           <p>${t("sessions.count").replace("{count}", total)}</p>
         </div>

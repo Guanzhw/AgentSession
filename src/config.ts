@@ -432,6 +432,56 @@ export function validateUserConfig(config: any) {
     }
   }
 
+  // Token pricing validation
+  if (config.tokenPricing !== undefined) {
+    if (!isObject(config.tokenPricing) || Array.isArray(config.tokenPricing)) {
+      errors.push("tokenPricing must be an object mapping model keys to pricing entries.");
+    } else {
+      for (const [key, entry] of Object.entries(config.tokenPricing as Record<string, unknown>)) {
+        if (!key.includes("/") || key.startsWith("/") || key.endsWith("/")) {
+          errors.push(`tokenPricing.${key} key must use provider/model format.`);
+        }
+        if (!isObject(entry)) {
+          errors.push(`tokenPricing.${key} must be an object.`);
+          continue;
+        }
+        const e = entry as Record<string, unknown>;
+        if (typeof e.currency !== "string" || !/^[A-Za-z]{3}$/.test(e.currency.trim())) {
+          errors.push(`tokenPricing.${key}.currency must be a three-letter ISO 4217 code.`);
+        }
+        if (typeof e.inputPerMillion !== "number" || !Number.isFinite(e.inputPerMillion) || (e.inputPerMillion as number) < 0) {
+          errors.push(`tokenPricing.${key}.inputPerMillion must be a finite non-negative number.`);
+        }
+        if (typeof e.outputPerMillion !== "number" || !Number.isFinite(e.outputPerMillion) || (e.outputPerMillion as number) < 0) {
+          errors.push(`tokenPricing.${key}.outputPerMillion must be a finite non-negative number.`);
+        }
+        for (const f of ["reasoningPerMillion", "cacheReadPerMillion", "cacheWritePerMillion"]) {
+          if (e[f] !== undefined && (typeof e[f] !== "number" || !Number.isFinite(e[f]) || (e[f] as number) < 0)) {
+            errors.push(`tokenPricing.${key}.${f} must be a finite non-negative number when provided.`);
+          }
+        }
+        if (e.sourceLabel !== undefined && (typeof e.sourceLabel !== "string" || e.sourceLabel.length > 200)) {
+          errors.push(`tokenPricing.${key}.sourceLabel must be a string of at most 200 characters when provided.`);
+        }
+        if (e.sourceUrl !== undefined) {
+          if (typeof e.sourceUrl !== "string") {
+            errors.push(`tokenPricing.${key}.sourceUrl must be a string when provided.`);
+          } else {
+            try {
+              const parsed = new URL(e.sourceUrl);
+              if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new Error("unsupported protocol");
+            } catch {
+              errors.push(`tokenPricing.${key}.sourceUrl must be an absolute http or https URL when provided.`);
+            }
+          }
+        }
+        if (e.asOf !== undefined && (typeof e.asOf !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(e.asOf))) {
+          errors.push(`tokenPricing.${key}.asOf must use YYYY-MM-DD when provided.`);
+        }
+      }
+    }
+  }
+
   return errors;
 }
 
@@ -452,6 +502,7 @@ export function applyRuntimeUserConfig(config: any, fileConfig: any) {
   config.resumeCommands = isObject(fileConfig.resumeCommands) ? fileConfig.resumeCommands : {};
   config.resumeShell = isObject(fileConfig.resumeShell) ? fileConfig.resumeShell : null;
   config.analysis = isObject(fileConfig.analysis) ? fileConfig.analysis : { enabled: false };
+  config.tokenPricing = isObject(fileConfig.tokenPricing) ? fileConfig.tokenPricing : {};
   return config;
 }
 

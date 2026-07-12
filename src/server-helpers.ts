@@ -18,8 +18,14 @@ export function injectLocaleScript(body: string, contentType: string): string {
     : body;
 }
 
-export function send(res: any, status: number, body: string, contentType = "text/html; charset=utf-8"): void {
-  res.writeHead(status, { "Content-Type": contentType });
+export function send(
+  res: any,
+  status: number,
+  body: string,
+  contentType = "text/html; charset=utf-8",
+  headers: Record<string, string> = {},
+): void {
+  res.writeHead(status, { "Content-Type": contentType, ...headers });
   res.end(injectLocaleScript(body, contentType));
 }
 

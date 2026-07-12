@@ -85,7 +85,7 @@ ab "open dashboard" open "$BASE/opencode" >/dev/null
 ab "wait for dashboard" wait --text "Recent Sessions" >/dev/null
 dashboard="$(read_ab "read dashboard" get text body)"
 assert_contains "dashboard" "$dashboard" "Recent Sessions"
-dashboard_session_ids="$(read_ab "count dashboard session ids" get count ".session-card .session-id")"
+dashboard_session_ids="$(read_ab "count dashboard session ids" get count ".session-card[data-session-id]")"
 assert_positive_count "dashboard session ids" "$dashboard_session_ids"
 dashboard_copy_buttons="$(read_ab "count dashboard copy buttons" get count ".session-card [data-action='copy-session-id']")"
 assert_positive_count "dashboard session ID copy buttons" "$dashboard_copy_buttons"
@@ -95,7 +95,7 @@ if [[ "$global_search_placeholder" != "Search titles and messages... ( / )" ]]; 
   exit 1
 fi
 list_filter_label="$(read_ab "read list filter label" get text ".filter-keyword > span")"
-if [[ "${list_filter_label,,}" != "filter list" ]]; then
+if [[ "${list_filter_label,,}" != "filter current list" ]]; then
   echo "List filter should identify its scoped behavior, got $list_filter_label" >&2
   exit 1
 fi
@@ -141,15 +141,38 @@ if [[ "$delete_focus_restored" != "trigger" && "$delete_focus_restored" != '"tri
   echo "Delete confirmation should restore focus to the visible menu trigger, got $delete_focus_restored" >&2
   exit 1
 fi
-post_delete_dashboard_count="$(read_ab "count dashboard sessions after dismissed delete" get count ".session-card .session-id")"
+post_delete_dashboard_count="$(read_ab "count dashboard sessions after dismissed delete" get count ".session-card[data-session-id]")"
 assert_positive_count "dashboard sessions after dismissed delete" "$post_delete_dashboard_count"
 
 ab "open stats" open "$BASE/opencode/stats" >/dev/null
-ab "wait for stats" wait --text "Statistics Overview" >/dev/null
+ab "wait for stats" wait --text "Token Explorer" >/dev/null
 page_token_total="$(read_ab "read stats token total" get attr ".stats-summary-value[data-token-total]" data-token-total)"
-api_token_total="$(curl -fsS "$BASE/api/opencode/stats" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>process.stdout.write(String(JSON.parse(s).tokenTotal)))")"
+api_token_total="$(curl -fsS "$BASE/api/opencode/stats" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>process.stdout.write(String(JSON.parse(s).totalTokens)))")"
 if [[ "$page_token_total" != "$api_token_total" ]]; then
   echo "Stats page token total $page_token_total did not match API total $api_token_total" >&2
+  exit 1
+fi
+stats_export_count="$(read_ab "count canonical stats exports" eval "[...document.querySelectorAll('.stats-export-link')].filter((link) => /^\/api\/opencode\/stats\/export\.(json|csv)\?/.test(link.getAttribute('href') || '')).length")"
+if [[ "$stats_export_count" != "2" ]]; then
+  echo "Token Explorer should expose two canonical export links, got $stats_export_count" >&2
+  exit 1
+fi
+stats_advanced_count="$(read_ab "count progressive advanced stats sections" get count ".stats-advanced-details")"
+if [[ "$stats_advanced_count" != "1" ]]; then
+  echo "SQLite Token Explorer should expose one progressive advanced section, got $stats_advanced_count" >&2
+  exit 1
+fi
+saved_view_result="$(read_ab "save and delete a stats view" eval "(() => { const key = 'osv-saved-views-opencode'; localStorage.removeItem(key); document.getElementById('save-view-btn')?.click(); const dialog = document.querySelector('.saved-view-dialog'); const input = dialog?.querySelector('.saved-view-input'); if (!dialog?.open || !input) return 'dialog-missing'; input.value = 'QA 7 days'; dialog.querySelector('.saved-view-dialog-save')?.click(); const saved = JSON.parse(localStorage.getItem(key) || '[]'); const link = document.querySelector('.saved-view-link'); const ok = saved.length === 1 && saved[0].name === 'QA 7 days' && link?.getAttribute('href')?.includes('/opencode/stats'); document.querySelector('.saved-view-delete')?.click(); return ok && JSON.parse(localStorage.getItem(key) || '[]').length === 0 ? 'ok' : 'failed'; })()")"
+if [[ "$saved_view_result" != "ok" && "$saved_view_result" != '"ok"' ]]; then
+  echo "Saved views should persist the current provider URL and remain deletable, got $saved_view_result" >&2
+  exit 1
+fi
+
+ab "open file-provider stats" open "$BASE/codex/stats?days=7" >/dev/null
+ab "wait for file-provider stats" wait --text "Token Explorer" >/dev/null
+file_stats_capability_state="$(read_ab "verify file-provider stats capability gates" eval "document.querySelectorAll('[name=model], [name=scope], .stats-advanced-details, .stats-model-ranking, .stats-top-sessions, .stats-coverage').length === 0 && document.body.innerText.includes('aggregate token data only')")"
+if [[ "$file_stats_capability_state" != "true" ]]; then
+  echo "File-provider Token Explorer should stay aggregate-only without advanced SQLite controls" >&2
   exit 1
 fi
 
@@ -194,12 +217,18 @@ ab "wait for reasoning" wait ".reasoning-block" >/dev/null
 detail="$(read_ab "read session detail" get text body)"
 assert_not_contains "detail" "$detail" "System Prompts"
 assert_contains "detail" "$detail" "Flow"
-assert_contains "detail" "$detail" "TOOL"
 assert_contains "detail session ID" "$detail" "$SAMPLE_SESSION_ID"
+detail_tool_count="$(read_ab "count detail tool calls" get count ".tool-call")"
+assert_positive_count "detail tool calls" "$detail_tool_count"
 
 detail_session_id_count="$(read_ab "count detail session id" get count ".session-header .session-id")"
-if [[ "$detail_session_id_count" != "1" ]]; then
-  echo "Detail page should show one session ID below the title, got $detail_session_id_count" >&2
+if [[ "$detail_session_id_count" != "0" ]]; then
+  echo "Detail page should keep the session ID out of the persistent header, got $detail_session_id_count" >&2
+  exit 1
+fi
+detail_copy_id_count="$(read_ab "count detail session ID menu actions" get count ".session-actions [data-action='copy-session-id']")"
+if [[ "$detail_copy_id_count" != "1" ]]; then
+  echo "Detail page should keep one copy-session-ID action in More, got $detail_copy_id_count" >&2
   exit 1
 fi
 

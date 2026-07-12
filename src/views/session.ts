@@ -1473,17 +1473,34 @@ export function renderSessionPage({
 }: { session: any; sessionTree?: any; sessionMetrics?: any; sessionFlow?: any; messages?: any[]; partsByMessage?: Map<any, any>; todos?: any[]; recentSessions?: any[]; meta?: any; provider?: string; providers?: any[]; manageable?: boolean; resumeCommand?: any; analysisAction?: any; analysisRuns?: any[]; terminalLaunchAllowed?: boolean; flowLazyUrl?: string }) {
   const title = session.title || session.slug || session.id;
   const starred = meta?.starred ? 1 : 0;
-  const managementActions = manageable ? `
+  const encodedProvider = encodeURIComponent(provider);
+  const encodedSessionId = encodeURIComponent(session.id);
+
+  // Action parity: visible actions + "More" dropdown
+  const visibleStarAction = manageable ? `
         <button class="star-btn action-btn ${starred ? "starred" : ""}" type="button" data-star-format="label" data-id="${escapeHtml(session.id)}" title="${starred ? t("action.starred") : t("action.star")}" aria-label="${starred ? t("action.starred") : t("action.star")}">
           ${starred ? t("action.starred") : t("action.star")}
         </button>
-        <button class="action-btn" type="button" data-action="rename" data-id="${escapeHtml(session.id)}">${t("action.rename")}</button>
-        ${renderExportMenu(provider, session.id)}
-        <button class="action-btn btn-danger" type="button" data-action="delete" data-id="${escapeHtml(session.id)}">${t("action.delete")}</button>
   ` : "";
   const resumeActions = resumeCommand && terminalLaunchAllowed ? `
         <button class="action-btn" data-action="resume-session" data-id="${escapeHtml(session.id)}" ${resumeCommand.available ? "" : "disabled"}>${t("action.open_terminal")}</button>
   ` : "";
+  const analysisButton = analysisAction && terminalLaunchAllowed
+    ? renderAnalysisLaunchButton(analysisAction, session)
+    : "";
+  const moreActionsDropdown = manageable ? `
+        <details class="more-actions">
+          <summary class="action-btn">${t("action.more_actions")}</summary>
+          <div class="more-actions-list">
+            <button type="button" data-action="rename" data-id="${escapeHtml(session.id)}">${t("action.rename")}</button>
+            <button type="button" data-action="copy-session-id" data-id="${escapeHtml(session.id)}">${t("action.copy_session_id_menu")}</button>
+            <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=md">${t("action.export_md")}</a>
+            <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=json">${t("action.export_json")}</a>
+            <button type="button" data-action="delete" data-id="${escapeHtml(session.id)}" class="menu-danger">${t("action.delete")}</button>
+          </div>
+        </details>
+  ` : "";
+
   const resumePreview = resumeCommand && terminalLaunchAllowed ? `
         <details class="resume-command-preview">
           <summary>${t("action.resume_preview")}</summary>
@@ -1502,9 +1519,7 @@ export function renderSessionPage({
           </div>
         </details>
   ` : "";
-  const analysisButton = analysisAction && terminalLaunchAllowed
-    ? renderAnalysisLaunchButton(analysisAction, session)
-    : "";
+
   const analysisMaterials = renderAnalysisLaunchControl(analysisAction, terminalLaunchAllowed);
   const actionShellClass = analysisMaterials
     ? "session-actions-shell analysis-launch-control"
@@ -1512,22 +1527,19 @@ export function renderSessionPage({
   const actions = `
       <div class="${actionShellClass}">
         <div class="session-actions">
-          ${managementActions}
+          ${visibleStarAction}
           ${resumeActions}
           ${analysisButton}
           ${renderTranscriptSearch()}
+          ${moreActionsDropdown}
         </div>
         ${resumePreview}
-        ${analysisMaterials}
       </div>
   `;
+
   const header = `
     <header class="session-header">
       <h1>${escapeHtml(title)}</h1>
-      <div class="session-id-row session-detail-id">
-        <code class="session-id">${escapeHtml(session.id)}</code>
-        <button class="copy-btn" type="button" data-action="copy-session-id" data-id="${escapeHtml(session.id)}" title="${t("action.copy_session_id")}" aria-label="${t("action.copy_session_id")}">${t("action.copy")}</button>
-      </div>
       <div class="session-meta-row">
         <span class="session-directory">${escapeHtml(session.directory || "")}</span>
         <span class="session-meta-sep">·</span>
@@ -1540,37 +1552,81 @@ export function renderSessionPage({
 ${actions}
     </header>
   `;
+
+  // Analysis collapse
   const showAnalysisStatus = Boolean(analysisAction) || analysisRuns.length > 0;
+  const activeRunStates = new Set(["prepared", "launched", "running", "waiting", "analysis_waiting_no_output", "failed", "invalid", "needs_attention"]);
+  const hasActiveRun = analysisRuns.some((run: any) => run?.active === true || activeRunStates.has(run?.state));
+  const analysisActivityBadge = hasActiveRun
+    ? `<span class="analysis-activity-badge">${t(analysisRuns.some((r: any) => r?.active === true || ["prepared", "launched", "running"].includes(r?.state)) ? "analysis.activity_badge_active" : analysisRuns.some((r: any) => ["failed", "invalid"].includes(r?.state)) ? "analysis.activity_badge_failed" : analysisRuns.some((r: any) => ["waiting", "analysis_waiting_no_output"].includes(r?.state)) ? "analysis.activity_badge_waiting" : "analysis.activity_badge_attention")}</span>`
+    : "";
   const analysisStatus = showAnalysisStatus ? `
-    <section class="analysis-status-panel" id="analysis-status-panel" data-provider="${escapeHtml(provider)}" data-session-id="${escapeHtml(session.id)}" data-terminal-launch="${terminalLaunchAllowed ? "true" : "false"}">
-      <div class="analysis-status-header">
-        <div>
-          <h2>${t("analysis.status_title")}</h2>
-          <p>${t("analysis.status_description")}</p>
+    <details class="analysis-activity-details" id="analysis-activity-details" ${hasActiveRun ? "open" : ""}>
+      <summary>${t("analysis.activity_summary").replace("{count}", String(analysisRuns.length))}${analysisActivityBadge}</summary>
+      <section class="analysis-status-panel" id="analysis-status-panel" data-provider="${escapeHtml(provider)}" data-session-id="${escapeHtml(session.id)}" data-terminal-launch="${terminalLaunchAllowed ? "true" : "false"}">
+        <div class="analysis-status-header">
+          <div>
+            <h2>${t("analysis.status_title")}</h2>
+            <p>${t("analysis.status_description")}</p>
+          </div>
+          <button type="button" class="btn" id="analysis-status-refresh">${t("analysis.refresh")}</button>
         </div>
-        <button type="button" class="btn" id="analysis-status-refresh">${t("analysis.refresh")}</button>
-      </div>
-      <div id="analysis-runs" class="analysis-runs" aria-live="polite"></div>
-      <script type="application/json" id="analysis-runs-initial">${JSON.stringify(analysisRuns).replace(/</g, "\\u003c")}</script>
-    </section>
+        <div id="analysis-runs" class="analysis-runs" aria-live="polite"></div>
+        <script type="application/json" id="analysis-runs-initial">${JSON.stringify(analysisRuns).replace(/</g, "\\u003c")}</script>
+      </section>
+    </details>
   ` : "";
 
   const messageMarkup = sessionTree
     ? renderSessionTree(sessionTree, 0, provider)
     : renderRawMessageGroups(messages, partsByMessage, provider);
 
+  // Raw data tab content
+  const rawDataContent = `
+    <div class="raw-data-section">
+      <p><strong>${t("detail.created")}</strong> ${escapeHtml(new Date(Number(session.time_created) || Date.now()).toLocaleString())}</p>
+      <p><strong>${t("detail.updated")}</strong> ${escapeHtml(new Date(Number(session.time_updated) || Date.now()).toLocaleString())}</p>
+      <p><strong>${t("detail.files")}</strong> ${escapeHtml(String(Number(session.summary_files) || 0))} / ${t("detail.additions")} +${escapeHtml(String(Number(session.summary_additions) || 0))} / ${t("detail.deletions")} -${escapeHtml(String(Number(session.summary_deletions) || 0))}</p>
+      ${session.directory ? `<p><strong>Directory</strong> ${escapeHtml(session.directory)}</p>` : ""}
+      <p><strong>Session ID</strong> <code>${escapeHtml(session.id)}</code></p>
+    </div>
+    <div class="raw-data-export">
+      <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=md" class="btn">${t("action.export_md")}</a>
+      <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=json" class="btn">${t("action.export_json")}</a>
+    </div>
+  `;
+
   const body = `
 <div class="session-workbench" data-session-id="${escapeHtml(session.id)}" data-provider="${escapeHtml(provider)}">
   ${renderToc(sessionTree)}
   <main id="${escapeHtml(anchorId("session", session.id))}" class="main-content">
     ${header}
-    ${analysisStatus}
-    ${renderSessionMetricsPanel(sessionMetrics)}
-    ${todoList(todos)}
-    <section id="session-messages" class="messages">
-      ${messageMarkup || `<p class="empty-state">${t("detail.no_messages")}</p>`}
-    </section>
-    ${sessionFlow ? renderCanonicalFlowPanel(sessionFlow) : renderFlowPanel(sessionTree, flowLazyUrl)}
+    <div class="tab-bar" role="tablist" aria-label="${escapeHtml(t("detail.tab_bar_label"))}" hidden>
+      <button role="tab" aria-selected="false" aria-controls="tab-overview" id="tab-btn-overview" tabindex="-1">${t("detail.tab_overview")}</button>
+      <button role="tab" aria-selected="true" aria-controls="tab-conversation" id="tab-btn-conversation" tabindex="0">${t("detail.tab_conversation")}</button>
+      <button role="tab" aria-selected="false" aria-controls="tab-flow" id="tab-btn-flow" tabindex="-1">${t("detail.tab_flow")}</button>
+      <button role="tab" aria-selected="false" aria-controls="tab-analysis" id="tab-btn-analysis" tabindex="-1">${t("detail.tab_analysis")}</button>
+      <button role="tab" aria-selected="false" aria-controls="tab-raw" id="tab-btn-raw" tabindex="-1">${t("detail.tab_raw")}</button>
+    </div>
+    <div role="tabpanel" id="tab-conversation" aria-labelledby="tab-btn-conversation">
+      <section id="session-messages" class="messages">
+        ${messageMarkup || `<p class="empty-state">${t("detail.no_messages")}</p>`}
+      </section>
+    </div>
+    <div role="tabpanel" id="tab-overview" aria-labelledby="tab-btn-overview">
+      ${renderSessionMetricsPanel(sessionMetrics)}
+      ${todoList(todos)}
+    </div>
+    <div role="tabpanel" id="tab-flow" aria-labelledby="tab-btn-flow" data-session-flow-tab>
+      ${sessionFlow ? renderCanonicalFlowPanel(sessionFlow) : renderFlowPanel(sessionTree, flowLazyUrl)}
+    </div>
+    <div role="tabpanel" id="tab-analysis" aria-labelledby="tab-btn-analysis">
+      ${analysisMaterials ? `<div class="analysis-tab-launch">${analysisMaterials}</div>` : `<p class="empty-state">${t("analysis.unavailable")}</p>`}
+      ${analysisStatus}
+    </div>
+    <div role="tabpanel" id="tab-raw" aria-labelledby="tab-btn-raw">
+      ${rawDataContent}
+    </div>
   </main>
 </div>
   `;

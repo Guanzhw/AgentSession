@@ -32,9 +32,9 @@ The focus is no longer just “list my chats.” The goal is to help you reconst
 |:---|:---:|:---|:---|
 | OpenCode | Full | `$XDG_DATA_HOME/opencode/opencode.db` or `~/.local/share/opencode/opencode.db` | Browse, search, star, rename, delete, trash, export, stats, trace, nested sessions, analysis |
 | CodeAgent | Full | `$XDG_DATA_HOME/opencode/db/ngagent.db` or `~/.local/share/opencode/db/ngagent.db` | OpenCode fork with the same viewer capabilities |
-| Claude Code | Manageable | `~/.claude/transcripts/` + `~/.claude/projects/` | Browse, search, star, rename, delete, trash, token stats, ReACT, trace, flow, subagents when sidechain transcripts exist, analysis prompt evidence |
-| Codex CLI | Manageable | `~/.codex/sessions/**/*.jsonl` | Browse, search, star, rename, delete, trash, token stats, ReACT, flow, nested subagents |
-| Gemini CLI | Manageable | `~/.gemini/tmp/*/chats/*.json` | Browse, search, star, rename, delete, trash, token stats, ReACT, flow |
+| Claude Code | Manageable | `~/.claude/transcripts/` + `~/.claude/projects/` | Browse, search, star, rename, delete, trash, Token Explorer, ReACT, trace, flow, subagents when sidechain transcripts exist, analysis prompt evidence |
+| Codex CLI | Manageable | `~/.codex/sessions/**/*.jsonl` | Browse, search, star, rename, delete, trash, Token Explorer, ReACT, flow, nested subagents |
+| Gemini CLI | Manageable | `~/.gemini/tmp/*/chats/*.json` | Browse, search, star, rename, delete, trash, Token Explorer, ReACT, flow |
 
 All providers store stars, custom titles, soft deletes, and permanent exclusions in OpenSessionViewer’s own metadata database. Original session databases and transcript files remain read-only.
 
@@ -48,7 +48,7 @@ All providers store stars, custom titles, soft deletes, and permanent exclusions
 - **Table of Contents**: long sessions get navigation for prompts, assistant turns, `task` / `subtask` / `spawn_agent` branches, and nested sessions.
 - **In-conversation search**: open the compact detail-page search from the action bar or press `/`; results report matching turns and text occurrences, highlight the exact text, and keep previous/next controls visible while navigating.
 - **Trace API**: step/span summaries classify tools, skills, agents, MCP calls, and LSP activity.
-- **Statistics**: total sessions, total messages, token trends, model distribution, and daily session activity.
+- **Statistics**: interactive Token Explorer with 7/30/90-day presets, token-component trends, top sessions, period comparison, heuristic insights, two-model comparison, saved views, and JSON/CSV export. SQLite-backed providers also support custom ranges, project/model/scope filters, model ranking, clickable day drill-down, and opt-in cost estimates; file-backed providers expose only the aggregate dimensions present in their transcripts.
 - **Local management**: every provider supports starring, renaming, batch actions, soft delete, restore, and permanent exclusion; these actions only mutate viewer metadata.
 - **Export**: OpenCode/CodeAgent sessions expose one Export menu for Markdown or JSON, with JSON including the session tree.
 - **Bilingual UI**: use `--lang en` or `--lang zh`.
@@ -181,6 +181,31 @@ server immediately. Server paths, port, and provider data directories are
 persisted but require a restart. `allowTerminalLaunch` is intentionally not
 web-configurable. Command launching is enabled by default; start OpenSessionViewer
 with `--disable-terminal-launch` to turn it off for the current process.
+
+Token Explorer does not embed a vendor price catalog. To enable cost estimates,
+add per-million-token rates under a `provider/model` key in Advanced JSON settings.
+The estimate appears only when the stats page is filtered to one model:
+
+```json
+{
+  "tokenPricing": {
+    "openai/gpt-5": {
+      "currency": "USD",
+      "inputPerMillion": 1.25,
+      "outputPerMillion": 10,
+      "cacheReadPerMillion": 0.125,
+      "sourceLabel": "Vendor pricing page",
+      "sourceUrl": "https://example.com/pricing",
+      "asOf": "2026-07-13"
+    }
+  }
+}
+```
+
+`currency` must be a three-letter code, rates must be finite and non-negative,
+and `sourceUrl` must be an absolute HTTP/HTTPS URL. Unpriced reasoning/cache
+dimensions are reported as omitted instead of silently treated as free. Use the
+actual model key and a trustworthy source, and maintain the `asOf` date yourself.
 
 ## Runtime Logs
 
@@ -570,10 +595,13 @@ Next work focuses on making AI workflows easier to reconstruct precisely:
 5. **Metrics Upgrade**
    - Add per-session token usage, runtime, step duration, tool counts, and better model/provider breakdowns.
 
-6. **Tool Flow Tree**
+6. **Token Explorer** ✅
+   - Interactive statistics page with filtering, multi-series trend, model ranking, and drill-down sessions.
+
+7. **Tool Flow Tree**
    - Upgrade the current trace/tool view into a complete tree that includes all sub-session branches, task calls, spans, and timing.
 
-7. **QA/Polish Pass**
+8. **QA/Polish Pass**
    - Fix and verify disclosure accessibility, add browser regression checks, and make `agent-browser` verification repeatable.
 
 ## Development

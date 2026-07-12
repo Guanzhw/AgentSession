@@ -17,6 +17,8 @@ const { getProvider } = await import("../dist/src/providers/index.js");
 const { providerRenderContext } = await import("../dist/src/routes/provider-context.js");
 const { registerSessionDetail } = await import("../dist/src/routes/session-detail.js");
 const { registerSessions } = await import("../dist/src/routes/sessions.js");
+const { registerSettingsStatsTrash } = await import("../dist/src/routes/settings-stats-trash.js");
+const { closeIndexDb } = await import("../dist/src/index-db.js");
 
 function captureGetRoutes(register, deps) {
   const routes = [];
@@ -55,7 +57,8 @@ test("router accepts structured results without resending handler-owned response
   router.get("/structured", () => ({
     status: 201,
     body: "structured",
-    contentType: "text/plain; charset=utf-8"
+    contentType: "text/plain; charset=utf-8",
+    headers: { "Content-Disposition": 'attachment; filename="fixture.txt"' }
   }));
 
   const server = createServer((req, res) => {
@@ -87,6 +90,7 @@ test("router accepts structured results without resending handler-owned response
   const structured = await fetch(`${baseUrl}/structured`);
   assert.equal(structured.status, 201);
   assert.equal(structured.headers.get("content-type"), "text/plain; charset=utf-8");
+  assert.equal(structured.headers.get("content-disposition"), 'attachment; filename="fixture.txt"');
   assert.equal(await structured.text(), "structured");
 });
 
@@ -275,6 +279,60 @@ test("provider page keeps unavailable paths and management capability provider-o
   );
 });
 
+test("stats route reads filters from the request URL and degrades file-provider controls honestly", async () => {
+  let requestedDays = null;
+  const adapter = {
+    id: "codex",
+    name: "Route fixture",
+    icon: "",
+    capabilities: {},
+    getTokenStats(days) {
+      requestedDays = days;
+      return [];
+    }
+  };
+  const providerInfo = [{ id: "codex", name: "Route fixture", icon: "", available: true, manageable: false }];
+  const routes = captureGetRoutes(registerSettingsStatsTrash, {
+    appConfig: { configPath: path.join(temp, "config.json") },
+    providerMap: new Map([["codex", adapter]]),
+    providerInfo
+  });
+  const route = routes.find(({ pattern }) => pattern === "/:provider/stats");
+  assert.ok(route);
+
+  const result = await route.handler({ url: "/codex/stats?days=7&scope=root&model=x/y" }, createResponseCapture(), { provider: "codex" });
+  assert.equal(result.status, 200);
+  assert.equal(requestedDays, 7);
+  assert.match(result.body, /value="7" checked/);
+  assert.match(result.body, /aggregate token data only/);
+  assert.doesNotMatch(result.body, /name="model"/);
+  assert.doesNotMatch(result.body, /name="scope" value="root" checked/);
+
+  const jsonExportRoute = routes.find(({ pattern }) => pattern instanceof RegExp && pattern.source.includes("stats\\/export\\.json"));
+  const csvExportRoute = routes.find(({ pattern }) => pattern instanceof RegExp && pattern.source.includes("stats\\/export\\.csv"));
+  assert.ok(jsonExportRoute);
+  assert.ok(csvExportRoute);
+
+  requestedDays = null;
+  const jsonUrl = "/api/codex/stats/export.json?days=7";
+  const jsonMatch = new URL(jsonUrl, "http://127.0.0.1").pathname.match(jsonExportRoute.pattern);
+  const jsonResult = await jsonExportRoute.handler({ url: jsonUrl }, createResponseCapture(), jsonMatch);
+  assert.equal(jsonResult.status, 200);
+  assert.equal(requestedDays, 7, "JSON export must parse filters from req.url");
+  assert.equal(jsonResult.headers["Content-Disposition"], 'attachment; filename="token-explorer-codex.json"');
+  assert.equal(JSON.parse(jsonResult.body).filters.days, 7);
+
+  requestedDays = null;
+  const csvUrl = "/api/codex/stats/export.csv?days=90";
+  const csvMatch = new URL(csvUrl, "http://127.0.0.1").pathname.match(csvExportRoute.pattern);
+  const csvResult = await csvExportRoute.handler({ url: csvUrl }, createResponseCapture(), csvMatch);
+  assert.equal(csvResult.status, 200);
+  assert.equal(requestedDays, 90, "CSV export must parse filters from req.url");
+  assert.match(csvResult.body, /^Provider,Composition Mode,Day \(UTC\),/);
+  assert.equal(csvResult.headers["Content-Disposition"], 'attachment; filename="token-explorer-codex.csv"');
+});
+
 test.after(() => {
+  closeIndexDb();
   rmSync(temp, { recursive: true, force: true });
 });

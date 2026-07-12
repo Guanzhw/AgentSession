@@ -41,6 +41,7 @@ export function layout(title: string, body: string, page = "home", { provider = 
       ${providerAvailable !== false && manageable ? `<a href="${providerPrefix}/trash" class="nav-link nav-link-trash ${page === "trash" ? "active" : ""}" title="${escapeHtml(t("nav.trash"))}" aria-label="${escapeHtml(t("nav.trash"))}">${t("nav.trash")}</a>` : ""}
       <a href="${providerPrefix}/settings" class="nav-link nav-link-settings ${page === "settings" ? "active" : ""}" title="${escapeHtml(t("nav.settings"))}" aria-label="${escapeHtml(t("nav.settings"))}">${t("nav.settings")}</a>
       <form class="search-form" action="${providerPrefix}/search" method="GET" role="search" aria-label="${escapeHtml(t("nav.search_label"))}">
+        <label class="search-visible-label" for="search-input">${escapeHtml(t("nav.search_current_provider_label"))}</label>
         <input type="search" name="q" value="${escapeHtml(searchQuery)}" placeholder="${t("nav.search_placeholder")}" class="search-input" id="search-input" aria-label="${escapeHtml(t("nav.search_label"))}">
       </form>
       <button id="theme-toggle" class="theme-toggle" title="Toggle theme" aria-label="Toggle theme">🌙</button>
