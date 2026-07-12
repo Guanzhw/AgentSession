@@ -1,14 +1,10 @@
+import { asNumber } from "../shared/parser.js";
 import {
   buildSessionTree,
   type SessionMessageNode,
   type SessionTree,
   type SessionUsage
 } from "../shared/session-tree.js";
-
-function asNumber(value: unknown) {
-  const amount = Number(value);
-  return Number.isFinite(amount) ? amount : 0;
-}
 
 export function readCodeAgentUsage(_session: Record<string, any>, messages: SessionMessageNode[]): SessionUsage {
   return messages.reduce((usage, message) => {
@@ -34,6 +30,6 @@ export function readCodeAgentUsage(_session: Record<string, any>, messages: Sess
   });
 }
 
-export function buildCodeAgentSessionTree(sessionId: string, dbPath = undefined): SessionTree | null {
+export function buildCodeAgentSessionTree(sessionId: string, dbPath: string | undefined = undefined): SessionTree | null {
   return buildSessionTree(sessionId, dbPath, readCodeAgentUsage);
 }

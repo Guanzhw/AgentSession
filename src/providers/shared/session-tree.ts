@@ -1,5 +1,5 @@
 import { getChildSessionsSafe, getMessages, getParts, getSessionSafe } from "../../db.js";
-import { parseJson } from "./parser.js";
+import { asNumber, parseJson } from "./parser.js";
 
 type Row = Record<string, any>;
 
@@ -63,11 +63,6 @@ export type SessionUsageReader = (session: Row, messages: SessionMessageNode[]) 
 
 function asObject(value: unknown): Row {
   return value && typeof value === "object" ? value as Row : {};
-}
-
-function asNumber(value: unknown): number {
-  const amount = Number(value);
-  return Number.isFinite(amount) ? amount : 0;
 }
 
 function readTimeStart(data: Row): number {
@@ -177,9 +172,9 @@ export function buildSessionTree(
   }
 
   const attachedChildIds = new Set<string>();
-  const messages: SessionMessageNode[] = getMessages(sessionId, dbPath).map((message) => {
+  const messages: SessionMessageNode[] = getMessages(sessionId, dbPath).map((message: any) => {
     const messageData = asObject(typeof message.data === "string" ? parseJson(message.data) : message.data);
-    const parts: SessionPartNode[] = getParts(message.id, dbPath).map((part) => {
+    const parts: SessionPartNode[] = getParts(message.id, dbPath).map((part: any) => {
       const partData = asObject(typeof part.data === "string" ? parseJson(part.data) : part.data);
       const childSessions = extractTaskSessionIds(partData)
         .map((id) => childrenById.get(id))

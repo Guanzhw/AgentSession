@@ -1,3 +1,4 @@
+import { asNumber } from "./parser.js";
 import type { MessageContainer, PartContainer, SessionContainer } from "./session-container.js";
 import type { SessionMetricsView } from "./session-metrics.js";
 
@@ -69,11 +70,6 @@ export interface FlowTree {
     totalCost: number;
     totalTokens: number;
   };
-}
-
-function asNumber(value: unknown) {
-  const amount = Number(value);
-  return Number.isFinite(amount) ? amount : 0;
 }
 
 function emptyMetrics(overrides: Partial<FlowMetrics> = {}): FlowMetrics {

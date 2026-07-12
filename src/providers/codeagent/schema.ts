@@ -1,11 +1,6 @@
-import { parseJson } from "../shared/parser.js";
+import { asNumber, parseJson } from "../shared/parser.js";
 
 type Row = Record<string, any>;
-
-function asNumber(value: unknown) {
-  const amount = Number(value);
-  return Number.isFinite(amount) ? amount : 0;
-}
 
 export function enrichCodeAgentSession(session: Row, messages: Row[]) {
   const assistantMessages = messages

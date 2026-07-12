@@ -36,6 +36,7 @@ export interface RawSession {
   timeUpdated: number;
   messageCount: number;
   tokenCount: number | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 export type MessageRole = "user" | "assistant" | "system" | "tool";
@@ -43,7 +44,7 @@ export type MessageRole = "user" | "assistant" | "system" | "tool";
 export interface Message {
   id: string;
   sessionId: string;
-  role: MessageRole | string;
+  role: MessageRole;
   content: string;
   thinking: string | null;
   toolName: string | null;
@@ -68,7 +69,7 @@ export interface DailyTokenStat {
 export interface SearchResult {
   sessionId: string;
   messageId: string;
-  role: MessageRole | string;
+  role: MessageRole;
   snippet: string;
   timestamp: number;
 }
@@ -126,7 +127,7 @@ export interface ProviderAdapter {
   getMessages(sessionId: string): Message[];
   getTokenStats(days?: number): DailyTokenStat[];
   searchMessages(query: string, limit?: number): SearchResult[];
-  exportSession(sessionId: string): unknown;
+  exportSession?(sessionId: string): unknown;
   getRuntimeEnvironment?(sessionId: string): RuntimeEnvironmentView | null;
   getSystemPrompts?(sessionId: string): unknown;
   getTrace?(sessionId: string): unknown;

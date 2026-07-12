@@ -35,7 +35,8 @@ function addPluginConfig(
   let text = "";
   try {
     text = readFileSync(configPath, "utf-8");
-  } catch {
+  } catch (err) {
+    console.warn("Failed to read plugin config:", configPath, err);
     return;
   }
   const names = [...text.matchAll(/^\s*\[plugins\.([^\]]+)\]\s*$/gm)]

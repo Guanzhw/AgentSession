@@ -4,7 +4,7 @@ import { buildOpenCodeSessionContext } from "./context.js";
 
 export type { SessionMetricsView } from "../shared/session-metrics.js";
 
-export function buildOpenCodeSessionMetrics(sessionId: string, dbPath = undefined) {
+export function buildOpenCodeSessionMetrics(sessionId: string, dbPath: string | undefined = undefined) {
   return buildSessionMetrics(
     sessionId,
     dbPath,

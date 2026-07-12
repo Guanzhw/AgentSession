@@ -7,6 +7,6 @@ export type {
   SessionContextView
 } from "../shared/context.js";
 
-export function buildOpenCodeSessionContext(sessionId: string, dbPath = undefined) {
+export function buildOpenCodeSessionContext(sessionId: string, dbPath: string | undefined = undefined) {
   return buildSessionContext(sessionId, dbPath, "OpenCode");
 }

@@ -94,9 +94,9 @@ export function resolveAnalysisRunPath(
   key: keyof typeof CATEGORIZED_FILES
 ) {
   const candidates = [
-    manifest?.files?.[key],
-    path.join(runDir, CATEGORIZED_FILES[key]),
-    LEGACY_FILES[key] ? path.join(runDir, LEGACY_FILES[key]) : null
+    (manifest?.files as Record<string, string> | undefined)?.[key],
+    path.join(runDir, (CATEGORIZED_FILES as Record<string, string>)[key]),
+    (LEGACY_FILES as Record<string, string>)[key] ? path.join(runDir, (LEGACY_FILES as Record<string, string>)[key]) : null
   ];
   for (const candidate of candidates) {
     if (typeof candidate !== "string" || !candidate) {

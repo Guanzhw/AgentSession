@@ -3,18 +3,18 @@ import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import type { ProviderAdapter, ResumeCommandSpec, ResumeShellSpec } from "./providers/interface.js";
 
-function isCommandSpec(value): value is ResumeCommandSpec {
+function isCommandSpec(value: any): value is ResumeCommandSpec {
   return Boolean(
     value
     && typeof value === "object"
     && typeof value.executable === "string"
     && value.executable.trim()
     && Array.isArray(value.args)
-    && value.args.every((arg) => typeof arg === "string")
+    && value.args.every((arg: any) => typeof arg === "string")
   );
 }
 
-function isShellSpec(value): value is ResumeShellSpec {
+function isShellSpec(value: any): value is ResumeShellSpec {
   return Boolean(
     value
     && typeof value === "object"
@@ -22,12 +22,12 @@ function isShellSpec(value): value is ResumeShellSpec {
     && value.executable.trim()
     && (value.args === undefined || (
       Array.isArray(value.args)
-      && value.args.every((arg) => typeof arg === "string")
+      && value.args.every((arg: any) => typeof arg === "string")
     ))
   );
 }
 
-function quoteDisplayArg(value) {
+function quoteDisplayArg(value: any) {
   if (!/[\s"'`$;&|<>()[\]{}]/.test(value)) {
     return value;
   }
@@ -39,8 +39,8 @@ const DIRECT_POWERSHELL_LAUNCH_ENV = "OPENSESSIONVIEWER_DIRECT_POWERSHELL_LAUNCH
 const TERMINAL_LAUNCH_CONFIRM_TIMEOUT_MS = 5000;
 const DETACHED_TERMINAL_OBSERVE_MS = 500;
 
-export function resolveWindowsExecutableCandidate(candidates, exists = existsSync) {
-  const direct = candidates.find((entry) => {
+export function resolveWindowsExecutableCandidate(candidates: any, exists = existsSync) {
+  const direct = candidates.find((entry: any) => {
     const lower = entry.toLowerCase();
     return WINDOWS_EXECUTABLE_EXTENSIONS.some((extension) => lower.endsWith(extension));
   });
@@ -63,7 +63,7 @@ export function resolveWindowsExecutableCandidate(candidates, exists = existsSyn
   return candidates[0] || null;
 }
 
-export function resolveExecutable(executable) {
+export function resolveExecutable(executable: any) {
   if (path.isAbsolute(executable)) {
     return existsSync(executable) ? executable : null;
   }
@@ -84,7 +84,7 @@ export function resolveExecutable(executable) {
   return resolveWindowsExecutableCandidate(candidates);
 }
 
-export function resolveProjectDirectory(directory) {
+export function resolveProjectDirectory(directory: any) {
   if (!directory || typeof directory !== "string" || !path.isAbsolute(directory)) {
     return null;
   }
@@ -92,12 +92,13 @@ export function resolveProjectDirectory(directory) {
   try {
     const resolved = realpathSync(directory);
     return statSync(resolved).isDirectory() ? resolved : null;
-  } catch {
+  } catch (err) {
+    console.warn("Failed to resolve project directory:", directory, err);
     return null;
   }
 }
 
-export function getResumeCommand(provider: ProviderAdapter, sessionId, directory, configuredCommands = {}) {
+export function getResumeCommand(provider: ProviderAdapter, sessionId: any, directory: any, configuredCommands: Record<string, any> = {}) {
   const configured = configuredCommands?.[provider.id];
   if (configured === false || configured === null) {
     return null;
@@ -108,7 +109,7 @@ export function getResumeCommand(provider: ProviderAdapter, sessionId, directory
     return null;
   }
 
-  const replace = (value) => value
+  const replace = (value: any) => value
     .replaceAll("{sessionId}", sessionId)
     .replaceAll("{projectPath}", cwd);
   const executable = spec.executable;
@@ -124,7 +125,7 @@ export function getResumeCommand(provider: ProviderAdapter, sessionId, directory
   };
 }
 
-export function buildPowerShellResumeArgs(powershell, shellArgs = ["-NoExit", "-NoLogo"]) {
+export function buildPowerShellResumeArgs(powershell: any, shellArgs = ["-NoExit", "-NoLogo"]) {
   const script = [
     "$json=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:OPENSESSIONVIEWER_RESUME_SPEC))",
     "$spec=$json|ConvertFrom-Json",
@@ -141,7 +142,7 @@ export function buildPowerShellResumeArgs(powershell, shellArgs = ["-NoExit", "-
   ];
 }
 
-export function resolvePowerShellLaunch(configuredShell = null, resolve = resolveExecutable) {
+export function resolvePowerShellLaunch(configuredShell: ResumeShellSpec | null = null, resolve = resolveExecutable) {
   const shellSpec = isShellSpec(configuredShell) ? configuredShell : null;
   const powershell = shellSpec
     ? resolve(shellSpec.executable)
@@ -157,7 +158,7 @@ export function resolvePowerShellLaunch(configuredShell = null, resolve = resolv
   };
 }
 
-function buildPowerShellStartProcessArgs(powershell) {
+function buildPowerShellStartProcessArgs(powershell: any) {
   const script = [
     `$json=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:${DIRECT_POWERSHELL_LAUNCH_ENV}))`,
     "$spec=$json|ConvertFrom-Json",
@@ -174,7 +175,7 @@ function buildPowerShellStartProcessArgs(powershell) {
   ];
 }
 
-export function buildPowerShellLaunchSpec({ cwd, terminal, powershellArgs }) {
+export function buildPowerShellLaunchSpec({ cwd, terminal, powershellArgs }: { cwd: string; terminal: string | null; powershellArgs: string[] }) {
   if (!cwd || typeof cwd !== "string") {
     throw new Error("Working directory is required");
   }
@@ -212,11 +213,11 @@ export function buildPowerShellLaunchSpec({ cwd, terminal, powershellArgs }) {
   };
 }
 
-function waitForLaunchConfirmation(child, { waitForExit = false, timeoutMs = TERMINAL_LAUNCH_CONFIRM_TIMEOUT_MS } = {}) {
+function waitForLaunchConfirmation(child: any, { waitForExit = false, timeoutMs = TERMINAL_LAUNCH_CONFIRM_TIMEOUT_MS } = {}) {
   return new Promise((resolve, reject) => {
     let settled = false;
     let spawned = false;
-    let observeTimer = null;
+    let observeTimer: any = null;
     const cleanup = () => {
       clearTimeout(timeout);
       if (observeTimer) {
@@ -226,7 +227,7 @@ function waitForLaunchConfirmation(child, { waitForExit = false, timeoutMs = TER
       child.off?.("error", onError);
       child.off?.("exit", onExit);
     };
-    const settle = (fn, value) => {
+    const settle = (fn: any, value: any) => {
       if (settled) {
         return;
       }
@@ -241,10 +242,10 @@ function waitForLaunchConfirmation(child, { waitForExit = false, timeoutMs = TER
         observeTimer = setTimeout(() => settle(resolve, launchResult()), DETACHED_TERMINAL_OBSERVE_MS);
       }
     };
-    const onError = (error) => {
+    const onError = (error: any) => {
       settle(reject, error instanceof Error ? error : new Error(String(error || "Terminal process failed to start")));
     };
-    const onExit = (code, signal) => {
+    const onExit = (code: any, signal: any) => {
       if (waitForExit) {
         if (code === 0) {
           settle(resolve, launchResult());
@@ -275,7 +276,7 @@ function waitForLaunchConfirmation(child, { waitForExit = false, timeoutMs = TER
   });
 }
 
-export async function spawnPowerShellLaunch({ cwd, terminal, powershellArgs, env }, spawnImpl = spawn) {
+export async function spawnPowerShellLaunch({ cwd, terminal, powershellArgs, env }: { cwd: string; terminal: string | null; powershellArgs: string[]; env?: Record<string, string> }, spawnImpl = spawn) {
   const launch = buildPowerShellLaunchSpec({ cwd, terminal, powershellArgs });
   let child;
   try {
@@ -286,13 +287,13 @@ export async function spawnPowerShellLaunch({ cwd, terminal, powershellArgs, env
       cwd: launch.cwd,
       env: { ...process.env, ...env, ...launch.env }
     });
-  } catch (error) {
+  } catch (error: any) {
     throw new Error(`Terminal launch failed for ${path.basename(launch.executable)}: ${error?.message || error}`);
   }
   let result;
   try {
     result = await waitForLaunchConfirmation(child, { waitForExit: !launch.detached }) as { pid: number | null };
-  } catch (error) {
+  } catch (error: any) {
     throw new Error(`Terminal launch failed for ${path.basename(launch.executable)}: ${error?.message || error}`);
   }
   child.unref?.();
@@ -304,18 +305,18 @@ export async function spawnPowerShellLaunch({ cwd, terminal, powershellArgs, env
   };
 }
 
-export async function launchPowerShellWithFallback({ cwd, terminal, powershellArgs, env }, spawnImpl = spawn) {
+export async function launchPowerShellWithFallback({ cwd, terminal, powershellArgs, env }: { cwd: string; terminal: string | null; powershellArgs: string[]; env?: Record<string, string> }, spawnImpl = spawn) {
   if (terminal) {
     try {
       return await spawnPowerShellLaunch({ cwd, terminal, powershellArgs, env }, spawnImpl);
-    } catch (terminalError) {
+    } catch (terminalError: any) {
       try {
         const fallbackResult = await spawnPowerShellLaunch({ cwd, terminal: null, powershellArgs, env }, spawnImpl);
         return {
           ...fallbackResult,
           fallbackFrom: terminal
         };
-      } catch (fallbackError) {
+      } catch (fallbackError: any) {
         throw new Error(
           `Failed to launch terminal via ${path.basename(terminal)} (${terminalError?.message || terminalError}) or direct PowerShell (${fallbackError?.message || fallbackError})`
         );
@@ -326,7 +327,7 @@ export async function launchPowerShellWithFallback({ cwd, terminal, powershellAr
   return spawnPowerShellLaunch({ cwd, terminal: null, powershellArgs, env }, spawnImpl);
 }
 
-export async function launchResumeCommand(command, configuredShell = null) {
+export async function launchResumeCommand(command: any, configuredShell = null) {
   if (process.platform !== "win32") {
     throw new Error("Terminal launching is currently supported on Windows only");
   }

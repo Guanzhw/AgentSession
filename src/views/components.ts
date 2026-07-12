@@ -1,12 +1,12 @@
 import { escapeHtml, renderMarkdown } from "../markdown.js";
 import { t } from "../i18n.js";
 
-function formatCount(value, prefix = "") {
+function formatCount(value: any, prefix = "") {
   const amount = Number(value) || 0;
   return `${prefix}${amount}`;
 }
 
-function formatCompactCount(value) {
+function formatCompactCount(value: any) {
   const amount = Number(value) || 0;
   if (Math.abs(amount) >= 1_000_000) {
     return `${(amount / 1_000_000).toFixed(amount >= 10_000_000 ? 0 : 1)}m`;
@@ -17,7 +17,7 @@ function formatCompactCount(value) {
   return String(amount);
 }
 
-function stringifyData(value) {
+function stringifyData(value: any) {
   if (value == null) {
     return "";
   }
@@ -28,17 +28,18 @@ function stringifyData(value) {
 
   try {
     return JSON.stringify(value, null, 2) ?? "";
-  } catch {
+  } catch (err) {
+    console.warn("Failed to stringify value:", err);
     return String(value ?? "");
   }
 }
 
-function truncate(value, limit = 3000) {
+function truncate(value: any, limit = 3000) {
   const text = stringifyData(value);
   return text.length > limit ? `${text.slice(0, limit)}\n\n${t("truncated")}` : text;
 }
 
-function toolDescription(tool, input) {
+function toolDescription(tool: any, input: any) {
   if (!input || typeof input !== "object") {
     return tool;
   }
@@ -48,7 +49,7 @@ function toolDescription(tool, input) {
   return match ? `${tool} — ${match}` : tool;
 }
 
-function tokenChip(label, value, title, className = "") {
+function tokenChip(label: any, value: any, title: any, className = "") {
   if (value == null || Number(value) === 0) {
     return "";
   }
@@ -57,7 +58,7 @@ function tokenChip(label, value, title, className = "") {
   return `<span class="${classes}" title="${escapeHtml(title)}"><span class="token-chip-label">${escapeHtml(label)}</span>${escapeHtml(formatCompactCount(value))}</span>`;
 }
 
-function outputTokenCount(tokens) {
+function outputTokenCount(tokens: any) {
   const input = Number(tokens.input) || 0;
   const output = Number(tokens.output) || 0;
   const reasoning = Number(tokens.reasoning) || 0;
@@ -85,7 +86,7 @@ function outputTokenCount(tokens) {
   return output + reasoning;
 }
 
-function inputTokenCount(tokens, output) {
+function inputTokenCount(tokens: any, output: any) {
   const input = Number(tokens.input) || 0;
   const cacheRead = Number(tokens.cache?.read) || 0;
   const cacheWrite = Number(tokens.cache?.write) || 0;
@@ -100,7 +101,7 @@ function inputTokenCount(tokens, output) {
   return input + cacheRead + cacheWrite;
 }
 
-export function formatTokens(tokens, { cacheWarning = null } = {}) {
+export function formatTokens(tokens: any, { cacheWarning = null }: { cacheWarning?: any } = {}) {
   if (!tokens || typeof tokens !== "object") {
     return "";
   }
@@ -142,7 +143,7 @@ export function formatTokens(tokens, { cacheWarning = null } = {}) {
   return pieces.join("");
 }
 
-export function formatTime(ts) {
+export function formatTime(ts: any) {
   const value = Number(ts);
   if (!value) {
     return "";
@@ -156,7 +157,7 @@ export function formatTime(ts) {
   return new Date(value).toLocaleDateString();
 }
 
-export function formatDuration(startMs, endMs) {
+export function formatDuration(startMs: any, endMs: any) {
   const start = Number(startMs);
   const end = Number(endMs);
   if (!start || !end || end < start) {
@@ -173,7 +174,7 @@ export function formatDuration(startMs, endMs) {
   return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
-export function sessionCard(s, active = false, { showCheckbox = false, provider = "opencode", manageable = false } = {}) {
+export function sessionCard(s: any, active = false, { showCheckbox = false, provider = "opencode", manageable = false } = {}) {
   const title = s.title || s.slug || s.id;
   const encodedProvider = encodeURIComponent(provider);
   const encodedSessionId = encodeURIComponent(s.id);
@@ -235,7 +236,7 @@ export function sessionCard(s, active = false, { showCheckbox = false, provider 
   </article>`;
 }
 
-export function messageHeader(role, meta: any = {}) {
+export function messageHeader(role: any, meta: any = {}) {
   const safeRole = escapeHtml(role || "unknown");
   const model = meta.model ? `<span class="message-model">${escapeHtml(meta.model)}</span>` : "";
   const tokens = formatTokens(meta.tokens, { cacheWarning: meta.cacheWarning });
@@ -251,7 +252,7 @@ export function messageHeader(role, meta: any = {}) {
     </header>`;
 }
 
-export function messageBubble(role, content, meta: any = {}) {
+export function messageBubble(role: any, content: any, meta: any = {}) {
   const safeRole = escapeHtml(role || "unknown");
   const reasoning = meta.reasoning ? `<div class="message-reasoning">${meta.reasoning}</div>` : "";
   const body = role === "assistant"
@@ -265,7 +266,7 @@ export function messageBubble(role, content, meta: any = {}) {
   </section>`;
 }
 
-export function reasoningBlock(content, duration = "", partId = "") {
+export function reasoningBlock(content: any, duration = "", partId = "") {
   const text = truncate(content, 6000);
   const safeDuration = duration ? `<span class="reasoning-duration">${escapeHtml(duration)}</span>` : "";
 
@@ -278,7 +279,7 @@ export function reasoningBlock(content, duration = "", partId = "") {
   </details>`;
 }
 
-export function toolCallBlock(tool, input, output, status, duration, partId) {
+export function toolCallBlock(tool: any, input: any, output: any, status: any, duration: any, partId: any) {
   const inputText = truncate(input);
   const outputText = truncate(output);
   const safeStatus = escapeHtml(status || "unknown");
@@ -304,7 +305,7 @@ export function toolCallBlock(tool, input, output, status, duration, partId) {
   </details>`;
 }
 
-export function todoList(todos = []) {
+export function todoList(todos: any[] = []) {
   if (!todos.length) {
     return "";
   }
@@ -316,7 +317,7 @@ export function todoList(todos = []) {
   };
 
   const items = todos.map((todo) => {
-    const icon = icons[todo.status] || "○";
+    const icon = (icons as Record<string, any>)[todo.status] || "○";
     return `<li class="todo-item todo-${escapeHtml(todo.status || "pending")}">
       <span class="todo-icon">${icon}</span>
       <span class="todo-content">${escapeHtml(todo.content || "")}</span>
@@ -329,7 +330,7 @@ export function todoList(todos = []) {
   </section>`;
 }
 
-export function pagination(total, limit, offset, baseUrl) {
+export function pagination(total: any, limit: any, offset: any, baseUrl: any) {
   const totalCount = Number(total) || 0;
   const pageSize = Number(limit) || 1;
   const currentOffset = Number(offset) || 0;

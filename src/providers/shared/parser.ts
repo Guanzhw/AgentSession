@@ -1,15 +1,21 @@
-export function parseJson(value) {
+export function asNumber(value: unknown): number {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+export function parseJson(value: any) {
   if (typeof value !== "string") {
     return value;
   }
   try {
     return JSON.parse(value);
-  } catch {
+  } catch (err) {
+    console.warn("Failed to parse JSON:", err);
     return value;
   }
 }
 
-export function createSnippet(text, query) {
+export function createSnippet(text: any, query: any) {
   if (!text) {
     return "";
   }
@@ -29,7 +35,7 @@ export function createSnippet(text, query) {
   return `${prefix}${text.slice(start, end)}${suffix}`;
 }
 
-export function mapDataRow(row) {
+export function mapDataRow(row: any) {
   if (!row) {
     return null;
   }

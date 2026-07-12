@@ -2,11 +2,22 @@ import { existsSync, readdirSync, lstatSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { getConfig } from "../../config.js";
+import type { MessageRole } from "../interface.js";
 import { parseTranscript, extractSessionMeta, recordsToMessages } from "./parser.js";
 import { icons } from "../../icons.js";
 import type { ProviderAdapter } from "../interface.js";
 import { buildClaudeCodeRuntimeEnvironment } from "./runtime-environment.js";
-import { buildClaudeCodeSessionViews, buildClaudeCodeSystemPrompts } from "./views.js";
+import {
+  buildLinkedClaudeCodeSessionViews,
+  buildClaudeCodeSystemPrompts
+} from "./views.js";
+import {
+  createSessionFileStore,
+  createStructuredViewCache,
+  createStructuredViewMethods,
+  buildTokenStats,
+  type TokenFieldMapping
+} from "../shared/file-adapter-helpers.js";
 
 function getClaudeDir() {
   return getConfig().claudeDir;
@@ -19,6 +30,12 @@ function getClaudeDir() {
 function discoverSessionFiles(): Array<{ sessionId: string; filePath: string }> {
   const claudeDir = getClaudeDir();
   const files: Array<{ sessionId: string; filePath: string }> = [];
+  const seenSessionIds = new Set<string>();
+  const addFile = (sessionId: string, filePath: string) => {
+    if (seenSessionIds.has(sessionId)) return;
+    seenSessionIds.add(sessionId);
+    files.push({ sessionId, filePath });
+  };
 
   // Legacy layout: ~/.claude/transcripts/{session-id}.jsonl
   const transcriptsDir = path.join(claudeDir, "transcripts");
@@ -27,10 +44,10 @@ function discoverSessionFiles(): Array<{ sessionId: string; filePath: string }> 
       for (const entry of readdirSync(transcriptsDir)) {
         if (entry.endsWith(".jsonl")) {
           const sessionId = entry.replace(".jsonl", "");
-          files.push({ sessionId, filePath: path.join(transcriptsDir, entry) });
+          addFile(sessionId, path.join(transcriptsDir, entry));
         }
       }
-    } catch { /* ignore read errors */ }
+    } catch (err) { console.warn("Ignoring read error in transcripts dir:", transcriptsDir, err); /* ignore read errors */ }
   }
 
   // Project-scoped layout: ~/.claude/projects/{encoded-path}/{uuid}.jsonl
@@ -46,40 +63,89 @@ function discoverSessionFiles(): Array<{ sessionId: string; filePath: string }> 
           if (entry.endsWith(".jsonl")) {
             const sessionId = entry.replace(".jsonl", "");
             // Avoid duplicates (same session ID in transcripts/ and projects/)
-            if (!files.some((f) => f.sessionId === sessionId)) {
-              files.push({ sessionId, filePath: path.join(projectPath, entry) });
-            }
+            addFile(sessionId, path.join(projectPath, entry));
           }
         }
+
+        const walkSubagents = (directory: string, insideSubagents = false, depth = 0) => {
+          if (depth > 4) return;
+          try {
+            for (const entry of readdirSync(directory)) {
+              const fullPath = path.join(directory, entry);
+              const entryStat = lstatSync(fullPath);
+              if (entryStat.isSymbolicLink()) continue;
+              const nextInsideSubagents = insideSubagents || entry === "subagents";
+              if (entryStat.isDirectory()) {
+                walkSubagents(fullPath, nextInsideSubagents, depth + 1);
+              } else if (nextInsideSubagents && entry.endsWith(".jsonl")) {
+                const sessionId = entry.replace(/\.jsonl$/, "").replace(/^agent-/, "");
+                addFile(sessionId, fullPath);
+              }
+            }
+          } catch (err) { console.warn("Ignoring inaccessible subagent directory:", directory, err); /* ignore malformed or inaccessible subagent directories */ }
+        };
+        walkSubagents(projectPath);
       }
-    } catch { /* ignore read errors */ }
+    } catch (err) { console.warn("Ignoring read error in projects dir:", projectsDir, err); /* ignore read errors */ }
   }
 
   return files;
 }
 
-function findSessionFile(sessionId: string) {
-  return discoverSessionFiles().find((file) => file.sessionId === sessionId) || null;
-}
-
-function readSessionBundle(sessionId: string) {
-  const entry = findSessionFile(sessionId);
-  if (!entry) return null;
-  try {
-    const records = parseTranscript(entry.filePath);
-    const session = extractSessionMeta(records, sessionId);
-    const messages = recordsToMessages(records, sessionId);
-    return { records, session, messages };
-  } catch {
-    return null;
+const sessionFiles = createSessionFileStore({
+  discoverFiles: discoverSessionFiles,
+  readEntry: (entry) => {
+    const records = parseTranscript(entry.filePath, { strict: true });
+    if (records.length === 0) {
+      throw new Error("Claude Code transcript has no parseable records");
+    }
+    const session = extractSessionMeta(records, entry.sessionId);
+    return {
+      records,
+      session,
+      messages: recordsToMessages(records, session.id)
+    };
+  },
+  onError: (filePath, error) => {
+    console.warn("Skipping unparseable Claude Code session file:", filePath, error);
   }
-}
+});
 
 function buildRuntimeEnvironmentForSession(sessionId: string, directory: string | null | undefined) {
   return directory
     ? buildClaudeCodeRuntimeEnvironment(sessionId, directory, getClaudeDir())
     : null;
 }
+
+function generateClaudeViews(sessionId: string) {
+  const entry = sessionFiles.get(sessionId);
+  if (!entry) return null;
+  return buildLinkedClaudeCodeSessionViews(
+    entry.session.id,
+    sessionFiles.getFamily(entry.session.id)
+  );
+}
+
+const getClaudeViews = createStructuredViewCache(generateClaudeViews);
+
+const claudeTokenMapping: TokenFieldMapping = {
+  filterRecord: (r) => r.type === "assistant" && !!(r.message?.usage ?? r.usage),
+  getTimestamp: (r) => r.timestamp ? new Date(r.timestamp).getTime() : 0,
+  inputTokens: (r) => Number((r.message?.usage ?? r.usage).input_tokens) || 0,
+  outputTokens: (r) => Number((r.message?.usage ?? r.usage).output_tokens) || 0,
+  totalTokens: (r) => {
+    const usage = r.message?.usage ?? r.usage;
+    return Number(usage.total_tokens)
+      || Number(usage.input_tokens)
+      + Number(usage.output_tokens)
+      + Number(usage.reasoning_tokens)
+      + Number(usage.cache_read_input_tokens)
+      + Number(usage.cache_creation_input_tokens);
+  },
+  reasoningTokens: (r) => Number((r.message?.usage ?? r.usage).reasoning_tokens) || 0,
+  cacheReadTokens: (r) => Number((r.message?.usage ?? r.usage).cache_read_input_tokens) || 0,
+  cacheWriteTokens: (r) => Number((r.message?.usage ?? r.usage).cache_creation_input_tokens) || 0,
+};
 
 const claudeCode = {
   id: "claude-code",
@@ -90,12 +156,13 @@ const claudeCode = {
     args: ["--resume", "{sessionId}"]
   },
   capabilities: {
+    localManagement: true,
     sessionAnalysis: true,
     structuredSessionViews: true
   },
 
   detect() {
-    return discoverSessionFiles().length > 0;
+    return sessionFiles.list().length > 0;
   },
 
   getDataPath() {
@@ -103,134 +170,77 @@ const claudeCode = {
   },
 
   async *scan() {
-    const files = discoverSessionFiles();
-    for (const { sessionId, filePath } of files) {
-      try {
-        const records = parseTranscript(filePath);
-        if (records.length === 0) continue;
-        const meta = extractSessionMeta(records, sessionId);
-        yield meta;
-      } catch {
-      }
+    for (const entry of sessionFiles.list()) {
+      if (entry.records.length === 0) continue;
+      yield entry.session;
     }
   },
 
   getSession(sessionId) {
-    return readSessionBundle(sessionId)?.session || null;
+    return sessionFiles.get(sessionId)?.session || null;
   },
 
   getRuntimeEnvironment(sessionId) {
-    const session = this.getSession(sessionId);
-    return buildRuntimeEnvironmentForSession(sessionId, session?.directory);
+    const session = sessionFiles.get(sessionId)?.session;
+    return session
+      ? buildRuntimeEnvironmentForSession(session.id, session.directory)
+      : null;
   },
 
   getMessages(sessionId) {
-    return readSessionBundle(sessionId)?.messages || [];
+    return sessionFiles.get(sessionId)?.messages || [];
   },
 
   getTokenStats(days = 30) {
-    const today = new Date();
-    today.setUTCHours(0, 0, 0, 0);
-    const cutoff = today.getTime() - (Math.max(1, days) - 1) * 86400000;
-    const files = discoverSessionFiles();
-    const dailyMap = new Map();
-
-    for (const { sessionId, filePath } of files) {
-      try {
-        const records = parseTranscript(filePath);
-        for (const r of records) {
-          if (r.type !== "assistant" || !(r.message?.usage ?? r.usage)) continue;
-          const ts = r.timestamp ? new Date(r.timestamp).getTime() : 0;
-          if (ts < cutoff) continue;
-          const day = new Date(ts).toISOString().slice(0, 10);
-          const usage = r.message?.usage ?? r.usage;
-          const input = Number(usage.input_tokens) || 0;
-          const output = Number(usage.output_tokens) || 0;
-          const reasoning = Number(usage.reasoning_tokens) || 0;
-          const cacheRead = Number(usage.cache_read_input_tokens) || 0;
-          const cacheWrite = Number(usage.cache_creation_input_tokens) || 0;
-          const existing = dailyMap.get(day) || {
-            day, inputTokens: 0, outputTokens: 0, totalTokens: 0, messageCount: 0,
-            reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0
-          };
-          existing.inputTokens += input;
-          existing.outputTokens += output;
-          existing.reasoningTokens += reasoning;
-          existing.cacheReadTokens += cacheRead;
-          existing.cacheWriteTokens += cacheWrite;
-          existing.totalTokens += Number(usage.total_tokens) || input + output + reasoning + cacheRead + cacheWrite;
-          existing.messageCount += 1;
-          dailyMap.set(day, existing);
-        }
-      } catch { /* skip */ }
-    }
-
-    return [...dailyMap.values()].sort((a, b) => a.day.localeCompare(b.day));
+    return buildTokenStats(
+      () => sessionFiles.list(),
+      (filePath) => sessionFiles.getByFilePath(filePath)?.records || [],
+      claudeTokenMapping,
+      days
+    );
   },
 
   searchMessages(query, limit = 20) {
     const term = (query || "").toLowerCase();
     if (!term) return [];
-    const files = discoverSessionFiles();
     const results = [];
 
-    for (const { sessionId, filePath } of files) {
+    for (const entry of sessionFiles.list()) {
       if (results.length >= limit) break;
-      try {
-        const records = parseTranscript(filePath);
-        for (const r of records) {
-          if (results.length >= limit) break;
-          let text = "";
-          if (r.type === "user") text = extractTextFromRecord(r);
-          if (r.type === "assistant") text = extractTextFromRecord(r);
-          if (text.toLowerCase().includes(term)) {
-            const idx = text.toLowerCase().indexOf(term);
-            const start = Math.max(0, idx - 40);
-            const end = Math.min(text.length, idx + term.length + 80);
-            results.push({
-              sessionId,
-              messageId: r.uuid || "",
-              role: r.type === "user" ? "user" : "assistant",
-              snippet: text.slice(start, end),
-              timestamp: r.timestamp ? new Date(r.timestamp).getTime() : 0
-            });
-          }
+      for (const r of entry.records) {
+        if (results.length >= limit) break;
+        let text = "";
+        if (r.type === "user") text = extractTextFromRecord(r);
+        if (r.type === "assistant") text = extractTextFromRecord(r);
+        if (text.toLowerCase().includes(term)) {
+          const idx = text.toLowerCase().indexOf(term);
+          const start = Math.max(0, idx - 40);
+          const end = Math.min(text.length, idx + term.length + 80);
+          results.push({
+            sessionId: entry.session.id,
+            messageId: r.uuid || "",
+            role: (r.type === "user" ? "user" : "assistant") as MessageRole,
+            snippet: text.slice(start, end),
+            timestamp: r.timestamp ? new Date(r.timestamp).getTime() : 0
+          });
         }
-      } catch { /* skip */ }
+      }
     }
 
     return results;
   },
 
-  exportSession(_sessionId) {
-    return null;
-  },
-
-  getSessionTree(sessionId) {
-    return getStructuredViews(sessionId)?.tree || null;
-  },
-
-  getSessionContainer(sessionId) {
-    return getStructuredViews(sessionId)?.container || null;
-  },
-
-  getSessionMetrics(sessionId) {
-    return getStructuredViews(sessionId)?.metrics || null;
-  },
-
-  getSessionFlow(sessionId) {
-    return getStructuredViews(sessionId)?.flow || null;
-  },
+  ...createStructuredViewMethods(getClaudeViews),
 
   getSystemPrompts(sessionId) {
-    const bundle = readSessionBundle(sessionId);
+    const bundle = sessionFiles.get(sessionId);
     if (!bundle) return null;
-    const runtimeEnvironment = buildRuntimeEnvironmentForSession(sessionId, bundle.session.directory);
+    const runtimeEnvironment = buildRuntimeEnvironmentForSession(bundle.session.id, bundle.session.directory);
     return buildClaudeCodeSystemPrompts(bundle.session, bundle.records, runtimeEnvironment);
   },
 
   getTrace(sessionId) {
-    return getStructuredViews(sessionId)?.trace || null;
+    return getClaudeViews(sessionId)?.trace || null;
   },
 
   getUnavailableReason() {
@@ -246,20 +256,15 @@ const claudeCode = {
       if (projectCount > 0) {
         return `Claude Code metadata lists ${projectCount} projects, but no transcript JSONL files were found in ${getClaudeDir()}. Claude Code removes old transcripts according to cleanupPeriodDays (30 days by default).`;
       }
-    } catch {
+    } catch (err) {
+      console.warn("Failed to parse Claude metadata:", err);
       return null;
     }
     return null;
   }
 } satisfies ProviderAdapter;
 
-function getStructuredViews(sessionId) {
-  const bundle = readSessionBundle(sessionId);
-  if (!bundle) return null;
-  return buildClaudeCodeSessionViews(bundle.session, bundle.messages);
-}
-
-function extractTextFromRecord(r) {
+function extractTextFromRecord(r: any) {
   if (r.type === "user") {
     const content = r.message?.content ?? r.content;
     if (typeof content === "string") return content;
@@ -268,7 +273,7 @@ function extractTextFromRecord(r) {
   if (r.type === "assistant") {
     const content = r.message?.content ?? r.content ?? [];
     if (typeof content === "string") return content;
-    return content.filter((b) => b.type === "text").map((b) => b.text).join("");
+    return content.filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
   }
   return "";
 }

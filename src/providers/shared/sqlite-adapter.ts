@@ -12,7 +12,7 @@ import {
 import { parseJson } from "./parser.js";
 import type { ProviderAdapter, ProviderId } from "../interface.js";
 
-function stringifyMessageContent(value) {
+function stringifyMessageContent(value: any) {
   if (value == null) {
     return "";
   }
@@ -21,7 +21,8 @@ function stringifyMessageContent(value) {
   }
   try {
     return JSON.stringify(value) ?? String(value);
-  } catch {
+  } catch (err) {
+    console.warn("Failed to stringify message content:", err);
     return String(value);
   }
 }
@@ -88,10 +89,10 @@ export function createSqliteSessionAdapter({
   getMessages(sessionId) {
     const dbPath = getAdapterDataPath();
     const messages = dbGetMessages(sessionId, dbPath);
-    const results = [];
+    const results: any[] = [];
     for (const msg of messages) {
       const data = typeof msg.data === "string" ? parseJson(msg.data) : msg.data;
-      const parts = getParts(msg.id, dbPath).map((p) => ({
+      const parts = getParts(msg.id, dbPath).map((p: any) => ({
         ...p,
         data: typeof p.data === "string" ? parseJson(p.data) : p.data
       }));
@@ -139,7 +140,7 @@ export function createSqliteSessionAdapter({
   },
 
   getTokenStats(days = 30) {
-    return dbGetTokenStats(days, getAdapterDataPath()).map((row) => ({
+    return dbGetTokenStats(days, getAdapterDataPath()).map((row: any) => ({
       day: row.day,
       inputTokens: Number(row.input_tokens) || 0,
       outputTokens: Number(row.output_tokens) || 0,
@@ -152,7 +153,7 @@ export function createSqliteSessionAdapter({
   },
 
   searchMessages(query, limit = 20) {
-    return dbSearchMessages(query, limit, getAdapterDataPath()).map((r) => ({
+    return dbSearchMessages(query, limit, getAdapterDataPath()).map((r: any) => ({
       sessionId: r.sessionId,
       messageId: r.messageId || r.partId,
       role: r.role || "unknown",
@@ -173,18 +174,18 @@ export function createSqliteSessionAdapter({
       "web_search"
     ]);
 
-    const truncate = (value) => {
+    const truncate = (value: any) => {
       if (value == null) return null;
       const text = typeof value === "string" ? value : JSON.stringify(value);
       return text.length > 500 ? `${text.slice(0, 500)}…` : text;
     };
 
-    const toNumber = (value) => {
+    const toNumber = (value: any) => {
       const n = Number(value);
       return Number.isFinite(n) ? n : 0;
     };
 
-    const classifyTool = (tool) => {
+    const classifyTool = (tool: any) => {
       if (tool === "skill") return { category: "skill", mcpServer: null };
       if (tool === "task") return { category: "agent", mcpServer: null };
       if (tool === "invalid") return { category: "invalid", mcpServer: null };
@@ -198,7 +199,7 @@ export function createSqliteSessionAdapter({
       return { category: "tool", mcpServer: null };
     };
 
-    const startStep = (msg, msgData, startPartData, startPart) => ({
+    const startStep = (msg: any, msgData: any, startPartData: any, startPart: any) => ({
       messageId: msg.id,
       agent: msgData?.agent || null,
       model: msgData?.modelID || null,
@@ -208,14 +209,14 @@ export function createSqliteSessionAdapter({
       timeStart: toNumber(startPartData?.time?.start) || toNumber(startPart?.time?.start),
       timeEnd: 0,
       duration: 0,
-      spans: []
+      spans: [] as any[]
     });
 
     let currentStep = null;
 
     for (const msg of messages) {
       const msgData = typeof msg.data === "string" ? parseJson(msg.data) : msg.data;
-      const parts = getParts(msg.id, dbPath).map((p) => ({
+      const parts = getParts(msg.id, dbPath).map((p: any) => ({
         ...p,
         data: typeof p.data === "string" ? parseJson(p.data) : p.data
       }));
@@ -310,7 +311,7 @@ export function createSqliteSessionAdapter({
          acc.totalSpans += step.spans.length;
          acc.totalDuration += toNumber(step.duration);
          acc.totalCost += toNumber(step.cost);
-          acc.totalTokens += toNumber(typeof step.tokens === 'object' && step.tokens !== null ? step.tokens.total : step.tokens);
+          acc.totalTokens += toNumber(typeof step.tokens === 'object' && step.tokens !== null ? (step.tokens as any).total : step.tokens);
          return acc;
        },
        { totalSteps: 0, totalSpans: 0, totalDuration: 0, totalCost: 0, totalTokens: 0 }

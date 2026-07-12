@@ -16,7 +16,7 @@ import { DatabaseSync } from "node:sqlite";
 import { runInNewContext } from "node:vm";
 import { EventEmitter } from "node:events";
 
-import { closeDb, getTokenStats, listSessionProjects, listSessions, searchMessages } from "../dist/src/db.js";
+import { closeDb, getModelDistribution, getTokenStats, listSessionProjects, listSessions, searchMessages } from "../dist/src/db.js";
 import { buildCodeAgentSessionTree } from "../dist/src/providers/codeagent/session-tree.js";
 import { enrichCodeAgentSession } from "../dist/src/providers/codeagent/schema.js";
 import { buildOpenCodeSessionTree } from "../dist/src/providers/opencode/session-tree.js";
@@ -31,6 +31,7 @@ import { buildGeminiRuntimeEnvironment } from "../dist/src/providers/gemini/runt
 import { buildFlowTreeFromContainer } from "../dist/src/providers/shared/flow-tree.js";
 import { renderCanonicalFlowPanelContent, renderSessionPage } from "../dist/src/views/session.js";
 import { renderSettingsPage } from "../dist/src/views/settings.js";
+import { renderStatsPage } from "../dist/src/views/stats.js";
 import { sessionCard } from "../dist/src/views/components.js";
 import { renderSessionsPage } from "../dist/src/views/sessions.js";
 import {
@@ -49,9 +50,13 @@ import {
 } from "../dist/src/providers/claude-code/parser.js";
 import {
   extractMeta as extractCodexMeta,
-  recordsToMessages as codexRecordsToMessages
+  recordsToMessages as codexRecordsToMessages,
+  resolveCodexInheritedContext
 } from "../dist/src/providers/codex/parser.js";
 import { buildMessageSessionViews } from "../dist/src/providers/shared/message-session.js";
+import { buildLinkedMessageSessionViews } from "../dist/src/providers/shared/linked-message-session.js";
+import { createSessionFileStore } from "../dist/src/providers/shared/file-adapter-helpers.js";
+import { dataToMessages as geminiDataToMessages } from "../dist/src/providers/gemini/parser.js";
 import { getAllProviders } from "../dist/src/providers/index.js";
 import {
   buildPowerShellLaunchSpec,
@@ -590,6 +595,334 @@ test("resume commands use structured placeholders and validated directories", ()
   assert.equal(providerDefault.executable, process.execPath);
   assert.deepEqual(providerDefault.args, ["--version", "default id"]);
   assert.equal(getResumeCommand(provider, "disabled", cwd, { codeagent: false }), null);
+});
+
+test("Codex preserves canonical subagent identity and groups each response as a ReACT turn", () => {
+  const records = [
+    {
+      timestamp: "2026-07-11T00:00:00.000Z",
+      type: "session_meta",
+      payload: {
+        id: "codex-child",
+        session_id: "codex-parent",
+        parent_thread_id: "codex-parent",
+        thread_source: "subagent",
+        agent_path: "/root/reviewer",
+        cwd: "D:\\WorkSpace"
+      }
+    },
+    {
+      timestamp: "2026-07-11T00:00:00.100Z",
+      type: "session_meta",
+      payload: { id: "codex-parent", session_id: "codex-parent", thread_source: "user" }
+    },
+    {
+      timestamp: "2026-07-11T00:00:00.000Z",
+      type: "response_item",
+      payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Inherited parent prompt" }] }
+    },
+    {
+      timestamp: "2026-07-11T00:00:00.000Z",
+      type: "event_msg",
+      payload: { type: "user_message", message: "Inherited parent prompt" }
+    },
+    {
+      timestamp: "2026-07-11T00:00:01.000Z",
+      type: "response_item",
+      payload: { type: "reasoning", summary: [{ type: "summary_text", text: "Inspect first" }] }
+    },
+    {
+      timestamp: "2026-07-11T00:00:02.000Z",
+      type: "response_item",
+      payload: { type: "function_call", name: "read_file", call_id: "call-1", arguments: "{\"path\":\"README.md\"}" }
+    },
+    {
+      timestamp: "2026-07-11T00:00:03.000Z",
+      type: "response_item",
+      payload: { type: "function_call_output", call_id: "call-1", output: "ok" }
+    },
+    {
+      timestamp: "2026-07-11T00:00:04.000Z",
+      type: "event_msg",
+      payload: { type: "token_count", info: { last_token_usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } } }
+    },
+    {
+      timestamp: "2026-07-11T00:00:05.000Z",
+      type: "response_item",
+      payload: { type: "custom_tool_call", name: "exec", call_id: "call-2", input: "npm test" }
+    },
+    {
+      timestamp: "2026-07-11T00:00:06.000Z",
+      type: "response_item",
+      payload: { type: "custom_tool_call_output", call_id: "call-2", output: "passed" }
+    },
+    {
+      timestamp: "2026-07-11T00:00:07.000Z",
+      type: "event_msg",
+      payload: { type: "token_count", info: { last_token_usage: { input_tokens: 8, output_tokens: 1, total_tokens: 9 } } }
+    },
+    {
+      timestamp: "2026-07-11T00:00:08.000Z",
+      type: "event_msg",
+      payload: { type: "user_message", message: "Reviewer follow-up" }
+    }
+  ];
+  const session = extractCodexMeta(records, "fallback");
+  const candidateMessages = codexRecordsToMessages(records, session.id);
+  const parentMessages = [{ role: "user", content: "Inherited parent prompt" }];
+  const resolved = resolveCodexInheritedContext(candidateMessages, parentMessages);
+  const views = buildMessageSessionViews({ ...session, messageCount: 3 }, resolved.messages);
+
+  assert.equal(session.id, "codex-child");
+  assert.equal(session.parentId, "codex-parent");
+  assert.equal(session.metadata.agentPath, "/root/reviewer");
+  assert.equal(session.messageCount, 4);
+  assert.deepEqual(session.metadata.inheritedContext, {
+    parentSessionId: "codex-parent",
+    candidateUserRecords: 2
+  });
+  assert.equal(candidateMessages.find((message) => message.content === "Inherited parent prompt")?.metadata.provenance, "inherited-parent-context-candidate");
+  assert.equal(resolved.excludedUserMessages, 1);
+  assert.equal(resolved.messages.some((message) => message.content === "Inherited parent prompt"), false);
+  assert.equal(resolved.messages.at(-1).content, "Reviewer follow-up");
+  assert.equal(resolved.messages.at(-1).metadata.provenance, "session");
+  const genuineChildPrompt = resolveCodexInheritedContext(candidateMessages, [{ role: "user", content: "Different parent prompt" }]);
+  assert.equal(genuineChildPrompt.excludedUserMessages, 0);
+  assert.equal(genuineChildPrompt.messages[0].content, "Inherited parent prompt");
+  assert.equal(genuineChildPrompt.messages[0].metadata.provenance, "session");
+  assert.equal(views.tree.messages.length, 3);
+  assert.deepEqual(views.tree.messages[0].parts.map((part) => part.type), ["reasoning", "tool"]);
+  assert.equal(views.tree.messages[0].parts[1].data.state.output, "ok");
+  assert.equal(views.tree.messages[1].parts[0].tool, "exec");
+  assert.equal(views.tree.messages[1].parts[0].data.state.output, "passed");
+});
+
+test("file session store reuses parsed transcripts, refreshes changed files, and bounds descendants", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "opensession-file-store-"));
+  try {
+    const write = (id, parentId, content) => writeFileSync(
+      path.join(temp, `${id}.json`),
+      JSON.stringify({ id, parentId, content })
+    );
+    write("root-alias", null, "root message");
+    write("child", "root-alias", "child message");
+    write("unrelated", null, "other message");
+    let reads = 0;
+    const store = createSessionFileStore({
+      refreshIntervalMs: 0,
+      discoverFiles: () => readdirSync(temp).map((name) => ({
+        sessionId: name.replace(/\.json$/, ""),
+        filePath: path.join(temp, name)
+      })),
+      readEntry: ({ filePath }) => {
+        reads++;
+        const record = JSON.parse(readFileSync(filePath, "utf8"));
+        return {
+          session: {
+            id: record.id === "root-alias" ? "root-canonical" : record.id,
+            parentId: record.parentId
+          },
+          records: [record],
+          messages: [record.content]
+        };
+      }
+    });
+
+    assert.equal(store.list().length, 3);
+    assert.equal(reads, 3);
+    assert.equal(store.get("root-alias").messages[0], "root message");
+    assert.equal(store.get("root-canonical").messages[0], "root message");
+    assert.deepEqual(store.getFamily("root-alias").map((entry) => entry.session.id), ["root-canonical", "child"]);
+    assert.deepEqual(store.getFamily("root-canonical").map((entry) => entry.session.id), ["root-canonical", "child"]);
+    assert.equal(reads, 3);
+
+    write("child", "root-alias", "updated child message with a different size");
+    assert.equal(store.get("child").messages[0], "updated child message with a different size");
+    assert.equal(reads, 4);
+    assert.deepEqual(store.getFamily("unrelated").map((entry) => entry.session.id), ["unrelated"]);
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("linked message sessions attach Codex-style spawn tools to child conversations", () => {
+  const session = (id, parentId, title, timeCreated, metadata = null) => ({
+    id,
+    provider: "codex",
+    parentId,
+    title,
+    directory: "D:\\WorkSpace",
+    timeCreated,
+    timeUpdated: timeCreated + 100,
+    messageCount: 1,
+    tokenCount: null,
+    metadata
+  });
+  const message = (id, sessionId, role, content, toolName = null, toolInput = null, toolOutput = null) => ({
+    id,
+    sessionId,
+    role,
+    content,
+    thinking: null,
+    toolName,
+    toolInput,
+    toolOutput,
+    timestamp: id === "spawn" ? 2000 : 3000,
+    tokens: null,
+    metadata: toolName ? { turnId: `${sessionId}:turn` } : null
+  });
+  const views = buildLinkedMessageSessionViews("parent", [
+    {
+      session: session("parent", null, "Parent", 1000),
+      messages: [message("spawn", "parent", "tool", "", "spawn_agent", { task_name: "reviewer" }, '{"task_name":"/root/reviewer"}')]
+    },
+    {
+      session: session("child", "parent", "Reviewer", 2100, { agentPath: "/root/reviewer" }),
+      messages: [
+        message("child-answer", "child", "assistant", "Review complete"),
+        message("child-spawn", "child", "tool", "", "spawn_agent", { task_name: "nested" }, '{"task_name":"/root/nested"}')
+      ]
+    },
+    {
+      session: session("grandchild", "child", "Nested reviewer", 3100, { agentPath: "/root/nested" }),
+      messages: [message("nested-answer", "grandchild", "assistant", "Nested review complete")]
+    }
+  ]);
+
+  const taskPart = views.tree.messages[0].parts[0];
+  assert.equal(taskPart.childSessions[0].session.id, "child");
+  assert.equal(taskPart.childSessions[0].messages[0].parts[0].data.text, "Review complete");
+  const nestedTask = taskPart.childSessions[0].messages[1].parts[0];
+  assert.equal(nestedTask.childSessions[0].session.id, "grandchild");
+  assert.equal(views.metrics.totals.branches, 2);
+  assert.equal(views.metrics.totals.messages, 4);
+});
+
+test("Claude and Gemini preserve provider response boundaries for ReACT grouping", () => {
+  const claudeRecords = [
+    {
+      type: "assistant",
+      uuid: "thinking-record",
+      timestamp: "2026-07-11T00:00:00.000Z",
+      message: { id: "claude-response", model: "claude", content: [{ type: "thinking", thinking: "Inspect" }] }
+    },
+    {
+      type: "assistant",
+      uuid: "tool-record",
+      timestamp: "2026-07-11T00:00:01.000Z",
+      message: { id: "claude-response", model: "claude", content: [{ type: "tool_use", id: "tool-1", name: "Read", input: { file_path: "README.md" } }] }
+    }
+  ];
+  const claudeSession = extractSessionMeta(claudeRecords, "claude-session");
+  const claudeViews = buildMessageSessionViews(claudeSession, recordsToMessages(claudeRecords, claudeSession.id));
+  assert.equal(claudeViews.tree.messages.length, 1);
+  assert.deepEqual(claudeViews.tree.messages[0].parts.map((part) => part.type), ["reasoning", "tool"]);
+
+  const geminiMessages = geminiDataToMessages({
+    messages: [{
+      id: "gemini-response",
+      type: "gemini",
+      text: "I checked it.",
+      timestamp: "2026-07-11T00:00:00.000Z",
+      toolCalls: [{ id: "tool-2", name: "read_file", args: { path: "README.md" }, result: "failed", status: "error" }]
+    }]
+  }, "gemini-session");
+  const geminiViews = buildMessageSessionViews({
+    id: "gemini-session",
+    provider: "gemini",
+    parentId: null,
+    title: "Gemini",
+    directory: null,
+    timeCreated: 0,
+    timeUpdated: 0,
+    messageCount: 1,
+    tokenCount: null
+  }, geminiMessages);
+  assert.equal(geminiViews.tree.messages.length, 1);
+  assert.deepEqual(geminiViews.tree.messages[0].parts.map((part) => part.type), ["text", "tool"]);
+  assert.equal(geminiViews.tree.messages[0].parts[1].data.state.status, "error");
+});
+
+test("Claude sidechain transcripts preserve canonical agent and parent session IDs", () => {
+  const session = extractSessionMeta([{
+    type: "assistant",
+    isSidechain: true,
+    agentId: "claude-agent-1",
+    sessionId: "claude-parent",
+    timestamp: "2026-07-11T00:00:00.000Z",
+    message: { id: "response", content: [{ type: "text", text: "Child result" }] }
+  }], "agent-claude-agent-1");
+
+  assert.equal(session.id, "claude-agent-1");
+  assert.equal(session.parentId, "claude-parent");
+  assert.deepEqual(session.metadata.aliases, ["claude-agent-1", "agent-claude-agent-1"]);
+});
+
+test("OpenCode model distribution groups by JSON model and provider values", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-model-distribution-"));
+  const dbPath = path.join(temp, "sessions.db");
+  try {
+    const db = new DatabaseSync(dbPath);
+    db.exec(`
+      CREATE TABLE session (
+        id TEXT PRIMARY KEY,
+        model TEXT,
+        time_archived INTEGER
+      );
+      CREATE TABLE message (
+        id TEXT PRIMARY KEY,
+        session_id TEXT,
+        data TEXT
+      );
+    `);
+    const insertSession = db.prepare("INSERT INTO session (id, model, time_archived) VALUES (?, ?, ?)");
+    insertSession.run("active-a", "legacy-model-a", null);
+    insertSession.run("active-b", "legacy-model-b", null);
+    insertSession.run("active-c", "legacy-model-c", null);
+    insertSession.run("archived", "legacy-model-d", 1);
+    const insertMessage = db.prepare(`
+      INSERT INTO message (id, session_id, data)
+      VALUES (?, ?, ?)
+    `);
+    const assistantData = (providerID, total) => JSON.stringify({
+      role: "assistant",
+      modelID: "shared-model",
+      providerID,
+      tokens: { total }
+    });
+    insertMessage.run("m1", "active-a", assistantData("provider-a", 10));
+    insertMessage.run("m2", "active-b", assistantData("provider-a", 20));
+    insertMessage.run("m3", "active-c", assistantData("provider-b", 5));
+    insertMessage.run("m4", "archived", assistantData("provider-a", 100));
+
+    const legacyRows = db.prepare(`
+      SELECT json_extract(message.data, '$.modelID') as model,
+             json_extract(message.data, '$.providerID') as provider,
+             COUNT(*) as count,
+             SUM(json_extract(message.data, '$.tokens.total')) as total_tokens
+      FROM message
+      JOIN session ON session.id = message.session_id
+      WHERE json_extract(message.data, '$.role') = 'assistant'
+        AND json_extract(message.data, '$.modelID') IS NOT NULL
+        AND session.time_archived IS NULL
+      GROUP BY model, provider
+      ORDER BY count DESC
+    `).all();
+    const legacyProviderARows = legacyRows.filter((row) => row.provider === "provider-a");
+    assert.equal(legacyRows.length, 3);
+    assert.equal(legacyProviderARows.length, 2);
+    assert.ok(legacyProviderARows.every((row) => row.model === "shared-model" && row.count === 1));
+    assert.deepEqual(legacyProviderARows.map((row) => row.total_tokens).sort((a, b) => a - b), [10, 20]);
+    db.close();
+
+    assert.deepEqual(getModelDistribution(dbPath).map((row) => ({ ...row })), [
+      { model: "shared-model", provider: "provider-a", count: 2, total_tokens: 30 },
+      { model: "shared-model", provider: "provider-b", count: 1, total_tokens: 5 }
+    ]);
+  } finally {
+    closeDb(dbPath);
+    rmSync(temp, { recursive: true, force: true });
+  }
 });
 
 test("windows executable resolution prefers runnable command shims", () => {
@@ -1200,9 +1533,65 @@ test("session management uses in-page dialogs", () => {
   assert.match(appJs, /tagName === "TEXTAREA"/);
   assert.match(appJs, /!isEditableShortcutTarget\(e\.target\)/);
   assert.match(appJs, /document\.getElementById\("search-input"\)\?\.focus\(\)/);
+  assert.match(appJs, /analysis_launch_confirm_title/);
+  assert.match(appJs, /const confirmed = await openConfirmDialog\(formatText\(ft\("analysis_launch_confirm"\)/);
+  assert.ok(
+    appJs.indexOf('openConfirmDialog(formatText(ft("analysis_launch_confirm")')
+      < appJs.indexOf('fetch(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/analyze`')
+  );
   const style = readFileSync(path.join(process.cwd(), "dist", "src", "static", "style.css"), "utf-8");
   assert.match(style, /\.btn:disabled \{/);
   assert.match(style, /cursor: not-allowed;/);
+  assert.match(style, /grid-template-columns: auto minmax\(0, 1fr\) minmax\(0, auto\)/);
+  assert.match(style, /@media \(max-width: 1300px\)[\s\S]*?\.logo-text \{\s*display: none;/);
+});
+
+test("analysis launch accessible name follows selected target labels and runtime count", () => {
+  const appJs = readFileSync(path.join(process.cwd(), "dist", "src", "static", "app.js"), "utf-8");
+  const helperSource = appJs
+    .match(/function analysisLaunchAccessibleLabel\([\s\S]*?\n\}\n\nfunction updateAnalysisLaunchControl/)?.[0]
+    ?.replace(/\n\nfunction updateAnalysisLaunchControl$/, "");
+  assert.ok(helperSource);
+  const analysisLaunchAccessibleLabel = runInNewContext(
+    `${helperSource}\nanalysisLaunchAccessibleLabel;`,
+    {
+      ft: (key) => ({
+        analysis_launch_action: "Launch analysis for {targets}; runtime extensions: {runtime}",
+        analysis_launch_running_title: "Running analyses: {targets}.",
+        analysis_launch_select_target: "Select a target"
+      })[key],
+      formatText: (template, values) => Object.entries(values).reduce(
+        (text, [key, value]) => text.replaceAll(`{${key}}`, String(value)),
+        template
+      )
+    }
+  );
+
+  assert.equal(
+    analysisLaunchAccessibleLabel([{ label: "Skills" }], 2, [], "Targets 1 · Runtime 2"),
+    "Launch analysis for Skills; runtime extensions: 2"
+  );
+  assert.equal(
+    analysisLaunchAccessibleLabel([{ label: "Skills" }, { label: "Tests" }], 0, [], "Targets 2 · Runtime 0"),
+    "Launch analysis for Skills, Tests; runtime extensions: 0"
+  );
+});
+
+test("model distribution legend distinguishes equal model names by provider", () => {
+  const html = renderStatsPage({
+    tokenStats: [],
+    modelDistribution: [
+      { model: "shared-model", provider: "provider-a", count: 2, total_tokens: 20 },
+      { model: "shared-model", provider: "provider-b", count: 1, total_tokens: 10 }
+    ],
+    dailySessions: [],
+    overview: { totalSessions: 0, totalMessages: 0 },
+    provider: "opencode",
+    providers: []
+  });
+
+  assert.match(html, /shared-model · Provider: provider-a — 2 \(66\.7%\)/);
+  assert.match(html, /shared-model · Provider: provider-b — 1 \(33\.3%\)/);
 });
 
 test("global search shortcut ignores editable targets", () => {
@@ -2948,6 +3337,9 @@ test("session rendering shows configured analysis actions only when launch is al
   assert.match(visible, /Export JSON/);
   assert.match(visible, /class="analysis-target-checkbox"/);
   assert.match(visible, /class="analysis-runtime-extension-checkbox"/);
+  assert.match(visible, /data-analysis-label="Analyze skills"/);
+  assert.match(visible, /data-analysis-label="AGENTS\.md"/);
+  assert.match(visible, /aria-label="Launch analysis for Analyze skills, Analyze tests; runtime extensions: 1"/);
   assert.match(visible, /Analyze 2 targets/);
   assert.match(visible, /Analysis materials/);
   assert.match(visible, /<details class="analysis-materials-panel">/);
@@ -2975,11 +3367,20 @@ test("session rendering includes in-conversation search controls", () => {
     session: { id: "searchable", title: "Searchable session", time_created: 1000 }
   });
 
-  assert.match(html, /data-session-search/);
+  assert.match(html, /<details class="session-search" data-session-search>/);
+  assert.match(html, /class="action-btn session-search-toggle"/);
+  assert.match(html, /class="session-search-panel"/);
   assert.match(html, /data-session-search-input/);
   assert.match(html, /data-session-search-previous/);
   assert.match(html, /data-session-search-next/);
+  assert.match(html, /data-session-search-close/);
   assert.match(html, /id="session-messages"/);
+  assert.ok(html.indexOf("data-session-search") < html.indexOf('id="session-messages"'));
+
+  const appJs = readFileSync(path.join(process.cwd(), "dist", "src", "static", "app.js"), "utf-8");
+  assert.match(appJs, /requestIdleCallback/);
+  assert.match(appJs, /data-session-search-highlight/);
+  assert.match(appJs, /highlightTranscriptMatches/);
 });
 
 test("built-in analysis targets resolve without target-specific config", () => {
@@ -3797,6 +4198,7 @@ test("subagent invocation headers show child-session token usage", () => {
   });
 
   assert.match(html, /subagent-tokens/);
+  assert.match(html, /href="\/opencode\/session\/child"[^>]*>Open<\/a>/);
   assert.match(html, /token-chip-label">↑<\/span>77k/);
   assert.match(html, /token-chip-label">↓<\/span>9\.9k/);
   assert.match(html, /token-chip-label">C<\/span>795k/);

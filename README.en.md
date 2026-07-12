@@ -32,23 +32,24 @@ The focus is no longer just “list my chats.” The goal is to help you reconst
 |:---|:---:|:---|:---|
 | OpenCode | Full | `$XDG_DATA_HOME/opencode/opencode.db` or `~/.local/share/opencode/opencode.db` | Browse, search, star, rename, delete, trash, export, stats, trace, nested sessions, analysis |
 | CodeAgent | Full | `$XDG_DATA_HOME/opencode/db/ngagent.db` or `~/.local/share/opencode/db/ngagent.db` | OpenCode fork with the same viewer capabilities |
-| Claude Code | Read-only | `~/.claude/transcripts/` + `~/.claude/projects/` | Browse, search, token stats, trace, flow, analysis prompt evidence |
-| Codex CLI | Read-only | `~/.codex/sessions/**/*.jsonl` | Browse, search, token stats |
-| Gemini CLI | Read-only | `~/.gemini/tmp/*/chats/*.json` | Browse, search, token stats |
+| Claude Code | Manageable | `~/.claude/transcripts/` + `~/.claude/projects/` | Browse, search, star, rename, delete, trash, token stats, ReACT, trace, flow, subagents when sidechain transcripts exist, analysis prompt evidence |
+| Codex CLI | Manageable | `~/.codex/sessions/**/*.jsonl` | Browse, search, star, rename, delete, trash, token stats, ReACT, flow, nested subagents |
+| Gemini CLI | Manageable | `~/.gemini/tmp/*/chats/*.json` | Browse, search, star, rename, delete, trash, token stats, ReACT, flow |
 
-OpenCode and CodeAgent store stars, custom titles, soft deletes, and trash state in OpenSessionViewer’s own metadata database. The original session databases remain read-only.
+All providers store stars, custom titles, soft deletes, and permanent exclusions in OpenSessionViewer’s own metadata database. Original session databases and transcript files remain read-only.
 
 ## Features
 
 - **Unified dashboard**: detected and undetected providers are shown in the top bar, with unavailable providers disabled.
-- **Session list and search**: project/time/starred filtering, sorting, infinite scroll, and a scoped list filter for titles, slugs, and directories. The top-bar search combines title and message-content matches. A reversible title-type filter can separate titles containing analysis/analyze signals from other sessions; it is a viewer heuristic, not provider metadata.
-- **Session detail review**: messages, tool calls, todos, and subsessions render in one review surface.
-- **Recursive session tree**: OpenCode/CodeAgent child sessions are organized as nested session containers instead of flat message rows.
+- **Session list and search**: project/time/starred filtering, sorting, infinite scroll, and a scoped list filter for provider titles, viewer custom titles, slugs, and directories. The top-bar search combines title and message-content matches. A reversible title-type filter can separate displayed titles containing analysis/analyze signals from other sessions; it is a viewer heuristic, not provider metadata.
+- **Session detail review**: provider-owned response boundaries keep reasoning, action/tool calls, and observation/tool results together as ReACT turns.
+- **Recursive session tree**: OpenCode, CodeAgent, Codex, and Claude Code sessions with stored sidechain transcripts render child sessions as nested containers with direct open links.
 - **Tool Flow Tree**: the right-side Flow view shows root sessions, messages, tools, and subagent branches by hierarchy.
-- **Table of Contents**: long sessions get navigation for prompts, assistant turns, task branches, and nested sessions.
+- **Table of Contents**: long sessions get navigation for prompts, assistant turns, `task` / `subtask` / `spawn_agent` branches, and nested sessions.
+- **In-conversation search**: open the compact detail-page search from the action bar or press `/`; results report matching turns and text occurrences, highlight the exact text, and keep previous/next controls visible while navigating.
 - **Trace API**: step/span summaries classify tools, skills, agents, MCP calls, and LSP activity.
 - **Statistics**: total sessions, total messages, token trends, model distribution, and daily session activity.
-- **Local management**: OpenCode/CodeAgent support starring, renaming, batch actions, soft delete, restore, and permanent delete.
+- **Local management**: every provider supports starring, renaming, batch actions, soft delete, restore, and permanent exclusion; these actions only mutate viewer metadata.
 - **Export**: OpenCode/CodeAgent sessions expose one Export menu for Markdown or JSON, with JSON including the session tree.
 - **Bilingual UI**: use `--lang en` or `--lang zh`.
 

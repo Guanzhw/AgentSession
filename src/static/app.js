@@ -55,6 +55,11 @@ const __I18N__ = {
     analysis_launch_running: "Analysis running",
     analysis_launch_running_title: "Running analyses: {targets}. Unselect those targets or wait for completion.",
     analysis_launch_summary: "Targets {targets} · Runtime {runtime}",
+    analysis_launch_action: "Launch analysis for {targets}; runtime extensions: {runtime}",
+    analysis_launch_confirm_title: "Launch session analysis?",
+    analysis_launch_confirm: "Launch the external analyzer once per selected target ({count} total): {targets}. Runtime extensions: {runtime}. Each run snapshots the selected materials and session evidence, then writes proposal-only outputs.",
+    analysis_launch_confirm_button: "Launch analyzer",
+    analysis_none: "None",
     analysis_status_prepared: "Preparing",
     analysis_status_launched: "Running",
     analysis_status_completed: "Completed",
@@ -122,8 +127,9 @@ const __I18N__ = {
     scroll_load_more: "Load more sessions",
     scroll_all_loaded: "All sessions loaded",
     scroll_loading: "Loading...",
-    "detail.search_results": "{current} of {total} matching turns",
-    "detail.search_no_results": "No matching turns"
+    "detail.search_results": "{current} / {total} turns · {occurrences} hits",
+    "detail.search_no_results": "No matching turns",
+    "detail.search_indexing": "Indexing conversation…"
   },
   zh: {
     rename_title: "重命名会话",
@@ -178,6 +184,11 @@ const __I18N__ = {
     analysis_launch_running: "分析运行中",
     analysis_launch_running_title: "正在运行的分析：{targets}。请取消选择这些目标，或等待完成。",
     analysis_launch_summary: "目标 {targets} · 运行时 {runtime}",
+    analysis_launch_action: "为 {targets} 启动分析；运行时扩展：{runtime} 个",
+    analysis_launch_confirm_title: "启动会话分析？",
+    analysis_launch_confirm: "将为每个所选目标各启动一次外部 Analyzer（共 {count} 次）：{targets}。运行时扩展：{runtime}。每个运行会快照所选材料和会话证据，然后写入仅供提案的输出。",
+    analysis_launch_confirm_button: "启动 Analyzer",
+    analysis_none: "无",
     analysis_status_prepared: "准备中",
     analysis_status_launched: "运行中",
     analysis_status_completed: "已完成",
@@ -245,8 +256,9 @@ const __I18N__ = {
     scroll_load_more: "加载更多会话",
     scroll_all_loaded: "已全部加载",
     scroll_loading: "加载中...",
-    "detail.search_results": "第 {current} / {total} 个匹配回合",
-    "detail.search_no_results": "没有匹配的会话回合"
+    "detail.search_results": "第 {current} / {total} 个回合 · {occurrences} 处命中",
+    "detail.search_no_results": "没有匹配的会话回合",
+    "detail.search_indexing": "正在索引会话…"
   }
 };
 
@@ -1211,6 +1223,17 @@ function checkedAnalysisValues(root, selector) {
     .filter(Boolean);
 }
 
+function checkedAnalysisEntries(root, selector) {
+  const scope = root || document;
+  return [...scope.querySelectorAll(selector)]
+    .filter((input) => input.checked && !input.disabled)
+    .map((input) => ({
+      value: input.value,
+      label: input.dataset.analysisLabel || input.value
+    }))
+    .filter((entry) => entry.value);
+}
+
 function activeAnalysisTargets() {
   return new Set(
     analysisRunsState
@@ -1226,11 +1249,24 @@ function analysisLaunchLabel(targetCount, runningTargets) {
   return formatText(ft("analysis_launch_many"), { targets: targetCount });
 }
 
+function analysisLaunchAccessibleLabel(targetEntries, runtimeCount, runningTargets, summaryText) {
+  if (runningTargets.length) {
+    return `${formatText(ft("analysis_launch_running_title"), { targets: runningTargets.join(", ") })} ${summaryText}`;
+  }
+  if (!targetEntries.length) return ft("analysis_launch_select_target");
+  return formatText(ft("analysis_launch_action"), {
+    targets: targetEntries.map((entry) => entry.label).join(", "),
+    runtime: runtimeCount
+  });
+}
+
 function updateAnalysisLaunchControl(control) {
   if (!control) return;
-  const selectedTargets = checkedAnalysisValues(control, ".analysis-target-checkbox");
+  const targetEntries = checkedAnalysisEntries(control, ".analysis-target-checkbox");
+  const runtimeEntries = checkedAnalysisEntries(control, ".analysis-runtime-extension-checkbox");
+  const selectedTargets = targetEntries.map((entry) => entry.value);
   const targetCount = selectedTargets.length;
-  const runtimeCount = checkedAnalysisValues(control, ".analysis-runtime-extension-checkbox").length;
+  const runtimeCount = runtimeEntries.length;
   const targetCountNode = control.querySelector("[data-analysis-selected-count]");
   const runtimeCountNode = control.querySelector("[data-runtime-selected-count]");
   const summary = control.querySelector("[data-analysis-launch-summary]");
@@ -1241,9 +1277,12 @@ function updateAnalysisLaunchControl(control) {
     targets: targetCount,
     runtime: runtimeCount
   });
-  const titleText = runningTargets.length
-    ? `${formatText(ft("analysis_launch_running_title"), { targets: runningTargets.join(", ") })} ${summaryText}`
-    : summaryText;
+  const titleText = analysisLaunchAccessibleLabel(
+    targetEntries,
+    runtimeCount,
+    runningTargets,
+    summaryText
+  );
   if (targetCountNode) targetCountNode.textContent = String(targetCount);
   if (runtimeCountNode) runtimeCountNode.textContent = String(runtimeCount);
   if (summary) {
@@ -1628,7 +1667,13 @@ function isEditableShortcutTarget(target) {
 document.addEventListener("keydown", (e) => {
   if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey && !isEditableShortcutTarget(e.target)) {
     e.preventDefault();
-    document.getElementById("search-input")?.focus();
+    const transcriptSearch = document.querySelector("[data-session-search]");
+    if (transcriptSearch) {
+      transcriptSearch.open = true;
+      transcriptSearch.querySelector("[data-session-search-input]")?.focus();
+    } else {
+      document.getElementById("search-input")?.focus();
+    }
   }
   if (e.key === "Escape") {
     const flowPanel = document.getElementById("session-flow-panel");
@@ -1640,6 +1685,8 @@ document.addEventListener("keydown", (e) => {
         btn.setAttribute("aria-expanded", "false");
       });
     }
+    const transcriptSearch = document.querySelector("[data-session-search]");
+    if (transcriptSearch?.open) transcriptSearch.open = false;
     document.activeElement.blur();
   }
 });
@@ -1766,7 +1813,8 @@ document.addEventListener("click", async (e) => {
 
   if (action === "analyze-session") {
     const control = btn.closest(".analysis-launch-control");
-    const targets = checkedAnalysisValues(control, ".analysis-target-checkbox");
+    const targetEntries = checkedAnalysisEntries(control, ".analysis-target-checkbox");
+    const targets = targetEntries.map((entry) => entry.value);
     if (!targets.length) {
       const fallbackTarget = btn.dataset.target || "";
       if (fallbackTarget) targets.push(fallbackTarget);
@@ -1782,9 +1830,26 @@ document.addEventListener("click", async (e) => {
       return;
     }
     const hasRuntimePicker = Boolean(control?.querySelector(".analysis-runtime-extension-checkbox"));
+    const runtimeEntries = checkedAnalysisEntries(control, ".analysis-runtime-extension-checkbox");
     const runtimeExtensionIds = hasRuntimePicker
-      ? checkedAnalysisValues(control, ".analysis-runtime-extension-checkbox")
+      ? runtimeEntries.map((entry) => entry.value)
       : null;
+    const targetLabels = targetEntries.length
+      ? targetEntries.map((entry) => entry.label)
+      : targets;
+    const runtimeLabels = runtimeEntries.length
+      ? runtimeEntries.map((entry) => entry.label)
+      : [ft("analysis_none")];
+    const confirmed = await openConfirmDialog(formatText(ft("analysis_launch_confirm"), {
+      count: targets.length,
+      targets: targetLabels.join(", "),
+      runtime: runtimeLabels.join(", ")
+    }), {
+      confirmLabel: ft("analysis_launch_confirm_button"),
+      title: ft("analysis_launch_confirm_title"),
+      restoreFocusTarget: btn
+    });
+    if (!confirmed) return;
     btn.disabled = true;
     try {
       for (const target of targets) {
@@ -2198,25 +2263,104 @@ if (sessionWorkbench) {
   const transcriptSearchStatus = transcriptSearch?.querySelector("[data-session-search-status]");
   const transcriptSearchPrevious = transcriptSearch?.querySelector("[data-session-search-previous]");
   const transcriptSearchNext = transcriptSearch?.querySelector("[data-session-search-next]");
-  let transcriptEntries = null;
+  const transcriptSearchClose = transcriptSearch?.querySelector("[data-session-search-close]");
+  let transcriptEntries = [];
+  let transcriptIndexPromise = null;
   let transcriptMatches = [];
   let transcriptMatchIndex = -1;
+  let transcriptOccurrenceCount = 0;
+  let transcriptSearchRevision = 0;
+  let transcriptSearchTimer = null;
+
+  const scheduleTranscriptIndexStep = (callback) => {
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(callback, { timeout: 100 });
+      return;
+    }
+    window.setTimeout(() => callback({ didTimeout: true, timeRemaining: () => 0 }), 0);
+  };
 
   const getTranscriptEntries = () => {
-    if (transcriptEntries) return transcriptEntries;
-    transcriptEntries = [...sessionWorkbench.querySelectorAll(".messages .message-turn")].map((turn) => {
-      const text = [];
+    if (transcriptIndexPromise) return transcriptIndexPromise;
+    const turns = [...sessionWorkbench.querySelectorAll(".messages .message-turn")];
+    transcriptIndexPromise = new Promise((resolve) => {
+      let index = 0;
+      const appendEntries = (deadline) => {
+        let processed = 0;
+        while (index < turns.length && (processed < 12 || (!deadline.didTimeout && deadline.timeRemaining() > 2))) {
+          const turn = turns[index];
+          const text = [];
+          const walker = document.createTreeWalker(turn, NodeFilter.SHOW_TEXT);
+          let node = walker.nextNode();
+          while (node) {
+            if (node.parentElement?.closest(".message-turn") === turn) {
+              text.push(node.nodeValue || "");
+            }
+            node = walker.nextNode();
+          }
+          transcriptEntries.push({ turn, text: text.join(" ").toLocaleLowerCase() });
+          index += 1;
+          processed += 1;
+        }
+        if (index < turns.length) {
+          scheduleTranscriptIndexStep(appendEntries);
+          return;
+        }
+        resolve(transcriptEntries);
+      };
+      scheduleTranscriptIndexStep(appendEntries);
+    });
+    return transcriptIndexPromise;
+  };
+
+  const clearTranscriptHighlights = () => {
+    const parents = new Set();
+    sessionWorkbench.querySelectorAll("mark[data-session-search-highlight]").forEach((mark) => {
+      const parent = mark.parentNode;
+      parents.add(parent);
+      mark.replaceWith(document.createTextNode(mark.textContent || ""));
+    });
+    parents.forEach((parent) => parent?.normalize());
+  };
+
+  const highlightTranscriptMatches = (query) => {
+    let occurrences = 0;
+    transcriptMatches.forEach((turn) => {
+      const nodes = [];
       const walker = document.createTreeWalker(turn, NodeFilter.SHOW_TEXT);
       let node = walker.nextNode();
       while (node) {
-        if (node.parentElement?.closest(".message-turn") === turn) {
-          text.push(node.nodeValue || "");
+        const parent = node.parentElement;
+        if (parent?.closest(".message-turn") === turn
+          && !parent.closest("mark[data-session-search-highlight]")
+          && !["SCRIPT", "STYLE"].includes(parent.tagName)) {
+          nodes.push(node);
         }
         node = walker.nextNode();
       }
-      return { turn, text: text.join(" ").toLocaleLowerCase() };
+      nodes.forEach((textNode) => {
+        const value = textNode.nodeValue || "";
+        const lowerValue = value.toLocaleLowerCase();
+        let matchIndex = lowerValue.indexOf(query);
+        if (matchIndex < 0) return;
+        const fragment = document.createDocumentFragment();
+        let offset = 0;
+        while (matchIndex >= 0) {
+          fragment.append(document.createTextNode(value.slice(offset, matchIndex)));
+          const mark = document.createElement("mark");
+          mark.className = "session-search-highlight";
+          mark.dataset.sessionSearchHighlight = "true";
+          mark.textContent = value.slice(matchIndex, matchIndex + query.length);
+          fragment.append(mark);
+          occurrences += 1;
+          offset = matchIndex + query.length;
+          matchIndex = lowerValue.indexOf(query, offset);
+        }
+        fragment.append(document.createTextNode(value.slice(offset)));
+        textNode.replaceWith(fragment);
+      });
     });
-    return transcriptEntries;
+    return occurrences;
   };
 
   const updateTranscriptSearchControls = () => {
@@ -2232,7 +2376,8 @@ if (sessionWorkbench) {
       ? ft("detail.search_no_results")
       : formatText(ft("detail.search_results"), {
         current: transcriptMatchIndex + 1,
-        total: transcriptMatches.length
+        total: transcriptMatches.length,
+        occurrences: transcriptOccurrenceCount
       });
   };
 
@@ -2253,22 +2398,29 @@ if (sessionWorkbench) {
     const current = transcriptMatches[transcriptMatchIndex];
     revealTranscriptMatch(current, transcriptSearchInput?.value.trim().toLocaleLowerCase() || "");
     if (scroll) {
-      current.scrollIntoView({ block: "center", behavior: "smooth" });
+      current.scrollIntoView({ block: "center", behavior: "auto" });
     }
     updateTranscriptSearchControls();
   };
 
-  const updateTranscriptMatches = (scroll = false) => {
+  const updateTranscriptMatches = async (scroll = false) => {
+    const revision = ++transcriptSearchRevision;
     const query = transcriptSearchInput?.value.trim().toLocaleLowerCase() || "";
     transcriptMatches.forEach((entry) => entry.classList.remove("session-search-match", "session-search-current"));
+    clearTranscriptHighlights();
     transcriptMatches = [];
     transcriptMatchIndex = -1;
+    transcriptOccurrenceCount = 0;
     if (query) {
-      transcriptMatches = getTranscriptEntries()
+      if (transcriptSearchStatus) transcriptSearchStatus.textContent = ft("detail.search_indexing");
+      const entries = await getTranscriptEntries();
+      if (revision !== transcriptSearchRevision) return;
+      transcriptMatches = entries
         .filter((entry) => entry.text.includes(query))
         .map((entry) => entry.turn);
       transcriptMatches.forEach((entry) => entry.classList.add("session-search-match"));
       if (transcriptMatches.length) {
+        transcriptOccurrenceCount = highlightTranscriptMatches(query);
         selectTranscriptMatch(0, scroll);
         return;
       }
@@ -2276,7 +2428,10 @@ if (sessionWorkbench) {
     updateTranscriptSearchControls();
   };
 
-  transcriptSearchInput?.addEventListener("input", () => updateTranscriptMatches(true));
+  transcriptSearchInput?.addEventListener("input", () => {
+    window.clearTimeout(transcriptSearchTimer);
+    transcriptSearchTimer = window.setTimeout(() => void updateTranscriptMatches(true), 80);
+  });
   transcriptSearchInput?.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" || !transcriptMatches.length) return;
     event.preventDefault();
@@ -2284,6 +2439,31 @@ if (sessionWorkbench) {
   });
   transcriptSearchPrevious?.addEventListener("click", () => selectTranscriptMatch(transcriptMatchIndex - 1));
   transcriptSearchNext?.addEventListener("click", () => selectTranscriptMatch(transcriptMatchIndex + 1));
+  transcriptSearchClose?.addEventListener("click", () => {
+    const current = transcriptMatches[transcriptMatchIndex] || null;
+    transcriptSearch.open = false;
+    if (current) {
+      const hadTabIndex = current.hasAttribute("tabindex");
+      current.tabIndex = -1;
+      current.focus({ preventScroll: true });
+      if (!hadTabIndex) {
+        current.addEventListener("blur", () => current.removeAttribute("tabindex"), { once: true });
+      }
+      return;
+    }
+    const toggle = transcriptSearch.querySelector("[data-session-search-toggle]");
+    const toggleRect = toggle?.getBoundingClientRect();
+    if (toggleRect && toggleRect.bottom > 0 && toggleRect.top < window.innerHeight) {
+      toggle.focus({ preventScroll: true });
+    } else {
+      transcriptSearchClose.blur();
+    }
+  });
+  transcriptSearch?.addEventListener("toggle", () => {
+    if (!transcriptSearch.open) return;
+    transcriptSearchInput?.focus();
+    void getTranscriptEntries();
+  });
 
   const tocGroups = [...document.querySelectorAll(".session-toc .toc-group")];
   const tocResizeHandle = document.querySelector(".toc-resize-handle");
@@ -2748,7 +2928,7 @@ if (sessionWorkbench) {
     event.preventDefault();
     lastManualNav = Date.now();
     history.pushState(null, "", link.getAttribute("href"));
-    target.scrollIntoView({ block: "start", behavior: "smooth" });
+    target.scrollIntoView({ block: "start", behavior: "auto" });
     target.classList.add("anchor-flash");
     setActiveTarget(target.id);
     setTimeout(() => target.classList.remove("anchor-flash"), 900);

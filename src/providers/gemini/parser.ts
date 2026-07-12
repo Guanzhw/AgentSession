@@ -6,7 +6,7 @@ import type { Message, RawSession } from "../interface.js";
  * @param {string} filePath
  * @returns {object} ConversationRecord
  */
-export function parseSession(filePath) {
+export function parseSession(filePath: any) {
   return JSON.parse(readFileSync(filePath, "utf-8"));
 }
 
@@ -15,11 +15,11 @@ export function parseSession(filePath) {
  * @param {object} data - ConversationRecord
  * @returns {import('../interface.js').RawSession}
  */
-export function extractMeta(data): RawSession {
+export function extractMeta(data: any): RawSession {
   const messages = data.messages || [];
   let totalTokens = 0;
   let messageCount = 0;
-  const firstUserMsg = messages.find((m) => m.type === "user");
+  const firstUserMsg = messages.find((m: any) => m.type === "user");
 
   for (const m of messages) {
     if (m.type === "user" || m.type === "gemini") messageCount++;
@@ -45,7 +45,7 @@ export function extractMeta(data): RawSession {
  * @param {string} sessionId
  * @returns {import('../interface.js').Message[]}
  */
-export function dataToMessages(data, sessionId): Message[] {
+export function dataToMessages(data: any, sessionId: any): Message[] {
   const messages = [];
   let idx = 0;
 
@@ -75,8 +75,9 @@ export function dataToMessages(data, sessionId): Message[] {
     }
 
     if (m.type === "gemini") {
+      const turnId = m.id || `${sessionId}:gemini:${idx++}`;
       messages.push({
-        id: m.id || `msg-${idx++}`,
+        id: m.id || turnId,
         sessionId,
         role: "assistant",
         content: m.text || "",
@@ -95,7 +96,8 @@ export function dataToMessages(data, sessionId): Message[] {
         metadata: {
           cached: m.tokenUsage?.cached || 0,
           thoughts: m.tokenUsage?.thoughts || 0,
-          tool: m.tokenUsage?.tool || 0
+          tool: m.tokenUsage?.tool || 0,
+          turnId
         }
       });
 
@@ -113,7 +115,7 @@ export function dataToMessages(data, sessionId): Message[] {
             toolOutput: tc.result || null,
             timestamp: ts,
             tokens: null,
-            metadata: { status: tc.status }
+            metadata: { status: tc.status, turnId, callId: tc.id || null }
           });
         }
       }
@@ -137,5 +139,5 @@ export function dataToMessages(data, sessionId): Message[] {
     }
   }
 
-  return messages;
+  return messages as Message[];
 }

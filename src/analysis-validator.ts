@@ -13,20 +13,20 @@ import {
   resolveIntegrityPath
 } from "./analysis-layout.js";
 
-function readJson(filePath, errors, label) {
+function readJson(filePath: any, errors: any, label: any) {
   if (!existsSync(filePath)) {
     errors.push(`${label} is missing`);
     return null;
   }
   try {
     return JSON.parse(readFileSync(filePath, "utf-8"));
-  } catch (error) {
+  } catch (error: any) {
     errors.push(`${label} is not valid JSON: ${error.message}`);
     return null;
   }
 }
 
-function requireFields(value, fields, errors, label) {
+function requireFields(value: any, fields: any, errors: any, label: any) {
   for (const field of fields) {
     if (value?.[field] === undefined) {
       errors.push(`${label} is missing ${field}`);
@@ -34,7 +34,7 @@ function requireFields(value, fields, errors, label) {
   }
 }
 
-function isInsideRoot(root, relativePath) {
+function isInsideRoot(root: any, relativePath: any) {
   if (!root || !relativePath || path.isAbsolute(relativePath)) {
     return false;
   }
@@ -43,34 +43,35 @@ function isInsideRoot(root, relativePath) {
   return resolved !== resolvedRoot && resolved.startsWith(`${resolvedRoot}${path.sep}`);
 }
 
-function writeJsonAtomic(filePath, value) {
+function writeJsonAtomic(filePath: any, value: any) {
   const temporary = `${filePath}.tmp`;
   writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
   renameSync(temporary, filePath);
 }
 
-function hashFile(filePath) {
+function hashFile(filePath: any) {
   return createHash("sha256").update(readFileSync(filePath)).digest("hex");
 }
 
 const ALLOWED_PROPOSAL_KINDS = new Set(["artifact-change", "skill-evolution"]);
 
-function normalizeEvidenceRef(value) {
+function normalizeEvidenceRef(value: any) {
   try {
     return decodeURIComponent(String(value));
-  } catch {
+  } catch (err) {
+    console.warn("Failed to normalize evidence ref:", err);
     return String(value);
   }
 }
 
-function evidenceTokens(value) {
+function evidenceTokens(value: any) {
   return normalizeEvidenceRef(value)
     .toLowerCase()
     .split(/[^a-z0-9._-]+/)
     .filter((token) => token.length > 2);
 }
 
-function suggestEvidenceRefs(ref, allowedRefs, limit = 3) {
+function suggestEvidenceRefs(ref: any, allowedRefs: any, limit = 3) {
   const normalizedRef = normalizeEvidenceRef(ref).toLowerCase();
   const refTail = normalizedRef.split(":").pop() || "";
   const refTokens = new Set(evidenceTokens(ref));
@@ -94,10 +95,10 @@ function suggestEvidenceRefs(ref, allowedRefs, limit = 3) {
     .map((entry) => entry.candidate);
 }
 
-export function validateAnalysisOutputs(runDir, processExitCode = 0, expectedIntegrity = null) {
+export function validateAnalysisOutputs(runDir: any, processExitCode = 0, expectedIntegrity: any = null) {
   const resolvedRunDir = path.resolve(runDir);
   const manifestPath = path.join(resolvedRunDir, "manifest.json");
-  const errors = [];
+  const errors: any[] = [];
   const manifest = readJson(manifestPath, errors, "manifest.json") || {
     schemaVersion: 1,
     runDir: resolvedRunDir
@@ -123,15 +124,15 @@ export function validateAnalysisOutputs(runDir, processExitCode = 0, expectedInt
   const kinds = new Set();
   const allowedEvidenceRefs = new Set(
     Array.isArray(evidenceIndex?.entries)
-      ? evidenceIndex.entries.map((entry) => entry.evidenceId).filter(Boolean)
+      ? evidenceIndex.entries.map((entry: any) => entry.evidenceId).filter(Boolean)
       : []
   );
   const allowedArtifactRefs = new Set(
     Array.isArray(artifacts?.files)
-      ? artifacts.files.map((entry) => entry.artifactId).filter(Boolean)
+      ? artifacts.files.map((entry: any) => entry.artifactId).filter(Boolean)
       : []
   );
-  const validateEvidenceRefs = (refs, label) => {
+  const validateEvidenceRefs = (refs: any, label: any) => {
     if (!Array.isArray(refs) || refs.length === 0) {
       errors.push(`${label} must contain at least one evidence reference`);
       return;
@@ -249,15 +250,15 @@ export function validateAnalysisOutputs(runDir, processExitCode = 0, expectedInt
 
   const allowedRoots = new Set(
     Array.isArray(artifacts?.roots)
-      ? artifacts.roots.map((root) => path.resolve(String(root)))
+      ? artifacts.roots.map((root: any) => path.resolve(String(root)))
       : []
   );
   const analysisOutputRoot = path.dirname(resolvedRunDir);
   const allowedExplicitTargets = new Set(
     Array.isArray(artifacts?.files)
       ? artifacts.files
-        .filter((file) => file.explicit === true)
-        .map((file) => `${path.resolve(String(file.root || ""))}\0${file.relativePath}`)
+        .filter((file: any) => file.explicit === true)
+        .map((file: any) => `${path.resolve(String(file.root || ""))}\0${file.relativePath}`)
       : []
   );
   const proposalTargets = new Set();
@@ -338,7 +339,8 @@ export function validateAnalysisOutputs(runDir, processExitCode = 0, expectedInt
           errors.unshift(`analysis stderr: ${stderr.slice(-2000)}`);
         }
       }
-    } catch {
+    } catch (err) {
+      console.warn("Failed to read analysis diagnostics:", err);
       // Best-effort diagnostic only; schema validation errors above are enough.
     }
   }
@@ -376,7 +378,7 @@ if (invokedPath === path.resolve(fileURLToPath(import.meta.url))) {
     if (process.argv[4]) {
       try {
         expectedIntegrity = JSON.parse(Buffer.from(process.argv[4], "base64").toString("utf-8"));
-      } catch (error) {
+      } catch (error: any) {
         console.error(`Invalid integrity metadata: ${error.message}`);
         process.exitCode = 2;
       }

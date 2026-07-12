@@ -3,14 +3,20 @@ import { getConfig } from "./config.js";
 
 function getMetaDbPath() { return getConfig().metaPath; }
 
-let metaDb;
+let metaDb: any;
+
+export function closeMetaDb() {
+  if (!metaDb) return;
+  metaDb.close();
+  metaDb = undefined;
+}
 
 export function getMetaDb() {
   if (!metaDb) {
     metaDb = new DatabaseSync(getMetaDbPath());
     // Migration: add provider column if not present
     const tableInfo = metaDb.prepare("PRAGMA table_info(session_meta)").all();
-    const hasProvider = tableInfo.some((col) => col.name === "provider");
+    const hasProvider = tableInfo.some((col: any) => col.name === "provider");
 
     if (!hasProvider && tableInfo.length > 0) {
       metaDb.exec("BEGIN TRANSACTION");
@@ -66,7 +72,7 @@ export function getMetaDb() {
  * Backward-compat: if called with 1 arg, treat it as sessionId with provider="opencode".
  * If called with 2 args, first is provider, second is sessionId.
  */
-function resolveArgs(providerOrId, sessionId = undefined) {
+function resolveArgs(providerOrId: any, sessionId: string | undefined = undefined) {
   if (sessionId === undefined) {
     return ["opencode", providerOrId];
   }
@@ -74,7 +80,7 @@ function resolveArgs(providerOrId, sessionId = undefined) {
 }
 
 /** 确保 session_id 在 session_meta 中有记录（upsert 辅助） */
-function ensureMeta(providerOrId, sessionId = undefined) {
+function ensureMeta(providerOrId: any, sessionId: string | undefined = undefined) {
   const [provider, sid] = resolveArgs(providerOrId, sessionId);
   const db = getMetaDb();
   const existing = db.prepare("SELECT 1 FROM session_meta WHERE provider = ? AND session_id = ?").get(provider, sid);
@@ -83,13 +89,13 @@ function ensureMeta(providerOrId, sessionId = undefined) {
   }
 }
 
-export function getMeta(providerOrId, sessionId = undefined) {
+export function getMeta(providerOrId: any, sessionId: string | undefined = undefined) {
   const [provider, sid] = resolveArgs(providerOrId, sessionId);
   const db = getMetaDb();
   return db.prepare("SELECT * FROM session_meta WHERE provider = ? AND session_id = ?").get(provider, sid) || null;
 }
 
-export function getAllMeta(provider = undefined) {
+export function getAllMeta(provider: string | undefined = undefined) {
   const db = getMetaDb();
   const rows = provider
     ? db.prepare("SELECT * FROM session_meta WHERE provider = ?").all(provider)
@@ -103,19 +109,19 @@ export function getAllMeta(provider = undefined) {
 export function getDeletedIds(provider = "opencode") {
   const db = getMetaDb();
   return db.prepare("SELECT session_id FROM session_meta WHERE provider = ? AND deleted = 1 AND permanent = 0").all(provider)
-    .map(r => r.session_id);
+    .map((r: any) => r.session_id);
 }
 
 /** 返回所有 deleted=1 或 permanent=1 的 session_id 集合（用于列表排除） */
-export function getExcludedIds(provider = "opencode") {
+export function getExcludedIds(provider = "opencode"): Set<string> {
   const db = getMetaDb();
   return new Set(
     db.prepare("SELECT session_id FROM session_meta WHERE provider = ? AND (deleted = 1 OR permanent = 1)").all(provider)
-      .map(r => r.session_id)
+      .map((r: any) => r.session_id)
   );
 }
 
-export function toggleStar(providerOrId, sessionId = undefined) {
+export function toggleStar(providerOrId: any, sessionId: string | undefined = undefined) {
   const [provider, sid] = resolveArgs(providerOrId, sessionId);
   const db = getMetaDb();
   ensureMeta(provider, sid);
@@ -126,7 +132,7 @@ export function toggleStar(providerOrId, sessionId = undefined) {
   return newStarred === 1;
 }
 
-export function renameSession(providerOrId, sessionIdOrTitle, newTitle = undefined) {
+export function renameSession(providerOrId: any, sessionIdOrTitle: any, newTitle: string | undefined = undefined) {
   let provider, sid, title;
   if (newTitle === undefined) {
     // Legacy: renameSession(sessionId, title)
@@ -145,7 +151,7 @@ export function renameSession(providerOrId, sessionIdOrTitle, newTitle = undefin
     .run(title || null, Date.now(), provider, sid);
 }
 
-export function softDelete(providerOrId, sessionId = undefined) {
+export function softDelete(providerOrId: any, sessionId: string | undefined = undefined) {
   const [provider, sid] = resolveArgs(providerOrId, sessionId);
   const db = getMetaDb();
   ensureMeta(provider, sid);
@@ -153,14 +159,14 @@ export function softDelete(providerOrId, sessionId = undefined) {
     .run(Date.now(), provider, sid);
 }
 
-export function restoreSession(providerOrId, sessionId = undefined) {
+export function restoreSession(providerOrId: any, sessionId: string | undefined = undefined) {
   const [provider, sid] = resolveArgs(providerOrId, sessionId);
   const db = getMetaDb();
   db.prepare("UPDATE session_meta SET deleted = 0, time_deleted = NULL WHERE provider = ? AND session_id = ?")
     .run(provider, sid);
 }
 
-export function permanentDelete(providerOrId, sessionId = undefined) {
+export function permanentDelete(providerOrId: any, sessionId: string | undefined = undefined) {
   const [provider, sid] = resolveArgs(providerOrId, sessionId);
   const db = getMetaDb();
   ensureMeta(provider, sid);
@@ -168,7 +174,7 @@ export function permanentDelete(providerOrId, sessionId = undefined) {
     .run(provider, sid);
 }
 
-export function batchAction(providerOrIds, idsOrAction, actionArg = undefined) {
+export function batchAction(providerOrIds: any, idsOrAction: any, actionArg: string | undefined = undefined) {
   let provider, ids, action;
   if (actionArg === undefined) {
     // Legacy: batchAction(ids, action)

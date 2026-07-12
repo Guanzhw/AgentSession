@@ -2,8 +2,23 @@
 import { DatabaseSync } from "node:sqlite";
 import { getConfig } from "./config.js";
 import { analysisTitleSqlCondition, analysisTitleSqlParams, normalizeSessionKindFilter } from "./session-kind.js";
+import { isEmptyProjectFilter } from "./project-filter.js";
+import {
+  getKindMatchingOverrideIds,
+  getOverrideTitleIds,
+  getSearchMatchingOverrideIds,
+  normalizeSessionTitleOverrides,
+  serializeSessionTitleOverrides,
+  type SessionTitleOverrides
+} from "./session-title-overrides.js";
 
-let indexDb;
+let indexDb: any;
+
+export function closeIndexDb() {
+  if (!indexDb) return;
+  indexDb.close();
+  indexDb = undefined;
+}
 
 export function getIndexDb() {
   if (!indexDb) {
@@ -34,7 +49,7 @@ export function getIndexDb() {
  * @param {string} provider
  * @param {import('./providers/interface.js').RawSession[]} sessions
  */
-export function upsertIndex(provider, sessions) {
+export function upsertIndex(provider: any, sessions: any) {
   const db = getIndexDb();
   const now = Date.now();
   const stmt = db.prepare(`
@@ -55,36 +70,68 @@ export function upsertIndex(provider, sessions) {
  * @param {string} timeRange - "today"|"week"|"month"|""
  * @returns {{ sessions: object[], total: number }}
  */
-function normalizeIncludedIds(includedIds = undefined) {
+function normalizeIncludedIds(includedIds: string[] | undefined = undefined) {
   if (includedIds === undefined) {
     return undefined;
   }
   return Array.from(includedIds).filter(Boolean);
 }
 
-function indexedSortOrder(sort = "updated-desc") {
+function indexedSortOrder(sort = "updated-desc", titleOverrides: SessionTitleOverrides = undefined) {
   if (sort === "updated-asc") {
-    return "time_updated ASC, time_created ASC, id ASC";
+    return { orderBy: "time_updated ASC, time_created ASC, id ASC", params: [] };
   }
-  if (sort === "title-asc") {
-    return "COALESCE(NULLIF(title, ''), id) COLLATE NOCASE ASC, time_updated DESC, id ASC";
+  if (sort === "title-asc" || sort === "title-desc") {
+    const hasOverrides = normalizeSessionTitleOverrides(titleOverrides).length > 0;
+    const effectiveTitle = hasOverrides
+      ? "COALESCE((SELECT value FROM json_each(?) AS title_override WHERE title_override.key = session_index.id), NULLIF(session_index.title, ''), session_index.id)"
+      : "COALESCE(NULLIF(session_index.title, ''), session_index.id)";
+    const direction = sort === "title-desc" ? "DESC" : "ASC";
+    return {
+      orderBy: `${effectiveTitle} COLLATE NOCASE ${direction}, session_index.time_updated DESC, session_index.id ASC`,
+      params: hasOverrides ? [serializeSessionTitleOverrides(titleOverrides)] : []
+    };
   }
-  if (sort === "title-desc") {
-    return "COALESCE(NULLIF(title, ''), id) COLLATE NOCASE DESC, time_updated DESC, id ASC";
-  }
-  return "time_updated DESC, time_created DESC, id ASC";
+  return { orderBy: "time_updated DESC, time_created DESC, id ASC", params: [] };
 }
 
-function indexedFilter(timeRange = "", search = "", project = "", includedIds = undefined, sessionKind = "all") {
+function idMembership(column: any, ids: any, params: any, negate = false) {
+  if (ids.length === 0) return negate ? "1 = 1" : "0 = 1";
+  params.push(JSON.stringify(ids));
+  return `${column} ${negate ? "NOT " : ""}IN (SELECT value FROM json_each(?))`;
+}
+
+function indexedFilter(
+  timeRange = "",
+  search = "",
+  project = "",
+  includedIds: string[] | undefined = undefined,
+  sessionKind = "all",
+  excludedIds: Set<string> | undefined = undefined,
+  titleOverrides: SessionTitleOverrides = undefined
+) {
   const where = ["provider = ?"];
   const params = [];
   const db = getIndexDb();
   const now = Date.now();
   const included = normalizeIncludedIds(includedIds);
+  const excluded = (normalizeIncludedIds as any)(excludedIds) || [];
+
+  // Normal provider lists mirror SQLite providers by showing root sessions.
+  // Explicit ID lookups (search, trash, or starred filters) may still surface
+  // an independently addressable child session.
+  if (included === undefined) {
+    where.push("parent_id IS NULL");
+  }
 
   if (search) {
-    where.push("(COALESCE(title, '') LIKE ? OR COALESCE(directory, '') LIKE ?)");
+    const searchConditions = ["COALESCE(title, '') LIKE ?", "COALESCE(directory, '') LIKE ?"];
     params.push(`%${search}%`, `%${search}%`);
+    const overrideMatches = getSearchMatchingOverrideIds(titleOverrides, search);
+    if (overrideMatches.length > 0) {
+      searchConditions.push(idMembership("id", overrideMatches, params));
+    }
+    where.push(`(${searchConditions.join(" OR ")})`);
   }
 
   if (timeRange === "today") {
@@ -100,43 +147,64 @@ function indexedFilter(timeRange = "", search = "", project = "", includedIds = 
   }
 
   if (project) {
-    where.push("COALESCE(directory, '') = ?");
-    params.push(project);
+    if (isEmptyProjectFilter(project)) {
+      where.push("COALESCE(directory, '') = ''");
+    } else {
+      where.push("COALESCE(directory, '') = ?");
+      params.push(project);
+    }
+  }
+
+  if (excluded.length > 0) {
+    where.push(idMembership("id", excluded, params, true));
   }
 
   if (included !== undefined) {
     if (included.length === 0) {
       where.push("0 = 1");
     } else {
-      where.push(`id IN (${included.map(() => "?").join(", ")})`);
-      params.push(...included);
+      where.push(idMembership("id", included, params));
     }
   }
 
   const kind = normalizeSessionKindFilter(sessionKind);
   if (kind !== "all") {
     const titleCondition = analysisTitleSqlCondition("LOWER(COALESCE(NULLIF(title, ''), id))");
-    where.push(kind === "analysis" ? `(${titleCondition})` : `NOT (${titleCondition})`);
-    params.push(...analysisTitleSqlParams());
+    const sourceKindCondition = kind === "analysis" ? `(${titleCondition})` : `NOT (${titleCondition})`;
+    const overrideIds = getOverrideTitleIds(titleOverrides);
+    const matchingOverrideIds = getKindMatchingOverrideIds(titleOverrides, kind);
+    if (overrideIds.length > 0) {
+      const sourceIdsCondition = idMembership("id", overrideIds, params, true);
+      params.push(...analysisTitleSqlParams());
+      if (matchingOverrideIds.length > 0) {
+        const overrideIdsCondition = idMembership("id", matchingOverrideIds, params);
+        where.push(`((${sourceIdsCondition} AND ${sourceKindCondition}) OR ${overrideIdsCondition})`);
+      } else {
+        where.push(`(${sourceIdsCondition} AND ${sourceKindCondition})`);
+      }
+    } else {
+      where.push(sourceKindCondition);
+      params.push(...analysisTitleSqlParams());
+    }
   }
 
   return { db, whereClause: `WHERE ${where.join(" AND ")}`, params };
 }
 
-export function getIndexedSessions(provider, limit = 50, offset = 0, timeRange = "", search = "", project = "", sort = "updated-desc", includedIds = undefined, sessionKind = "all") {
-  const { db, whereClause, params } = indexedFilter(timeRange, search, project, includedIds, sessionKind);
-  const orderBy = indexedSortOrder(sort);
+export function getIndexedSessions(provider: any, limit = 50, offset = 0, timeRange = "", search = "", project = "", sort = "updated-desc", includedIds = undefined, sessionKind = "all", excludedIds = undefined, titleOverrides: SessionTitleOverrides = undefined) {
+  const { db, whereClause, params } = indexedFilter(timeRange, search, project, includedIds, sessionKind, excludedIds, titleOverrides);
+  const { orderBy, params: sortParams } = indexedSortOrder(sort, titleOverrides);
   const total = db.prepare(`SELECT COUNT(*) as c FROM session_index ${whereClause}`).get(provider, ...params).c;
   const sessions = db.prepare(`
     SELECT * FROM session_index ${whereClause}
     ORDER BY ${orderBy} LIMIT ? OFFSET ?
-  `).all(provider, ...params, limit, offset);
+  `).all(provider, ...params, ...sortParams, limit, offset);
 
   return { sessions, total };
 }
 
-export function getIndexedSessionProjects(provider, timeRange = "", search = "", includedIds = undefined, sessionKind = "all") {
-  const { db, whereClause, params } = indexedFilter(timeRange, search, "", includedIds, sessionKind);
+export function getIndexedSessionProjects(provider: any, timeRange = "", search = "", includedIds: string[] | undefined = undefined, sessionKind = "all", excludedIds: Set<string> | undefined = undefined, titleOverrides: SessionTitleOverrides = undefined) {
+  const { db, whereClause, params } = indexedFilter(timeRange, search, "", includedIds, sessionKind, excludedIds, titleOverrides);
   return db.prepare(`
     SELECT COALESCE(directory, '') AS id,
            COALESCE(NULLIF(directory, ''), 'Unknown project') AS label,
@@ -145,7 +213,7 @@ export function getIndexedSessionProjects(provider, timeRange = "", search = "",
     ${whereClause}
     GROUP BY COALESCE(directory, '')
     ORDER BY count DESC, label COLLATE NOCASE ASC
-  `).all(provider, ...params).map((row) => ({
+  `).all(provider, ...params).map((row: any) => ({
     id: row.id,
     label: row.label,
     worktree: row.label,
@@ -153,8 +221,8 @@ export function getIndexedSessionProjects(provider, timeRange = "", search = "",
   }));
 }
 
-export function getIndexedOverview(provider, timeRange = "", search = "", project = "", sessionKind = "all") {
-  const { db, whereClause, params } = indexedFilter(timeRange, search, project, undefined, sessionKind);
+export function getIndexedOverview(provider: any, timeRange = "", search = "", project = "", sessionKind = "all", excludedIds: Set<string> | undefined = undefined, includedIds: string[] | undefined = undefined, titleOverrides: SessionTitleOverrides = undefined) {
+  const { db, whereClause, params } = indexedFilter(timeRange, search, project, includedIds, sessionKind, excludedIds, titleOverrides);
   const row = db.prepare(`
     SELECT COUNT(*) AS totalSessions,
            COALESCE(SUM(COALESCE(message_count, 0)), 0) AS totalMessages
@@ -172,7 +240,7 @@ export function getIndexedOverview(provider, timeRange = "", search = "", projec
  * Run a full index for a provider using its scan() method.
  * @param {import('./providers/interface.js').ProviderAdapter} adapter
  */
-export async function indexProvider(adapter) {
+export async function indexProvider(adapter: any) {
   const batch = [];
   for await (const session of adapter.scan()) {
     batch.push(session);
@@ -188,7 +256,7 @@ export async function indexProvider(adapter) {
  * @param {string} provider
  * @returns {number}
  */
-export function getLastIndexedTime(provider) {
+export function getLastIndexedTime(provider: any) {
   const db = getIndexDb();
   const row = db.prepare("SELECT MAX(last_indexed) as t FROM session_index WHERE provider = ?").get(provider);
   return row?.t || 0;
@@ -198,7 +266,7 @@ export function getLastIndexedTime(provider) {
  * Clear indexed sessions for a provider (or all providers).
  * @param {string} [provider]
  */
-export function clearIndex(provider) {
+export function clearIndex(provider: any) {
   const db = getIndexDb();
   if (provider) {
     db.prepare("DELETE FROM session_index WHERE provider = ?").run(provider);

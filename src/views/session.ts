@@ -1,22 +1,24 @@
 import { t } from "../i18n.js";
 import { escapeHtml } from "../markdown.js";
 import type { SessionPartNode, SessionTree } from "../providers/opencode/session-tree.js";
+import { isSubagentToolName } from "../providers/shared/linked-message-session.js";
 import { formatDuration, formatTime, formatTokens, messageBubble, messageHeader, reasoningBlock, todoList, toolCallBlock } from "./components.js";
 import { layout } from "./layout.js";
 
-function safeParse(value) {
+function safeParse(value: any) {
   if (typeof value !== "string") {
     return value || {};
   }
 
   try {
     return JSON.parse(value);
-  } catch {
+  } catch (err) {
+    console.warn("Failed to parse JSON value:", err);
     return {};
   }
 }
 
-function modelLabel(model) {
+function modelLabel(model: any) {
   if (typeof model === "string") {
     return model;
   }
@@ -31,11 +33,11 @@ function modelLabel(model) {
   return model.modelID || model.providerID || "";
 }
 
-function messageModelLabel(messageData) {
+function messageModelLabel(messageData: any) {
   return modelLabel(messageData.model) || modelLabel(messageData);
 }
 
-function cacheUsage(messageData) {
+function cacheUsage(messageData: any) {
   const tokens = messageData?.tokens;
   if (!tokens || typeof tokens !== "object") {
     return null;
@@ -56,7 +58,7 @@ function cacheUsage(messageData) {
   };
 }
 
-function annotateCacheWarning(message, previousUsage) {
+function annotateCacheWarning(message: any, previousUsage: any) {
   const usage = cacheUsage(message.data);
   const sameModel = usage?.model && usage.model === previousUsage?.model;
   const unusualMiss = sameModel
@@ -82,11 +84,11 @@ function annotateCacheWarning(message, previousUsage) {
   };
 }
 
-function formatCount(value) {
+function formatCount(value: any) {
   return (Number(value) || 0).toLocaleString();
 }
 
-function formatMilliseconds(ms) {
+function formatMilliseconds(ms: any) {
   const totalSeconds = Math.round((Number(ms) || 0) / 1000);
   if (totalSeconds < 60) {
     return `${totalSeconds}s`;
@@ -96,14 +98,14 @@ function formatMilliseconds(ms) {
   return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
-function anchorId(prefix, id) {
+function anchorId(prefix: any, id: any) {
   const cleanId = String(id || "").replace(/[^A-Za-z0-9_-]/g, "-");
   const normalizedPrefix = prefix.endsWith("-") ? prefix.slice(0, -1) : prefix;
   const alreadyHasPrefix = cleanId.toLowerCase().startsWith(normalizedPrefix.toLowerCase() + "-") || cleanId.toLowerCase().startsWith(normalizedPrefix.toLowerCase() + "_");
   return alreadyHasPrefix ? cleanId : `${normalizedPrefix}-${cleanId}`;
 }
 
-function stringifyCompact(value) {
+function stringifyCompact(value: any) {
   if (value == null) {
     return "";
   }
@@ -112,12 +114,13 @@ function stringifyCompact(value) {
   }
   try {
     return JSON.stringify(value);
-  } catch {
+  } catch (err) {
+    console.warn("Failed to stringify value:", err);
     return String(value);
   }
 }
 
-function compactText(value, limit = 72) {
+function compactText(value: any, limit = 72) {
   const text = stringifyCompact(value).replace(/\s+/g, " ").trim();
   if (!text) {
     return "";
@@ -125,44 +128,46 @@ function compactText(value, limit = 72) {
   return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
 }
 
-function partStatus(partData) {
+function partStatus(partData: any) {
   return typeof partData?.state?.status === "string" ? partData.state.status : "";
 }
 
-function isErrorPart(partData) {
+function isErrorPart(partData: any) {
   return partStatus(partData) === "error" || Boolean(partData?.error);
 }
 
-function isTaskTool(tool) {
-  return ["task", "subtask"].includes(String(tool || ""));
+function isTaskTool(tool: any) {
+  return isSubagentToolName(tool);
 }
 
-function formatPercent(value) {
+function formatPercent(value: any) {
   const amount = Number(value) || 0;
   return `${Math.round(amount * 100)}%`;
 }
 
-function isNavigableMessageRole(role) {
+function isNavigableMessageRole(role: any) {
   return ["user", "assistant", "agent"].includes(String(role || "").toLowerCase());
 }
 
-function taskTitle(partData) {
+function taskTitle(partData: any) {
   return partData?.state?.title
     || partData?.state?.input?.description
     || partData?.state?.input?.subagent_type
+    || partData?.state?.input?.task_name
+    || partData?.state?.input?.agent_path
     || "";
 }
 
-function taskDisplayTitle(partData) {
+function taskDisplayTitle(partData: any) {
   return taskTitle(partData) || "Task";
 }
 
-function childSessionCountLabel(count) {
+function childSessionCountLabel(count: any) {
   const amount = Number(count) || 0;
   return `${amount} ${amount === 1 ? "session" : "sessions"}`;
 }
 
-function toolTitle(partData) {
+function toolTitle(partData: any) {
   if (partData?.type === "tool" && isTaskTool(partData?.tool)) {
     return taskTitle(partData);
   }
@@ -180,28 +185,28 @@ function toolTitle(partData) {
   return detail ? `${partData?.tool || partData?.type} · ${detail}` : (partData?.tool || partData?.type || "part");
 }
 
-function messageToolName(message) {
-  const toolPart = message.parts.find((part) => part.type === "tool");
+function messageToolName(message: any) {
+  const toolPart = message.parts.find((part: any) => part.type === "tool");
   if (!toolPart) return "";
   const input = toolPart.data?.state?.input || {};
   return String(input.description || input.command || input.filePath || toolPart.tool || "");
 }
 
-function messageText(message) {
-  const textPart = message.parts.find((part) => part.type === "text" && part.data?.text);
+function messageText(message: any) {
+  const textPart = message.parts.find((part: any) => part.type === "text" && part.data?.text);
   return compactText(textPart?.data?.text || message.data?.summary || messageToolName(message) || message.id, 86);
 }
 
-function tocMessageText(message) {
-  const textPart = message.parts.find((part) => part.type === "text" && compactText(part.data?.text));
+function tocMessageText(message: any) {
+  const textPart = message.parts.find((part: any) => part.type === "text" && compactText(part.data?.text));
   return compactText(textPart?.data?.text || "", 86);
 }
 
-function hasVisibleMessagePart(message) {
+function hasVisibleMessagePart(message: any) {
   return message.parts.some(isVisiblePartNode);
 }
 
-function isVisiblePartNode(part) {
+function isVisiblePartNode(part: any) {
   if (part.childSessions.length > 0) {
     return true;
   }
@@ -211,7 +216,7 @@ function isVisiblePartNode(part) {
   return part.type === "tool";
 }
 
-function renderMetric(label, value) {
+function renderMetric(label: any, value: any) {
   return `<span class="session-stat"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></span>`;
 }
 
@@ -248,6 +253,7 @@ function renderSubagentExportActions(part: SessionPartNode, provider: string) {
   const encoded = encodeURIComponent(childId);
   const suffix = part.childSessions.length > 1 ? ` first session of ${part.childSessions.length}` : "";
   return `<span class="subagent-actions" aria-label="Subagent export actions">
+    <a class="subagent-export-btn" href="/${escapeHtml(provider)}/session/${encoded}" title="${escapeHtml(`Open${suffix}`)}">Open</a>
     <a class="subagent-export-btn" href="/api/${escapeHtml(provider)}/session/${encoded}/export?format=md" title="${escapeHtml(`Export${suffix} as Markdown`)}">MD</a>
     <a class="subagent-export-btn" href="/api/${escapeHtml(provider)}/session/${encoded}/export?format=json" title="${escapeHtml(`Export${suffix} as JSON`)}">JSON</a>
   </span>`;
@@ -295,7 +301,7 @@ function renderSubagentBranch(part: SessionPartNode, childMarkup: string, provid
   </details>`;
 }
 
-function renderMessageControls(message, provider: string) {
+function renderMessageControls(message: any, provider: string) {
   const role = String(message.role || "").toLowerCase();
   if (role !== "user") {
     return "";
@@ -306,19 +312,19 @@ function renderMessageControls(message, provider: string) {
   </div>`;
 }
 
-function messageTurnRole(role) {
+function messageTurnRole(role: any) {
   const normalized = String(role || "assistant").toLowerCase();
   if (normalized === "agent") return "assistant";
   if (normalized === "tool") return "assistant";
   return normalized;
 }
 
-function hasOwnMessageBubble(message) {
+function hasOwnMessageBubble(message: any) {
   return Array.isArray(message.parts)
-    && message.parts.some((part) => part.type === "text" && Boolean(part.data?.text));
+    && message.parts.some((part: any) => part.type === "text" && Boolean(part.data?.text));
 }
 
-function renderMessageGroup(message, markup, provider: string) {
+function renderMessageGroup(message: any, markup: any, provider: string) {
   const role = messageTurnRole(message.role);
   const messageAnchor = escapeHtml(anchorId("msg", message.id));
   const data = message.data || {};
@@ -333,7 +339,7 @@ function renderMessageGroup(message, markup, provider: string) {
   return `<article id="${messageAnchor}" class="message-group message-turn message-turn-${escapeHtml(role)}" data-role="${escapeHtml(role)}">${renderMessageControls(message, provider)}${toolOnlyHeader}${markup}</article>`;
 }
 
-function renderSubagentChildSession(tree: SessionTree, provider: string) {
+function renderSubagentChildSession(tree: SessionTree, provider: string): string {
   const messageBlocks = [];
   let previousCacheUsage = null;
 
@@ -343,9 +349,9 @@ function renderSubagentChildSession(tree: SessionTree, provider: string) {
     if (annotated.usage && messageTurnRole(message.role) === "assistant") {
       previousCacheUsage = annotated.usage;
     }
-    const result = renderMessagePartsResult(message, 0, provider);
+    const result: any = renderMessagePartsResult(message, 0, provider);
     if (result.hasVisibleContent && result.markup) {
-      const group = [renderMessageGroup(message, result.markup, provider)];
+      const group: any = [renderMessageGroup(message, result.markup, provider)];
       attachPendingReasoning(group, result.pendingReasoning);
       messageBlocks.push(group[0]);
     } else if (result.pendingReasoning.length && messageTurnRole(message.role) === "assistant") {
@@ -360,16 +366,16 @@ function renderSubagentChildSession(tree: SessionTree, provider: string) {
     }
   }
 
-  const messageMarkup = messageBlocks.filter(Boolean).join("\n");
+  const messageMarkup: any = messageBlocks.filter(Boolean).join("\n");
 
-  const detachedMarkup = tree.detachedChildren
+  const detachedMarkup: any = tree.detachedChildren
     .map((child) => renderSubagentChildSession(child, provider))
     .filter(Boolean)
     .join("\n");
   return [messageMarkup, detachedMarkup].filter(Boolean).join("\n");
 }
 
-function makeTocNode(id, type, label, meta, depth, children = []) {
+function makeTocNode(id: any, type: any, label: any, meta: any, depth: any, children: any[] = []) {
   return {
     id,
     type,
@@ -380,12 +386,12 @@ function makeTocNode(id, type, label, meta, depth, children = []) {
   };
 }
 
-function collectMessageTaskTocNodes(message, parentAgentDepth) {
-  const nodes = [];
+function collectMessageTaskTocNodes(message: any, parentAgentDepth: any): any[] {
+  const nodes: any[] = [];
 
   for (const part of message.parts) {
     if (part.type === "tool" && isTaskTool(part.tool)) {
-      const children = part.childSessions.flatMap((child) => collectTocNodes(child, parentAgentDepth));
+      const children = part.childSessions.flatMap((child: any) => collectTocNodes(child, parentAgentDepth));
       nodes.push(makeTocNode(
         anchorId("part", part.id),
         "Task",
@@ -406,8 +412,8 @@ function collectMessageTaskTocNodes(message, parentAgentDepth) {
   return nodes;
 }
 
-function collectTocNodes(tree: SessionTree, userDepth = 0) {
-  const nodes = [];
+function collectTocNodes(tree: SessionTree, userDepth = 0): any[] {
+  const nodes: any[] = [];
   let currentUserNode = null;
 
   for (const message of tree.messages) {
@@ -418,7 +424,7 @@ function collectTocNodes(tree: SessionTree, userDepth = 0) {
 
     const label = tocMessageText(message);
     const agentDepth = userDepth + 1;
-    const taskNodes = collectMessageTaskTocNodes(message, label ? agentDepth : userDepth);
+    const taskNodes: any = collectMessageTaskTocNodes(message, label ? agentDepth : userDepth);
     if (!label) {
       if (taskNodes.length) {
         if (currentUserNode) {
@@ -464,7 +470,7 @@ function collectTocNodes(tree: SessionTree, userDepth = 0) {
   return nodes;
 }
 
-function renderTocNode(node) {
+function renderTocNode(node: any) {
   const children = Array.isArray(node.children) ? node.children : [];
   const normalizedType = String(node.type || "").toLowerCase();
   const typeName = normalizedType === "user"
@@ -531,7 +537,7 @@ function renderFlowPanel(_tree: SessionTree | null, lazyUrl = "") {
   </section>`;
 }
 
-function flowHref(node) {
+function flowHref(node: any) {
   const target = node?.target;
   if (!target?.kind || !target?.id) {
     return "#";
@@ -542,7 +548,7 @@ function flowHref(node) {
   return "#";
 }
 
-function flowNodeDetails(node) {
+function flowNodeDetails(node: any) {
   const metrics = node?.metrics || {};
   const operationalMeta = [
     metrics.duration ? formatMilliseconds(metrics.duration) : "",
@@ -555,7 +561,7 @@ function flowNodeDetails(node) {
   return [isMessage ? "" : node.meta, operationalMeta, status].filter(Boolean).join(" · ");
 }
 
-function renderFlowMapNode(node) {
+function renderFlowMapNode(node: any) {
   const kind = node.kind || "agent";
   const label = compactText(node.label, kind === "user" ? 64 : 48) || kind;
   const details = flowNodeDetails(node);
@@ -590,14 +596,14 @@ function renderFlowMapNode(node) {
   </a>`;
 }
 
-function flowBranchTemplateId(invocation, branch, index) {
+function flowBranchTemplateId(invocation: any, branch: any, index: any) {
   return anchorId("flow-branch", `${invocation.id}-${branch.id}-${index}`);
 }
 
-function renderFlowBranchSummary(invocation, branch, index) {
+function renderFlowBranchSummary(invocation: any, branch: any, index: any) {
   const metrics = branch?.metrics || {};
   const line = Array.isArray(branch?.line) ? branch.line : [];
-  const messageCount = line.filter((node) => node.kind === "user" || node.kind === "agent").length;
+  const messageCount = line.filter((node: any) => node.kind === "user" || node.kind === "agent").length;
   const templateId = flowBranchTemplateId(invocation, branch, index);
   const meta = [
     messageCount ? `${formatCount(messageCount)} messages` : "",
@@ -621,10 +627,10 @@ function renderFlowBranchSummary(invocation, branch, index) {
   </template>`;
 }
 
-function renderFlowInvocationGroup(invocations, returnNodes) {
-  const inferred = invocations.some((node) => node.inferred);
-  const branchCount = invocations.reduce((sum, node) => sum + (Array.isArray(node.branches) ? node.branches.length : 0), 0);
-  const summaries = invocations.flatMap((invocation) => {
+function renderFlowInvocationGroup(invocations: any, returnNodes: any) {
+  const inferred = invocations.some((node: any) => node.inferred);
+  const branchCount = invocations.reduce((sum: any, node: any) => sum + (Array.isArray(node.branches) ? node.branches.length : 0), 0);
+  const summaries = invocations.flatMap((invocation: any) => {
     const branches = Array.isArray(invocation.branches) ? invocation.branches : [];
     if (!branches.length) {
       return [`<div class="flow-branch-summary flow-branch-summary-empty">
@@ -632,14 +638,14 @@ function renderFlowInvocationGroup(invocations, returnNodes) {
         <span class="flow-branch-summary-meta">No child session data</span>
       </div>`];
     }
-    return branches.map((branch, index) => renderFlowBranchSummary(invocation, branch, index));
+    return branches.map((branch: any, index: any) => renderFlowBranchSummary(invocation, branch, index));
   }).join("\n");
   const groupLabel = invocations.length === 1
     ? compactText(invocations[0].label, 44) || "Subagent"
     : `${formatCount(invocations.length)} parallel calls`;
   const returnNode = returnNodes.get(invocations[invocations.length - 1].id);
 
-  return `<div class="flow-map-step flow-map-fork flow-map-fork-collapsed ${inferred ? "flow-map-fork-inferred" : ""}" data-invocation-group="${escapeHtml(invocations.map((node) => node.id).join(","))}" data-invocation-count="${invocations.length}">
+  return `<div class="flow-map-step flow-map-fork flow-map-fork-collapsed ${inferred ? "flow-map-fork-inferred" : ""}" data-invocation-group="${escapeHtml(invocations.map((node: any) => node.id).join(","))}" data-invocation-count="${invocations.length}">
     <div class="flow-fanout-main">
       <div class="flow-fanout-node flow-map-node-invocation">
         <span class="flow-map-node-kind">Subagent</span>
@@ -653,10 +659,10 @@ function renderFlowInvocationGroup(invocations, returnNodes) {
   </div>`;
 }
 
-function renderFlowMapSession(session, depth = 0) {
+function renderFlowMapSession(session: any, depth = 0) {
   const line = Array.isArray(session?.line) ? session.line : [];
   const returnNodes = new Map(
-    line.filter((node) => node.kind === "return").map((node) => [node.invocationId, node])
+    line.filter((node: any) => node.kind === "return").map((node: any) => [node.invocationId, node])
   );
   const rendered = [];
 
@@ -691,7 +697,7 @@ function renderFlowMapSession(session, depth = 0) {
   </section>`;
 }
 
-function renderFlowMapSummary(summary) {
+function renderFlowMapSummary(summary: any) {
   const stats = [
     ["Duration", formatMilliseconds(summary.totalDuration)],
     ["Tools", formatCount(summary.toolCalls)],
@@ -705,18 +711,18 @@ function renderFlowMapSummary(summary) {
   </div>`;
 }
 
-function renderFlowMapOverview(root) {
+function renderFlowMapOverview(root: any) {
   const line = Array.isArray(root?.line) ? root.line : [];
   const marks = line
-    .filter((node) => node.kind !== "return")
-    .map((node) => `<span class="flow-map-overview-mark flow-map-overview-${escapeHtml(node.kind)} ${node.emphasis === "final" ? "flow-map-overview-final" : ""}"></span>`)
+    .filter((node: any) => node.kind !== "return")
+    .map((node: any) => `<span class="flow-map-overview-mark flow-map-overview-${escapeHtml(node.kind)} ${node.emphasis === "final" ? "flow-map-overview-final" : ""}"></span>`)
     .join("");
   return `<div class="flow-map-overview" data-flow-overview aria-label="Flow overview">
     <div class="flow-map-overview-track">${marks}<span class="flow-map-overview-window" data-flow-overview-window></span></div>
   </div>`;
 }
 
-export function renderCanonicalFlowPanelContent(sessionFlow) {
+export function renderCanonicalFlowPanelContent(sessionFlow: any) {
   if (!sessionFlow?.root) {
     return `<div class="flow-panel-header">
       <h2>Conversation Flow</h2>
@@ -750,7 +756,7 @@ export function renderCanonicalFlowPanelContent(sessionFlow) {
   `;
 }
 
-function renderCanonicalFlowPanel(sessionFlow) {
+function renderCanonicalFlowPanel(sessionFlow: any) {
   if (!sessionFlow?.root) {
     return "";
   }
@@ -760,14 +766,14 @@ function renderCanonicalFlowPanel(sessionFlow) {
   </section>`;
 }
 
-function renderSessionMetricsPanel(sessionMetrics) {
+function renderSessionMetricsPanel(sessionMetrics: any) {
   if (!sessionMetrics?.totals) {
     return "";
   }
 
   const totals = sessionMetrics.totals;
   const topTools = Array.isArray(sessionMetrics.tools)
-    ? sessionMetrics.tools.slice(0, 5).map((tool) => `${tool.name} ${tool.count}`).join(" · ")
+    ? sessionMetrics.tools.slice(0, 5).map((tool: any) => `${tool.name} ${tool.count}`).join(" · ")
     : "";
   const tokenPieces = [
     `${formatCount(totals.inputTokens)} in`,
@@ -790,18 +796,18 @@ function renderSessionMetricsPanel(sessionMetrics) {
   </section>`;
 }
 
-function renderReasoningPart(partData) {
+function renderReasoningPart(partData: any) {
   return reasoningBlock(
     partData?.text || "",
     formatDuration(partData?.time?.start, partData?.time?.end)
   );
 }
 
-function renderTurnReasoning(reasoningMarkup) {
+function renderTurnReasoning(reasoningMarkup: any) {
   return reasoningMarkup ? `<div class="turn-reasoning">${reasoningMarkup}</div>` : "";
 }
 
-function renderPart(messageData, partData, partId, reasoningMarkup = "") {
+function renderPart(messageData: any, partData: any, partId: any, reasoningMarkup = "") {
   if (!partData || typeof partData !== "object") {
     return "";
   }
@@ -843,7 +849,7 @@ function renderPart(messageData, partData, partId, reasoningMarkup = "") {
   return "";
 }
 
-function renderPartNode(messageData, part: SessionPartNode, depth = 0, provider = "opencode", reasoningMarkup = "") {
+function renderPartNode(messageData: any, part: SessionPartNode, depth = 0, provider = "opencode", reasoningMarkup = ""): string {
   const isTaskWithSession = part.type === "tool" && isTaskTool(part.tool) && part.childSessions.length > 0;
   const renderedPart = isTaskWithSession ? "" : renderPart(messageData, part.data, part.id, reasoningMarkup);
   const partAnchor = escapeHtml(anchorId("part", part.id));
@@ -855,7 +861,7 @@ function renderPartNode(messageData, part: SessionPartNode, depth = 0, provider 
   // branch container so navigation, export actions, and QA identify every
   // session instead of collapsing several IDs into one visual branch.
   if (isTaskWithSession) {
-    const branches = part.childSessions.map((child, index) => (
+    const branches: any = part.childSessions.map((child, index) => (
       renderSubagentBranch(
         { ...part, childSessions: [child] },
         renderSubagentChildSession(child, provider),
@@ -879,7 +885,7 @@ function renderPartNode(messageData, part: SessionPartNode, depth = 0, provider 
   return `<div id="${partAnchor}" class="session-part-anchor">${renderedPart}${branch}</div>`;
 }
 
-function attachReasoningToRenderedPart(renderedPart, reasoningMarkup) {
+function attachReasoningToRenderedPart(renderedPart: any, reasoningMarkup: any) {
   if (!renderedPart || !reasoningMarkup) {
     return null;
   }
@@ -903,7 +909,7 @@ function attachReasoningToRenderedPart(renderedPart, reasoningMarkup) {
   return null;
 }
 
-function attachPendingReasoning(renderedParts, pendingReasoning) {
+function attachPendingReasoning(renderedParts: any, pendingReasoning: any) {
   if (!pendingReasoning.length) {
     return;
   }
@@ -922,7 +928,7 @@ function attachPendingReasoning(renderedParts, pendingReasoning) {
   pendingReasoning.length = 0;
 }
 
-function renderMessagePartsResult(message, depth = 0, provider = "opencode", initialReasoning = []) {
+function renderMessagePartsResult(message: any, depth = 0, provider = "opencode", initialReasoning: any[] = []): any {
   const renderedParts = [];
   const pendingReasoning = [...initialReasoning];
   let visibleCount = 0;
@@ -938,7 +944,7 @@ function renderMessagePartsResult(message, depth = 0, provider = "opencode", ini
 
     const reasoningMarkup = pendingReasoning.join("\n");
     const isToolPart = part.type === "tool";
-    let rendered = renderPartNode(message.data, part, depth, provider, isToolPart ? "" : reasoningMarkup);
+    let rendered: any = renderPartNode(message.data, part, depth, provider, isToolPart ? "" : reasoningMarkup);
     if (rendered && reasoningMarkup && isToolPart) {
       rendered = `${renderTurnReasoning(reasoningMarkup)}\n${rendered}`;
     } else if (rendered && reasoningMarkup && !rendered.includes(reasoningMarkup) && !(part.type === "text" && !part.data?.text)) {
@@ -962,14 +968,14 @@ function renderMessagePartsResult(message, depth = 0, provider = "opencode", ini
   };
 }
 
-function renderMessageParts(message, depth = 0, provider = "opencode") {
+function renderMessageParts(message: any, depth = 0, provider = "opencode") {
   const result = renderMessagePartsResult(message, depth, provider);
   const renderedParts = result.markup ? [result.markup] : [];
   attachPendingReasoning(renderedParts, result.pendingReasoning);
   return renderedParts.filter(Boolean).join("\n");
 }
 
-function renderSessionTree(tree: SessionTree, depth = 0, provider = "opencode") {
+function renderSessionTree(tree: SessionTree, depth = 0, provider = "opencode"): string {
   const messageBlocks = [];
   let previousCacheUsage = null;
 
@@ -998,11 +1004,11 @@ function renderSessionTree(tree: SessionTree, depth = 0, provider = "opencode") 
 
   const messageMarkup = messageBlocks.filter(Boolean).join("\n");
 
-  const detachedMarkup = tree.detachedChildren
+  const detachedMarkup: any = tree.detachedChildren
     .map((child) => renderSessionTree(child, depth + 1, provider))
     .filter(Boolean)
     .join("\n");
-  const body = [messageMarkup, detachedMarkup].filter(Boolean).join("\n");
+  const body: any = [messageMarkup, detachedMarkup].filter(Boolean).join("\n");
 
   if (depth === 0) {
     return body;
@@ -1016,7 +1022,7 @@ function renderSessionTree(tree: SessionTree, depth = 0, provider = "opencode") 
   </details>`;
 }
 
-function renderRawParts(messageData, parts = []) {
+function renderRawParts(messageData: any, parts: any[] = []) {
   const renderedParts = [];
   const pendingReasoning = [];
 
@@ -1046,7 +1052,7 @@ function renderRawParts(messageData, parts = []) {
   return renderedParts.filter(Boolean).join("\n");
 }
 
-function renderRawMessageGroups(messages, partsByMessage, provider) {
+function renderRawMessageGroups(messages: any, partsByMessage: any, provider: any) {
   const groups = [];
   let previousCacheUsage = null;
 
@@ -1079,7 +1085,7 @@ function renderRawMessageGroups(messages, partsByMessage, provider) {
         id: message.id,
         role,
         data: messageData,
-        parts: parts.map((part) => ({ id: part.id, data: safeParse(part.data), type: safeParse(part.data)?.type }))
+        parts: parts.map((part: any) => ({ id: part.id, data: safeParse(part.data), type: safeParse(part.data)?.type }))
       },
       markup: [renderedParts]
     });
@@ -1090,18 +1096,18 @@ function renderRawMessageGroups(messages, partsByMessage, provider) {
     .join("\n");
 }
 
-function analysisItems(values) {
+function analysisItems(values: any) {
   return Array.isArray(values)
     ? values.filter((value) => typeof value === "string" && value.trim())
     : [];
 }
 
-function analysisList(values) {
+function analysisList(values: any) {
   const items = analysisItems(values);
   return items.length ? items.join(", ") : t("analysis.none");
 }
 
-function renderAnalysisValuePills(values, limit = 4) {
+function renderAnalysisValuePills(values: any, limit = 4) {
   const items = analysisItems(values);
   if (!items.length) {
     return `<span class="analysis-target-pill analysis-target-pill-muted">${t("analysis.none")}</span>`;
@@ -1116,7 +1122,7 @@ function renderAnalysisValuePills(values, limit = 4) {
   return visible.join("");
 }
 
-function renderAnalysisTargetMeta(label, values, limit = 4) {
+function renderAnalysisTargetMeta(label: any, values: any, limit = 4) {
   return `<span class="analysis-target-meta">
     <span class="analysis-target-meta-label">${escapeHtml(label)}</span>
     <span class="analysis-target-pills">${renderAnalysisValuePills(values, limit)}</span>
@@ -1126,7 +1132,7 @@ function renderAnalysisTargetMeta(label, values, limit = 4) {
 const analysisMaterialKinds = ["skills", "prompts", "agents", "rules", "other"];
 const runtimeInventoryKinds = ["skill", "agent", "plugin", "instruction", "command", "hook", "rule", "tool", "extension"];
 
-function analysisMaterialKindLabel(kind) {
+function analysisMaterialKindLabel(kind: any) {
   if (kind === "skills") return t("analysis.inventory_skills");
   if (kind === "prompts") return t("analysis.inventory_prompts");
   if (kind === "agents") return t("analysis.inventory_agents");
@@ -1134,7 +1140,7 @@ function analysisMaterialKindLabel(kind) {
   return t("analysis.inventory_other");
 }
 
-function analysisMaterialKind(value) {
+function analysisMaterialKind(value: any) {
   const key = String(value || "").toLowerCase();
   if (key.includes("skill")) return "skills";
   if (key.includes("prompt")) return "prompts";
@@ -1143,7 +1149,7 @@ function analysisMaterialKind(value) {
   return "other";
 }
 
-function runtimeInventoryKindLabel(kind) {
+function runtimeInventoryKindLabel(kind: any) {
   if (kind === "skill") return t("analysis.inventory_skills");
   if (kind === "agent") return t("analysis.inventory_agents");
   if (kind === "plugin") return t("analysis.inventory_plugins");
@@ -1155,12 +1161,12 @@ function runtimeInventoryKindLabel(kind) {
   return t("analysis.inventory_other");
 }
 
-function runtimeInventoryKind(value) {
+function runtimeInventoryKind(value: any) {
   const kind = String(value || "").toLowerCase();
   return runtimeInventoryKinds.includes(kind) ? kind : "extension";
 }
 
-function renderAnalysisTargetChoice(target, selectedTargets) {
+function renderAnalysisTargetChoice(target: any, selectedTargets: any) {
   const artifacts = target?.artifacts || {};
   const checked = selectedTargets.has(target.id) && target.available;
   const disabled = target.available ? "" : "disabled";
@@ -1170,6 +1176,7 @@ function renderAnalysisTargetChoice(target, selectedTargets) {
       type="checkbox"
       class="analysis-target-checkbox"
       value="${escapeHtml(target.id)}"
+      data-analysis-label="${escapeHtml(target.label || target.id)}"
       ${checked ? "checked" : ""}
       ${disabled}
     >
@@ -1185,7 +1192,7 @@ function renderAnalysisTargetChoice(target, selectedTargets) {
   </label>`;
 }
 
-function runtimeScopeLabel(scope) {
+function runtimeScopeLabel(scope: any) {
   return scope === "project"
     ? t("analysis.project_scope")
     : scope === "user"
@@ -1193,7 +1200,7 @@ function runtimeScopeLabel(scope) {
       : scope || "Runtime";
 }
 
-function renderRuntimeExtensionChoice(extension, selectedRuntimeIds) {
+function renderRuntimeExtensionChoice(extension: any, selectedRuntimeIds: any) {
   const checked = selectedRuntimeIds.has(extension.id) && extension.available;
   const source = extension.source || extension.sourcePath || extension.sourceType || "";
   const kind = runtimeInventoryKind(extension.kind);
@@ -1203,6 +1210,7 @@ function renderRuntimeExtensionChoice(extension, selectedRuntimeIds) {
       type="checkbox"
       class="analysis-runtime-extension-checkbox"
       value="${escapeHtml(extension.id)}"
+      data-analysis-label="${escapeHtml(extension.name || extension.id)}"
       ${checked ? "checked" : ""}
       ${extension.available ? "" : "disabled"}
     >
@@ -1220,19 +1228,19 @@ function renderRuntimeExtensionChoice(extension, selectedRuntimeIds) {
   </label>`;
 }
 
-function runtimeTabDomId(kind) {
+function runtimeTabDomId(kind: any) {
   return `analysis-runtime-tab-${String(kind || "extension").replace(/[^a-z0-9_-]/gi, "-")}`;
 }
 
-function renderAnalysisInventory(targets, selectedTargets, runtimeExtensions, selectedRuntimeIds) {
+function renderAnalysisInventory(targets: any, selectedTargets: any, runtimeExtensions: any, selectedRuntimeIds: any) {
   const targetChoices = targets
     .slice()
-    .sort((a, b) => {
+    .sort((a: any, b: any) => {
       const kindDelta = analysisMaterialKinds.indexOf(analysisMaterialKind(a.id || a.label))
         - analysisMaterialKinds.indexOf(analysisMaterialKind(b.id || b.label));
       return kindDelta || String(a.label || a.id).localeCompare(String(b.label || b.id));
     })
-    .map((target) => renderAnalysisTargetChoice(target, selectedTargets));
+    .map((target: any) => renderAnalysisTargetChoice(target, selectedTargets));
 
   const runtimeGroups = new Map();
   for (const extension of runtimeExtensions) {
@@ -1309,7 +1317,7 @@ function renderAnalysisInventory(targets, selectedTargets, runtimeExtensions, se
   </div>`;
 }
 
-function resolveAnalysisLaunchState(analysisAction) {
+function resolveAnalysisLaunchState(analysisAction: any) {
   const targets = Array.isArray(analysisAction?.targets) ? analysisAction.targets : [];
   const selectedTargets = new Set(
     (Array.isArray(analysisAction?.selectedTargets) && analysisAction.selectedTargets.length
@@ -1325,11 +1333,11 @@ function resolveAnalysisLaunchState(analysisAction) {
     Array.isArray(runtimeEnvironment?.selectedExtensionIds)
       ? runtimeEnvironment.selectedExtensionIds
       : runtimeExtensions
-        .filter((extension) => extension.defaultSelected && extension.available)
-        .map((extension) => extension.id)
+        .filter((extension: any) => extension.defaultSelected && extension.available)
+        .map((extension: any) => extension.id)
   );
-  const selectedTargetCount = targets.filter((target) => selectedTargets.has(target.id) && target.available).length;
-  const selectedRuntimeCount = runtimeExtensions.filter((extension) => selectedRuntimeIds.has(extension.id) && extension.available).length;
+  const selectedTargetCount = targets.filter((target: any) => selectedTargets.has(target.id) && target.available).length;
+  const selectedRuntimeCount = runtimeExtensions.filter((extension: any) => selectedRuntimeIds.has(extension.id) && extension.available).length;
   return {
     runtimeEnvironment,
     runtimeExtensions,
@@ -1341,16 +1349,30 @@ function resolveAnalysisLaunchState(analysisAction) {
   };
 }
 
-function renderAnalysisLaunchButton(analysisAction, session) {
-  const { selectedTargetCount, selectedRuntimeCount } = resolveAnalysisLaunchState(analysisAction);
-  const launchSummary = t("analysis.launch_summary")
-    .replace("{targets}", String(selectedTargetCount))
-    .replace("{runtime}", String(selectedRuntimeCount));
+function renderAnalysisLaunchButton(analysisAction: any, session: any) {
+  const {
+    runtimeExtensions,
+    selectedRuntimeIds,
+    selectedTargetCount,
+    selectedTargets,
+    targets
+  } = resolveAnalysisLaunchState(analysisAction);
   const launchLabel = selectedTargetCount <= 0
     ? t("analysis.launch_select_target")
     : selectedTargetCount === 1
       ? t("analysis.launch_one")
       : t("analysis.launch_many").replace("{targets}", String(selectedTargetCount));
+  const selectedTargetLabels = targets
+    .filter((target: any) => selectedTargets.has(target.id) && target.available)
+    .map((target: any) => target.label || target.id);
+  const selectedRuntimeLabels = runtimeExtensions
+    .filter((extension: any) => selectedRuntimeIds.has(extension.id) && extension.available)
+    .map((extension: any) => extension.name || extension.id);
+  const launchAccessibleLabel = selectedTargetCount <= 0
+    ? launchLabel
+    : t("analysis.launch_action")
+      .replace("{targets}", analysisList(selectedTargetLabels))
+      .replace("{runtime}", String(selectedRuntimeLabels.length));
   return `<button
     type="button"
     class="action-btn action-btn-primary analysis-launch-button"
@@ -1358,13 +1380,13 @@ function renderAnalysisLaunchButton(analysisAction, session) {
     data-id="${escapeHtml(session.id)}"
     data-target="${escapeHtml(analysisAction.target || "skills")}"
     data-unavailable="${analysisAction.available ? "false" : "true"}"
-    title="${escapeHtml(launchSummary)}"
-    aria-label="${escapeHtml(launchSummary)}"
+    title="${escapeHtml(launchAccessibleLabel)}"
+    aria-label="${escapeHtml(launchAccessibleLabel)}"
     ${analysisAction.available ? "" : "disabled"}
   >${escapeHtml(launchLabel)}</button>`;
 }
 
-function renderAnalysisLaunchControl(analysisAction, terminalLaunchAllowed) {
+function renderAnalysisLaunchControl(analysisAction: any, terminalLaunchAllowed: any) {
   if (!analysisAction || !terminalLaunchAllowed) {
     return "";
   }
@@ -1400,7 +1422,7 @@ function renderAnalysisLaunchControl(analysisAction, terminalLaunchAllowed) {
   </details>`;
 }
 
-function renderExportMenu(provider, sessionId) {
+function renderExportMenu(provider: any, sessionId: any) {
   const encodedProvider = encodeURIComponent(provider);
   const encodedSessionId = encodeURIComponent(sessionId);
   return `<details class="action-menu">
@@ -1413,17 +1435,21 @@ function renderExportMenu(provider, sessionId) {
 }
 
 function renderTranscriptSearch() {
-  return `<section class="session-search" data-session-search>
-    <label class="session-search-field" for="session-transcript-search">
-      <span>${t("detail.search_messages")}</span>
-      <input id="session-transcript-search" type="search" autocomplete="off" data-session-search-input placeholder="${t("detail.search_placeholder")}" aria-describedby="session-transcript-search-status">
-    </label>
-    <div class="session-search-navigation">
-      <button class="session-search-nav-btn" type="button" data-session-search-previous disabled>${t("detail.search_previous")}</button>
-      <output id="session-transcript-search-status" class="session-search-status" data-session-search-status aria-live="polite"></output>
-      <button class="session-search-nav-btn" type="button" data-session-search-next disabled>${t("detail.search_next")}</button>
+  return `<details class="session-search" data-session-search>
+    <summary class="action-btn session-search-toggle" data-session-search-toggle>${t("detail.search_messages")}</summary>
+    <div class="session-search-panel">
+      <label class="session-search-field" for="session-transcript-search">
+        <span class="visually-hidden">${t("detail.search_messages")}</span>
+        <input id="session-transcript-search" type="search" autocomplete="off" data-session-search-input placeholder="${t("detail.search_placeholder")}" aria-describedby="session-transcript-search-status">
+      </label>
+      <div class="session-search-navigation">
+        <output id="session-transcript-search-status" class="session-search-status" data-session-search-status aria-live="polite"></output>
+        <button class="session-search-nav-btn" type="button" data-session-search-previous disabled title="${t("detail.search_previous")}" aria-label="${t("detail.search_previous")}">&#8593;</button>
+        <button class="session-search-nav-btn" type="button" data-session-search-next disabled title="${t("detail.search_next")}" aria-label="${t("detail.search_next")}">&#8595;</button>
+        <button class="session-search-nav-btn session-search-close" type="button" data-session-search-close title="${t("detail.search_close")}" aria-label="${t("detail.search_close")}">&#215;</button>
+      </div>
     </div>
-  </section>`;
+  </details>`;
 }
 
 export function renderSessionPage({
@@ -1444,7 +1470,7 @@ export function renderSessionPage({
   analysisRuns = [],
   terminalLaunchAllowed = false,
   flowLazyUrl = ""
-}) {
+}: { session: any; sessionTree?: any; sessionMetrics?: any; sessionFlow?: any; messages?: any[]; partsByMessage?: Map<any, any>; todos?: any[]; recentSessions?: any[]; meta?: any; provider?: string; providers?: any[]; manageable?: boolean; resumeCommand?: any; analysisAction?: any; analysisRuns?: any[]; terminalLaunchAllowed?: boolean; flowLazyUrl?: string }) {
   const title = session.title || session.slug || session.id;
   const starred = meta?.starred ? 1 : 0;
   const managementActions = manageable ? `
@@ -1483,17 +1509,18 @@ export function renderSessionPage({
   const actionShellClass = analysisMaterials
     ? "session-actions-shell analysis-launch-control"
     : "session-actions-shell";
-  const actions = managementActions || resumeActions || resumePreview || analysisButton || analysisMaterials ? `
+  const actions = `
       <div class="${actionShellClass}">
         <div class="session-actions">
           ${managementActions}
           ${resumeActions}
           ${analysisButton}
+          ${renderTranscriptSearch()}
         </div>
         ${resumePreview}
         ${analysisMaterials}
       </div>
-  ` : "";
+  `;
   const header = `
     <header class="session-header">
       <h1>${escapeHtml(title)}</h1>
@@ -1540,7 +1567,6 @@ ${actions}
     ${analysisStatus}
     ${renderSessionMetricsPanel(sessionMetrics)}
     ${todoList(todos)}
-    ${renderTranscriptSearch()}
     <section id="session-messages" class="messages">
       ${messageMarkup || `<p class="empty-state">${t("detail.no_messages")}</p>`}
     </section>

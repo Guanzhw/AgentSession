@@ -10,36 +10,36 @@ import { layout } from "./layout.js";
 
 const builtinTargets = BUILTIN_ANALYSIS_TARGETS;
 
-function asObject(value) {
+function asObject(value: any) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
-function stringList(value, fallback = []) {
+function stringList(value: any, fallback: any[] = []) {
   return Array.isArray(value) ? value.filter((item) => typeof item === "string") : fallback;
 }
 
-function checked(value) {
+function checked(value: any) {
   return value ? "checked" : "";
 }
 
-function extractModel(args) {
+function extractModel(args: any) {
   const index = args.indexOf("--model");
   return index >= 0 && typeof args[index + 1] === "string" ? args[index + 1] : "";
 }
 
-function withoutModelArgs(args) {
+function withoutModelArgs(args: any) {
   const index = args.indexOf("--model");
   if (index < 0) return args;
   return [...args.slice(0, index), ...args.slice(index + 2)];
 }
 
-function resetButton(reset) {
+function resetButton(reset: any) {
   return reset
     ? `<button type="button" class="settings-reset-btn" data-reset-setting="${escapeHtml(reset)}">${t("settings.reset_default")}</button>`
     : "";
 }
 
-function field({ id, label, value = "", help = "", type = "text", placeholder = "", reset = "" }) {
+function field({ id, label, value = "", help = "", type = "text", placeholder = "", reset = "" }: { id: string; label: string; value?: string; help?: string; type?: string; placeholder?: string; reset?: string }) {
   return `
     <div class="settings-field">
       <div class="settings-field-heading">
@@ -52,7 +52,7 @@ function field({ id, label, value = "", help = "", type = "text", placeholder = 
   `;
 }
 
-function selectField({ id, label, options = [], help = "", reset = "" }) {
+function selectField({ id, label, options = [], help = "", reset = "" }: { id: string; label: string; options?: { value: string; selected?: boolean; label: string }[]; help?: string; reset?: string }) {
   return `
     <div class="settings-field">
       <div class="settings-field-heading">
@@ -71,7 +71,7 @@ function selectField({ id, label, options = [], help = "", reset = "" }) {
   `;
 }
 
-function textareaField({ id, label, values = [], help = "", placeholder = "", reset = "" }) {
+function textareaField({ id, label, values = [], help = "", placeholder = "", reset = "" }: { id: string; label: string; values?: string[]; help?: string; placeholder?: string; reset?: string }) {
   return `
     <div class="settings-field">
       <div class="settings-field-heading">
@@ -84,7 +84,7 @@ function textareaField({ id, label, values = [], help = "", placeholder = "", re
   `;
 }
 
-function switchField({ id, label, description, enabled, reset = "" }) {
+function switchField({ id, label, description, enabled, reset = "" }: { id: string; label: string; description: string; enabled: boolean; reset?: string }) {
   return `
     <div class="settings-switch-row">
       <label class="settings-switch" for="${id}">
@@ -100,7 +100,7 @@ function switchField({ id, label, description, enabled, reset = "" }) {
   `;
 }
 
-function artifactValues(values) {
+function artifactValues(values: any) {
   const entries = stringList(values);
   return entries.length
     ? entries.map((value) => `<code>${escapeHtml(value)}</code>`).join("")
@@ -118,18 +118,18 @@ export function renderSettingsPage({
   providers = [],
   providerAvailable = true,
   manageable = false
-}) {
+}: { configPath: string; configDocument: { config?: any; error?: string; raw?: any }; terminalLaunchAllowed?: boolean; provider?: string; providerName?: string; resumeDefault?: any; analysisDefaultCommand?: any; providers?: any[]; providerAvailable?: boolean; manageable?: boolean }) {
   const config = asObject(configDocument.config);
   const analysis = asObject(config.analysis);
   const sharedDefaultTargetId = Array.isArray(analysis.defaultTargets) && analysis.defaultTargets.length
-    ? analysis.defaultTargets.find((id) => typeof id === "string" && id)
+    ? analysis.defaultTargets.find((id: any) => typeof id === "string" && id)
     : typeof analysis.defaultTarget === "string" && analysis.defaultTarget
       ? analysis.defaultTarget
       : "skills";
   const analysisProviders = asObject(analysis.providers);
   const analysisProvider = asObject(analysisProviders[provider]);
   const defaultTargetId = Array.isArray(analysisProvider.defaultTargets) && analysisProvider.defaultTargets.length
-    ? analysisProvider.defaultTargets.find((id) => typeof id === "string" && id)
+    ? analysisProvider.defaultTargets.find((id: any) => typeof id === "string" && id)
     : typeof analysisProvider.defaultTarget === "string" && analysisProvider.defaultTarget
       ? analysisProvider.defaultTarget
       : sharedDefaultTargetId;
@@ -144,7 +144,7 @@ export function renderSettingsPage({
     targetId
   ])];
   const targetOptions = targetIds.map((id) => {
-    const builtin = builtinTargets[id];
+    const builtin = (builtinTargets as Record<string, any>)[id];
     const effective = getProviderAnalysisTarget(analysis, provider, id);
     const label = typeof effective.label === "string" && effective.label
       ? effective.label

@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { Message, ProviderAdapter } from "./providers/interface.js";
+import { asNumber } from "./providers/shared/parser.js";
 import { buildMessageSessionViews } from "./providers/shared/message-session.js";
 
 type Row = Record<string, any>;
@@ -34,11 +35,6 @@ function asObject(value: unknown): Row {
   return value && typeof value === "object" ? value as Row : {};
 }
 
-function asNumber(value: unknown) {
-  const amount = Number(value);
-  return Number.isFinite(amount) ? amount : 0;
-}
-
 function compact(value: unknown, limit = 500) {
   if (value == null) {
     return "";
@@ -69,8 +65,8 @@ export function makeEvidenceId(
 
 function messagePreview(message: Row) {
   const text = (message.parts || [])
-    .filter((part) => part?.partType === "text" && part?.data?.text)
-    .map((part) => part.data.text)
+    .filter((part: any) => part?.partType === "text" && part?.data?.text)
+    .map((part: any) => part.data.text)
     .join("\n");
   return compact(text || message.title || message.data?.summary || `${message.role || "unknown"} message`);
 }

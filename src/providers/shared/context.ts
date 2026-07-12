@@ -1,5 +1,5 @@
 import { getMessages, getParts, getSession, getTodos } from "../../db.js";
-import { parseJson } from "./parser.js";
+import { asNumber, parseJson } from "./parser.js";
 
 type Row = Record<string, any>;
 
@@ -51,11 +51,6 @@ export interface ContextDiff {
 
 function asObject(value: unknown): Row {
   return value && typeof value === "object" ? value as Row : {};
-}
-
-function asNumber(value: unknown) {
-  const amount = Number(value);
-  return Number.isFinite(amount) ? amount : 0;
 }
 
 function compact(value: unknown, limit = 260) {
@@ -161,7 +156,7 @@ function classifyCheckpoint(index: number, snapshotId: string | null, previousSn
 
 export function buildSessionContext(
   sessionId: string,
-  dbPath = undefined,
+  dbPath: string | undefined = undefined,
   providerName = "session provider"
 ): SessionContextView {
   const session = getSession(sessionId, dbPath);

@@ -77,8 +77,10 @@ export const en = {
   "detail.search_placeholder": "Search messages and tools",
   "detail.search_previous": "Previous",
   "detail.search_next": "Next",
-  "detail.search_results": "{current} of {total} matching turns",
+  "detail.search_close": "Close conversation search",
+  "detail.search_results": "{current} / {total} turns · {occurrences} hits",
   "detail.search_no_results": "No matching turns",
+  "detail.search_indexing": "Indexing conversation…",
 
   // Session actions
   "action.starred": "★ Starred",
@@ -131,6 +133,10 @@ export const en = {
   "analysis.launch_many": "Analyze {targets} targets",
   "analysis.launch_running": "Analysis running",
   "analysis.launch_summary": "Targets {targets} · Runtime {runtime}",
+  "analysis.launch_action": "Launch analysis for {targets}; runtime extensions: {runtime}",
+  "analysis.launch_confirm_title": "Launch session analysis?",
+  "analysis.launch_confirm": "Launch the external analyzer once per selected target ({count} total): {targets}. Runtime extensions: {runtime}. Each run snapshots the selected materials and session evidence, then writes proposal-only outputs.",
+  "analysis.launch_confirm_button": "Launch analyzer",
   "analysis.implementation_title": "Implementation",
   "analysis.implementation_launch": "Implement accepted proposals",
   "analysis.implementation_ready": "Validated proposals are ready for user-approved implementation.",
@@ -237,6 +243,7 @@ export const en = {
   "stats.peak_day": "Peak Day",
   "stats.token_trend": "Token Usage Trend",
   "stats.model_distribution": "Model Distribution",
+  "stats.provider": "Provider",
   "stats.daily_sessions": "Daily Sessions",
 
   // Tool calls

@@ -81,11 +81,11 @@ export const BUILTIN_ANALYSIS_TARGETS = {
   }
 };
 
-export function getBuiltinAnalysisTarget(targetId) {
-  return BUILTIN_ANALYSIS_TARGETS[targetId] || null;
+export function getBuiltinAnalysisTarget(targetId: any) {
+  return (BUILTIN_ANALYSIS_TARGETS as Record<string, any>)[targetId] || null;
 }
 
-export function mergeAnalysisTarget(base, override) {
+export function mergeAnalysisTarget(base: any, override: any) {
   const left = base && typeof base === "object" ? base : {};
   const right = override && typeof override === "object" ? override : {};
   const defaultRoots = Array.isArray(left.artifactRoots)
@@ -116,7 +116,7 @@ export function mergeAnalysisTarget(base, override) {
   };
 }
 
-export function getSharedAnalysisTarget(analysisConfig, targetId) {
+export function getSharedAnalysisTarget(analysisConfig: any, targetId: any) {
   const defaults = getBuiltinAnalysisTarget(targetId) || {
     ...DEFAULT_ANALYSIS_TARGET,
     label: `Analyze ${targetId}`
@@ -124,7 +124,7 @@ export function getSharedAnalysisTarget(analysisConfig, targetId) {
   return mergeAnalysisTarget(defaults, analysisConfig?.targets?.[targetId]);
 }
 
-export function getProviderAnalysisTarget(analysisConfig, providerId, targetId) {
+export function getProviderAnalysisTarget(analysisConfig: any, providerId: any, targetId: any) {
   return mergeAnalysisTarget(
     getSharedAnalysisTarget(analysisConfig, targetId),
     analysisConfig?.providers?.[providerId]?.targets?.[targetId]

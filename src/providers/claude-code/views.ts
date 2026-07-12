@@ -1,7 +1,12 @@
 import { readFileSync, statSync } from "node:fs";
 import type { Message, RawSession, RuntimeEnvironmentView, RuntimeExtensionReference, TokenUsage } from "../interface.js";
+import { asNumber } from "../shared/parser.js";
 import { buildFlowTreeFromContainer } from "../shared/flow-tree.js";
 import { buildMessageSessionViews } from "../shared/message-session.js";
+import {
+  buildLinkedMessageSessionViews,
+  type MessageSessionBundle
+} from "../shared/linked-message-session.js";
 import type { SessionMetricsView } from "../shared/session-metrics.js";
 import type { SessionTree } from "../shared/session-tree.js";
 
@@ -49,11 +54,6 @@ export interface ClaudeCodeTraceStep {
 }
 
 const MAX_TRACE_STEPS = 200;
-
-function asNumber(value: unknown) {
-  const amount = Number(value);
-  return Number.isFinite(amount) ? amount : 0;
-}
 
 function asTime(value: unknown, fallback = 0) {
   if (typeof value === "string" && value) {
@@ -112,7 +112,8 @@ function readText(filePath: string | null, fallback: unknown = "") {
   }
   try {
     return readFileSync(filePath, "utf-8");
-  } catch {
+  } catch (err) {
+    console.warn("Failed to read file:", filePath, err);
     return compact(fallback);
   }
 }
@@ -123,7 +124,8 @@ function sourceTime(sourcePath: string | null, fallback = 0) {
   }
   try {
     return statSync(sourcePath).mtimeMs;
-  } catch {
+  } catch (err) {
+    console.warn("Failed to stat file:", sourcePath, err);
     return asNumber(fallback);
   }
 }
@@ -433,9 +435,8 @@ function stepsToMetrics(steps: ClaudeCodeTraceStep[]): SessionMetricsView["steps
   });
 }
 
-export function buildClaudeCodeSessionViews(session: RawSession | Row, messages: Message[]) {
-  const base = buildMessageSessionViews(session, messages);
-  const trace = buildClaudeCodeTraceFromTree(String(session.id), base.tree);
+function enrichClaudeCodeSessionViews(base: any) {
+  const trace = buildClaudeCodeTraceFromTree(String(base.tree.session.id), base.tree);
   const metrics: SessionMetricsView = {
     ...base.metrics,
     totals: {
@@ -451,4 +452,13 @@ export function buildClaudeCodeSessionViews(session: RawSession | Row, messages:
     flow: buildFlowTreeFromContainer(base.container, metrics),
     trace
   };
+}
+
+export function buildClaudeCodeSessionViews(session: RawSession | Row, messages: Message[]) {
+  return enrichClaudeCodeSessionViews(buildMessageSessionViews(session, messages));
+}
+
+export function buildLinkedClaudeCodeSessionViews(sessionId: string, bundles: MessageSessionBundle[]) {
+  const base = buildLinkedMessageSessionViews(sessionId, bundles);
+  return base ? enrichClaudeCodeSessionViews(base) : null;
 }

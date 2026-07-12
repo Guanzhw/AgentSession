@@ -203,6 +203,34 @@ if [[ "$detail_session_id_count" != "1" ]]; then
   exit 1
 fi
 
+ab "open transcript search" click "[data-session-search-toggle]" >/dev/null
+ab "search transcript" fill "[data-session-search-input]" "tool" >/dev/null
+ab "wait for transcript search results" wait --fn "document.querySelector('[data-session-search-status]')?.textContent.includes('hits')" >/dev/null
+transcript_search_feedback="$(read_ab "verify transcript search feedback" eval "(() => document.querySelectorAll('mark[data-session-search-highlight]').length > 0 && document.querySelectorAll('.session-search-current').length === 1 && /[0-9]+ \/ [0-9]+ turns · [0-9]+ hits/.test(document.querySelector('[data-session-search-status]')?.textContent || ''))()")"
+if [[ "$transcript_search_feedback" != "true" ]]; then
+  echo "Transcript search should show word highlights, one current turn, and explicit turn/hit counts" >&2
+  exit 1
+fi
+read_ab "remember transcript search scroll" eval "window.__qaTranscriptSearchScrollY = window.scrollY; true" >/dev/null
+ab "close transcript search" click "[data-session-search-close]" >/dev/null
+transcript_search_close_state="$(read_ab "verify transcript search close position" eval "!document.querySelector('[data-session-search]').open && Math.abs(window.scrollY - window.__qaTranscriptSearchScrollY) < 2")"
+if [[ "$transcript_search_close_state" != "true" ]]; then
+  echo "Closing transcript search should preserve the current result scroll position" >&2
+  exit 1
+fi
+echo "[qa] agent-browser: reopen transcript search with shortcut" >&2
+MSYS2_ARG_CONV_EXCL='*' "$NPX_CMD" --yes agent-browser --session "$SESSION_NAME" press / >/dev/null
+# A browser-side wait here can wedge the Windows agent-browser transport after
+# a synthetic key press. Let the native details/focus events settle briefly,
+# then keep the same strict state assertion below.
+sleep 0.25
+transcript_search_shortcut_state="$(read_ab "verify transcript search shortcut" eval "document.querySelector('[data-session-search]').open && document.activeElement === document.querySelector('[data-session-search-input]')")"
+if [[ "$transcript_search_shortcut_state" != "true" ]]; then
+  echo "The slash shortcut should open transcript search and focus its input" >&2
+  exit 1
+fi
+ab "close transcript search after shortcut" press Escape >/dev/null
+
 resume_preview_count="$(read_ab "count resume command previews" get count ".resume-command-preview")"
 resume_copy_count="$(read_ab "count resume command copy buttons" get count ".resume-command-preview [data-action='copy-resume-command']")"
 resume_launch_count="$(read_ab "count terminal launch buttons" get count ".session-actions [data-action='resume-session']")"

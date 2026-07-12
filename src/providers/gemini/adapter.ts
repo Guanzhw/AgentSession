@@ -5,6 +5,14 @@ import { parseSession, extractMeta, dataToMessages } from "./parser.js";
 import { icons } from "../../icons.js";
 import type { ProviderAdapter } from "../interface.js";
 import { buildGeminiRuntimeEnvironment } from "./runtime-environment.js";
+import { buildMessageSessionViews } from "../shared/message-session.js";
+import {
+  createSessionFileStore,
+  createStructuredViewCache,
+  createStructuredViewMethods,
+  buildTokenStats,
+  type TokenFieldMapping
+} from "../shared/file-adapter-helpers.js";
 
 function getGeminiDir() {
   return getConfig().geminiDir;
@@ -25,15 +33,57 @@ function discoverSessionFiles() {
       try {
         for (const entry of readdirSync(chatsDir)) {
           if (entry.endsWith(".json")) {
-            files.push({ filePath: path.join(chatsDir, entry) });
+            files.push({
+              sessionId: entry.replace(/\.json$/, ""),
+              filePath: path.join(chatsDir, entry)
+            });
           }
         }
-      } catch { /* skip */ }
+      } catch (err) { console.warn("Skipping unreadable chat directory:", chatsDir, err); /* skip */ }
     }
-  } catch { /* skip */ }
+  } catch (err) { console.warn("Skipping unreadable project directory:", tmpDir, err); /* skip */ }
 
   return files;
 }
+
+const sessionFiles = createSessionFileStore({
+  discoverFiles: discoverSessionFiles,
+  readEntry: (entry) => {
+    const records = parseSession(entry.filePath);
+    const session = extractMeta(records);
+    if (!session.id) {
+      throw new Error("Gemini session file has no canonical sessionId");
+    }
+    return {
+      records,
+      session,
+      messages: dataToMessages(records, session.id)
+    };
+  },
+  onError: (filePath, error) => {
+    console.warn("Skipping unparseable Gemini session file:", filePath, error);
+  }
+});
+
+function generateGeminiViews(sessionId: string) {
+  const entry = sessionFiles.get(sessionId);
+  return entry
+    ? buildMessageSessionViews(entry.session, entry.messages)
+    : null;
+}
+
+const getGeminiViews = createStructuredViewCache(generateGeminiViews);
+
+const geminiTokenMapping: TokenFieldMapping = {
+  filterRecord: (m) => m.type === "gemini" && !!m.tokenUsage,
+  getTimestamp: (m) => m.timestamp ? new Date(m.timestamp).getTime() : 0,
+  inputTokens: (m) => m.tokenUsage.input || 0,
+  outputTokens: (m) => m.tokenUsage.output || 0,
+  totalTokens: (m) => m.tokenUsage.total || 0,
+  reasoningTokens: (m) => m.tokenUsage.thoughts || 0,
+  cacheReadTokens: (m) => m.tokenUsage.cached || 0,
+  cacheWriteTokens: () => 0,
+};
 
 const gemini = {
   id: "gemini",
@@ -42,6 +92,10 @@ const gemini = {
   resumeCommand: {
     executable: "gemini",
     args: ["--resume", "{sessionId}"]
+  },
+  capabilities: {
+    localManagement: true,
+    structuredSessionViews: true
   },
 
   detect() {
@@ -53,100 +107,61 @@ const gemini = {
   },
 
   async *scan() {
-    for (const { filePath } of discoverSessionFiles()) {
-      try {
-        const data = parseSession(filePath);
-        if (!data.sessionId) continue;
-        yield extractMeta(data);
-      } catch { /* skip */ }
+    for (const entry of sessionFiles.list()) {
+      yield entry.session;
     }
   },
 
   getSession(sessionId) {
-    for (const { filePath } of discoverSessionFiles()) {
-      try {
-        const data = parseSession(filePath);
-        if (data.sessionId === sessionId) return extractMeta(data);
-      } catch { /* skip */ }
-    }
-    return null;
+    return sessionFiles.get(sessionId)?.session || null;
   },
 
   getRuntimeEnvironment(sessionId) {
-    const session = this.getSession(sessionId);
+    const session = sessionFiles.get(sessionId)?.session;
     return session?.directory
-      ? buildGeminiRuntimeEnvironment(sessionId, session.directory, getGeminiDir())
+      ? buildGeminiRuntimeEnvironment(session.id, session.directory as string, getGeminiDir())
       : null;
   },
 
   getMessages(sessionId) {
-    for (const { filePath } of discoverSessionFiles()) {
-      try {
-        const data = parseSession(filePath);
-        if (data.sessionId === sessionId) return dataToMessages(data, sessionId);
-      } catch { /* skip */ }
-    }
-    return [];
+    return sessionFiles.get(sessionId)?.messages || [];
   },
 
+  ...createStructuredViewMethods(getGeminiViews),
+
   getTokenStats(days = 30) {
-    const today = new Date();
-    today.setUTCHours(0, 0, 0, 0);
-    const cutoff = today.getTime() - (Math.max(1, days) - 1) * 86400000;
-    const dailyMap = new Map();
-    for (const { filePath } of discoverSessionFiles()) {
-      try {
-        const data = parseSession(filePath);
-        for (const m of data.messages || []) {
-          if (m.type !== "gemini" || !m.tokenUsage) continue;
-          const ts = m.timestamp ? new Date(m.timestamp).getTime() : 0;
-          if (ts < cutoff) continue;
-          const day = new Date(ts).toISOString().slice(0, 10);
-          const existing = dailyMap.get(day) || {
-            day, inputTokens: 0, outputTokens: 0, totalTokens: 0, messageCount: 0,
-            reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0
-          };
-          existing.inputTokens += m.tokenUsage.input || 0;
-          existing.outputTokens += m.tokenUsage.output || 0;
-          existing.totalTokens += m.tokenUsage.total || 0;
-          existing.reasoningTokens += m.tokenUsage.thoughts || 0;
-          existing.cacheReadTokens += m.tokenUsage.cached || 0;
-          existing.messageCount += 1;
-          dailyMap.set(day, existing);
-        }
-      } catch { /* skip */ }
-    }
-    return [...dailyMap.values()].sort((a, b) => a.day.localeCompare(b.day));
+    return buildTokenStats(
+      () => sessionFiles.list(),
+      (filePath) => sessionFiles.getByFilePath(filePath)?.records || { messages: [] },
+      geminiTokenMapping,
+      days
+    );
   },
 
   searchMessages(query, limit = 20) {
     const term = (query || "").toLowerCase();
     if (!term) return [];
     const results = [];
-    for (const { filePath } of discoverSessionFiles()) {
+    for (const entry of sessionFiles.list()) {
       if (results.length >= limit) break;
-      try {
-        const data = parseSession(filePath);
-        for (const m of data.messages || []) {
-          if (results.length >= limit) break;
-          const text = m.text || "";
-          if (text.toLowerCase().includes(term)) {
-            const idx = text.toLowerCase().indexOf(term);
-            results.push({
-              sessionId: data.sessionId,
-              messageId: m.id || "",
-              role: m.type === "user" ? "user" : "assistant",
-              snippet: text.slice(Math.max(0, idx - 40), idx + term.length + 80),
-              timestamp: m.timestamp ? new Date(m.timestamp).getTime() : 0
-            });
-          }
+      for (const m of entry.records.messages || []) {
+        if (results.length >= limit) break;
+        const text = m.text || "";
+        if (text.toLowerCase().includes(term)) {
+          const idx = text.toLowerCase().indexOf(term);
+          results.push({
+            sessionId: entry.session.id,
+            messageId: m.id || "",
+            role: (m.type === "user" ? "user" : "assistant") as import("../interface.js").MessageRole,
+            snippet: text.slice(Math.max(0, idx - 40), idx + term.length + 80),
+            timestamp: m.timestamp ? new Date(m.timestamp).getTime() : 0
+          });
         }
-      } catch { /* skip */ }
+      }
     }
     return results;
   },
 
-  exportSession(_sessionId) { return null; }
 } satisfies ProviderAdapter;
 
 export default gemini;

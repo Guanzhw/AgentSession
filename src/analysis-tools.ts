@@ -157,8 +157,8 @@ function artifactInventory(run: ReturnType<typeof loadRun>) {
   return readJson(assertRegularFileInside(run.runDir, run.files.artifactsPath));
 }
 
-function readArtifactSnapshot(run, inventory, args, toolName) {
-  const artifact = (inventory.files || []).find((entry) => (
+function readArtifactSnapshot(run: any, inventory: any, args: any, toolName: any) {
+  const artifact = (inventory.files || []).find((entry: any) => (
     (args.artifactId && entry.artifactId === args.artifactId)
     || (args.snapshotPath && entry.snapshotPath === args.snapshotPath)
     || (args.relativePath && entry.relativePath === args.relativePath)
@@ -350,7 +350,7 @@ function createSessionAccess(
           && ["task", "subtask"].includes(String(entry.toolName || "").toLowerCase())
         ))
         .map(timelineEntry);
-      const session = run.sessionIndex.sessions.find((item) => item.sessionId === sessionId) || null;
+      const session = run.sessionIndex.sessions.find((item: any) => item.sessionId === sessionId) || null;
       const systemPrompts = entries
         .filter((entry) => entry.sessionId === sessionId && entry.kind === "system-prompt")
         .map(timelineEntry);
@@ -367,7 +367,7 @@ function createSessionAccess(
     listSessions(args: Row = {}) {
       const hasParentFilter = Object.prototype.hasOwnProperty.call(args, "parentSessionId");
       const sessions = (run.sessionIndex.sessions || [])
-        .filter((session) => !hasParentFilter || session.parentSessionId === args.parentSessionId);
+        .filter((session: any) => !hasParentFilter || session.parentSessionId === args.parentSessionId);
       return paginate(sessions, args) as any;
     },
 
@@ -436,7 +436,7 @@ function createSessionAccess(
           detector: "explicit-error-reason"
         }));
       const rankedSessions = run.sessionIndex.sessions
-        .map((session) => ({
+        .map((session: any) => ({
           sessionId: session.sessionId,
           evidenceId: session.evidenceId,
           title: session.title,
@@ -445,16 +445,16 @@ function createSessionAccess(
           errors: Number(session.direct?.errors) || 0,
           errorRate: Number(session.direct?.errorRate) || 0
         }))
-        .filter((session) => args.includeRoot === true || session.parentSessionId)
-        .filter((session) => session.toolCalls >= minToolCalls)
-        .sort((left, right) => right.errorRate - left.errorRate || right.errors - left.errors);
+        .filter((session: any) => args.includeRoot === true || session.parentSessionId)
+        .filter((session: any) => session.toolCalls >= minToolCalls)
+        .sort((left: any, right: any) => right.errorRate - left.errorRate || right.errors - left.errors);
       return {
         interruptions,
         highErrorRate: {
           heuristic: true,
           threshold,
           minToolCalls,
-          flagged: rankedSessions.filter((session) => session.errorRate >= threshold),
+          flagged: rankedSessions.filter((session: any) => session.errorRate >= threshold),
           rankedSessions
         }
       };
@@ -564,14 +564,14 @@ function createRuntimeExtensionAccess(run: ReturnType<typeof loadRun>): Analysis
         return readArtifactSnapshot(run, inventory, args, "extension_get");
       }
       const extension = (inventory.runtimeEnvironment.extensions || [])
-        .find((entry) => entry.id === args.extensionId);
+        .find((entry: any) => entry.id === args.extensionId);
       if (!extension) {
         throw new Error("extension_get requires a selected extensionId");
       }
       return {
         extension,
         artifacts: (inventory.files || [])
-          .filter((artifact) => (artifact.runtimeExtensionIds || []).includes(extension.id))
+          .filter((artifact: any) => (artifact.runtimeExtensionIds || []).includes(extension.id))
       };
     }
   };

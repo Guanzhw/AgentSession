@@ -41,7 +41,8 @@ function usablePath(sourcePath: string | null) {
       return null;
     }
     return realpathSync(sourcePath);
-  } catch {
+  } catch (err) {
+    console.warn("Failed to stat source path:", sourcePath, err);
     return null;
   }
 }
@@ -63,7 +64,8 @@ export function runtimeInstructionFiles({
       if (!resolvedPath) return false;
       try {
         return lstatSync(resolvedPath).isFile();
-      } catch {
+      } catch (err) {
+        console.warn("Failed to stat resolved path:", resolvedPath, err);
         return false;
       }
     })
@@ -123,7 +125,8 @@ function visibleEntries(root: string) {
     return readdirSync(root, { withFileTypes: true })
       .filter((entry) => !entry.isSymbolicLink() && !SKIPPED_DIRECTORIES.has(entry.name))
       .sort((left, right) => left.name.localeCompare(right.name));
-  } catch {
+  } catch (err) {
+    console.warn("Failed to read directory entries:", root, err);
     return [];
   }
 }
@@ -206,6 +209,9 @@ export function projectDirectories(directory: string) {
 }
 
 export function readJsonLike(filePath: string) {
+  if (!existsSync(filePath)) {
+    return null;
+  }
   try {
     return JSON.parse(
       readFileSync(filePath, "utf-8")
@@ -213,7 +219,8 @@ export function readJsonLike(filePath: string) {
         .replace(/^\s*\/\/.*$/gm, "")
         .replace(/,\s*([}\]])/g, "$1")
     );
-  } catch {
+  } catch (err) {
+    console.warn("Failed to parse JSON-like file:", filePath, err);
     return null;
   }
 }

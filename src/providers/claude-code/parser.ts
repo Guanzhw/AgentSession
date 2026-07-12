@@ -1,12 +1,8 @@
 import { readFileSync } from "node:fs";
 import type { Message, RawSession } from "../interface.js";
+import { asNumber } from "../shared/parser.js";
 
-function asNumber(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : 0;
-}
-
-function usageToTokens(usage) {
+function usageToTokens(usage: any) {
   if (!usage || typeof usage !== "object") {
     return null;
   }
@@ -25,21 +21,21 @@ function usageToTokens(usage) {
   };
 }
 
-function contentBlocks(content) {
+function contentBlocks(content: any) {
   if (typeof content === "string") {
     return [{ type: "text", text: content }];
   }
   return Array.isArray(content) ? content : [];
 }
 
-function textFromContent(content) {
+function textFromContent(content: any) {
   return contentBlocks(content)
     .filter((block) => block?.type === "text")
     .map((block) => block.text || "")
     .join("");
 }
 
-function titleFromRecords(records) {
+function titleFromRecords(records: any) {
   const custom = [...records].reverse().find((record) => (
     (record.type === "custom-title" || record.type === "custom_title") && record.customTitle
   ));
@@ -52,7 +48,7 @@ function titleFromRecords(records) {
     return String(summary.summary).slice(0, 160);
   }
 
-  const firstUser = records.find((record) => record.type === "user");
+  const firstUser = records.find((record: any) => record.type === "user");
   const firstText = textFromContent(firstUser?.message?.content ?? firstUser?.content).trim();
   return firstText ? firstText.slice(0, 120) : null;
 }
@@ -62,7 +58,7 @@ function titleFromRecords(records) {
  * @param {string} filePath - Absolute path to .jsonl file
  * @returns {object[]} Parsed records
  */
-export function parseTranscript(filePath) {
+export function parseTranscript(filePath: any, options: { strict?: boolean } = {}) {
   const content = readFileSync(filePath, "utf-8");
   const records = [];
   for (const line of content.split("\n")) {
@@ -70,7 +66,11 @@ export function parseTranscript(filePath) {
     if (!trimmed) continue;
     try {
       records.push(JSON.parse(trimmed));
-    } catch {
+    } catch (err) {
+      if (options.strict) {
+        throw new Error(`Malformed Claude transcript line in ${filePath}`, { cause: err });
+      }
+      console.warn("Skipping malformed JSON line in:", filePath, err);
       // Skip malformed lines
     }
   }
@@ -83,12 +83,17 @@ export function parseTranscript(filePath) {
  * @param {string} sessionId
  * @returns {import('../interface.js').RawSession}
  */
-export function extractSessionMeta(records, sessionId): RawSession {
+export function extractSessionMeta(records: any, sessionId: any): RawSession {
   let timeCreated = 0;
   let timeUpdated = 0;
   let totalTokens = 0;
   let directory = null;
   let previousAssistantUsage = "";
+  const sidechainRecord = records.find((record: any) => record.isSidechain);
+  const canonicalId = sidechainRecord?.agentId || sessionId.replace(/^agent-/, "");
+  const parentId = sidechainRecord?.isSidechain && sidechainRecord.sessionId !== canonicalId
+    ? sidechainRecord.sessionId || null
+    : null;
 
   for (const r of records) {
     const ts = r.timestamp ? new Date(r.timestamp).getTime() : 0;
@@ -109,18 +114,22 @@ export function extractSessionMeta(records, sessionId): RawSession {
       previousAssistantUsage = "";
     }
   }
-  const messageCount = recordsToMessages(records, sessionId).length;
+  const messageCount = recordsToMessages(records, canonicalId).length;
 
   return {
-    id: sessionId,
+    id: canonicalId,
     provider: "claude-code",
-    parentId: null,
-    title: titleFromRecords(records),
+    parentId,
+    title: sidechainRecord?.agentId || titleFromRecords(records),
     directory,
     timeCreated,
     timeUpdated,
     messageCount,
-    tokenCount: totalTokens || null
+    tokenCount: totalTokens || null,
+    metadata: sidechainRecord ? {
+      agentId: sidechainRecord.agentId || canonicalId,
+      aliases: [sidechainRecord.agentId, sessionId].filter(Boolean)
+    } : null
   };
 }
 
@@ -130,7 +139,7 @@ export function extractSessionMeta(records, sessionId): RawSession {
  * @param {string} sessionId
  * @returns {import('../interface.js').Message[]}
  */
-export function recordsToMessages(records, sessionId): Message[] {
+export function recordsToMessages(records: any, sessionId: any): Message[] {
   const messages = [];
   let msgIndex = 0;
   let pendingThinking = [];
@@ -181,6 +190,7 @@ export function recordsToMessages(records, sessionId): Message[] {
 
     if (r.type === "assistant") {
       const blocks = contentBlocks(r.message?.content ?? r.content);
+      const turnId = r.message?.id || r.uuid || `assistant-${msgIndex}`;
       const tokens = usageToTokens(r.message?.usage ?? r.usage);
       const usageKey = JSON.stringify(tokens);
       if (usageKey !== assistantUsageKey) {
@@ -207,7 +217,8 @@ export function recordsToMessages(records, sessionId): Message[] {
             tokens: assistantTokens,
             metadata: {
               model: r.message?.model || null,
-              stopReason: r.message?.stop_reason || null
+              stopReason: r.message?.stop_reason || null,
+              turnId
             }
           });
           pendingThinking = [];
@@ -226,7 +237,7 @@ export function recordsToMessages(records, sessionId): Message[] {
             toolOutput: null, // output comes from tool_result records
             timestamp: ts,
             tokens: assistantTokens,
-            metadata: { model: r.message?.model || null }
+            metadata: { model: r.message?.model || null, turnId, callId: block.id || null }
           });
           pendingThinking = [];
           assistantTokens = null;
@@ -252,7 +263,10 @@ export function recordsToMessages(records, sessionId): Message[] {
         toolOutput: rawContent,
         timestamp: ts,
         tokens: null,
-        metadata: { isError: r.is_error || false }
+        metadata: {
+          isError: r.is_error || false,
+          toolUseId: r.tool_use_id || r.toolUseId || null
+        }
       });
     }
     if (r.type === "tool_use") {
@@ -267,10 +281,13 @@ export function recordsToMessages(records, sessionId): Message[] {
         toolOutput: null,
         timestamp: ts,
         tokens: null,
-        metadata: null
+        metadata: {
+          turnId: r.message?.id || r.parentUuid || r.uuid || `tool-${msgIndex}`,
+          callId: r.tool_use_id || r.id || null
+        }
       });
     }
   }
 
-  return messages;
+  return messages as Message[];
 }

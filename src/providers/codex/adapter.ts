@@ -1,11 +1,25 @@
 import { existsSync, readdirSync, lstatSync } from "node:fs";
 import path from "node:path";
 import { getConfig } from "../../config.js";
-import { parseSession, extractMeta, recordsToMessages } from "./parser.js";
+import {
+  parseSession,
+  extractCodexSessionId,
+  extractMeta,
+  recordsToMessages,
+  resolveCodexInheritedContext,
+  countCodexRenderedMessages
+} from "./parser.js";
 import { icons } from "../../icons.js";
-import type { ProviderAdapter } from "../interface.js";
-import { buildMessageSessionViews } from "../shared/message-session.js";
+import type { Message, ProviderAdapter, RawSession } from "../interface.js";
+import { buildLinkedMessageSessionViews } from "../shared/linked-message-session.js";
 import { buildCodexRuntimeEnvironment } from "./runtime-environment.js";
+import {
+  createStructuredViewCache,
+  createStructuredViewMethods,
+  createSessionFileStore,
+  buildTokenStats,
+  type TokenFieldMapping
+} from "../shared/file-adapter-helpers.js";
 
 function getCodexDir() {
   return getConfig().codexDir;
@@ -14,10 +28,10 @@ function getCodexDir() {
 function discoverSessionFiles() {
   const sessionsDir = path.join(getCodexDir(), "sessions");
   if (!existsSync(sessionsDir)) return [];
-  const files = [];
+  const files: any[] = [];
   const visited = new Set();
 
-  function walk(dir) {
+  function walk(dir: any) {
     try {
       const dirStat = lstatSync(dir);
       if (dirStat.isSymbolicLink()) return;
@@ -32,17 +46,78 @@ function discoverSessionFiles() {
           if (stat.isSymbolicLink()) continue;
           if (stat.isDirectory()) walk(full);
           else if (entry.endsWith(".jsonl")) {
-            const sessionId = entry.replace(/\.jsonl$/, "").replace(/^rollout-/, "");
+            const stem = entry.replace(/\.jsonl$/, "").replace(/^rollout-/, "");
+            const canonicalSuffix = stem.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+            const sessionId = canonicalSuffix?.[0] || stem;
             files.push({ sessionId, filePath: full });
           }
-        } catch { /* skip */ }
+        } catch (err) { console.warn("Skipping unreadable directory entry:", full, err); /* skip */ }
       }
-    } catch { /* skip */ }
+    } catch (err) { console.warn("Skipping unreadable directory:", dir, err); /* skip */ }
   }
 
   walk(sessionsDir);
   return files;
 }
+
+const sessionFiles = createSessionFileStore({
+  discoverFiles: discoverSessionFiles,
+  readEntry(entry) {
+    const records = parseSession(entry.filePath);
+    const canonicalId = extractCodexSessionId(records, entry.sessionId);
+    const messages = recordsToMessages(records, canonicalId);
+    const session = extractMeta(records, entry.sessionId, messages);
+    return {
+      records,
+      session,
+      messages
+    };
+  },
+  onError(filePath, err) {
+    console.warn("Skipping unparseable Codex session file:", filePath, err);
+  }
+});
+
+function resolveEntry(entry: { session: RawSession; messages: Message[] }) {
+  const parent = entry.session.parentId
+    ? sessionFiles.get(String(entry.session.parentId))
+    : null;
+  const resolved = resolveCodexInheritedContext(entry.messages, parent?.messages || []);
+  const inheritedContext = entry.session.metadata?.inheritedContext;
+  const session = {
+    ...entry.session,
+    messageCount: countCodexRenderedMessages(resolved.messages),
+    metadata: inheritedContext ? {
+      ...entry.session.metadata,
+      inheritedContext: {
+        ...inheritedContext,
+        excludedUserMessages: resolved.excludedUserMessages
+      }
+    } : entry.session.metadata
+  };
+  return { session, messages: resolved.messages };
+}
+
+function generateCodexViews(sessionId: string) {
+  const root = sessionFiles.get(sessionId);
+  if (!root) return null;
+  const canonicalId = String(root.session.id);
+  const bundles = sessionFiles.getFamily(canonicalId).map(resolveEntry);
+  return buildLinkedMessageSessionViews(canonicalId, bundles);
+}
+
+const getCodexViews = createStructuredViewCache(generateCodexViews);
+
+const codexTokenMapping: TokenFieldMapping = {
+  filterRecord: (r) => r.type === "event_msg" && r.payload?.type === "token_count",
+  getTimestamp: (r) => r.timestamp ? new Date(r.timestamp).getTime() : 0,
+  inputTokens: (r) => (r.payload.info?.last_token_usage || {}).input_tokens || 0,
+  outputTokens: (r) => (r.payload.info?.last_token_usage || {}).output_tokens || 0,
+  totalTokens: (r) => (r.payload.info?.last_token_usage || {}).total_tokens || 0,
+  reasoningTokens: (r) => (r.payload.info?.last_token_usage || {}).reasoning_output_tokens || 0,
+  cacheReadTokens: (r) => (r.payload.info?.last_token_usage || {}).cached_input_tokens || 0,
+  cacheWriteTokens: () => 0,
+};
 
 const codex = {
   id: "codex",
@@ -53,6 +128,7 @@ const codex = {
     args: ["resume", "{sessionId}"]
   },
   capabilities: {
+    localManagement: true,
     structuredSessionViews: true
   },
 
@@ -65,132 +141,65 @@ const codex = {
   },
 
   async *scan() {
-    for (const { sessionId, filePath } of discoverSessionFiles()) {
-      try {
-        const records = parseSession(filePath);
-        if (records.length === 0) continue;
-        yield extractMeta(records, sessionId);
-      } catch { /* skip */ }
+    for (const entry of sessionFiles.list()) {
+      if (entry.records.length) yield resolveEntry(entry).session;
     }
   },
 
   getSession(sessionId) {
-    for (const entry of discoverSessionFiles()) {
-      try {
-        const session = extractMeta(parseSession(entry.filePath), entry.sessionId);
-        if (session.id === sessionId || entry.sessionId === sessionId) {
-          return session;
-        }
-      } catch { /* skip */ }
-    }
-    return null;
+    const entry = sessionFiles.get(sessionId);
+    return entry ? resolveEntry(entry).session : null;
   },
 
   getRuntimeEnvironment(sessionId) {
     const session = this.getSession(sessionId);
     return session?.directory
-      ? buildCodexRuntimeEnvironment(sessionId, session.directory, getCodexDir())
+      ? buildCodexRuntimeEnvironment(sessionId, session.directory as string, getCodexDir())
       : null;
   },
 
   getMessages(sessionId) {
-    for (const entry of discoverSessionFiles()) {
-      try {
-        const records = parseSession(entry.filePath);
-        const session = extractMeta(records, entry.sessionId);
-        if (session.id === sessionId || entry.sessionId === sessionId) {
-          return recordsToMessages(records, session.id);
-        }
-      } catch { /* skip */ }
-    }
-    return [];
+    const entry = sessionFiles.get(sessionId);
+    return entry ? resolveEntry(entry).messages : [];
   },
 
-  getSessionTree(sessionId) {
-    return getStructuredViews(sessionId)?.tree || null;
-  },
-
-  getSessionContainer(sessionId) {
-    return getStructuredViews(sessionId)?.container || null;
-  },
-
-  getSessionMetrics(sessionId) {
-    return getStructuredViews(sessionId)?.metrics || null;
-  },
-
-  getSessionFlow(sessionId) {
-    return getStructuredViews(sessionId)?.flow || null;
-  },
+  ...createStructuredViewMethods(getCodexViews),
 
   getTokenStats(days = 30) {
-    const today = new Date();
-    today.setUTCHours(0, 0, 0, 0);
-    const cutoff = today.getTime() - (Math.max(1, days) - 1) * 86400000;
-    const dailyMap = new Map();
-    for (const { filePath } of discoverSessionFiles()) {
-      try {
-        for (const r of parseSession(filePath)) {
-          if (r.type !== "event_msg" || r.payload?.type !== "token_count") continue;
-          const ts = r.timestamp ? new Date(r.timestamp).getTime() : 0;
-          if (ts < cutoff) continue;
-          const day = new Date(ts).toISOString().slice(0, 10);
-          const usage = r.payload.info?.last_token_usage || {};
-          const existing = dailyMap.get(day) || {
-            day, inputTokens: 0, outputTokens: 0, totalTokens: 0, messageCount: 0,
-            reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0
-          };
-          existing.inputTokens += usage.input_tokens || 0;
-          existing.outputTokens += usage.output_tokens || 0;
-          existing.totalTokens += usage.total_tokens || 0;
-          existing.reasoningTokens += usage.reasoning_output_tokens || 0;
-          existing.cacheReadTokens += usage.cached_input_tokens || 0;
-          existing.messageCount += 1;
-          dailyMap.set(day, existing);
-        }
-      } catch { /* skip */ }
-    }
-    return [...dailyMap.values()].sort((a, b) => a.day.localeCompare(b.day));
+    return buildTokenStats(
+      () => sessionFiles.list(),
+      (filePath) => sessionFiles.getByFilePath(filePath)?.records || [],
+      codexTokenMapping,
+      days
+    );
   },
 
   searchMessages(query, limit = 20) {
     const term = (query || "").toLowerCase();
     if (!term) return [];
     const results = [];
-    for (const { sessionId: fallbackId, filePath } of discoverSessionFiles()) {
+    for (const entry of sessionFiles.list()) {
       if (results.length >= limit) break;
-      try {
-        const records = parseSession(filePath);
-        const sessionId = extractMeta(records, fallbackId).id;
-        for (const r of records) {
-          if (results.length >= limit) break;
-          let text = "";
-          if (r.type === "event_msg" && r.payload?.type === "user_message") text = r.payload.message || "";
-          if (r.type === "response_item" && r.payload?.role === "assistant") {
-            text = (r.payload.content || []).flatMap((c) => c.content || [c]).filter((c) => c.type === "text").map((c) => c.text).join("");
-          }
-          if (text.toLowerCase().includes(term)) {
-            const idx = text.toLowerCase().indexOf(term);
-            results.push({
-              sessionId,
-              messageId: "",
-              role: r.type === "event_msg" ? "user" : "assistant",
-              snippet: text.slice(Math.max(0, idx - 40), idx + term.length + 80),
-              timestamp: r.timestamp ? new Date(r.timestamp).getTime() : 0
-            });
-          }
+      const { session, messages } = resolveEntry(entry);
+      for (const message of messages) {
+        if (results.length >= limit) break;
+        if (!["user", "assistant"].includes(message.role)) continue;
+        const text = message.content || "";
+        if (text.toLowerCase().includes(term)) {
+          const idx = text.toLowerCase().indexOf(term);
+          results.push({
+            sessionId: session.id,
+            messageId: message.id,
+            role: message.role,
+            snippet: text.slice(Math.max(0, idx - 40), idx + term.length + 80),
+            timestamp: message.timestamp
+          });
         }
-      } catch { /* skip */ }
+      }
     }
     return results;
   },
 
-  exportSession(_sessionId) { return null; }
 } satisfies ProviderAdapter;
-
-function getStructuredViews(sessionId) {
-  const session = codex.getSession(sessionId);
-  if (!session) return null;
-  return buildMessageSessionViews(session, codex.getMessages(sessionId));
-}
 
 export default codex;

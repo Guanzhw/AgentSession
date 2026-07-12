@@ -2,26 +2,26 @@ import { escapeHtml } from "../markdown.js";
 import { layout } from "./layout.js";
 import { t } from "../i18n.js";
 
-function formatNumber(n) {
+function formatNumber(n: any) {
   if (n >= 1000000) return (n / 1000000).toFixed(2) + 'M';
   if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
   return n.toLocaleString();
 }
 
-function formatExact(n) {
+function formatExact(n: any) {
   return (Number(n) || 0).toLocaleString();
 }
 
-function renderLineChart(data, width = 600, height = 200) {
+function renderLineChart(data: any, width = 600, height = 200) {
   if (!data || data.length === 0) return '<svg width="600" height="200"><text x="300" y="100" text-anchor="middle" fill="var(--text-secondary)">No data</text></svg>';
 
   const padding = { top: 20, right: 20, bottom: 30, left: 50 };
   const innerWidth = width - padding.left - padding.right;
   const innerHeight = height - padding.top - padding.bottom;
 
-  const maxTokens = Math.max(...data.map(d => d.total_tokens || 0), 1);
+  const maxTokens = Math.max(...data.map((d: any) => d.total_tokens || 0), 1);
 
-  const points = data.map((d, i) => {
+  const points = data.map((d: any, i: any) => {
     const x = padding.left + (i / Math.max(data.length - 1, 1)) * innerWidth;
     const y = padding.top + innerHeight - ((d.total_tokens || 0) / maxTokens) * innerHeight;
     return `${x},${y}`;
@@ -60,13 +60,13 @@ function renderLineChart(data, width = 600, height = 200) {
       ${gridLines}
       <path d="${areaData}" fill="url(#gradient-line)" />
       <path d="${pathData}" fill="none" stroke="var(--accent-color)" stroke-width="2" />
-      ${points.map(p => `<circle cx="${p.split(',')[0]}" cy="${p.split(',')[1]}" r="3" fill="var(--accent-color)" />`).join('')}
+      ${points.map((p: any) => `<circle cx="${p.split(',')[0]}" cy="${p.split(',')[1]}" r="3" fill="var(--accent-color)" />`).join('')}
       ${xLabels}
     </svg>
   `;
 }
 
-function renderPieChart(data, width = 300, height = 300) {
+function renderPieChart(data: any, width = 300, height = 300) {
   if (!data || data.length === 0) return '<svg width="300" height="300"><text x="150" y="150" text-anchor="middle" fill="var(--text-secondary)">No data</text></svg>';
 
   const colors = ["#6366f1", "#8b5cf6", "#ec4899", "#f59e0b", "#10b981", "#3b82f6", "#ef4444", "#14b8a6"];
@@ -74,14 +74,14 @@ function renderPieChart(data, width = 300, height = 300) {
   const cy = height / 2;
   const radius = Math.min(cx, cy) - 20;
 
-  const total = data.reduce((sum, d) => sum + (d.count || 0), 0);
+  const total = data.reduce((sum: any, d: any) => sum + (d.count || 0), 0);
   if (total === 0) return '<svg width="300" height="300"><text x="150" y="150" text-anchor="middle" fill="var(--text-secondary)">No data</text></svg>';
 
   let currentAngle = 0;
   let paths = '';
   let legend = '';
 
-  data.forEach((d, i) => {
+  data.forEach((d: any, i: any) => {
     const sliceAngle = ((d.count || 0) / total) * 2 * Math.PI;
     const x1 = cx + radius * Math.cos(currentAngle);
     const y1 = cy + radius * Math.sin(currentAngle);
@@ -97,7 +97,9 @@ function renderPieChart(data, width = 300, height = 300) {
     }
 
     const pct = ((d.count / total) * 100).toFixed(1);
-    legend += `<div class="legend-item"><span class="legend-color" style="background:${color}"></span><span class="legend-label">${escapeHtml(d.model || "unknown")} — ${formatNumber(d.count)} (${pct}%)</span></div>`;
+    const model = d.model || "unknown";
+    const provider = d.provider || "unknown";
+    legend += `<div class="legend-item"><span class="legend-color" style="background:${color}"></span><span class="legend-label">${escapeHtml(model)} · ${escapeHtml(t("stats.provider"))}: ${escapeHtml(provider)} — ${formatNumber(d.count)} (${pct}%)</span></div>`;
     currentAngle += sliceAngle;
   });
 
@@ -109,14 +111,14 @@ function renderPieChart(data, width = 300, height = 300) {
   `;
 }
 
-function renderBarChart(data, width = 600, height = 200) {
+function renderBarChart(data: any, width = 600, height = 200) {
   if (!data || data.length === 0) return '<svg width="600" height="200"><text x="300" y="100" text-anchor="middle" fill="var(--text-secondary)">No data</text></svg>';
 
   const padding = { top: 20, right: 20, bottom: 30, left: 50 };
   const innerWidth = width - padding.left - padding.right;
   const innerHeight = height - padding.top - padding.bottom;
 
-  const maxCount = Math.max(...data.map(d => d.count || 0), 1);
+  const maxCount = Math.max(...data.map((d: any) => d.count || 0), 1);
   const barWidth = Math.max(4, (innerWidth / data.length) - 2);
 
   let gridLines = '';
@@ -127,7 +129,7 @@ function renderBarChart(data, width = 600, height = 200) {
     gridLines += `<text x="${padding.left - 5}" y="${y + 4}" text-anchor="end" font-size="10" fill="var(--text-secondary)">${Math.round(val)}</text>`;
   }
 
-  const bars = data.map((d, i) => {
+  const bars = data.map((d: any, i: any) => {
     const x = padding.left + (i / data.length) * innerWidth + 1;
     const barHeight = ((d.count || 0) / maxCount) * innerHeight;
     const y = padding.top + innerHeight - barHeight;
@@ -150,19 +152,19 @@ function renderBarChart(data, width = 600, height = 200) {
   `;
 }
 
-export function renderStatsPage(data) {
+export function renderStatsPage(data: any) {
   const { tokenStats, modelDistribution, dailySessions, overview, provider, providers } = data;
   const totalSessions = overview?.totalSessions ?? 0;
   const totalMessages = overview?.totalMessages ?? 0;
   const totalTokens = tokenStats && tokenStats.length > 0
-    ? tokenStats.reduce((s, d) => s + (d.total_tokens || 0), 0)
+    ? tokenStats.reduce((s: any, d: any) => s + (d.total_tokens || 0), 0)
     : 0;
   const tokenBreakdown = {
-    input: tokenStats.reduce((sum, row) => sum + (Number(row.input_tokens) || 0), 0),
-    output: tokenStats.reduce((sum, row) => sum + (Number(row.output_tokens) || 0), 0),
-    reasoning: tokenStats.reduce((sum, row) => sum + (Number(row.reasoning_tokens) || 0), 0),
-    cacheRead: tokenStats.reduce((sum, row) => sum + (Number(row.cache_read_tokens) || 0), 0),
-    cacheWrite: tokenStats.reduce((sum, row) => sum + (Number(row.cache_write_tokens) || 0), 0)
+    input: tokenStats.reduce((sum: any, row: any) => sum + (Number(row.input_tokens) || 0), 0),
+    output: tokenStats.reduce((sum: any, row: any) => sum + (Number(row.output_tokens) || 0), 0),
+    reasoning: tokenStats.reduce((sum: any, row: any) => sum + (Number(row.reasoning_tokens) || 0), 0),
+    cacheRead: tokenStats.reduce((sum: any, row: any) => sum + (Number(row.cache_read_tokens) || 0), 0),
+    cacheWrite: tokenStats.reduce((sum: any, row: any) => sum + (Number(row.cache_write_tokens) || 0), 0)
   };
 
   // Find peak day

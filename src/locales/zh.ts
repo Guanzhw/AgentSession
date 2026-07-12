@@ -77,8 +77,10 @@ export const zh = {
   "detail.search_placeholder": "搜索消息和工具调用",
   "detail.search_previous": "上一个",
   "detail.search_next": "下一个",
-  "detail.search_results": "第 {current} / {total} 个匹配回合",
+  "detail.search_close": "关闭会话搜索",
+  "detail.search_results": "第 {current} / {total} 个回合 · {occurrences} 处命中",
   "detail.search_no_results": "没有匹配的会话回合",
+  "detail.search_indexing": "正在索引会话…",
 
   // Session actions
   "action.starred": "★ 已收藏",
@@ -131,6 +133,10 @@ export const zh = {
   "analysis.launch_many": "分析 {targets} 个目标",
   "analysis.launch_running": "分析运行中",
   "analysis.launch_summary": "目标 {targets} · 运行时 {runtime}",
+  "analysis.launch_action": "为 {targets} 启动分析；运行时扩展：{runtime} 个",
+  "analysis.launch_confirm_title": "启动会话分析？",
+  "analysis.launch_confirm": "将为每个所选目标各启动一次外部 Analyzer（共 {count} 次）：{targets}。运行时扩展：{runtime}。每个运行会快照所选材料和会话证据，然后写入仅供提案的输出。",
+  "analysis.launch_confirm_button": "启动 Analyzer",
   "analysis.implementation_title": "实现",
   "analysis.implementation_launch": "实现已接受的提案",
   "analysis.implementation_ready": "已校验的提案可由用户确认后启动实现。",
@@ -237,6 +243,7 @@ export const zh = {
   "stats.peak_day": "峰值日",
   "stats.token_trend": "Token 消耗趋势",
   "stats.model_distribution": "模型使用分布",
+  "stats.provider": "提供方",
   "stats.daily_sessions": "每日会话数",
 
   // Tool calls

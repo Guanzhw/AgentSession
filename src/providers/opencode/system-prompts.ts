@@ -2,7 +2,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { getDb } from "../../db.js";
-import { parseJson } from "./parser.js";
+import { asNumber, parseJson } from "./parser.js";
 
 type Row = Record<string, any>;
 type JsonObject = Record<string, any>;
@@ -48,11 +48,6 @@ interface AgentPrompt {
   disabled?: boolean;
 }
 
-function asNumber(value: unknown) {
-  const amount = Number(value);
-  return Number.isFinite(amount) ? amount : 0;
-}
-
 function compact(value: unknown, limit = 420) {
   if (value == null || value === "") {
     return "";
@@ -81,7 +76,7 @@ function item(kind: SystemPromptItem["kind"], title: string, preview: unknown, s
   };
 }
 
-function firstTextPart(messageId: string, dbPath = undefined) {
+function firstTextPart(messageId: string, dbPath: string | undefined = undefined) {
   const db = getDb(dbPath);
   const row = db.prepare(`
     SELECT data
@@ -100,25 +95,37 @@ function section(title: string, note: string, items: SystemPromptItem[]): System
 }
 
 function existsFile(file: string) {
+  if (!fs.existsSync(file)) {
+    return false;
+  }
   try {
     return fs.statSync(file).isFile();
-  } catch {
+  } catch (err) {
+    console.warn("Failed to stat file:", file, err);
     return false;
   }
 }
 
 function existsDir(dir: string) {
+  if (!fs.existsSync(dir)) {
+    return false;
+  }
   try {
     return fs.statSync(dir).isDirectory();
-  } catch {
+  } catch (err) {
+    console.warn("Failed to stat dir:", dir, err);
     return false;
   }
 }
 
 function readText(file: string) {
+  if (!fs.existsSync(file)) {
+    return "";
+  }
   try {
     return fs.readFileSync(file, "utf8");
-  } catch {
+  } catch (err) {
+    console.warn("Failed to read file:", file, err);
     return "";
   }
 }
@@ -210,7 +217,8 @@ function stripJsonComments(input: string) {
 function parseJsonc(text: string) {
   try {
     return JSON.parse(stripJsonComments(text).replace(/,\s*([}\]])/g, "$1")) as JsonObject;
-  } catch {
+  } catch (err) {
+    console.warn("Failed to parse JSONC:", err);
     return null;
   }
 }
@@ -494,7 +502,7 @@ function resolveOpenCodePromptSources(session: Row | undefined, project: Row | u
   };
 }
 
-export function buildOpenCodeSystemPrompts(sessionId: string, dbPath = undefined): SystemPromptsView {
+export function buildOpenCodeSystemPrompts(sessionId: string, dbPath: string | undefined = undefined): SystemPromptsView {
   const db = getDb(dbPath);
   const session = db.prepare(`SELECT * FROM session WHERE id = ?`).get(sessionId) as Row | undefined;
   const firstUser = db.prepare(`

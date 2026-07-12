@@ -2,6 +2,7 @@ import { escapeHtml } from "../markdown.js";
 import { layout } from "./layout.js";
 import { sessionCard } from "./components.js";
 import { t } from "../i18n.js";
+import { projectFilterValue } from "../project-filter.js";
 
 export function renderSessionsPage({
   sessions = [],
@@ -23,7 +24,7 @@ export function renderSessionsPage({
   providerAvailable = true,
   manageable = false,
   providers = []
-} = {}) {
+}: { sessions?: any[]; total?: number; limit?: number; offset?: number; query?: string; note?: string; range?: string; project?: string; sort?: string; starredOnly?: boolean; sessionKind?: string; projectOptions?: { id: string; label: string; count?: number; worktree?: string }[]; searchMode?: string; totalMessages?: number; deletedCount?: number; provider?: string; providerAvailable?: boolean; manageable?: boolean; providers?: any[] } = {}) {
   const isAvailable = providerAvailable !== false;
   const isManageableProvider = isAvailable && manageable;
   const hasVisibleSessions = sessions.length > 0;
@@ -38,7 +39,7 @@ export function renderSessionsPage({
 
   const searchNote = note ? `<p class="search-note">${escapeHtml(note)}</p>` : "";
 
-  const shortProjectLabel = (value) => {
+  const shortProjectLabel = (value: any) => {
     const text = String(value || "");
     const parts = text.split(/[\\/]/).filter(Boolean);
     return parts.at(-1) || text || t("filter.unknown_project");
@@ -71,8 +72,9 @@ export function renderSessionsPage({
   const projectSelectOptions = [
     `<option value="">${t("filter.all_projects")}</option>`,
     ...projectOptions.map((item) => {
+      const optionValue = projectFilterValue(item.id);
       const label = `${shortProjectLabel(item.label)} (${Number(item.count) || 0})`;
-      return `<option value="${escapeHtml(item.id)}" ${String(item.id) === String(project) ? "selected" : ""} title="${escapeHtml(item.worktree || item.label || "")}">${escapeHtml(label)}</option>`;
+      return `<option value="${escapeHtml(optionValue)}" ${optionValue === String(project) ? "selected" : ""} title="${escapeHtml(item.worktree || item.label || "")}">${escapeHtml(label)}</option>`;
     })
   ].join("");
   const filterBar = isAvailable ? `<form class="session-filter" action="/${provider}" method="GET">

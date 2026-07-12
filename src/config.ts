@@ -9,7 +9,7 @@ import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
  * @param {string} [fallback]
  * @returns {string}
  */
-function probePaths(candidates, fallback) {
+function probePaths(candidates: any, fallback: any) {
   for (const p of candidates) {
     if (p && existsSync(p)) return p;
   }
@@ -93,7 +93,7 @@ const defaults = {
   allowTerminalLaunch: true,
 };
 
-function isObject(value) {
+function isObject(value: any) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
@@ -117,7 +117,7 @@ const LEGACY_ANALYSIS_MATERIALS = {
   }
 };
 
-function sameStringArray(left, right) {
+function sameStringArray(left: any, right: any) {
   return Array.isArray(left)
     && left.length === right.length
     && left.every((value, index) => value === right[index]);
@@ -126,25 +126,25 @@ function sameStringArray(left, right) {
 const DEFAULT_ANALYSIS_OUTPUT_DIR = ".codeagentsession/analysis";
 const LEGACY_DEFAULT_ANALYSIS_OUTPUT_DIR = ".opensessionviewer/analysis";
 
-function migrateLegacyTargetMaterials(targetId, target) {
+function migrateLegacyTargetMaterials(targetId: any, target: any) {
   if (!isObject(target)) return;
-  const legacy = LEGACY_ANALYSIS_MATERIALS[targetId];
+  const legacy = (LEGACY_ANALYSIS_MATERIALS as Record<string, any>)[targetId];
   if (!legacy) return;
   const legacyRootsMatched = legacy.roots?.some(
-    (roots) => sameStringArray(target.artifactRoots, roots)
+    (roots: any) => sameStringArray(target.artifactRoots, roots)
   );
   if (legacyRootsMatched) {
     delete target.artifactRoots;
   }
   if (
     legacyRootsMatched
-    && legacy.files?.some((files) => sameStringArray(target.artifactFiles, files))
+    && legacy.files?.some((files: any) => sameStringArray(target.artifactFiles, files))
   ) {
     delete target.artifactFiles;
   }
 }
 
-function migrateLegacyAnalysisMaterials(config) {
+function migrateLegacyAnalysisMaterials(config: any) {
   const analysis = isObject(config.analysis) ? config.analysis : null;
   if (!analysis) return config;
   const outputDir = typeof analysis.outputDir === "string"
@@ -174,7 +174,7 @@ function migrateLegacyAnalysisMaterials(config) {
   return config;
 }
 
-export function readUserConfigDocument(configPath) {
+export function readUserConfigDocument(configPath: any) {
   if (!configPath || !existsSync(configPath)) {
     return {
       exists: false,
@@ -202,7 +202,7 @@ export function readUserConfigDocument(configPath) {
       config: migrateLegacyAnalysisMaterials(parsed),
       error: ""
     };
-  } catch (error) {
+  } catch (error: any) {
     return {
       exists: true,
       raw,
@@ -212,7 +212,7 @@ export function readUserConfigDocument(configPath) {
   }
 }
 
-export function readUserConfig(configPath) {
+export function readUserConfig(configPath: any) {
   const document = readUserConfigDocument(configPath);
   if (document.error) {
     console.warn(`Ignoring invalid OpenSessionViewer config at ${configPath}: ${document.error}`);
@@ -220,13 +220,13 @@ export function readUserConfig(configPath) {
   return document.config;
 }
 
-function validateStringArray(value, field, errors) {
+function validateStringArray(value: any, field: any, errors: any) {
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
     errors.push(`${field} must be an array of strings.`);
   }
 }
 
-function validateShell(value, field, errors) {
+function validateShell(value: any, field: any, errors: any) {
   if (!isObject(value)) {
     errors.push(`${field} must be an object.`);
     return;
@@ -239,7 +239,7 @@ function validateShell(value, field, errors) {
   }
 }
 
-function validateCommand(value, field, errors) {
+function validateCommand(value: any, field: any, errors: any) {
   if (!isObject(value)) {
     errors.push(`${field} must be an object.`);
     return;
@@ -247,7 +247,7 @@ function validateCommand(value, field, errors) {
   if (typeof value.executable !== "string" || !value.executable.trim()) {
     errors.push(`${field}.executable must be a non-empty string.`);
   }
-  if (!Array.isArray(value.args) || value.args.some((item) => typeof item !== "string")) {
+  if (!Array.isArray(value.args) || value.args.some((item: any) => typeof item !== "string")) {
     errors.push(`${field}.args must be an array of strings.`);
   }
   if (value.cwd !== undefined && typeof value.cwd !== "string") {
@@ -258,7 +258,7 @@ function validateCommand(value, field, errors) {
   }
 }
 
-function validateAnalysisTargets(value, field, errors) {
+function validateAnalysisTargets(value: any, field: any, errors: any) {
   if (!isObject(value)) {
     errors.push(`${field} must be an object.`);
     return;
@@ -300,8 +300,8 @@ function validateAnalysisTargets(value, field, errors) {
   }
 }
 
-export function validateUserConfig(config) {
-  const errors = [];
+export function validateUserConfig(config: any) {
+  const errors: any[] = [];
   if (!isObject(config)) {
     return ["Configuration root must be a JSON object."];
   }
@@ -435,7 +435,7 @@ export function validateUserConfig(config) {
   return errors;
 }
 
-export function writeUserConfig(configPath, config) {
+export function writeUserConfig(configPath: any, config: any) {
   const errors = validateUserConfig(config);
   if (errors.length) {
     const error: any = new Error("Invalid OpenSessionViewer configuration.");
@@ -447,7 +447,7 @@ export function writeUserConfig(configPath, config) {
   writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf-8");
 }
 
-export function applyRuntimeUserConfig(config, fileConfig) {
+export function applyRuntimeUserConfig(config: any, fileConfig: any) {
   migrateLegacyAnalysisMaterials(fileConfig);
   config.resumeCommands = isObject(fileConfig.resumeCommands) ? fileConfig.resumeCommands : {};
   config.resumeShell = isObject(fileConfig.resumeShell) ? fileConfig.resumeShell : null;
@@ -538,7 +538,7 @@ Options:
     config.dbPath = process.env.SESSION_VIEWER_DB_PATH;
   }
   if (process.env.OPENSESSIONVIEWER_META_PATH || process.env.OH_MY_OPENSESSION_META_PATH) {
-    config.metaDir = path.dirname(process.env.OPENSESSIONVIEWER_META_PATH || process.env.OH_MY_OPENSESSION_META_PATH);
+    config.metaDir = path.dirname(process.env.OPENSESSIONVIEWER_META_PATH || process.env.OH_MY_OPENSESSION_META_PATH || "");
   }
 
   config.metaPath = path.join(config.metaDir, "meta.db");
@@ -549,7 +549,7 @@ Options:
   return config;
 }
 
-let _config;
+let _config: any;
 
 export function getConfig() {
   if (!_config) _config = parseArgs();

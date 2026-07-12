@@ -7,6 +7,6 @@ export type {
   SessionContainer
 } from "../shared/session-container.js";
 
-export function buildOpenCodeSessionContainer(sessionId: string, dbPath = undefined) {
+export function buildOpenCodeSessionContainer(sessionId: string, dbPath: string | undefined = undefined) {
   return buildSessionContainer(sessionId, dbPath, buildOpenCodeSessionTree);
 }

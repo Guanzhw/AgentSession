@@ -1,3 +1,4 @@
+import { asNumber } from "../shared/parser.js";
 import {
   buildSessionTree,
   type SessionMessageNode,
@@ -7,11 +8,6 @@ import {
 } from "../shared/session-tree.js";
 
 type Row = Record<string, any>;
-
-function asNumber(value: unknown) {
-  const amount = Number(value);
-  return Number.isFinite(amount) ? amount : 0;
-}
 
 function readOpenCodeUsage(session: Row): SessionUsage {
   return {
@@ -26,6 +22,6 @@ function readOpenCodeUsage(session: Row): SessionUsage {
 
 export type { SessionMessageNode, SessionPartNode, SessionTree };
 
-export function buildOpenCodeSessionTree(sessionId: string, dbPath = undefined): SessionTree | null {
+export function buildOpenCodeSessionTree(sessionId: string, dbPath: string | undefined = undefined): SessionTree | null {
   return buildSessionTree(sessionId, dbPath, readOpenCodeUsage);
 }

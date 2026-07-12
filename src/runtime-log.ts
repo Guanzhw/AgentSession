@@ -7,22 +7,22 @@ const maxStringLength = 600;
 const maxArrayItems = 25;
 const maxObjectKeys = 40;
 
-function dateSegment(date) {
+function dateSegment(date: any) {
   return date.toISOString().slice(0, 10);
 }
 
-function truncate(value) {
+function truncate(value: any) {
   if (value.length <= maxStringLength) {
     return value;
   }
   return `${value.slice(0, maxStringLength)}...`;
 }
 
-function isPlainObject(value) {
+function isPlainObject(value: any) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function sanitizeValue(value, depth = 0) {
+function sanitizeValue(value: any, depth = 0): any {
   if (value === null || value === undefined) {
     return value;
   }
@@ -42,7 +42,7 @@ function sanitizeValue(value, depth = 0) {
     if (depth >= 2) {
       return "[object]";
     }
-    const sanitized = {};
+    const sanitized: Record<string, any> = {};
     for (const [key, entry] of Object.entries(value).slice(0, maxObjectKeys)) {
       sanitized[key] = sensitiveKeyPattern.test(key)
         ? "[redacted]"
@@ -53,38 +53,39 @@ function sanitizeValue(value, depth = 0) {
   return truncate(String(value));
 }
 
-function sanitizeEventName(value) {
+function sanitizeEventName(value: any) {
   if (typeof value !== "string" || !value.trim()) {
     return "runtime.event";
   }
   return value.trim().replace(/[^a-zA-Z0-9._:-]/g, "_").slice(0, 120) || "runtime.event";
 }
 
-function sanitizeLevel(value) {
+function sanitizeLevel(value: any) {
   return allowedLevels.has(value) ? value : "info";
 }
 
-export function getRuntimeLogDir(metaDir) {
+export function getRuntimeLogDir(metaDir: any) {
   return path.join(metaDir, "logs");
 }
 
-export function getRuntimeLogPath(metaDir, now = new Date()) {
+export function getRuntimeLogPath(metaDir: any, now = new Date()) {
   return path.join(getRuntimeLogDir(metaDir), `runtime-${dateSegment(now)}.jsonl`);
 }
 
-function safeRuntimeId(encoded) {
+function safeRuntimeId(encoded: any) {
   if (!encoded) {
     return undefined;
   }
   try {
     const decoded = decodeURIComponent(encoded);
     return decoded.length <= 200 ? decoded : undefined;
-  } catch {
+  } catch (err) {
+    console.warn("Failed to decode session ID:", encoded, err);
     return undefined;
   }
 }
 
-export function getRuntimeRouteContext(method, pathname) {
+export function getRuntimeRouteContext(method: any, pathname: any) {
   if (pathname === "/favicon.ico" || pathname.startsWith("/static/")) {
     return null;
   }
@@ -199,24 +200,24 @@ export function getRuntimeRouteContext(method, pathname) {
   return { method, route: "/unmatched" };
 }
 
-export function runtimeLevelForStatus(statusCode) {
+export function runtimeLevelForStatus(statusCode: any) {
   if (statusCode >= 500) return "error";
   if (statusCode >= 400) return "warn";
   return "info";
 }
 
-export function runtimeErrorMessage(error) {
+export function runtimeErrorMessage(error: any) {
   return error?.message || String(error || "Unknown error");
 }
 
-export function runtimeExecutableName(command) {
+export function runtimeExecutableName(command: any) {
   const executable = command?.resolvedExecutable || command?.executable || "";
   return executable ? path.basename(String(executable)) : "";
 }
 
 export function buildRuntimeEvent(input: any = {}, now = new Date()) {
   const source = isPlainObject(input) ? input : {};
-  const record = {
+  const record: Record<string, any> = {
     ts: now.toISOString(),
     level: sanitizeLevel(source.level),
     event: sanitizeEventName(source.event)
@@ -234,7 +235,7 @@ export function buildRuntimeEvent(input: any = {}, now = new Date()) {
   return record;
 }
 
-export function recordRuntimeEvent(metaDir, input: any = {}, options: any = {}) {
+export function recordRuntimeEvent(metaDir: any, input: any = {}, options: any = {}) {
   if (!metaDir) {
     return null;
   }
@@ -246,7 +247,7 @@ export function recordRuntimeEvent(metaDir, input: any = {}, options: any = {}) 
     mkdirSync(path.dirname(logPath), { recursive: true });
     appendFileSync(logPath, `${JSON.stringify(record)}\n`, "utf-8");
     return record;
-  } catch (error) {
+  } catch (error: any) {
     console.warn(`Runtime log write failed: ${error?.message || error}`);
     return null;
   }

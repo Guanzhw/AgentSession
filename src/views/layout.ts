@@ -2,7 +2,7 @@ import { escapeHtml } from "../markdown.js";
 import { t, getLocale } from "../i18n.js";
 import { icons } from "../icons.js";
 
-export function layout(title, body, page = "home", { provider = null, providers = [], providerAvailable = true, manageable = false, searchQuery = "" } = {}) {
+export function layout(title: string, body: string, page = "home", { provider = null, providers = [], providerAvailable = true, manageable = false, searchQuery = "" }: { provider?: string | null; providers?: { id: string; name: string; icon: string; available: boolean }[]; providerAvailable?: boolean; manageable?: boolean; searchQuery?: string } = {}) {
   const providerPrefix = provider ? `/${encodeURIComponent(provider)}` : "";
 
   const providerTabs = providers.map((p) => {

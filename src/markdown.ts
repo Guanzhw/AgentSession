@@ -1,4 +1,4 @@
-export function renderMarkdown(text) {
+export function renderMarkdown(text: any) {
   if (!text) return "";
   const lines = text.split("\n");
   const html = [];
@@ -74,12 +74,12 @@ export function renderMarkdown(text) {
   return html.join("\n");
 }
 
-function inlineFormat(text) {
+function inlineFormat(text: any) {
   let result = escapeHtml(text);
   result = result.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   result = result.replace(/\*(.+?)\*/g, "<em>$1</em>");
   result = result.replace(/`([^`]+)`/g, "<code>$1</code>");
-  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) => {
+  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_: any, label: any, url: any) => {
     const decoded = url.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
     if (/^(https?:|mailto:|\/|#)/.test(decoded)) {
       return `<a href="${url}" target="_blank" rel="noopener">${label}</a>`;
@@ -89,7 +89,7 @@ function inlineFormat(text) {
   return result;
 }
 
-export function escapeHtml(text) {
+export function escapeHtml(text: any) {
   return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")

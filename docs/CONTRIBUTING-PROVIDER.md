@@ -12,6 +12,11 @@ Every provider must export a default object matching this shape (see `src/provid
   name: "Display Name",        // Human-readable name for UI
   icon: "🔵",                  // Emoji or icon reference
 
+  capabilities: {
+    localManagement: true,     // Viewer-owned star/title/trash state; source stays read-only
+    structuredSessionViews: true // ReACT/tree/metrics/flow views supplied by the adapter
+  },
+
   detect() → boolean,          // Is this tool installed on this machine?
   getDataPath() → string|null, // Root path to session data
   scan() → AsyncIterable,      // Stream all session metadata
@@ -22,6 +27,12 @@ Every provider must export a default object matching this shape (see `src/provid
   exportSession(id) → object|null // Reserved for future (return null in v1)
 }
 ```
+
+`localManagement` does not authorize writes to provider data. It enables the
+shared viewer metadata workflow keyed by the provider's canonical
+`(provider, sessionId)` identity. File-backed providers can enable it when
+`scan()` and `getSession()` preserve that canonical ID; Trash is resolved from
+the cross-provider index rather than by mutating or rescanning transcript files.
 
 ### Method Signatures
 
@@ -37,7 +48,8 @@ Every provider must export a default object matching this shape (see `src/provid
 **scan()** → `AsyncIterable<RawSession>`
 - Generator function that yields session metadata
 - Called during startup to index all sessions
-- Each yielded object must have: `id`, `provider`, `title`, `timeCreated`, `timeUpdated`, `messageCount`
+- Each yielded object must have: `id`, `provider`, `parentId`, `title`, `timeCreated`, `timeUpdated`, `messageCount`
+- Child transcripts must keep their provider-owned canonical `id` and set `parentId`; optional `metadata.aliases`, `agentId`, or `agentPath` can help associate the child with its spawning tool call
 
 **getSession(sessionId)** → `object | null`
 - Returns full session metadata for a specific ID
@@ -48,6 +60,12 @@ Every provider must export a default object matching this shape (see `src/provid
 - Returns all messages in a session
 - Each message must have: `id`, `sessionId`, `role`, `content`, `timestamp`
 - Optional: `thinking`, `toolName`, `toolInput`, `toolOutput`, `tokens`, `metadata`
+- When one provider response is fragmented across reasoning, text, tool call, and tool result records, give those messages the same `metadata.turnId` (or `responseGroupId`). The shared structured-view builder will render them as one ReACT turn without merging across provider response boundaries.
+
+**Structured session views**
+- Set `capabilities.structuredSessionViews` and implement `getSessionTree`, `getSessionContainer`, `getSessionMetrics`, and `getSessionFlow` together.
+- File providers can use `buildMessageSessionViews()` for flat histories or `buildLinkedMessageSessionViews()` when `scan()` exposes canonical `parentId` relationships.
+- Spawn tools named `task`, `subtask`, `spawn_agent`, or `delegate_task` can receive child sessions. Prefer an explicit child ID/path stored in the call; creation-order fallback is reserved for provider records that omit a call ID.
 
 **getTokenStats(days)** → `DailyTokenStat[]`
 - Returns token usage aggregated by day for the last N days

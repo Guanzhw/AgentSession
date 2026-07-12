@@ -1,3 +1,4 @@
+import { asNumber } from "./parser.js";
 import type { SessionContainer } from "./session-container.js";
 import type { SessionContextView } from "./context.js";
 
@@ -33,11 +34,6 @@ export interface SessionMetricsView {
     cost: number;
     contextItems: number;
   }>;
-}
-
-function asNumber(value: unknown) {
-  const amount = Number(value);
-  return Number.isFinite(amount) ? amount : 0;
 }
 
 function collectTools(container: SessionContainer | null, counts = new Map<string, number>()) {
