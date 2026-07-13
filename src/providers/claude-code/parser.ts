@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import type { Message, RawSession } from "../interface.js";
 import { asNumber } from "../shared/parser.js";
 
-function usageToTokens(usage: any) {
+export function claudeUsageToTokens(usage: any) {
   if (!usage || typeof usage !== "object") {
     return null;
   }
@@ -19,6 +19,45 @@ function usageToTokens(usage: any) {
     cache: { read: cacheRead, write: cacheWrite },
     total: asNumber(usage.total_tokens) || input + output + reasoning + cacheRead + cacheWrite
   };
+}
+
+/**
+ * Claude writes one assistant response as multiple records when it contains
+ * thinking, tool calls, or text. Every fragment repeats the same usage
+ * payload, so token aggregation must retain one record per response instead
+ * of summing each fragment.
+ */
+export function uniqueClaudeAssistantUsageRecords(records: any[]) {
+  const uniqueRecords = [];
+  const seenResponseIds = new Set<string>();
+  let previousFallbackUsage = "";
+
+  for (const record of records) {
+    if (record.type !== "assistant") {
+      previousFallbackUsage = "";
+      continue;
+    }
+
+    const usage = record.message?.usage ?? record.usage;
+    const tokens = claudeUsageToTokens(usage);
+    if (!tokens) continue;
+
+    const responseId = record.message?.id;
+    if (typeof responseId === "string" && responseId) {
+      if (seenResponseIds.has(responseId)) continue;
+      seenResponseIds.add(responseId);
+      previousFallbackUsage = "";
+      uniqueRecords.push(record);
+      continue;
+    }
+
+    const fallbackUsage = JSON.stringify(tokens);
+    if (fallbackUsage === previousFallbackUsage) continue;
+    previousFallbackUsage = fallbackUsage;
+    uniqueRecords.push(record);
+  }
+
+  return uniqueRecords;
 }
 
 function contentBlocks(content: any) {
@@ -88,7 +127,6 @@ export function extractSessionMeta(records: any, sessionId: any): RawSession {
   let timeUpdated = 0;
   let totalTokens = 0;
   let directory = null;
-  let previousAssistantUsage = "";
   const sidechainRecord = records.find((record: any) => record.isSidechain);
   const canonicalId = sidechainRecord?.agentId || sessionId.replace(/^agent-/, "");
   const parentId = sidechainRecord?.isSidechain && sidechainRecord.sessionId !== canonicalId
@@ -103,16 +141,10 @@ export function extractSessionMeta(records: any, sessionId: any): RawSession {
     if (r.type === "system" && r.cwd) directory = r.cwd;
     if (r.cwd && !directory) directory = r.cwd;
 
-    if (r.type === "assistant") {
-      const tokens = usageToTokens(r.message?.usage ?? r.usage);
-      const usageKey = JSON.stringify(tokens);
-      if (usageKey !== previousAssistantUsage) {
-        totalTokens += tokens?.total || 0;
-        previousAssistantUsage = usageKey;
-      }
-    } else {
-      previousAssistantUsage = "";
-    }
+  }
+
+  for (const record of uniqueClaudeAssistantUsageRecords(records)) {
+    totalTokens += claudeUsageToTokens(record.message?.usage ?? record.usage)?.total || 0;
   }
   const messageCount = recordsToMessages(records, canonicalId).length;
 
@@ -191,7 +223,7 @@ export function recordsToMessages(records: any, sessionId: any): Message[] {
     if (r.type === "assistant") {
       const blocks = contentBlocks(r.message?.content ?? r.content);
       const turnId = r.message?.id || r.uuid || `assistant-${msgIndex}`;
-      const tokens = usageToTokens(r.message?.usage ?? r.usage);
+      const tokens = claudeUsageToTokens(r.message?.usage ?? r.usage);
       const usageKey = JSON.stringify(tokens);
       if (usageKey !== assistantUsageKey) {
         assistantUsageKey = usageKey;

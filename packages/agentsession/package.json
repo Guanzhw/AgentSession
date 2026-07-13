@@ -5,8 +5,6 @@
   "type": "module",
   "bin": {
     "agentsession": "dist/bin/cli.js",
-    "codeagentsession": "dist/bin/cli.js",
-    "codeagent-session": "dist/bin/cli.js",
     "opensession": "dist/bin/cli.js",
     "oh-my-opensession": "dist/bin/cli.js"
   },
@@ -30,7 +28,6 @@
     "agentsession",
     "agent-session",
     "opencode",
-    "codeagent",
     "claude-code",
     "codex",
     "gemini",

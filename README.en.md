@@ -1,6 +1,6 @@
 # AgentSession
 
-> A local AI session archive for developers: one searchable, traceable, reviewable web UI for OpenCode, CodeAgent, Claude Code, Codex CLI, and Gemini CLI sessions.
+> A local AI session archive for developers: one searchable, traceable, reviewable web UI for OpenCode, Claude Code, Codex CLI, and Gemini CLI sessions.
 
 [English](./README.en.md) · [中文](./README.md)
 
@@ -31,7 +31,6 @@ The focus is no longer just “list my chats.” The goal is to help you reconst
 | Provider | Status | Default Source | Capabilities |
 |:---|:---:|:---|:---|
 | OpenCode | Full | `$XDG_DATA_HOME/opencode/opencode.db` or `~/.local/share/opencode/opencode.db` | Browse, search, star, rename, delete, trash, export, stats, trace, nested sessions, analysis |
-| CodeAgent | Full | `$XDG_DATA_HOME/opencode/db/ngagent.db` or `~/.local/share/opencode/db/ngagent.db` | OpenCode fork with the same viewer capabilities |
 | Claude Code | Manageable | `~/.claude/transcripts/` + `~/.claude/projects/` | Browse, search, star, rename, delete, trash, Token Explorer, ReACT, trace, flow, subagents when sidechain transcripts exist, analysis prompt evidence |
 | Codex CLI | Manageable | `~/.codex/sessions/**/*.jsonl` | Browse, search, star, rename, delete, trash, Token Explorer, ReACT, flow, nested subagents |
 | Gemini CLI | Manageable | `~/.gemini/tmp/*/chats/*.json` | Browse, search, star, rename, delete, trash, Token Explorer, ReACT, flow |
@@ -43,14 +42,14 @@ All providers store stars, custom titles, soft deletes, and permanent exclusions
 - **Unified dashboard**: detected and undetected providers are shown in the top bar, with unavailable providers disabled.
 - **Session list and search**: project/time/starred filtering, sorting, infinite scroll, and a scoped list filter for provider titles, viewer custom titles, slugs, and directories. The top-bar search combines title and message-content matches. A reversible title-type filter can separate displayed titles containing analysis/analyze signals from other sessions; it is a viewer heuristic, not provider metadata.
 - **Session detail review**: provider-owned response boundaries keep reasoning, action/tool calls, and observation/tool results together as ReACT turns.
-- **Recursive session tree**: OpenCode, CodeAgent, Codex, and Claude Code sessions with stored sidechain transcripts render child sessions as nested containers with direct open links.
+- **Recursive session tree**: OpenCode, Codex, and Claude Code sessions with stored sidechain transcripts render child sessions as nested containers with direct open links.
 - **Tool Flow Tree**: the right-side Flow view shows root sessions, messages, tools, and subagent branches by hierarchy.
 - **Table of Contents**: long sessions get navigation for prompts, assistant turns, `task` / `subtask` / `spawn_agent` branches, and nested sessions.
 - **In-conversation search**: open the compact detail-page search from the action bar or press `/`; results report matching turns and text occurrences, highlight the exact text, and keep previous/next controls visible while navigating.
 - **Trace API**: step/span summaries classify tools, skills, agents, MCP calls, and LSP activity.
 - **Statistics**: interactive Token Explorer with 7/30/90-day presets, token-component trends, top sessions, period comparison, heuristic insights, two-model comparison, saved views, and JSON/CSV export. SQLite-backed providers also support custom ranges, project/model/scope filters, model ranking, clickable day drill-down, and opt-in cost estimates; file-backed providers expose only the aggregate dimensions present in their transcripts.
 - **Local management**: every provider supports starring, renaming, batch actions, soft delete, restore, and permanent exclusion; these actions only mutate viewer metadata.
-- **Export**: OpenCode/CodeAgent sessions expose one Export menu for Markdown or JSON, with JSON including the session tree.
+- **Export**: OpenCode sessions expose one Export menu for Markdown or JSON, with JSON including the session tree.
 - **Bilingual UI**: use `--lang en` or `--lang zh`.
 
 ## Quick Start
@@ -101,7 +100,7 @@ agentsession [options]
 | `PORT` | Default server port |
 | `SESSION_VIEWER_DB_PATH` | OpenCode DB path, lower priority than `--opencode-db` |
 | `OPENCODE_DB_PATH` | Alternative OpenCode DB env var |
-| `XDG_DATA_HOME` | XDG data root for OpenCode and CodeAgent |
+| `XDG_DATA_HOME` | XDG data root for OpenCode |
 | `CLAUDE_CONFIG_DIR` | Claude Code data directory |
 | `CODEX_HOME` | Codex CLI data directory |
 | `GEMINI_HOME` | Gemini CLI data directory |
@@ -170,7 +169,6 @@ All registered providers declare a default resume command:
 | Provider | Default command |
 |---|---|
 | OpenCode | `opencode --session {sessionId}` |
-| CodeAgent | `codeagent --session {sessionId}` |
 | Claude Code | `claude --resume {sessionId}` |
 | Codex CLI | `codex resume {sessionId}` |
 | Gemini CLI | `gemini --resume {sessionId}` |
@@ -185,11 +183,6 @@ file selected by `--config`:
     "opencode": {
       "executable": "opencode",
       "args": ["--session", "{sessionId}"]
-    },
-    "codeagent": {
-      "executable": "my-codeagent",
-      "args": ["resume", "{sessionId}"],
-      "cwd": "D:\\WorkSpace"
     },
     "gemini": false
   },
@@ -269,8 +262,8 @@ own `diagnostics/` directory.
 ## Session Analysis And Evaluation Proposals
 
 AgentSession can launch a configured analyzer non-interactively from
-provider detail pages that declare session-analysis support, currently OpenCode,
-CodeAgent, and Claude Code. Other providers keep their read-only viewer features until
+provider detail pages that declare session-analysis support, currently OpenCode
+and Claude Code. Other providers keep their read-only viewer features until
 their adapters declare the same capability. The analysis run is proposal-only:
 it snapshots the session as indexed JSONL
 evidence, snapshots selected artifacts, creates an evaluation seed, and asks
@@ -408,7 +401,7 @@ can be overridden:
   "analysis": {
     "enabled": true,
     "defaultTarget": "skills",
-    "outputDir": ".codeagentsession/analysis",
+    "outputDir": ".agentsession/analysis",
     "includeRawSnapshots": false,
     "shell": {
       "executable": "powershell.exe",
@@ -506,8 +499,8 @@ are normalized on load and removed the next time settings are saved. Other
 custom paths are preserved.
 
 When `analysis.outputDir` is omitted, runs default to
-`.codeagentsession/analysis` inside the session project. AgentSession writes
-`.codeagentsession/.gitignore` so generated runs stay out of source control even
+`.agentsession/analysis` inside the session project. AgentSession writes
+`.agentsession/.gitignore` so generated runs stay out of source control even
 when the project does not already ignore that directory. Existing
 `.opensessionviewer/analysis` runs remain discoverable for compatibility. Each
 run carries the read-only evidence query tool and its local dependency in its
@@ -586,7 +579,6 @@ src/
 │   ├── interface.ts       # ProviderAdapter interface
 │   ├── index.ts           # Provider registry
 │   ├── opencode/          # OpenCode-compatible SQLite adapter factory
-│   ├── codeagent/         # CodeAgent adapter, reusing OpenCode schema/parser
 │   ├── claude-code/       # Claude Code JSONL adapter
 │   ├── codex/             # Codex CLI JSONL adapter
 │   └── gemini/            # Gemini JSON adapter
@@ -614,7 +606,6 @@ Validated coverage:
 - dashboard, session list, search, stats, and session detail
 - recursive session tree, TOC, and Flow view
 - OpenCode management action entry points
-- CodeAgent unavailable-provider page when the default DB is absent
 - delegated `agent-browser` E2E with no browser/page console errors
 
 ## Roadmap

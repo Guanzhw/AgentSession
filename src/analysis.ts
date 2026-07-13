@@ -45,7 +45,7 @@ import { supportsSessionAnalysis as providerSupportsSessionAnalysis } from "./pr
 const MAX_ARTIFACT_FILES = 200;
 const MAX_ARTIFACT_BYTES = 256 * 1024;
 const MAX_TOTAL_ARTIFACT_BYTES = 5 * 1024 * 1024;
-const PROJECT_ANALYSIS_DIR_NAME = ".codeagentsession";
+const PROJECT_ANALYSIS_DIR_NAME = ".agentsession";
 const LEGACY_PROJECT_ANALYSIS_DIR_NAME = ".opensessionviewer";
 const PROJECT_ANALYSIS_GITIGNORE = "*\n!.gitignore\n";
 export const SESSION_ANALYSIS_PROVIDER_ID = "opencode";

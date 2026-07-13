@@ -20,8 +20,7 @@ The package is intentionally small:
 - No runtime npm dependencies.
 - Server-rendered HTML with plain browser JavaScript and CSS.
 - Node's built-in test runner.
-- Provider adapters for OpenCode, CodeAgent, Claude Code, Codex CLI, and
-  Gemini CLI.
+- Provider adapters for OpenCode, Claude Code, Codex CLI, and Gemini CLI.
 
 ## Non-Negotiable Invariants
 
@@ -42,9 +41,6 @@ The package is intentionally small:
 - Route behavior through `ProviderAdapter` methods and declared capabilities.
   Do not add central `if (provider.id === "...")` branches when a capability or
   optional adapter method can express the behavior.
-- OpenCode and CodeAgent share schema-neutral SQLite helpers, but CodeAgent is
-  an independent provider with its own schema enrichment and structured-view
-  modules. Do not treat it as an OpenCode alias.
 - Shared provider code under `src/providers/shared/` must be genuinely
   schema-neutral. Keep provider field assumptions in the owning provider.
 
@@ -139,7 +135,6 @@ src/
     index.ts                     provider registration
     shared/                      schema-neutral provider helpers
     opencode/                    OpenCode adapter and structured views
-    codeagent/                   CodeAgent adapter, schema, and structured views
     claude-code/                 Claude transcript adapter/parser
     codex/                       Codex JSONL adapter/parser
     gemini/                      Gemini JSON adapter/parser
@@ -208,7 +203,7 @@ When adding or changing a provider:
    contract or supported capabilities change.
 
 Use Gemini as a compact file-provider example, Claude and Codex as JSONL
-examples, and OpenCode/CodeAgent as structured SQLite examples. Read the actual
+examples, and OpenCode as the structured SQLite example. Read the actual
 adapter before copying a pattern because provider capabilities differ.
 
 ### Server and APIs
@@ -396,8 +391,8 @@ Inspect `app.log` and `app-error.log` if startup or indexing fails.
 ## Repeatable E2E QA
 
 The QA suite assumes a compatible server is already running. It checks the
-dashboard, search, statistics, settings, detail rendering, exports, flow,
-terminal-launch-disabled behavior, and the CodeAgent unavailable flow.
+dashboard, search, statistics, settings, detail rendering, exports, flow, and
+terminal-launch-disabled behavior.
 
 ```powershell
 $env:OPENSESSIONVIEWER_QA_BASE_URL = 'http://127.0.0.1:3456'

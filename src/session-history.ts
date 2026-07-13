@@ -7,7 +7,7 @@ import { getExcludedIds as defaultGetExcludedIds } from "./meta.js";
 import { getAllProviders, getAvailableProviders } from "./providers/index.js";
 import type { Message, MessageRole, ProviderAdapter, ProviderId, RawSession } from "./providers/interface.js";
 
-const PROVIDER_IDS: ProviderId[] = ["opencode", "codeagent", "claude-code", "codex", "gemini"];
+const PROVIDER_IDS: ProviderId[] = ["opencode", "claude-code", "codex", "gemini"];
 const EVENT_SEGMENTS = ["message", "thinking", "tool"] as const;
 const EVENT_STATUSES = ["error", "completed", "unknown"] as const;
 const HARD_LIMITS = {

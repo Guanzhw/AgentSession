@@ -15,6 +15,24 @@
   "engines": {
     "node": ">=22.5.0"
   },
+  "keywords": [
+    "agentsession",
+    "mcp",
+    "model-context-protocol",
+    "coding-agent",
+    "session-history",
+    "opencode",
+    "claude-code",
+    "codex",
+    "gemini"
+  ],
+  "author": "Guanzhw",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Guanzhw/AgentSession.git"
+  },
+  "homepage": "https://github.com/Guanzhw/AgentSession",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "agentsession": "^1.4.0",

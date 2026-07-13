@@ -895,7 +895,7 @@ if (settingsForm) {
     const commandArgs = Array.isArray(command.args) ? command.args : [];
 
     setChecked("settings-analysis-enabled", analysis.enabled);
-    setValue("settings-analysis-output", analysis.outputDir || ".codeagentsession/analysis");
+    setValue("settings-analysis-output", analysis.outputDir || ".agentsession/analysis");
     setChecked("settings-raw-snapshots", analysis.includeRawSnapshots);
     populateTargetOptions(analysis, providerSettings, targetId);
     loadTargetDraft(targetId);
@@ -933,8 +933,8 @@ if (settingsForm) {
     const analysis = asObject(config.analysis);
     if (isChecked("settings-analysis-enabled")) analysis.enabled = true;
     else delete analysis.enabled;
-    const outputDir = value("settings-analysis-output") || ".codeagentsession/analysis";
-    if (outputDir === ".codeagentsession/analysis") delete analysis.outputDir;
+    const outputDir = value("settings-analysis-output") || ".agentsession/analysis";
+    if (outputDir === ".agentsession/analysis") delete analysis.outputDir;
     else analysis.outputDir = outputDir;
     if (isChecked("settings-raw-snapshots")) analysis.includeRawSnapshots = true;
     else delete analysis.includeRawSnapshots;
@@ -1085,7 +1085,7 @@ if (settingsForm) {
     const resumeDefault = asObject(initialData.resumeDefault);
 
     if (key === "analysis-enabled") setChecked("settings-analysis-enabled", false);
-    if (key === "analysis-output") setValue("settings-analysis-output", ".codeagentsession/analysis");
+    if (key === "analysis-output") setValue("settings-analysis-output", ".agentsession/analysis");
     if (key === "raw-snapshots") setChecked("settings-raw-snapshots", false);
     if (key === "default-target") setValue("settings-default-target", inheritedDefaultTargetId);
     if (key === "target-label") {

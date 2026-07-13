@@ -416,7 +416,6 @@ export const zh = {
 
   // Providers
   "provider.opencode": "OpenCode",
-  "provider.codeagent": "CodeAgent",
   "provider.claude-code": "Claude Code",
   "provider.codex": "Codex CLI",
   "provider.gemini": "Gemini CLI",

@@ -497,9 +497,6 @@ md_export="$(curl -fsS "$BASE/api/opencode/session/$SAMPLE_SESSION_ID/export?for
 assert_contains "markdown export" "$md_export" "### Reasoning"
 assert_not_contains "markdown export" "$md_export" "System Prompts"
 
-ab "open CodeAgent route" open "$BASE/codeagent" >/dev/null
-ab "wait for CodeAgent unavailable state" wait --text "Not installed" >/dev/null
-
 browser_errors="$(read_ab "collect browser errors" errors)"
 ab "close session" close >/dev/null
 

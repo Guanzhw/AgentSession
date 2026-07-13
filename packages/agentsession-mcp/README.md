@@ -6,6 +6,7 @@ a web server or modifying provider-owned data.
 
 ```bash
 npm install --global agentsession-mcp
+agentsession-mcp --help
 agentsession-mcp --config /path/to/config.json
 ```
 

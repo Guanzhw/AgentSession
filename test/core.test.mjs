@@ -17,9 +17,6 @@ import { runInNewContext } from "node:vm";
 import { EventEmitter } from "node:events";
 
 import { closeDb, getFilteredSessionCount, getModelDistribution, getModelPairs, getStatsProjects, getTokenCoverage, getTokenStats, getTopTokenSessions, listSessionProjects, listSessions, searchMessages } from "../dist/src/db.js";
-import { buildCodeAgentSessionTree } from "../dist/src/providers/codeagent/session-tree.js";
-import { enrichCodeAgentSession } from "../dist/src/providers/codeagent/schema.js";
-import { buildOpenCodeSessionTree } from "../dist/src/providers/opencode/session-tree.js";
 import { buildOpenCodeRuntimeEnvironment } from "../dist/src/providers/opencode/runtime-environment.js";
 import { buildClaudeCodeRuntimeEnvironment } from "../dist/src/providers/claude-code/runtime-environment.js";
 import {
@@ -45,9 +42,11 @@ import {
 import { isAnalysisTitledSession, matchesSessionKind } from "../dist/src/session-kind.js";
 import { t } from "../dist/src/i18n.js";
 import {
+  claudeUsageToTokens,
   extractSessionMeta,
   parseTranscript,
-  recordsToMessages
+  recordsToMessages,
+  uniqueClaudeAssistantUsageRecords
 } from "../dist/src/providers/claude-code/parser.js";
 import {
   extractMeta as extractCodexMeta,
@@ -181,6 +180,35 @@ test("Claude fragmented assistant records preserve reasoning and count repeated 
     cache: { read: 50, write: 0 },
     total: 170
   });
+});
+
+test("Claude token usage keeps optional fields numeric and deduplicates response fragments", () => {
+  const records = [
+    {
+      type: "assistant",
+      message: {
+        id: "response-1",
+        usage: { input_tokens: 10, output_tokens: 4, cache_read_input_tokens: 7 }
+      }
+    },
+    {
+      type: "assistant",
+      message: {
+        id: "response-1",
+        usage: { input_tokens: 10, output_tokens: 4, cache_read_input_tokens: 7 }
+      }
+    }
+  ];
+
+  assert.deepEqual(claudeUsageToTokens(records[0].message.usage), {
+    input: 10,
+    output: 4,
+    reasoning: 0,
+    cache: { read: 7, write: 0 },
+    total: 21
+  });
+  assert.equal(uniqueClaudeAssistantUsageRecords(records).length, 1);
+  assert.equal(extractSessionMeta(records, "fragmented-response").tokenCount, 21);
 });
 
 test("normalized message providers build structured tree, metrics, flow, and model-aware cache data", () => {
@@ -450,132 +478,18 @@ test("OpenCode token stats include child sessions exactly once", () => {
   }
 });
 
-test("CodeAgent and OpenCode use provider-owned session metric readers", () => {
-  const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-provider-metrics-"));
-  const dbPath = path.join(temp, "sessions.db");
-  try {
-    const db = new DatabaseSync(dbPath);
-    db.exec(`
-      CREATE TABLE session (
-        id TEXT PRIMARY KEY,
-        parent_id TEXT,
-        title TEXT,
-        slug TEXT,
-        directory TEXT,
-        time_created INTEGER,
-        time_updated INTEGER,
-        time_archived INTEGER,
-        tokens_input INTEGER,
-        tokens_output INTEGER,
-        tokens_reasoning INTEGER,
-        tokens_cache_read INTEGER,
-        tokens_cache_write INTEGER,
-        cost REAL
-      );
-      CREATE TABLE message (
-        id TEXT PRIMARY KEY,
-        session_id TEXT,
-        data TEXT
-      );
-      CREATE TABLE part (
-        id TEXT PRIMARY KEY,
-        message_id TEXT,
-        session_id TEXT,
-        data TEXT
-      );
-    `);
-    db.prepare(`
-      INSERT INTO session (
-        id, parent_id, title, time_created, time_updated, time_archived,
-        tokens_input, tokens_output, tokens_reasoning, tokens_cache_read,
-        tokens_cache_write, cost
-      ) VALUES (?, NULL, ?, 1000, 2000, NULL, 100, 50, 25, 10, 5, 9.5)
-    `).run("root", "Provider metrics");
-    db.prepare("INSERT INTO message (id, session_id, data) VALUES (?, ?, ?)").run(
-      "assistant",
-      "root",
-      JSON.stringify({
-        role: "assistant",
-        time: { created: 1100 },
-        cost: 1.25,
-        tokens: {
-          input: 7,
-          output: 3,
-          reasoning: 2,
-          cache: { read: 4, write: 1 }
-        }
-      })
-    );
-    db.close();
-
-    const codeAgent = buildCodeAgentSessionTree("root", dbPath);
-    assert.deepEqual({
-      input: codeAgent.metrics.inputTokens,
-      output: codeAgent.metrics.outputTokens,
-      reasoning: codeAgent.metrics.reasoningTokens,
-      cacheRead: codeAgent.metrics.cacheReadTokens,
-      cacheWrite: codeAgent.metrics.cacheWriteTokens,
-      cost: codeAgent.metrics.cost
-    }, {
-      input: 7,
-      output: 3,
-      reasoning: 2,
-      cacheRead: 4,
-      cacheWrite: 1,
-      cost: 1.25
-    });
-
-    const openCode = buildOpenCodeSessionTree("root", dbPath);
-    assert.equal(openCode.metrics.inputTokens, 100);
-    assert.equal(openCode.metrics.outputTokens, 50);
-    assert.equal(openCode.metrics.cost, 9.5);
-  } finally {
-    closeDb(dbPath);
-  }
-});
-
-test("CodeAgent derives session identity and totals from assistant messages", () => {
-  const session = enrichCodeAgentSession(
-    { id: "session", agent: null, model: null, cost: 0 },
-    [
-      {
-        id: "assistant",
-        data: JSON.stringify({
-          role: "assistant",
-          agent: "build",
-          providerID: "w3",
-          modelID: "MiniMax-M2.5",
-          cost: 0.75,
-          tokens: {
-            input: 11,
-            output: 4,
-            reasoning: 2,
-            cache: { read: 6, write: 1 }
-          }
-        })
-      }
-    ]
-  );
-
-  assert.equal(session.agent, "build");
-  assert.equal(session.model, "w3/MiniMax-M2.5");
-  assert.equal(session.tokens_input, 11);
-  assert.equal(session.tokens_cache_read, 6);
-  assert.equal(session.cost, 0.75);
-});
-
 test("resume commands use structured placeholders and validated directories", () => {
   const cwd = resolveProjectDirectory(process.cwd());
   assert.ok(cwd);
   const provider = {
-    id: "codeagent",
+    id: "opencode",
     resumeCommand: {
       executable: process.execPath,
       args: ["--version", "{sessionId}"]
     }
   };
   const command = getResumeCommand(provider, "session id", cwd, {
-    codeagent: {
+    opencode: {
       executable: process.execPath,
       args: ["--version", "{sessionId}", "{projectPath}"]
     }
@@ -588,7 +502,7 @@ test("resume commands use structured placeholders and validated directories", ()
   assert.equal(getResumeCommand(provider, "id", "relative/path", {}), null);
 
   const fixedExecutable = getResumeCommand(provider, "node", cwd, {
-    codeagent: { executable: "{sessionId}", args: [] }
+    opencode: { executable: "{sessionId}", args: [] }
   });
   assert.equal(fixedExecutable.executable, "{sessionId}");
   assert.equal(fixedExecutable.available, false);
@@ -596,7 +510,7 @@ test("resume commands use structured placeholders and validated directories", ()
   const providerDefault = getResumeCommand(provider, "default id", cwd, {});
   assert.equal(providerDefault.executable, process.execPath);
   assert.deepEqual(providerDefault.args, ["--version", "default id"]);
-  assert.equal(getResumeCommand(provider, "disabled", cwd, { codeagent: false }), null);
+  assert.equal(getResumeCommand(provider, "disabled", cwd, { opencode: false }), null);
 });
 
 test("Token Explorer database queries share the usable assistant-token dataset", () => {
@@ -918,6 +832,114 @@ test("linked message sessions attach Codex-style spawn tools to child conversati
   assert.equal(views.metrics.totals.messages, 4);
 });
 
+test("Codex subagent transcripts exclude copied parent context and expose encrypted task envelopes", () => {
+  const records = [
+    {
+      type: "session_meta",
+      timestamp: "2026-07-12T00:00:00.000Z",
+      payload: {
+        id: "child",
+        parent_thread_id: "parent",
+        agent_path: "/root/reviewer",
+        thread_source: "subagent"
+      }
+    },
+    {
+      type: "event_msg",
+      timestamp: "2026-07-12T00:00:01.000Z",
+      payload: { type: "user_message", message: "Parent prompt" }
+    },
+    {
+      type: "session_meta",
+      timestamp: "2026-07-12T00:00:01.001Z",
+      payload: { id: "parent", thread_source: "user" }
+    },
+    {
+      type: "response_item",
+      timestamp: "2026-07-12T00:00:02.000Z",
+      payload: {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "Parent answer" }]
+      }
+    },
+    {
+      type: "response_item",
+      timestamp: "2026-07-12T00:00:03.000Z",
+      payload: {
+        type: "agent_message",
+        content: [
+          {
+            type: "input_text",
+            text: "Message Type: NEW_TASK\nTask name: /root/reviewer\nSender: /root\nPayload:"
+          },
+          { type: "encrypted_content", encrypted_content: "opaque" }
+        ]
+      }
+    },
+    {
+      type: "response_item",
+      timestamp: "2026-07-12T00:00:04.000Z",
+      payload: {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "Child review complete" }]
+      }
+    }
+  ];
+
+  const messages = codexRecordsToMessages(records, "child");
+  assert.deepEqual(messages.map((message) => message.role), ["user", "assistant"]);
+  assert.match(messages[0].content, /Subagent task: \/root\/reviewer/);
+  assert.match(messages[0].content, /encrypted in the Codex transcript/);
+  assert.equal(messages[0].metadata?.promptAvailable, false);
+  assert.equal(messages[1].content, "Child review complete");
+  assert.doesNotMatch(JSON.stringify(messages), /Parent prompt|Parent answer/);
+
+  const resolved = resolveCodexInheritedContext([
+    {
+      id: "copied-after-output",
+      sessionId: "child",
+      role: "user",
+      content: "Parent prompt",
+      thinking: null,
+      toolName: null,
+      toolInput: null,
+      toolOutput: null,
+      timestamp: 0,
+      tokens: null,
+      metadata: { provenance: "session" }
+    },
+    {
+      id: "actual-child-message",
+      sessionId: "child",
+      role: "user",
+      content: "Child-specific follow-up",
+      thinking: null,
+      toolName: null,
+      toolInput: null,
+      toolOutput: null,
+      timestamp: 0,
+      tokens: null,
+      metadata: { provenance: "session" }
+    }
+  ], [{
+    id: "parent-message",
+    sessionId: "parent",
+    role: "user",
+    content: "Parent prompt",
+    thinking: null,
+    toolName: null,
+    toolInput: null,
+    toolOutput: null,
+    timestamp: 0,
+    tokens: null,
+    metadata: null
+  }]);
+  assert.equal(resolved.excludedUserMessages, 1);
+  assert.deepEqual(resolved.messages.map((message) => message.content), ["Child-specific follow-up"]);
+});
+
 test("Claude and Gemini preserve provider response boundaries for ReACT grouping", () => {
   const claudeRecords = [
     {
@@ -1070,7 +1092,7 @@ test("every provider declares a configurable resume command", () => {
   const providers = getAllProviders();
   assert.deepEqual(
     providers.map((provider) => provider.id),
-    ["opencode", "codeagent", "claude-code", "codex", "gemini"]
+    ["opencode", "claude-code", "codex", "gemini"]
   );
   for (const provider of providers) {
     assert.equal(typeof provider.resumeCommand?.executable, "string", provider.id);
@@ -2592,18 +2614,12 @@ test("settings page exposes config location and startup-only launch status", () 
       name: "OpenCode",
       icon: "OC",
       available: true
-    }, {
-      id: "codeagent",
-      name: "CodeAgent",
-      icon: "CA",
-      available: false
     }]
   });
 
   assert.match(html, /data-page="settings"/);
   assert.match(html, /class="logo"[^>]+title="AgentSession"[^>]+aria-label="AgentSession"/);
   assert.match(html, /class="provider-tab active"[^>]+title="OpenCode"[^>]+aria-label="OpenCode"[^>]+aria-current="page"/);
-  assert.match(html, new RegExp(`class="provider-tab disabled"[^>]+aria-label="CodeAgent - ${regexEscape(t("provider.not_detected"))}"[^>]+aria-disabled="true"`));
   assert.match(html, /id="theme-toggle"[^>]+aria-label="Toggle theme"/);
   assert.match(html, /id="settings-form"/);
   assert.match(html, /class="settings-section-nav"/);
@@ -2704,37 +2720,6 @@ test("settings page exposes config location and startup-only launch status", () 
   assert.match(customTargetHtml, /provider-memories/);
   assert.match(customTargetHtml, /MEMORY\.md/);
 
-  const codeAgentHtml = renderSettingsPage({
-    configPath: "C:\\Users\\tester\\config.json",
-    configDocument: {
-      exists: false,
-      raw: "{}\n",
-      config: {},
-      error: ""
-    },
-    terminalLaunchAllowed: true,
-    provider: "codeagent",
-    providerName: "CodeAgent",
-    analysisDefaultCommand: OPENCODE_ANALYSIS_COMMAND,
-    resumeDefault: {
-      executable: "codeagent",
-      args: ["--session", "{sessionId}"]
-    },
-    providers: [{
-      id: "codeagent",
-      name: "CodeAgent",
-      icon: "CA",
-      available: true
-    }]
-  });
-  assert.match(codeAgentHtml, /id="settings-analyzer-enabled"[^>]+checked/);
-  assert.match(codeAgentHtml, /id="settings-analyzer-model"/);
-  assert.match(codeAgentHtml, /id="settings-analysis-preset"/);
-  assert.match(codeAgentHtml, /deepseek\/deepseek-v4-flash/);
-  const codeAgentInitialData = JSON.parse(
-    codeAgentHtml.match(/<script type="application\/json" id="settings-initial-data">([\s\S]*?)<\/script>/)[1]
-  );
-  assert.equal(codeAgentInitialData.analysisDefaultCommand.executable, "opencode");
 });
 
 test("settings browser script blocks save while advanced JSON is invalid", () => {
@@ -3219,10 +3204,10 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   });
   assert.equal(
     path.dirname(run.runDir),
-    path.join(projectPath, ".codeagentsession", "analysis")
+    path.join(projectPath, ".agentsession", "analysis")
   );
   assert.equal(
-    readFileSync(path.join(projectPath, ".codeagentsession", ".gitignore"), "utf-8"),
+    readFileSync(path.join(projectPath, ".agentsession", ".gitignore"), "utf-8"),
     "*\n!.gitignore\n"
   );
   assert.equal(preparedRuns.length, 1);
@@ -3304,7 +3289,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   );
   assert.equal(
     artifacts.files.some((file) => (
-      file.sourcePath.includes(`${path.sep}.codeagentsession${path.sep}`)
+      file.sourcePath.includes(`${path.sep}.agentsession${path.sep}`)
       || file.sourcePath.includes(`${path.sep}.opensessionviewer${path.sep}`)
     )),
     false
@@ -3760,7 +3745,7 @@ test("analysis run listing preserves legacy metadata-directory runs", () => {
 
   assert.equal(
     getAnalysisOutputRoot(projectPath, {}, metaDir),
-    path.join(projectPath, ".codeagentsession", "analysis")
+    path.join(projectPath, ".agentsession", "analysis")
   );
   const legacyProjectRunDir = path.join(projectPath, ".opensessionviewer", "analysis", "legacy-project-run");
   mkdirSync(legacyProjectRunDir, { recursive: true });
@@ -4081,21 +4066,6 @@ test("built-in analysis targets resolve without target-specific config", () => {
     assert.deepEqual(settings.target.fileExtensions, expected.fileExtensions);
     assert.match(settings.target.prompt, /\S/);
   }
-});
-
-test("CodeAgent opts into session analysis with the shared analyzer default", () => {
-  const codeAgent = getAllProviders().find((provider) => provider.id === "codeagent");
-  assert.equal(codeAgent?.capabilities?.sessionAnalysis, true);
-  const analysisConfig = { enabled: true };
-
-  assert.deepEqual(
-    getAnalysisTargetIds(codeAgent, analysisConfig),
-    Object.keys(BUILTIN_ANALYSIS_TARGETS)
-  );
-  assert.equal(
-    resolveAnalysisSettings(codeAgent, analysisConfig, "skills").command.executable,
-    "opencode"
-  );
 });
 
 test("provider analysis targets override shared artifacts without changing other providers", () => {

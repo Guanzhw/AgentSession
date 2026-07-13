@@ -5,7 +5,23 @@ import { initConfig } from "agentsession/config";
 import { createSessionHistoryService } from "agentsession/session-history";
 import { createSessionHistoryMcpServer } from "./session-history-server.js";
 
-const config = initConfig(process.argv.slice(2));
+function printHelp() {
+  console.log(`AgentSession-MCP — Read-only Local Session History MCP Server
+
+Usage: agentsession-mcp [options]
+
+Options:
+  --config <path>  Path to an AgentSession JSON config file
+  -h, --help       Show this help`);
+}
+
+const argv = process.argv.slice(2);
+if (argv.includes("--help") || argv.includes("-h")) {
+  printHelp();
+  process.exit(0);
+}
+
+const config = initConfig(argv);
 const service = createSessionHistoryService({ limits: config.mcp });
 const diagnostics = await service.refreshIndex();
 for (const diagnostic of diagnostics) {

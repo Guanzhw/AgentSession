@@ -3,7 +3,13 @@ import os from "node:os";
 import path from "node:path";
 import { getConfig } from "../../config.js";
 import type { MessageRole } from "../interface.js";
-import { parseTranscript, extractSessionMeta, recordsToMessages } from "./parser.js";
+import {
+  parseTranscript,
+  extractSessionMeta,
+  recordsToMessages,
+  claudeUsageToTokens,
+  uniqueClaudeAssistantUsageRecords
+} from "./parser.js";
 import { icons } from "../../icons.js";
 import type { ProviderAdapter } from "../interface.js";
 import { buildClaudeCodeRuntimeEnvironment } from "./runtime-environment.js";
@@ -131,25 +137,17 @@ const getClaudeViews = createStructuredViewCache(generateClaudeViews);
 const claudeTokenMapping: TokenFieldMapping = {
   filterRecord: (r) => r.type === "assistant" && !!(r.message?.usage ?? r.usage),
   getTimestamp: (r) => r.timestamp ? new Date(r.timestamp).getTime() : 0,
-  inputTokens: (r) => Number((r.message?.usage ?? r.usage).input_tokens) || 0,
-  outputTokens: (r) => Number((r.message?.usage ?? r.usage).output_tokens) || 0,
-  totalTokens: (r) => {
-    const usage = r.message?.usage ?? r.usage;
-    return Number(usage.total_tokens)
-      || Number(usage.input_tokens)
-      + Number(usage.output_tokens)
-      + Number(usage.reasoning_tokens)
-      + Number(usage.cache_read_input_tokens)
-      + Number(usage.cache_creation_input_tokens);
-  },
-  reasoningTokens: (r) => Number((r.message?.usage ?? r.usage).reasoning_tokens) || 0,
-  cacheReadTokens: (r) => Number((r.message?.usage ?? r.usage).cache_read_input_tokens) || 0,
-  cacheWriteTokens: (r) => Number((r.message?.usage ?? r.usage).cache_creation_input_tokens) || 0,
+  inputTokens: (r) => claudeUsageToTokens(r.message?.usage ?? r.usage)?.input || 0,
+  outputTokens: (r) => claudeUsageToTokens(r.message?.usage ?? r.usage)?.output || 0,
+  totalTokens: (r) => claudeUsageToTokens(r.message?.usage ?? r.usage)?.total || 0,
+  reasoningTokens: (r) => claudeUsageToTokens(r.message?.usage ?? r.usage)?.reasoning || 0,
+  cacheReadTokens: (r) => claudeUsageToTokens(r.message?.usage ?? r.usage)?.cache.read || 0,
+  cacheWriteTokens: (r) => claudeUsageToTokens(r.message?.usage ?? r.usage)?.cache.write || 0,
 };
 
 const getClaudeTokenStats = createIncrementalTokenStats(
   () => sessionFiles.getFileSignatures(),
-  (filePath) => sessionFiles.getByFilePath(filePath)?.records || [],
+  (filePath) => uniqueClaudeAssistantUsageRecords(sessionFiles.getByFilePath(filePath)?.records || []),
   claudeTokenMapping,
 );
 

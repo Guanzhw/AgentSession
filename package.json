@@ -6,7 +6,7 @@
   "private": true,
   "scripts": {
     "build": "npm run build:core && npm run build --workspace=agentsession-mcp",
-    "build:core": "tsc && node scripts/copy-static.mjs && node scripts/copy-package-dist.mjs",
+    "build:core": "node scripts/clean-dist.mjs && tsc && node scripts/copy-static.mjs && node scripts/copy-package-dist.mjs",
     "test": "npm run build && node --test test/*.test.mjs",
     "start": "npm run build && node dist/bin/cli.js",
     "dev": "npm run build && node dist/bin/cli.js --open",
@@ -24,7 +24,6 @@
     "agentsession",
     "agent-session",
     "opencode",
-    "codeagent",
     "claude-code",
     "codex",
     "gemini",

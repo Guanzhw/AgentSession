@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -163,6 +164,13 @@ test("AgentSession-MCP lists exactly five read-only tools over the MCP protocol"
     "session_timeline"
   ]);
   assert.equal(tools.tools.every((tool) => tool.annotations?.readOnlyHint === true), true);
+  const searchTool = tools.tools.find((tool) => tool.name === "session_search");
+  assert.deepEqual(searchTool.inputSchema.properties.providers.items.enum, [
+    "opencode",
+    "claude-code",
+    "codex",
+    "gemini"
+  ]);
 
   const response = await client.callTool({ name: "session_search", arguments: { query: "Needle" } });
   assert.equal(response.isError, undefined);
@@ -190,6 +198,15 @@ test("compiled stdio executable initializes without polluting MCP stdout", async
   assert.equal(tools.tools.length, 5);
   const search = await client.callTool({ name: "session_search", arguments: { query: "does-not-exist" } });
   assert.equal(search.isError, undefined);
+});
+
+test("compiled MCP executable has MCP-specific help", () => {
+  const executable = path.join(process.cwd(), "packages", "agentsession-mcp", "dist", "cli.js");
+  const result = spawnSync(process.execPath, [executable, "--help"], { encoding: "utf8" });
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /AgentSession-MCP/);
+  assert.match(result.stdout, /Usage: agentsession-mcp \[options\]/);
+  assert.equal(result.stderr, "");
 });
 
 test("MCP configuration rejects unsafe limits", () => {

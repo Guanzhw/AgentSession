@@ -242,7 +242,7 @@ test("session exports stay complete and keep the HTTP server alive", async (t) =
 });
 
 test("provider page keeps unavailable paths and management capability provider-owned", async () => {
-  const providers = ["codeagent", "gemini"].map((providerId) => getProvider(providerId));
+  const providers = ["gemini"].map((providerId) => getProvider(providerId));
   assert.ok(providers.every(Boolean));
   const providerInfo = providers.map((provider) => ({
     id: provider.id,

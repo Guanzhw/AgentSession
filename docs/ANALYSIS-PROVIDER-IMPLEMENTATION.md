@@ -421,7 +421,7 @@ It does not restrict explicitly selected runtime extension files.
 New runs use:
 
 ```text
-<project>/.codeagentsession/analysis/<run>/
+<project>/.agentsession/analysis/<run>/
 |-- manifest.json
 |-- outputs/
 |   |-- report.md

@@ -26,6 +26,7 @@ function responseText(payload: any) {
 }
 
 type CodexMessageProvenance = "session" | "inherited-parent-context-candidate";
+type CodexRecordProvenance = "session" | "inherited-parent-context";
 
 function primarySessionMeta(records: any[]) {
   return records.find((record: any) => record.type === "session_meta")?.payload || {};
@@ -45,14 +46,73 @@ function isChildOwnedOutput(record: any) {
     || ["reasoning", "function_call", "custom_tool_call"].includes(record.payload?.type);
 }
 
-/** Mark pre-output user records as candidates. The parent transcript must
- * confirm an exact duplicate before an adapter may hide one. */
+function agentMessageText(payload: any) {
+  return responseText(payload).replace(/\s+/g, " ").trim();
+}
+
+function isSubagentTaskEnvelope(record: any, primaryMeta: any) {
+  if (record.type !== "response_item" || record.payload?.type !== "agent_message") return false;
+  const text = agentMessageText(record.payload);
+  if (!/^Message Type:\s*NEW_TASK\b/i.test(text)) return false;
+  const agentPath = primaryMeta.agent_path || primaryMeta.source?.subagent?.thread_spawn?.agent_path;
+  return !agentPath || text.includes(String(agentPath));
+}
+
+function subagentTaskMessage(payload: any) {
+  const text = agentMessageText(payload);
+  const taskName = text.match(/(?:^|\s)Task name:\s*([^\s]+)/i)?.[1] || null;
+  const hasEncryptedBody = (payload?.content || []).some((item: any) => (
+    item?.type === "encrypted_content"
+    || (Array.isArray(item?.content) && item.content.some((child: any) => child?.type === "encrypted_content"))
+  ));
+  const content = taskName
+    ? `Subagent task: ${taskName}`
+    : "Subagent task";
+  return {
+    content: hasEncryptedBody
+      ? `${content}\n\nThe task body is encrypted in the Codex transcript and cannot be recovered locally.`
+      : text,
+    taskName,
+    promptAvailable: !hasEncryptedBody
+  };
+}
+
+/**
+ * Codex subagent rollouts begin with a copied parent-thread segment. That
+ * segment ends at the child-specific NEW_TASK envelope; everything before it
+ * belongs to the parent even though it lives in the child JSONL file.
+ */
+export function classifyCodexRecordProvenance(records: any[]) {
+  const primaryMeta = primarySessionMeta(records);
+  const parentId = primaryMeta.parent_thread_id
+    || primaryMeta.forked_from_id
+    || primaryMeta.source?.subagent?.thread_spawn?.parent_thread_id
+    || null;
+  const provenance = new Map<any, CodexRecordProvenance>();
+  const hasTaskEnvelope = records.some((record) => isSubagentTaskEnvelope(record, primaryMeta));
+  let insideInheritedParentContext = Boolean(parentId && hasTaskEnvelope);
+
+  for (const record of records) {
+    if (insideInheritedParentContext && isSubagentTaskEnvelope(record, primaryMeta)) {
+      insideInheritedParentContext = false;
+      provenance.set(record, "session");
+      continue;
+    }
+    provenance.set(record, insideInheritedParentContext ? "inherited-parent-context" : "session");
+  }
+  return provenance;
+}
+
+/** Mark copied parent user records as candidates. The adapter confirms the
+ * exact duplicate against the parent before it hides it. */
 export function classifyCodexMessageProvenance(records: any[]) {
   const primaryMeta = primarySessionMeta(records);
   const parentId = primaryMeta.parent_thread_id
     || primaryMeta.forked_from_id
     || primaryMeta.source?.subagent?.thread_spawn?.parent_thread_id
     || null;
+  const hasTaskEnvelope = records.some((record) => isSubagentTaskEnvelope(record, primaryMeta));
+  const recordProvenance = classifyCodexRecordProvenance(records);
   const provenance = new Map<any, CodexMessageProvenance>();
   let childOwnedOutputSeen = false;
   for (const record of records) {
@@ -62,7 +122,10 @@ export function classifyCodexMessageProvenance(records: any[]) {
     if (isUserRecord) {
       provenance.set(
         record,
-        parentId && !childOwnedOutputSeen ? "inherited-parent-context-candidate" : "session"
+        recordProvenance.get(record) === "inherited-parent-context"
+          || (!hasTaskEnvelope && parentId && !childOwnedOutputSeen)
+          ? "inherited-parent-context-candidate"
+          : "session"
       );
     }
   }
@@ -73,8 +136,9 @@ function normalizedUserContent(value: unknown) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
-/** Hide only candidate user messages that are proven duplicates of the parent.
- * A genuine child prompt remains visible even when it occurs before output. */
+/** Hide any user message that is proven to be copied from the parent. The
+ * direct record provenance makes the usual case precise; exact matching keeps
+ * older rollouts from leaking copied messages after a parent output. */
 export function resolveCodexInheritedContext(messages: Message[], parentMessages: Message[]) {
   const parentUserContent = new Set(
     parentMessages
@@ -84,11 +148,8 @@ export function resolveCodexInheritedContext(messages: Message[], parentMessages
   );
   let excludedUserMessages = 0;
   const resolved = messages.flatMap((message) => {
-    if (message.metadata?.provenance !== "inherited-parent-context-candidate") {
-      return [message];
-    }
     const content = normalizedUserContent(message.content);
-    if (content && parentUserContent.has(content)) {
+    if (message.role === "user" && content && parentUserContent.has(content)) {
       excludedUserMessages += 1;
       return [];
     }
@@ -221,11 +282,13 @@ export function recordsToMessages(records: any, sessionId: any): Message[] {
   let responseIndex = 0;
   let responseGroup: any = null;
   const toolCalls = new Map();
+  const seenSubagentTaskEnvelopes = new Set<string>();
   const primaryMeta = primarySessionMeta(records);
   const subagentStart = primaryMeta.parent_thread_id || primaryMeta.forked_from_id
     ? new Date(records.find((record: any) => record.type === "session_meta")?.timestamp || 0).getTime()
     : 0;
   const messageProvenance = classifyCodexMessageProvenance(records);
+  const recordProvenance = classifyCodexRecordProvenance(records);
 
   const currentResponseGroup = () => {
     if (!responseGroup) responseGroup = `${sessionId}:response:${responseIndex++}`;
@@ -235,6 +298,7 @@ export function recordsToMessages(records: any, sessionId: any): Message[] {
   for (const r of records) {
     const ts = r.timestamp ? new Date(r.timestamp).getTime() : 0;
     if (subagentStart && ts && ts < subagentStart) continue;
+    if (recordProvenance.get(r) === "inherited-parent-context") continue;
 
     if (r.type === "session_meta") {
       model = r.payload?.model || r.payload?.model_name || model;
@@ -259,6 +323,32 @@ export function recordsToMessages(records: any, sessionId: any): Message[] {
         timestamp: ts,
         tokens: null,
         metadata: { images: r.payload.images, provenance }
+      });
+    }
+
+    if (isSubagentTaskEnvelope(r, primaryMeta)) {
+      responseGroup = null;
+      const task = subagentTaskMessage(r.payload);
+      const taskKey = `${task.taskName || ""}\u0000${task.content}`;
+      if (seenSubagentTaskEnvelopes.has(taskKey)) continue;
+      seenSubagentTaskEnvelopes.add(taskKey);
+      messages.push({
+        id: r.payload.id || `subagent-task-${idx++}`,
+        sessionId,
+        role: "user",
+        content: task.content,
+        thinking: null,
+        toolName: null,
+        toolInput: null,
+        toolOutput: null,
+        timestamp: ts,
+        tokens: null,
+        metadata: {
+          provenance: "session",
+          source: "subagent_task",
+          taskName: task.taskName,
+          promptAvailable: task.promptAvailable
+        }
       });
     }
 

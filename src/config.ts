@@ -133,7 +133,7 @@ function sameStringArray(left: any, right: any) {
     && left.every((value, index) => value === right[index]);
 }
 
-const DEFAULT_ANALYSIS_OUTPUT_DIR = ".codeagentsession/analysis";
+const DEFAULT_ANALYSIS_OUTPUT_DIR = ".agentsession/analysis";
 const LEGACY_DEFAULT_ANALYSIS_OUTPUT_DIR = ".opensessionviewer/analysis";
 
 function migrateLegacyTargetMaterials(targetId: any, target: any) {
