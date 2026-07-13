@@ -1,6 +1,6 @@
 # Contributing a New Provider
 
-This guide explains how to add support for a new AI coding tool to OpenSessionViewer. Each provider is a lightweight adapter that implements a standard interface to expose session data.
+This guide explains how to add support for a new AI coding tool to AgentSession. Each provider is a lightweight adapter that implements a standard interface to expose session data.
 
 ## Provider Adapter Interface
 

@@ -2544,7 +2544,7 @@ if (sessionWorkbench) {
   };
 
   try {
-    const storedTocWidth = Number(localStorage.getItem("opensessionviewer.tocWidth"));
+    const storedTocWidth = Number(localStorage.getItem("agentsession.tocWidth") || localStorage.getItem("opensessionviewer.tocWidth"));
     if (storedTocWidth) {
       sessionWorkbench.style.setProperty("--toc-width", `${storedTocWidth}px`);
     }
@@ -2574,7 +2574,7 @@ if (sessionWorkbench) {
         document.removeEventListener("pointermove", onMove);
         document.removeEventListener("pointerup", onUp);
         try {
-          localStorage.setItem("opensessionviewer.tocWidth", String(width));
+          localStorage.setItem("agentsession.tocWidth", String(width));
         } catch {}
       };
       document.addEventListener("pointermove", onMove);

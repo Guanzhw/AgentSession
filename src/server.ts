@@ -6,7 +6,7 @@ import {
 } from "./config.js";
 import { getStats } from "./db.js";
 import { getLocale, setLocale } from "./i18n.js";
-import { getIndexDb, upsertIndex } from "./index-db.js";
+import { getIndexDb, indexProvider } from "./index-db.js";
 import { getAllProviders, getAvailableProviders } from "./providers/index.js";
 import { supportsLocalManagement, usesSqliteSessionStore } from "./providers/kinds.js";
 import {
@@ -81,20 +81,16 @@ export async function startServer(config = getConfig()) {
           event: "provider.index.start",
           provider: provider.id
         });
-        const sessions: any[] = [];
-        for await (const session of provider.scan()) {
-          sessions.push(session);
-        }
-        upsertIndex(provider.id, sessions);
+        const indexed = await indexProvider(provider);
         const durationMs = Date.now() - startTime;
         recordRuntimeEvent(appConfig.metaDir, {
           event: "provider.index.complete",
           provider: provider.id,
-          indexed: sessions.length,
+          indexed,
           durationMs,
           ok: true
         });
-        console.log(`Indexed ${sessions.length} sessions for ${provider.id} in ${durationMs}ms`);
+        console.log(`Indexed ${indexed} sessions for ${provider.id} in ${durationMs}ms`);
       } catch (err: any) {
         console.error(`Failed to index ${provider.id}: ${err.message}`);
         recordRuntimeEvent(appConfig.metaDir, {
@@ -208,7 +204,7 @@ export async function startServer(config = getConfig()) {
 
     const server = createServer(requestHandler);
     server.listen(PORT, "127.0.0.1", () => {
-      console.log(`OpenSessionViewer running at http://localhost:${PORT}`);
+      console.log(`AgentSession running at http://localhost:${PORT}`);
       console.log(`Language: ${getLocale()}`);
       console.log(`${stats.totalSessions} sessions, ${stats.totalMessages} messages.`);
       recordRuntimeEvent(appConfig.metaDir, {

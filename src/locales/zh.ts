@@ -167,7 +167,7 @@ export const zh = {
 
   // Settings
   "settings.title": "设置",
-  "settings.description": "管理当前本地服务器使用的持久化 OpenSessionViewer 配置。",
+  "settings.description": "管理当前本地服务器使用的持久化 AgentSession 配置。",
   "settings.config_file": "配置文件",
   "settings.launch_permission": "命令启动权限",
   "settings.launch_enabled": "当前服务器进程已启用",
@@ -208,7 +208,7 @@ export const zh = {
   "settings.target_prompt_help": "当前 Provider 实际生效的目标指引。恢复默认值会继承共享或内置指令。",
   "settings.target_prompt_placeholder": "例如：关注重复出现的失败，只提出最小且有证据支持的修改。",
   "settings.prompt_file": "可选提示词文件路径",
-  "settings.prompt_file_help": "引用已有文本文件；OpenSessionViewer 不会自动创建它。",
+  "settings.prompt_file_help": "引用已有文本文件；AgentSession 不会自动创建它。",
   "settings.prompt_file_base": "相对路径解析目录：",
   "settings.prompt_preview_title": "实际生效的 Analyzer 提示词",
   "settings.prompt_preview_description": "保存前检查当前表单草稿生成的提示词。会话专用值以占位符显示。",

@@ -1,0 +1,16 @@
+# AgentSession
+
+AgentSession is a local-first, read-only viewer and manager for AI coding
+sessions from OpenCode, CodeAgent, Claude Code, Codex CLI, and Gemini CLI.
+
+```bash
+npm install --global agentsession
+agentsession
+```
+
+It opens a loopback-only web UI at `http://localhost:3456`. Provider-owned
+databases and transcript files remain read-only; viewer metadata is stored
+separately.
+
+For coding-agent access to the same local history, install
+[`agentsession-mcp`](https://www.npmjs.com/package/agentsession-mcp).

@@ -131,7 +131,10 @@ export function createSqliteSessionAdapter({
             toolOutput: toolOutput ?? toolError ?? null,
             timestamp: Number(pd.time?.start) || Number(data?.time?.created) || 0,
             tokens: null,
-            metadata: { duration: pd.time ? (Number(pd.time.end) - Number(pd.time.start)) : null }
+            metadata: {
+              duration: pd.time ? (Number(pd.time.end) - Number(pd.time.start)) : null,
+              status: typeof pd.state?.status === "string" ? pd.state.status : null
+            }
           });
         }
       }
@@ -325,4 +328,3 @@ export function createSqliteSessionAdapter({
   }
   } satisfies ProviderAdapter;
 }
-

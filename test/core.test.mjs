@@ -2527,7 +2527,7 @@ test("settings page exposes config location and startup-only launch status", () 
   });
 
   assert.match(html, /data-page="settings"/);
-  assert.match(html, /class="logo"[^>]+title="OpenSessionViewer"[^>]+aria-label="OpenSessionViewer"/);
+  assert.match(html, /class="logo"[^>]+title="AgentSession"[^>]+aria-label="AgentSession"/);
   assert.match(html, /class="provider-tab active"[^>]+title="OpenCode"[^>]+aria-label="OpenCode"[^>]+aria-current="page"/);
   assert.match(html, new RegExp(`class="provider-tab disabled"[^>]+aria-label="CodeAgent - ${regexEscape(t("provider.not_detected"))}"[^>]+aria-disabled="true"`));
   assert.match(html, /id="theme-toggle"[^>]+aria-label="Toggle theme"/);
@@ -2551,7 +2551,7 @@ test("settings page exposes config location and startup-only launch status", () 
   assert.match(html, /Analyze skills \(built-in\)/);
   assert.match(html, /id="settings-target-prompt"/);
   assert.match(html, /data-reset-setting="target-prompt"/);
-  assert.match(html, /OpenSessionViewer does not create it/);
+  assert.match(html, /AgentSession does not create it/);
   assert.match(html, /id="settings-artifact-summary-roots"/);
   assert.match(html, /Analysis materials used by default/);
   assert.match(html, /data-reset-setting="artifact-roots"/);
@@ -4095,7 +4095,7 @@ test("analysis prompt preview uses the real builder and reports configured sourc
   assert.equal(preview.targetInstructionSource, "configured");
   assert.equal(preview.promptFile.available, true);
   assert.equal(preview.promptFile.resolvedPath, promptPath);
-  assert.match(preview.prompt, /# OpenSessionViewer session analysis/);
+  assert.match(preview.prompt, /# AgentSession session analysis/);
   assert.match(preview.prompt, /<analysis-run-directory>/);
   assert.match(preview.prompt, /Propose only minimal evidence-backed changes/);
   assert.match(preview.prompt, /Inspect successful and failed executions contrastively/);

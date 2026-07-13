@@ -36,7 +36,7 @@ export function buildAnalysisPrompt({
   rawSnapshotsIncluded
 }: AnalysisPromptParams) {
   const rootEvidenceId = makeEvidenceId(provider.id, session.id, "session", session.id);
-  return `# OpenSessionViewer session analysis
+  return `# AgentSession session analysis
 
 You are analyzing an existing ${provider.name} session as evidence for improving external agent guidance.
 
@@ -231,10 +231,10 @@ export function buildImplementationPrompt({
   const accessManifestLine = existsSync(files.accessManifestPath)
     ? `- Analysis access interface: ${files.accessManifestPath}`
     : `- Analysis access interface: ${files.accessManifestPath} (not available for this legacy run)`;
-  return `# OpenSessionViewer accepted-proposal implementation
+  return `# AgentSession accepted-proposal implementation
 
 The user has reviewed and accepted the validated proposal set from an
-OpenSessionViewer analysis run. Implement only that accepted set, then verify
+AgentSession analysis run. Implement only that accepted set, then verify
 the result.
 
 ## Run context

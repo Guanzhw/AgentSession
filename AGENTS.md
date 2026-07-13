@@ -1,13 +1,14 @@
-# Development Guide
+# AgentSession Development Guide
 
 This file is the repository-level source of truth for coding agents and
-contributors working on CodeagentSession. The runtime and many configuration
-names still use the historical OpenSessionViewer name. Preserve those names
-unless a change explicitly includes a compatibility and migration plan.
+contributors working on AgentSession. The runtime still accepts historical
+OpenSessionViewer configuration names for compatibility. Prefer AgentSession
+names in new public surfaces and preserve the legacy names unless a change
+includes a compatibility and migration plan.
 
 ## Project Summary
 
-CodeagentSession is a local-first, multi-provider viewer for AI coding
+AgentSession is a local-first, multi-provider viewer for AI coding
 sessions. It reads provider-owned session data, builds a cross-provider index,
 renders server-side HTML, exposes JSON APIs, and stores viewer-only metadata
 such as stars, custom titles, and deletion state in a separate local database.
@@ -28,7 +29,7 @@ The package is intentionally small:
 
 - Do not write to, migrate, delete from, or otherwise mutate provider-owned
   databases and transcript files.
-- Viewer state belongs in `src/meta.ts` and the OpenSessionViewer metadata
+- Viewer state belongs in `src/meta.ts` and the AgentSession metadata
   database.
 - "Permanent delete" currently means permanently excluding a session in viewer
   metadata. It does not delete the source session.
@@ -154,6 +155,9 @@ test/
 docs/
   CONTRIBUTING-PROVIDER.md       detailed provider contribution walkthrough
 dist/                            generated build output; never edit directly
+packages/
+  agentsession/                  publishable Viewer package assembled from dist
+  agentsession-mcp/              publishable read-only stdio MCP server
 tmp/, logs/, .opensessionviewer/ runtime and QA artifacts; do not commit
 ```
 
@@ -229,7 +233,8 @@ adapter before copying a pattern because provider capabilities differ.
 - CLI flags override environment variables and file configuration where
   implemented.
 - The default config file is `config.json` under the metadata directory;
-  `OPENSESSIONVIEWER_CONFIG` and `--config` select another file.
+`AGENTSESSION_CONFIG` and `--config` select another file.
+`OPENSESSIONVIEWER_CONFIG` remains a compatibility fallback.
 - `analysis`, `resumeCommands`, and `resumeShell` can be applied to a running
   server through the settings API. Data directories, port, and other
   startup-owned settings require restart.
@@ -328,7 +333,7 @@ For analysis runs, report the final `manifest.state`, validation errors, output
 counts, and integrity result. Do not report a successful external process exit
 as a successful analysis when validation failed.
 
-## Restart OpenSessionViewer
+## Restart AgentSession
 
 Run these commands from the repository root after server-affecting changes.
 

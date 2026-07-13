@@ -217,7 +217,11 @@ ab "wait for reasoning" wait ".reasoning-block" >/dev/null
 detail="$(read_ab "read session detail" get text body)"
 assert_not_contains "detail" "$detail" "System Prompts"
 assert_contains "detail" "$detail" "Flow"
-assert_contains "detail session ID" "$detail" "$SAMPLE_SESSION_ID"
+detail_session_workbench_id="$(read_ab "read detail session id" get attr ".session-workbench" data-session-id)"
+if [[ "$detail_session_workbench_id" != "$SAMPLE_SESSION_ID" && "$detail_session_workbench_id" != "\"$SAMPLE_SESSION_ID\"" ]]; then
+  echo "Detail session workbench ID did not include $SAMPLE_SESSION_ID" >&2
+  exit 1
+fi
 detail_tool_count="$(read_ab "count detail tool calls" get count ".tool-call")"
 assert_positive_count "detail tool calls" "$detail_tool_count"
 

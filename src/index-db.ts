@@ -236,6 +236,82 @@ export function getIndexedOverview(provider: any, timeRange = "", search = "", p
   };
 }
 
+function escapeLikePattern(value: string) {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
+
+/**
+ * Read a single indexed session without exposing the database to callers.
+ */
+export function getIndexedSession(provider: string, sessionId: string) {
+  return getIndexDb().prepare(`
+    SELECT id, provider, parent_id, title, directory, time_created, time_updated, message_count, token_count
+    FROM session_index
+    WHERE provider = ? AND id = ?
+  `).get(provider, sessionId) || null;
+}
+
+/**
+ * Search only the viewer-owned session metadata index. This is intentionally
+ * narrower than the transcript search contract and accepts no SQL fragments.
+ */
+export function findIndexedSessionMetadata(
+  provider: string,
+  query: string,
+  limit = 20,
+  excludedIds: Set<string> = new Set(),
+  updatedAfter: number | undefined = undefined,
+  updatedBefore: number | undefined = undefined
+) {
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 100));
+  const term = escapeLikePattern(String(query || "").trim());
+  if (!term) return [];
+  const where = ["provider = ?", "(COALESCE(title, '') LIKE ? ESCAPE '\\' OR COALESCE(directory, '') LIKE ? ESCAPE '\\')"];
+  const params: any[] = [provider, `%${term}%`, `%${term}%`];
+  if (Number.isFinite(updatedAfter)) {
+    where.push("time_updated >= ?");
+    params.push(updatedAfter);
+  }
+  if (Number.isFinite(updatedBefore)) {
+    where.push("time_updated <= ?");
+    params.push(updatedBefore);
+  }
+  if (excludedIds.size > 0) {
+    where.push(idMembership("id", [...excludedIds], params, true));
+  }
+  return getIndexDb().prepare(`
+    SELECT id, provider, parent_id, title, directory, time_created, time_updated, message_count, token_count
+    FROM session_index
+    WHERE ${where.join(" AND ")}
+    ORDER BY time_updated DESC, time_created DESC, id ASC
+    LIMIT ?
+  `).all(...params, safeLimit);
+}
+
+/**
+ * Return direct children only; callers retain provider and metadata filtering.
+ */
+export function getIndexedSessionChildren(
+  provider: string,
+  parentId: string,
+  limit = 20,
+  excludedIds: Set<string> = new Set()
+) {
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 100));
+  const where = ["provider = ?", "parent_id = ?"];
+  const params: any[] = [provider, parentId];
+  if (excludedIds.size > 0) {
+    where.push(idMembership("id", [...excludedIds], params, true));
+  }
+  return getIndexDb().prepare(`
+    SELECT id, provider, parent_id, title, directory, time_created, time_updated, message_count, token_count
+    FROM session_index
+    WHERE ${where.join(" AND ")}
+    ORDER BY time_updated DESC, time_created DESC, id ASC
+    LIMIT ?
+  `).all(...params, safeLimit);
+}
+
 /**
  * Run a full index for a provider using its scan() method.
  * @param {import('./providers/interface.js').ProviderAdapter} adapter

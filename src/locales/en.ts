@@ -167,7 +167,7 @@ export const en = {
 
   // Settings
   "settings.title": "Settings",
-  "settings.description": "Manage the persistent OpenSessionViewer configuration used by this local server.",
+  "settings.description": "Manage the persistent AgentSession configuration used by this local server.",
   "settings.config_file": "Configuration file",
   "settings.launch_permission": "Command launch permission",
   "settings.launch_enabled": "Enabled for this server process",
@@ -208,7 +208,7 @@ export const en = {
   "settings.target_prompt_help": "Effective target guidance for this provider. Reset restores the shared or built-in instructions.",
   "settings.target_prompt_placeholder": "For example: Focus on recurring failures and propose only minimal, evidence-backed changes.",
   "settings.prompt_file": "Optional prompt file path",
-  "settings.prompt_file_help": "References an existing text file; OpenSessionViewer does not create it.",
+  "settings.prompt_file_help": "References an existing text file; AgentSession does not create it.",
   "settings.prompt_file_base": "Relative paths resolve from:",
   "settings.prompt_preview_title": "Effective analyzer prompt",
   "settings.prompt_preview_description": "Inspect the prompt produced from the current form draft before saving. Session-specific values are shown as placeholders.",

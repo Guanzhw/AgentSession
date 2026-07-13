@@ -27,14 +27,14 @@ export function layout(title: string, body: string, page = "home", { provider = 
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${escapeHtml(title)} — OpenSessionViewer</title>
+  <title>${escapeHtml(title)} — AgentSession</title>
   <script>document.documentElement.dataset.theme=localStorage.theme||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light')</script>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css">
 </head>
 <body data-page="${escapeHtml(page)}" data-provider="${escapeHtml(provider || "")}" data-manageable="${manageable ? "true" : "false"}">
   <nav class="topbar">
-    <a href="${providerPrefix || "/"}" class="logo" title="OpenSessionViewer" aria-label="OpenSessionViewer">${icons.opensession}<span class="logo-text">OpenSessionViewer</span></a>
+    <a href="${providerPrefix || "/"}" class="logo" title="AgentSession" aria-label="AgentSession">${icons.opensession}<span class="logo-text">AgentSession</span></a>
     <div class="topbar-tabs">${providerTabs}</div>
     <div class="topbar-actions">
       <a href="${providerPrefix}/stats" class="nav-link nav-link-stats ${page === "stats" ? "active" : ""}" title="${escapeHtml(t("nav.stats"))}" aria-label="${escapeHtml(t("nav.stats"))}">${t("nav.stats")}</a>

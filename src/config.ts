@@ -34,11 +34,15 @@ function defaultDbPath() {
 }
 
 function defaultMetaDir() {
-  if (process.platform === "win32") {
-    return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "opensessionviewer");
-  }
-  const configHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
-  return path.join(configHome, "opensessionviewer");
+  const legacyDir = process.platform === "win32"
+    ? path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "opensessionviewer")
+    : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "opensessionviewer");
+  const agentSessionDir = process.platform === "win32"
+    ? path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "agentsession")
+    : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "agentsession");
+  if (existsSync(agentSessionDir)) return agentSessionDir;
+  if (existsSync(legacyDir)) return legacyDir;
+  return agentSessionDir;
 }
 
 function defaultClaudeDir() {
@@ -91,6 +95,12 @@ const defaults = {
   geminiDir: defaultGeminiDir(),
   reindex: false,
   allowTerminalLaunch: true,
+  mcp: {
+    searchLimit: 20,
+    timelineLimit: 50,
+    eventMaxChars: 4000,
+    contextWindow: 5
+  },
 };
 
 function isObject(value: any) {
@@ -215,7 +225,7 @@ export function readUserConfigDocument(configPath: any) {
 export function readUserConfig(configPath: any) {
   const document = readUserConfigDocument(configPath);
   if (document.error) {
-    console.warn(`Ignoring invalid OpenSessionViewer config at ${configPath}: ${document.error}`);
+    console.warn(`Ignoring invalid AgentSession config at ${configPath}: ${document.error}`);
   }
   return document.config;
 }
@@ -255,6 +265,39 @@ function validateCommand(value: any, field: any, errors: any) {
   }
   if (value.stdin !== undefined && value.stdin !== "prompt") {
     errors.push(`${field}.stdin must be "prompt" when provided.`);
+  }
+}
+
+const MCP_LIMIT_FIELDS = {
+  searchLimit: { max: 100 },
+  timelineLimit: { max: 200 },
+  eventMaxChars: { max: 20000 },
+  contextWindow: { max: 20 }
+};
+
+export function normalizeMcpConfig(value: any = undefined) {
+  const configured = isObject(value) ? value : {};
+  const normalized: Record<string, number> = {};
+  for (const [field, rule] of Object.entries(MCP_LIMIT_FIELDS)) {
+    const candidate = configured[field];
+    const fallback = (defaults.mcp as any)[field];
+    normalized[field] = Number.isInteger(candidate) && candidate > 0
+      ? Math.min(candidate, rule.max)
+      : fallback;
+  }
+  return normalized;
+}
+
+function validateMcpConfig(value: any, field: string, errors: any[]) {
+  if (!isObject(value)) {
+    errors.push(`${field} must be an object.`);
+    return;
+  }
+  for (const [name, rule] of Object.entries(MCP_LIMIT_FIELDS)) {
+    const candidate = value[name];
+    if (candidate !== undefined && (!Number.isInteger(candidate) || candidate <= 0 || candidate > rule.max)) {
+      errors.push(`${field}.${name} must be a positive integer no greater than ${rule.max}.`);
+    }
   }
 }
 
@@ -320,6 +363,10 @@ export function validateUserConfig(config: any) {
 
   if (config.resumeShell !== undefined && config.resumeShell !== null) {
     validateShell(config.resumeShell, "resumeShell", errors);
+  }
+
+  if (config.mcp !== undefined) {
+    validateMcpConfig(config.mcp, "mcp", errors);
   }
 
   if (config.analysis !== undefined) {
@@ -488,7 +535,7 @@ export function validateUserConfig(config: any) {
 export function writeUserConfig(configPath: any, config: any) {
   const errors = validateUserConfig(config);
   if (errors.length) {
-    const error: any = new Error("Invalid OpenSessionViewer configuration.");
+    const error: any = new Error("Invalid AgentSession configuration.");
     error.validationErrors = errors;
     throw error;
   }
@@ -503,6 +550,7 @@ export function applyRuntimeUserConfig(config: any, fileConfig: any) {
   config.resumeShell = isObject(fileConfig.resumeShell) ? fileConfig.resumeShell : null;
   config.analysis = isObject(fileConfig.analysis) ? fileConfig.analysis : { enabled: false };
   config.tokenPricing = isObject(fileConfig.tokenPricing) ? fileConfig.tokenPricing : {};
+  config.mcp = normalizeMcpConfig(fileConfig.mcp);
   return config;
 }
 
@@ -512,7 +560,7 @@ function detectLang() {
 }
 
 export function parseArgs(argv = process.argv.slice(2)) {
-  let configPath = process.env.OPENSESSIONVIEWER_CONFIG || "";
+  let configPath = process.env.AGENTSESSION_CONFIG || process.env.OPENSESSIONVIEWER_CONFIG || "";
   const explicitConfigIndex = argv.indexOf("--config");
   if (explicitConfigIndex >= 0 && argv[explicitConfigIndex + 1]) {
     configPath = argv[explicitConfigIndex + 1];
@@ -535,7 +583,8 @@ export function parseArgs(argv = process.argv.slice(2)) {
       : null,
     analysis: fileConfig.analysis && typeof fileConfig.analysis === "object"
       ? fileConfig.analysis
-      : { enabled: false }
+      : { enabled: false },
+    mcp: normalizeMcpConfig(fileConfig.mcp)
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -560,9 +609,9 @@ export function parseArgs(argv = process.argv.slice(2)) {
     } else if (argv[i] === "--open") {
       config.open = true;
     } else if (argv[i] === "--help" || argv[i] === "-h") {
-      console.log(`OpenSessionViewer — Multi-Provider Session Viewer & Manager
+      console.log(`AgentSession — Multi-Provider Session Viewer & Manager
 
-Usage: opensessionviewer [options]
+Usage: agentsession [options]
 
 Options:
   --port <number>       Server port (default: 3456, env: PORT)
@@ -570,7 +619,7 @@ Options:
   --claude-dir <path>   Path to Claude CLI data dir (default: ~/.claude)
   --codex-dir <path>    Path to Codex data dir (default: ~/.codex)
   --gemini-dir <path>   Path to Gemini data dir (default: ~/.gemini)
-  --config <path>       Path to OpenSessionViewer JSON config
+  --config <path>       Path to AgentSession JSON config
   --disable-terminal-launch
                         Disable resume and analysis command launching
   --reindex             Force full reindex of all providers on start
@@ -588,8 +637,8 @@ Options:
   if (!argv.includes("--db") && !argv.includes("--opencode-db") && process.env.SESSION_VIEWER_DB_PATH) {
     config.dbPath = process.env.SESSION_VIEWER_DB_PATH;
   }
-  if (process.env.OPENSESSIONVIEWER_META_PATH || process.env.OH_MY_OPENSESSION_META_PATH) {
-    config.metaDir = path.dirname(process.env.OPENSESSIONVIEWER_META_PATH || process.env.OH_MY_OPENSESSION_META_PATH || "");
+  if (process.env.AGENTSESSION_META_PATH || process.env.OPENSESSIONVIEWER_META_PATH || process.env.OH_MY_OPENSESSION_META_PATH) {
+    config.metaDir = path.dirname(process.env.AGENTSESSION_META_PATH || process.env.OPENSESSIONVIEWER_META_PATH || process.env.OH_MY_OPENSESSION_META_PATH || "");
   }
 
   config.metaPath = path.join(config.metaDir, "meta.db");

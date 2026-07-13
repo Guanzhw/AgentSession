@@ -1,0 +1,49 @@
+{
+  "name": "agentsession",
+  "version": "1.4.0",
+  "description": "AgentSession — a local-first multi-provider viewer and manager for AI coding sessions.",
+  "type": "module",
+  "bin": {
+    "agentsession": "dist/bin/cli.js",
+    "codeagentsession": "dist/bin/cli.js",
+    "codeagent-session": "dist/bin/cli.js",
+    "opensession": "dist/bin/cli.js",
+    "oh-my-opensession": "dist/bin/cli.js"
+  },
+  "exports": {
+    "./config": {
+      "types": "./dist/src/config.d.ts",
+      "default": "./dist/src/config.js"
+    },
+    "./session-history": {
+      "types": "./dist/src/session-history.d.ts",
+      "default": "./dist/src/session-history.js"
+    }
+  },
+  "files": [
+    "dist/"
+  ],
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "keywords": [
+    "agentsession",
+    "agent-session",
+    "opencode",
+    "codeagent",
+    "claude-code",
+    "codex",
+    "gemini",
+    "session-viewer",
+    "ai-coding",
+    "session-manager",
+    "cli"
+  ],
+  "author": "Guanzhw",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Guanzhw/AgentSession.git"
+  },
+  "homepage": "https://github.com/Guanzhw/AgentSession"
+}

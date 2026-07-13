@@ -1,4 +1,4 @@
-# OpenSessionViewer
+# AgentSession
 
 > A local AI session archive for developers: one searchable, traceable, reviewable web UI for OpenCode, CodeAgent, Claude Code, Codex CLI, and Gemini CLI sessions.
 
@@ -7,15 +7,15 @@
 ![Node.js >= 22.5.0](https://img.shields.io/badge/node-%3E%3D22.5.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.2.0](https://img.shields.io/badge/v1.2.0-orange?style=flat-square)
+![v1.4.0](https://img.shields.io/badge/version-1.4.0-orange?style=flat-square)
 
 ## Attribution
 
-OpenSessionViewer is based on [OpenSession](https://github.com/HeavyBunny19C/OpenSession). It keeps the original local, multi-provider AI session viewer direction, moves the codebase to TypeScript, and extends the roadmap toward richer nested-session, tool-flow, and context visualization.
+AgentSession is based on [OpenSession](https://github.com/HeavyBunny19C/OpenSession). It keeps the original local, multi-provider AI session viewer direction, moves the codebase to TypeScript, and extends the roadmap toward richer nested-session, tool-flow, and context visualization.
 
 ## What It Is
 
-OpenSessionViewer is a local-first viewer for AI coding sessions. It reads session data already stored on your machine and presents a unified dashboard, search, detail pages, statistics, exports, and trace views. It does not modify the original provider databases.
+AgentSession is a local-first viewer for AI coding sessions. It reads session data already stored on your machine and presents a unified dashboard, search, detail pages, statistics, exports, and trace views. It does not modify the original provider databases.
 
 The focus is no longer just “list my chats.” The goal is to help you reconstruct what happened during an AI-assisted engineering workflow:
 
@@ -36,7 +36,7 @@ The focus is no longer just “list my chats.” The goal is to help you reconst
 | Codex CLI | Manageable | `~/.codex/sessions/**/*.jsonl` | Browse, search, star, rename, delete, trash, Token Explorer, ReACT, flow, nested subagents |
 | Gemini CLI | Manageable | `~/.gemini/tmp/*/chats/*.json` | Browse, search, star, rename, delete, trash, Token Explorer, ReACT, flow |
 
-All providers store stars, custom titles, soft deletes, and permanent exclusions in OpenSessionViewer’s own metadata database. Original session databases and transcript files remain read-only.
+All providers store stars, custom titles, soft deletes, and permanent exclusions in AgentSession’s own metadata database. Original session databases and transcript files remain read-only.
 
 ## Features
 
@@ -56,7 +56,8 @@ All providers store stars, custom titles, soft deletes, and permanent exclusions
 ## Quick Start
 
 ```bash
-npx @guanzhw/opensessionviewer
+npm install --global agentsession
+agentsession
 ```
 
 Then open:
@@ -68,8 +69,8 @@ http://localhost:3456
 Run from source:
 
 ```bash
-git clone https://github.com/Guanzhw/OpenSessionViewer.git
-cd OpenSessionViewer
+git clone https://github.com/Guanzhw/AgentSession.git
+cd AgentSession
 npm install
 npm start
 ```
@@ -77,14 +78,14 @@ npm start
 ## CLI Options
 
 ```text
-opensessionviewer [options]
+agentsession [options]
 
 --port <number>       Server port, default 3456
 --opencode-db <path>  OpenCode database path, alias --db
 --claude-dir <path>   Claude Code data directory
 --codex-dir <path>    Codex CLI data directory
 --gemini-dir <path>   Gemini CLI data directory
---config <path>       OpenSessionViewer JSON config
+--config <path>       AgentSession JSON config
 --disable-terminal-launch
                       Disable resume and analysis command launching
 --reindex             Rebuild the cross-provider index on start
@@ -104,9 +105,50 @@ opensessionviewer [options]
 | `CLAUDE_CONFIG_DIR` | Claude Code data directory |
 | `CODEX_HOME` | Codex CLI data directory |
 | `GEMINI_HOME` | Gemini CLI data directory |
-| `OPENSESSIONVIEWER_META_PATH` | OpenSessionViewer metadata DB path |
-| `OH_MY_OPENSESSION_META_PATH` | Legacy metadata DB path |
-| `OPENSESSIONVIEWER_CONFIG` | JSON config path |
+| `AGENTSESSION_META_PATH` | AgentSession metadata DB path |
+| `AGENTSESSION_CONFIG` | AgentSession JSON config path |
+| `OPENSESSIONVIEWER_META_PATH` | Legacy metadata DB path |
+| `OH_MY_OPENSESSION_META_PATH` | Older metadata DB compatibility path |
+| `OPENSESSIONVIEWER_CONFIG` | Legacy JSON config path |
+
+## AgentSession-MCP: local session history for coding agents
+
+`agentsession-mcp` is a separate stdio MCP package for Codex, Claude Code,
+Gemini CLI, OpenCode, and other MCP hosts to query the session history from
+locally available providers. It starts no web server, binds no port, and never
+modifies provider-owned data.
+
+```bash
+npm install --global agentsession-mcp
+agentsession-mcp --config /path/to/config.json
+```
+
+It exposes exactly five read-only tools: `session_search`, `session_get`,
+`session_timeline`, `session_get_context`, and `session_get_event`. Keyword
+search covers titles, recorded message text, and recorded directories by
+default. Reasoning, tool input, and tool output require explicit opt-in and
+are always bounded server-side.
+
+Use the same AgentSession JSON config to reuse provider paths and the metadata
+directory. MCP output limits are optional and server-capped:
+
+```json
+{
+  "mcp": {
+    "searchLimit": 20,
+    "timelineLimit": 50,
+    "eventMaxChars": 4000,
+    "contextWindow": 5
+  }
+}
+```
+
+Register it in an MCP host with the `agentsession-mcp` command and optional
+`--config` argument. For example, in Codex CLI:
+
+```bash
+codex mcp add agentsession -- agentsession-mcp --config /path/to/config.json
+```
 
 ## Resume Commands
 
@@ -134,7 +176,7 @@ All registered providers declare a default resume command:
 | Gemini CLI | `gemini --resume {sessionId}` |
 
 Every command and the PowerShell-compatible terminal shell can be overridden in
-`config.json` under the normal OpenSessionViewer config directory, or in the
+`config.json` under the normal AgentSession config directory, or in the
 file selected by `--config`:
 
 ```json
@@ -165,7 +207,7 @@ path. Set a provider entry to `false` to disable its resume actions.
 
 `resumeShell.executable` may be `pwsh.exe`, `powershell.exe`, or an absolute path
 to a PowerShell-compatible executable. Its `args` are inserted before the
-generated `-EncodedCommand` argument. When omitted, OpenSessionViewer selects
+generated `-EncodedCommand` argument. When omitted, AgentSession selects
 `pwsh.exe` and then `powershell.exe`, using `["-NoExit", "-NoLogo"]`.
 
 ## Web Settings
@@ -179,7 +221,7 @@ saving. The underlying JSON remains available in a collapsed Advanced section.
 Changes to `analysis`, `resumeCommands`, and `resumeShell` apply to the running
 server immediately. Server paths, port, and provider data directories are
 persisted but require a restart. `allowTerminalLaunch` is intentionally not
-web-configurable. Command launching is enabled by default; start OpenSessionViewer
+web-configurable. Command launching is enabled by default; start AgentSession
 with `--disable-terminal-launch` to turn it off for the current process.
 
 Token Explorer does not embed a vendor price catalog. To enable cost estimates,
@@ -209,7 +251,7 @@ actual model key and a trustworthy source, and maintain the `asOf` date yourself
 
 ## Runtime Logs
 
-OpenSessionViewer writes append-only JSONL runtime events under the metadata
+AgentSession writes append-only JSONL runtime events under the metadata
 directory:
 
 ```text
@@ -226,7 +268,7 @@ own `diagnostics/` directory.
 
 ## Session Analysis And Evaluation Proposals
 
-OpenSessionViewer can launch a configured analyzer non-interactively from
+AgentSession can launch a configured analyzer non-interactively from
 provider detail pages that declare session-analysis support, currently OpenCode,
 CodeAgent, and Claude Code. Other providers keep their read-only viewer features until
 their adapters declare the same capability. The analysis run is proposal-only:
@@ -259,7 +301,7 @@ Analysis inputs are intentionally separated:
   including files such as `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md`, plus
   skills, agents, commands, plugins, hooks, tools, and rules.
 
-Before launch, OpenSessionViewer resolves the current local provider runtime
+Before launch, AgentSession resolves the current local provider runtime
 extensions and automatically captures the default selected project/user skills,
 instructions, agents, commands, plugins, hooks, tools, rules, or extension
 bundles that are capturable. Each provider still owns the exact kinds and search
@@ -309,12 +351,12 @@ New runs organize those files by purpose:
 
 Older flat run directories remain readable.
 
-Generated evaluation cases begin with `status: "proposed"`. OpenSessionViewer
+Generated evaluation cases begin with `status: "proposed"`. AgentSession
 does not modify skills or mark a proposal as validated. Promotion should happen
 only after baseline and candidate executions pass replay, held-out, and
 regression checks.
 
-After the analyzer exits, OpenSessionViewer automatically checks the output
+After the analyzer exits, AgentSession automatically checks the output
 schemas, requires replay/held-out/regression cases, verifies proposal roots and
 paths against the captured artifact inventory, resolves every `ev:...` and
 `artifact:...` reference, requires explicit baseline/candidate expectations and
@@ -464,20 +506,20 @@ are normalized on load and removed the next time settings are saved. Other
 custom paths are preserved.
 
 When `analysis.outputDir` is omitted, runs default to
-`.codeagentsession/analysis` inside the session project. CodeagentSession writes
+`.codeagentsession/analysis` inside the session project. AgentSession writes
 `.codeagentsession/.gitignore` so generated runs stay out of source control even
 when the project does not already ignore that directory. Existing
 `.opensessionviewer/analysis` runs remain discoverable for compatibility. Each
 run carries the read-only evidence query tool and its local dependency in its
 own `tools/` directory, so the analyzer does not need access to the
-CodeagentSession installation directory. Explicit absolute output directories
+AgentSession installation directory. Explicit absolute output directories
 remain supported, but a project-scoped analyzer sandbox must also be able to
 access that path.
 
 Target-specific analyzer instructions can be edited directly on the settings
 page or configured as `analysis.targets.<target>.prompt`. `promptFile` is an
 optional reference to an existing text file; relative paths are resolved from
-the directory containing `config.json`, and OpenSessionViewer does not create
+the directory containing `config.json`, and AgentSession does not create
 that file. Use **Preview effective prompt** on the settings page to inspect the
 same composed prompt template used for a run, with session-specific paths shown
 as placeholders.
@@ -527,7 +569,7 @@ for the agent-oriented implementation guide for other providers.
 
 Claude Code histories are read from both the legacy `~/.claude/transcripts`
 layout and the current `~/.claude/projects/<project>/*.jsonl` layout.
-OpenSessionViewer never modifies these files.
+AgentSession never modifies these files.
 
 Claude Code removes transcript files according to its `cleanupPeriodDays`
 setting, which defaults to 30 days. Project metadata can remain in
