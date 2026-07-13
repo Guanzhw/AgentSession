@@ -5,7 +5,7 @@ history. It queries the providers configured for AgentSession without starting
 a web server or modifying provider-owned data.
 
 ```bash
-npm install --global agentsession-mcp
+npm install --global @acetamido/agentsession-mcp
 agentsession-mcp --help
 agentsession-mcp --config /path/to/config.json
 ```

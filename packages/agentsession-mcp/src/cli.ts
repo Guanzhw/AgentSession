@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { initConfig } from "agentsession/config";
-import { createSessionHistoryService } from "agentsession/session-history";
+import { initConfig } from "@acetamido/agentsession/config";
+import { createSessionHistoryService } from "@acetamido/agentsession/session-history";
 import { createSessionHistoryMcpServer } from "./session-history-server.js";
 
 function printHelp() {

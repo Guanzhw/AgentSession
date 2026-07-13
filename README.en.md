@@ -55,7 +55,7 @@ All providers store stars, custom titles, soft deletes, and permanent exclusions
 ## Quick Start
 
 ```bash
-npm install --global agentsession
+npm install --global @acetamido/agentsession
 agentsession
 ```
 
@@ -112,13 +112,13 @@ agentsession [options]
 
 ## AgentSession-MCP: local session history for coding agents
 
-`agentsession-mcp` is a separate stdio MCP package for Codex, Claude Code,
+`@acetamido/agentsession-mcp` is a separate stdio MCP package for Codex, Claude Code,
 Gemini CLI, OpenCode, and other MCP hosts to query the session history from
 locally available providers. It starts no web server, binds no port, and never
 modifies provider-owned data.
 
 ```bash
-npm install --global agentsession-mcp
+npm install --global @acetamido/agentsession-mcp
 agentsession-mcp --config /path/to/config.json
 ```
 

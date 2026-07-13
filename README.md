@@ -62,7 +62,7 @@ AgentSession 是一个本地优先的 AI 编程会话查看器。它不会修改
 ### 方式一：安装打包后的包（推荐）
 
 ```bash
-npm install --global agentsession
+npm install --global @acetamido/agentsession
 agentsession
 ```
 
@@ -115,10 +115,10 @@ agentsession [options]
 
 ## AgentSession-MCP：供 Coding Agent 查询会话历史
 
-`agentsession-mcp` 是一个独立的 stdio MCP 包，供 Codex、Claude Code、Gemini CLI、OpenCode 等 MCP Host 查询本机已注册 Provider 的会话历史。它不启动 Web 服务、不绑定端口，也不会修改任何 Provider 数据。
+`@acetamido/agentsession-mcp` 是一个独立的 stdio MCP 包，供 Codex、Claude Code、Gemini CLI、OpenCode 等 MCP Host 查询本机已注册 Provider 的会话历史。它不启动 Web 服务、不绑定端口，也不会修改任何 Provider 数据。
 
 ```bash
-npm install --global agentsession-mcp
+npm install --global @acetamido/agentsession-mcp
 agentsession-mcp --config /path/to/config.json
 ```
 

@@ -3,7 +3,7 @@ import { z } from "zod";
 import {
   SessionHistoryError,
   type SessionHistoryService
-} from "agentsession/session-history";
+} from "@acetamido/agentsession/session-history";
 
 const providerSchema = z.enum(["opencode", "claude-code", "codex", "gemini"]);
 const sessionRefSchema = z.object({

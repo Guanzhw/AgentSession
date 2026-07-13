@@ -3,7 +3,7 @@
 Status: implemented (V1); real-data acceptance timing remains release-gated
 Scope: first implementation of a local, read-only MCP server for normalized
 coding-agent session history, distributed as the separately publishable
-AgentSession-MCP (`agentsession-mcp` on npm) package.
+AgentSession-MCP (`@acetamido/agentsession-mcp` on npm) package.
 
 ## 1. Decision And Boundary
 
@@ -269,21 +269,21 @@ the viewer-owned FTS index before publishing the feature.
 
 ## 7. Transport, Configuration, And Logging
 
-Build the MCP server as the AgentSession-MCP (`agentsession-mcp`) npm workspace
+Build the MCP server as the AgentSession-MCP (`@acetamido/agentsession-mcp`) npm workspace
 package in this repository. It
 is independently installable and runs independently from the Viewer HTTP
 process, but it is not a separate source repository.
 
 Use the official TypeScript MCP SDK as a runtime dependency of
-agentsession-mcp. A hand-written implementation of the evolving protocol would
+`@acetamido/agentsession-mcp`. A hand-written implementation of the evolving protocol would
 be higher risk than one narrowly scoped dependency. The main
-AgentSession (`agentsession`) Viewer package keeps its zero runtime dependency
+AgentSession (`@acetamido/agentsession`) Viewer package keeps its zero runtime dependency
 constraint.
 
 `AgentSession` and `AgentSession-MCP` are the display names; npm package names
 and executable names use lowercase. The repository root is a private workspace
 orchestrator. `packages/agentsession` packages the compiled Viewer output, and
-`packages/agentsession-mcp` depends on the public `agentsession` exports. This
+`packages/agentsession-mcp` depends on the public `@acetamido/agentsession` exports. This
 keeps the MCP SDK out of the Viewer runtime dependency set.
 
 The package exposes this stdio binary:
@@ -295,11 +295,11 @@ agentsession-mcp --config <same-config.json> [provider path options]
 The normal user installation is:
 
 ~~~text
-npm install -g agentsession-mcp
+npm install -g @acetamido/agentsession-mcp
 ~~~
 
 The AgentSession package publishes a small public session-history factory,
-`agentsession/session-history`. The MCP package depends on that
+`@acetamido/agentsession/session-history`. The MCP package depends on that
 public contract rather than importing private dist paths. Both packages release
 from the same repository with the same major/minor version and a compatible
 dependency range. Do not duplicate provider adapters or session normalization
@@ -422,7 +422,7 @@ turn session history into a secret vault.
 | src/index-db.ts | Reuse indexProvider(adapter) and add narrowly scoped index queries needed by session history. |
 | src/meta.ts | Read excluded-session IDs as an MCP access filter only. |
 | src/session-history.ts | New provider-neutral service and event projection layer. |
-| packages/agentsession-mcp/package.json | New published agentsession-mcp package manifest, MCP SDK dependency, and binary declaration. |
+| packages/agentsession-mcp/package.json | New published @acetamido/agentsession-mcp package manifest, MCP SDK dependency, and binary declaration. |
 | packages/agentsession-mcp/src/cli.ts | New stdio-only process entry point. |
 | packages/agentsession-mcp/src/session-history-server.ts | New MCP protocol adapter and five tool schemas. |
 | test/mcp.test.mjs | New protocol and service integration coverage. |

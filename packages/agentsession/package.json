@@ -1,5 +1,5 @@
 {
-  "name": "agentsession",
+  "name": "@acetamido/agentsession",
   "version": "1.4.0",
   "description": "AgentSession — a local-first multi-provider viewer and manager for AI coding sessions.",
   "type": "module",
