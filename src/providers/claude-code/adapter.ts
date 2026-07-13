@@ -15,7 +15,7 @@ import {
   createSessionFileStore,
   createStructuredViewCache,
   createStructuredViewMethods,
-  buildTokenStats,
+  createIncrementalTokenStats,
   type TokenFieldMapping
 } from "../shared/file-adapter-helpers.js";
 
@@ -147,6 +147,12 @@ const claudeTokenMapping: TokenFieldMapping = {
   cacheWriteTokens: (r) => Number((r.message?.usage ?? r.usage).cache_creation_input_tokens) || 0,
 };
 
+const getClaudeTokenStats = createIncrementalTokenStats(
+  () => sessionFiles.getFileSignatures(),
+  (filePath) => sessionFiles.getByFilePath(filePath)?.records || [],
+  claudeTokenMapping,
+);
+
 const claudeCode = {
   id: "claude-code",
   name: "Claude Code",
@@ -192,12 +198,11 @@ const claudeCode = {
   },
 
   getTokenStats(days = 30) {
-    return buildTokenStats(
-      () => sessionFiles.list(),
-      (filePath) => sessionFiles.getByFilePath(filePath)?.records || [],
-      claudeTokenMapping,
-      days
-    );
+    return getClaudeTokenStats(days);
+  },
+
+  getStatsRevision() {
+    return sessionFiles.getStatsRevision();
   },
 
   searchMessages(query, limit = 20) {

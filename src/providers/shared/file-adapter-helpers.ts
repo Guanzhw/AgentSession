@@ -13,6 +13,11 @@ export interface IndexedSessionFile<TSession, TRecords, TMessages> extends Sessi
   messages: TMessages;
 }
 
+export interface SessionFileSignature {
+  filePath: string;
+  signature: string;
+}
+
 interface SessionFileStoreOptions<TSession extends { id: string; parentId?: string | null }, TRecords, TMessages> {
   discoverFiles: () => SessionFileDescriptor[];
   readEntry: (descriptor: SessionFileDescriptor) => {
@@ -39,6 +44,7 @@ export function createSessionFileStore<
   let entriesByPath = new Map<string, IndexedSessionFile<TSession, TRecords, TMessages> & { signature: string }>();
   let entriesById = new Map<string, IndexedSessionFile<TSession, TRecords, TMessages> & { signature: string }>();
   let childrenByParent = new Map<string, Array<IndexedSessionFile<TSession, TRecords, TMessages> & { signature: string }>>();
+  let revision = 0;
 
   const refresh = (force = false) => {
     const now = Date.now();
@@ -80,9 +86,12 @@ export function createSessionFileStore<
         nextChildren.set(key, children);
       }
     }
+    const changed = nextByPath.size !== entriesByPath.size
+      || [...nextByPath].some(([filePath, entry]) => entriesByPath.get(filePath)?.signature !== entry.signature);
     entriesByPath = nextByPath;
     entriesById = nextById;
     childrenByParent = nextChildren;
+    if (changed) revision++;
     lastRefresh = now;
   };
 
@@ -103,6 +112,14 @@ export function createSessionFileStore<
       refresh();
       const entry = entriesByPath.get(path.resolve(filePath));
       return entry ? publicEntry(entry) : null;
+    },
+    getStatsRevision() {
+      refresh();
+      return revision;
+    },
+    getFileSignatures(): SessionFileSignature[] {
+      refresh();
+      return [...entriesByPath.values()].map(({ filePath, signature }) => ({ filePath, signature }));
     },
     getFamily(rootSessionId: string) {
       refresh();
@@ -228,4 +245,84 @@ export function buildTokenStats(
   }
 
   return [...dailyMap.values()].sort((a, b) => a.day.localeCompare(b.day));
+}
+
+/**
+ * Keep per-transcript daily aggregates while transcript signatures are stable.
+ * A changed transcript is the only one reparsed into aggregate buckets; range
+ * changes merely combine the already computed daily buckets.
+ */
+export function createIncrementalTokenStats(
+  discoverFiles: () => SessionFileSignature[],
+  parseFile: (filePath: string) => any,
+  fieldMapping: TokenFieldMapping,
+): (days?: number) => DailyTokenStat[] {
+  const byFile = new Map<string, { signature: string; days: Map<string, DailyTokenStat> }>();
+
+  const buildFileDays = (filePath: string) => {
+    const dailyMap = new Map<string, DailyTokenStat>();
+    const data = parseFile(filePath);
+    const records = Array.isArray(data) ? data : (data?.records || data?.messages || []);
+    for (const record of records) {
+      if (!fieldMapping.filterRecord(record)) continue;
+      const timestamp = fieldMapping.getTimestamp(record);
+      if (!Number.isFinite(timestamp) || timestamp <= 0) continue;
+      const day = new Date(timestamp).toISOString().slice(0, 10);
+      const existing = dailyMap.get(day) || {
+        day, inputTokens: 0, outputTokens: 0, totalTokens: 0, messageCount: 0,
+        reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0
+      };
+      existing.inputTokens += fieldMapping.inputTokens(record);
+      existing.outputTokens += fieldMapping.outputTokens(record);
+      existing.totalTokens += fieldMapping.totalTokens(record);
+      existing.reasoningTokens = (existing.reasoningTokens ?? 0) + fieldMapping.reasoningTokens(record);
+      existing.cacheReadTokens = (existing.cacheReadTokens ?? 0) + fieldMapping.cacheReadTokens(record);
+      existing.cacheWriteTokens = (existing.cacheWriteTokens ?? 0) + fieldMapping.cacheWriteTokens(record);
+      existing.messageCount += 1;
+      dailyMap.set(day, existing);
+    }
+    return dailyMap;
+  };
+
+  return (days = 30) => {
+    const files = discoverFiles();
+    const activePaths = new Set(files.map(({ filePath }) => filePath));
+    for (const filePath of byFile.keys()) {
+      if (!activePaths.has(filePath)) byFile.delete(filePath);
+    }
+
+    for (const { filePath, signature } of files) {
+      const cached = byFile.get(filePath);
+      if (cached?.signature === signature) continue;
+      try {
+        byFile.set(filePath, { signature, days: buildFileDays(filePath) });
+      } catch (error) {
+        console.warn("Skipping unparseable session file for token stats:", filePath, error);
+        byFile.delete(filePath);
+      }
+    }
+
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const cutoff = today.getTime() - (Math.max(1, days) - 1) * 86400000;
+    const totals = new Map<string, DailyTokenStat>();
+    for (const cached of byFile.values()) {
+      for (const stat of cached.days.values()) {
+        if (new Date(`${stat.day}T00:00:00.000Z`).getTime() < cutoff) continue;
+        const existing = totals.get(stat.day) || {
+          day: stat.day, inputTokens: 0, outputTokens: 0, totalTokens: 0, messageCount: 0,
+          reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0
+        };
+        existing.inputTokens += stat.inputTokens;
+        existing.outputTokens += stat.outputTokens;
+        existing.totalTokens += stat.totalTokens;
+        existing.reasoningTokens = (existing.reasoningTokens ?? 0) + (stat.reasoningTokens ?? 0);
+        existing.cacheReadTokens = (existing.cacheReadTokens ?? 0) + (stat.cacheReadTokens ?? 0);
+        existing.cacheWriteTokens = (existing.cacheWriteTokens ?? 0) + (stat.cacheWriteTokens ?? 0);
+        existing.messageCount += stat.messageCount;
+        totals.set(stat.day, existing);
+      }
+    }
+    return [...totals.values()].sort((a, b) => a.day.localeCompare(b.day));
+  };
 }

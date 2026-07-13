@@ -764,59 +764,15 @@ export function getTokenCoverage(pathOverride = undefined, opts: {
 
   const where = conds.join(" AND ");
 
-  // Check for token data: total > 0 OR any component > 0
-  const withTokens = d.prepare(`
-    SELECT COUNT(*) as cnt
-    FROM message
-    JOIN session ON session.id = message.session_id
-    WHERE ${where}
-      AND (
-        json_extract(message.data, '$.tokens.total') > 0
-        OR (
-          COALESCE(json_extract(message.data, '$.tokens.input'), 0)
-          + COALESCE(json_extract(message.data, '$.tokens.output'), 0)
-          + COALESCE(json_extract(message.data, '$.tokens.reasoning'), 0)
-          + COALESCE(json_extract(message.data, '$.tokens.cache.read'), 0)
-          + COALESCE(json_extract(message.data, '$.tokens.cache.write'), 0) > 0
-        )
-      )
-  `).get(...params);
-
-  const total = d.prepare(`
-    SELECT COUNT(*) as cnt
-    FROM message
-    JOIN session ON session.id = message.session_id
-    WHERE ${where}
-  `).get(...params);
-
-  const sessionsWithTokens = d.prepare(`
-    SELECT COUNT(DISTINCT session.id) as cnt
-    FROM message
-    JOIN session ON session.id = message.session_id
-    WHERE ${where}
-      AND (
-        json_extract(message.data, '$.tokens.total') > 0
-        OR (
-          COALESCE(json_extract(message.data, '$.tokens.input'), 0)
-          + COALESCE(json_extract(message.data, '$.tokens.output'), 0)
-          + COALESCE(json_extract(message.data, '$.tokens.reasoning'), 0)
-          + COALESCE(json_extract(message.data, '$.tokens.cache.read'), 0)
-          + COALESCE(json_extract(message.data, '$.tokens.cache.write'), 0) > 0
-        )
-      )
-  `).get(...params);
-
-  const totalSessions = d.prepare(`
-    SELECT COUNT(DISTINCT session.id) as cnt
-    FROM message
-    JOIN session ON session.id = message.session_id
-    WHERE ${where}
-  `).get(...params);
-
-  // A dimension is available when the provider records the field, even when
-  // every value in the selected range happens to be zero.
-  const dimChecks = d.prepare(`
+  // Keep coverage to one scan of the same filtered assistant-message set.
+  // A dimension counts as available even when every observed value is zero.
+  const usable = statsUsableTokenSql();
+  const summary = d.prepare(`
     SELECT
+      COUNT(*) as total_assistant_messages,
+      COUNT(DISTINCT session.id) as total_sessions,
+      SUM(CASE WHEN ${usable} THEN 1 ELSE 0 END) as messages_with_tokens,
+      COUNT(DISTINCT CASE WHEN ${usable} THEN session.id END) as sessions_with_tokens,
       MAX(CASE WHEN json_type(message.data, '$.tokens.input') IS NOT NULL THEN 1 ELSE 0 END) as has_input,
       MAX(CASE WHEN json_type(message.data, '$.tokens.output') IS NOT NULL THEN 1 ELSE 0 END) as has_output,
       MAX(CASE WHEN json_type(message.data, '$.tokens.reasoning') IS NOT NULL THEN 1 ELSE 0 END) as has_reasoning,
@@ -828,16 +784,16 @@ export function getTokenCoverage(pathOverride = undefined, opts: {
   `).get(...params);
 
   return {
-    messagesWithTokens: Number(withTokens?.cnt) || 0,
-    totalAssistantMessages: Number(total?.cnt) || 0,
-    sessionsWithTokens: Number(sessionsWithTokens?.cnt) || 0,
-    totalSessions: Number(totalSessions?.cnt) || 0,
+    messagesWithTokens: Number(summary?.messages_with_tokens) || 0,
+    totalAssistantMessages: Number(summary?.total_assistant_messages) || 0,
+    sessionsWithTokens: Number(summary?.sessions_with_tokens) || 0,
+    totalSessions: Number(summary?.total_sessions) || 0,
     dimensions: {
-      input: Boolean(dimChecks?.has_input),
-      output: Boolean(dimChecks?.has_output),
-      reasoning: Boolean(dimChecks?.has_reasoning),
-      cacheRead: Boolean(dimChecks?.has_cache_read),
-      cacheWrite: Boolean(dimChecks?.has_cache_write),
+      input: Boolean(summary?.has_input),
+      output: Boolean(summary?.has_output),
+      reasoning: Boolean(summary?.has_reasoning),
+      cacheRead: Boolean(summary?.has_cache_read),
+      cacheWrite: Boolean(summary?.has_cache_write),
     },
   };
 }

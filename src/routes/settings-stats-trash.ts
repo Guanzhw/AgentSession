@@ -10,6 +10,7 @@ import {
   getTokenStats,
   getTopTokenSessions,
 } from "../db.js";
+import { statSync } from "node:fs";
 import { getAllMeta, getDeletedIds } from "../meta.js";
 import { getIndexedSessions } from "../index-db.js";
 import {
@@ -23,7 +24,7 @@ import { OPENCODE_ANALYSIS_COMMAND } from "../analysis.js";
 import { readUserConfigDocument } from "../config.js";
 import { getProvider } from "../providers/index.js";
 import { renderSettingsPage } from "../views/settings.js";
-import { renderStatsPage } from "../views/stats.js";
+import { renderStatsDeferredSection, renderStatsPage } from "../views/stats.js";
 import { renderTrashPage } from "../views/trash.js";
 import { providerRenderContext } from "./provider-context.js";
 import {
@@ -40,6 +41,7 @@ import { computeHeuristicInsights } from "../stats-insights.js";
 import type { HeuristicInsight } from "../stats-insights.js";
 import { computeCostEstimate } from "../stats-cost.js";
 import type { CostEstimate, TokenPricingEntry } from "../stats-cost.js";
+import { createStatsCache } from "../stats-cache.js";
 
 export function registerSettingsStatsTrash(
   app: any,
@@ -50,6 +52,26 @@ export function registerSettingsStatsTrash(
   }
 ) {
   const { appConfig, providerMap, providerInfo } = deps;
+  const statsCache = createStatsCache();
+
+  function statsSourceFingerprint(adapter: any) {
+    const revision = adapter.getStatsRevision?.();
+    if (revision !== undefined && revision !== null) return `revision:${revision}`;
+    const dataPath = adapter.getDataPath?.();
+    try {
+      const stat = dataPath ? statSync(dataPath) : null;
+      return stat ? `${dataPath}:${stat.size}:${stat.mtimeMs}` : `missing:${dataPath || ""}`;
+    } catch {
+      return `missing:${dataPath || ""}`;
+    }
+  }
+
+  function statsQueryKey(providerId: string, searchParams: URLSearchParams, detail: "initial" | "full") {
+    const pairs = [...searchParams.entries()].sort(([leftKey, leftValue], [rightKey, rightValue]) =>
+      leftKey.localeCompare(rightKey) || leftValue.localeCompare(rightValue)
+    );
+    return `${detail}:${providerId}:${new URLSearchParams(pairs).toString()}`;
+  }
 
   // Settings page
   app.get("/:provider/settings", async (_req: any, _res: any, params: any) => {
@@ -80,7 +102,7 @@ export function registerSettingsStatsTrash(
 
   // ── Helper: build Token Explorer data for SQLite providers ────────────────
 
-  function buildSqliteTokenExplorer(adapter: any, providerSegment: string, searchParams: URLSearchParams): Omit<TokenExplorerData, 'provider' | 'providers' | 'manageable'> & { dayDrill: string | null; modelPairs: any[]; projects: Array<{ projectId: string; label: string; count: number }> } {
+  function buildSqliteTokenExplorer(adapter: any, providerSegment: string, searchParams: URLSearchParams, detail: "initial" | "full" = "full"): Omit<TokenExplorerData, 'provider' | 'providers' | 'manageable'> & { dayDrill: string | null; modelPairs: any[]; projects: Array<{ projectId: string; label: string; count: number }> } {
     const dbPath = adapter.getDataPath();
     const filters = parseStatsFilters(searchParams);
     const dayDrill = parseStatsDay(searchParams.get("day"));
@@ -153,22 +175,54 @@ export function registerSettingsStatsTrash(
       messageCount: Number(row.count) || 0,
     }));
 
-    // Model pairs for filter dropdown
-    const rawPairs = getModelPairs(dbPath, {
+    // With no active model filter, the ranking and selector have exactly the
+    // same dataset. Reuse it rather than scanning messages twice.
+    const modelPairs = filters.modelPair
+      ? (getModelPairs(dbPath, {
+          days: filters.days,
+          fromDate: filters.from || undefined,
+          toDate: filters.to || undefined,
+          project: filters.project || undefined,
+          scope: filters.scope,
+        }) as any[]).map((row: any) => ({
+          key: String(row.key || ""),
+          model: String(row.model || "unknown"),
+          provider: String(row.provider || "unknown"),
+          totalTokens: Number(row.total_tokens) || 0,
+        }))
+      : modelRanking.map((row) => ({
+          key: row.key,
+          model: row.modelId,
+          provider: row.providerId,
+          totalTokens: row.totalTokens,
+        }));
+
+    // Session count for overview (from message table)
+    const totalSessions = getFilteredSessionCount(dbPath, {
       days: filters.days,
       fromDate: filters.from || undefined,
       toDate: filters.to || undefined,
       project: filters.project || undefined,
+      modelPair: filters.modelPair || undefined,
       scope: filters.scope,
     });
-    const modelPairs = (rawPairs as any[]).map((row: any) => ({
-      key: String(row.key || ""),
-      model: String(row.model || "unknown"),
-      provider: String(row.provider || "unknown"),
-      totalTokens: Number(row.total_tokens) || 0,
-    }));
+    const overview = computeOverview(padded, totalSessions);
 
-    // Top sessions
+    if (detail === "initial") {
+      const projects = getStatsProjects(dbPath, {
+        days: filters.days,
+        fromDate: filters.from || undefined,
+        toDate: filters.to || undefined,
+        scope: filters.scope,
+      });
+      return {
+        filters, tokenStats: padded, modelRanking, topSessions: [], coverage: null,
+        overview, comparison: null, insights: [], costEstimate: null, compareA: null, compareB: null,
+        dayDrill, modelPairs, projects, capabilities,
+      };
+    }
+
+    // Top sessions and coverage are deferred from the initial page render.
     const topRows = getTopTokenSessions(dbPath, {
       days: filters.days,
       fromDate: filters.from || undefined,
@@ -190,7 +244,6 @@ export function registerSettingsStatsTrash(
       timeUpdated: Number(row.time_updated) || 0,
     }));
 
-    // Coverage
     const covRaw = getTokenCoverage(dbPath, {
       days: filters.days,
       fromDate: filters.from || undefined,
@@ -206,27 +259,14 @@ export function registerSettingsStatsTrash(
       ["cache-read", covRaw.dimensions.cacheRead],
       ["cache-write", covRaw.dimensions.cacheWrite],
     ] as const;
-    const available = dimensionEntries.filter(([, present]) => present).map(([name]) => name);
-    const missing = dimensionEntries.filter(([, present]) => !present).map(([name]) => name);
     const coverage: CoverageInfo = {
       messagesWithTokens: covRaw.messagesWithTokens,
       totalAssistantMessages: covRaw.totalAssistantMessages,
-      availableDimensions: available,
-      missingDimensions: missing,
+      availableDimensions: dimensionEntries.filter(([, present]) => present).map(([name]) => name),
+      missingDimensions: dimensionEntries.filter(([, present]) => !present).map(([name]) => name),
       sessionsWithTokens: covRaw.sessionsWithTokens,
       totalSessions: covRaw.totalSessions,
     };
-
-    // Session count for overview (from message table)
-    const totalSessions = getFilteredSessionCount(dbPath, {
-      days: filters.days,
-      fromDate: filters.from || undefined,
-      toDate: filters.to || undefined,
-      project: filters.project || undefined,
-      modelPair: filters.modelPair || undefined,
-      scope: filters.scope,
-    });
-    const overview = computeOverview(padded, totalSessions);
 
     // ── Comparison (same-period) ────────────────────────────────────────
     let comparison: ComparisonResult | null = null;
@@ -378,10 +418,16 @@ export function registerSettingsStatsTrash(
     return { filters, tokenStats: padded, modelRanking, topSessions, coverage, overview, comparison: null, insights: [] as any[], costEstimate: null, compareA: null, compareB: null, dayDrill, modelPairs, projects: null, capabilities };
   }
 
-  function buildTokenExplorer(adapter: any, providerId: string, searchParams: URLSearchParams) {
+  function buildTokenExplorer(adapter: any, providerId: string, searchParams: URLSearchParams, detail: "initial" | "full" = "full") {
     return usesSqliteSessionStore(adapter)
-      ? buildSqliteTokenExplorer(adapter, providerId, searchParams)
+      ? buildSqliteTokenExplorer(adapter, providerId, searchParams, detail)
       : buildFileBasedTokenExplorer(adapter, providerId, searchParams);
+  }
+
+  function buildCachedTokenExplorer(adapter: any, providerId: string, searchParams: URLSearchParams, detail: "initial" | "full" = "full") {
+    const fingerprint = `${statsSourceFingerprint(adapter)}:${JSON.stringify(appConfig.tokenPricing || {})}`;
+    const key = statsQueryKey(providerId, searchParams, detail);
+    return statsCache.getOrBuild(key, fingerprint, () => buildTokenExplorer(adapter, providerId, searchParams, detail));
   }
 
   // ── Stats / Token Explorer page ───────────────────────────────────────────
@@ -398,16 +444,44 @@ export function registerSettingsStatsTrash(
     const searchParams = new URL(req.url || "/", "http://localhost").searchParams;
 
     try {
-      const tokenExplorer = buildTokenExplorer(adapter, providerSegment, searchParams);
+      const tokenExplorer = buildCachedTokenExplorer(adapter, providerSegment, searchParams, "initial");
+      const deferredUrl = `/api/${encodeURIComponent(providerSegment)}/stats/deferred?${searchParams.toString()}`;
 
       return {
         status: 200,
-        body: renderStatsPage({ ...tokenExplorer, ...renderContext }),
+        body: renderStatsPage({ ...tokenExplorer, ...renderContext, deferredUrl }),
         contentType: "text/html; charset=utf-8"
       };
     } catch (err: any) {
       console.error(`Route error: ${err.message}`);
       return { status: 500, body: JSON.stringify({ error: "Internal server error" }), contentType: "application/json; charset=utf-8" };
+    }
+  });
+
+  // Deferred Token Explorer sections. This keeps the initial response focused
+  // on filters, KPIs, trend data, and the model ranking.
+  app.get(/^\/api\/([a-z][a-z0-9-]*)\/stats\/deferred$/, async (req: any, _res: any, match: RegExpMatchArray) => {
+    const providerId = match[1];
+    const adapter = providerMap.get(providerId);
+    if (!adapter) return { status: 404, body: "", contentType: "text/html; charset=utf-8" };
+
+    const section = new URL(req.url || "/", "http://localhost").searchParams.get("section");
+    if (section !== "secondary" && section !== "advanced") {
+      return { status: 400, body: "", contentType: "text/html; charset=utf-8" };
+    }
+
+    try {
+      const searchParams = new URL(req.url || "/", "http://localhost").searchParams;
+      searchParams.delete("section");
+      const data = buildCachedTokenExplorer(adapter, providerId, searchParams, "full");
+      return {
+        status: 200,
+        body: renderStatsDeferredSection({ ...data, provider: providerId }, section),
+        contentType: "text/html; charset=utf-8"
+      };
+    } catch (err: any) {
+      console.error(`Route error: ${err.message}`);
+      return { status: 500, body: "", contentType: "text/html; charset=utf-8" };
     }
   });
 
@@ -448,7 +522,7 @@ export function registerSettingsStatsTrash(
 
     try {
       const searchParams = new URL(_req.url || "/", "http://localhost").searchParams;
-      const data = buildTokenExplorer(adapter, providerId, searchParams);
+      const data = buildCachedTokenExplorer(adapter, providerId, searchParams);
       return {
         status: data.filters.validationError ? 400 : 200,
         body: JSON.stringify({
@@ -481,7 +555,7 @@ export function registerSettingsStatsTrash(
 
     try {
       const searchParams = new URL(_req.url || "/", "http://localhost").searchParams;
-      const data = buildTokenExplorer(adapter, providerId, searchParams);
+      const data = buildCachedTokenExplorer(adapter, providerId, searchParams);
       if (data.filters.validationError) {
         return {
           status: 400,
@@ -521,35 +595,14 @@ export function registerSettingsStatsTrash(
 
     try {
       const searchParams = new URL(_req.url || "/", "http://localhost").searchParams;
-      const filters = parseStatsFilters(searchParams);
+      const cached = buildCachedTokenExplorer(adapter, providerId, searchParams, "initial");
+      const filters = cached.filters;
 
       if (usesSqliteSessionStore(adapter)) {
-        const dbPath = adapter.getDataPath();
-        const rows = getTokenStats(filters.days, dbPath, {
-          project: filters.project || undefined,
-          modelPair: filters.modelPair || undefined,
-          scope: filters.scope,
-          fromDate: filters.from || undefined,
-          toDate: filters.to || undefined,
-        });
-        const tokenStats = padTokenStats((rows as any[]).map((row: any) => ({
-          day: String(row.day || ""),
-          input_tokens: Number(row.input_tokens) || 0,
-          output_tokens: Number(row.output_tokens) || 0,
-          reasoning_tokens: Number(row.reasoning_tokens) || 0,
-          cache_read_tokens: Number(row.cache_read_tokens) || 0,
-          cache_write_tokens: Number(row.cache_write_tokens) || 0,
-          total_tokens: Number(row.total_tokens) || 0,
-          message_count: Number(row.message_count) || 0,
-        })), filters.days, undefined, filters.from || undefined, filters.to || undefined);
-        const totalTokens = tokenStats.reduce((s: number, r: TokenDayRow) => s + r.total_tokens, 0);
-        return json(res, { filters, tokenStats, totalTokens });
+        return json(res, { filters, tokenStats: cached.tokenStats, totalTokens: cached.overview.totalTokens });
       }
 
-      const rawStats = adapter.getTokenStats(filters.days);
-      const tokenStats = padTokenStats((Array.isArray(rawStats) ? rawStats : []).map(normalizeProviderTokenStat), filters.days, undefined, filters.from || undefined, filters.to || undefined);
-      const totalTokens = tokenStats.reduce((s: number, r: TokenDayRow) => s + r.total_tokens, 0);
-      return json(res, { filters, tokenStats, totalTokens });
+      return json(res, { filters, tokenStats: cached.tokenStats, totalTokens: cached.overview.totalTokens });
     } catch (err: any) {
       console.error(`Route error: ${err.message}`);
       return json(res, { error: "Internal server error" }, 500);

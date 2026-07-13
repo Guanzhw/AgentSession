@@ -31,7 +31,7 @@ import { buildGeminiRuntimeEnvironment } from "../dist/src/providers/gemini/runt
 import { buildFlowTreeFromContainer } from "../dist/src/providers/shared/flow-tree.js";
 import { renderCanonicalFlowPanelContent, renderSessionPage } from "../dist/src/views/session.js";
 import { renderSettingsPage } from "../dist/src/views/settings.js";
-import { renderStatsPage } from "../dist/src/views/stats.js";
+import { renderStatsDeferredSection, renderStatsPage } from "../dist/src/views/stats.js";
 import { sessionCard } from "../dist/src/views/components.js";
 import { renderSessionsPage } from "../dist/src/views/sessions.js";
 import { EMPTY_PROJECT_FILTER } from "../dist/src/project-filter.js";
@@ -56,7 +56,8 @@ import {
 } from "../dist/src/providers/codex/parser.js";
 import { buildMessageSessionViews } from "../dist/src/providers/shared/message-session.js";
 import { buildLinkedMessageSessionViews } from "../dist/src/providers/shared/linked-message-session.js";
-import { createSessionFileStore } from "../dist/src/providers/shared/file-adapter-helpers.js";
+import { createIncrementalTokenStats, createSessionFileStore } from "../dist/src/providers/shared/file-adapter-helpers.js";
+import { createStatsCache } from "../dist/src/stats-cache.js";
 import { dataToMessages as geminiDataToMessages } from "../dist/src/providers/gemini/parser.js";
 import { getAllProviders } from "../dist/src/providers/index.js";
 import {
@@ -807,6 +808,61 @@ test("file session store reuses parsed transcripts, refreshes changed files, and
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }
+});
+
+test("incremental token stats only re-aggregates transcripts with a new signature", () => {
+  const now = Date.now();
+  let reads = 0;
+  const records = new Map([
+    ["first", [{ timestamp: now, tokens: 3 }]],
+    ["second", [{ timestamp: now, tokens: 5 }]],
+  ]);
+  let files = [
+    { filePath: "first", signature: "first-v1" },
+    { filePath: "second", signature: "second-v1" },
+  ];
+  const getTokenStats = createIncrementalTokenStats(
+    () => files,
+    (filePath) => {
+      reads++;
+      return records.get(filePath);
+    },
+    {
+      filterRecord: () => true,
+      getTimestamp: (record) => record.timestamp,
+      inputTokens: (record) => record.tokens,
+      outputTokens: () => 0,
+      totalTokens: (record) => record.tokens,
+      reasoningTokens: () => 0,
+      cacheReadTokens: () => 0,
+      cacheWriteTokens: () => 0,
+    }
+  );
+
+  assert.equal(getTokenStats(30)[0].totalTokens, 8);
+  assert.equal(reads, 2);
+  assert.equal(getTokenStats(90)[0].totalTokens, 8);
+  assert.equal(reads, 2, "range changes reuse per-file daily aggregates");
+
+  records.set("second", [{ timestamp: now, tokens: 11 }]);
+  files = [
+    { filePath: "first", signature: "first-v1" },
+    { filePath: "second", signature: "second-v2" },
+  ];
+  assert.equal(getTokenStats(30)[0].totalTokens, 14);
+  assert.equal(reads, 3, "only the changed transcript is re-aggregated");
+});
+
+test("stats cache reuses a matching source fingerprint and invalidates changed data", () => {
+  const cache = createStatsCache(2, 60_000);
+  let builds = 0;
+  const build = () => ({ build: ++builds });
+
+  assert.deepEqual(cache.getOrBuild("opencode:30", "db-v1", build), { build: 1 });
+  assert.deepEqual(cache.getOrBuild("opencode:30", "db-v1", build), { build: 1 });
+  assert.equal(builds, 1);
+  assert.deepEqual(cache.getOrBuild("opencode:30", "db-v2", build), { build: 2 });
+  assert.equal(builds, 2);
 });
 
 test("linked message sessions attach Codex-style spawn tools to child conversations", () => {
@@ -1856,6 +1912,24 @@ test("Token Explorer renders with no data without crashing", () => {
 
   assert.match(html, /Token Explorer/);
   assert.match(html, /No data/);
+});
+
+test("Token Explorer defers non-primary sections while retaining server-rendered fragments", () => {
+  const base = {
+    filters: { days: 30, from: null, to: null, project: "", modelPair: null, scope: "all", compareA: null, compareB: null, rangePreset: "30", requestedFrom: "", requestedTo: "", validationError: null },
+    tokenStats: [], modelRanking: [], overview: { totalSessions: 0, totalMessages: 0, totalTokens: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, peakDay: "", peakDayTokens: 0, avgTokensPerSession: 0 },
+    topSessions: [], coverage: null, comparison: null, insights: [], costEstimate: null, compareA: null, compareB: null,
+    provider: "opencode", providers: [], manageable: false,
+    capabilities: { customRange: true, project: true, model: true, scope: true, dayDrill: true, composition: true, modelRanking: true, sessionBreakdown: true, coverage: true },
+  };
+  const initial = renderStatsPage({ ...base, deferredUrl: "/api/opencode/stats/deferred?days=30" });
+  assert.match(initial, /data-stats-deferred-section="secondary"/);
+  assert.match(initial, /data-stats-deferred-section="advanced"/);
+  assert.doesNotMatch(initial, /top-sessions-table/);
+
+  const fragment = renderStatsDeferredSection({ ...base, dayDrill: null }, "secondary");
+  assert.match(fragment, /Top Token Sessions/);
+  assert.match(fragment, /Data Coverage/);
 });
 
 test("Token Explorer JS interactivity hooks are present", () => {

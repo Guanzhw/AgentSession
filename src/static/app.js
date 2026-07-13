@@ -3362,7 +3362,61 @@ if (sessionWorkbench) {
     update();
   }
 
+  // ── Token Explorer: Deferred Sections ─────────────────────────────────────
+  function initDeferredStats() {
+    const sections = Array.from(document.querySelectorAll("[data-stats-deferred-url]"));
+    if (!sections.length) return;
+
+    const load = async (section) => {
+      if (section.dataset.statsDeferredState === "loading" || section.dataset.statsDeferredState === "loaded") return;
+      section.dataset.statsDeferredState = "loading";
+      try {
+        const url = new URL(section.dataset.statsDeferredUrl, window.location.origin);
+        url.searchParams.set("section", section.dataset.statsDeferredSection);
+        const response = await fetch(url, { headers: { Accept: "text/html" } });
+        if (!response.ok) throw new Error(`Deferred stats request failed: ${response.status}`);
+        section.innerHTML = await response.text();
+        section.dataset.statsDeferredState = "loaded";
+        section.removeAttribute("aria-busy");
+      } catch (error) {
+        console.error(error);
+        section.innerHTML = `<p class="stats-empty">${escapeHtmlClient(ft("stats.load_failed"))}</p>`;
+        section.dataset.statsDeferredState = "failed";
+        section.removeAttribute("aria-busy");
+      }
+    };
+
+    const secondary = sections.filter((section) => section.dataset.statsDeferredSection === "secondary");
+    if (secondary.length) {
+      if ("IntersectionObserver" in window) {
+        const observer = new IntersectionObserver((entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) continue;
+            observer.unobserve(entry.target);
+            void load(entry.target);
+          }
+        }, { rootMargin: "320px 0px" });
+        secondary.forEach((section) => observer.observe(section));
+      } else {
+        secondary.forEach((section) => { void load(section); });
+      }
+    }
+
+    sections
+      .filter((section) => section.dataset.statsDeferredSection === "advanced")
+      .forEach((section) => {
+        const details = section.closest("details");
+        if (!details) return;
+        if (details.open) void load(section);
+        details.addEventListener("toggle", () => {
+          if (details.open) void load(section);
+        });
+      });
+  }
+
   initSavedViews();
 
   initCompareSelectors();
+
+  initDeferredStats();
 })();

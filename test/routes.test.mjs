@@ -5,6 +5,7 @@ import { once } from "node:events";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
 
 const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-routes-"));
 process.env.OPENSESSIONVIEWER_META_PATH = path.join(temp, "meta.db");
@@ -19,6 +20,7 @@ const { registerSessionDetail } = await import("../dist/src/routes/session-detai
 const { registerSessions } = await import("../dist/src/routes/sessions.js");
 const { registerSettingsStatsTrash } = await import("../dist/src/routes/settings-stats-trash.js");
 const { closeIndexDb } = await import("../dist/src/index-db.js");
+const { closeDb } = await import("../dist/src/db.js");
 
 function captureGetRoutes(register, deps) {
   const routes = [];
@@ -330,6 +332,56 @@ test("stats route reads filters from the request URL and degrades file-provider 
   assert.equal(requestedDays, 90, "CSV export must parse filters from req.url");
   assert.match(csvResult.body, /^Provider,Composition Mode,Day \(UTC\),/);
   assert.equal(csvResult.headers["Content-Disposition"], 'attachment; filename="token-explorer-codex.csv"');
+});
+
+test("sqlite stats defer supporting sections to a fragment endpoint", async () => {
+  const statsTemp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-deferred-stats-"));
+  const dbPath = path.join(statsTemp, "sessions.db");
+  try {
+    const db = new DatabaseSync(dbPath);
+    db.exec(`
+      CREATE TABLE project (id TEXT PRIMARY KEY, name TEXT, worktree TEXT);
+      CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT, project_id TEXT, title TEXT, slug TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER, time_archived INTEGER);
+      CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT);
+    `);
+    const now = Date.now();
+    db.prepare("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)").run("session-1", null, null, "Deferred fixture", "deferred", statsTemp, now, now);
+    db.prepare("INSERT INTO message VALUES (?, ?, ?)").run("message-1", "session-1", JSON.stringify({
+      role: "assistant", providerID: "openai", modelID: "gpt-5", time: { created: now }, tokens: { input: 4, output: 2, total: 6 }
+    }));
+    db.close();
+
+    const adapter = {
+      id: "opencode", name: "Route fixture", icon: "", capabilities: { sqliteSessionStore: true },
+      getDataPath() { return dbPath; },
+      getTokenStats() { return []; },
+    };
+    const routes = captureGetRoutes(registerSettingsStatsTrash, {
+      appConfig: { configPath: path.join(statsTemp, "config.json"), tokenPricing: {} },
+      providerMap: new Map([["opencode", adapter]]),
+      providerInfo: [{ id: "opencode", name: "Route fixture", icon: "", available: true, manageable: false }]
+    });
+    const pageRoute = routes.find(({ pattern }) => pattern === "/:provider/stats");
+    const deferredRoute = routes.find(({ pattern }) => pattern instanceof RegExp && pattern.source.includes("stats\\/deferred"));
+    assert.ok(pageRoute);
+    assert.ok(deferredRoute);
+
+    const page = await pageRoute.handler({ url: "/opencode/stats?days=30" }, createResponseCapture(), { provider: "opencode" });
+    assert.equal(page.status, 200);
+    assert.match(page.body, /data-stats-deferred-section="secondary"/);
+    assert.doesNotMatch(page.body, /top-sessions-table/);
+
+    const url = "/api/opencode/stats/deferred?days=30&section=secondary";
+    const match = new URL(url, "http://127.0.0.1").pathname.match(deferredRoute.pattern);
+    assert.ok(match);
+    const deferred = await deferredRoute.handler({ url }, createResponseCapture(), match);
+    assert.equal(deferred.status, 200);
+    assert.match(deferred.body, /top-sessions-table/);
+    assert.match(deferred.body, /stats-coverage/);
+  } finally {
+    closeDb(dbPath);
+    rmSync(statsTemp, { recursive: true, force: true });
+  }
 });
 
 test.after(() => {

@@ -334,6 +334,8 @@ export const en = {
   "stats.comparison_vs": "vs {prev}",
   "stats.comparison_kpi_delta": "{value} ({percent}) vs previous period",
   "stats.advanced_title": "Advanced insights and estimates",
+  "stats.loading": "Loading statistics…",
+  "stats.load_failed": "Statistics could not be loaded.",
 
   // Stats insights
   "stats.insights_title": "Heuristic Insights",

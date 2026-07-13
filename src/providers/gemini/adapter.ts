@@ -10,7 +10,7 @@ import {
   createSessionFileStore,
   createStructuredViewCache,
   createStructuredViewMethods,
-  buildTokenStats,
+  createIncrementalTokenStats,
   type TokenFieldMapping
 } from "../shared/file-adapter-helpers.js";
 
@@ -85,6 +85,12 @@ const geminiTokenMapping: TokenFieldMapping = {
   cacheWriteTokens: () => 0,
 };
 
+const getGeminiTokenStats = createIncrementalTokenStats(
+  () => sessionFiles.getFileSignatures(),
+  (filePath) => sessionFiles.getByFilePath(filePath)?.records || { messages: [] },
+  geminiTokenMapping,
+);
+
 const gemini = {
   id: "gemini",
   name: "Gemini CLI",
@@ -130,12 +136,11 @@ const gemini = {
   ...createStructuredViewMethods(getGeminiViews),
 
   getTokenStats(days = 30) {
-    return buildTokenStats(
-      () => sessionFiles.list(),
-      (filePath) => sessionFiles.getByFilePath(filePath)?.records || { messages: [] },
-      geminiTokenMapping,
-      days
-    );
+    return getGeminiTokenStats(days);
+  },
+
+  getStatsRevision() {
+    return sessionFiles.getStatsRevision();
   },
 
   searchMessages(query, limit = 20) {

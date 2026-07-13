@@ -775,9 +775,23 @@ function renderCostEstimate(costEstimate: CostEstimate | null, filters: StatsFil
   </section>`;
 }
 
+/** Render a lazily requested Token Explorer fragment without page chrome. */
+export function renderStatsDeferredSection(data: Omit<TokenExplorerData, "providers" | "manageable"> & { dayDrill?: string | null }, section: "secondary" | "advanced") {
+  const capabilities: StatsCapabilities = data.capabilities || { customRange: true, project: true, model: true, scope: true, dayDrill: true, composition: true, modelRanking: true, sessionBreakdown: true, coverage: true };
+  if (section === "secondary") {
+    return `${capabilities.sessionBreakdown ? renderTopSessions(data.topSessions || [], data.provider, data.dayDrill || null, data.filters) : ""}
+      ${capabilities.coverage ? renderCoverage(data.coverage || null) : ""}`;
+  }
+  if (!capabilities.model) return "";
+  return `${renderComparison(data.comparison || null, data.filters)}
+    ${renderInsights(data.insights || [])}
+    ${renderModelCompare(data.compareA || null, data.compareB || null, data.filters, data.provider)}
+    ${renderCostEstimate(data.costEstimate || null, data.filters)}`;
+}
+
 // ── Main render ─────────────────────────────────────────────────────────────
 
-export function renderStatsPage(data: TokenExplorerData & { dayDrill?: string | null; modelPairs?: Array<{ key: string; model: string; provider: string; totalTokens: number }>; projects?: Array<{ projectId: string; label: string; count: number }> | null }) {
+export function renderStatsPage(data: TokenExplorerData & { dayDrill?: string | null; modelPairs?: Array<{ key: string; model: string; provider: string; totalTokens: number }>; projects?: Array<{ projectId: string; label: string; count: number }> | null; deferredUrl?: string | null }) {
   const { filters = { days: 30, from: null, to: null, project: "", modelPair: null, scope: "all", compareA: null, compareB: null, rangePreset: "30", requestedFrom: "", requestedTo: "", validationError: null }, tokenStats, modelRanking, topSessions, coverage, overview, provider, providers = [], manageable, comparison = null, insights = [], costEstimate = null, compareA = null, compareB = null } = data;
 
   // Day drill-down from URL (passed by route handler)
@@ -806,9 +820,23 @@ export function renderStatsPage(data: TokenExplorerData & { dayDrill?: string | 
   }
   const rangeQuery = rangeParams.toString();
   const exportQuery = statsFiltersToParams(filters).toString();
-  const advancedContent = capabilities.model
+  const deferredUrl = data.deferredUrl || null;
+  const advancedContent = !deferredUrl && capabilities.model
     ? `${renderComparison(comparison, filters)}${renderInsights(insights)}${renderModelCompare(compareA, compareB, filters, provider)}${renderCostEstimate(costEstimate, filters)}`
     : "";
+  const secondaryContent = deferredUrl
+    ? `<div class="stats-deferred-section" data-stats-deferred-url="${escapeHtml(deferredUrl)}" data-stats-deferred-section="secondary" aria-busy="true"><p class="stats-deferred-loading">${escapeHtml(t("stats.loading"))}</p></div>`
+    : `${capabilities.sessionBreakdown ? renderTopSessions(safeTopSessions, provider, dayDrill, filters) : ""}
+      ${capabilities.coverage ? renderCoverage(safeCoverage) : ""}`;
+  const advancedSection = deferredUrl && capabilities.model
+    ? `<details class="stats-advanced-details"${filters.compareA && filters.compareB ? " open" : ""}>
+        <summary>${escapeHtml(t("stats.advanced_title"))}</summary>
+        <div class="stats-advanced-content stats-deferred-section" data-stats-deferred-url="${escapeHtml(deferredUrl)}" data-stats-deferred-section="advanced" aria-busy="true"><p class="stats-deferred-loading">${escapeHtml(t("stats.loading"))}</p></div>
+      </details>`
+    : advancedContent ? `<details class="stats-advanced-details"${filters.compareA && filters.compareB ? " open" : ""}>
+        <summary>${escapeHtml(t("stats.advanced_title"))}</summary>
+        <div class="stats-advanced-content">${advancedContent}</div>
+      </details>` : "";
 
   const content = `
     <div class="stats-page">
@@ -856,14 +884,9 @@ export function renderStatsPage(data: TokenExplorerData & { dayDrill?: string | 
 
       ${capabilities.modelRanking ? renderModelRanking(safeModelRanking, safeOverview.totalTokens, filters, provider) : ""}
 
-      ${capabilities.sessionBreakdown ? renderTopSessions(safeTopSessions, provider, dayDrill, filters) : ""}
+      ${secondaryContent}
 
-      ${capabilities.coverage ? renderCoverage(safeCoverage) : ""}
-
-      ${advancedContent ? `<details class="stats-advanced-details"${filters.compareA && filters.compareB ? " open" : ""}>
-        <summary>${escapeHtml(t("stats.advanced_title"))}</summary>
-        <div class="stats-advanced-content">${advancedContent}</div>
-      </details>` : ""}
+      ${advancedSection}
     </div>
   `;
 

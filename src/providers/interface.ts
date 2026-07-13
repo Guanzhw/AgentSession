@@ -126,6 +126,8 @@ export interface ProviderAdapter {
   getSession(sessionId: string): RawSession | Record<string, unknown> | null;
   getMessages(sessionId: string): Message[];
   getTokenStats(days?: number): DailyTokenStat[];
+  /** Monotonically changes when a file-backed provider's stats source changes. */
+  getStatsRevision?(): string | number;
   searchMessages(query: string, limit?: number): SearchResult[];
   exportSession?(sessionId: string): unknown;
   getRuntimeEnvironment?(sessionId: string): RuntimeEnvironmentView | null;

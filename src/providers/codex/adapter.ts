@@ -17,7 +17,7 @@ import {
   createStructuredViewCache,
   createStructuredViewMethods,
   createSessionFileStore,
-  buildTokenStats,
+  createIncrementalTokenStats,
   type TokenFieldMapping
 } from "../shared/file-adapter-helpers.js";
 
@@ -119,6 +119,12 @@ const codexTokenMapping: TokenFieldMapping = {
   cacheWriteTokens: () => 0,
 };
 
+const getCodexTokenStats = createIncrementalTokenStats(
+  () => sessionFiles.getFileSignatures(),
+  (filePath) => sessionFiles.getByFilePath(filePath)?.records || [],
+  codexTokenMapping,
+);
+
 const codex = {
   id: "codex",
   name: "Codex CLI",
@@ -166,12 +172,11 @@ const codex = {
   ...createStructuredViewMethods(getCodexViews),
 
   getTokenStats(days = 30) {
-    return buildTokenStats(
-      () => sessionFiles.list(),
-      (filePath) => sessionFiles.getByFilePath(filePath)?.records || [],
-      codexTokenMapping,
-      days
-    );
+    return getCodexTokenStats(days);
+  },
+
+  getStatsRevision() {
+    return sessionFiles.getStatsRevision();
   },
 
   searchMessages(query, limit = 20) {

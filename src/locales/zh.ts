@@ -334,6 +334,8 @@ export const zh = {
   "stats.comparison_vs": "对比 {prev}",
   "stats.comparison_kpi_delta": "较前一周期 {value}（{percent}）",
   "stats.advanced_title": "高级洞察与估算",
+  "stats.loading": "正在加载统计数据…",
+  "stats.load_failed": "统计数据加载失败。",
 
   // Stats insights
   "stats.insights_title": "启发式洞察",
