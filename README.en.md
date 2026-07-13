@@ -35,6 +35,8 @@ The focus is no longer just “list my chats.” The goal is to help you reconst
 | Codex CLI | Manageable | `~/.codex/sessions/**/*.jsonl` | Browse, search, star, rename, delete, trash, Token Explorer, ReACT, flow, nested subagents |
 | Gemini CLI | Manageable | `~/.gemini/tmp/*/chats/*.json` | Browse, search, star, rename, delete, trash, Token Explorer, ReACT, flow |
 
+Adding a provider? Follow the [provider contribution guide](./docs/CONTRIBUTING-PROVIDER.md) for the adapter, MCP, test, and release checklist.
+
 All providers store stars, custom titles, soft deletes, and permanent exclusions in AgentSession’s own metadata database. Original session databases and transcript files remain read-only.
 
 ## Features

@@ -1,377 +1,288 @@
 # Contributing a New Provider
 
-This guide explains how to add support for a new AI coding tool to AgentSession. Each provider is a lightweight adapter that implements a standard interface to expose session data.
+This is the implementation guide for adding a local AI coding-agent session
+provider to AgentSession. A provider reads and normalizes its own session data;
+it must never modify the provider-owned database or transcript files.
 
-## Provider Adapter Interface
+`src/providers/interface.ts` is authoritative. Treat this document as the
+end-to-end checklist that makes the TypeScript contract usable in the viewer,
+the read-only MCP server, and a release.
 
-Every provider must export a default object matching this shape (see `src/providers/interface.ts` for full TypeScript definitions):
+## A complete Provider
 
-```javascript
-{
-  id: "provider-id",           // Unique identifier (lowercase, used in URLs)
-  name: "Display Name",        // Human-readable name for UI
-  icon: "🔵",                  // Emoji or icon reference
+A complete Provider is more than a parser. It must:
 
-  capabilities: {
-    localManagement: true,     // Viewer-owned star/title/trash state; source stays read-only
-    structuredSessionViews: true // ReACT/tree/metrics/flow views supplied by the adapter
-  },
+1. detect its local data without writing to it;
+2. preserve canonical session IDs and parent relationships;
+3. expose normalized sessions, messages, token statistics, and search;
+4. register with the viewer and, when supported, AgentSession-MCP;
+5. declare only capabilities it actually implements; and
+6. include fixture, unavailable-data, and real-data verification.
 
-  detect() → boolean,          // Is this tool installed on this machine?
-  getDataPath() → string|null, // Root path to session data
-  scan() → AsyncIterable,      // Stream all session metadata
-  getSession(id) → object|null,// Get single session detail
-  getMessages(id) → Message[], // Get all messages for a session
-  getTokenStats(days) → DailyTokenStat[], // Token usage by day
-  searchMessages(query, limit) → SearchResult[], // Full-text search
-  exportSession(id) → object|null // Reserved for future (return null in v1)
-}
-```
+Keep defaults, schema extraction, transcript quirks, resume behavior,
+structured views, and runtime-environment discovery under
+`src/providers/<provider-id>/`. Do not add central
+`if (provider.id === "my-tool")` branches.
 
-`localManagement` does not authorize writes to provider data. It enables the
-shared viewer metadata workflow keyed by the provider's canonical
-`(provider, sessionId)` identity. File-backed providers can enable it when
-`scan()` and `getSession()` preserve that canonical ID; Trash is resolved from
-the cross-provider index rather than by mutating or rescanning transcript files.
+## Pick the correct reference implementation
 
-### Method Signatures
+Read the actual adapter before copying it. Choose by source data shape rather
+than product similarity.
 
-**detect()** → `boolean`
-- Returns true if the tool's data directory exists on this machine
-- Example: Check if `~/.config/gemini/tmp` exists
+| Source data | Start with | Key pattern |
+|---|---|---|
+| One JSON session per file | `src/providers/gemini/` | File store, incremental token statistics, and flat structured views. |
+| JSONL transcript | `src/providers/claude-code/` or `src/providers/codex/` | Defensive record parsing and explicit response/child-session boundaries. |
+| OpenCode-compatible SQLite | `src/providers/opencode/` and `src/providers/shared/sqlite-adapter.ts` | Share only schema-neutral SQLite behavior; keep schema enrichment provider-owned. |
+| Nested/sidechain agent transcripts | `src/providers/shared/linked-message-session.ts` | Canonical `parentId` plus explicit spawn references. |
 
-**getDataPath()** → `string | null`
-- Returns the root directory containing session data
-- Used for logging and debugging
-- Can return null if data is not file-based
+For file-backed sources, prefer `createSessionFileStore()`,
+`createStructuredViewCache()`, `createStructuredViewMethods()`, and
+`createIncrementalTokenStats()` from
+`src/providers/shared/file-adapter-helpers.ts`. They avoid reparsing unchanged
+files and keep detail views consistent.
 
-**scan()** → `AsyncIterable<RawSession>`
-- Generator function that yields session metadata
-- Called during startup to index all sessions
-- Each yielded object must have: `id`, `provider`, `parentId`, `title`, `timeCreated`, `timeUpdated`, `messageCount`
-- Child transcripts must keep their provider-owned canonical `id` and set `parentId`; optional `metadata.aliases`, `agentId`, or `agentPath` can help associate the child with its spawning tool call
+## Non-negotiable data rules
 
-**getSession(sessionId)** → `object | null`
-- Returns full session metadata for a specific ID
-- Must include all fields from RawSession type
-- Return null if session not found
+- Provider data is read-only. Stars, custom titles, trash, and exclusions are
+  AgentSession metadata, never source-data writes.
+- A session ID remains canonical in scan results, lookup, URLs, metadata,
+  exports, resume commands, analysis runs, parent links, and MCP requests.
+- Use Unix milliseconds. A corrupt individual file must not block other
+  sessions; retain a useful diagnostic and return `null`/empty arrays at
+  optional boundaries.
+- Normalize raw records at the parser/adapter boundary. Browser code must not
+  know the provider's source schema.
+- Reveal System Prompts and runtime configuration only from resolvable local
+  evidence. Never claim to recover hidden provider prompts.
 
-**getMessages(sessionId)** → `Message[]`
-- Returns all messages in a session
-- Each message must have: `id`, `sessionId`, `role`, `content`, `timestamp`
-- Optional: `thinking`, `toolName`, `toolInput`, `toolOutput`, `tokens`, `metadata`
-- When one provider response is fragmented across reasoning, text, tool call, and tool result records, give those messages the same `metadata.turnId` (or `responseGroupId`). The shared structured-view builder will render them as one ReACT turn without merging across provider response boundaries.
+## The ProviderAdapter contract
 
-**Structured session views**
-- Set `capabilities.structuredSessionViews` and implement `getSessionTree`, `getSessionContainer`, `getSessionMetrics`, and `getSessionFlow` together.
-- File providers can use `buildMessageSessionViews()` for flat histories or `buildLinkedMessageSessionViews()` when `scan()` exposes canonical `parentId` relationships.
-- Spawn tools named `task`, `subtask`, `spawn_agent`, or `delegate_task` can receive child sessions. Prefer an explicit child ID/path stored in the call; creation-order fallback is reserved for provider records that omit a call ID.
+Every adapter must provide `id`, `name`, `icon`, `detect()`,
+`getDataPath()`, `scan()`, `getSession()`, `getMessages()`,
+`getTokenStats()`, and `searchMessages()`.
 
-**getTokenStats(days)** → `DailyTokenStat[]`
-- Returns token usage aggregated by day for the last N days
-- Each entry: `{ day: "YYYY-MM-DD", inputTokens, outputTokens, totalTokens, messageCount }`
-- Return empty array if tokens not tracked
+| Member | Required behavior |
+|---|---|
+| `id` | Stable lowercase ID. Add it to `ProviderId` first. |
+| `detect()` | True only when locally configured source data is usable. |
+| `scan()` / `getSession()` | Canonical `RawSession` records; use `parentId: null` when there is no parent. |
+| `getMessages()` | Full normalized `Message[]`, including every required nullable field. |
+| `getTokenStats(days)` | Daily trusted aggregates, or `[]` when unavailable. Do not double count fragmented responses. |
+| `searchMessages()` | Bounded snippets associated with canonical session and message IDs. |
 
-**searchMessages(query, limit)** → `SearchResult[]`
-- Full-text search across all messages
-- Each result: `{ sessionId, messageId, role, snippet, timestamp }`
-- Snippet should show context around the match (±40 chars)
-- Return up to `limit` results
+### Normalize all nullable fields
 
-**exportSession(sessionId)** → `object | null`
-- Reserved for future use — return null in v1
+`RawSession.parentId` is required even for a flat history. `Message` fields such
+as `thinking`, `toolName`, `toolInput`, `toolOutput`, `tokens`, and `metadata`
+are also required by the TypeScript type; use `null`, not omission.
 
----
+```ts
+import type { Message, RawSession } from "../interface.js";
 
-## Step-by-Step: Adding a New Provider
-
-### Step 1: Create Provider Directory
-
-Create `src/providers/{id}/` with two files:
-
-```
-src/providers/my-tool/
-├── adapter.ts    # Main adapter implementation
-└── parser.ts     # Helper to parse raw data into standard format
-```
-
-### Step 2: Implement the Adapter
-
-In `src/providers/my-tool/adapter.ts`:
-
-```javascript
-import { parseSession, extractMeta, dataToMessages } from "./parser.js";
-
-const myTool = {
-  id: "my-tool",
-  name: "My Tool CLI",
-  icon: "🟢",
-
-  detect() {
-    // Check if tool is installed
-    return existsSync(path.join(getMyToolDir(), "sessions"));
-  },
-
-  getDataPath() {
-    return getMyToolDir();
-  },
-
-  async *scan() {
-    // Yield all sessions
-    for (const file of discoverSessionFiles()) {
-      try {
-        const data = parseSession(file);
-        yield extractMeta(data);
-      } catch { /* skip */ }
-    }
-  },
-
-  getSession(sessionId) {
-    // Find and return single session
-    for (const file of discoverSessionFiles()) {
-      try {
-        const data = parseSession(file);
-        if (data.sessionId === sessionId) return extractMeta(data);
-      } catch { /* skip */ }
-    }
-    return null;
-  },
-
-  getMessages(sessionId) {
-    // Return messages for session
-    for (const file of discoverSessionFiles()) {
-      try {
-        const data = parseSession(file);
-        if (data.sessionId === sessionId) return dataToMessages(data, sessionId);
-      } catch { /* skip */ }
-    }
-    return [];
-  },
-
-  getTokenStats(days = 30) {
-    // Aggregate token usage by day
-    const cutoff = Date.now() - days * 86400000;
-    const dailyMap = new Map();
-    // ... implementation ...
-    return [...dailyMap.values()].sort((a, b) => a.day.localeCompare(b.day));
-  },
-
-  searchMessages(query, limit = 20) {
-    // Full-text search
-    const term = (query || "").toLowerCase();
-    if (!term) return [];
-    const results = [];
-    // ... implementation ...
-    return results;
-  },
-
-  exportSession() { return null; }
-};
-
-export default myTool;
-```
-
-### Step 3: Implement the Parser
-
-In `src/providers/my-tool/parser.ts`, implement helpers:
-
-```javascript
-export function parseSession(filePath) {
-  // Read and parse raw session file
-  // Return object with: sessionId, messages, metadata
-}
-
-export function extractMeta(data) {
-  // Convert parsed data to RawSession format
+export function normalizeSession(raw: any): RawSession {
   return {
-    id: data.sessionId,
-    provider: "my-tool",
-    title: data.title || null,
-    directory: data.directory || null,
-    timeCreated: data.createdAt || 0,
-    timeUpdated: data.updatedAt || 0,
-    messageCount: data.messages?.length || 0,
-    tokenCount: data.totalTokens || null
+    id: String(raw.sessionId),
+    provider: "my-tool", // Valid after ProviderId is extended.
+    parentId: raw.parentSessionId ? String(raw.parentSessionId) : null,
+    title: typeof raw.title === "string" ? raw.title : null,
+    directory: typeof raw.cwd === "string" ? raw.cwd : null,
+    timeCreated: Number(raw.createdAt) || 0,
+    timeUpdated: Number(raw.updatedAt) || 0,
+    messageCount: Array.isArray(raw.messages) ? raw.messages.length : 0,
+    tokenCount: Number.isFinite(raw.totalTokens) ? Number(raw.totalTokens) : null,
+    metadata: null
   };
 }
 
-export function dataToMessages(data, sessionId) {
-  // Convert parsed data to Message[] format
-  return (data.messages || []).map(m => ({
-    id: m.id,
+export function normalizeMessage(raw: any, sessionId: string): Message {
+  return {
+    id: String(raw.id),
     sessionId,
-    role: m.role,
-    content: m.text || "",
-    timestamp: m.timestamp || 0,
-    tokens: m.tokens ? { input: m.tokens.input, output: m.tokens.output } : null
-  }));
+    role: raw.role === "user" ? "user" : "assistant",
+    content: typeof raw.text === "string" ? raw.text : "",
+    thinking: typeof raw.thinking === "string" ? raw.thinking : null,
+    toolName: typeof raw.toolName === "string" ? raw.toolName : null,
+    toolInput: raw.toolInput ?? null,
+    toolOutput: raw.toolOutput ?? null,
+    timestamp: Number(raw.timestamp) || 0,
+    tokens: raw.tokens
+      ? { input: Number(raw.tokens.input) || 0, output: Number(raw.tokens.output) || 0 }
+      : null,
+    metadata: raw.turnId ? { turnId: String(raw.turnId) } : null
+  };
 }
 ```
 
-### Step 4: Register the Provider
+When one response is fragmented into reasoning, text, tool call, and tool
+result records, give those fragments the same `metadata.turnId` (or
+`responseGroupId`). A group must never cross assistant-response boundaries.
 
-In `src/providers/index.ts`, add:
+### Capabilities and optional methods
 
-```javascript
-import myTool from "./my-tool/adapter.js";
+Capabilities are declarations, not feature requests. Declare one only when the
+implementation and tests support it.
 
-// ... existing registrations ...
-registerProvider(myTool);
+| Capability or method | Use it when |
+|---|---|
+| `localManagement` | Canonical session IDs are stable enough for viewer metadata. It never authorizes source writes. |
+| `sqliteSessionStore` | The provider uses the compatible SQLite session-store behavior. |
+| `sessionAnalysis` | A provider-owned analysis launch and validation path exists. |
+| `structuredSessionViews` | All four methods exist: `getSessionTree`, `getSessionContainer`, `getSessionMetrics`, and `getSessionFlow`. |
+| `resumeCommand` | A safe structured executable/argument command with `{sessionId}` and `{directory}` placeholders is known. |
+| `getStatsRevision()` | A file-backed source can report changed statistics input. |
+| `getRuntimeEnvironment()` | Locally resolvable instruction/skill/agent/command/plugin/hook/rule evidence exists. |
+| `getSystemPrompts()` / `getTrace()` | Provider-owned, evidence-backed prompt or trace views exist. |
+
+For flat histories, compose `buildMessageSessionViews()` with
+`createStructuredViewMethods()`. For child sessions, use the linked-session
+helper instead of guessing from display order.
+
+## End-to-end change checklist
+
+### 1. Define the ID and path boundary
+
+- [ ] Add the stable lowercase ID to `ProviderId` in
+  `src/providers/interface.ts`.
+- [ ] Add a default data-path resolver and configuration field in
+  `src/config.ts` if users need to configure the provider root.
+- [ ] When the path is configurable, add its CLI flag, help text, environment
+  variable, config validation, and both README entries.
+- [ ] Add an icon in `src/icons.ts`.
+
+### 2. Create a provider-owned parser and adapter
+
+Create `src/providers/my-tool/`. It normally contains:
+
+```text
+src/providers/my-tool/
+├── adapter.ts              # Detection, paths, capabilities, public methods
+├── parser.ts               # Raw schema to RawSession/Message normalization
+└── runtime-environment.ts  # Only when local runtime evidence is resolvable
 ```
 
----
+Use `node:fs`, `node:path`, and `node:os`. Catch parse errors per source file,
+not around the whole provider scan. Use `satisfies ProviderAdapter` on the
+adapter object so the contract is checked during typecheck.
 
-## Example: Gemini Adapter (Simplest Reference)
+The adapter shape should follow this pattern; its store, views, token mapping,
+and search stay provider-owned:
 
-The Gemini adapter is the simplest implementation. Key patterns:
-
-**File discovery** (`gemini/adapter.ts` lines 10-30):
-```javascript
-function discoverSessionFiles() {
-  const tmpDir = path.join(getGeminiDir(), "tmp");
-  if (!existsSync(tmpDir)) return [];
-  const files = [];
-  try {
-    for (const projectDir of readdirSync(tmpDir)) {
-      const chatsDir = path.join(tmpDir, projectDir, "chats");
-      if (!existsSync(chatsDir)) continue;
-      for (const entry of readdirSync(chatsDir)) {
-        if (entry.endsWith(".json")) {
-          files.push({ filePath: path.join(chatsDir, entry) });
-        }
-      }
-    }
-  } catch { /* skip */ }
-  return files;
-}
+```ts
+const myTool = {
+  id: "my-tool",
+  name: "My Tool CLI",
+  icon: icons.myTool,
+  resumeCommand: { executable: "my-tool", args: ["resume", "{sessionId}"] },
+  capabilities: { localManagement: true, structuredSessionViews: true },
+  detect: () => existsSync(path.join(getMyToolDir(), "sessions")),
+  getDataPath: () => getMyToolDir(),
+  async *scan() { for (const entry of sessionFiles.list()) yield entry.session; },
+  getSession: (id: string) => sessionFiles.get(id)?.session || null,
+  getMessages: (id: string) => sessionFiles.get(id)?.messages || [],
+  ...createStructuredViewMethods(getViews),
+  getTokenStats: (days = 30) => getMyToolTokenStats(days),
+  getStatsRevision: () => sessionFiles.getStatsRevision(),
+  searchMessages: (query: string, limit = 20) => searchMyToolMessages(query, limit)
+} satisfies ProviderAdapter;
 ```
 
-**Token stats aggregation** (`gemini/adapter.ts` lines 76-97):
-```javascript
-getTokenStats(days = 30) {
-  const cutoff = Date.now() - days * 86400000;
-  const dailyMap = new Map();
-  for (const { filePath } of discoverSessionFiles()) {
-    try {
-      const data = parseSession(filePath);
-      for (const m of data.messages || []) {
-        if (m.type !== "gemini" || !m.tokenUsage) continue;
-        const ts = m.timestamp ? new Date(m.timestamp).getTime() : 0;
-        if (ts < cutoff) continue;
-        const day = new Date(ts).toISOString().slice(0, 10);
-        const existing = dailyMap.get(day) || { day, inputTokens: 0, outputTokens: 0, totalTokens: 0, messageCount: 0 };
-        existing.inputTokens += m.tokenUsage.input || 0;
-        existing.outputTokens += m.tokenUsage.output || 0;
-        existing.totalTokens += m.tokenUsage.total || 0;
-        existing.messageCount += 1;
-        dailyMap.set(day, existing);
-      }
-    } catch { /* skip */ }
-  }
-  return [...dailyMap.values()].sort((a, b) => a.day.localeCompare(b.day));
-}
+### 3. Register the viewer
+
+- [ ] Import the adapter and call `registerProvider(myTool)` in
+  `src/providers/index.ts`.
+- [ ] Confirm `getAllProviders()` contains it while unavailable and
+  `getAvailableProviders()` contains it only after `detect()` succeeds.
+- [ ] Keep provider-specific parsing and views out of shared routes and views.
+
+### 4. Register MCP ID validation
+
+AgentSession-MCP deliberately validates Provider IDs. A newly registered viewer
+Provider is not MCP-queryable until both of these are updated:
+
+- [ ] Extend `PROVIDER_IDS` in `src/session-history.ts`.
+- [ ] Extend the Zod `providerSchema` in
+  `packages/agentsession-mcp/src/session-history-server.ts`.
+- [ ] Test that `session_search`, `session_get`, and one event/context call
+  accept the new ID while results remain read-only and transcript content stays
+  marked untrusted.
+
+Do not add analysis launch, terminal launch, or mutation tools to this MCP
+server.
+
+### 5. Add optional runtime and analysis support only when justified
+
+Implement `getRuntimeEnvironment()` only when the adapter can resolve current
+local evidence and source paths. It must not imply that hidden historical
+instructions were recovered.
+
+Set `sessionAnalysis` only after provider-owned launch configuration, bounded
+runtime capture, and the validator lifecycle in
+`docs/ANALYSIS-PROVIDER-IMPLEMENTATION.md` are in place. A provider is useful
+without analysis support.
+
+### 6. Update public documentation
+
+- [ ] Add the provider, source path, and truthful capabilities to the support
+  table in `README.md` and `README.en.md`.
+- [ ] Update CLI/config/environment and resume-command examples when relevant.
+- [ ] Update this guide when the contract, capability model, or MCP registration
+  boundary changes.
+
+## Test and acceptance matrix
+
+Use small provider-owned fixtures. Do not rely only on one contributor's local
+data directory.
+
+| Surface | Required evidence |
+|---|---|
+| Parser | Current and legacy shapes; canonical ID; `parentId`; timestamps; every nullable Message field; tools/reasoning/models/tokens when present. |
+| Corruption and cache | One malformed file is skipped; unchanged files are reused; changed files reparse; deleted files disappear. |
+| Adapter | Absent-data `detect()`; scan/get/messages/search agreement; token fragments are not double counted. |
+| Nested agents | Explicit child IDs link correctly; copied parent context does not become child content; multiple children do not cross-contaminate. |
+| Capabilities | Every declared capability has a matching view, resume, runtime, or analysis test. |
+| Viewer routes | Unavailable state, detail, search, metadata management, and structured views work without central provider-ID branches. |
+| MCP | Both static validators accept the ID; the five read-only tools remain bounded and untrusted-content safe. |
+| Real data | Scan a real source, inspect a detail API/page, and report source path plus observed session/message counts. |
+
+Run at least:
+
+```powershell
+npm run typecheck
+npm test
+
+# For user-visible behavior, with a compatible local server running:
+npm run qa:e2e
 ```
 
-**Search implementation** (`gemini/adapter.ts` lines 99-124):
-```javascript
-searchMessages(query, limit = 20) {
-  const term = (query || "").toLowerCase();
-  if (!term) return [];
-  const results = [];
-  for (const { filePath } of discoverSessionFiles()) {
-    if (results.length >= limit) break;
-    try {
-      const data = parseSession(filePath);
-      for (const m of data.messages || []) {
-        if (results.length >= limit) break;
-        const text = m.text || "";
-        if (text.toLowerCase().includes(term)) {
-          const idx = text.toLowerCase().indexOf(term);
-          results.push({
-            sessionId: data.sessionId,
-            messageId: m.id || "",
-            role: m.type === "user" ? "user" : "assistant",
-            snippet: text.slice(Math.max(0, idx - 40), idx + term.length + 80),
-            timestamp: m.timestamp ? new Date(m.timestamp).getTime() : 0
-          });
-        }
-      }
-    } catch { /* skip */ }
-  }
-  return results;
-}
-```
+For release-quality work, restart AgentSession, call `GET /api/providers`, and
+exercise both unavailable and installed states against a real source. Follow
+the validation matrix in `AGENTS.md` for the changed surface.
 
----
+## Pull request checklist
 
-## QA Checklist
+- [ ] Provider data remains read-only.
+- [ ] IDs stay canonical across viewer, metadata, resume, analysis, and MCP.
+- [ ] Provider-specific code stays under `src/providers/<id>/`; shared helpers
+  remain schema-neutral.
+- [ ] Required adapter methods and nullable normalized fields are present.
+- [ ] Capabilities exactly match implemented behavior.
+- [ ] Config, CLI help, icons, registration, and both MCP allow lists were reviewed.
+- [ ] Fixtures cover current, malformed, unavailable, and nested data as applicable.
+- [ ] Real local data plus browser/API output were verified.
+- [ ] English and Chinese README tables/examples are current.
+- [ ] `git diff --check`, typecheck, and relevant tests pass.
 
-Before submitting your provider, verify all methods work:
+## Related references
 
-- [ ] **detect()** — Returns true when tool is installed, false otherwise
-- [ ] **scan()** — Yields at least one session (if data exists)
-- [ ] **getSession(id)** — Returns correct session metadata
-- [ ] **getMessages(id)** — Returns array of messages with role, content, timestamp
-- [ ] **searchMessages(query)** — Returns results with snippet context
-- [ ] **getTokenStats(days)** — Returns daily aggregates (or empty array if not tracked)
-- [ ] **exportSession()** — Returns null (reserved for v2)
-
-Test with:
-```bash
-npm run build
-node -e "
-import adapter from './dist/src/providers/my-tool/adapter.js';
-console.log('Detected:', adapter.detect());
-if (adapter.detect()) {
-  for await (const s of adapter.scan()) {
-    console.log('Session:', s.id, s.title);
-    break;
-  }
-}
-"
-```
-
----
-
-## File Structure Convention
-
-```
-src/providers/
-├── interface.ts          # Type definitions (TypeScript)
-├── index.ts              # Registration hub
-├── opencode/
-│   ├── adapter.ts        # Main adapter
-│   └── parser.ts         # Parsing helpers
-├── claude-code/
-│   ├── adapter.ts
-│   └── parser.ts
-├── codex/
-│   ├── adapter.ts
-│   └── parser.ts
-└── gemini/
-    ├── adapter.ts
-    └── parser.ts
-```
-
-Each provider is self-contained. The adapter imports its parser, and `index.ts` imports all adapters for registration.
-
----
-
-## Tips
-
-1. **Error handling**: Wrap file I/O in try-catch. Silently skip corrupted files.
-2. **Performance**: Cache file discovery if possible. Avoid re-scanning on every method call.
-3. **Timestamps**: Always use Unix milliseconds (Date.now() format).
-4. **Snippets**: Include ±40 characters of context around search matches.
-5. **Null safety**: Return empty arrays/null rather than throwing errors.
-6. **Async generators**: Use `async *scan()` for streaming large datasets.
-
----
-
-## Questions?
-
-Refer to:
-- `src/providers/interface.ts` — Full type definitions
-- `src/providers/gemini/` — Simplest working example
-- `src/server.ts` — How adapters are used in routing
-- `docs/ANALYSIS-PROVIDER-IMPLEMENTATION.md` — How to make a provider support session analysis
+- `src/providers/interface.ts` — authoritative adapter contract.
+- `src/providers/gemini/` — compact JSON file-provider example.
+- `src/providers/claude-code/` and `src/providers/codex/` — JSONL and nested
+  transcript examples.
+- `src/providers/shared/file-adapter-helpers.ts` — file-store, token, and
+  structured-view helpers.
+- `src/providers/shared/linked-message-session.ts` — nested session linking.
+- `src/providers/shared/sqlite-adapter.ts` — schema-neutral SQLite helpers.
+- `src/session-history.ts` and
+  `packages/agentsession-mcp/src/session-history-server.ts` — MCP ID boundary.
+- `docs/ANALYSIS-PROVIDER-IMPLEMENTATION.md` — analysis integration.

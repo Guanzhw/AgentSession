@@ -36,6 +36,8 @@ AgentSession 是一个本地优先的 AI 编程会话查看器。它不会修改
 | Codex CLI | 可管理 | `~/.codex/sessions/**/*.jsonl` | 浏览、搜索、收藏、重命名、删除、回收站、Token Explorer、ReACT、Flow、嵌套子 agent |
 | Gemini CLI | 可管理 | `~/.gemini/tmp/*/chats/*.json` | 浏览、搜索、收藏、重命名、删除、回收站、Token Explorer、ReACT、Flow |
 
+想要新增 Provider？请阅读[新增 Provider 指南](./docs/CONTRIBUTING-PROVIDER.md)，其中包含适配器、MCP、测试和发布验收清单。
+
 所有 Provider 都使用独立的本地元数据库保存收藏、自定义标题、软删除和永久排除状态，不会写回原始会话数据库或 transcript 文件。
 
 ## 主要功能
