@@ -32,7 +32,7 @@ import { renderSettingsPage } from "../dist/src/views/settings.js";
 import { renderStatsDeferredSection, renderStatsPage } from "../dist/src/views/stats.js";
 import { sessionCard } from "../dist/src/views/components.js";
 import { renderSessionsPage } from "../dist/src/views/sessions.js";
-import { EMPTY_PROJECT_FILTER } from "../dist/src/project-filter.js";
+import { EMPTY_PROJECT_FILTER, normalizeCrossProviderProjectPath } from "../dist/src/project-filter.js";
 import { parseSessionNavigationContext } from "../dist/src/navigation-context.js";
 import {
   getSearchResults,
@@ -1412,6 +1412,15 @@ test("runtime helper utilities classify status, errors, and executables", () => 
   assert.equal(runtimeExecutableName({ executable: "/usr/bin/node" }), "node");
   assert.equal(runtimeExecutableName(null), "");
   assert.equal(recordRuntimeEvent(null, { event: "ignored" }), null);
+});
+
+test("cross-provider project paths normalize Windows and WSL aliases", () => {
+  assert.equal(normalizeCrossProviderProjectPath("D:\\WorkSpace\\OpenSession\\"), "d:/workspace/opensession");
+  assert.equal(normalizeCrossProviderProjectPath("D:/WorkSpace/OpenSession"), "d:/workspace/opensession");
+  assert.equal(normalizeCrossProviderProjectPath("/mnt/d/WorkSpace/OpenSession/"), "d:/workspace/opensession");
+  assert.equal(normalizeCrossProviderProjectPath("D:\\"), "d:/");
+  assert.equal(normalizeCrossProviderProjectPath("/mnt/d/"), "d:/");
+  assert.equal(normalizeCrossProviderProjectPath("/srv/Project/"), "/srv/Project");
 });
 
 test("sessions search page preserves query and exposes content pagination", () => {

@@ -2,7 +2,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { getConfig } from "./config.js";
 import { analysisTitleSqlCondition, analysisTitleSqlParams, normalizeSessionKindFilter } from "./session-kind.js";
-import { isEmptyProjectFilter } from "./project-filter.js";
+import { isEmptyProjectFilter, normalizeCrossProviderProjectPath } from "./project-filter.js";
 import {
   getKindMatchingOverrideIds,
   getOverrideTitleIds,
@@ -40,6 +40,7 @@ export function getIndexDb() {
     `);
     indexDb.exec("CREATE INDEX IF NOT EXISTS idx_session_provider ON session_index(provider)");
     indexDb.exec("CREATE INDEX IF NOT EXISTS idx_session_updated ON session_index(time_updated DESC)");
+    indexDb.function("normalize_cross_provider_project", { deterministic: true }, normalizeCrossProviderProjectPath);
   }
   return indexDb;
 }
@@ -286,8 +287,8 @@ function crossProviderFilter(query: CrossProviderSessionQuery, includeProject = 
   if (includeProject && query.project) {
     if (isEmptyProjectFilter(query.project)) where.push("COALESCE(directory, '') = ''");
     else {
-      where.push("COALESCE(directory, '') = ?");
-      params.push(query.project);
+      where.push("normalize_cross_provider_project(COALESCE(directory, '')) = ?");
+      params.push(normalizeCrossProviderProjectPath(query.project));
     }
   }
   const excluded = query.excluded || [];
@@ -328,14 +329,28 @@ export function getCrossProviderSessions(query: CrossProviderSessionQuery) {
 
 export function getCrossProviderSessionProjects(query: CrossProviderSessionQuery) {
   const { db, whereClause, params } = crossProviderFilter(query, false);
-  return db.prepare(`
+  const rows = db.prepare(`
     SELECT COALESCE(directory, '') AS id,
            COALESCE(NULLIF(directory, ''), 'Unknown project') AS label,
            COUNT(*) AS count
     FROM session_index ${whereClause}
     GROUP BY COALESCE(directory, '')
     ORDER BY count DESC, label COLLATE NOCASE ASC
-  `).all(...params).map((row: any) => ({ id: row.id, label: row.label, worktree: row.label, count: Number(row.count) || 0 }));
+  `).all(...params);
+  const grouped = new Map<string, { id: string; label: string; worktree: string; count: number }>();
+  for (const row of rows) {
+    const key = normalizeCrossProviderProjectPath(row.id);
+    const count = Number(row.count) || 0;
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.count += count;
+    } else {
+      grouped.set(key, { id: row.id, label: row.label, worktree: row.label, count });
+    }
+  }
+  return [...grouped.values()].sort((left, right) => (
+    right.count - left.count || left.label.localeCompare(right.label, undefined, { sensitivity: "base" })
+  ));
 }
 
 export function getCrossProviderOverview(query: CrossProviderSessionQuery) {

@@ -324,6 +324,44 @@ test("centralized sessions page queries multiple providers and keeps canonical p
   assert.equal(payload.sessions[0].provider, "gemini");
 });
 
+test("centralized project filters merge equivalent Windows and WSL paths", async () => {
+  const db = getIndexDb();
+  const insert = db.prepare(`INSERT OR REPLACE INTO session_index
+    (id, provider, parent_id, title, directory, time_created, time_updated, message_count, token_count, last_indexed)
+    VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`);
+  insert.run("project-alias-win", "codex", "Project alias fixture", "D:\\WorkSpace\\ProjectAliases", 1000, 4000, 1, 10, Date.now());
+  insert.run("project-alias-slash", "codex", "Project alias fixture", "D:/WorkSpace/ProjectAliases", 1000, 3000, 1, 10, Date.now());
+  insert.run("project-alias-wsl", "gemini", "Project alias fixture", "/mnt/d/WorkSpace/ProjectAliases", 1000, 2000, 1, 10, Date.now());
+
+  const providerInfo = [
+    { id: "codex", name: "Codex", icon: "", available: true, manageable: false },
+    { id: "gemini", name: "Gemini", icon: "", available: true, manageable: false },
+  ];
+  const routes = captureGetRoutes(registerSessions, {
+    appConfig: {},
+    providerMap: new Map(providerInfo.map((provider) => [provider.id, { ...provider, capabilities: {} }])),
+    providerInfo,
+  });
+  const pageRoute = routes.find(({ pattern }) => pattern === "/sessions");
+  const apiRoute = routes.find(({ pattern }) => pattern === "/api/sessions");
+
+  const page = await pageRoute.handler({ url: "/sessions?provider=codex&provider=gemini&q=Project%20alias%20fixture" }, createResponseCapture());
+  assert.equal(page.status, 200);
+  assert.equal((page.body.match(/ProjectAliases \(3\)/g) || []).length, 1);
+
+  const response = createResponseCapture();
+  await apiRoute.handler({
+    url: "/api/sessions?provider=codex&provider=gemini&q=Project%20alias%20fixture&project=D%3A%5CWorkSpace%5CProjectAliases"
+  }, response);
+  const payload = JSON.parse(response.body);
+  assert.equal(payload.total, 3);
+  assert.deepEqual(new Set(payload.sessions.map((session) => session.id)), new Set([
+    "project-alias-win",
+    "project-alias-slash",
+    "project-alias-wsl"
+  ]));
+});
+
 test("stats route reads filters from the request URL and degrades file-provider controls honestly", async () => {
   let requestedDays = null;
   const adapter = {

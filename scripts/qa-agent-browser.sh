@@ -89,6 +89,12 @@ if ! printf '%s' "$global_session_state" | grep -Eq 'filters[^0-9]*[1-9][0-9]*' 
   exit 1
 fi
 
+global_project_state="$(read_ab "verify equivalent project paths are merged" eval "(() => { const normalize = (value) => { let path = String(value || '').trim().replaceAll('\\\\', '/'); const wsl = path.match(/^\\/mnt\\/([a-z])(?:\\/(.*))?$/i); if (wsl) path = wsl[1] + ':/' + (wsl[2] || ''); if (/^[a-z]:\\/+$/i.test(path)) return path[0].toLowerCase() + ':/'; path = path.replace(/\\/+$/, ''); return /^[a-z]:\\//i.test(path) ? path.toLowerCase() : path; }; const values = [...document.querySelectorAll('select[name=project] option')].map((option) => normalize(option.value)).filter(Boolean); return values.length === new Set(values).size; })()")"
+if [[ "$global_project_state" != "true" ]]; then
+  echo "Centralized Sessions should merge equivalent Windows and WSL project paths, got $global_project_state" >&2
+  exit 1
+fi
+
 ab "open centralized usage" open "$BASE/stats" >/dev/null
 ab "wait for centralized usage" wait --text "Usage by provider" >/dev/null
 global_usage_state="$(read_ab "verify centralized usage" eval "(() => { const before = [...document.querySelectorAll('.trend-y-label')].map((x) => x.textContent.trim()); [...document.querySelectorAll('.trend-legend-toggle')].filter((x) => x.dataset.series !== 'output' && x.checked).forEach((x) => x.click()); const after = [...document.querySelectorAll('.trend-y-label')].map((x) => x.textContent.trim()); return JSON.stringify({ providers: document.querySelectorAll('.stats-provider-selector input[name=provider]:checked').length, breakdown: document.querySelectorAll('.stats-provider-breakdown-card').length, rescaled: before[0] !== after[0] }); })()")"

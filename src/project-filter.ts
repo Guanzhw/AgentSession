@@ -9,3 +9,19 @@ export function projectFilterValue(projectId: unknown) {
 export function isEmptyProjectFilter(value: unknown) {
   return value === EMPTY_PROJECT_FILTER;
 }
+
+export function normalizeCrossProviderProjectPath(value: unknown) {
+  let normalized = String(value || "").trim().replaceAll("\\", "/");
+  if (!normalized) return "";
+
+  const wslMount = normalized.match(/^\/mnt\/([a-z])(?:\/(.*))?$/i);
+  if (wslMount) {
+    normalized = `${wslMount[1]}:/${wslMount[2] || ""}`;
+  }
+
+  if (/^[a-z]:\/+$/i.test(normalized)) {
+    return `${normalized[0].toLowerCase()}:/`;
+  }
+  normalized = normalized.replace(/\/+$/, "");
+  return /^[a-z]:\//i.test(normalized) ? normalized.toLowerCase() : normalized;
+}
