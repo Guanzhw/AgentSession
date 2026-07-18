@@ -53,7 +53,7 @@ function execute(summary: (result: any) => string, operation: () => unknown) {
 export function createSessionHistoryMcpServer(service: SessionHistoryService) {
   const server = new McpServer({
     name: "AgentSession-MCP",
-    version: "1.4.0"
+    version: "1.5.0"
   });
   const annotations = {
     readOnlyHint: true,

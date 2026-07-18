@@ -1,6 +1,6 @@
 {
   "name": "@acetamido/agentsession-mcp",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Read-only local coding-agent session history MCP server for AgentSession.",
   "type": "module",
   "bin": {
@@ -35,7 +35,7 @@
   "homepage": "https://github.com/Guanzhw/AgentSession",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@acetamido/agentsession": "^1.4.0",
+    "@acetamido/agentsession": "^1.5.0",
     "zod": "^3.25.76"
   }
 }

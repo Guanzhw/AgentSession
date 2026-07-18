@@ -7,7 +7,17 @@
 ![Node.js >= 22.5.0](https://img.shields.io/badge/node-%3E%3D22.5.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.4.0](https://img.shields.io/badge/version-1.4.0-orange?style=flat-square)
+![v1.5.0](https://img.shields.io/badge/version-1.5.0-orange?style=flat-square)
+
+## 1.5.0 更新
+
+- `/sessions` 和 `/stats` 现在是统一的跨 Provider 入口；Provider 是可组合的筛选条件，详情页仍保留 canonical Provider URL。
+- 统一 Token 趋势图直接提供 Provider 筛选，来源卡片可在同一页面下钻或打开 Provider 专属高级统计。
+- 等价的 Windows、斜杠规范化 Windows 和 WSL 项目路径会合并为一个跨 Provider 项目筛选项。
+- Codex CLI 会话现在支持 proposal-only 会话分析，并使用 Codex 自己的会话证据与 runtime extensions。
+- 会话详情标签切换保持稳定内容轨道，避免 Conversation 的目录栏出现/隐藏时引发整页横向跳动。
+
+完整变更见 [CHANGELOG.md](./CHANGELOG.md)。
 
 ## 来源说明
 
@@ -45,13 +55,14 @@ AgentSession 是一个本地优先的 AI 编程会话查看器。它不会修改
 - **统一会话入口**：`/sessions` 在一个列表中展示所有已检测 Provider，并支持 Provider 多选、项目/时间筛选、排序和跨 Provider 无限滚动。会话始终保留 `(provider, sessionId)` 复合身份，详情页继续使用 Provider 所有的 canonical URL。
 - **会话列表与搜索**：全局入口筛选 Provider 标题、viewer 自定义标题和目录；Provider 页面继续提供消息内容搜索、收藏和本地管理。标题类型筛选可将带有 analysis/analyze 信号的显示标题与其他会话分开；它是可逆的查看器启发式，不是 Provider 元数据。
 - **详情页复盘**：按 Provider 保存的模型响应边界，把 reasoning、action/tool call 和 observation/tool result 组织在同一个 ReACT 回合中。
+- **稳定的详情标签**：Overview、Conversation、Flow、Analysis 和 Raw data 共用稳定内容轨道；Conversation 目录栏淡入淡出，不会让标题、操作区和标签栏重新排版，并尊重系统减少动态效果偏好。
 - **递归 Session Tree**：OpenCode、Codex，以及保存了 sidechain transcript 的 Claude Code child session 会被组织成嵌套结构；每个子会话还可独立打开。
 - **Tool Flow Tree**：右侧 Flow 视图按时间和层级展示 root、message、tool、subagent 分支。
 - **Table of Contents**：长会话自动生成可折叠导航，只索引用户消息、assistant 消息和 `task` / `subtask` / `spawn_agent` 子 agent。
 - **会话内搜索**：可从详情页操作栏打开紧凑搜索，或按 `/` 聚焦；结果会同时显示匹配回合与文本命中数，逐词高亮，并在上下跳转时保持控制条可见。
 - **System Prompts**：解析当前可用的 OpenCode 配置、agent markdown、AGENTS.md/CLAUDE.md 和 `instructions`，展示用户开始前可能进入系统上下文的内容来源。
 - **Trace API**：暴露 step/span summary，聚合 tool、skill、agent、MCP、LSP 等调用。
-- **统一用量入口**：`/stats` 使用同一份每日 Token 组成契约聚合所有已选 Provider，展示跨 Provider 趋势和来源拆分；单 Provider 明细继续提供 Top 会话、周期对比、模型排名、按日下钻和可选费用估算。文件型 Provider 只展示 transcript 实际提供的维度，不伪造能力。
+- **统一用量入口**：`/stats` 使用同一份每日 Token 组成契约聚合所有已选 Provider；总量趋势图直接提供 Provider 筛选，来源卡片可在同一页面应用单 Provider 筛选或进入 Provider 专属明细。单 Provider 明细继续提供 Top 会话、周期对比、模型排名、按日下钻和可选费用估算。文件型 Provider 只展示 transcript 实际提供的维度，不伪造能力。
 - **本地管理**：所有 Provider 都支持收藏、重命名、批量操作、软删除、回收站恢复和永久排除；这些操作只修改 viewer 元数据。
 - **导出**：OpenCode 在详情页提供一个 Export 菜单，可选择 Markdown
   或 JSON 导出，JSON 包含 session tree。

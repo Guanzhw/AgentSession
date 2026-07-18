@@ -7,7 +7,17 @@
 ![Node.js >= 22.5.0](https://img.shields.io/badge/node-%3E%3D22.5.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.4.0](https://img.shields.io/badge/version-1.4.0-orange?style=flat-square)
+![v1.5.0](https://img.shields.io/badge/version-1.5.0-orange?style=flat-square)
+
+## What's New in 1.5.0
+
+- `/sessions` and `/stats` are unified cross-provider entry points; providers are composable filters while detail pages retain canonical provider URLs.
+- The combined token trend exposes provider filters directly, and contribution cards can filter in place or open provider-specific advanced statistics.
+- Equivalent Windows, slash-normalized Windows, and WSL project paths merge into one cross-provider project filter.
+- Codex CLI sessions now support proposal-only analysis with Codex-owned session evidence and runtime extensions.
+- Session-detail tabs keep a stable content track, avoiding the page jump previously caused by showing or hiding the Conversation table of contents.
+
+See [CHANGELOG.md](./CHANGELOG.md) for the complete release notes.
 
 ## Attribution
 
@@ -44,12 +54,13 @@ All providers store stars, custom titles, soft deletes, and permanent exclusions
 - **Unified Sessions entry**: `/sessions` lists every detected provider together with provider multi-select, project/time filters, sorting, and cross-provider infinite scroll. Sessions retain their `(provider, sessionId)` identity and canonical provider-owned detail URL.
 - **Session list and search**: the global entry filters provider titles, viewer custom titles, and directories; provider pages retain message-content search, starring, and local management. A reversible title-type filter can separate displayed titles containing analysis/analyze signals from other sessions; it is a viewer heuristic, not provider metadata.
 - **Session detail review**: provider-owned response boundaries keep reasoning, action/tool calls, and observation/tool results together as ReACT turns.
+- **Stable detail tabs**: Overview, Conversation, Flow, Analysis, and Raw data share one content track. The Conversation table of contents fades without reflowing the title, actions, or tab bar and honors reduced-motion preferences.
 - **Recursive session tree**: OpenCode, Codex, and Claude Code sessions with stored sidechain transcripts render child sessions as nested containers with direct open links.
 - **Tool Flow Tree**: the right-side Flow view shows root sessions, messages, tools, and subagent branches by hierarchy.
 - **Table of Contents**: long sessions get navigation for prompts, assistant turns, `task` / `subtask` / `spawn_agent` branches, and nested sessions.
 - **In-conversation search**: open the compact detail-page search from the action bar or press `/`; results report matching turns and text occurrences, highlight the exact text, and keep previous/next controls visible while navigating.
 - **Trace API**: step/span summaries classify tools, skills, agents, MCP calls, and LSP activity.
-- **Unified Usage entry**: `/stats` aggregates selected providers through one daily token-composition contract and shows a combined trend plus provider breakdown. Provider detail pages retain top sessions, period comparison, model ranking, day drill-down, and optional cost estimates. File-backed providers expose only dimensions present in their transcripts.
+- **Unified Usage entry**: `/stats` aggregates selected providers through one daily token-composition contract. The total trend exposes provider filters directly, while contribution cards apply a single-provider filter in place or open provider-specific details. Provider detail pages retain top sessions, period comparison, model ranking, day drill-down, and optional cost estimates. File-backed providers expose only dimensions present in their transcripts.
 - **Local management**: every provider supports starring, renaming, batch actions, soft delete, restore, and permanent exclusion; these actions only mutate viewer metadata.
 - **Export**: OpenCode sessions expose one Export menu for Markdown or JSON, with JSON including the session tree.
 - **Bilingual UI**: use `--lang en` or `--lang zh`.

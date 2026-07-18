@@ -30,6 +30,13 @@ Do not call analysis support done just because the launch endpoint returns
 `ok: true`. The launch response only proves that a local process was started.
 The validator result in `manifest.json` is the success gate.
 
+The currently verified analysis-capable adapters are OpenCode, Claude Code,
+and Codex CLI. The source provider and analyzer are separate concerns: the
+provider owns the normalized session evidence and runtime extensions, while
+the configured analyzer command executes the proposal workflow. For example,
+a Codex session may be evaluated by a configured OpenCode-backed analyzer
+without changing the evidence provider or writing to Codex-owned data.
+
 ## Architecture
 
 The core code paths are:
