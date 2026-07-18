@@ -22,6 +22,7 @@ import { getResumeCommand } from "../resume.js";
 import { getSessionAnalysisAction, listSessionAnalysisRuns } from "../analysis.js";
 import { renderSessionPage, renderCanonicalFlowPanelContent } from "../views/session.js";
 import { providerRenderContext } from "./provider-context.js";
+import { parseSessionNavigationContext } from "../navigation-context.js";
 
 export function registerSessionDetail(
   app: any,
@@ -44,6 +45,7 @@ export function registerSessionDetail(
     }
 
     const renderContext = providerRenderContext(providerSegment, providerInfo, adapter);
+    const navigationContext = parseSessionNavigationContext(new URL(req.url || "/", `http://localhost:${appConfig.port}`).searchParams.get("from"));
 
     try {
       if (usesSqliteSessionStore(adapter)) {
@@ -99,6 +101,7 @@ export function registerSessionDetail(
             analysisRuns,
             terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),
             flowLazyUrl: adapter.getSessionFlow ? `/api/${providerSegment}/session/${encodeURIComponent(sessionId)}/flow-panel` : "",
+            navigationContext,
             ...renderContext
           }),
           contentType: "text/html; charset=utf-8"
@@ -149,6 +152,7 @@ export function registerSessionDetail(
           analysisRuns,
           terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),
           flowLazyUrl: adapter.getSessionFlow ? `/api/${providerSegment}/session/${encodeURIComponent(sessionId)}/flow-panel` : "",
+          navigationContext,
           ...renderContext
         }),
         contentType: "text/html; charset=utf-8"

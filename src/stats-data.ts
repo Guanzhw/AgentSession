@@ -110,6 +110,10 @@ export interface TokenExplorerData {
   providers: any[];
   manageable: boolean;
   capabilities?: StatsCapabilities;
+  /** Cross-provider context used by the centralized Usage page. */
+  global?: boolean;
+  selectedProviders?: string[];
+  providerBreakdown?: Array<{ provider: string; name: string; totalTokens: number; totalMessages: number; totalSessions: number; advancedDetails: boolean }>;
 }
 
 export interface StatsCapabilities {

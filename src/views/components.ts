@@ -174,9 +174,10 @@ export function formatDuration(startMs: any, endMs: any) {
   return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
-export function sessionCard(s: any, active = false, { showCheckbox = false, provider = "opencode", manageable = false } = {}) {
+export function sessionCard(s: any, active = false, { showCheckbox = false, provider = "opencode", manageable = false, showProvider = false, providerName = "", returnTo = "" } = {}) {
+  const sessionProvider = s.provider || provider;
   const title = s.title || s.slug || s.id;
-  const encodedProvider = encodeURIComponent(provider);
+  const encodedProvider = encodeURIComponent(sessionProvider);
   const encodedSessionId = encodeURIComponent(s.id);
   const exportFilePrefix = `session-${String(s.id).slice(0, 8)}`;
   const classes = ["session-card"];
@@ -193,6 +194,8 @@ export function sessionCard(s: any, active = false, { showCheckbox = false, prov
   ].filter(Boolean).join("");
   const statsHtml = stats ? `<footer class="session-card-stats">${stats}</footer>` : "";
   const analysisBadge = s.analysisTitled ? `<span class="session-kind-badge">${t("session.analysis_badge")}</span>` : "";
+  const providerBadge = showProvider ? `<span class="session-provider-badge" title="${escapeHtml(sessionProvider)}">${escapeHtml(providerName || sessionProvider)}</span>` : "";
+  const detailHref = `/${encodedProvider}/session/${encodeURIComponent(s.id)}${returnTo ? `?from=${encodeURIComponent(returnTo)}` : ""}`;
 
   const checkboxHtml = showCheckbox
     ? `<input type="checkbox" class="card-checkbox" data-id="${escapeHtml(s.id)}">`
@@ -219,10 +222,11 @@ export function sessionCard(s: any, active = false, { showCheckbox = false, prov
     <div class="session-card-content">
       <header class="session-card-header">
         <div class="session-card-title-stack">
-          <a href="/${provider}/session/${encodeURIComponent(s.id)}" class="session-card-title-link">
+          <a href="${detailHref}" class="session-card-title-link">
             <h2 class="session-card-title">${escapeHtml(title)}</h2>
           </a>
           ${analysisBadge}
+          ${providerBadge}
         </div>
         <time class="session-card-time" datetime="${new Date(Number(s.time_updated) || Date.now()).toISOString()}">${escapeHtml(formatTime(s.time_updated))}</time>
       </header>

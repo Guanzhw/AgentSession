@@ -23,16 +23,33 @@ export function renderSessionsPage({
   provider = "opencode",
   providerAvailable = true,
   manageable = false,
-  providers = []
-}: { sessions?: any[]; total?: number; limit?: number; offset?: number; query?: string; note?: string; range?: string; project?: string; sort?: string; starredOnly?: boolean; sessionKind?: string; projectOptions?: { id: string; label: string; count?: number; worktree?: string }[]; searchMode?: string; totalMessages?: number; deletedCount?: number; provider?: string; providerAvailable?: boolean; manageable?: boolean; providers?: any[] } = {}) {
+  providers = [],
+  selectedProviders = [],
+  global = false
+}: { sessions?: any[]; total?: number; limit?: number; offset?: number; query?: string; note?: string; range?: string; project?: string; sort?: string; starredOnly?: boolean; sessionKind?: string; projectOptions?: { id: string; label: string; count?: number; worktree?: string }[]; searchMode?: string; totalMessages?: number; deletedCount?: number; provider?: string | null; providerAvailable?: boolean; manageable?: boolean; providers?: any[]; selectedProviders?: string[]; global?: boolean } = {}) {
   const isAvailable = providerAvailable !== false;
   const isManageableProvider = isAvailable && manageable;
   const hasVisibleSessions = sessions.length > 0;
   const hasActiveFilters = Boolean(query || range || project || starredOnly || sort !== "updated-desc" || sessionKind !== "all");
+  const listParams = new URLSearchParams();
+  if (query) listParams.set("q", query);
+  if (range) listParams.set("range", range);
+  if (project) listParams.set("project", project);
+  if (sort !== "updated-desc") listParams.set("sort", sort);
+  if (sessionKind !== "all") listParams.set("kind", sessionKind);
+  if (starredOnly) listParams.set("starred", "1");
+  if (global) selectedProviders.forEach((id) => listParams.append("provider", id));
+  const listBasePath = global
+    ? "/sessions"
+    : searchMode === "content"
+      ? `/${encodeURIComponent(provider || "opencode")}/search`
+      : `/${encodeURIComponent(provider || "opencode")}`;
+  const listPath = `${listBasePath}${listParams.size ? `?${listParams.toString()}` : ""}`;
+  const providerNames = new Map(providers.map((item: any) => [item.id, item.name || item.id]));
   const cards = !isAvailable
     ? `<p class="empty-state">${t("provider.not_detected")}</p>`
   : sessions.length
-    ? sessions.map((session) => sessionCard(session, false, { showCheckbox: true, provider, manageable: isManageableProvider })).join("\n")
+    ? sessions.map((session) => sessionCard(session, false, { showCheckbox: !global, provider: provider || session.provider, manageable: isManageableProvider, showProvider: global, providerName: providerNames.get(session.provider || provider) || "", returnTo: listPath })).join("\n")
     : hasActiveFilters
       ? `<p class="empty-state">${query ? t("sessions.empty_search").replace("{query}", escapeHtml(query)) : t("sessions.empty_filter")}</p>`
       : `<p class="empty-state">${t("sessions.empty")}</p>`;
@@ -78,7 +95,16 @@ export function renderSessionsPage({
       return `<option value="${escapeHtml(optionValue)}" ${optionValue === String(project) ? "selected" : ""} title="${escapeHtml(item.worktree || item.label || "")}">${escapeHtml(label)}</option>`;
     })
   ].join("");
-  const filterBar = isAvailable ? `<form class="session-filter" action="/${provider}" method="GET">
+  const filterAction = global ? "/sessions" : `/${provider}`;
+  const providerSelector = global ? `<fieldset class="provider-filter" aria-label="${escapeHtml(t("filter.providers"))}">
+    <legend>${escapeHtml(t("filter.providers"))}</legend>
+    ${providers.map((item: any) => `<label class="provider-filter-option${item.available === false ? " disabled" : ""}">
+      <input type="checkbox" name="provider" value="${escapeHtml(item.id)}" ${selectedProviders.includes(item.id) ? "checked" : ""} ${item.available === false ? "disabled" : ""}>
+      <span>${item.icon || ""} ${escapeHtml(item.name || item.id)}</span>
+    </label>`).join("")}
+  </fieldset>` : "";
+  const filterBar = isAvailable ? `<form class="session-filter" action="${filterAction}" method="GET">
+    ${providerSelector}
     <label class="filter-field filter-keyword">
       <span>${t("filter.keyword")}</span>
       <input type="search" name="q" value="${escapeHtml(query)}" placeholder="${t("filter.keyword_placeholder")}">
@@ -108,14 +134,14 @@ export function renderSessionsPage({
     </div>` : ""}
     <div class="filter-actions">
       <button class="btn" type="submit">${t("filter.apply")}</button>
-      ${hasActiveFilters ? `<a class="btn btn-secondary" href="/${provider}">${t("filter.clear")}</a>` : ""}
+      ${hasActiveFilters || (global && selectedProviders.length !== providers.filter((item: any) => item.available !== false).length) ? `<a class="btn btn-secondary" href="${filterAction}">${t("filter.clear")}</a>` : ""}
     </div>
   </form>` : "";
   const dashboard = `
     <section class="provider-summary">
       <span>${t("sessions.provider_summary").replace("{total}", String(total)).replace("{messages}", String(totalMessages))}</span>
       ${isManageableProvider ? `<span>${t("sessions.provider_summary_trash").replace("{count}", String(deletedCount))}</span>` : ""}
-      <a href="/${provider}/stats">${t("nav.stats")} →</a>
+      <a href="${escapeHtml(global ? `/stats${selectedProviders.length ? `?${selectedProviders.map((id) => `provider=${encodeURIComponent(id)}`).join("&")}` : ""}` : `/${provider}/stats`)}">${t("nav.stats")} →</a>
       ${isManageableProvider ? `<a href="/${provider}/trash">${t("nav.trash")} →</a>` : ""}
     </section>
   `;
@@ -125,7 +151,7 @@ export function renderSessionsPage({
     <section class="page-header">
       <div class="page-header-row">
         <div>
-          ${searchMode === "content" && query ? `<a class="back-to-filter" href="/${provider}">${t("sessions.back_to_filter")}</a>` : ""}
+          ${searchMode === "content" && query ? `<a class="back-to-filter" href="${filterAction}">${t("sessions.back_to_filter")}</a>` : ""}
           <h1>${searchMode === "content" && query ? t("sessions.search_title").replace("{query}", escapeHtml(query)) : t("sessions.title")}</h1>
           <p>${t("sessions.count").replace("{count}", total)}</p>
         </div>
@@ -148,7 +174,7 @@ export function renderSessionsPage({
     <section class="session-list" id="session-list">
       ${cards}
     </section>
-    ${total > offset + sessions.length ? `<button id="scroll-sentinel" class="scroll-load-more" type="button" data-offset="${offset + sessions.length}" data-total="${total}" data-range="${escapeHtml(range)}" data-project="${escapeHtml(project)}" data-query="${escapeHtml(query)}" data-mode="${escapeHtml(searchMode)}" data-sort="${escapeHtml(sort)}" data-kind="${escapeHtml(sessionKind)}" data-starred="${starredOnly ? "1" : ""}" data-provider="${provider}">${t("sessions.load_more")}</button>` : ""}
+    ${total > offset + sessions.length ? `<button id="scroll-sentinel" class="scroll-load-more" type="button" data-offset="${offset + sessions.length}" data-total="${total}" data-range="${escapeHtml(range)}" data-project="${escapeHtml(project)}" data-query="${escapeHtml(query)}" data-mode="${escapeHtml(searchMode)}" data-sort="${escapeHtml(sort)}" data-kind="${escapeHtml(sessionKind)}" data-starred="${starredOnly ? "1" : ""}" data-provider="${escapeHtml(provider || "")}" data-providers="${escapeHtml(selectedProviders.join(","))}" data-provider-names="${escapeHtml(JSON.stringify(Object.fromEntries(providerNames)))}" data-return-to="${escapeHtml(listPath)}" data-global="${global ? "true" : "false"}">${t("sessions.load_more")}</button>` : ""}
   `;
 
   const isContentSearch = searchMode === "content" && query;

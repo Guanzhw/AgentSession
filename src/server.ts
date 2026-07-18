@@ -50,9 +50,11 @@ function buildRouter(
   const router = new Router();
   registerMutations(router, { appConfig, providerMap, availableProviders });
   registerAnalysisRoutes(router, { appConfig, providerMap });
+  // Register static global explorer entries before the single-segment
+  // provider route (`/:provider`) so `/stats` cannot be mistaken for a provider.
+  registerSettingsStatsTrash(router, { appConfig, providerMap, providerInfo });
   registerSessions(router, { appConfig, providerMap, providerInfo });
   registerSessionDetail(router, { appConfig, providerMap, providerInfo });
-  registerSettingsStatsTrash(router, { appConfig, providerMap, providerInfo });
   return router;
 }
 
@@ -145,9 +147,8 @@ export async function startServer(config = getConfig()) {
       try {
         // Root redirect
         if (pathname === "/") {
-          const defaultProvider = availableProviders[0];
-          if (defaultProvider) {
-            res.writeHead(302, { Location: `/${defaultProvider.id}` });
+          if (availableProviders.length > 0) {
+            res.writeHead(302, { Location: "/sessions" });
             res.end();
             return;
           }

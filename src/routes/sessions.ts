@@ -1,6 +1,6 @@
 import { getOverviewStats, listSessionProjects } from "../db.js";
 import { getAllMeta, getDeletedIds, getExcludedIds } from "../meta.js";
-import { getIndexedOverview, getIndexedSessionProjects } from "../index-db.js";
+import { getCrossProviderOverview, getCrossProviderSessionProjects, getCrossProviderSessions, getIndexedOverview, getIndexedSessionProjects } from "../index-db.js";
 import {
   getVisibleListResults,
   getIndexedListResults,
@@ -31,6 +31,107 @@ export function registerSessions(
   }
 ) {
   const { providerMap, providerInfo } = deps;
+
+  function selectedProviderIds(searchParams: URLSearchParams) {
+    const requested = searchParams.getAll("provider").flatMap((value) => value.split(",")).filter(Boolean);
+    const available = [...providerMap.keys()];
+    return requested.length ? [...new Set(requested)].filter((id) => providerMap.has(id)) : available;
+  }
+
+  function buildCrossProviderList(searchParams: URLSearchParams, limit = 30, offset = 0) {
+    const providers = selectedProviderIds(searchParams);
+    const range = searchParams.get("range") || "";
+    const query = searchParams.get("q") || "";
+    const project = searchParams.get("project") || "";
+    const sort = resolveSessionSort(searchParams);
+    const sessionKind = resolveSessionKindFilter(searchParams);
+    const excluded = providers.flatMap((provider) => [...getExcludedIds(provider)].map((id) => ({ provider, id })));
+    const metaByProvider = new Map(providers.map((provider) => [provider, getAllMeta(provider)]));
+    const titleOverrides = providers.flatMap((provider) => [...getTitleOverrides(metaByProvider.get(provider) || new Map())]
+      .map(([id, title]) => ({ provider, id, title })));
+    const queryOptions = { providers, limit, offset, timeRange: range, search: query, project, sort, sessionKind, excluded, titleOverrides };
+    const results = getCrossProviderSessions(queryOptions);
+    return {
+      ...results,
+      sessions: results.sessions.map((session: any) => normalizeSessionRecord(enrichSession(session, metaByProvider.get(session.provider)))),
+      providers,
+      range,
+      query,
+      project,
+      sort,
+      sessionKind,
+      excluded,
+      titleOverrides,
+    };
+  }
+
+  app.get("/api/sessions", async (req: any, res: any) => {
+    try {
+      const searchParams = new URL(req.url || "/", "http://localhost").searchParams;
+      const limit = Math.min(Math.max(1, Number(searchParams.get("limit")) || 30), 100);
+      const offset = Math.max(0, Number(searchParams.get("offset")) || 0);
+      const result = buildCrossProviderList(searchParams, limit, offset);
+      return json(res, {
+        sessions: result.sessions.map(toApiSessionShape),
+        total: result.total,
+        offset,
+        hasMore: offset + result.sessions.length < result.total,
+      });
+    } catch (err: any) {
+      console.error(`Route error: ${err.message}`);
+      return json(res, { error: "Internal server error" }, 500);
+    }
+  });
+
+  app.get("/sessions", async (req: any) => {
+    try {
+      const searchParams = new URL(req.url || "/", "http://localhost").searchParams;
+      const offset = Math.max(0, Number(searchParams.get("offset")) || 0);
+      const result = buildCrossProviderList(searchParams, 30, offset);
+      const overview = getCrossProviderOverview({
+        providers: result.providers,
+        timeRange: result.range,
+        search: result.query,
+        project: result.project,
+        sessionKind: result.sessionKind,
+        excluded: result.excluded,
+        titleOverrides: result.titleOverrides,
+      });
+      const projectOptions = getCrossProviderSessionProjects({
+        providers: result.providers,
+        timeRange: result.range,
+        search: result.query,
+        sessionKind: result.sessionKind,
+        excluded: result.excluded,
+        titleOverrides: result.titleOverrides,
+      });
+      return {
+        status: 200,
+        body: renderSessionsPage({
+          sessions: result.sessions,
+          total: result.total,
+          limit: 30,
+          offset,
+          query: result.query,
+          range: result.range,
+          project: result.project,
+          sort: result.sort,
+          sessionKind: result.sessionKind,
+          projectOptions,
+          totalMessages: overview.totalMessages,
+          provider: null,
+          providers: providerInfo,
+          selectedProviders: result.providers,
+          global: true,
+          manageable: false,
+        }),
+        contentType: "text/html; charset=utf-8",
+      };
+    } catch (err: any) {
+      console.error(`Route error: ${err.message}`);
+      return { status: 500, body: JSON.stringify({ error: "Internal server error" }), contentType: "application/json; charset=utf-8" };
+    }
+  });
 
   // API: list sessions
   app.get(/^\/api\/([a-z][a-z0-9-]*)\/sessions$/, async (req: any, res: any, match: RegExpMatchArray) => {

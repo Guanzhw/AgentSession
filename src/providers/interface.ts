@@ -56,6 +56,11 @@ export interface Message {
 }
 
 export interface DailyTokenStat {
+  /**
+   * Token components are mutually exclusive. Provider adapters must remove
+   * cached input from input and reasoning from output when the source reports
+   * those values as subsets, so charts can safely stack these fields.
+   */
   day: string;
   inputTokens: number;
   outputTokens: number;

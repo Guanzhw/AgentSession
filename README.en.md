@@ -41,15 +41,15 @@ All providers store stars, custom titles, soft deletes, and permanent exclusions
 
 ## Features
 
-- **Unified dashboard**: detected and undetected providers are shown in the top bar, with unavailable providers disabled.
-- **Session list and search**: project/time/starred filtering, sorting, infinite scroll, and a scoped list filter for provider titles, viewer custom titles, slugs, and directories. The top-bar search combines title and message-content matches. A reversible title-type filter can separate displayed titles containing analysis/analyze signals from other sessions; it is a viewer heuristic, not provider metadata.
+- **Unified Sessions entry**: `/sessions` lists every detected provider together with provider multi-select, project/time filters, sorting, and cross-provider infinite scroll. Sessions retain their `(provider, sessionId)` identity and canonical provider-owned detail URL.
+- **Session list and search**: the global entry filters provider titles, viewer custom titles, and directories; provider pages retain message-content search, starring, and local management. A reversible title-type filter can separate displayed titles containing analysis/analyze signals from other sessions; it is a viewer heuristic, not provider metadata.
 - **Session detail review**: provider-owned response boundaries keep reasoning, action/tool calls, and observation/tool results together as ReACT turns.
 - **Recursive session tree**: OpenCode, Codex, and Claude Code sessions with stored sidechain transcripts render child sessions as nested containers with direct open links.
 - **Tool Flow Tree**: the right-side Flow view shows root sessions, messages, tools, and subagent branches by hierarchy.
 - **Table of Contents**: long sessions get navigation for prompts, assistant turns, `task` / `subtask` / `spawn_agent` branches, and nested sessions.
 - **In-conversation search**: open the compact detail-page search from the action bar or press `/`; results report matching turns and text occurrences, highlight the exact text, and keep previous/next controls visible while navigating.
 - **Trace API**: step/span summaries classify tools, skills, agents, MCP calls, and LSP activity.
-- **Statistics**: interactive Token Explorer with 7/30/90-day presets, token-component trends, top sessions, period comparison, heuristic insights, two-model comparison, saved views, and JSON/CSV export. SQLite-backed providers also support custom ranges, project/model/scope filters, model ranking, clickable day drill-down, and opt-in cost estimates; file-backed providers expose only the aggregate dimensions present in their transcripts.
+- **Unified Usage entry**: `/stats` aggregates selected providers through one daily token-composition contract and shows a combined trend plus provider breakdown. Provider detail pages retain top sessions, period comparison, model ranking, day drill-down, and optional cost estimates. File-backed providers expose only dimensions present in their transcripts.
 - **Local management**: every provider supports starring, renaming, batch actions, soft delete, restore, and permanent exclusion; these actions only mutate viewer metadata.
 - **Export**: OpenCode sessions expose one Export menu for Markdown or JSON, with JSON including the session tree.
 - **Bilingual UI**: use `--lang en` or `--lang zh`.
@@ -599,7 +599,7 @@ The latest real-data validation used:
 
 ```text
 OpenCode DB: C:\Users\QQ110\.local\share\opencode\opencode.db
-Server: http://127.0.0.1:3456/opencode
+Server: http://127.0.0.1:3456/sessions
 Data: 24 sessions, 1903 messages
 ```
 

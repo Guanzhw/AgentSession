@@ -1,13 +1,10 @@
 import {
   getCompareModelStats,
-  getFilteredSessionCount,
-  getModelDistribution,
   getModelPairs,
   getPreviousPeriodAggregates,
   getSessionsByIds,
   getStatsProjects,
   getTokenCoverage,
-  getTokenStats,
   getTopTokenSessions,
 } from "../db.js";
 import { statSync } from "node:fs";
@@ -42,6 +39,12 @@ import type { HeuristicInsight } from "../stats-insights.js";
 import { computeCostEstimate } from "../stats-cost.js";
 import type { CostEstimate, TokenPricingEntry } from "../stats-cost.js";
 import { createStatsCache } from "../stats-cache.js";
+import {
+  getIndexedModelDistribution,
+  getIndexedTokenSessionCount,
+  getIndexedTokenStats,
+  refreshSqliteTokenStatsIndex,
+} from "../stats-index.js";
 
 export function registerSettingsStatsTrash(
   app: any,
@@ -66,7 +69,7 @@ export function registerSettingsStatsTrash(
     }
   }
 
-  function statsQueryKey(providerId: string, searchParams: URLSearchParams, detail: "initial" | "full") {
+  function statsQueryKey(providerId: string, searchParams: URLSearchParams, detail: "initial" | "drill" | "full") {
     const pairs = [...searchParams.entries()].sort(([leftKey, leftValue], [rightKey, rightValue]) =>
       leftKey.localeCompare(rightKey) || leftValue.localeCompare(rightValue)
     );
@@ -102,8 +105,9 @@ export function registerSettingsStatsTrash(
 
   // ── Helper: build Token Explorer data for SQLite providers ────────────────
 
-  function buildSqliteTokenExplorer(adapter: any, providerSegment: string, searchParams: URLSearchParams, detail: "initial" | "full" = "full"): Omit<TokenExplorerData, 'provider' | 'providers' | 'manageable'> & { dayDrill: string | null; modelPairs: any[]; projects: Array<{ projectId: string; label: string; count: number }> } {
+  function buildSqliteTokenExplorer(adapter: any, providerSegment: string, searchParams: URLSearchParams, detail: "initial" | "drill" | "full" = "full"): Omit<TokenExplorerData, 'provider' | 'providers' | 'manageable'> & { dayDrill: string | null; modelPairs: any[]; projects: Array<{ projectId: string; label: string; count: number }> } {
     const dbPath = adapter.getDataPath();
+    refreshSqliteTokenStatsIndex(providerSegment, dbPath);
     const filters = parseStatsFilters(searchParams);
     const dayDrill = parseStatsDay(searchParams.get("day"));
     const capabilities: StatsCapabilities = { customRange: true, project: true, model: true, scope: true, dayDrill: true, composition: true, modelRanking: true, sessionBreakdown: true, coverage: true };
@@ -136,7 +140,8 @@ export function registerSettingsStatsTrash(
       };
     }
 
-    const tokenStatRows = getTokenStats(filters.days, dbPath, {
+    const tokenStatRows = getIndexedTokenStats(providerSegment, {
+      days: filters.days,
       project: filters.project || undefined,
       modelPair: filters.modelPair || undefined,
       scope: filters.scope,
@@ -158,7 +163,7 @@ export function registerSettingsStatsTrash(
     const padded = padTokenStats(tokenStats, filters.days, undefined, filters.from || undefined, filters.to || undefined);
 
     // Model distribution ranked by tokens
-    const distRows = getModelDistribution(dbPath, {
+    const distRows = getIndexedModelDistribution(providerSegment, {
       days: filters.days,
       fromDate: filters.from || undefined,
       toDate: filters.to || undefined,
@@ -198,7 +203,7 @@ export function registerSettingsStatsTrash(
         }));
 
     // Session count for overview (from message table)
-    const totalSessions = getFilteredSessionCount(dbPath, {
+    const totalSessions = getIndexedTokenSessionCount(providerSegment, {
       days: filters.days,
       fromDate: filters.from || undefined,
       toDate: filters.to || undefined,
@@ -267,6 +272,23 @@ export function registerSettingsStatsTrash(
       sessionsWithTokens: covRaw.sessionsWithTokens,
       totalSessions: covRaw.totalSessions,
     };
+
+    // A day click needs its session results immediately, but the advanced
+    // comparison/cost modules can remain lazy. This keeps drill-down fast even
+    // when the provider database has many models and historical records.
+    if (detail === "drill") {
+      const projects = getStatsProjects(dbPath, {
+        days: filters.days,
+        fromDate: filters.from || undefined,
+        toDate: filters.to || undefined,
+        scope: filters.scope,
+      });
+      return {
+        filters, tokenStats: padded, modelRanking, topSessions, coverage, overview,
+        comparison: null, insights: [], costEstimate: null, compareA: null, compareB: null,
+        dayDrill, modelPairs, projects, capabilities,
+      };
+    }
 
     // ── Comparison (same-period) ────────────────────────────────────────
     let comparison: ComparisonResult | null = null;
@@ -367,23 +389,22 @@ export function registerSettingsStatsTrash(
     const requestedFilters = parseStatsFilters(searchParams);
     const filters = {
       ...requestedFilters,
-      days: requestedFilters.from || requestedFilters.to ? 30 : requestedFilters.days,
-      from: null,
-      to: null,
       project: "",
       modelPair: null,
       scope: "all" as const,
-      rangePreset: ([7, 90].includes(requestedFilters.days) ? String(requestedFilters.days) : "30") as "7" | "30" | "90",
-      requestedFrom: "",
-      requestedTo: "",
-      validationError: null,
     };
     const dayDrill = null;
-    const capabilities: StatsCapabilities = { customRange: false, project: false, model: false, scope: false, dayDrill: false, composition: false, modelRanking: false, sessionBreakdown: false, coverage: false };
+    const capabilities: StatsCapabilities = { customRange: true, project: false, model: false, scope: false, dayDrill: false, composition: true, modelRanking: false, sessionBreakdown: false, coverage: false };
 
     // Token stats from adapter
-    const rawStats = adapter.getTokenStats(filters.days);
-    const tokenStats = (Array.isArray(rawStats) ? rawStats : []).map(normalizeProviderTokenStat);
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const collectionDays = filters.from
+      ? Math.max(filters.days, Math.floor((today.getTime() - Date.parse(`${filters.from}T00:00:00Z`)) / 86400000) + 1)
+      : filters.days;
+    const rawStats = adapter.getTokenStats(collectionDays);
+    const tokenStats = (Array.isArray(rawStats) ? rawStats : []).map(normalizeProviderTokenStat)
+      .filter((row) => (!filters.from || row.day >= filters.from) && (!filters.to || row.day <= filters.to));
     const padded = padTokenStats(tokenStats, filters.days, undefined, filters.from || undefined, filters.to || undefined);
 
     // Model ranking: not available for most file-based providers
@@ -418,19 +439,114 @@ export function registerSettingsStatsTrash(
     return { filters, tokenStats: padded, modelRanking, topSessions, coverage, overview, comparison: null, insights: [] as any[], costEstimate: null, compareA: null, compareB: null, dayDrill, modelPairs, projects: null, capabilities };
   }
 
-  function buildTokenExplorer(adapter: any, providerId: string, searchParams: URLSearchParams, detail: "initial" | "full" = "full") {
+  function buildTokenExplorer(adapter: any, providerId: string, searchParams: URLSearchParams, detail: "initial" | "drill" | "full" = "full") {
     return usesSqliteSessionStore(adapter)
       ? buildSqliteTokenExplorer(adapter, providerId, searchParams, detail)
       : buildFileBasedTokenExplorer(adapter, providerId, searchParams);
   }
 
-  function buildCachedTokenExplorer(adapter: any, providerId: string, searchParams: URLSearchParams, detail: "initial" | "full" = "full") {
+  function buildCachedTokenExplorer(adapter: any, providerId: string, searchParams: URLSearchParams, detail: "initial" | "drill" | "full" = "full") {
     const fingerprint = `${statsSourceFingerprint(adapter)}:${JSON.stringify(appConfig.tokenPricing || {})}`;
     const key = statsQueryKey(providerId, searchParams, detail);
     return statsCache.getOrBuild(key, fingerprint, () => buildTokenExplorer(adapter, providerId, searchParams, detail));
   }
 
+  function selectedStatsProviders(searchParams: URLSearchParams) {
+    const requested = searchParams.getAll("provider").flatMap((value) => value.split(",")).filter(Boolean);
+    const available = [...providerMap.keys()];
+    return requested.length ? [...new Set(requested)].filter((id) => providerMap.has(id)) : available;
+  }
+
+  function buildGlobalTokenExplorer(searchParams: URLSearchParams): TokenExplorerData & { modelPairs: any[]; projects: null } {
+    const selectedProviders = selectedStatsProviders(searchParams);
+    const sharedParams = new URLSearchParams();
+    for (const key of ["days", "from", "to"]) {
+      const value = searchParams.get(key);
+      if (value !== null) sharedParams.set(key, value);
+    }
+    const filters = parseStatsFilters(sharedParams);
+    const byDay = new Map<string, TokenDayRow>();
+    const providerBreakdown: NonNullable<TokenExplorerData["providerBreakdown"]> = [];
+    let totalSessions = 0;
+
+    for (const providerId of selectedProviders) {
+      const adapter = providerMap.get(providerId);
+      if (!adapter) continue;
+      const data = buildCachedTokenExplorer(adapter, providerId, sharedParams, "initial");
+      totalSessions += data.overview.totalSessions;
+      providerBreakdown.push({
+        provider: providerId,
+        name: providerInfo.find((item) => item.id === providerId)?.name || providerId,
+        totalTokens: data.overview.totalTokens,
+        totalMessages: data.overview.totalMessages,
+        totalSessions: data.overview.totalSessions,
+        advancedDetails: Boolean(data.capabilities && (data.capabilities.project || data.capabilities.model || data.capabilities.dayDrill || data.capabilities.sessionBreakdown)),
+      });
+      for (const row of data.tokenStats) {
+        const current = byDay.get(row.day) || { day: row.day, input_tokens: 0, output_tokens: 0, reasoning_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, total_tokens: 0, message_count: 0 };
+        current.input_tokens += row.input_tokens;
+        current.output_tokens += row.output_tokens;
+        current.reasoning_tokens += row.reasoning_tokens;
+        current.cache_read_tokens += row.cache_read_tokens;
+        current.cache_write_tokens += row.cache_write_tokens;
+        current.total_tokens += row.total_tokens;
+        current.message_count += row.message_count;
+        byDay.set(row.day, current);
+      }
+    }
+
+    const tokenStats = [...byDay.values()].sort((left, right) => left.day.localeCompare(right.day));
+    providerBreakdown.sort((left, right) => right.totalTokens - left.totalTokens || left.name.localeCompare(right.name));
+    return {
+      filters,
+      tokenStats,
+      modelRanking: [],
+      topSessions: [],
+      coverage: null,
+      comparison: null,
+      insights: [],
+      costEstimate: null,
+      compareA: null,
+      compareB: null,
+      overview: computeOverview(tokenStats, totalSessions),
+      provider: "",
+      providers: providerInfo,
+      manageable: false,
+      capabilities: { customRange: true, project: false, model: false, scope: false, dayDrill: false, composition: true, modelRanking: false, sessionBreakdown: false, coverage: false },
+      global: true,
+      selectedProviders,
+      providerBreakdown,
+      modelPairs: [],
+      projects: null,
+    };
+  }
+
   // ── Stats / Token Explorer page ───────────────────────────────────────────
+
+  app.get("/stats", async (req: any) => {
+    try {
+      const searchParams = new URL(req.url || "/", "http://localhost").searchParams;
+      const data = buildGlobalTokenExplorer(searchParams);
+      return { status: 200, body: renderStatsPage(data), contentType: "text/html; charset=utf-8" };
+    } catch (err: any) {
+      console.error(`Route error: ${err.message}`);
+      return { status: 500, body: JSON.stringify({ error: "Internal server error" }), contentType: "application/json; charset=utf-8" };
+    }
+  });
+
+  app.get("/api/stats/export.json", async (req: any) => {
+    try {
+      const data = buildGlobalTokenExplorer(new URL(req.url || "/", "http://localhost").searchParams);
+      return {
+        status: data.filters.validationError ? 400 : 200,
+        body: JSON.stringify({ providers: data.selectedProviders, filters: data.filters, overview: data.overview, providerBreakdown: data.providerBreakdown, tokenStats: data.tokenStats }, null, 2),
+        contentType: "application/json; charset=utf-8",
+        headers: { "Content-Disposition": 'attachment; filename="token-explorer-all-providers.json"' },
+      };
+    } catch {
+      return { status: 500, body: JSON.stringify({ error: "Internal server error" }), contentType: "application/json; charset=utf-8" };
+    }
+  });
 
   app.get("/:provider/stats", async (req: any, _res: any, params: any) => {
     const providerSegment = params.provider;
@@ -444,7 +560,8 @@ export function registerSettingsStatsTrash(
     const searchParams = new URL(req.url || "/", "http://localhost").searchParams;
 
     try {
-      const tokenExplorer = buildCachedTokenExplorer(adapter, providerSegment, searchParams, "initial");
+      const dayDrill = parseStatsDay(searchParams.get("day"));
+      const tokenExplorer = buildCachedTokenExplorer(adapter, providerSegment, searchParams, dayDrill ? "drill" : "initial");
       const deferredUrl = `/api/${encodeURIComponent(providerSegment)}/stats/deferred?${searchParams.toString()}`;
 
       return {

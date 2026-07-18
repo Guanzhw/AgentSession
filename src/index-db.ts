@@ -236,6 +236,114 @@ export function getIndexedOverview(provider: any, timeRange = "", search = "", p
   };
 }
 
+export interface CrossProviderSessionQuery {
+  providers: string[];
+  limit?: number;
+  offset?: number;
+  timeRange?: string;
+  search?: string;
+  project?: string;
+  sort?: string;
+  sessionKind?: string;
+  excluded?: Array<{ provider: string; id: string }>;
+  titleOverrides?: Array<{ provider: string; id: string; title: string }>;
+}
+
+function crossProviderTitleExpression(params: any[], overrides: CrossProviderSessionQuery["titleOverrides"]) {
+  if (!overrides?.length) return "COALESCE(NULLIF(session_index.title, ''), session_index.id)";
+  params.push(JSON.stringify(overrides));
+  return `COALESCE((
+    SELECT json_extract(item.value, '$.title') FROM json_each(?) AS item
+    WHERE json_extract(item.value, '$.provider') = session_index.provider
+      AND json_extract(item.value, '$.id') = session_index.id
+  ), NULLIF(session_index.title, ''), session_index.id)`;
+}
+
+function crossProviderFilter(query: CrossProviderSessionQuery, includeProject = true) {
+  const db = getIndexDb();
+  const providers = [...new Set(query.providers.filter(Boolean))];
+  const where = ["provider IN (SELECT value FROM json_each(?))", "parent_id IS NULL"];
+  const params: any[] = [JSON.stringify(providers)];
+  const now = Date.now();
+
+  if (providers.length === 0) where.push("0 = 1");
+  if (query.search) {
+    const effectiveTitle = crossProviderTitleExpression(params, query.titleOverrides);
+    where.push(`(${effectiveTitle} LIKE ? OR COALESCE(directory, '') LIKE ?)`);
+    params.push(`%${query.search}%`, `%${query.search}%`);
+  }
+  if (query.timeRange === "today") {
+    const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+    where.push("time_updated >= ?");
+    params.push(startOfDay.getTime());
+  } else if (query.timeRange === "week") {
+    where.push("time_updated >= ?");
+    params.push(now - 7 * 86400000);
+  } else if (query.timeRange === "month") {
+    where.push("time_updated >= ?");
+    params.push(now - 30 * 86400000);
+  }
+  if (includeProject && query.project) {
+    if (isEmptyProjectFilter(query.project)) where.push("COALESCE(directory, '') = ''");
+    else {
+      where.push("COALESCE(directory, '') = ?");
+      params.push(query.project);
+    }
+  }
+  const excluded = query.excluded || [];
+  if (excluded.length > 0) {
+    where.push("NOT EXISTS (SELECT 1 FROM json_each(?) AS hidden WHERE json_extract(hidden.value, '$.provider') = session_index.provider AND json_extract(hidden.value, '$.id') = session_index.id)");
+    params.push(JSON.stringify(excluded));
+  }
+  const kind = normalizeSessionKindFilter(query.sessionKind);
+  if (kind !== "all") {
+    const effectiveTitle = crossProviderTitleExpression(params, query.titleOverrides);
+    const titleCondition = analysisTitleSqlCondition(`LOWER(${effectiveTitle})`);
+    where.push(kind === "analysis" ? titleCondition : `NOT (${titleCondition})`);
+    params.push(...analysisTitleSqlParams());
+  }
+  return { db, whereClause: `WHERE ${where.join(" AND ")}`, params };
+}
+
+/** Query the viewer-owned index across providers while preserving (provider,id) identity. */
+export function getCrossProviderSessions(query: CrossProviderSessionQuery) {
+  const { db, whereClause, params } = crossProviderFilter(query);
+  const limit = Math.max(1, Math.min(Number(query.limit) || 30, 100));
+  const offset = Math.max(0, Number(query.offset) || 0);
+  const sortParams: any[] = [];
+  const effectiveTitle = query.sort === "title-asc" || query.sort === "title-desc"
+    ? crossProviderTitleExpression(sortParams, query.titleOverrides)
+    : "";
+  const orderBy = query.sort === "updated-asc"
+    ? "time_updated ASC, time_created ASC, provider ASC, id ASC"
+    : query.sort === "title-asc"
+      ? `${effectiveTitle} COLLATE NOCASE ASC, time_updated DESC, provider ASC, id ASC`
+      : query.sort === "title-desc"
+        ? `${effectiveTitle} COLLATE NOCASE DESC, time_updated DESC, provider ASC, id ASC`
+        : "time_updated DESC, time_created DESC, provider ASC, id ASC";
+  const total = Number(db.prepare(`SELECT COUNT(*) AS c FROM session_index ${whereClause}`).get(...params)?.c) || 0;
+  const sessions = db.prepare(`SELECT * FROM session_index ${whereClause} ORDER BY ${orderBy} LIMIT ? OFFSET ?`).all(...params, ...sortParams, limit, offset);
+  return { sessions, total };
+}
+
+export function getCrossProviderSessionProjects(query: CrossProviderSessionQuery) {
+  const { db, whereClause, params } = crossProviderFilter(query, false);
+  return db.prepare(`
+    SELECT COALESCE(directory, '') AS id,
+           COALESCE(NULLIF(directory, ''), 'Unknown project') AS label,
+           COUNT(*) AS count
+    FROM session_index ${whereClause}
+    GROUP BY COALESCE(directory, '')
+    ORDER BY count DESC, label COLLATE NOCASE ASC
+  `).all(...params).map((row: any) => ({ id: row.id, label: row.label, worktree: row.label, count: Number(row.count) || 0 }));
+}
+
+export function getCrossProviderOverview(query: CrossProviderSessionQuery) {
+  const { db, whereClause, params } = crossProviderFilter(query);
+  const row = db.prepare(`SELECT COUNT(*) AS totalSessions, COALESCE(SUM(message_count), 0) AS totalMessages FROM session_index ${whereClause}`).get(...params);
+  return { totalSessions: Number(row?.totalSessions) || 0, totalMessages: Number(row?.totalMessages) || 0 };
+}
+
 function escapeLikePattern(value: string) {
   return value.replace(/[\\%_]/g, "\\$&");
 }

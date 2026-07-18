@@ -42,8 +42,8 @@ AgentSession 是一个本地优先的 AI 编程会话查看器。它不会修改
 
 ## 主要功能
 
-- **统一仪表盘**：所有已检测 Provider 都显示在顶栏，未检测的 Provider 会灰显。
-- **会话列表与搜索**：支持项目/时间/收藏筛选、排序、无限滚动，以及筛选 Provider 标题、viewer 自定义标题、slug 和目录的列表筛选。顶栏搜索会合并标题和消息内容命中。标题类型筛选可将带有 analysis/analyze 信号的显示标题与其他会话分开；它是可逆的查看器启发式，不是 Provider 元数据。
+- **统一会话入口**：`/sessions` 在一个列表中展示所有已检测 Provider，并支持 Provider 多选、项目/时间筛选、排序和跨 Provider 无限滚动。会话始终保留 `(provider, sessionId)` 复合身份，详情页继续使用 Provider 所有的 canonical URL。
+- **会话列表与搜索**：全局入口筛选 Provider 标题、viewer 自定义标题和目录；Provider 页面继续提供消息内容搜索、收藏和本地管理。标题类型筛选可将带有 analysis/analyze 信号的显示标题与其他会话分开；它是可逆的查看器启发式，不是 Provider 元数据。
 - **详情页复盘**：按 Provider 保存的模型响应边界，把 reasoning、action/tool call 和 observation/tool result 组织在同一个 ReACT 回合中。
 - **递归 Session Tree**：OpenCode、Codex，以及保存了 sidechain transcript 的 Claude Code child session 会被组织成嵌套结构；每个子会话还可独立打开。
 - **Tool Flow Tree**：右侧 Flow 视图按时间和层级展示 root、message、tool、subagent 分支。
@@ -51,7 +51,7 @@ AgentSession 是一个本地优先的 AI 编程会话查看器。它不会修改
 - **会话内搜索**：可从详情页操作栏打开紧凑搜索，或按 `/` 聚焦；结果会同时显示匹配回合与文本命中数，逐词高亮，并在上下跳转时保持控制条可见。
 - **System Prompts**：解析当前可用的 OpenCode 配置、agent markdown、AGENTS.md/CLAUDE.md 和 `instructions`，展示用户开始前可能进入系统上下文的内容来源。
 - **Trace API**：暴露 step/span summary，聚合 tool、skill、agent、MCP、LSP 等调用。
-- **统计面板**：交互式 Token Explorer，提供 7/30/90 天预设、Token 分量趋势、Top 会话、周期对比、启发式洞察、双模型对比、已保存视图和 JSON/CSV 导出。SQLite Provider 进一步支持自定义日期、项目/模型/范围筛选、模型排名、按日下钻和可选费用估算；文件型 Provider 只展示 transcript 实际提供的汇总维度，不伪造筛选或覆盖率能力。
+- **统一用量入口**：`/stats` 使用同一份每日 Token 组成契约聚合所有已选 Provider，展示跨 Provider 趋势和来源拆分；单 Provider 明细继续提供 Top 会话、周期对比、模型排名、按日下钻和可选费用估算。文件型 Provider 只展示 transcript 实际提供的维度，不伪造能力。
 - **本地管理**：所有 Provider 都支持收藏、重命名、批量操作、软删除、回收站恢复和永久排除；这些操作只修改 viewer 元数据。
 - **导出**：OpenCode 在详情页提供一个 Export 菜单，可选择 Markdown
   或 JSON 导出，JSON 包含 session tree。

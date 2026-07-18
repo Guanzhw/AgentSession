@@ -4,6 +4,7 @@ import type { SessionPartNode, SessionTree } from "../providers/opencode/session
 import { isSubagentToolName } from "../providers/shared/linked-message-session.js";
 import { formatDuration, formatTime, formatTokens, messageBubble, messageHeader, reasoningBlock, todoList, toolCallBlock } from "./components.js";
 import { layout } from "./layout.js";
+import type { SessionNavigationContext } from "../navigation-context.js";
 
 function safeParse(value: any) {
   if (typeof value !== "string") {
@@ -1469,12 +1470,20 @@ export function renderSessionPage({
   analysisAction = null,
   analysisRuns = [],
   terminalLaunchAllowed = false,
-  flowLazyUrl = ""
-}: { session: any; sessionTree?: any; sessionMetrics?: any; sessionFlow?: any; messages?: any[]; partsByMessage?: Map<any, any>; todos?: any[]; recentSessions?: any[]; meta?: any; provider?: string; providers?: any[]; manageable?: boolean; resumeCommand?: any; analysisAction?: any; analysisRuns?: any[]; terminalLaunchAllowed?: boolean; flowLazyUrl?: string }) {
+  flowLazyUrl = "",
+  navigationContext = null
+}: { session: any; sessionTree?: any; sessionMetrics?: any; sessionFlow?: any; messages?: any[]; partsByMessage?: Map<any, any>; todos?: any[]; recentSessions?: any[]; meta?: any; provider?: string; providers?: any[]; manageable?: boolean; resumeCommand?: any; analysisAction?: any; analysisRuns?: any[]; terminalLaunchAllowed?: boolean; flowLazyUrl?: string; navigationContext?: SessionNavigationContext | null }) {
   const title = session.title || session.slug || session.id;
   const starred = meta?.starred ? 1 : 0;
   const encodedProvider = encodeURIComponent(provider);
   const encodedSessionId = encodeURIComponent(session.id);
+  const providerName = providers.find((item: any) => item.id === provider)?.name || provider;
+  const sourceLabel = navigationContext?.section === "stats" ? t("nav.stats") : t("nav.sessions");
+  const breadcrumb = navigationContext ? `<nav class="session-breadcrumb" aria-label="${escapeHtml(t("detail.breadcrumb_label"))}">
+    <a href="${escapeHtml(navigationContext.href)}">← ${escapeHtml(t("detail.back_to_source", { source: sourceLabel }))}</a>
+    <span>${escapeHtml(providerName)}</span>
+    ${navigationContext.day ? `<span>${escapeHtml(navigationContext.day)}</span>` : ""}
+  </nav>` : "";
 
   // Action parity: visible actions + "More" dropdown
   const visibleStarAction = manageable ? `
@@ -1600,6 +1609,7 @@ ${actions}
 <div class="session-workbench" data-session-id="${escapeHtml(session.id)}" data-provider="${escapeHtml(provider)}">
   ${renderToc(sessionTree)}
   <main id="${escapeHtml(anchorId("session", session.id))}" class="main-content">
+    ${breadcrumb}
     ${header}
     <div class="tab-bar" role="tablist" aria-label="${escapeHtml(t("detail.tab_bar_label"))}" hidden>
       <button role="tab" aria-selected="false" aria-controls="tab-overview" id="tab-btn-overview" tabindex="-1">${t("detail.tab_overview")}</button>
@@ -1631,5 +1641,5 @@ ${actions}
 </div>
   `;
 
-  return layout(title, body, "home", { provider, providers, manageable });
+  return layout(title, body, navigationContext?.section === "stats" ? "stats" : "home", { provider, providers, manageable });
 }

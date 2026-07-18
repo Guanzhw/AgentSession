@@ -24,6 +24,7 @@ import {
   buildClaudeCodeSystemPrompts
 } from "../dist/src/providers/claude-code/views.js";
 import { buildCodexRuntimeEnvironment } from "../dist/src/providers/codex/runtime-environment.js";
+import { codexDailyTokenComponents } from "../dist/src/providers/codex/adapter.js";
 import { buildGeminiRuntimeEnvironment } from "../dist/src/providers/gemini/runtime-environment.js";
 import { buildFlowTreeFromContainer } from "../dist/src/providers/shared/flow-tree.js";
 import { renderCanonicalFlowPanelContent, renderSessionPage } from "../dist/src/views/session.js";
@@ -32,6 +33,7 @@ import { renderStatsDeferredSection, renderStatsPage } from "../dist/src/views/s
 import { sessionCard } from "../dist/src/views/components.js";
 import { renderSessionsPage } from "../dist/src/views/sessions.js";
 import { EMPTY_PROJECT_FILTER } from "../dist/src/project-filter.js";
+import { parseSessionNavigationContext } from "../dist/src/navigation-context.js";
 import {
   getSearchResults,
   resolveSessionKindFilter,
@@ -57,6 +59,12 @@ import { buildMessageSessionViews } from "../dist/src/providers/shared/message-s
 import { buildLinkedMessageSessionViews } from "../dist/src/providers/shared/linked-message-session.js";
 import { createIncrementalTokenStats, createSessionFileStore } from "../dist/src/providers/shared/file-adapter-helpers.js";
 import { createStatsCache } from "../dist/src/stats-cache.js";
+import {
+  getIndexedModelDistribution,
+  getIndexedTokenSessionCount,
+  getIndexedTokenStats,
+  refreshSqliteTokenStatsIndex,
+} from "../dist/src/stats-index.js";
 import { dataToMessages as geminiDataToMessages } from "../dist/src/providers/gemini/parser.js";
 import { getAllProviders } from "../dist/src/providers/index.js";
 import {
@@ -724,6 +732,28 @@ test("file session store reuses parsed transcripts, refreshes changed files, and
   }
 });
 
+test("Codex daily stats make cached input and reasoning mutually exclusive", () => {
+  assert.deepEqual(codexDailyTokenComponents({
+    input_tokens: 53123,
+    cached_input_tokens: 51968,
+    output_tokens: 82,
+    reasoning_output_tokens: 13,
+    total_tokens: 53205,
+  }), {
+    input: 1155,
+    output: 69,
+    reasoning: 13,
+    cacheRead: 51968,
+    total: 53205,
+  });
+  assert.equal(codexDailyTokenComponents({
+    input_tokens: 100,
+    cached_input_tokens: 80,
+    output_tokens: 30,
+    reasoning_output_tokens: 10,
+  }).total, 130);
+});
+
 test("incremental token stats only re-aggregates transcripts with a new signature", () => {
   const now = Date.now();
   let reads = 0;
@@ -777,6 +807,108 @@ test("stats cache reuses a matching source fingerprint and invalidates changed d
   assert.equal(builds, 1);
   assert.deepEqual(cache.getOrBuild("opencode:30", "db-v2", build), { build: 2 });
   assert.equal(builds, 2);
+});
+
+test("SQLite token stats index persists buckets and refreshes only changed sessions", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "agentsession-stats-index-"));
+  const sourcePath = path.join(temp, "source.db");
+  const source = new DatabaseSync(sourcePath);
+  const cache = new DatabaseSync(":memory:");
+  try {
+    source.exec(`
+      CREATE TABLE session (
+        id TEXT PRIMARY KEY, project_id TEXT, parent_id TEXT, time_updated INTEGER, time_archived INTEGER
+      );
+      CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT);
+    `);
+    source.prepare("INSERT INTO session VALUES (?, ?, ?, ?, NULL)").run("s1", "project-a", null, 100);
+    source.prepare("INSERT INTO message VALUES (?, ?, ?)").run("m1", "s1", JSON.stringify({
+      role: "assistant", time: { created: Date.now() }, modelID: "model-a", providerID: "provider-a",
+      tokens: { input: 10, output: 4, cache: { read: 6 }, total: 20 }
+    }));
+    source.prepare("INSERT INTO message VALUES (?, ?, ?)").run("m0", "s1", JSON.stringify({
+      role: "assistant", time: { created: Date.now() }, modelID: "model-a", providerID: "provider-a",
+      tokens: { input: 0, output: 0, total: 0 }
+    }));
+    source.close();
+
+    assert.deepEqual(refreshSqliteTokenStatsIndex("opencode", sourcePath, cache), { changed: 1, removed: 0, total: 1 });
+    assert.deepEqual(refreshSqliteTokenStatsIndex("opencode", sourcePath, cache), { changed: 0, removed: 0, total: 1 });
+    const rows = getIndexedTokenStats("opencode", { days: 30, scope: "all" }, cache);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].total_tokens, 20);
+    assert.equal(rows[0].message_count, 1);
+    assert.equal(rows[0].cache_read_tokens, 6);
+    assert.equal(getIndexedTokenSessionCount("opencode", { days: 30, scope: "all" }, cache), 1);
+    assert.equal(getIndexedModelDistribution("opencode", { days: 30, scope: "all" }, cache)[0].model, "model-a");
+
+    const update = new DatabaseSync(sourcePath);
+    update.prepare("UPDATE session SET time_updated = ? WHERE id = ?").run(200, "s1");
+    update.prepare("INSERT INTO message VALUES (?, ?, ?)").run("m2", "s1", JSON.stringify({
+      role: "assistant", time: { created: Date.now() }, modelID: "model-a", providerID: "provider-a",
+      tokens: { input: 5, output: 2, total: 7 }
+    }));
+    update.close();
+    assert.deepEqual(refreshSqliteTokenStatsIndex("opencode", sourcePath, cache), { changed: 1, removed: 0, total: 1 });
+    assert.equal(getIndexedTokenStats("opencode", { days: 30, scope: "all" }, cache)[0].total_tokens, 27);
+
+    const replace = new DatabaseSync(sourcePath);
+    replace.prepare("UPDATE session SET time_archived = ? WHERE id = ?").run(300, "s1");
+    replace.prepare("INSERT INTO session VALUES (?, ?, ?, ?, NULL)").run("s2", "project-a", null, 300);
+    replace.prepare("INSERT INTO message VALUES (?, ?, ?)").run("m3", "s2", JSON.stringify({
+      role: "assistant", time: { created: Date.now() }, modelID: "model-b", providerID: "provider-b",
+      tokens: { input: 3, output: 2, total: 5 }
+    }));
+    replace.close();
+    assert.deepEqual(refreshSqliteTokenStatsIndex("opencode", sourcePath, cache), { changed: 1, removed: 1, total: 1 });
+    assert.equal(getIndexedTokenStats("opencode", { days: 30, scope: "all" }, cache)[0].total_tokens, 5);
+
+    const remove = new DatabaseSync(sourcePath);
+    remove.prepare("DELETE FROM message WHERE session_id = ?").run("s2");
+    remove.prepare("DELETE FROM session WHERE id = ?").run("s2");
+    remove.close();
+    assert.deepEqual(refreshSqliteTokenStatsIndex("opencode", sourcePath, cache), { changed: 0, removed: 1, total: 0 });
+    assert.equal(getIndexedTokenStats("opencode", { days: 30, scope: "all" }, cache).length, 0);
+  } finally {
+    closeDb(sourcePath);
+    cache.close();
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("SQLite token stats index rebuilds when a provider data path changes", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "agentsession-stats-source-"));
+  const firstPath = path.join(temp, "first.db");
+  const secondPath = path.join(temp, "second.db");
+  const cache = new DatabaseSync(":memory:");
+  const createSource = (dbPath, total) => {
+    const db = new DatabaseSync(dbPath);
+    db.exec(`
+      CREATE TABLE session (
+        id TEXT PRIMARY KEY, project_id TEXT, parent_id TEXT, time_updated INTEGER, time_archived INTEGER
+      );
+      CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT);
+    `);
+    db.prepare("INSERT INTO session VALUES (?, ?, ?, ?, NULL)").run("same-id", "project-a", null, 100);
+    db.prepare("INSERT INTO message VALUES (?, ?, ?)").run("same-message", "same-id", JSON.stringify({
+      role: "assistant", time: { created: Date.now() }, modelID: "model-a", providerID: "provider-a",
+      tokens: { input: total, output: 0, total }
+    }));
+    db.close();
+  };
+  try {
+    createSource(firstPath, 10);
+    createSource(secondPath, 99);
+    refreshSqliteTokenStatsIndex("opencode", firstPath, cache);
+    assert.equal(getIndexedTokenStats("opencode", { days: 30, scope: "all" }, cache)[0].total_tokens, 10);
+    refreshSqliteTokenStatsIndex("opencode", secondPath, cache);
+    assert.equal(getIndexedTokenStats("opencode", { days: 30, scope: "all" }, cache)[0].total_tokens, 99);
+  } finally {
+    closeDb(firstPath);
+    closeDb(secondPath);
+    cache.close();
+    rmSync(temp, { recursive: true, force: true });
+  }
 });
 
 test("linked message sessions attach Codex-style spawn tools to child conversations", () => {
@@ -1310,6 +1442,7 @@ test("sessions search page preserves query and exposes content pagination", () =
   assert.match(html, /data-total="40"/);
   assert.match(html, /data-query="analysis"/);
   assert.match(html, /data-mode="content"/);
+  assert.match(html, /from=%2Fopencode%2Fsearch%3Fq%3Danalysis/);
   assert.match(html, />Load more sessions<\/button>/);
 });
 
@@ -1381,7 +1514,7 @@ test("session list exposes sort, title type, and starred filters through paginat
   );
 });
 
-test("global search distinguishes title and message search from list filtering", () => {
+test("global search uses the centralized sessions entry while list filters stay scoped", () => {
   const html = renderSessionsPage({
     sessions: [],
     total: 0,
@@ -1391,8 +1524,8 @@ test("global search distinguishes title and message search from list filtering",
     providers: []
   });
 
-  assert.match(html, /action="\/opencode\/search" method="GET" role="search" aria-label="Search titles and message content"/);
-  assert.match(html, /placeholder="Search titles and messages\.\.\. \( \/ \)"/);
+  assert.match(html, /action="\/sessions" method="GET" role="search" aria-label="Search session titles and projects"/);
+  assert.match(html, /placeholder="Search titles and projects\.\.\. \( \/ \)"/);
   assert.match(html, /<span>Filter current list<\/span>/);
   assert.match(html, /placeholder="Title, slug, or directory"/);
 });
@@ -1462,7 +1595,7 @@ test("mobile topbar keeps settings reachable when utility links collapse", () =>
   });
   const style = readFileSync(path.join(process.cwd(), "dist", "src", "static", "style.css"), "utf8");
 
-  assert.match(html, /href="\/opencode\/stats" class="nav-link nav-link-stats /);
+  assert.match(html, /href="\/stats" class="nav-link nav-link-stats /);
   assert.match(html, /href="\/opencode\/trash" class="nav-link nav-link-trash /);
   assert.match(html, /href="\/opencode\/settings" class="nav-link nav-link-settings [^"]*" title="Settings" aria-label="Settings"/);
   const mobileTopbarStart = style.indexOf("@media (max-width: 480px)");
@@ -1878,7 +2011,7 @@ test("Token Explorer top sessions table links to canonical session URLs", () => 
     providers: []
   });
 
-  assert.match(html, /href="\/opencode\/session\/ses_abc123"/);
+  assert.match(html, /href="\/opencode\/session\/ses_abc123\?from=/);
   assert.match(html, /Fix auth bug/);
   assert.match(html, /anthropic\/claude-4/);
   assert.match(html, /15\.0K/);
@@ -1905,7 +2038,7 @@ test("Token Explorer coverage bar shows percentage when data is partial", () => 
 
 test("Token Explorer day drill-down shows filtered info", () => {
   const html = renderStatsPage({
-    tokenStats: [],
+    tokenStats: [{ day: "2026-07-11", input_tokens: 100, output_tokens: 20, reasoning_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, total_tokens: 120, message_count: 1 }],
     modelRanking: [],
     topSessions: [],
     coverage: { messagesWithTokens: 0, totalAssistantMessages: 0, availableDimensions: [], missingDimensions: [] },
@@ -1918,6 +2051,34 @@ test("Token Explorer day drill-down shows filtered info", () => {
 
   assert.match(html, /Filtered to 2026-07-11/);
   assert.match(html, /Show all days/);
+  assert.match(html, /trend-day-hit is-selected/);
+  assert.match(html, /aria-current="true"/);
+  assert.match(html, /#stats-session-results/);
+  assert.match(html, /id="stats-session-results"/);
+});
+
+test("session navigation context accepts viewer-owned sources and rejects unsafe targets", () => {
+  assert.deepEqual(parseSessionNavigationContext("/opencode/stats?days=30&day=2026-07-11#stats-session-results"), {
+    href: "/opencode/stats?days=30&day=2026-07-11#stats-session-results",
+    section: "stats",
+    day: "2026-07-11",
+  });
+  assert.equal(parseSessionNavigationContext("//example.com/steal"), null);
+  assert.equal(parseSessionNavigationContext("/api/opencode/session/x"), null);
+  assert.equal(parseSessionNavigationContext("javascript:alert(1)"), null);
+});
+
+test("session detail shows a safe source breadcrumb and activates Usage for a stats drill", () => {
+  const html = renderSessionPage({
+    session: { id: "ses_1", title: "Drilled session", directory: "D:\\work", time_created: 1 },
+    provider: "opencode",
+    providers: [{ id: "opencode", name: "OpenCode", icon: "", available: true }],
+    navigationContext: parseSessionNavigationContext("/opencode/stats?day=2026-07-11#stats-session-results"),
+  });
+  assert.match(html, /class="session-breadcrumb"/);
+  assert.match(html, /Back to Usage/);
+  assert.match(html, /2026-07-11/);
+  assert.match(html, /nav-link nav-link-stats active/);
 });
 
 test("Token Explorer renders with no data without crashing", () => {
@@ -2009,16 +2170,16 @@ test("Token Explorer day drill clear link preserves a custom range", () => {
     dayDrill: "2026-06-05", provider: "opencode", providers: []
   });
 
-  assert.match(html, /href="\/opencode\/stats\?days=custom&from=2026-06-01&to=2026-06-15"/);
+  assert.match(html, /href="\/opencode\/stats\?days=custom&amp;from=2026-06-01&amp;to=2026-06-15"/);
 });
 
-test("file-backed Token Explorer exposes aggregate-only capabilities", () => {
+test("file-backed Token Explorer keeps the shared composition chart while limiting database-only features", () => {
   const html = renderStatsPage({
     tokenStats: [{ day: "2026-07-10", input_tokens: 1, output_tokens: 1, reasoning_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, total_tokens: 2, message_count: 1 }],
     modelRanking: [], topSessions: [], coverage: null,
     overview: { totalSessions: 1, totalMessages: 1, totalTokens: 2, inputTokens: 1, outputTokens: 1, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, peakDay: "2026-07-10", peakDayTokens: 2, avgTokensPerSession: 2 },
     filters: { days: 30, from: null, to: null, project: "", modelPair: null, scope: "all" },
-    capabilities: { customRange: false, project: false, model: false, scope: false, dayDrill: false, composition: false, modelRanking: false, sessionBreakdown: false, coverage: false },
+    capabilities: { customRange: false, project: false, model: false, scope: false, dayDrill: false, composition: true, modelRanking: false, sessionBreakdown: false, coverage: false },
     projects: null, provider: "codex", providers: []
   });
 
@@ -2027,7 +2188,12 @@ test("file-backed Token Explorer exposes aggregate-only capabilities", () => {
   assert.doesNotMatch(html, /Model Ranking/);
   assert.doesNotMatch(html, /Top Token Sessions/);
   assert.doesNotMatch(html, /Data Coverage/);
-  assert.match(html, /data-series="total"/);
+  assert.match(html, /trend-band-input/);
+  assert.match(html, /trend-band-output/);
+  assert.match(html, /data-day-index="0" data-series="output" data-value="1"/);
+  assert.match(html, /class="trend-y-label" data-grid-index="0"/);
+  assert.match(html, /data-plot-top="22" data-plot-height="238"/);
+  assert.doesNotMatch(html, /data-series="total"/);
   assert.doesNotMatch(html, /day=2026-07-10/);
 });
 
@@ -2619,7 +2785,7 @@ test("settings page exposes config location and startup-only launch status", () 
 
   assert.match(html, /data-page="settings"/);
   assert.match(html, /class="logo"[^>]+title="AgentSession"[^>]+aria-label="AgentSession"/);
-  assert.match(html, /class="provider-tab active"[^>]+title="OpenCode"[^>]+aria-label="OpenCode"[^>]+aria-current="page"/);
+  assert.match(html, /class="provider-context" title="OpenCode"/);
   assert.match(html, /id="theme-toggle"[^>]+aria-label="Toggle theme"/);
   assert.match(html, /id="settings-form"/);
   assert.match(html, /class="settings-section-nav"/);

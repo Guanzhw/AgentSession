@@ -38,7 +38,7 @@ function shortDir(dir: string): string {
 
 // ── Filter bar ──────────────────────────────────────────────────────────────
 
-function renderFilterBar(filters: StatsFilters, modelPairs: Array<{ key: string; model: string; provider: string; totalTokens: number }>, provider: string, projects: Array<{ projectId: string; label: string; count: number }> | null | undefined, capabilities: StatsCapabilities, providers: any[]) {
+function renderFilterBar(filters: StatsFilters, modelPairs: Array<{ key: string; model: string; provider: string; totalTokens: number }>, provider: string, projects: Array<{ projectId: string; label: string; count: number }> | null | undefined, capabilities: StatsCapabilities, providers: any[], pagePath = `/${encodeURIComponent(provider)}/stats`, selectedProviders: string[] = []) {
   const params = statsFiltersToParams(filters);
   const baseParams = new URLSearchParams(params);
   // Remove days so presets aren't duplicated; we'll set it via radio buttons
@@ -129,10 +129,11 @@ function renderFilterBar(filters: StatsFilters, modelPairs: Array<{ key: string;
   const scopeDisabled = capabilities.scope ? "" : " disabled";
   const limitedNote = Object.values(capabilities).every(Boolean)
     ? ""
-    : `<p class="stats-filter-limited">${escapeHtml(t("stats.filters_limited"))}</p>`;
+    : `<p class="stats-filter-limited">${escapeHtml(t(pagePath === "/stats" ? "stats.filters_limited_global" : "stats.filters_limited"))}</p>`;
 
   return `
-  <form class="stats-filter-bar" method="GET" action="/${encodeURIComponent(provider)}/stats">
+  <form class="stats-filter-bar" method="GET" action="${escapeHtml(pagePath)}">
+    ${selectedProviders.map((id) => `<input type="hidden" name="provider" value="${escapeHtml(id)}">`).join("")}
     <div class="stats-filter-row">
       <div class="stats-filter-group stats-filter-presets">
         ${presetRadios}
@@ -164,13 +165,45 @@ function renderFilterBar(filters: StatsFilters, modelPairs: Array<{ key: string;
       ${compareSelects}
       <div class="stats-filter-actions">
         <button type="submit" class="stats-filter-btn stats-filter-apply">${t("stats.filter_apply")}</button>
-        <a href="/${encodeURIComponent(provider)}/stats" class="stats-filter-btn stats-filter-clear">${t("stats.filter_clear")}</a>
+        <a href="${escapeHtml(pagePath)}${selectedProviders.length ? `?${selectedProviders.map((id) => `provider=${encodeURIComponent(id)}`).join("&")}` : ""}" class="stats-filter-btn stats-filter-clear">${t("stats.filter_clear")}</a>
       </div>
     </div>
     ${validationMessage}
     <p class="stats-filter-timezone">${escapeHtml(t("stats.timezone_utc"))}</p>
     ${limitedNote}
   </form>`;
+}
+
+function hrefWithParams(path: string, params: URLSearchParams, hash = "") {
+  const query = params.toString();
+  return `${path}${query ? `?${query}` : ""}${hash}`;
+}
+
+function renderProviderBreakdown(entries: NonNullable<TokenExplorerData["providerBreakdown"]>, totalTokens: number, filters: StatsFilters) {
+  if (!entries.length) return "";
+  return `<section class="stats-provider-breakdown">
+    <div class="stats-section-heading"><div><h2>${escapeHtml(t("stats.provider_breakdown"))}</h2><p>${escapeHtml(t("stats.provider_breakdown_help"))}</p></div></div>
+    <div class="stats-provider-breakdown-grid">
+      ${entries.map((entry) => {
+        const share = totalTokens > 0 ? Math.round(entry.totalTokens / totalTokens * 1000) / 10 : 0;
+        const rangeParams = new URLSearchParams();
+        if (filters.rangePreset === "custom" && filters.from && filters.to) {
+          rangeParams.set("days", "custom");
+          rangeParams.set("from", filters.from);
+          rangeParams.set("to", filters.to);
+        } else {
+          rangeParams.set("days", String(filters.days));
+        }
+        return `<a class="stats-provider-breakdown-card" href="${escapeHtml(hrefWithParams(`/${encodeURIComponent(entry.provider)}/stats`, rangeParams))}">
+          <span class="stats-provider-breakdown-heading"><span class="stats-provider-breakdown-name">${escapeHtml(entry.name)}</span><span class="stats-provider-capability ${entry.advancedDetails ? "advanced" : "aggregate"}">${escapeHtml(t(entry.advancedDetails ? "stats.provider_advanced" : "stats.provider_aggregate"))}</span></span>
+          <strong>${fmtNum(entry.totalTokens)}</strong>
+          <span>${share}% · ${fmtExact(entry.totalMessages)} ${escapeHtml(t("stats.messages_unit"))}</span>
+          <span class="stats-provider-open">${escapeHtml(t(entry.advancedDetails ? "stats.provider_open_advanced" : "stats.provider_open_focused"))} →</span>
+          <i style="--provider-share:${Math.min(100, share)}%"></i>
+        </a>`;
+      }).join("")}
+    </div>
+  </section>`;
 }
 
 // ── KPI cards ───────────────────────────────────────────────────────────────
@@ -210,24 +243,41 @@ function renderKpiCards(overview: TokenExplorerData["overview"], capabilities: S
   </div>`;
 }
 
-// ── Stacked token trend chart ───────────────────────────────────────────────
+// ── Stacked daily token chart ───────────────────────────────────────────────
 
 const TREND_COLORS: Record<string, string> = {
-  total: "#6366f1",
-  output: "#10b981",
-  input: "#6366f1",
-  reasoning: "#8b5cf6",
-  cacheRead: "#f59e0b",
-  cacheWrite: "#ec4899",
+  total: "#60a5fa",
+  input: "#60a5fa",
+  cacheRead: "#34d399",
+  cacheWrite: "#14b8a6",
+  output: "#a78bfa",
+  reasoning: "#fbbf24",
+  other: "#64748b",
 };
 
 const TREND_KEYS: Array<{ key: string; label: string }> = [
-  { key: "output", label: "stats.legend_output" },
   { key: "input", label: "stats.legend_input" },
-  { key: "reasoning", label: "stats.legend_reasoning" },
   { key: "cacheRead", label: "stats.legend_cache_read" },
   { key: "cacheWrite", label: "stats.legend_cache_write" },
+  { key: "output", label: "stats.legend_output" },
+  { key: "reasoning", label: "stats.legend_reasoning" },
+  { key: "other", label: "stats.legend_other" },
 ];
+
+function trendValue(row: TokenDayRow, key: string): number {
+  if (key === "input") return Math.max(0, Number(row.input_tokens) || 0);
+  if (key === "output") return Math.max(0, Number(row.output_tokens) || 0);
+  if (key === "reasoning") return Math.max(0, Number(row.reasoning_tokens) || 0);
+  if (key === "cacheRead") return Math.max(0, Number(row.cache_read_tokens) || 0);
+  if (key === "cacheWrite") return Math.max(0, Number(row.cache_write_tokens) || 0);
+  if (key === "other") {
+    const known = trendValue(row, "input") + trendValue(row, "output")
+      + trendValue(row, "reasoning") + trendValue(row, "cacheRead")
+      + trendValue(row, "cacheWrite");
+    return Math.max(0, (Number(row.total_tokens) || 0) - known);
+  }
+  return Math.max(0, Number(row.total_tokens) || 0);
+}
 
 function renderTokenTrend(
   rows: TokenDayRow[],
@@ -236,6 +286,7 @@ function renderTokenTrend(
   missingDimensions: string[],
   allowDayDrill: boolean,
   allowComposition: boolean,
+  selectedDay: string | null = null,
 ) {
   if (!rows || rows.length === 0) {
     return `<section class="stats-chart-section">
@@ -244,155 +295,115 @@ function renderTokenTrend(
     </section>`;
   }
 
-  const width = 700;
-  const height = 260;
-  const pad = { top: 10, right: 20, bottom: 36, left: 60 };
+  const width = 960;
+  const height = 300;
+  const pad = { top: 22, right: 18, bottom: 40, left: 64 };
   const iw = width - pad.left - pad.right;
   const ih = height - pad.top - pad.bottom;
 
-  // Stack the series
   const trendKeys = allowComposition ? TREND_KEYS : [{ key: "total", label: "stats.legend_total" }];
-  const seriesData = trendKeys.map(tk => {
-    const mapped = tk.key === "output" ? "output_tokens"
-      : tk.key === "input" ? "input_tokens"
-      : tk.key === "reasoning" ? "reasoning_tokens"
-      : tk.key === "cacheRead" ? "cache_read_tokens"
-      : tk.key === "cacheWrite" ? "cache_write_tokens"
-      : "total_tokens";
-    return rows.map((r: any) => Number(r[mapped]) || 0);
-  });
+  const totals = rows.map(row => trendKeys.reduce((sum, key) => sum + trendValue(row, key.key), 0));
+  const positiveTotals = totals.filter(Boolean).sort((a, b) => b - a);
+  const maxTotal = Math.max(...totals, 1);
+  const secondTotal = positiveTotals[1] || 0;
+  const clippedScale = secondTotal > 0 && maxTotal > secondTotal * 4;
+  const chartMax = clippedScale ? Math.max(1, secondTotal * 1.25) : maxTotal;
+  const yVal = (value: number) => pad.top + ih - (Math.min(value, chartMax) / chartMax) * ih;
 
-  // Compute cumulative stack top for each day
-  const stackTops: number[][] = [];
-  for (let day = 0; day < rows.length; day++) {
-    let acc = 0;
-    const tops: number[] = [];
-    for (let s = 0; s < seriesData.length; s++) {
-      acc += seriesData[s][day];
-      tops.push(acc);
-    }
-    stackTops.push(tops);
-  }
-
-  // Max of the stacked total
-  const maxStack = Math.max(...stackTops.map(d => d[d.length - 1]), 1);
-
-  // Helper: y from value
-  function yVal(v: number) { return pad.top + ih - (v / maxStack) * ih; }
-
-  // Grid lines
   let gridLines = "";
   for (let i = 0; i <= 4; i++) {
     const y = pad.top + (i / 4) * ih;
-    const val = maxStack - (i / 4) * maxStack;
-    gridLines += `<line x1="${pad.left}" y1="${y}" x2="${width - pad.right}" y2="${y}" stroke="var(--border-color)" stroke-dasharray="4 4" />`;
-    gridLines += `<text x="${pad.left - 6}" y="${y + 4}" text-anchor="end" font-size="10" fill="var(--text-muted)">${fmtNum(val)}</text>`;
+    const val = chartMax - (i / 4) * chartMax;
+    gridLines += `<line x1="${pad.left}" y1="${y}" x2="${width - pad.right}" y2="${y}" class="trend-grid-line" />`;
+    gridLines += `<text x="${pad.left - 6}" y="${y + 4}" text-anchor="end" font-size="10" fill="var(--text-muted)" class="trend-y-label" data-grid-index="${i}">${fmtNum(val)}</text>`;
   }
 
-  // Build stacked areas (from bottom to top so topmost renders on top)
-  let paths = "";
+  let bars = "";
   let interactiveAreas = "";
-  const bandW = iw / Math.max(rows.length - 1, 1);
+  const slotWidth = iw / Math.max(rows.length, 1);
+  const barWidth = Math.max(4, Math.min(48, slotWidth * 0.68));
 
-  for (let s = seriesData.length - 1; s >= 0; s--) {
-    const color = TREND_COLORS[trendKeys[s].key] || "#999";
-    const dimName = trendKeys[s].key === "cacheRead" ? "cache-read"
-      : trendKeys[s].key === "cacheWrite" ? "cache-write"
-      : trendKeys[s].key;
-    const dimMissing = missingDimensions.includes(dimName);
-
-    if (dimMissing) continue;
-
-    // Build SVG path for this series band
-    let d = "";
-    const baseYs: number[] = s === 0 ? rows.map(() => pad.top + ih) : stackTops.map(t => yVal(t[s - 1]));
-    const thisYs = stackTops.map(t => yVal(t[s]));
-
-    // Top line: left to right
-    for (let i = 0; i < rows.length; i++) {
-      const x = rows.length === 1 ? pad.left + iw / 2 : pad.left + (i / (rows.length - 1)) * iw;
-      d += (i === 0 ? "M" : "L") + ` ${x},${thisYs[i]}`;
+  for (let dayIndex = 0; dayIndex < rows.length; dayIndex++) {
+    const row = rows[dayIndex];
+    const centerX = pad.left + slotWidth * dayIndex + slotWidth / 2;
+    const x = centerX - barWidth / 2;
+    let cumulative = 0;
+    for (const key of trendKeys) {
+      const value = trendValue(row, key.key);
+      if (value <= 0) continue;
+      const baseY = yVal(cumulative);
+      cumulative += value;
+      const topY = yVal(cumulative);
+      const rectHeight = Math.max(0, baseY - topY);
+      if (rectHeight <= 0) continue;
+      bars += `<rect x="${x}" y="${topY}" width="${barWidth}" height="${rectHeight}"
+        fill="${TREND_COLORS[key.key] || "#64748b"}" class="trend-bar trend-band-${key.key}" rx="${Math.min(3, barWidth / 5)}"
+        data-day-index="${dayIndex}" data-series="${key.key}" data-value="${value}" />`;
     }
-    // Bottom line: right to left
-    for (let i = rows.length - 1; i >= 0; i--) {
-      const x = rows.length === 1 ? pad.left + iw / 2 : pad.left + (i / (rows.length - 1)) * iw;
-      d += ` L ${x},${baseYs[i]}`;
-    }
-    d += " Z";
 
-    const opacity = 0.85;
-    paths += `<path d="${d}" fill="${color}" opacity="${opacity}" class="trend-band trend-band-${trendKeys[s].key}" />`;
-
-    // Transparent interactive areas for tooltips
-    for (let i = 0; i < rows.length; i++) {
-      const cx = rows.length === 1 ? pad.left + iw / 2 : pad.left + (i / (rows.length - 1)) * iw;
-      const x = cx - bandW / 2;
-      const barW = rows.length === 1 ? 12 : Math.max(bandW, 6);
-      const topY = thisYs[i];
-      const bottomY = baseYs[i];
-      const seriesVal = seriesData[s][i];
-      if (seriesVal > 0) {
-        const drillParams = statsFiltersToParams(filters);
-        drillParams.set("day", rows[i].day);
-        const drillHref = `/${encodeURIComponent(provider)}/stats?${drillParams.toString()}`;
-        const ariaLabel = t("stats.trend_point_aria", {
-          day: rows[i].day,
-          series: t(trendKeys[s].label),
-          value: fmtExact(seriesVal),
-          total: fmtExact(stackTops[i][seriesData.length - 1]),
-        });
-        const hitContent = `<rect x="${x}" y="${topY}" width="${barW}" height="${Math.max(bottomY - topY, 1)}" fill="transparent" />`;
-        interactiveAreas += allowDayDrill
-          ? `<a href="${drillHref}" class="trend-hit" aria-label="${escapeHtml(ariaLabel)}"
-          data-day="${escapeHtml(rows[i].day)}"
-          data-series="${trendKeys[s].key}"
-          data-val="${seriesVal}"
-          data-total="${stackTops[i][seriesData.length - 1]}">${hitContent}</a>`
-          : `<g class="trend-hit" role="group" tabindex="0" aria-label="${escapeHtml(ariaLabel)}"
-          data-day="${escapeHtml(rows[i].day)}"
-          data-series="${trendKeys[s].key}"
-          data-val="${seriesVal}"
-          data-total="${stackTops[i][seriesData.length - 1]}">${hitContent}</g>`;
-      }
-    }
+    const total = totals[dayIndex];
+    const drillParams = statsFiltersToParams(filters);
+    drillParams.set("day", row.day);
+    const drillHref = hrefWithParams(`/${encodeURIComponent(provider)}/stats`, drillParams, "#stats-session-results");
+    const ariaLabel = t("stats.trend_day_aria", { day: row.day, total: fmtExact(total) });
+    const data = `data-day="${escapeHtml(row.day)}" data-total="${total}"
+      data-input="${trendValue(row, "input")}" data-output="${trendValue(row, "output")}"
+      data-reasoning="${trendValue(row, "reasoning")}" data-cache-read="${trendValue(row, "cacheRead")}"
+      data-cache-write="${trendValue(row, "cacheWrite")}" data-other="${trendValue(row, "other")}"`;
+    const hitRect = `<rect x="${pad.left + slotWidth * dayIndex}" y="${pad.top}" width="${slotWidth}" height="${ih}" fill="transparent" />`;
+    interactiveAreas += allowDayDrill
+      ? `<a href="${drillHref}" class="trend-hit trend-day-hit${selectedDay === row.day ? " is-selected" : ""}" aria-label="${escapeHtml(ariaLabel)}"${selectedDay === row.day ? ' aria-current="true"' : ""} ${data}>${hitRect}</a>`
+      : `<g class="trend-hit trend-day-hit" role="group" tabindex="0" aria-label="${escapeHtml(ariaLabel)}" ${data}>${hitRect}</g>`;
+    const peakHidden = clippedScale && total > chartMax ? "" : " hidden";
+    bars += `<path d="M ${centerX - 5} ${pad.top + 7} L ${centerX} ${pad.top + 1} L ${centerX + 5} ${pad.top + 7}"
+      class="trend-clipped-marker${peakHidden}" data-day-index="${dayIndex}" />`;
+    bars += `<text x="${centerX}" y="${pad.top + 18}" text-anchor="middle"
+      class="trend-clipped-label${peakHidden}" data-day-index="${dayIndex}">${fmtNum(total)}</text>`;
   }
 
   // X-axis labels
   let xLabels = "";
   const step = Math.max(1, Math.ceil(rows.length / 5));
   for (let i = 0; i < rows.length; i += step) {
-    const cx = rows.length === 1 ? pad.left + iw / 2 : pad.left + (i / (rows.length - 1)) * iw;
-    const anchor = i === 0 ? "start" : i === rows.length - 1 ? "end" : "middle";
-    xLabels += `<text x="${cx}" y="${height - 8}" text-anchor="${anchor}" font-size="10" fill="var(--text-muted)">${rows[i].day.substring(5)}</text>`;
+    const cx = pad.left + slotWidth * i + slotWidth / 2;
+    xLabels += `<text x="${cx}" y="${height - 9}" text-anchor="middle" font-size="10" fill="var(--text-muted)">${rows[i].day.substring(5)}</text>`;
   }
   // Last label
   if (rows.length > 1 && (rows.length - 1) % step !== 0) {
-    const cx = pad.left + iw;
-    xLabels += `<text x="${cx}" y="${height - 8}" text-anchor="end" font-size="10" fill="var(--text-muted)">${rows[rows.length - 1].day.substring(5)}</text>`;
+    const cx = pad.left + slotWidth * (rows.length - 1) + slotWidth / 2;
+    xLabels += `<text x="${cx}" y="${height - 9}" text-anchor="middle" font-size="10" fill="var(--text-muted)">${rows[rows.length - 1].day.substring(5)}</text>`;
   }
 
   // Legend
+  const grandTotal = totals.reduce((sum, value) => sum + value, 0);
   let legendItems = trendKeys.map(tk => {
     const dimLabel = tk.key === "cacheRead" ? "cache-read" : tk.key === "cacheWrite" ? "cache-write" : tk.key;
-    const missing = missingDimensions.includes(dimLabel);
+    const seriesTotal = rows.reduce((sum, row) => sum + trendValue(row, tk.key), 0);
+    const missing = seriesTotal === 0 || (tk.key !== "other" && missingDimensions.includes(dimLabel));
     const style = missing ? "opacity:0.3;text-decoration:line-through" : "";
     const disabledAttr = missing ? " disabled" : "";
     return `<label class="trend-legend-item" style="${style}">
       <input type="checkbox" class="trend-legend-toggle" data-series="${tk.key}" checked${disabledAttr}>
       <span class="trend-legend-swatch" style="background:${TREND_COLORS[tk.key] || "#999"}"></span>
-      <span class="trend-legend-label">${t(tk.label)}${missing ? ` (${t("stats.unavailable")})` : ""}</span>
+      <span class="trend-legend-copy"><span class="trend-legend-label">${t(tk.label)}${missing ? ` (${t("stats.unavailable")})` : ""}</span>
+      ${missing ? "" : `<span class="trend-legend-value">${fmtNum(seriesTotal)} · ${grandTotal > 0 ? Math.round(seriesTotal / grandTotal * 100) : 0}%</span>`}</span>
     </label>`;
   }).join("");
 
   return `
   <section class="stats-chart-section">
-    <h2 class="stats-chart-title">${t("stats.token_trend")}</h2>
-    <p class="stats-chart-help">${t(allowDayDrill ? "stats.token_trend_help" : "stats.token_trend_help_readonly")}</p>
+    <div class="stats-chart-heading">
+      <div><h2 class="stats-chart-title">${t("stats.token_trend")}</h2>
+      <p class="stats-chart-help">${t(allowDayDrill ? "stats.token_trend_help" : "stats.token_trend_help_readonly")}</p></div>
+      <span class="trend-scale-note${clippedScale ? "" : " hidden"}">${t("stats.peak_compressed")}</span>
+    </div>
     <div class="stats-chart-body">
       <div class="trend-legend">${legendItems}</div>
-      <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" class="chart-svg trend-chart" role="img" aria-label="${escapeHtml(t("stats.trend_aria"))}">
+      <p class="stats-scroll-hint">${t("stats.scroll_hint")}</p>
+      <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" class="chart-svg trend-chart" role="img"
+        data-plot-top="${pad.top}" data-plot-height="${ih}" aria-label="${escapeHtml(t("stats.trend_aria"))}">
         ${gridLines}
-        ${paths}
+        ${bars}
         ${interactiveAreas}
         ${xLabels}
       </svg>
@@ -473,7 +484,7 @@ function renderTopSessions(sessions: TopSessionEntry[], provider: string, dayFil
   const dayInfo = safeDay
     ? `<p class="stats-drill-info">
         ${escapeHtml(t("stats.drill_day_title", { day: safeDay }))}
-        <a href="/${encodeURIComponent(provider)}/stats?${statsFiltersToParams(filters).toString()}" class="stats-drill-clear">
+        <a href="${escapeHtml(hrefWithParams(`/${encodeURIComponent(provider)}/stats`, statsFiltersToParams(filters)))}" class="stats-drill-clear">
           ${t("stats.drill_day_clear")}
         </a>
       </p>`
@@ -481,7 +492,7 @@ function renderTopSessions(sessions: TopSessionEntry[], provider: string, dayFil
 
   if (!sessions || sessions.length === 0) {
     return `
-    <section class="stats-chart-section">
+    <section class="stats-chart-section" id="stats-session-results" tabindex="-1">
       <h2 class="stats-chart-title">${t("stats.top_sessions")}</h2>
       ${dayInfo}
       <div class="stats-chart-body"><p class="stats-empty">${t("stats.top_sessions_empty")}</p></div>
@@ -489,7 +500,10 @@ function renderTopSessions(sessions: TopSessionEntry[], provider: string, dayFil
   }
 
   const rows = sessions.map(s => {
-    const sessionUrl = `/${encodeURIComponent(provider)}/session/${encodeURIComponent(s.sessionId)}`;
+    const returnParams = statsFiltersToParams(filters);
+    if (safeDay) returnParams.set("day", safeDay);
+    const returnTo = hrefWithParams(`/${encodeURIComponent(provider)}/stats`, returnParams, "#stats-session-results");
+    const sessionUrl = `/${encodeURIComponent(provider)}/session/${encodeURIComponent(s.sessionId)}?from=${encodeURIComponent(returnTo)}`;
     const modelLabel = s.providerModel === "__multiple__"
       ? t("stats.multiple_models", { count: String(s.modelCount || 0) })
       : s.providerModel === "__unknown__" || !s.providerModel
@@ -506,7 +520,7 @@ function renderTopSessions(sessions: TopSessionEntry[], provider: string, dayFil
   }).join("");
 
   return `
-  <section class="stats-chart-section">
+  <section class="stats-chart-section" id="stats-session-results" tabindex="-1">
     <h2 class="stats-chart-title">${t("stats.top_sessions")}</h2>
     ${dayInfo}
     <div class="stats-chart-body">
@@ -821,10 +835,13 @@ export function renderStatsPage(data: TokenExplorerData & { dayDrill?: string | 
   const rangeQuery = rangeParams.toString();
   const exportQuery = statsFiltersToParams(filters).toString();
   const deferredUrl = data.deferredUrl || null;
+  const isGlobal = data.global === true;
+  const selectedProviders = data.selectedProviders || [];
+  const pagePath = isGlobal ? "/stats" : `/${encodeURIComponent(provider)}/stats`;
   const advancedContent = !deferredUrl && capabilities.model
     ? `${renderComparison(comparison, filters)}${renderInsights(insights)}${renderModelCompare(compareA, compareB, filters, provider)}${renderCostEstimate(costEstimate, filters)}`
     : "";
-  const secondaryContent = deferredUrl
+  const secondaryContent = deferredUrl && !dayDrill
     ? `<div class="stats-deferred-section" data-stats-deferred-url="${escapeHtml(deferredUrl)}" data-stats-deferred-section="secondary" aria-busy="true"><p class="stats-deferred-loading">${escapeHtml(t("stats.loading"))}</p></div>`
     : `${capabilities.sessionBreakdown ? renderTopSessions(safeTopSessions, provider, dayDrill, filters) : ""}
       ${capabilities.coverage ? renderCoverage(safeCoverage) : ""}`;
@@ -845,23 +862,30 @@ export function renderStatsPage(data: TokenExplorerData & { dayDrill?: string | 
 
       <div class="stats-provider-bar">
         <span class="stats-provider-label">${t("stats.provider")}:</span>
-        <div class="stats-provider-list">
+        ${isGlobal ? `<form class="stats-provider-list stats-provider-selector" action="/stats" method="GET">
+          ${[...statsFiltersToParams(filters).entries()].filter(([key]) => !["project", "model", "scope", "comparea", "compareb"].includes(key)).map(([key, value]) => `<input type="hidden" name="${escapeHtml(key)}" value="${escapeHtml(value)}">`).join("")}
+          ${(providers || []).map((p: any) => `<label class="stats-provider-item${p.available === false ? " disabled" : ""}">
+            <input type="checkbox" name="provider" value="${escapeHtml(p.id)}" ${selectedProviders.includes(p.id) ? "checked" : ""} ${p.available === false ? "disabled" : ""}>
+            <span>${escapeHtml(p.name || p.id)}</span>
+          </label>`).join("")}
+          <button class="stats-filter-btn stats-filter-apply" type="submit">${escapeHtml(t("stats.filter_apply"))}</button>
+        </form>` : `<div class="stats-provider-list">
           ${(providers || []).map((p: any) => {
             const isCurrent = p.id === provider;
             const className = `stats-provider-item${isCurrent ? " current" : ""}${p.available === false ? " disabled" : ""}`;
             if (p.available === false) {
               return `<span class="${className}" aria-disabled="true">${escapeHtml(p.name || p.id)}</span>`;
             }
-            return `<a href="/${encodeURIComponent(p.id)}/stats?${rangeQuery}" class="${className}"${isCurrent ? ' aria-current="page"' : ""}>${escapeHtml(p.name || p.id)}</a>`;
+            return `<a href="/stats?provider=${encodeURIComponent(p.id)}&${rangeQuery}" class="${className}"${isCurrent ? ' aria-current="page"' : ""}>${escapeHtml(p.name || p.id)}</a>`;
           }).join("")}
-        </div>
+        </div>`}
       </div>
 
-      ${renderFilterBar(filters, modelPairs, provider, projects, capabilities, providers)}
+      ${renderFilterBar(filters, modelPairs, provider, projects, capabilities, providers, pagePath, selectedProviders)}
 
       <div class="stats-export-bar">
-        <a href="/api/${encodeURIComponent(provider)}/stats/export.json?${exportQuery}" class="stats-export-link" download>${t("stats.export_json")}</a>
-        <a href="/api/${encodeURIComponent(provider)}/stats/export.csv?${exportQuery}" class="stats-export-link" download>${t("stats.export_csv")}</a>
+        <a href="${isGlobal ? "/api/stats/export.json" : `/api/${encodeURIComponent(provider)}/stats/export.json`}?${isGlobal ? selectedProviders.map((id) => `provider=${encodeURIComponent(id)}`).join("&") + (exportQuery ? "&" : "") : ""}${exportQuery}" class="stats-export-link" download>${t("stats.export_json")}</a>
+        ${isGlobal ? "" : `<a href="/api/${encodeURIComponent(provider)}/stats/export.csv?${exportQuery}" class="stats-export-link" download>${t("stats.export_csv")}</a>`}
       </div>
 
       <div class="stats-saved-views" data-provider="${escapeHtml(provider)}">
@@ -880,15 +904,19 @@ export function renderStatsPage(data: TokenExplorerData & { dayDrill?: string | 
 
       ${renderKpiCards(safeOverview, capabilities, comparison)}
 
-      ${renderTokenTrend(safeTokenStats, filters, provider, safeCoverage?.missingDimensions ?? [], capabilities.dayDrill, capabilities.composition)}
+      ${renderProviderBreakdown(data.providerBreakdown || [], safeOverview.totalTokens, filters)}
+
+      ${renderTokenTrend(safeTokenStats, filters, provider, safeCoverage?.missingDimensions ?? [], capabilities.dayDrill, capabilities.composition, dayDrill)}
+
+      ${dayDrill ? secondaryContent : ""}
 
       ${capabilities.modelRanking ? renderModelRanking(safeModelRanking, safeOverview.totalTokens, filters, provider) : ""}
 
-      ${secondaryContent}
+      ${dayDrill ? "" : secondaryContent}
 
       ${advancedSection}
     </div>
   `;
 
-  return layout(t("stats.title"), content, "stats", { provider, providers, manageable: manageable === true });
+  return layout(t("stats.title"), content, "stats", { provider: isGlobal ? null : provider, providers, manageable: manageable === true });
 }

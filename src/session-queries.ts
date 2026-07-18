@@ -249,6 +249,7 @@ export function getProviderSearchResults(adapter: any, query: string, limit: num
 export function toApiSessionShape(session: any) {
   return {
     id: session.id,
+    provider: session.provider || "",
     title: session.title || session.slug || session.id,
     directory: session.directory || "",
     time_updated: Number(session.time_updated) || 0,

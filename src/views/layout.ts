@@ -4,23 +4,11 @@ import { icons } from "../icons.js";
 
 export function layout(title: string, body: string, page = "home", { provider = null, providers = [], providerAvailable = true, manageable = false, searchQuery = "" }: { provider?: string | null; providers?: { id: string; name: string; icon: string; available: boolean }[]; providerAvailable?: boolean; manageable?: boolean; searchQuery?: string } = {}) {
   const providerPrefix = provider ? `/${encodeURIComponent(provider)}` : "";
-
-  const providerTabs = providers.map((p) => {
-    const isActive = p.id === provider;
-    const isDisabled = p.available === false;
-    const providerName = escapeHtml(p.name);
-    if (isDisabled) {
-      const disabledLabel = escapeHtml(`${p.name} - ${t("provider.not_detected")}`);
-      return `<span class="provider-tab disabled" title="${disabledLabel}" aria-label="${disabledLabel}" aria-disabled="true">
-        <span class="provider-icon">${p.icon}</span>
-        <span class="provider-name">${providerName}</span>
-      </span>`;
-    }
-    return `<a href="/${encodeURIComponent(p.id)}" class="provider-tab ${isActive ? "active" : ""}" data-provider="${escapeHtml(p.id)}" title="${providerName}" aria-label="${providerName}"${isActive ? ` aria-current="page"` : ""}>
-      <span class="provider-icon">${p.icon}</span>
-      <span class="provider-name">${providerName}</span>
-    </a>`;
-  }).join("");
+  const settingsProvider = provider || providers.find((item) => item.available !== false)?.id || null;
+  const currentProvider = provider ? providers.find((item) => item.id === provider) : null;
+  const providerContext = currentProvider
+    ? `<span class="provider-context" title="${escapeHtml(currentProvider.name)}"><span>${currentProvider.icon}</span>${escapeHtml(currentProvider.name)}</span>`
+    : "";
 
   return `<!DOCTYPE html>
 <html lang="${getLocale() === 'zh' ? 'zh-CN' : 'en'}">
@@ -34,15 +22,18 @@ export function layout(title: string, body: string, page = "home", { provider = 
 </head>
 <body data-page="${escapeHtml(page)}" data-provider="${escapeHtml(provider || "")}" data-manageable="${manageable ? "true" : "false"}">
   <nav class="topbar">
-    <a href="${providerPrefix || "/"}" class="logo" title="AgentSession" aria-label="AgentSession">${icons.opensession}<span class="logo-text">AgentSession</span></a>
-    <div class="topbar-tabs">${providerTabs}</div>
+    <a href="/sessions" class="logo" title="AgentSession" aria-label="AgentSession">${icons.opensession}<span class="logo-text">AgentSession</span></a>
+    <div class="topbar-tabs">
+      <a href="/sessions" class="nav-link ${page === "home" || page === "search" ? "active" : ""}">${escapeHtml(t("nav.sessions"))}</a>
+      <a href="/stats" class="nav-link nav-link-stats ${page === "stats" ? "active" : ""}">${escapeHtml(t("nav.stats"))}</a>
+    </div>
     <div class="topbar-actions">
-      <a href="${providerPrefix}/stats" class="nav-link nav-link-stats ${page === "stats" ? "active" : ""}" title="${escapeHtml(t("nav.stats"))}" aria-label="${escapeHtml(t("nav.stats"))}">${t("nav.stats")}</a>
+      ${providerContext}
       ${providerAvailable !== false && manageable ? `<a href="${providerPrefix}/trash" class="nav-link nav-link-trash ${page === "trash" ? "active" : ""}" title="${escapeHtml(t("nav.trash"))}" aria-label="${escapeHtml(t("nav.trash"))}">${t("nav.trash")}</a>` : ""}
-      <a href="${providerPrefix}/settings" class="nav-link nav-link-settings ${page === "settings" ? "active" : ""}" title="${escapeHtml(t("nav.settings"))}" aria-label="${escapeHtml(t("nav.settings"))}">${t("nav.settings")}</a>
-      <form class="search-form" action="${providerPrefix}/search" method="GET" role="search" aria-label="${escapeHtml(t("nav.search_label"))}">
-        <label class="search-visible-label" for="search-input">${escapeHtml(t("nav.search_current_provider_label"))}</label>
-        <input type="search" name="q" value="${escapeHtml(searchQuery)}" placeholder="${t("nav.search_placeholder")}" class="search-input" id="search-input" aria-label="${escapeHtml(t("nav.search_label"))}">
+      ${settingsProvider ? `<a href="/${encodeURIComponent(settingsProvider)}/settings" class="nav-link nav-link-settings ${page === "settings" ? "active" : ""}" title="${escapeHtml(t("nav.settings"))}" aria-label="${escapeHtml(t("nav.settings"))}">${t("nav.settings")}</a>` : ""}
+      <form class="search-form" action="/sessions" method="GET" role="search" aria-label="${escapeHtml(t("nav.search_sessions_label"))}">
+        <label class="search-visible-label" for="search-input">${escapeHtml(t("nav.search_all_providers_label"))}</label>
+        <input type="search" name="q" value="${escapeHtml(searchQuery)}" placeholder="${t("nav.search_sessions_placeholder")}" class="search-input" id="search-input" aria-label="${escapeHtml(t("nav.search_sessions_label"))}">
       </form>
       <button id="theme-toggle" class="theme-toggle" title="Toggle theme" aria-label="Toggle theme">🌙</button>
     </div>

@@ -143,6 +143,7 @@ const __I18N__ = {
     "stats.legend_reasoning": "Reasoning",
     "stats.legend_cache_read": "Cache Read",
     "stats.legend_cache_write": "Cache Write",
+    "stats.legend_other": "Other",
     "stats.tooltip_series": "{series}: {val}",
     "stats.tooltip_total": "Total: {total}",
     saved_views_name_prompt: "Saved view name",
@@ -291,6 +292,7 @@ const __I18N__ = {
     "stats.legend_reasoning": "推理",
     "stats.legend_cache_read": "缓存读取",
     "stats.legend_cache_write": "缓存写入",
+    "stats.legend_other": "其他",
     "stats.tooltip_series": "{series}：{val}",
     "stats.tooltip_total": "总计：{total}",
     saved_views_name_prompt: "已保存视图名称",
@@ -2153,8 +2155,9 @@ function escapeHtmlClient(str) {
 }
 
 function renderSessionCard(s) {
+  const sessionProvider = s.provider || PROVIDER;
   const id = escapeHtmlClient(s.id);
-  const encodedProvider = encodeURIComponent(PROVIDER);
+  const encodedProvider = encodeURIComponent(sessionProvider);
   const encodedSessionId = encodeURIComponent(s.id || "");
   const exportFilePrefix = escapeHtmlClient(`session-${String(s.id || "").slice(0, 8)}`);
   const title = escapeHtmlClient(s.title || s.id);
@@ -2171,6 +2174,11 @@ function renderSessionCard(s) {
     deletions > 0 ? `<span class="deletions">-${deletions}</span>` : ""
   ].filter(Boolean).join("");
   const analysisBadge = s.analysisTitled ? `<span class="session-kind-badge">${escapeHtmlClient(ft("session_analysis_badge"))}</span>` : "";
+  let providerNames = {};
+  try { providerNames = JSON.parse(scrollSentinel?.dataset.providerNames || "{}"); } catch {}
+  const providerBadge = scrollSentinel?.dataset.global === "true" ? `<span class="session-provider-badge" title="${escapeHtmlClient(sessionProvider)}">${escapeHtmlClient(providerNames[sessionProvider] || sessionProvider)}</span>` : "";
+  const returnTo = scrollSentinel?.dataset.returnTo || "";
+  const detailHref = `/${encodedProvider}/session/${encodeURIComponent(s.id)}${returnTo ? `?from=${encodeURIComponent(returnTo)}` : ""}`;
 
   const actionsHtml = IS_MANAGEABLE_PROVIDER ? `
     <div class="card-actions">
@@ -2189,14 +2197,15 @@ function renderSessionCard(s) {
   ` : "";
 
   return `<article class="${classes.join(" ")}" data-session-id="${id}">
-    <input type="checkbox" class="card-checkbox" data-id="${id}">
+    ${IS_MANAGEABLE_PROVIDER ? `<input type="checkbox" class="card-checkbox" data-id="${id}">` : ""}
     <div class="session-card-content">
       <header class="session-card-header">
         <div class="session-card-title-stack">
-          <a href="/${PROVIDER}/session/${encodeURIComponent(s.id)}" class="session-card-title-link">
+          <a href="${detailHref}" class="session-card-title-link">
             <h2 class="session-card-title">${title}</h2>
           </a>
           ${analysisBadge}
+          ${providerBadge}
         </div>
         <time class="session-card-time" datetime="${new Date(timeUpdated).toISOString()}">${escapeHtmlClient(formatTimeClient(timeUpdated))}</time>
       </header>
@@ -2218,6 +2227,8 @@ if (scrollSentinel && sessionList) {
   const scrollSort = scrollSentinel.dataset.sort || "";
   const scrollKind = scrollSentinel.dataset.kind || "";
   const scrollStarred = scrollSentinel.dataset.starred || "";
+  const scrollProviders = scrollSentinel.dataset.providers || "";
+  const isGlobalSessions = scrollSentinel.dataset.global === "true";
   let isLoading = false;
   let observer = null;
 
@@ -2247,8 +2258,9 @@ if (scrollSentinel && sessionList) {
       if (scrollSort) params.set("sort", scrollSort);
       if (scrollKind) params.set("kind", scrollKind);
       if (scrollStarred) params.set("starred", scrollStarred);
+      if (scrollProviders) scrollProviders.split(",").filter(Boolean).forEach((provider) => params.append("provider", provider));
 
-      const res = await fetch(`/api/${PROVIDER}/sessions?${params.toString()}`);
+      const res = await fetch(`${isGlobalSessions ? "/api/sessions" : `/api/${PROVIDER}/sessions`}?${params.toString()}`);
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
@@ -3147,23 +3159,78 @@ if (sessionWorkbench) {
     }
   }
 
-  document.querySelectorAll(".trend-legend-toggle").forEach((toggle) => {
+  const chartSvg = document.querySelector(".trend-chart");
+  const trendToggles = Array.from(document.querySelectorAll(".trend-legend-toggle"));
+  const enabledTrendSeries = () => new Set(
+    trendToggles.filter((toggle) => toggle.checked && !toggle.disabled).map((toggle) => toggle.dataset.series)
+  );
+  const compactTrendNumber = (value) => {
+    const number = Number(value) || 0;
+    if (number >= 1_000_000_000) return (number / 1_000_000_000).toFixed(2) + "B";
+    if (number >= 1_000_000) return (number / 1_000_000).toFixed(2) + "M";
+    if (number >= 1_000) return (number / 1_000).toFixed(1) + "K";
+    return number.toLocaleString();
+  };
+
+  function reflowTrendChart() {
+    if (!chartSvg) return;
+    const enabled = enabledTrendSeries();
+    const plotTop = Number(chartSvg.dataset.plotTop) || 0;
+    const plotHeight = Number(chartSvg.dataset.plotHeight) || 1;
+    const hits = Array.from(chartSvg.querySelectorAll(".trend-day-hit"));
+    const barsByDay = hits.map(() => []);
+    chartSvg.querySelectorAll(".trend-bar").forEach((bar) => {
+      const dayIndex = Number(bar.dataset.dayIndex);
+      if (barsByDay[dayIndex]) barsByDay[dayIndex].push(bar);
+    });
+    const visibleTotals = barsByDay.map((bars) => bars.reduce((sum, bar) =>
+      enabled.has(bar.dataset.series) ? sum + (Number(bar.dataset.value) || 0) : sum, 0));
+    const positiveTotals = visibleTotals.filter(Boolean).sort((a, b) => b - a);
+    const maxTotal = Math.max(...visibleTotals, 1);
+    const secondTotal = positiveTotals[1] || 0;
+    const clippedScale = secondTotal > 0 && maxTotal > secondTotal * 4;
+    const chartMax = clippedScale ? Math.max(1, secondTotal * 1.25) : maxTotal;
+    const yValue = (value) => plotTop + plotHeight - (Math.min(value, chartMax) / chartMax) * plotHeight;
+
+    chartSvg.querySelectorAll(".trend-y-label").forEach((label) => {
+      const index = Number(label.dataset.gridIndex) || 0;
+      label.textContent = compactTrendNumber(chartMax - (index / 4) * chartMax);
+    });
+
+    barsByDay.forEach((bars, dayIndex) => {
+      let cumulative = 0;
+      bars.forEach((bar) => {
+        const visible = enabled.has(bar.dataset.series);
+        bar.classList.toggle("hidden", !visible);
+        if (!visible) return;
+        const value = Number(bar.dataset.value) || 0;
+        const baseY = yValue(cumulative);
+        cumulative += value;
+        const topY = yValue(cumulative);
+        bar.setAttribute("y", String(topY));
+        bar.setAttribute("height", String(Math.max(0, baseY - topY)));
+      });
+
+      const isClipped = clippedScale && visibleTotals[dayIndex] > chartMax;
+      const marker = chartSvg.querySelector(`.trend-clipped-marker[data-day-index="${dayIndex}"]`);
+      const label = chartSvg.querySelector(`.trend-clipped-label[data-day-index="${dayIndex}"]`);
+      marker?.classList.toggle("hidden", !isClipped);
+      label?.classList.toggle("hidden", !isClipped);
+      if (label) label.textContent = compactTrendNumber(visibleTotals[dayIndex]);
+      if (hits[dayIndex]) hits[dayIndex].dataset.visibleTotal = String(visibleTotals[dayIndex]);
+    });
+    document.querySelector(".trend-scale-note")?.classList.toggle("hidden", !clippedScale);
+  }
+
+  trendToggles.forEach((toggle) => {
     toggle.addEventListener("change", function () {
-      const series = this.dataset.series;
-      document.querySelectorAll(".trend-band-" + series).forEach((band) => {
-        band.classList.toggle("hidden", !this.checked);
-      });
-      document.querySelectorAll(`.trend-hit[data-series="${CSS.escape(series)}"]`).forEach((hit) => {
-        hit.classList.toggle("hidden", !this.checked);
-        hit.setAttribute("aria-hidden", this.checked ? "false" : "true");
-        if (hit.hasAttribute("tabindex")) hit.setAttribute("tabindex", this.checked ? "0" : "-1");
-      });
+      reflowTrendChart();
     });
   });
+  reflowTrendChart();
 
   const tooltip = document.getElementById("trend-tooltip");
   if (tooltip) {
-    const chartSvg = document.querySelector(".trend-chart");
     if (chartSvg) {
       const seriesLabels = {
         total: ft("stats.legend_total"),
@@ -3172,6 +3239,7 @@ if (sessionWorkbench) {
         reasoning: ft("stats.legend_reasoning"),
         cacheRead: ft("stats.legend_cache_read"),
         cacheWrite: ft("stats.legend_cache_write"),
+        other: ft("stats.legend_other"),
       };
       const showTrendTooltip = function (hit, clientX, clientY) {
         if (!hit) {
@@ -3179,13 +3247,21 @@ if (sessionWorkbench) {
           return;
         }
         const day = hit.dataset.day;
-        const series = hit.dataset.series;
-        const val = Number(hit.dataset.val) || 0;
-        const total = Number(hit.dataset.total) || 0;
-        const seriesLabel = seriesLabels[series] || series;
-        tooltip.innerHTML = "<strong>" + day + "</strong><br>" +
-          formatText(ft("stats.tooltip_series"), { series: seriesLabel, val: val.toLocaleString() }) + "<br>" +
-          formatText(ft("stats.tooltip_total"), { total: total.toLocaleString() });
+        const visibleSeries = enabledTrendSeries();
+        const total = Number(hit.dataset.visibleTotal) || 0;
+        const values = [
+          ["input", hit.dataset.input],
+          ["cacheRead", hit.dataset.cacheRead],
+          ["cacheWrite", hit.dataset.cacheWrite],
+          ["output", hit.dataset.output],
+          ["reasoning", hit.dataset.reasoning],
+          ["other", hit.dataset.other],
+        ].map(([series, raw]) => [series, Number(raw) || 0])
+          .filter(([series, value]) => visibleSeries.has(series) && value > 0);
+        tooltip.innerHTML = "<strong>" + day + "</strong>" +
+          values.map(([series, value]) => "<span><i style=\"background:" + ({ input: "#60a5fa", cacheRead: "#34d399", cacheWrite: "#14b8a6", output: "#a78bfa", reasoning: "#fbbf24", other: "#64748b" }[series] || "#64748b") + "\"></i>" +
+            formatText(ft("stats.tooltip_series"), { series: seriesLabels[series] || series, val: value.toLocaleString() }) + "</span>").join("") +
+          "<b>" + formatText(ft("stats.tooltip_total"), { total: total.toLocaleString() }) + "</b>";
         tooltip.hidden = false;
 
         const svgRect = chartSvg.getBoundingClientRect();

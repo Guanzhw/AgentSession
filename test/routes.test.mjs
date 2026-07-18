@@ -19,8 +19,9 @@ const { providerRenderContext } = await import("../dist/src/routes/provider-cont
 const { registerSessionDetail } = await import("../dist/src/routes/session-detail.js");
 const { registerSessions } = await import("../dist/src/routes/sessions.js");
 const { registerSettingsStatsTrash } = await import("../dist/src/routes/settings-stats-trash.js");
-const { closeIndexDb } = await import("../dist/src/index-db.js");
+const { closeIndexDb, getIndexDb } = await import("../dist/src/index-db.js");
 const { closeDb } = await import("../dist/src/db.js");
+const { closeMetaDb, renameSession } = await import("../dist/src/meta.js");
 
 function captureGetRoutes(register, deps) {
   const routes = [];
@@ -281,6 +282,48 @@ test("provider page keeps unavailable paths and management capability provider-o
   );
 });
 
+test("centralized sessions page queries multiple providers and keeps canonical provider identity", async () => {
+  const db = getIndexDb();
+  const insert = db.prepare(`INSERT OR REPLACE INTO session_index
+    (id, provider, parent_id, title, directory, time_created, time_updated, message_count, token_count, last_indexed)
+    VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`);
+  insert.run("shared-id", "codex", "Codex session", "D:\\codex", 1000, 3000, 3, 30, Date.now());
+  insert.run("shared-id", "gemini", "Gemini session", "D:\\gemini", 1000, 2000, 2, 20, Date.now());
+  const providerInfo = [
+    { id: "codex", name: "Codex", icon: "", available: true, manageable: false },
+    { id: "gemini", name: "Gemini", icon: "", available: true, manageable: false },
+  ];
+  const routes = captureGetRoutes(registerSessions, {
+    appConfig: {},
+    providerMap: new Map(providerInfo.map((provider) => [provider.id, { ...provider, capabilities: {} }])),
+    providerInfo,
+  });
+  const pageRoute = routes.find(({ pattern }) => pattern === "/sessions");
+  const apiRoute = routes.find(({ pattern }) => pattern === "/api/sessions");
+  assert.ok(pageRoute);
+  assert.ok(apiRoute);
+
+  const page = await pageRoute.handler({ url: "/sessions?provider=codex&provider=gemini" }, createResponseCapture());
+  assert.equal(page.status, 200);
+  assert.match(page.body, /href="\/codex\/session\/shared-id\?from=/);
+  assert.match(page.body, /href="\/gemini\/session\/shared-id\?from=/);
+  assert.match(page.body, /class="session-provider-badge" title="codex">Codex</);
+  assert.match(page.body, /class="session-provider-badge" title="gemini">Gemini</);
+  assert.match(page.body, /href="\/stats\?provider=codex&amp;provider=gemini"/);
+
+  renameSession("gemini", "shared-id", "Renamed global fixture");
+  const renamed = await pageRoute.handler({ url: "/sessions?provider=gemini&q=Renamed" }, createResponseCapture());
+  assert.equal(renamed.status, 200);
+  assert.match(renamed.body, /Renamed global fixture/);
+  assert.doesNotMatch(renamed.body, /Codex session/);
+
+  const response = createResponseCapture();
+  await apiRoute.handler({ url: "/api/sessions?provider=gemini" }, response);
+  const payload = JSON.parse(response.body);
+  assert.equal(payload.total, 1);
+  assert.equal(payload.sessions[0].provider, "gemini");
+});
+
 test("stats route reads filters from the request URL and degrades file-provider controls honestly", async () => {
   let requestedDays = null;
   const adapter = {
@@ -310,6 +353,11 @@ test("stats route reads filters from the request URL and degrades file-provider 
   assert.doesNotMatch(result.body, /name="model"/);
   assert.doesNotMatch(result.body, /name="scope" value="root" checked/);
 
+  requestedDays = null;
+  const historical = await route.handler({ url: "/codex/stats?days=custom&from=2025-07-01&to=2025-07-07" }, createResponseCapture(), { provider: "codex" });
+  assert.equal(historical.status, 200);
+  assert.ok(requestedDays > 7, "historical custom ranges must collect far enough back before filtering daily aggregates");
+
   const jsonExportRoute = routes.find(({ pattern }) => pattern instanceof RegExp && pattern.source.includes("stats\\/export\\.json"));
   const csvExportRoute = routes.find(({ pattern }) => pattern instanceof RegExp && pattern.source.includes("stats\\/export\\.csv"));
   assert.ok(jsonExportRoute);
@@ -332,6 +380,38 @@ test("stats route reads filters from the request URL and degrades file-provider 
   assert.equal(requestedDays, 90, "CSV export must parse filters from req.url");
   assert.match(csvResult.body, /^Provider,Composition Mode,Day \(UTC\),/);
   assert.equal(csvResult.headers["Content-Disposition"], 'attachment; filename="token-explorer-codex.csv"');
+});
+
+test("centralized Usage page aggregates selected providers and preserves component totals", async () => {
+  const providers = [
+    {
+      id: "codex", name: "Codex", icon: "", capabilities: {},
+      getTokenStats() { return [{ day: "2026-07-18", inputTokens: 10, outputTokens: 4, reasoningTokens: 2, cacheReadTokens: 5, cacheWriteTokens: 0, totalTokens: 21, messageCount: 2 }]; }
+    },
+    {
+      id: "gemini", name: "Gemini", icon: "", capabilities: {},
+      getTokenStats() { return [{ day: "2026-07-18", inputTokens: 7, outputTokens: 3, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 1, totalTokens: 11, messageCount: 1 }]; }
+    }
+  ];
+  const providerInfo = providers.map((provider) => ({ id: provider.id, name: provider.name, icon: "", available: true, manageable: false }));
+  const routes = captureGetRoutes(registerSettingsStatsTrash, {
+    appConfig: { configPath: path.join(temp, "config.json") },
+    providerMap: new Map(providers.map((provider) => [provider.id, provider])),
+    providerInfo,
+  });
+  const route = routes.find(({ pattern }) => pattern === "/stats");
+  assert.ok(route);
+  const result = await route.handler({ url: "/stats?provider=codex&provider=gemini&days=7" }, createResponseCapture());
+  assert.equal(result.status, 200);
+  assert.match(result.body, /Usage by provider/);
+  assert.match(result.body, /Codex/);
+  assert.match(result.body, /Gemini/);
+  assert.match(result.body, /data-token-total="32"/);
+  assert.match(result.body, /name="provider" value="codex" checked/);
+  assert.match(result.body, /name="provider" value="gemini" checked/);
+  assert.match(result.body, /href="\/codex\/stats\?days=7"/);
+  assert.match(result.body, /href="\/gemini\/stats\?days=7"/);
+  assert.equal((result.body.match(/Aggregate only/g) || []).length, 2);
 });
 
 test("sqlite stats defer supporting sections to a fragment endpoint", async () => {
@@ -371,6 +451,14 @@ test("sqlite stats defer supporting sections to a fragment endpoint", async () =
     assert.match(page.body, /data-stats-deferred-section="secondary"/);
     assert.doesNotMatch(page.body, /top-sessions-table/);
 
+    const day = new Date(now).toISOString().slice(0, 10);
+    const drilled = await pageRoute.handler({ url: `/opencode/stats?days=30&day=${day}` }, createResponseCapture(), { provider: "opencode" });
+    assert.equal(drilled.status, 200);
+    assert.doesNotMatch(drilled.body, /data-stats-deferred-section="secondary"/);
+    assert.match(drilled.body, /id="stats-session-results"/);
+    assert.match(drilled.body, /top-sessions-table/);
+    assert.match(drilled.body, /Filtered to/);
+
     const url = "/api/opencode/stats/deferred?days=30&section=secondary";
     const match = new URL(url, "http://127.0.0.1").pathname.match(deferredRoute.pattern);
     assert.ok(match);
@@ -385,6 +473,7 @@ test("sqlite stats defer supporting sections to a fragment endpoint", async () =
 });
 
 test.after(() => {
+  closeMetaDb();
   closeIndexDb();
   rmSync(temp, { recursive: true, force: true });
 });

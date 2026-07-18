@@ -77,7 +77,8 @@ const getGeminiViews = createStructuredViewCache(generateGeminiViews);
 const geminiTokenMapping: TokenFieldMapping = {
   filterRecord: (m) => m.type === "gemini" && !!m.tokenUsage,
   getTimestamp: (m) => m.timestamp ? new Date(m.timestamp).getTime() : 0,
-  inputTokens: (m) => m.tokenUsage.input || 0,
+  // Gemini reports cached content as a subset of prompt tokens.
+  inputTokens: (m) => Math.max(0, (m.tokenUsage.input || 0) - (m.tokenUsage.cached || 0)),
   outputTokens: (m) => m.tokenUsage.output || 0,
   totalTokens: (m) => m.tokenUsage.total || 0,
   reasoningTokens: (m) => m.tokenUsage.thoughts || 0,

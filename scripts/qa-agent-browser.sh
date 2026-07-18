@@ -81,6 +81,22 @@ wait_for_server
 
 ab "clear previous session" close --all >/dev/null || true
 
+ab "open centralized sessions" open "$BASE/sessions" >/dev/null
+ab "wait for centralized sessions" wait --text "Recent Sessions" >/dev/null
+global_session_state="$(read_ab "verify centralized session providers" eval "JSON.stringify({ filters: document.querySelectorAll('.provider-filter input[name=provider]:checked').length, badges: document.querySelectorAll('.session-provider-badge').length, badLinks: [...document.querySelectorAll('.session-card-title-link')].filter((link) => !/^\\/(opencode|claude-code|codex|gemini)\\/session\\//.test(link.getAttribute('href') || '')).length })")"
+if ! printf '%s' "$global_session_state" | grep -Eq 'filters[^0-9]*[1-9][0-9]*' || ! printf '%s' "$global_session_state" | grep -Eq 'badLinks[^0-9]*0'; then
+  echo "Centralized sessions should expose selected provider filters and canonical provider-owned detail links, got $global_session_state" >&2
+  exit 1
+fi
+
+ab "open centralized usage" open "$BASE/stats" >/dev/null
+ab "wait for centralized usage" wait --text "Usage by provider" >/dev/null
+global_usage_state="$(read_ab "verify centralized usage" eval "(() => { const before = [...document.querySelectorAll('.trend-y-label')].map((x) => x.textContent.trim()); [...document.querySelectorAll('.trend-legend-toggle')].filter((x) => x.dataset.series !== 'output' && x.checked).forEach((x) => x.click()); const after = [...document.querySelectorAll('.trend-y-label')].map((x) => x.textContent.trim()); return JSON.stringify({ providers: document.querySelectorAll('.stats-provider-selector input[name=provider]:checked').length, breakdown: document.querySelectorAll('.stats-provider-breakdown-card').length, rescaled: before[0] !== after[0] }); })()")"
+if ! printf '%s' "$global_usage_state" | grep -Eq 'providers[^0-9]*[1-9][0-9]*' || ! printf '%s' "$global_usage_state" | grep -Eq 'breakdown[^0-9]*[1-9][0-9]*' || ! printf '%s' "$global_usage_state" | grep -Eq 'rescaled[^a-z]*true'; then
+  echo "Centralized Usage should expose provider filters, provider breakdown, and dynamic chart rescaling, got $global_usage_state" >&2
+  exit 1
+fi
+
 ab "open dashboard" open "$BASE/opencode" >/dev/null
 ab "wait for dashboard" wait --text "Recent Sessions" >/dev/null
 dashboard="$(read_ab "read dashboard" get text body)"
@@ -90,8 +106,8 @@ assert_positive_count "dashboard session ids" "$dashboard_session_ids"
 dashboard_copy_buttons="$(read_ab "count dashboard copy buttons" get count ".session-card [data-action='copy-session-id']")"
 assert_positive_count "dashboard session ID copy buttons" "$dashboard_copy_buttons"
 global_search_placeholder="$(read_ab "read global search placeholder" get attr "#search-input" placeholder)"
-if [[ "$global_search_placeholder" != "Search titles and messages... ( / )" ]]; then
-  echo "Global search should identify title and message coverage, got $global_search_placeholder" >&2
+if [[ "$global_search_placeholder" != "Search titles and projects... ( / )" ]]; then
+  echo "Global navigation search should honestly describe its metadata scope, got $global_search_placeholder" >&2
   exit 1
 fi
 list_filter_label="$(read_ab "read list filter label" get text ".filter-keyword > span")"
