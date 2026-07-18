@@ -70,6 +70,8 @@ export function createSessionHistoryMcpServer(service: SessionHistoryService) {
       providers: z.array(providerSchema).max(5).optional(),
       updatedAfter: z.number().finite().optional(),
       updatedBefore: z.number().finite().optional(),
+      directory: z.string().trim().min(1).max(4000).optional(),
+      cursor: z.string().min(1).max(4000).optional(),
       limit: z.number().int().positive().max(100).optional()
     }).strict(),
     outputSchema: toolOutputSchema,

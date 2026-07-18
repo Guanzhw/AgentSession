@@ -29,6 +29,10 @@ function createFixture() {
       id: "content", provider: "codex", parentId: null, title: "Other", directory: "/work/content",
       timeCreated: 2, timeUpdated: 90, messageCount: 1, tokenCount: null
     }],
+    ["content-z", {
+      id: "content-z", provider: "codex", parentId: null, title: "Other Z", directory: "/work/content-z",
+      timeCreated: 2, timeUpdated: 90, messageCount: 1, tokenCount: null
+    }],
     ["child", {
       id: "child", provider: "codex", parentId: "root", title: "Child", directory: "/work/root",
       timeCreated: 3, timeUpdated: 95, messageCount: 1, tokenCount: null
@@ -47,6 +51,9 @@ function createFixture() {
     ["content", [
       { id: "m4", sessionId: "content", role: "assistant", content: "Needle appears only in content", thinking: null, toolName: null, toolInput: null, toolOutput: null, timestamp: 40, tokens: null, metadata: null }
     ]],
+    ["content-z", [
+      { id: "m5", sessionId: "content-z", role: "assistant", content: "Needle appears in tied content", thinking: null, toolName: null, toolInput: null, toolOutput: null, timestamp: 40, tokens: null, metadata: null }
+    ]],
     ["child", []],
     ["hidden", []]
   ]);
@@ -63,6 +70,7 @@ function createFixture() {
     searchMessages: (query) => query.toLowerCase().includes("needle")
       ? [
           { sessionId: "content", messageId: "m4", role: "assistant", snippet: "Needle appears only in content", timestamp: 40 },
+          { sessionId: "content-z", messageId: "m5", role: "assistant", snippet: "Needle appears in tied content", timestamp: 40 },
           { sessionId: "hidden", messageId: "hidden-1", role: "assistant", snippet: "hidden Needle", timestamp: 50 }
         ]
       : []
@@ -100,9 +108,26 @@ test("session-history service keeps retrieval bounded, canonical, and read-only"
 test("session-history service searches, pages events, honors exclusions, and requires explicit sensitive-content opt-in", () => {
   const { service } = createFixture();
   const search = service.search({ query: "Needle" });
-  assert.deepEqual(search.matches.map((match) => match.session.sessionId), ["root", "content"]);
+  assert.deepEqual(search.matches.map((match) => match.session.sessionId), ["root", "content", "content-z"]);
   assert.equal(search.matches[0].matchField, "title");
   assert.equal(search.matches.some((match) => match.session.sessionId === "hidden"), false);
+
+  const firstSearchPage = service.search({ query: "Needle", limit: 2 });
+  assert.deepEqual(firstSearchPage.matches.map((match) => match.session.sessionId), ["root", "content"]);
+  assert.ok(firstSearchPage.nextCursor);
+  assert.equal(firstSearchPage.truncated, true);
+  const secondSearchPage = service.search({ query: "Needle", limit: 2, cursor: firstSearchPage.nextCursor });
+  assert.deepEqual(secondSearchPage.matches.map((match) => match.session.sessionId), ["content-z"]);
+  assert.equal(secondSearchPage.nextCursor, null);
+  assert.equal(secondSearchPage.truncated, false);
+  assert.deepEqual(
+    service.search({ query: "Needle", directory: "/work/content" }).matches.map((match) => match.session.sessionId),
+    ["content"]
+  );
+  assert.throws(
+    () => service.search({ query: "Needle", directory: "/work/root", cursor: firstSearchPage.nextCursor }),
+    (error) => error instanceof SessionHistoryError && error.code === "invalid_cursor"
+  );
 
   const overview = service.get({ session: { provider: "codex", sessionId: "root" } });
   assert.equal(overview.session.sessionId, "root");
@@ -165,7 +190,7 @@ test("OpenCode SQLite search event references round-trip and session_get reports
     CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, data TEXT);
   `);
   db.prepare("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .run("ses_sqlite", null, "project", "SQLite session", "sqlite-session", "/work/sqlite", 10, 20, null);
+    .run("ses_sqlite", null, "project", "SQLite session", "sqlite-session", "D:\\Work\\sqlite", 10, 20, null);
   db.prepare("INSERT INTO message VALUES (?, ?, ?)")
     .run("msg_sqlite", "ses_sqlite", JSON.stringify({ role: "user", time: { created: 15 } }));
   db.prepare("INSERT INTO part VALUES (?, ?, ?, ?)")
@@ -192,6 +217,7 @@ test("OpenCode SQLite search event references round-trip and session_get reports
   const search = service.search({ query: "Needle" });
   assert.equal(search.matches.length, 1);
   assert.equal(service.search({ query: "Needle SQLite" }).matches.length, 1);
+  assert.equal(service.search({ query: "Needle", directory: "/mnt/d/Work/sqlite" }).matches.length, 1);
   assert.equal(search.matches[0].event.messageId, "msg_sqlite:prt_sqlite");
   const event = service.getEvent({ event: search.matches[0].event });
   assert.equal(event.content.text, "Needle in SQLite");
@@ -230,10 +256,12 @@ test("AgentSession-MCP lists exactly five read-only tools over the MCP protocol"
     "codex",
     "gemini"
   ]);
+  assert.ok(searchTool.inputSchema.properties.directory);
+  assert.ok(searchTool.inputSchema.properties.cursor);
 
   const response = await client.callTool({ name: "session_search", arguments: { query: "Needle" } });
   assert.equal(response.isError, undefined);
-  assert.equal(response.structuredContent.result.matches.length, 2);
+  assert.equal(response.structuredContent.result.matches.length, 3);
   const invalid = await client.callTool({ name: "session_get", arguments: {
     session: { provider: "codex", sessionId: "root" },
     unexpected: true

@@ -4,6 +4,7 @@ import {
   indexProvider as defaultIndexProvider
 } from "./index-db.js";
 import { getExcludedIds as defaultGetExcludedIds } from "./meta.js";
+import { normalizeCrossProviderProjectPath } from "./project-filter.js";
 import { getAllProviders, getAvailableProviders } from "./providers/index.js";
 import type { Message, MessageRole, ProviderAdapter, ProviderId, RawSession } from "./providers/interface.js";
 import { matchesSearchQuery } from "./providers/shared/parser.js";
@@ -269,7 +270,7 @@ function encodeCursor(offset: number, fingerprint: string): string {
 
 function decodeCursor(cursor: unknown, fingerprint: string): number {
   if (typeof cursor !== "string" || !cursor) {
-    throw new SessionHistoryError("invalid_cursor", "cursor must be an opaque cursor returned by session_timeline.");
+    throw new SessionHistoryError("invalid_cursor", "cursor must be an opaque cursor returned by this request.");
   }
   try {
     const payload = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
@@ -278,7 +279,28 @@ function decodeCursor(cursor: unknown, fingerprint: string): number {
     }
     return payload.offset;
   } catch {
-    throw new SessionHistoryError("invalid_cursor", "cursor is invalid for this timeline request.");
+    throw new SessionHistoryError("invalid_cursor", "cursor is invalid for this request.");
+  }
+}
+
+function encodeSearchCursor(offset: number, fingerprint: string, snapshotUpdatedBefore: number): string {
+  return Buffer.from(JSON.stringify({ version: 1, offset, fingerprint, snapshotUpdatedBefore }), "utf8").toString("base64url");
+}
+
+function decodeSearchCursor(cursor: unknown, fingerprint: string): { offset: number; snapshotUpdatedBefore: number } {
+  if (typeof cursor !== "string" || !cursor) {
+    throw new SessionHistoryError("invalid_cursor", "cursor must be an opaque cursor returned by session_search.");
+  }
+  try {
+    const payload = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+    if (payload?.version !== 1 || !Number.isInteger(payload.offset) || payload.offset < 0
+      || typeof payload.snapshotUpdatedBefore !== "number" || !Number.isFinite(payload.snapshotUpdatedBefore)
+      || payload.fingerprint !== fingerprint) {
+      throw new Error("mismatch");
+    }
+    return { offset: payload.offset, snapshotUpdatedBefore: payload.snapshotUpdatedBefore };
+  } catch {
+    throw new SessionHistoryError("invalid_cursor", "cursor is invalid for this search request.");
   }
 }
 
@@ -402,15 +424,24 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
       }
       const requestedProviders = assertStringArray(input?.providers, "providers", PROVIDER_IDS) as ProviderId[] | undefined;
       const updatedAfter = resolveTime(input?.updatedAfter, "updatedAfter");
-      const updatedBefore = resolveTime(input?.updatedBefore, "updatedBefore");
-      if (updatedAfter !== undefined && updatedBefore !== undefined && updatedAfter > updatedBefore) {
+      const requestedUpdatedBefore = resolveTime(input?.updatedBefore, "updatedBefore");
+      const requestedDirectory = input?.directory === undefined ? undefined : asNonEmptyString(input.directory)?.trim();
+      if (input?.directory !== undefined && !requestedDirectory) {
+        throw new SessionHistoryError("invalid_input", "directory must be a non-empty recorded project path.");
+      }
+      const directory = requestedDirectory ? normalizeCrossProviderProjectPath(requestedDirectory) : undefined;
+      if (updatedAfter !== undefined && requestedUpdatedBefore !== undefined && updatedAfter > requestedUpdatedBefore) {
         throw new SessionHistoryError("invalid_input", "updatedAfter must not be later than updatedBefore.");
       }
       const limit = resolveLimit(input?.limit, limits.searchLimit, limits.searchLimit, "limit");
       const available = availableProviderMap();
       const selectedIds = requestedProviders || [...available.keys()];
+      const fingerprint = cursorFingerprint({ query, providers: selectedIds, updatedAfter, updatedBefore: requestedUpdatedBefore, directory });
+      const cursorPage = input?.cursor === undefined ? null : decodeSearchCursor(input.cursor, fingerprint);
+      const offset = cursorPage?.offset || 0;
+      const updatedBefore = cursorPage?.snapshotUpdatedBefore ?? requestedUpdatedBefore ?? Date.now();
       const diagnostics: ProviderDiagnostic[] = [];
-      const results = new Map<string, { rank: number; value: Record<string, unknown> }>();
+      const results = new Map<string, { key: string; rank: number; value: Record<string, unknown> }>();
 
       for (const providerId of selectedIds) {
         const provider = available.get(providerId);
@@ -419,12 +450,13 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
           continue;
         }
         const startedAt = Date.now();
-        const perProviderLimit = Math.min(limit, limits.searchLimit);
+        const perProviderLimit = HARD_LIMITS.searchLimit;
         const excluded = excludedIds(providerId);
         try {
           const add = (session: RawSession | Record<string, unknown>, field: "title" | "directory" | "message", snippet: string, messageId: string | null = null) => {
             const summary = sessionSummary(providerId, session);
             if (!summary.session.sessionId || excluded.has(summary.session.sessionId) || !isWithinRange(summary.updatedAt, updatedAfter, updatedBefore)) return;
+            if (directory && normalizeCrossProviderProjectPath(summary.directory) !== directory) return;
             const rank = field === "title" ? 0 : field === "directory" ? 1 : 2;
             const key = `${providerId}\u0000${summary.session.sessionId}`;
             const value = {
@@ -439,7 +471,7 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
             };
             const existing = results.get(key);
             if (!existing || rank < existing.rank || (rank === existing.rank && Number(value.updatedAt) > Number(existing.value.updatedAt))) {
-              results.set(key, { rank, value });
+              results.set(key, { key, rank, value });
             }
           };
 
@@ -469,14 +501,22 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
         }
       }
 
-      const matches = [...results.values()]
-        .sort((left, right) => left.rank - right.rank || Number(right.value.updatedAt) - Number(left.value.updatedAt))
-        .slice(0, limit)
+      const sortedMatches = [...results.values()]
+        .sort((left, right) => left.rank - right.rank
+          || Number(right.value.updatedAt) - Number(left.value.updatedAt)
+          || left.key.localeCompare(right.key))
         .map((entry) => entry.value);
+      const matches = sortedMatches.slice(offset, offset + limit);
+      const nextOffset = offset + matches.length;
+      const nextCursor = nextOffset < sortedMatches.length
+        ? encodeSearchCursor(nextOffset, fingerprint, updatedBefore)
+        : null;
       return {
         matches,
         diagnostics,
-        truncated: matches.length >= limit,
+        nextCursor,
+        snapshotUpdatedBefore: updatedBefore,
+        truncated: nextCursor !== null,
         untrustedContent: true
       };
     },

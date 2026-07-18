@@ -26,4 +26,6 @@ are opt-in and server-side bounded.
 
 `session_search` uses case-insensitive AND matching for whitespace-separated
 terms across titles, recorded directories, and visible message text. Terms do
-not need to be adjacent. Reasoning is excluded from normal search results.
+not need to be adjacent. Use `directory` for an exact normalized project-path
+filter and `nextCursor` to continue a time-bounded result snapshot. Reasoning
+is excluded from normal search results.
