@@ -191,12 +191,14 @@ test("OpenCode SQLite search event references round-trip and session_get reports
 
   const search = service.search({ query: "Needle" });
   assert.equal(search.matches.length, 1);
+  assert.equal(service.search({ query: "Needle SQLite" }).matches.length, 1);
   assert.equal(search.matches[0].event.messageId, "msg_sqlite:prt_sqlite");
   const event = service.getEvent({ event: search.matches[0].event });
   assert.equal(event.content.text, "Needle in SQLite");
   const overview = service.get({ session: { provider: "opencode", sessionId: "ses_sqlite" } });
   assert.equal(overview.messageCount, 1);
   assert.equal(service.search({ query: "PrivateReasoningNeedle" }).matches.length, 0);
+  assert.equal(service.search({ query: "%" }).matches.length, 0);
   closeDb(dbPath);
 });
 

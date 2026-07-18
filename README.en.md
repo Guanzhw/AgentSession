@@ -138,8 +138,9 @@ agentsession-mcp --config /path/to/config.json
 It exposes exactly five read-only tools: `session_search`, `session_get`,
 `session_timeline`, `session_get_context`, and `session_get_event`. Keyword
 search covers titles, recorded message text, and recorded directories by
-default. Reasoning, tool input, and tool output require explicit opt-in and
-are always bounded server-side.
+default. Whitespace-separated terms must all match but do not need to be
+adjacent. Normal search does not return reasoning; reasoning, tool input, and
+tool output require explicit opt-in and are always bounded server-side.
 
 Use the same AgentSession JSON config to reuse provider paths and the metadata
 directory. MCP output limits are optional and server-capped:

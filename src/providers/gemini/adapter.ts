@@ -6,6 +6,7 @@ import { icons } from "../../icons.js";
 import type { ProviderAdapter } from "../interface.js";
 import { buildGeminiRuntimeEnvironment } from "./runtime-environment.js";
 import { buildMessageSessionViews } from "../shared/message-session.js";
+import { createSnippet, matchesSearchQuery } from "../shared/parser.js";
 import {
   createSessionFileStore,
   createStructuredViewCache,
@@ -145,21 +146,19 @@ const gemini = {
   },
 
   searchMessages(query, limit = 20) {
-    const term = (query || "").toLowerCase();
-    if (!term) return [];
+    if (!String(query || "").trim()) return [];
     const results = [];
     for (const entry of sessionFiles.list()) {
       if (results.length >= limit) break;
       for (const m of entry.records.messages || []) {
         if (results.length >= limit) break;
         const text = m.text || "";
-        if (text.toLowerCase().includes(term)) {
-          const idx = text.toLowerCase().indexOf(term);
+        if (matchesSearchQuery(text, query)) {
           results.push({
             sessionId: entry.session.id,
             messageId: m.id || "",
             role: (m.type === "user" ? "user" : "assistant") as import("../interface.js").MessageRole,
-            snippet: text.slice(Math.max(0, idx - 40), idx + term.length + 80),
+            snippet: createSnippet(text, query),
             timestamp: m.timestamp ? new Date(m.timestamp).getTime() : 0
           });
         }

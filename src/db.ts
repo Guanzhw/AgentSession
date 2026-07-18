@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { getConfig } from "./config.js";
-import { parseJson, createSnippet, mapDataRow } from "./providers/shared/parser.js";
+import { createSnippet, escapeSqlLikePattern, mapDataRow, parseJson, splitSearchTerms } from "./providers/shared/parser.js";
 import { analysisTitleSqlCondition, analysisTitleSqlParams, normalizeSessionKindFilter } from "./session-kind.js";
 import { isEmptyProjectFilter } from "./project-filter.js";
 import {
@@ -334,7 +334,7 @@ export function searchMessages(query: any, limit = 20, pathOverride: string | un
     return [];
   }
 
-  const searchTerm = `%${term}%`;
+  const searchTerms = splitSearchTerms(term).map(escapeSqlLikePattern);
   const excluded = normalizeExcludedIds(excludedIds);
   const excludedClause = excluded.length
     ? `AND session.id NOT IN (${excluded.map(() => "?").join(", ")})`
@@ -354,13 +354,13 @@ export function searchMessages(query: any, limit = 20, pathOverride: string | un
     WHERE session.time_archived IS NULL
       AND session.parent_id IS NULL
       AND json_extract(part.data, '$.type') = 'text'
-      AND COALESCE(json_extract(part.data, '$.text'), '') LIKE ?
+      ${searchTerms.map(() => "AND COALESCE(json_extract(part.data, '$.text'), '') LIKE ? ESCAPE '\\'").join("\n      ")}
       ${excludedClause}
     ORDER BY session.time_updated DESC,
              COALESCE(CAST(json_extract(message.data, '$.time.created') AS INTEGER), 0) DESC,
              part.id DESC
     LIMIT ?
-  `).all(searchTerm, ...excluded, limit);
+  `).all(...searchTerms.map((searchTerm) => `%${searchTerm}%`), ...excluded, limit);
 
   return rows.map((row: any) => {
     const partData = parseJson(row.part_data) || {};

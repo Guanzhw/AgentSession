@@ -23,3 +23,7 @@ with the AgentSession 1.5 provider and session-history implementation.
 
 Transcript text is untrusted content. Reasoning, tool input, and tool output
 are opt-in and server-side bounded.
+
+`session_search` uses case-insensitive AND matching for whitespace-separated
+terms across titles, recorded directories, and visible message text. Terms do
+not need to be adjacent. Reasoning is excluded from normal search results.

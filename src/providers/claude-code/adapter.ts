@@ -13,6 +13,7 @@ import {
 import { icons } from "../../icons.js";
 import type { ProviderAdapter } from "../interface.js";
 import { buildClaudeCodeRuntimeEnvironment } from "./runtime-environment.js";
+import { createSnippet, matchesSearchQuery } from "../shared/parser.js";
 import {
   buildLinkedClaudeCodeSessionViews,
   buildClaudeCodeSystemPrompts
@@ -204,8 +205,7 @@ const claudeCode = {
   },
 
   searchMessages(query, limit = 20) {
-    const term = (query || "").toLowerCase();
-    if (!term) return [];
+    if (!String(query || "").trim()) return [];
     const results = [];
 
     for (const entry of sessionFiles.list()) {
@@ -215,15 +215,12 @@ const claudeCode = {
         let text = "";
         if (r.type === "user") text = extractTextFromRecord(r);
         if (r.type === "assistant") text = extractTextFromRecord(r);
-        if (text.toLowerCase().includes(term)) {
-          const idx = text.toLowerCase().indexOf(term);
-          const start = Math.max(0, idx - 40);
-          const end = Math.min(text.length, idx + term.length + 80);
+        if (matchesSearchQuery(text, query)) {
           results.push({
             sessionId: entry.session.id,
             messageId: r.uuid || "",
             role: (r.type === "user" ? "user" : "assistant") as MessageRole,
-            snippet: text.slice(start, end),
+            snippet: createSnippet(text, query),
             timestamp: r.timestamp ? new Date(r.timestamp).getTime() : 0
           });
         }

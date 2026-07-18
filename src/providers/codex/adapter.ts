@@ -13,6 +13,7 @@ import { icons } from "../../icons.js";
 import type { Message, ProviderAdapter, RawSession } from "../interface.js";
 import { buildLinkedMessageSessionViews } from "../shared/linked-message-session.js";
 import { buildCodexRuntimeEnvironment } from "./runtime-environment.js";
+import { createSnippet, matchesSearchQuery } from "../shared/parser.js";
 import {
   createStructuredViewCache,
   createStructuredViewMethods,
@@ -201,8 +202,7 @@ const codex = {
   },
 
   searchMessages(query, limit = 20) {
-    const term = (query || "").toLowerCase();
-    if (!term) return [];
+    if (!String(query || "").trim()) return [];
     const results = [];
     for (const entry of sessionFiles.list()) {
       if (results.length >= limit) break;
@@ -211,13 +211,12 @@ const codex = {
         if (results.length >= limit) break;
         if (!["user", "assistant"].includes(message.role)) continue;
         const text = message.content || "";
-        if (text.toLowerCase().includes(term)) {
-          const idx = text.toLowerCase().indexOf(term);
+        if (matchesSearchQuery(text, query)) {
           results.push({
             sessionId: session.id,
             messageId: message.id,
             role: message.role,
-            snippet: text.slice(Math.max(0, idx - 40), idx + term.length + 80),
+            snippet: createSnippet(text, query),
             timestamp: message.timestamp
           });
         }

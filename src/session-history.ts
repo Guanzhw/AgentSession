@@ -6,6 +6,7 @@ import {
 import { getExcludedIds as defaultGetExcludedIds } from "./meta.js";
 import { getAllProviders, getAvailableProviders } from "./providers/index.js";
 import type { Message, MessageRole, ProviderAdapter, ProviderId, RawSession } from "./providers/interface.js";
+import { matchesSearchQuery } from "./providers/shared/parser.js";
 
 const PROVIDER_IDS: ProviderId[] = ["opencode", "claude-code", "codex", "gemini"];
 const EVENT_SEGMENTS = ["message", "thinking", "tool"] as const;
@@ -447,9 +448,8 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
             const row = indexed as Record<string, unknown>;
             const title = String(row.title || "");
             const directory = String(row.directory || "");
-            const normalizedQuery = query.toLocaleLowerCase();
-            if (title.toLocaleLowerCase().includes(normalizedQuery)) add(row, "title", title);
-            else if (directory.toLocaleLowerCase().includes(normalizedQuery)) add(row, "directory", directory);
+            if (matchesSearchQuery(title, query)) add(row, "title", title);
+            else if (matchesSearchQuery(directory, query)) add(row, "directory", directory);
           }
 
           const messageMatches = provider.searchMessages(query, perProviderLimit);

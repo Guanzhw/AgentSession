@@ -1677,7 +1677,7 @@ test("sqlite session queries exclude viewer-deleted sessions from paging, projec
     const insertPart = db.prepare("INSERT INTO part (id, message_id, session_id, data) VALUES (?, ?, ?, ?)");
     for (const id of ["b", "c"]) {
       insertMessage.run(`m-${id}`, id, JSON.stringify({ role: "assistant", time: { created: 100 } }));
-      insertPart.run(`p-${id}`, `m-${id}`, id, JSON.stringify({ text: "needle in content" }));
+      insertPart.run(`p-${id}`, `m-${id}`, id, JSON.stringify({ type: "text", text: "needle in content" }));
     }
   } finally {
     db.close();

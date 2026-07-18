@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { getConfig } from "./config.js";
 import { analysisTitleSqlCondition, analysisTitleSqlParams, normalizeSessionKindFilter } from "./session-kind.js";
 import { isEmptyProjectFilter, normalizeCrossProviderProjectPath } from "./project-filter.js";
+import { escapeSqlLikePattern, splitSearchTerms } from "./providers/shared/parser.js";
 import {
   getKindMatchingOverrideIds,
   getOverrideTitleIds,
@@ -359,10 +360,6 @@ export function getCrossProviderOverview(query: CrossProviderSessionQuery) {
   return { totalSessions: Number(row?.totalSessions) || 0, totalMessages: Number(row?.totalMessages) || 0 };
 }
 
-function escapeLikePattern(value: string) {
-  return value.replace(/[\\%_]/g, "\\$&");
-}
-
 /**
  * Read a single indexed session without exposing the database to callers.
  */
@@ -387,10 +384,14 @@ export function findIndexedSessionMetadata(
   updatedBefore: number | undefined = undefined
 ) {
   const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 100));
-  const term = escapeLikePattern(String(query || "").trim());
-  if (!term) return [];
-  const where = ["provider = ?", "(COALESCE(title, '') LIKE ? ESCAPE '\\' OR COALESCE(directory, '') LIKE ? ESCAPE '\\')"];
-  const params: any[] = [provider, `%${term}%`, `%${term}%`];
+  const terms = splitSearchTerms(query).map(escapeSqlLikePattern);
+  if (!terms.length) return [];
+  const where = ["provider = ?"];
+  const params: any[] = [provider];
+  for (const term of terms) {
+    where.push("(COALESCE(title, '') LIKE ? ESCAPE '\\' OR COALESCE(directory, '') LIKE ? ESCAPE '\\')");
+    params.push(`%${term}%`, `%${term}%`);
+  }
   if (Number.isFinite(updatedAfter)) {
     where.push("time_updated >= ?");
     params.push(updatedAfter);
