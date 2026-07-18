@@ -1402,7 +1402,7 @@ function renderAnalysisLaunchControl(analysisAction: any, terminalLaunchAllowed:
     targets
   } = resolveAnalysisLaunchState(analysisAction);
 
-  return `<details class="analysis-materials-panel">
+  return `<details class="analysis-materials-panel" id="analysis-materials-panel">
     <summary>
       <span>
         <strong>${t("analysis.materials_title")}</strong>
@@ -1534,7 +1534,7 @@ export function renderSessionPage({
     ? "session-actions-shell analysis-launch-control"
     : "session-actions-shell";
   const actions = `
-      <div class="${actionShellClass}">
+      <div class="${actionShellClass}"${analysisMaterials ? ' data-analysis-selection-id="analysis-materials-panel"' : ""}>
         <div class="session-actions">
           ${visibleStarAction}
           ${resumeActions}

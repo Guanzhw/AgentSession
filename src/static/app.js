@@ -1274,6 +1274,11 @@ function checkedAnalysisEntries(root, selector) {
     .filter((entry) => entry.value);
 }
 
+function analysisSelectionRoot(control) {
+  const selectionId = control?.dataset.analysisSelectionId || "";
+  return selectionId ? document.getElementById(selectionId) || control : control || document;
+}
+
 function activeAnalysisTargets() {
   return new Set(
     analysisRunsState
@@ -1302,8 +1307,9 @@ function analysisLaunchAccessibleLabel(targetEntries, runtimeCount, runningTarge
 
 function updateAnalysisLaunchControl(control) {
   if (!control) return;
-  const targetEntries = checkedAnalysisEntries(control, ".analysis-target-checkbox");
-  const runtimeEntries = checkedAnalysisEntries(control, ".analysis-runtime-extension-checkbox");
+  const selectionRoot = analysisSelectionRoot(control);
+  const targetEntries = checkedAnalysisEntries(selectionRoot, ".analysis-target-checkbox");
+  const runtimeEntries = checkedAnalysisEntries(selectionRoot, ".analysis-runtime-extension-checkbox");
   const selectedTargets = targetEntries.map((entry) => entry.value);
   const targetCount = selectedTargets.length;
   const runtimeCount = runtimeEntries.length;
@@ -1338,7 +1344,7 @@ function updateAnalysisLaunchControl(control) {
 
 document.querySelectorAll(".analysis-launch-control").forEach((control) => {
   updateAnalysisLaunchControl(control);
-  control.addEventListener("change", (event) => {
+  analysisSelectionRoot(control).addEventListener("change", (event) => {
     if (event.target.matches(".analysis-target-checkbox, .analysis-runtime-extension-checkbox")) {
       updateAnalysisLaunchControl(control);
     }
@@ -1853,7 +1859,8 @@ document.addEventListener("click", async (e) => {
 
   if (action === "analyze-session") {
     const control = btn.closest(".analysis-launch-control");
-    const targetEntries = checkedAnalysisEntries(control, ".analysis-target-checkbox");
+    const selectionRoot = analysisSelectionRoot(control);
+    const targetEntries = checkedAnalysisEntries(selectionRoot, ".analysis-target-checkbox");
     const targets = targetEntries.map((entry) => entry.value);
     if (!targets.length) {
       const fallbackTarget = btn.dataset.target || "";
@@ -1869,8 +1876,8 @@ document.addEventListener("click", async (e) => {
       updateAnalysisLaunchControl(control);
       return;
     }
-    const hasRuntimePicker = Boolean(control?.querySelector(".analysis-runtime-extension-checkbox"));
-    const runtimeEntries = checkedAnalysisEntries(control, ".analysis-runtime-extension-checkbox");
+    const hasRuntimePicker = Boolean(selectionRoot?.querySelector(".analysis-runtime-extension-checkbox"));
+    const runtimeEntries = checkedAnalysisEntries(selectionRoot, ".analysis-runtime-extension-checkbox");
     const runtimeExtensionIds = hasRuntimePicker
       ? runtimeEntries.map((entry) => entry.value)
       : null;

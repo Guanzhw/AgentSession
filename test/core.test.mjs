@@ -3955,7 +3955,10 @@ test("analysis run listing preserves legacy metadata-directory runs", () => {
 test("session analysis requires a provider capability and an enabled target", () => {
   const opencode = { id: "opencode", capabilities: { sessionAnalysis: true } };
   const claude = { id: "claude-code", capabilities: { sessionAnalysis: true } };
-  const codex = { id: "codex", capabilities: { structuredSessionViews: true } };
+  const codex = getAllProviders().find((provider) => provider.id === "codex");
+  const gemini = getAllProviders().find((provider) => provider.id === "gemini");
+  assert.equal(codex.capabilities.sessionAnalysis, true);
+  assert.equal(typeof codex.getRuntimeEnvironment, "function");
   assert.equal(resolveAnalysisSettings(opencode, { enabled: false }), null);
   assert.equal(resolveAnalysisSettings(opencode, {
     enabled: true,
@@ -3970,7 +3973,7 @@ test("session analysis requires a provider capability and an enabled target", ()
       }
     }
   }), null);
-  assert.equal(resolveAnalysisSettings(codex, {
+  assert.equal(resolveAnalysisSettings(gemini, {
     enabled: true,
     providers: {
       opencode: {
@@ -3982,6 +3985,9 @@ test("session analysis requires a provider capability and an enabled target", ()
     enabled: true
   }).command.executable, "opencode");
   assert.equal(resolveAnalysisSettings(claude, {
+    enabled: true
+  }).command.executable, "opencode");
+  assert.equal(resolveAnalysisSettings(codex, {
     enabled: true
   }).command.executable, "opencode");
 });
@@ -4128,6 +4134,7 @@ test("session rendering shows configured analysis actions only when launch is al
   assert.match(visible, /data-action="analyze-session"/);
   assert.match(visible, /data-target="skills"/);
   assert.match(visible, /class="session-actions-shell analysis-launch-control"/);
+  assert.match(visible, /data-analysis-selection-id="analysis-materials-panel"/);
   assert.match(visible, /class="more-actions"/);
   assert.match(visible, /Export MD/);
   assert.match(visible, /Export JSON/);
@@ -4138,7 +4145,7 @@ test("session rendering shows configured analysis actions only when launch is al
   assert.match(visible, /aria-label="Launch analysis for Analyze skills, Analyze tests; runtime extensions: 1"/);
   assert.match(visible, /Analyze 2 targets/);
   assert.match(visible, /Analysis materials/);
-  assert.match(visible, /<details class="analysis-materials-panel">/);
+  assert.match(visible, /<details class="analysis-materials-panel" id="analysis-materials-panel">/);
   assert.doesNotMatch(visible, /<details class="analysis-materials-panel" open>/);
   assert.match(visible, /class="analysis-target-choice analysis-target-choice-compact/);
   assert.match(visible, /class="analysis-runtime-tab is-active"/);

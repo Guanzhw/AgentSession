@@ -155,6 +155,7 @@ const codex = {
   },
   capabilities: {
     localManagement: true,
+    sessionAnalysis: true,
     structuredSessionViews: true
   },
 

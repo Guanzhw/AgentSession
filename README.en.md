@@ -31,8 +31,8 @@ The focus is no longer just “list my chats.” The goal is to help you reconst
 | Provider | Status | Default Source | Capabilities |
 |:---|:---:|:---|:---|
 | OpenCode | Full | `$XDG_DATA_HOME/opencode/opencode.db` or `~/.local/share/opencode/opencode.db` | Browse, search, star, rename, delete, trash, export, stats, trace, nested sessions, analysis |
-| Claude Code | Manageable | `~/.claude/transcripts/` + `~/.claude/projects/` | Browse, search, star, rename, delete, trash, Token Explorer, ReACT, trace, flow, subagents when sidechain transcripts exist, analysis prompt evidence |
-| Codex CLI | Manageable | `~/.codex/sessions/**/*.jsonl` | Browse, search, star, rename, delete, trash, Token Explorer, ReACT, flow, nested subagents |
+| Claude Code | Manageable | `~/.claude/transcripts/` + `~/.claude/projects/` | Browse, search, star, rename, delete, trash, Token Explorer, ReACT, trace, flow, subagents when sidechain transcripts exist, analysis prompt evidence, analysis |
+| Codex CLI | Manageable | `~/.codex/sessions/**/*.jsonl` | Browse, search, star, rename, delete, trash, Token Explorer, ReACT, flow, nested subagents, analysis |
 | Gemini CLI | Manageable | `~/.gemini/tmp/*/chats/*.json` | Browse, search, star, rename, delete, trash, Token Explorer, ReACT, flow |
 
 Adding a provider? Follow the [provider contribution guide](./docs/CONTRIBUTING-PROVIDER.md) for the adapter, MCP, test, and release checklist.
@@ -264,8 +264,8 @@ own `diagnostics/` directory.
 ## Session Analysis And Evaluation Proposals
 
 AgentSession can launch a configured analyzer non-interactively from
-provider detail pages that declare session-analysis support, currently OpenCode
-and Claude Code. Other providers keep their read-only viewer features until
+provider detail pages that declare session-analysis support, currently OpenCode,
+Claude Code, and Codex CLI. Other providers keep their read-only viewer features until
 their adapters declare the same capability. The analysis run is proposal-only:
 it snapshots the session as indexed JSONL
 evidence, snapshots selected artifacts, creates an evaluation seed, and asks
