@@ -317,6 +317,12 @@ else
   fi
 fi
 
+tab_layout_state="$(read_ab "verify stable session tab layout" eval "(() => { const workbench = document.querySelector('.session-workbench'); const main = workbench?.querySelector('.main-content'); const tabBar = workbench?.querySelector('.tab-bar'); const overview = document.getElementById('tab-btn-overview'); const conversation = document.getElementById('tab-btn-conversation'); if (!workbench || !main || !tabBar || !overview || !conversation) return JSON.stringify({ ready: false }); const measure = () => { const mainRect = main.getBoundingClientRect(); const tabRect = tabBar.getBoundingClientRect(); return { x: mainRect.x, width: mainRect.width, tabDocumentTop: tabRect.top + window.scrollY }; }; const before = measure(); overview.click(); const after = measure(); const nonConversation = !workbench.classList.contains('session-conversation-tab-active'); conversation.click(); const restored = measure(); return JSON.stringify({ ready: true, nonConversation, restoredConversation: workbench.classList.contains('session-conversation-tab-active'), stableX: Math.abs(before.x - after.x) < 1, stableWidth: Math.abs(before.width - after.width) < 1, stableTabTop: Math.abs(before.tabDocumentTop - after.tabDocumentTop) < 1, restoredX: Math.abs(before.x - restored.x) < 1 }); })()")"
+if ! printf '%s' "$tab_layout_state" | grep -Eq 'ready[^a-z]*true' || ! printf '%s' "$tab_layout_state" | grep -Eq 'nonConversation[^a-z]*true' || ! printf '%s' "$tab_layout_state" | grep -Eq 'restoredConversation[^a-z]*true' || ! printf '%s' "$tab_layout_state" | grep -Eq 'stableX[^a-z]*true' || ! printf '%s' "$tab_layout_state" | grep -Eq 'stableWidth[^a-z]*true' || ! printf '%s' "$tab_layout_state" | grep -Eq 'stableTabTop[^a-z]*true' || ! printf '%s' "$tab_layout_state" | grep -Eq 'restoredX[^a-z]*true'; then
+  echo "Session tab changes should preserve the content position and width, got $tab_layout_state" >&2
+  exit 1
+fi
+
 toc_unexpected="$(read_ab "count unexpected toc entries" get count ".session-toc .toc-link:not(.toc-user):not(.toc-assistant):not(.toc-agent):not(.toc-task)")"
 if [[ "$toc_unexpected" != "0" ]]; then
   echo "TOC included non-message/non-task entries: $toc_unexpected" >&2

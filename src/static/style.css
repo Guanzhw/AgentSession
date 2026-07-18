@@ -533,6 +533,7 @@ body::before {
 }
 
 .session-workbench .main-content {
+  grid-column: 2;
   min-width: 0;
   max-width: 980px;
   width: 100%;
@@ -541,12 +542,11 @@ body::before {
   overflow: visible;
 }
 
-.session-workbench:not(.session-conversation-tab-active) {
-  grid-template-columns: minmax(0, 1fr);
-}
-
 .session-workbench:not(.session-conversation-tab-active) .session-toc {
-  display: none;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity var(--transition-fast), visibility 0s linear 0.2s;
 }
 
 .session-toc {
@@ -560,11 +560,21 @@ body::before {
   background: color-mix(in srgb, var(--bg-primary) 88%, var(--bg-secondary));
   border-color: var(--border-color);
   padding: 10px 8px;
+  opacity: 1;
+  visibility: visible;
+  transition: opacity var(--transition-fast), visibility 0s linear 0s;
 }
 
 .session-toc {
   position: sticky;
   border-right: 1px solid var(--border-color);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-toc,
+  .session-workbench:not(.session-conversation-tab-active) .session-toc {
+    transition: none;
+  }
 }
 
 .toc-resize-handle {
@@ -5577,6 +5587,14 @@ pre code.hljs {
 @media (max-width: 820px) {
   .session-workbench {
     grid-template-columns: 1fr;
+  }
+
+  .session-workbench .main-content {
+    grid-column: 1;
+  }
+
+  .session-workbench:not(.session-conversation-tab-active) .session-toc {
+    display: none;
   }
 
   .session-toc {
