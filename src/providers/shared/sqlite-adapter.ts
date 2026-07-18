@@ -158,7 +158,7 @@ export function createSqliteSessionAdapter({
   searchMessages(query, limit = 20) {
     return dbSearchMessages(query, limit, getAdapterDataPath()).map((r: any) => ({
       sessionId: r.sessionId,
-      messageId: r.messageId || r.partId,
+      messageId: r.messageId && r.partId ? `${r.messageId}:${r.partId}` : r.messageId || r.partId,
       role: r.role || "unknown",
       snippet: r.snippet,
       timestamp: Number(r.timeUpdated) || 0

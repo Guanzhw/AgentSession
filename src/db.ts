@@ -353,6 +353,7 @@ export function searchMessages(query: any, limit = 20, pathOverride: string | un
     JOIN session ON session.id = part.session_id
     WHERE session.time_archived IS NULL
       AND session.parent_id IS NULL
+      AND json_extract(part.data, '$.type') = 'text'
       AND COALESCE(json_extract(part.data, '$.text'), '') LIKE ?
       ${excludedClause}
     ORDER BY session.time_updated DESC,

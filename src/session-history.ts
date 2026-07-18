@@ -484,11 +484,13 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
     get(input: Record<string, unknown>) {
       const ref = assertSessionRef(input?.session);
       const { session } = getVisibleSession(ref);
+      const messages = getVisibleMessages(ref);
       const excluded = excludedIds(ref.provider);
       const children = indexedChildren(ref.provider, ref.sessionId, 50, excluded)
         .map((row: any) => indexedSessionSummary(ref.provider, row));
       return {
         ...sessionSummary(ref.provider, session),
+        messageCount: messages.length,
         children,
         untrustedContent: true
       };

@@ -4,13 +4,16 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
 
 const temp = mkdtempSync(path.join(os.tmpdir(), "agentsession-mcp-"));
 process.env.OPENSESSIONVIEWER_META_PATH = path.join(temp, "meta.db");
 
 const { initConfig, parseArgs, validateUserConfig } = await import("../dist/src/config.js");
 initConfig([]);
+const { closeDb } = await import("../dist/src/db.js");
 const { createSessionHistoryService, SessionHistoryError } = await import("../dist/src/session-history.js");
+const { createSqliteSessionAdapter } = await import("../dist/src/providers/shared/sqlite-adapter.js");
 const { createSessionHistoryMcpServer } = await import("../packages/agentsession-mcp/dist/session-history-server.js");
 const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
 const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
@@ -141,6 +144,60 @@ test("session-history service searches, pages events, honors exclusions, and req
     () => service.get({ session: { provider: "codex", sessionId: "hidden" } }),
     (error) => error instanceof SessionHistoryError && error.code === "session_not_found"
   );
+});
+
+test("OpenCode SQLite search event references round-trip and session_get reports normalized message count", () => {
+  const dbPath = path.join(temp, "opencode-search-events.db");
+  const db = new DatabaseSync(dbPath);
+  db.exec(`
+    CREATE TABLE session (
+      id TEXT PRIMARY KEY,
+      parent_id TEXT,
+      project_id TEXT,
+      title TEXT,
+      slug TEXT,
+      directory TEXT,
+      time_created INTEGER,
+      time_updated INTEGER,
+      time_archived INTEGER
+    );
+    CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT);
+    CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, data TEXT);
+  `);
+  db.prepare("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .run("ses_sqlite", null, "project", "SQLite session", "sqlite-session", "/work/sqlite", 10, 20, null);
+  db.prepare("INSERT INTO message VALUES (?, ?, ?)")
+    .run("msg_sqlite", "ses_sqlite", JSON.stringify({ role: "user", time: { created: 15 } }));
+  db.prepare("INSERT INTO part VALUES (?, ?, ?, ?)")
+    .run("prt_sqlite", "msg_sqlite", "ses_sqlite", JSON.stringify({ type: "text", text: "Needle in SQLite" }));
+  db.prepare("INSERT INTO part VALUES (?, ?, ?, ?)")
+    .run("prt_reasoning", "msg_sqlite", "ses_sqlite", JSON.stringify({ type: "reasoning", text: "PrivateReasoningNeedle" }));
+  db.close();
+
+  const adapter = createSqliteSessionAdapter({
+    id: "opencode",
+    name: "Fixture OpenCode",
+    defaultDataPath: () => dbPath
+  });
+  const service = createSessionHistoryService({
+    dependencies: {
+      getAvailableProviders: () => [adapter],
+      getAllProviders: () => [adapter],
+      getExcludedIds: () => new Set(),
+      findIndexedSessionMetadata: () => [],
+      getIndexedSessionChildren: () => []
+    }
+  });
+
+  const search = service.search({ query: "Needle" });
+  assert.equal(search.matches.length, 1);
+  assert.equal(search.matches[0].event.messageId, "msg_sqlite:prt_sqlite");
+  const event = service.getEvent({ event: search.matches[0].event });
+  assert.equal(event.content.text, "Needle in SQLite");
+  const overview = service.get({ session: { provider: "opencode", sessionId: "ses_sqlite" } });
+  assert.equal(overview.messageCount, 1);
+  assert.equal(service.search({ query: "PrivateReasoningNeedle" }).matches.length, 0);
+  closeDb(dbPath);
 });
 
 test("AgentSession-MCP lists exactly five read-only tools over the MCP protocol", async (t) => {
