@@ -447,9 +447,28 @@ test("centralized Usage page aggregates selected providers and preserves compone
   assert.match(result.body, /data-token-total="32"/);
   assert.match(result.body, /name="provider" value="codex" checked/);
   assert.match(result.body, /name="provider" value="gemini" checked/);
+  assert.match(result.body, /href="\/stats\?provider=codex&amp;days=7"/);
+  assert.match(result.body, /href="\/stats\?provider=gemini&amp;days=7"/);
   assert.match(result.body, /href="\/codex\/stats\?days=7"/);
   assert.match(result.body, /href="\/gemini\/stats\?days=7"/);
-  assert.equal((result.body.match(/Aggregate only/g) || []).length, 2);
+  assert.match(result.body, /data-provider-token-total="32">32<\/strong>/);
+  assert.match(result.body, /Selected providers total/);
+  assert.match(result.body, /Total Token Trend/);
+  assert.match(result.body, /Providers shown/);
+  assert.ok(result.body.indexOf("Total Token Trend") < result.body.indexOf("Usage by provider"));
+  assert.match(result.body, /Show only Codex/);
+  assert.match(result.body, /Show only Gemini/);
+  assert.equal((result.body.match(/Provider details/g) || []).length, 2);
+
+  const focused = await route.handler({ url: "/stats?provider=codex&days=7" }, createResponseCapture());
+  assert.equal(focused.status, 200);
+  assert.match(focused.body, /class="stats-provider-breakdown-card is-selected"/);
+  assert.match(focused.body, /class="stats-provider-filter-link stats-provider-open"[^>]*href="\/stats\?days=7"[^>]*aria-label="Codex: Show all providers"/);
+  assert.doesNotMatch(focused.body, /aria-current="true"/);
+  assert.match(focused.body, /<span class="stats-provider-capability selected">Selected<\/span>/);
+  assert.match(focused.body, /href="\/stats\?days=7"/);
+  assert.match(focused.body, /Show all providers/);
+  assert.doesNotMatch(focused.body, /Show only Codex/);
 });
 
 test("sqlite stats defer supporting sections to a fragment endpoint", async () => {

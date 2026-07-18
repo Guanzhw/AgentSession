@@ -30,8 +30,15 @@ Every adapter exposes normalized daily token components through the shared
 statistics contract: input, output, reasoning, cache read, cache write, total,
 and message count. `/stats` requests the selected providers with the same UTC
 date range, merges rows by day, and presents a provider breakdown alongside the
-combined trend. File-backed providers honor custom ranges by filtering their
-daily aggregates after bounded collection.
+combined trend. The total trend is the primary visualization, with provider
+checkboxes presented directly as chart filters for multi-provider comparison.
+Provider contribution cards follow the chart as drill-down context; a card
+offers separate actions to apply that provider as a single-value filter without
+leaving `/stats` or open the provider-specific details page. The selected card
+restores all available providers, and every action preserves the active date
+range.
+File-backed providers honor custom ranges by filtering their daily aggregates
+after bounded collection.
 
 The global page exposes only capabilities whose meaning is provider-neutral.
 Project/model filters, coverage, session rankings, cost estimates, and day

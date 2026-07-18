@@ -179,14 +179,23 @@ function hrefWithParams(path: string, params: URLSearchParams, hash = "") {
   return `${path}${query ? `?${query}` : ""}${hash}`;
 }
 
-function renderProviderBreakdown(entries: NonNullable<TokenExplorerData["providerBreakdown"]>, totalTokens: number, filters: StatsFilters) {
+function renderProviderBreakdown(entries: NonNullable<TokenExplorerData["providerBreakdown"]>, totalTokens: number, filters: StatsFilters, selectedProviders: string[]) {
   if (!entries.length) return "";
   return `<section class="stats-provider-breakdown">
-    <div class="stats-section-heading"><div><h2>${escapeHtml(t("stats.provider_breakdown"))}</h2><p>${escapeHtml(t("stats.provider_breakdown_help"))}</p></div></div>
+    <div class="stats-section-heading stats-provider-summary-heading">
+      <div><h2>${escapeHtml(t("stats.provider_breakdown"))}</h2><p>${escapeHtml(t("stats.provider_breakdown_help"))}</p></div>
+      <div class="stats-provider-total">
+        <span>${escapeHtml(t("stats.provider_selected_total"))}</span>
+        <strong data-provider-token-total="${totalTokens}">${fmtNum(totalTokens)}</strong>
+        <span>${fmtExact(totalTokens)} ${escapeHtml(t("stats.tokens_unit"))}</span>
+      </div>
+    </div>
     <div class="stats-provider-breakdown-grid">
       ${entries.map((entry) => {
         const share = totalTokens > 0 ? Math.round(entry.totalTokens / totalTokens * 1000) / 10 : 0;
+        const selected = selectedProviders.length === 1 && selectedProviders[0] === entry.provider;
         const rangeParams = new URLSearchParams();
+        if (!selected) rangeParams.set("provider", entry.provider);
         if (filters.rangePreset === "custom" && filters.from && filters.to) {
           rangeParams.set("days", "custom");
           rangeParams.set("from", filters.from);
@@ -194,13 +203,21 @@ function renderProviderBreakdown(entries: NonNullable<TokenExplorerData["provide
         } else {
           rangeParams.set("days", String(filters.days));
         }
-        return `<a class="stats-provider-breakdown-card" href="${escapeHtml(hrefWithParams(`/${encodeURIComponent(entry.provider)}/stats`, rangeParams))}">
-          <span class="stats-provider-breakdown-heading"><span class="stats-provider-breakdown-name">${escapeHtml(entry.name)}</span><span class="stats-provider-capability ${entry.advancedDetails ? "advanced" : "aggregate"}">${escapeHtml(t(entry.advancedDetails ? "stats.provider_advanced" : "stats.provider_aggregate"))}</span></span>
+        const actionLabel = selected
+          ? t("stats.provider_show_all")
+          : t("stats.provider_show_only", { provider: entry.name });
+        const detailParams = new URLSearchParams(rangeParams);
+        detailParams.delete("provider");
+        return `<article class="stats-provider-breakdown-card${selected ? " is-selected" : ""}">
+          <span class="stats-provider-breakdown-heading"><span class="stats-provider-breakdown-name">${escapeHtml(entry.name)}</span><span class="stats-provider-capability ${selected ? "selected" : "filter"}">${escapeHtml(t(selected ? "stats.provider_selected" : "stats.provider_filter"))}</span></span>
           <strong>${fmtNum(entry.totalTokens)}</strong>
           <span>${share}% · ${fmtExact(entry.totalMessages)} ${escapeHtml(t("stats.messages_unit"))}</span>
-          <span class="stats-provider-open">${escapeHtml(t(entry.advancedDetails ? "stats.provider_open_advanced" : "stats.provider_open_focused"))} →</span>
-          <i style="--provider-share:${Math.min(100, share)}%"></i>
-        </a>`;
+          <span class="stats-provider-actions">
+            <a class="stats-provider-filter-link stats-provider-open" href="${escapeHtml(hrefWithParams("/stats", rangeParams))}"${selected ? ` aria-label="${escapeHtml(`${entry.name}: ${actionLabel}`)}"` : ""}>${escapeHtml(actionLabel)} →</a>
+            <a class="stats-provider-details" href="${escapeHtml(hrefWithParams(`/${encodeURIComponent(entry.provider)}/stats`, detailParams))}">${escapeHtml(t("stats.provider_details"))} →</a>
+          </span>
+          <span class="stats-provider-share" style="--provider-share:${Math.min(100, share)}%" aria-hidden="true"></span>
+        </article>`;
       }).join("")}
     </div>
   </section>`;
@@ -287,10 +304,18 @@ function renderTokenTrend(
   allowDayDrill: boolean,
   allowComposition: boolean,
   selectedDay: string | null = null,
+  providerSelector = "",
+  unified = false,
 ) {
+  const title = t(unified ? "stats.total_token_trend" : "stats.token_trend");
+  const help = t(unified
+    ? "stats.total_token_trend_help"
+    : allowDayDrill ? "stats.token_trend_help" : "stats.token_trend_help_readonly");
   if (!rows || rows.length === 0) {
     return `<section class="stats-chart-section">
-      <h2 class="stats-chart-title">${t("stats.token_trend")}</h2>
+      <div class="stats-chart-heading"><div><h2 class="stats-chart-title">${title}</h2>
+      <p class="stats-chart-help">${help}</p></div></div>
+      ${providerSelector}
       <div class="stats-chart-body"><p class="stats-empty">${t("stats.no_data")}</p></div>
     </section>`;
   }
@@ -393,10 +418,11 @@ function renderTokenTrend(
   return `
   <section class="stats-chart-section">
     <div class="stats-chart-heading">
-      <div><h2 class="stats-chart-title">${t("stats.token_trend")}</h2>
-      <p class="stats-chart-help">${t(allowDayDrill ? "stats.token_trend_help" : "stats.token_trend_help_readonly")}</p></div>
+      <div><h2 class="stats-chart-title">${title}</h2>
+      <p class="stats-chart-help">${help}</p></div>
       <span class="trend-scale-note${clippedScale ? "" : " hidden"}">${t("stats.peak_compressed")}</span>
     </div>
+    ${providerSelector}
     <div class="stats-chart-body">
       <div class="trend-legend">${legendItems}</div>
       <p class="stats-scroll-hint">${t("stats.scroll_hint")}</p>
@@ -854,22 +880,24 @@ export function renderStatsPage(data: TokenExplorerData & { dayDrill?: string | 
         <summary>${escapeHtml(t("stats.advanced_title"))}</summary>
         <div class="stats-advanced-content">${advancedContent}</div>
       </details>` : "";
+  const providerSelector = isGlobal ? `<form class="stats-provider-list stats-provider-selector stats-chart-provider-filter" action="/stats" method="GET" aria-label="${escapeHtml(t("stats.chart_providers"))}">
+    <span class="stats-provider-label">${escapeHtml(t("stats.chart_providers"))}:</span>
+    ${[...statsFiltersToParams(filters).entries()].filter(([key]) => !["project", "model", "scope", "comparea", "compareb"].includes(key)).map(([key, value]) => `<input type="hidden" name="${escapeHtml(key)}" value="${escapeHtml(value)}">`).join("")}
+    ${(providers || []).map((p: any) => `<label class="stats-provider-item${p.available === false ? " disabled" : ""}">
+      <input type="checkbox" name="provider" value="${escapeHtml(p.id)}" ${selectedProviders.includes(p.id) ? "checked" : ""} ${p.available === false ? "disabled" : ""}>
+      <span>${escapeHtml(p.name || p.id)}</span>
+    </label>`).join("")}
+    <button class="stats-filter-btn stats-filter-apply" type="submit">${escapeHtml(t("stats.filter_apply"))}</button>
+  </form>` : "";
 
   const content = `
     <div class="stats-page">
       <h1 class="stats-title">${t("stats.title")}</h1>
       <p class="stats-desc">${t("stats.desc")}</p>
 
-      <div class="stats-provider-bar">
+      ${isGlobal ? "" : `<div class="stats-provider-bar">
         <span class="stats-provider-label">${t("stats.provider")}:</span>
-        ${isGlobal ? `<form class="stats-provider-list stats-provider-selector" action="/stats" method="GET">
-          ${[...statsFiltersToParams(filters).entries()].filter(([key]) => !["project", "model", "scope", "comparea", "compareb"].includes(key)).map(([key, value]) => `<input type="hidden" name="${escapeHtml(key)}" value="${escapeHtml(value)}">`).join("")}
-          ${(providers || []).map((p: any) => `<label class="stats-provider-item${p.available === false ? " disabled" : ""}">
-            <input type="checkbox" name="provider" value="${escapeHtml(p.id)}" ${selectedProviders.includes(p.id) ? "checked" : ""} ${p.available === false ? "disabled" : ""}>
-            <span>${escapeHtml(p.name || p.id)}</span>
-          </label>`).join("")}
-          <button class="stats-filter-btn stats-filter-apply" type="submit">${escapeHtml(t("stats.filter_apply"))}</button>
-        </form>` : `<div class="stats-provider-list">
+        <div class="stats-provider-list">
           ${(providers || []).map((p: any) => {
             const isCurrent = p.id === provider;
             const className = `stats-provider-item${isCurrent ? " current" : ""}${p.available === false ? " disabled" : ""}`;
@@ -878,8 +906,8 @@ export function renderStatsPage(data: TokenExplorerData & { dayDrill?: string | 
             }
             return `<a href="/stats?provider=${encodeURIComponent(p.id)}&${rangeQuery}" class="${className}"${isCurrent ? ' aria-current="page"' : ""}>${escapeHtml(p.name || p.id)}</a>`;
           }).join("")}
-        </div>`}
-      </div>
+        </div>
+      </div>`}
 
       ${renderFilterBar(filters, modelPairs, provider, projects, capabilities, providers, pagePath, selectedProviders)}
 
@@ -904,9 +932,9 @@ export function renderStatsPage(data: TokenExplorerData & { dayDrill?: string | 
 
       ${renderKpiCards(safeOverview, capabilities, comparison)}
 
-      ${renderProviderBreakdown(data.providerBreakdown || [], safeOverview.totalTokens, filters)}
+      ${renderTokenTrend(safeTokenStats, filters, provider, safeCoverage?.missingDimensions ?? [], capabilities.dayDrill, capabilities.composition, dayDrill, providerSelector, isGlobal)}
 
-      ${renderTokenTrend(safeTokenStats, filters, provider, safeCoverage?.missingDimensions ?? [], capabilities.dayDrill, capabilities.composition, dayDrill)}
+      ${renderProviderBreakdown(data.providerBreakdown || [], safeOverview.totalTokens, filters, selectedProviders)}
 
       ${dayDrill ? secondaryContent : ""}
 

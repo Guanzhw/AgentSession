@@ -97,11 +97,25 @@ fi
 
 ab "open centralized usage" open "$BASE/stats" >/dev/null
 ab "wait for centralized usage" wait --text "Usage by provider" >/dev/null
-global_usage_state="$(read_ab "verify centralized usage" eval "(() => { const before = [...document.querySelectorAll('.trend-y-label')].map((x) => x.textContent.trim()); [...document.querySelectorAll('.trend-legend-toggle')].filter((x) => x.dataset.series !== 'output' && x.checked).forEach((x) => x.click()); const after = [...document.querySelectorAll('.trend-y-label')].map((x) => x.textContent.trim()); return JSON.stringify({ providers: document.querySelectorAll('.stats-provider-selector input[name=provider]:checked').length, breakdown: document.querySelectorAll('.stats-provider-breakdown-card').length, rescaled: before[0] !== after[0] }); })()")"
-if ! printf '%s' "$global_usage_state" | grep -Eq 'providers[^0-9]*[1-9][0-9]*' || ! printf '%s' "$global_usage_state" | grep -Eq 'breakdown[^0-9]*[1-9][0-9]*' || ! printf '%s' "$global_usage_state" | grep -Eq 'rescaled[^a-z]*true'; then
+global_usage_state="$(read_ab "verify centralized usage" eval "(() => { const before = [...document.querySelectorAll('.trend-y-label')].map((x) => x.textContent.trim()); [...document.querySelectorAll('.trend-legend-toggle')].filter((x) => x.dataset.series !== 'output' && x.checked).forEach((x) => x.click()); const after = [...document.querySelectorAll('.trend-y-label')].map((x) => x.textContent.trim()); const cards = [...document.querySelectorAll('.stats-provider-breakdown-card')]; return JSON.stringify({ providers: document.querySelectorAll('.stats-provider-selector input[name=provider]:checked').length, breakdown: cards.length, unifiedLinks: cards.filter((card) => /^\/stats\?provider=/.test(card.querySelector('.stats-provider-filter-link')?.getAttribute('href') || '')).length, detailLinks: cards.filter((card) => /^\/[a-z][a-z0-9-]*\/stats/.test(card.querySelector('.stats-provider-details')?.getAttribute('href') || '')).length, totalsMatch: document.querySelector('[data-provider-token-total]')?.dataset.providerTokenTotal === document.querySelector('[data-token-total]')?.dataset.tokenTotal, explicitActions: cards.filter((card) => /Show only /.test(card.textContent || '')).length, rescaled: before[0] !== after[0] }); })()")"
+if ! printf '%s' "$global_usage_state" | grep -Eq 'providers[^0-9]*[1-9][0-9]*' || ! printf '%s' "$global_usage_state" | grep -Eq 'breakdown[^0-9]*[1-9][0-9]*' || ! printf '%s' "$global_usage_state" | grep -Eq 'unifiedLinks[^0-9]*[1-9][0-9]*' || ! printf '%s' "$global_usage_state" | grep -Eq 'detailLinks[^0-9]*[1-9][0-9]*' || ! printf '%s' "$global_usage_state" | grep -Eq 'totalsMatch[^a-z]*true' || ! printf '%s' "$global_usage_state" | grep -Eq 'explicitActions[^0-9]*[1-9][0-9]*' || ! printf '%s' "$global_usage_state" | grep -Eq 'rescaled[^a-z]*true'; then
   echo "Centralized Usage should expose provider filters, provider breakdown, and dynamic chart rescaling, got $global_usage_state" >&2
   exit 1
 fi
+
+usage_drilldown_started="$(read_ab "drill into one usage provider" eval "(() => { const link = document.querySelector('.stats-provider-filter-link'); if (!link) return false; link.click(); return true; })()")"
+if [[ "$usage_drilldown_started" != "true" ]]; then
+  echo "Centralized Usage should provide a provider drill-down card" >&2
+  exit 1
+fi
+ab "wait for focused usage" wait --text "Show all providers" >/dev/null
+focused_usage_state="$(read_ab "verify focused usage reset" eval "(() => { const cards = [...document.querySelectorAll('.stats-provider-breakdown-card')]; const selected = cards.filter((card) => card.classList.contains('is-selected')); return JSON.stringify({ providers: document.querySelectorAll('.stats-provider-selector input[name=provider]:checked').length, selected: selected.length, resetLinks: selected.filter((card) => { const link = card.querySelector('.stats-provider-filter-link'); return /^\/stats\?days=/.test(link?.getAttribute('href') || '') && /Show all providers/.test(link?.textContent || ''); }).length }); })()")"
+if ! printf '%s' "$focused_usage_state" | grep -Eq 'providers[^0-9]*1' || ! printf '%s' "$focused_usage_state" | grep -Eq 'selected[^0-9]*1' || ! printf '%s' "$focused_usage_state" | grep -Eq 'resetLinks[^0-9]*1'; then
+  echo "Focused Usage should offer a one-click return to all providers, got $focused_usage_state" >&2
+  exit 1
+fi
+read_ab "restore all usage providers" eval "document.querySelector('.stats-provider-breakdown-card.is-selected .stats-provider-filter-link').click(); true" >/dev/null
+ab "wait for unified usage reset" wait --text "Show only" >/dev/null
 
 ab "open dashboard" open "$BASE/opencode" >/dev/null
 ab "wait for dashboard" wait --text "Recent Sessions" >/dev/null
