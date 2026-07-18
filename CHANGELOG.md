@@ -22,6 +22,11 @@
   motion preferences and retains the existing narrow-screen layout.
 - Unified Usage prioritizes the total token trend and keeps provider filters,
   selected state, date range, and reset actions in one explorer.
+- AgentSession-MCP search now supports whitespace-separated AND terms, exact
+  normalized project-directory filtering, and cursor continuation over a
+  time-bounded result snapshot.
+- OpenCode MCP search events now round-trip through `session_get_event`, and
+  `session_get` reports the normalized message count instead of a placeholder.
 
 ### Compatibility and safety
 
@@ -30,6 +35,8 @@
 - AgentSession-MCP retains exactly five bounded, read-only session-history
   tools: `session_search`, `session_get`, `session_timeline`,
   `session_get_context`, and `session_get_event`.
+- Normal MCP search excludes reasoning parts, and SQLite LIKE metacharacters
+  are treated as literal query text.
 
 ## 1.4.0
 
