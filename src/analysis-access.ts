@@ -191,7 +191,8 @@ export function buildAnalysisAccessManifest({
   rootSessionId,
   runDir,
   files,
-  nodeExecutable = process.execPath
+  nodeExecutable = process.execPath,
+  executableArgs = []
 }: {
   providerId: ProviderId;
   providerName: string;
@@ -199,8 +200,11 @@ export function buildAnalysisAccessManifest({
   runDir: string;
   files: Record<string, string>;
   nodeExecutable?: string;
+  executableArgs?: string[];
 }) {
   const relative = (filePath: string) => analysisRunRelativePath(runDir, filePath);
+  const quotedArgs = executableArgs.map((arg) => `"${arg}"`).join(" ");
+  const commandPrefix = [`"${nodeExecutable}"`, quotedArgs].filter(Boolean).join(" ");
   return {
     schemaVersion: 1,
     interfaceVersion: ANALYSIS_ACCESS_INTERFACE_VERSION,
@@ -212,9 +216,12 @@ export function buildAnalysisAccessManifest({
     generatedAt: new Date().toISOString(),
     accessTool: {
       executable: nodeExecutable,
+      executableArgs,
       path: files.analysisToolPath,
       relativePath: relative(files.analysisToolPath),
-      invocation: `"${nodeExecutable}" "${files.analysisToolPath}" "${runDir}" <command> [argsJson]`
+      invocation: executableArgs.length
+        ? `${commandPrefix} "${runDir}" <command> [argsJson]`
+        : `${commandPrefix} "${files.analysisToolPath}" "${runDir}" <command> [argsJson]`
     },
     interfaces: ANALYSIS_ACCESS_TOOLS,
     backingStores: {

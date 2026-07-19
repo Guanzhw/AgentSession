@@ -7,10 +7,11 @@
 ![Node.js >= 22.13.0](https://img.shields.io/badge/node-%3E%3D22.13.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.5.3](https://img.shields.io/badge/version-1.5.3-orange?style=flat-square)
+![v1.6.0](https://img.shields.io/badge/version-1.6.0-orange?style=flat-square)
 
-## 1.5.3 更新
+## 1.6.0 更新
 
+- 新增无需系统 Node.js 的跨平台单文件 Viewer 与 MCP binary，并通过 GitHub Release 发布 SHA-256 校验和。
 - Windows 可执行文件路径现在可在 Linux/WSL 上正确提取文件名，跨平台测试不再依赖宿主路径语义。
 - 最低 Node.js 版本修正为 22.13.0，确保 `node:sqlite` 无需实验参数即可使用。
 - `/sessions` 和 `/stats` 现在是统一的跨 Provider 入口；Provider 是可组合的筛选条件，详情页仍保留 canonical Provider URL。
@@ -74,7 +75,16 @@ AgentSession 是一个本地优先的 AI 编程会话查看器。它不会修改
 
 本项目当前支持以下安装方式：
 
-### 方式一：安装打包后的包（推荐）
+### 方式一：下载单文件 binary（无需安装 Node.js）
+
+从 [GitHub Releases](https://github.com/Guanzhw/AgentSession/releases) 下载对应平台压缩包，并用同一 Release 中的 `SHA256SUMS` 验证文件。每个压缩包包含：
+
+- `agentsession` / `agentsession.exe`：Web Viewer；
+- `agentsession-mcp` / `agentsession-mcp.exe`：只读 stdio MCP Server。
+
+当前发布 Windows x64、Linux x64、Linux arm64 与 macOS arm64。binary 内嵌 Node.js runtime、Web 静态资源和 analysis helper，不依赖系统 Node.js 或源码目录。目前未提供商业代码签名，Windows SmartScreen 或 macOS Gatekeeper 可能要求用户确认本地下载的可执行文件。
+
+### 方式二：安装 npm 包
 
 ```bash
 npm install --global @acetamido/agentsession
@@ -83,7 +93,7 @@ agentsession
 
 打开 http://localhost:3456 来访问主页
 
-### 方式二：从源码运行
+### 方式三：从源码运行
 
 ```bash
 git clone https://github.com/Guanzhw/AgentSession.git

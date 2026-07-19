@@ -41,6 +41,7 @@ import {
   launchPowerShellWithFallback
 } from "./resume.js";
 import { supportsSessionAnalysis as providerSupportsSessionAnalysis } from "./providers/kinds.js";
+import { isBinaryRuntime, readBinaryAsset } from "./binary-runtime.js";
 
 const MAX_ARTIFACT_FILES = 200;
 const MAX_ARTIFACT_BYTES = 256 * 1024;
@@ -1162,9 +1163,19 @@ export function prepareSessionAnalysis({
     settings.target.prompt,
     readPromptFile(settings.target.promptFile, configPath)
   ].filter(Boolean).join("\n\n");
-  const runtimeDir = path.dirname(fileURLToPath(import.meta.url));
-  copyFileSync(path.join(runtimeDir, "analysis-tools.js"), files.analysisToolPath);
-  copyFileSync(path.join(runtimeDir, "analysis-layout.js"), files.analysisLayoutPath);
+  if (isBinaryRuntime()) {
+    const analysisTool = readBinaryAsset("analysis-tools.js");
+    const analysisLayout = readBinaryAsset("analysis-layout.js");
+    if (analysisTool === null || analysisLayout === null) {
+      throw new Error("Binary analysis helper assets are unavailable");
+    }
+    writeFileSync(files.analysisToolPath, analysisTool, "utf-8");
+    writeFileSync(files.analysisLayoutPath, analysisLayout, "utf-8");
+  } else {
+    const runtimeDir = path.dirname(fileURLToPath(import.meta.url));
+    copyFileSync(path.join(runtimeDir, "analysis-tools.js"), files.analysisToolPath);
+    copyFileSync(path.join(runtimeDir, "analysis-layout.js"), files.analysisLayoutPath);
+  }
   writeJson(files.analysisToolPackagePath, {
     private: true,
     type: "module"
@@ -1174,7 +1185,10 @@ export function prepareSessionAnalysis({
     providerName: provider.name,
     rootSessionId: sessionId,
     runDir,
-    files
+    files,
+    ...(isBinaryRuntime()
+      ? { nodeExecutable: process.execPath, executableArgs: ["--internal-analysis-tool"] }
+      : {})
   }));
   const prompt = buildAnalysisPrompt({
     provider,
@@ -1593,7 +1607,9 @@ export async function launchSessionAnalysis(run: any, fallbackShell = null) {
     agentTimeoutSeconds: 1800,
     outputWaitSeconds: 600,
     nodeExecutable: process.execPath,
-    validatorPath: path.join(path.dirname(fileURLToPath(import.meta.url)), "analysis-validator.js")
+    validatorPath: isBinaryRuntime()
+      ? "--internal-analysis-validator"
+      : path.join(path.dirname(fileURLToPath(import.meta.url)), "analysis-validator.js")
   }), "utf-8").toString("base64");
   const launchResult = await launchPowerShellWithFallback({
     cwd: run.command.cwd,

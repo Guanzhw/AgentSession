@@ -7,10 +7,11 @@
 ![Node.js >= 22.13.0](https://img.shields.io/badge/node-%3E%3D22.13.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.5.3](https://img.shields.io/badge/version-1.5.3-orange?style=flat-square)
+![v1.6.0](https://img.shields.io/badge/version-1.6.0-orange?style=flat-square)
 
-## What's New in 1.5.3
+## What's New in 1.6.0
 
+- Added cross-platform single-file Viewer and MCP binaries that require no system Node.js, published through GitHub Releases with SHA-256 checksums.
 - Windows executable paths now retain their basename on Linux and WSL, so cross-platform diagnostics and tests use consistent names.
 - The minimum Node.js version is corrected to 22.13.0 so `node:sqlite` works without an experimental flag.
 - `/sessions` and `/stats` are unified cross-provider entry points; providers are composable filters while detail pages retain canonical provider URLs.
@@ -68,6 +69,15 @@ All providers store stars, custom titles, soft deletes, and permanent exclusions
 - **Bilingual UI**: use `--lang en` or `--lang zh`.
 
 ## Quick Start
+
+Download the archive for your platform from [GitHub Releases](https://github.com/Guanzhw/AgentSession/releases), then verify it against `SHA256SUMS` from the same release. Each archive contains:
+
+- `agentsession` / `agentsession.exe`: the Web Viewer;
+- `agentsession-mcp` / `agentsession-mcp.exe`: the read-only stdio MCP server.
+
+Windows x64, Linux x64, Linux arm64, and macOS arm64 are published. The binaries embed Node.js, Web assets, and the analysis helpers, so they do not require a system Node.js installation or a source checkout. Commercial code signing is not currently configured, so Windows SmartScreen or macOS Gatekeeper may ask users to confirm the downloaded executable.
+
+Alternatively, install from npm:
 
 ```bash
 npm install --global @acetamido/agentsession

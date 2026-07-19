@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { getLocale } from "./i18n.js";
 import { getProvider } from "./providers/index.js";
+import { isBinaryRuntime, readBinaryAsset } from "./binary-runtime.js";
 
 export const staticDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "static");
 
@@ -147,7 +148,10 @@ export function serveStatic(reqPath: string, res: any): void {
       : "application/octet-stream";
 
   try {
-    const body = readFileSync(filePath).toString();
+    const body = isBinaryRuntime()
+      ? readBinaryAsset(`static/${relativePath}`)
+      : readFileSync(filePath).toString();
+    if (body === null) throw new Error("Embedded static asset not found");
     send(res, 200, body, contentType);
   } catch (err) {
     console.warn("Failed to read static file:", filePath, err);

@@ -635,20 +635,26 @@ export function runAnalysisTool(runDir: string, toolName: string, args: Row = {}
   throw new Error(`Unknown analysis tool: ${toolName}`);
 }
 
-const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : "";
-if (invokedPath === path.resolve(fileURLToPath(import.meta.url))) {
-  const runDir = process.argv[2];
-  const toolName = process.argv[3];
+export function runAnalysisToolCli(argv = process.argv.slice(2)) {
+  const [runDir, toolName, argsJson] = argv;
   if (!runDir || !toolName) {
     console.error("Usage: node analysis-tools.js <runDir> <toolName> [argsJson]");
     process.exitCode = 2;
   } else {
     try {
-      const args = process.argv[4] ? JSON.parse(process.argv[4]) : {};
+      const args = argsJson ? JSON.parse(argsJson) : {};
       process.stdout.write(formatAnalysisToolOutput(runAnalysisTool(runDir, toolName, args)));
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
       process.exitCode = 1;
     }
   }
+}
+
+const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : "";
+if (
+  path.basename(invokedPath) === "analysis-tools.js"
+  && invokedPath === path.resolve(fileURLToPath(import.meta.url))
+) {
+  runAnalysisToolCli();
 }

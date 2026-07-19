@@ -1,5 +1,6 @@
 node_modules/
 dist/
+artifacts/
 *.db
 logs/
 app.log

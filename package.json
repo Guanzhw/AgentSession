@@ -1,11 +1,13 @@
 {
   "name": "agentsession-workspace",
-  "version": "1.5.3",
+  "version": "1.6.0",
   "description": "AgentSession — a local-first multi-provider viewer and manager for AI coding sessions.",
   "type": "module",
   "private": true,
   "scripts": {
     "build": "npm run build:core && npm run build --workspace=@acetamido/agentsession-mcp",
+    "build:binary": "node scripts/build-sea.mjs",
+    "smoke:binary": "node scripts/smoke-sea.mjs",
     "build:core": "node scripts/clean-dist.mjs && tsc && node scripts/copy-static.mjs && node scripts/copy-package-dist.mjs",
     "test": "npm run build && node --test test/*.test.mjs",
     "start": "npm run build && node dist/bin/cli.js",
@@ -40,7 +42,9 @@
   },
   "homepage": "https://github.com/Guanzhw/AgentSession",
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
     "@types/node": "^24.10.1",
+    "esbuild": "0.28.1",
     "typescript": "^5.9.3"
   }
 }

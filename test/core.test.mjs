@@ -97,6 +97,7 @@ import {
   runAnalysisTool
 } from "../dist/src/analysis-tools.js";
 import { validateAnalysisOutputs } from "../dist/src/analysis-validator.js";
+import { buildAnalysisAccessManifest } from "../dist/src/analysis-access.js";
 import { BUILTIN_ANALYSIS_TARGETS } from "../dist/src/analysis-targets.js";
 import { resolveAnalysisRunPath } from "../dist/src/analysis-layout.js";
 import {
@@ -118,6 +119,29 @@ import {
 
 const fixture = (name) => path.join(process.cwd(), "test", "fixtures", name);
 const regexEscape = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+test("binary analysis access invokes the embedded helper mode", () => {
+  const runDir = path.join(os.tmpdir(), "analysis-run");
+  const files = {
+    analysisToolPath: path.join(runDir, "tools", "analysis-tools.js"),
+    sessionIndexPath: path.join(runDir, "evidence", "session-index.json"),
+    evidenceIndexPath: path.join(runDir, "evidence", "evidence-index.json"),
+    evidencePath: path.join(runDir, "evidence", "evidence.jsonl"),
+    artifactsPath: path.join(runDir, "artifacts.json")
+  };
+  const manifest = buildAnalysisAccessManifest({
+    providerId: "codex",
+    providerName: "Codex CLI",
+    rootSessionId: "session-1",
+    runDir,
+    files,
+    nodeExecutable: "agentsession.exe",
+    executableArgs: ["--internal-analysis-tool"]
+  });
+  assert.deepEqual(manifest.accessTool.executableArgs, ["--internal-analysis-tool"]);
+  assert.match(manifest.accessTool.invocation, /agentsession\.exe" "--internal-analysis-tool"/);
+  assert.doesNotMatch(manifest.accessTool.invocation, /analysis-tools\.js" "C:/);
+});
 
 test("Claude current transcripts preserve tools, thinking, titles, and cache tokens", () => {
   const records = parseTranscript(fixture("claude-current.jsonl"));

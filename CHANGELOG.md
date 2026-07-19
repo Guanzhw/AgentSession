@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.6.0 - 2026-07-19
+
+### Added
+
+- Added Node SEA single-file binaries for the AgentSession Viewer and the
+  read-only AgentSession MCP server on Windows x64, Linux x64, Linux arm64, and
+  macOS arm64.
+- Added embedded Web assets and binary-native analysis helper/validator modes,
+  so the Viewer binary does not depend on a Node.js installation or source
+  checkout while preserving the proposal-only analysis pipeline.
+- Added a four-platform release workflow that runs the full suite and binary
+  smoke checks before publishing archives and `SHA256SUMS` to GitHub Releases.
+
+### Changed
+
+- Made the GitHub repository public and restored npm provenance for releases
+  from the now-public source repository.
+
 ## 1.5.3 - 2026-07-19
 
 ### Fixed

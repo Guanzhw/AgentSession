@@ -367,23 +367,23 @@ export function validateAnalysisOutputs(runDir: any, processExitCode = 0, expect
   return updatedManifest;
 }
 
-const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : "";
-if (invokedPath === path.resolve(fileURLToPath(import.meta.url))) {
-  const runDir = process.argv[2];
+export function runAnalysisValidatorCli(argv = process.argv.slice(2)) {
+  const [runDir, processExitCode, integrityBase64] = argv;
   if (!runDir) {
     console.error("Usage: node analysis-validator.js <runDir> [processExitCode]");
     process.exitCode = 2;
   } else {
     let expectedIntegrity = null;
-    if (process.argv[4]) {
+    if (integrityBase64) {
       try {
-        expectedIntegrity = JSON.parse(Buffer.from(process.argv[4], "base64").toString("utf-8"));
+        expectedIntegrity = JSON.parse(Buffer.from(integrityBase64, "base64").toString("utf-8"));
       } catch (error: any) {
         console.error(`Invalid integrity metadata: ${error.message}`);
         process.exitCode = 2;
+        return;
       }
     }
-    const result = validateAnalysisOutputs(runDir, Number(process.argv[3]) || 0, expectedIntegrity);
+    const result = validateAnalysisOutputs(runDir, Number(processExitCode) || 0, expectedIntegrity);
     console.log(JSON.stringify({
       state: result.state,
       validation: result.validation
@@ -392,4 +392,12 @@ if (invokedPath === path.resolve(fileURLToPath(import.meta.url))) {
       process.exitCode = 1;
     }
   }
+}
+
+const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : "";
+if (
+  path.basename(invokedPath) === "analysis-validator.js"
+  && invokedPath === path.resolve(fileURLToPath(import.meta.url))
+) {
+  runAnalysisValidatorCli();
 }
