@@ -55,7 +55,8 @@ function cacheUsage(messageData: any) {
   return {
     model: messageModelLabel(messageData),
     prompt,
-    rate: read / prompt
+    rate: read / prompt,
+    requestCount: Number(messageData?.tokenRequestCount) || 1
   };
 }
 
@@ -63,6 +64,8 @@ function annotateCacheWarning(message: any, previousUsage: any) {
   const usage = cacheUsage(message.data);
   const sameModel = usage?.model && usage.model === previousUsage?.model;
   const unusualMiss = sameModel
+    && usage.requestCount === 1
+    && previousUsage?.requestCount === 1
     && usage.prompt >= 8192
     && previousUsage.prompt >= 8192
     && usage.rate < 0.01
@@ -333,6 +336,7 @@ function renderMessageGroup(message: any, markup: any, provider: string) {
     ? messageHeader(role, {
       model: messageModelLabel(data),
       tokens: data.tokens,
+      tokenRequestCount: data.tokenRequestCount,
       cacheWarning: data.cacheWarning,
       time: data.time?.created
     })
@@ -820,6 +824,7 @@ function renderPart(messageData: any, partData: any, partId: any, reasoningMarku
     return messageBubble(messageData.role, partData.text, {
       model: messageModelLabel(messageData),
       tokens: messageData.tokens,
+      tokenRequestCount: messageData.tokenRequestCount,
       cacheWarning: messageData.cacheWarning,
       time: messageData.time?.created
     });

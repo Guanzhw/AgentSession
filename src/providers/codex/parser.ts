@@ -258,11 +258,16 @@ export function extractMeta(records: any, fallbackId: any, normalizedMessages?: 
 export function countCodexRenderedMessages(messages: Message[]) {
   let count = 0;
   let previousGroup = null;
+  let activeAssistant = false;
   for (const message of messages) {
+    const role = String(message.role || "").toLowerCase();
     const group = message.metadata?.turnId ?? message.metadata?.responseGroupId;
     const groupable = typeof group === "string"
-      && ["assistant", "tool"].includes(String(message.role || "").toLowerCase());
-    if (!groupable || group !== previousGroup) count++;
+      && ["assistant", "tool"].includes(role);
+    const groupedWithPrevious = groupable && group === previousGroup;
+    const implicitContinuation = activeAssistant && role === "tool";
+    if (!groupedWithPrevious && !implicitContinuation) count++;
+    activeAssistant = ["assistant", "tool"].includes(role);
     previousGroup = groupable ? group : null;
   }
   return count;
@@ -275,7 +280,7 @@ export function countCodexRenderedMessages(messages: Message[]) {
  * @returns {import('../interface.js').Message[]}
  */
 export function recordsToMessages(records: any, sessionId: any): Message[] {
-  const messages = [];
+  const messages: any[] = [];
   let idx = 0;
   let model = null;
   let pendingUsageTarget: any = null;
@@ -377,7 +382,25 @@ export function recordsToMessages(records: any, sessionId: any): Message[] {
     if (r.type === "response_item" && r.payload?.type === "reasoning") {
       const thinking = responseText({ content: r.payload.summary || r.payload.content || [] });
       if (thinking) {
-        const message = {
+        const turnId = currentResponseGroup();
+        const previous: any = messages.at(-1);
+        // Codex streams cumulative reasoning snapshots for one request. Each
+        // later snapshot contains the earlier summary plus more detail, so
+        // rendering all of them produces a column of duplicate Reasoning
+        // blocks. Keep the newest snapshot in that response group.
+        const previousThinking: string = typeof previous?.thinking === "string" ? previous.thinking : "";
+        const replacesProgressiveSnapshot = Boolean(previous?.role === "assistant"
+          && !previous.content
+          && !previous.toolName
+          && previous.metadata?.turnId === turnId
+          && previousThinking
+          && (thinking.startsWith(previousThinking) || previousThinking.startsWith(thinking)));
+        if (replacesProgressiveSnapshot) {
+          if (thinking.length > previousThinking.length) previous.thinking = thinking;
+          pendingUsageTarget = previous;
+          continue;
+        }
+        const message: any = {
           id: r.payload.id || `reasoning-${idx++}`,
           sessionId,
           role: "assistant",
@@ -388,7 +411,7 @@ export function recordsToMessages(records: any, sessionId: any): Message[] {
           toolOutput: null,
           timestamp: ts,
           tokens: null,
-          metadata: { model, provider: "openai", provenance: "session", turnId: currentResponseGroup() }
+          metadata: { model, provider: "openai", provenance: "session", turnId }
         };
         messages.push(message);
         pendingUsageTarget = message;

@@ -2053,6 +2053,32 @@ document.addEventListener("click", async (e) => {
 
 });
 
+// List controls apply immediately, while the keyword field remains explicit:
+// Enter or Apply commits it. This keeps an unfinished search out of an
+// automatic provider/project/sort update.
+(function initSessionFilterAutoApply() {
+  const filter = document.querySelector("[data-session-filter]");
+  if (!filter) return;
+
+  const keyword = filter.querySelector("input[name='q']");
+  filter.addEventListener("change", (event) => {
+    const control = event.target;
+    if (!control?.matches?.("[data-session-filter-auto]")) return;
+
+    const params = new URLSearchParams();
+    for (const [name, value] of new FormData(filter).entries()) {
+      if (name !== "q") params.append(name, String(value));
+    }
+
+    const appliedKeyword = keyword?.defaultValue || "";
+    if (appliedKeyword) params.set("q", appliedKeyword);
+
+    const destination = new URL(filter.action, window.location.origin);
+    destination.search = params.toString();
+    window.location.assign(`${destination.pathname}${destination.search}${destination.hash}`);
+  });
+})();
+
 const toggleBatchBtn = document.getElementById("toggle-batch");
 const batchBar = document.getElementById("batch-bar");
 const sessionList = document.getElementById("session-list");

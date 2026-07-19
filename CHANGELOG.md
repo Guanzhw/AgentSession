@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.7.1 - 2026-07-20
+
+### Fixed
+
+- Reconstructed file-backed provider detail transcripts into ReAct cards across
+  Claude Code, Codex CLI, Gemini CLI, and Pi: tool-only continuations remain
+  under the preceding assistant turn, while a new reasoning record never
+  crosses an assistant boundary. Codex cumulative reasoning snapshots now
+  collapse to their latest state instead of rendering repeated blocks.
+- Preserved per-request token accounting after card merging by showing the
+  aggregate only with an explicit request count and aggregate-aware tooltips.
+
+### Changed
+
+- Session-list filters now apply as soon as a filter changes; keyword search
+  still waits for Enter or Apply, with the search field aligned beside Apply.
+
 ## 1.7.0 - 2026-07-19
 
 ### Added

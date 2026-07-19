@@ -691,12 +691,12 @@ test("Codex preserves canonical subagent identity and groups each response as a 
   const candidateMessages = codexRecordsToMessages(records, session.id);
   const parentMessages = [{ role: "user", content: "Inherited parent prompt" }];
   const resolved = resolveCodexInheritedContext(candidateMessages, parentMessages);
-  const views = buildMessageSessionViews({ ...session, messageCount: 3 }, resolved.messages);
+  const views = buildMessageSessionViews({ ...session, messageCount: 2 }, resolved.messages);
 
   assert.equal(session.id, "codex-child");
   assert.equal(session.parentId, "codex-parent");
   assert.equal(session.metadata.agentPath, "/root/reviewer");
-  assert.equal(session.messageCount, 4);
+  assert.equal(session.messageCount, 3);
   assert.deepEqual(session.metadata.inheritedContext, {
     parentSessionId: "codex-parent",
     candidateUserRecords: 2
@@ -710,11 +710,11 @@ test("Codex preserves canonical subagent identity and groups each response as a 
   assert.equal(genuineChildPrompt.excludedUserMessages, 0);
   assert.equal(genuineChildPrompt.messages[0].content, "Inherited parent prompt");
   assert.equal(genuineChildPrompt.messages[0].metadata.provenance, "session");
-  assert.equal(views.tree.messages.length, 3);
-  assert.deepEqual(views.tree.messages[0].parts.map((part) => part.type), ["reasoning", "tool"]);
+  assert.equal(views.tree.messages.length, 2);
+  assert.deepEqual(views.tree.messages[0].parts.map((part) => part.type), ["reasoning", "tool", "tool"]);
   assert.equal(views.tree.messages[0].parts[1].data.state.output, "ok");
-  assert.equal(views.tree.messages[1].parts[0].tool, "exec");
-  assert.equal(views.tree.messages[1].parts[0].data.state.output, "passed");
+  assert.equal(views.tree.messages[0].parts[2].tool, "exec");
+  assert.equal(views.tree.messages[0].parts[2].data.state.output, "passed");
 });
 
 test("file session store reuses parsed transcripts, refreshes changed files, and bounds descendants", () => {
@@ -991,10 +991,10 @@ test("linked message sessions attach Codex-style spawn tools to child conversati
   const taskPart = views.tree.messages[0].parts[0];
   assert.equal(taskPart.childSessions[0].session.id, "child");
   assert.equal(taskPart.childSessions[0].messages[0].parts[0].data.text, "Review complete");
-  const nestedTask = taskPart.childSessions[0].messages[1].parts[0];
+  const nestedTask = taskPart.childSessions[0].messages[0].parts[1];
   assert.equal(nestedTask.childSessions[0].session.id, "grandchild");
   assert.equal(views.metrics.totals.branches, 2);
-  assert.equal(views.metrics.totals.messages, 4);
+  assert.equal(views.metrics.totals.messages, 3);
 });
 
 test("Codex subagent transcripts exclude copied parent context and expose encrypted task envelopes", () => {
@@ -1105,7 +1105,7 @@ test("Codex subagent transcripts exclude copied parent context and expose encryp
   assert.deepEqual(resolved.messages.map((message) => message.content), ["Child-specific follow-up"]);
 });
 
-test("Claude and Gemini preserve provider response boundaries for ReACT grouping", () => {
+test("file-backed providers preserve ReACT response boundaries and fold tool-only continuations", () => {
   const claudeRecords = [
     {
       type: "assistant",
@@ -1148,6 +1148,151 @@ test("Claude and Gemini preserve provider response boundaries for ReACT grouping
   assert.equal(geminiViews.tree.messages.length, 1);
   assert.deepEqual(geminiViews.tree.messages[0].parts.map((part) => part.type), ["text", "tool"]);
   assert.equal(geminiViews.tree.messages[0].parts[1].data.state.status, "error");
+
+  const piRecords = [
+    {
+      type: "message",
+      id: "pi-user",
+      timestamp: "2026-07-11T00:00:00.000Z",
+      message: { role: "user", content: [{ type: "text", text: "Inspect the repository." }] }
+    },
+    {
+      type: "message",
+      id: "pi-assistant",
+      timestamp: "2026-07-11T00:00:01.000Z",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "text", text: "I will inspect the status." },
+          { type: "toolCall", id: "pi-read", name: "read", arguments: { path: "package.json" } }
+        ]
+      }
+    },
+    {
+      type: "message",
+      id: "pi-read-result",
+      timestamp: "2026-07-11T00:00:02.000Z",
+      message: {
+        role: "toolResult",
+        toolCallId: "pi-read",
+        content: [{ type: "text", text: "{\"name\":\"agentsession\"}" }]
+      }
+    },
+    {
+      type: "message",
+      id: "pi-bash",
+      timestamp: "2026-07-11T00:00:03.000Z",
+      message: { role: "bashExecution", command: "git status --short", output: "", exitCode: 0 }
+    },
+    {
+      type: "message",
+      id: "pi-next",
+      timestamp: "2026-07-11T00:00:04.000Z",
+      message: { role: "assistant", content: [{ type: "text", text: "The repository is clean." }] }
+    }
+  ];
+  const piViews = buildMessageSessionViews({
+    id: "pi-session",
+    provider: "pi",
+    parentId: null,
+    title: "Pi",
+    directory: null,
+    timeCreated: 0,
+    timeUpdated: 0,
+    messageCount: 3,
+    tokenCount: null
+  }, piRecordsToMessages(piRecords, "pi-session"));
+  assert.equal(piViews.tree.messages.length, 3);
+  assert.deepEqual(piViews.tree.messages[1].parts.map((part) => part.type), ["text", "tool", "tool"]);
+  assert.equal(piViews.tree.messages[1].parts[1].data.state.output, "{\"name\":\"agentsession\"}");
+  assert.equal(piViews.tree.messages[1].parts[2].tool, "bash");
+
+  const codexRecords = [
+    {
+      timestamp: "2026-07-11T00:00:00.000Z",
+      type: "response_item",
+      payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Checking the repository." }] }
+    },
+    {
+      timestamp: "2026-07-11T00:00:01.000Z",
+      type: "response_item",
+      payload: { type: "custom_tool_call", call_id: "call-1", name: "exec", input: { command: "git status" } }
+    },
+    {
+      timestamp: "2026-07-11T00:00:02.000Z",
+      type: "event_msg",
+      payload: { type: "token_count", info: { last_token_usage: { input_tokens: 110, cached_input_tokens: 90, output_tokens: 20, total_tokens: 130 } } }
+    },
+    {
+      timestamp: "2026-07-11T00:00:03.000Z",
+      type: "response_item",
+      payload: { type: "custom_tool_call", call_id: "call-continuation", name: "exec", input: { command: "git diff --stat" } }
+    },
+    {
+      timestamp: "2026-07-11T00:00:04.000Z",
+      type: "event_msg",
+      payload: { type: "token_count", info: { last_token_usage: { input_tokens: 210, cached_input_tokens: 190, output_tokens: 30, total_tokens: 240 } } }
+    },
+    {
+      timestamp: "2026-07-11T00:00:05.000Z",
+      type: "response_item",
+      payload: { type: "reasoning", summary: [{ type: "summary_text", text: "Inspect" }] }
+    },
+    {
+      timestamp: "2026-07-11T00:00:05.500Z",
+      type: "response_item",
+      payload: { type: "reasoning", summary: [{ type: "summary_text", text: "Inspect the changed files." }] }
+    },
+    {
+      timestamp: "2026-07-11T00:00:06.000Z",
+      type: "response_item",
+      payload: { type: "custom_tool_call", call_id: "call-2", name: "exec", input: { command: "git diff" } }
+    },
+    {
+      timestamp: "2026-07-11T00:00:07.000Z",
+      type: "response_item",
+      payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "The changes are ready." }] }
+    },
+    {
+      timestamp: "2026-07-11T00:00:08.000Z",
+      type: "response_item",
+      payload: { type: "custom_tool_call", call_id: "call-3", name: "exec", input: { command: "npm test" } }
+    }
+  ];
+  const codexViews = buildMessageSessionViews({
+    id: "codex-session",
+    provider: "codex",
+    parentId: null,
+    title: "Codex",
+    directory: null,
+    timeCreated: 0,
+    timeUpdated: 0,
+    messageCount: 2,
+    tokenCount: null
+  }, codexRecordsToMessages(codexRecords, "codex-session"));
+  assert.equal(codexViews.tree.messages.length, 2);
+  assert.deepEqual(codexViews.tree.messages[0].parts.map((part) => part.type), ["text", "tool", "tool"]);
+  assert.deepEqual(codexViews.tree.messages[1].parts.map((part) => part.type), ["reasoning", "tool", "text", "tool"]);
+  assert.equal(codexViews.tree.messages[1].parts[0].data.text, "Inspect the changed files.");
+  assert.deepEqual(codexViews.tree.messages[0].data.tokens, {
+    input: 40,
+    output: 50,
+    reasoning: 0,
+    total: 370,
+    cache: { read: 280, write: 0 }
+  });
+  assert.equal(codexViews.tree.messages[0].data.tokenRequestCount, 2);
+  assert.equal(codexViews.tree.messages[0].data.tokenRequests.length, 2);
+  assert.equal(codexViews.metrics.totals.totalTokens, 370);
+  const codexHtml = renderSessionPage({
+    session: codexViews.tree.session,
+    sessionTree: codexViews.tree,
+    provider: "codex"
+  });
+  assert.match(codexHtml, /message-token-requests" title="Aggregated across 2 model requests">2 requests/);
+  assert.match(codexHtml, /Uncached prompt input uploaded across 2 model requests: 40/);
+  assert.match(codexHtml, /Total tokens across 2 model requests: 370/);
+  assert.equal(extractCodexMeta(codexRecords, "codex-session").messageCount, 2);
 });
 
 test("Claude sidechain transcripts preserve canonical agent and parent session IDs", () => {
@@ -1606,22 +1751,26 @@ test("session list exposes sort, title type, and starred filters through paginat
     providers: []
   });
 
-  assert.match(html, /<select name="sort">/);
+  assert.match(html, /<select name="sort" data-session-filter-auto>/);
   assert.match(html, /<option value="title-asc" selected>Title A-Z<\/option>/);
-  assert.match(html, /<select name="kind">/);
+  assert.match(html, /<select name="kind" data-session-filter-auto>/);
   assert.match(html, /<option value="analysis" selected>Analysis titles<\/option>/);
-  assert.match(html, /<input type="checkbox" name="starred" value="1" checked>/);
+  assert.match(html, /<input type="checkbox" name="starred" value="1" data-session-filter-auto checked>/);
   assert.match(html, /<option value="global"\s+title="\/">Global sessions \(4\)<\/option>/);
   assert.match(html, /data-sort="title-asc"/);
   assert.match(html, /data-kind="analysis"/);
   assert.match(html, /data-starred="1"/);
   assert.match(html, /href="\/opencode">Clear<\/a>/);
+  const filterMarkup = html.slice(html.indexOf('<form class="session-filter"'));
+  assert.ok(filterMarkup.indexOf('<select name="kind"') < filterMarkup.indexOf('<input type="search" name="q"'));
+  assert.ok(filterMarkup.indexOf('<input type="search" name="q"') < filterMarkup.indexOf('>Apply</button>'));
 
   const style = readFileSync(path.join(process.cwd(), "dist", "src", "static", "style.css"), "utf8");
   assert.match(
     style,
-    /\.session-filter \{\s*display: grid;\s*grid-template-columns: minmax\(0, 1\.5fr\) minmax\(0, 1\.15fr\) minmax\(0, 0\.75fr\) minmax\(0, 0\.95fr\) minmax\(0, 0\.85fr\) max-content max-content;/
+    /\.session-filter \{\s*display: grid;\s*grid-template-columns: minmax\(0, 1\.15fr\) minmax\(0, 0\.75fr\) minmax\(0, 0\.95fr\) minmax\(0, 0\.85fr\) minmax\(220px, 1\.5fr\) max-content;/
   );
+  assert.match(style, /\.filter-actions \{\s*grid-column: 5 \/ -1;/);
 });
 
 test("global search uses the centralized sessions entry while list filters stay scoped", () => {

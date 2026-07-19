@@ -99,40 +99,40 @@ export function renderSessionsPage({
   const providerSelector = global ? `<fieldset class="provider-filter" aria-label="${escapeHtml(t("filter.providers"))}">
     <legend>${escapeHtml(t("filter.providers"))}</legend>
     ${providers.map((item: any) => `<label class="provider-filter-option${item.available === false ? " disabled" : ""}">
-      <input type="checkbox" name="provider" value="${escapeHtml(item.id)}" ${selectedProviders.includes(item.id) ? "checked" : ""} ${item.available === false ? "disabled" : ""}>
+      <input type="checkbox" name="provider" value="${escapeHtml(item.id)}" data-session-filter-auto ${selectedProviders.includes(item.id) ? "checked" : ""} ${item.available === false ? "disabled" : ""}>
       <span>${item.icon || ""} ${escapeHtml(item.name || item.id)}</span>
     </label>`).join("")}
   </fieldset>` : "";
-  const filterBar = isAvailable ? `<form class="session-filter" action="${filterAction}" method="GET">
+  const filterBar = isAvailable ? `<form class="session-filter" data-session-filter action="${filterAction}" method="GET">
     ${providerSelector}
-    <label class="filter-field filter-keyword">
-      <span>${t("filter.keyword")}</span>
-      <input type="search" name="q" value="${escapeHtml(query)}" placeholder="${t("filter.keyword_placeholder")}">
-    </label>
     <label class="filter-field">
       <span>${t("filter.project")}</span>
-      <select name="project">${projectSelectOptions}</select>
+      <select name="project" data-session-filter-auto>${projectSelectOptions}</select>
     </label>
     <label class="filter-field">
       <span>${t("filter.time")}</span>
-      <select name="range">${rangeOptions}</select>
+      <select name="range" data-session-filter-auto>${rangeOptions}</select>
     </label>
     <label class="filter-field">
       <span>${t("filter.sort")}</span>
-      <select name="sort">${sortOptions}</select>
+      <select name="sort" data-session-filter-auto>${sortOptions}</select>
     </label>
     <label class="filter-field">
       <span>${t("filter.title_type")}</span>
-      <select name="kind">${sessionKindOptions}</select>
+      <select name="kind" data-session-filter-auto>${sessionKindOptions}</select>
     </label>
-    ${isManageableProvider ? `<div class="filter-field filter-check">
-      <span>${t("filter.view")}</span>
-      <label class="filter-checkbox">
-        <input type="checkbox" name="starred" value="1" ${starredOnly ? "checked" : ""}>
-        <span>${t("filter.starred_only")}</span>
-      </label>
-    </div>` : ""}
     <div class="filter-actions">
+      ${isManageableProvider ? `<div class="filter-field filter-check">
+        <span>${t("filter.view")}</span>
+        <label class="filter-checkbox">
+          <input type="checkbox" name="starred" value="1" data-session-filter-auto ${starredOnly ? "checked" : ""}>
+          <span>${t("filter.starred_only")}</span>
+        </label>
+      </div>` : ""}
+      <label class="filter-field filter-keyword">
+        <span>${t("filter.keyword")}</span>
+        <input type="search" name="q" value="${escapeHtml(query)}" placeholder="${t("filter.keyword_placeholder")}">
+      </label>
       <button class="btn" type="submit">${t("filter.apply")}</button>
       ${hasActiveFilters || (global && selectedProviders.length !== providers.filter((item: any) => item.available !== false).length) ? `<a class="btn btn-secondary" href="${filterAction}">${t("filter.clear")}</a>` : ""}
     </div>

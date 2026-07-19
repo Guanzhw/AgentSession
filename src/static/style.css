@@ -1934,7 +1934,7 @@ mark.session-search-highlight {
   color: var(--text-secondary);
 }
 
-.message-model, .message-tokens, .message-time {
+.message-model, .message-tokens, .message-token-requests, .message-time {
   font-size: 12px;
   color: var(--text-muted);
 }
@@ -2844,6 +2844,19 @@ mark {
   font-size: 17px;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.message-token-requests {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border: 1px solid color-mix(in srgb, var(--accent-color) 38%, var(--border-color));
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent-color) 9%, var(--bg-secondary));
+  color: var(--accent-color);
+  font-size: 11px;
+  line-height: 1.25;
+  white-space: nowrap;
 }
 .stats-chart-heading {
   display: flex;
@@ -3996,7 +4009,7 @@ a.model-rank-row:hover { background: var(--bg-secondary); }
 /* Session filters */
 .session-filter {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1.15fr) minmax(0, 0.75fr) minmax(0, 0.95fr) minmax(0, 0.85fr) max-content max-content;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.75fr) minmax(0, 0.95fr) minmax(0, 0.85fr) minmax(220px, 1.5fr) max-content;
   gap: 10px;
   align-items: end;
   margin-top: 18px;
@@ -4069,11 +4082,21 @@ a.model-rank-row:hover { background: var(--bg-secondary); }
 }
 
 .filter-actions {
+  grid-column: 5 / -1;
   display: flex;
   gap: 8px;
-  align-items: center;
+  align-items: end;
   justify-content: flex-end;
   min-height: 34px;
+  min-width: 0;
+}
+
+.filter-actions .filter-keyword {
+  flex: 1 1 220px;
+}
+
+.filter-actions .filter-check {
+  flex: 0 0 auto;
 }
 
 .filter-actions .btn {
@@ -4094,8 +4117,13 @@ a.model-rank-row:hover { background: var(--bg-secondary); }
   }
 
   .filter-actions {
+    grid-column: 1 / -1;
     justify-content: flex-start;
     flex-wrap: wrap;
+  }
+
+  .filter-actions .filter-keyword {
+    flex-basis: 100%;
   }
 }
 

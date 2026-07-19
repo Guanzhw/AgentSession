@@ -101,7 +101,7 @@ function inputTokenCount(tokens: any, output: any) {
   return input + cacheRead + cacheWrite;
 }
 
-export function formatTokens(tokens: any, { cacheWarning = null }: { cacheWarning?: any } = {}) {
+export function formatTokens(tokens: any, { cacheWarning = null, requestCount = 1 }: { cacheWarning?: any; requestCount?: number } = {}) {
   if (!tokens || typeof tokens !== "object") {
     return "";
   }
@@ -120,14 +120,18 @@ export function formatTokens(tokens: any, { cacheWarning = null }: { cacheWarnin
   const cachePercent = input > 0 ? cacheRead / input * 100 : 0;
   const cachePrecision = cachePercent > 0 && (cachePercent < 1 || cachePercent > 99) ? 2 : 1;
   const cacheRate = `${cachePercent.toFixed(cachePrecision)}%`;
+  const requestCountLabel = Math.max(1, Number(requestCount) || 1);
+  const aggregateScope = requestCountLabel > 1
+    ? ` across ${formatCompactCount(requestCountLabel)} model requests`
+    : " for this request";
   const outputTitle = tokens.reasoning
-    ? `Output tokens including reasoning: ${formatCompactCount(output)}`
-    : `Output tokens: ${formatCompactCount(output)}`;
+    ? `Output tokens including reasoning${aggregateScope}: ${formatCompactCount(output)}`
+    : `Output tokens${aggregateScope}: ${formatCompactCount(output)}`;
   const cacheTitle = cacheWarning
     ? `Possible cache miss: cached prompt input fell to ${cacheRate} after the previous same-model request was ${cacheWarning.previousRate}. Provider-reported values can also reflect routing or telemetry issues.`
-    : `Cached prompt input for this request: ${formatCompactCount(cache.read)} of ${formatCompactCount(input)} (${cacheRate} cache hit). This is provider-reported and not cumulative.`;
+    : `Cached prompt input${aggregateScope}: ${formatCompactCount(cache.read)} of ${formatCompactCount(input)} (${cacheRate} cache hit). Provider-reported values are summed per request.`;
   const pieces = [
-    tokenChip("↑", uncachedInput, `Uncached prompt input uploaded for this request: ${formatCompactCount(uncachedInput)}. Total prompt input: ${formatCompactCount(input)}${inputBreakdown ? ` (${inputBreakdown})` : ""}`),
+    tokenChip("↑", uncachedInput, `Uncached prompt input uploaded${aggregateScope}: ${formatCompactCount(uncachedInput)}. Total prompt input: ${formatCompactCount(input)}${inputBreakdown ? ` (${inputBreakdown})` : ""}`),
     tokenChip("↓", output, outputTitle),
     tokenChip("C", cache.read, cacheTitle, cacheWarning ? "token-chip-cache-warning" : ""),
     tokenChip("W", cache.write, `Cache write tokens: ${formatCompactCount(cache.write)}`)
@@ -240,8 +244,15 @@ export function sessionCard(s: any, active = false, { showCheckbox = false, prov
 export function messageHeader(role: any, meta: any = {}) {
   const safeRole = escapeHtml(role || "unknown");
   const model = meta.model ? `<span class="message-model">${escapeHtml(meta.model)}</span>` : "";
-  const tokens = formatTokens(meta.tokens, { cacheWarning: meta.cacheWarning });
-  const total = meta.tokens?.total != null ? ` title="Total tokens: ${escapeHtml(formatCompactCount(meta.tokens.total))}"` : "";
+  const requestCount = Math.max(0, Number(meta.tokenRequestCount) || (meta.tokens ? 1 : 0));
+  const requestCountText = formatCompactCount(requestCount);
+  const tokens = formatTokens(meta.tokens, { cacheWarning: meta.cacheWarning, requestCount });
+  const requestLabel = requestCount > 1
+    ? `<span class="message-token-requests" title="${escapeHtml(t("detail.token_requests_aggregate", { count: requestCountText }))}">${escapeHtml(t("detail.token_requests", { count: requestCountText }))}</span>`
+    : "";
+  const total = meta.tokens?.total != null
+    ? ` title="Total tokens${requestCount > 1 ? ` across ${escapeHtml(requestCountText)} model requests` : ""}: ${escapeHtml(formatCompactCount(meta.tokens.total))}"`
+    : "";
   const tokenMarkup = tokens ? `<span class="message-tokens"${total}>${tokens}</span>` : "";
   const time = meta.time ? `<time class="message-time">${escapeHtml(formatTime(meta.time))}</time>` : "";
 
@@ -249,6 +260,7 @@ export function messageHeader(role: any, meta: any = {}) {
       <span class="message-role">${safeRole}</span>
       ${model}
       ${tokenMarkup}
+      ${requestLabel}
       ${time}
     </header>`;
 }

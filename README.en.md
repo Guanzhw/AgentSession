@@ -7,9 +7,14 @@
 ![Node.js >= 22.13.0](https://img.shields.io/badge/node-%3E%3D22.13.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.7.0](https://img.shields.io/badge/version-1.7.0-orange?style=flat-square)
+![v1.7.1](https://img.shields.io/badge/version-1.7.1-orange?style=flat-square)
 
-## What's New in 1.7.0
+## What's New in 1.7.1
+
+- File-backed providers now keep tool-only continuation calls with the preceding assistant ReAct turn. Codex cumulative reasoning snapshots render once at their latest state, and merged token summaries disclose how many model requests they aggregate.
+- Session-list filters apply immediately; title search still requires Enter or Apply and now sits beside Apply.
+
+### 1.7.0
 
 - Pi is now a first-class provider with branch-tree JSONL parsing, active branches, forked sessions, reasoning, tool results, Token Explorer, flow, runtime extensions, resume commands, and MCP access.
 - MCP diagnostics now include unavailable providers by default; `session_get` returns first/last message previews and long events return reusable continuation arguments.

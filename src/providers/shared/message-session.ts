@@ -12,15 +12,62 @@ import type {
 
 type Row = Record<string, any>;
 
+function cloneTokenUsage(tokens: TokenUsage): TokenUsage {
+  return {
+    input: asNumber(tokens.input),
+    output: asNumber(tokens.output),
+    reasoning: asNumber(tokens.reasoning),
+    total: asNumber(tokens.total),
+    cache: {
+      read: asNumber(tokens.cache?.read),
+      write: asNumber(tokens.cache?.write)
+    }
+  };
+}
+
+function tokenUsageTotal(tokens: TokenUsage) {
+  const total = asNumber(tokens.total);
+  return total || (
+    asNumber(tokens.input)
+    + asNumber(tokens.output)
+    + asNumber(tokens.reasoning)
+    + asNumber(tokens.cache?.read)
+    + asNumber(tokens.cache?.write)
+  );
+}
+
+function sumTokenUsage(values: TokenUsage[]): TokenUsage | null {
+  if (!values.length) return null;
+  return values.reduce<TokenUsage>((total, tokens) => ({
+    input: asNumber(total.input) + asNumber(tokens.input),
+    output: asNumber(total.output) + asNumber(tokens.output),
+    reasoning: asNumber(total.reasoning) + asNumber(tokens.reasoning),
+    total: tokenUsageTotal(total) + tokenUsageTotal(tokens),
+    cache: {
+      read: asNumber(total.cache?.read) + asNumber(tokens.cache?.read),
+      write: asNumber(total.cache?.write) + asNumber(tokens.cache?.write)
+    }
+  }), {
+    input: 0,
+    output: 0,
+    reasoning: 0,
+    total: 0,
+    cache: { read: 0, write: 0 }
+  });
+}
+
 function messageData(message: Message): Row {
   const metadata = message.metadata && typeof message.metadata === "object"
     ? message.metadata
     : {};
   const model = metadata.model;
+  const tokens = message.tokens ? cloneTokenUsage(message.tokens) : null;
   return {
     role: message.role,
     time: { created: message.timestamp },
-    tokens: message.tokens,
+    tokens,
+    tokenRequestCount: tokens ? 1 : 0,
+    tokenRequests: tokens ? [tokens] : [],
     ...metadata,
     model: typeof model === "string"
       ? { modelID: model, providerID: metadata.provider || null }
@@ -102,9 +149,20 @@ function responseGroupId(message: Message) {
 
 function mergeMessageData(target: Row, message: Message) {
   const incoming = messageData(message);
-  if (message.tokens) target.tokens = message.tokens;
+  if (incoming.tokens) {
+    const existingRequests = Array.isArray(target.tokenRequests)
+      ? target.tokenRequests.filter((tokens: any) => tokens && typeof tokens === "object")
+      : target.tokens && typeof target.tokens === "object"
+        ? [target.tokens]
+        : [];
+    const tokenRequests = [...existingRequests, incoming.tokens as TokenUsage];
+    target.tokenRequests = tokenRequests;
+    target.tokenRequestCount = tokenRequests.length;
+    target.tokens = sumTokenUsage(tokenRequests);
+  }
   if (!target.model && incoming.model) target.model = incoming.model;
   for (const [key, value] of Object.entries(incoming)) {
+    if (["tokens", "tokenRequestCount", "tokenRequests"].includes(key)) continue;
     if (target[key] == null && value != null) target[key] = value;
   }
 }
@@ -115,6 +173,7 @@ export function buildMessageSessionTree(session: RawSession | Row, messages: Mes
   const toolPartsById = new Map<string, SessionPartNode>();
   let previousGroupId: string | null = null;
   let previousGroupNode: SessionMessageNode | null = null;
+  let activeAssistantNode: SessionMessageNode | null = null;
   messages.forEach((message, index) => {
     const toolUseId = message.metadata?.toolUseId;
     if (typeof toolUseId === "string" && toolUseId) {
@@ -135,11 +194,29 @@ export function buildMessageSessionTree(session: RawSession | Row, messages: Mes
       if (typeof callId === "string" && callId) toolPartsById.set(callId, toolPart);
     }
     const groupId = responseGroupId(message);
-    const groupable = Boolean(groupId) && ["assistant", "tool"].includes(String(message.role || "").toLowerCase());
-    if (groupable && previousGroupNode && previousGroupId === groupId) {
-      previousGroupNode.parts.push(...parts);
-      previousGroupNode.timeCreated = Math.min(previousGroupNode.timeCreated || message.timestamp, message.timestamp || previousGroupNode.timeCreated);
-      mergeMessageData(previousGroupNode.data, message);
+    const role = String(message.role || "").toLowerCase();
+    const groupable = Boolean(groupId) && ["assistant", "tool"].includes(role);
+    const groupedWithPrevious = groupable && previousGroupNode && previousGroupId === groupId;
+    // Providers can persist a tool-only continuation after a progress update
+    // with a new response id (for example, Codex emits token_count between
+    // individual exec calls). Keep that tool in the visible assistant card.
+    // A new reasoning record starts its own ReAct observation/decision card:
+    // it must not be folded into a prior assistant response just because no
+    // visible text was emitted between the two requests.
+    const implicitContinuation = Boolean(activeAssistantNode) && role === "tool";
+    const continuationTarget = groupedWithPrevious
+      ? previousGroupNode
+      : implicitContinuation
+        ? activeAssistantNode
+        : null;
+    if (continuationTarget) {
+      continuationTarget.parts.push(...parts);
+      continuationTarget.timeCreated = Math.min(continuationTarget.timeCreated || message.timestamp, message.timestamp || continuationTarget.timeCreated);
+      mergeMessageData(continuationTarget.data, message);
+      if (groupable) {
+        previousGroupId = groupId;
+        previousGroupNode = continuationTarget;
+      }
       return;
     }
 
@@ -152,6 +229,7 @@ export function buildMessageSessionTree(session: RawSession | Row, messages: Mes
       parts
     };
     nodes.push(node);
+    activeAssistantNode = ["assistant", "tool"].includes(role) ? node : null;
     previousGroupId = groupable ? groupId : null;
     previousGroupNode = groupable ? node : null;
   });

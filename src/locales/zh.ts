@@ -98,6 +98,8 @@ export const zh = {
   "detail.search_results": "第 {current} / {total} 个回合 · {occurrences} 处命中",
   "detail.search_no_results": "没有匹配的会话回合",
   "detail.search_indexing": "正在索引会话…",
+  "detail.token_requests": "{count} 次请求",
+  "detail.token_requests_aggregate": "汇总自 {count} 次模型请求",
 
   // Session actions
   "action.starred": "★ 已收藏",

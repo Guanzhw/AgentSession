@@ -98,6 +98,8 @@ export const en = {
   "detail.search_results": "{current} / {total} turns · {occurrences} hits",
   "detail.search_no_results": "No matching turns",
   "detail.search_indexing": "Indexing conversation…",
+  "detail.token_requests": "{count} requests",
+  "detail.token_requests_aggregate": "Aggregated across {count} model requests",
 
   // Session actions
   "action.starred": "★ Starred",

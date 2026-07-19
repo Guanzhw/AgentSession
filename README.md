@@ -7,9 +7,14 @@
 ![Node.js >= 22.13.0](https://img.shields.io/badge/node-%3E%3D22.13.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.7.0](https://img.shields.io/badge/version-1.7.0-orange?style=flat-square)
+![v1.7.1](https://img.shields.io/badge/version-1.7.1-orange?style=flat-square)
 
-## 1.7.0 更新
+## 1.7.1 更新
+
+- 文件型 Provider 现在会把仅工具调用的后续请求保留在前一个 Assistant 的 ReAct 回合内；Codex 的累计 reasoning 快照只展示最新状态，合并后的 token 汇总会明确标注聚合了多少次模型请求。
+- 会话列表的筛选项会立即生效；标题搜索仍需按 Enter 或 Apply，且已移到 Apply 旁边。
+
+### 1.7.0
 
 - Pi 现已成为一等 Provider，支持分支树 JSONL、活动分支、fork 会话、reasoning、工具结果、Token Explorer、Flow、runtime extensions、恢复命令与 MCP 查询。
 - MCP 默认诊断现在包含未安装的 Provider；`session_get` 返回首末消息预览，长事件返回可直接复用的 continuation 参数。
