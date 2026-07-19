@@ -147,7 +147,7 @@ npm install --global @acetamido/agentsession-mcp
 agentsession-mcp --config /path/to/config.json
 ```
 
-它只提供五个只读工具：`session_search`、`session_get`、`session_timeline`、`session_get_context` 与 `session_get_event`。默认搜索标题、消息正文和已记录的目录；以空白分隔的多个关键词必须全部命中，但不要求相邻。`session_search` 可用 `directory` 限定规范化后的项目路径，并用返回的 `nextCursor` 继续读取同一时间快照。普通搜索不会返回 reasoning；reasoning、tool input 与 tool output 均需要显式请求，并始终受服务端长度限制。
+它只提供五个只读工具：`session_search`、`session_get`、`session_timeline`、`session_get_context` 与 `session_get_event`。默认搜索标题、消息正文和已记录的目录；以空白分隔的多个关键词必须全部命中，但不要求相邻。`session_search` 可用 `directory` 限定规范化后的项目路径，并用返回的 `nextCursor` 继续读取同一时间快照；默认搜索的 `diagnostics` 会列出所有已注册 Provider，包括未安装的 Provider。`session_get` 同时返回首条和末条可见消息预览，标题命中后通常无需先调用 timeline 才能取得 EventRef。普通搜索不会返回 reasoning；reasoning、tool input 与 tool output 均需要显式请求，并始终受服务端长度限制。截断的 `session_get_event` 内容会返回可直接用于下一次调用的 `continuation`/`continuations` 参数，直到 `nextOffset` 为 `null`。
 
 使用相同的 AgentSession 配置文件即可复用 Provider 路径与元数据目录。可选的 MCP 输出上限如下；所有数值都有服务端硬上限：
 

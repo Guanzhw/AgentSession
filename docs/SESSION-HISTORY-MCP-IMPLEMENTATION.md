@@ -126,21 +126,32 @@ Optional input:
   "providers": ["opencode", "codex"],
   "updatedAfter": 1710000000000,
   "updatedBefore": 1720000000000,
+  "directory": "D:/WorkSpace/example",
+  "cursor": "opaque-cursor-from-previous-result",
   "limit": 20
 }
 ~~~
 
-The result includes provider diagnostics, a bounded ordered list of matches,
+The result includes diagnostics for every selected provider, a bounded ordered list of matches,
 and each match's SessionRef, optional EventRef, match field, snippet, title,
 directory, and update timestamp. The result sets truncated when a provider's
 bounded search result was exhausted; it must not claim an exact global total
 when the provider API cannot supply one.
+
+When providers is omitted, diagnostics cover every registered provider rather
+than only the available subset. An unavailable provider is reported with
+status unavailable without making the otherwise successful cross-provider
+search fail.
 
 By default, matching includes session title, recorded normalized message text,
 and recorded working-directory metadata. A tool name or error is searchable
 only when its adapter exposes it through normal message search content. Search
 excludes visible reasoning and raw tool input/output so broad keyword search
 does not accidentally load sensitive, high-volume data into model context.
+Whitespace-separated query terms use case-insensitive AND semantics and do not
+need to be adjacent. The optional directory filter compares normalized recorded
+project paths. nextCursor continues the same snapshotUpdatedBefore result set;
+changing query, provider, time, or directory filters invalidates that cursor.
 
 ### 5.2 session_get
 
@@ -149,6 +160,7 @@ Returns one normalized session overview:
 - canonical SessionRef;
 - title, directory, created and updated timestamps;
 - message and token counts when available;
+- first and last visible-message previews with EventRefs;
 - recorded parent session reference; and
 - bounded direct child-session summaries from the viewer-owned session index.
 
@@ -215,7 +227,11 @@ Message text is returned for a message segment. A thinking segment requires
 includeThinking: true. A tool segment always returns its name and status, but
 tool input and output require their explicit include flags. The maximum
 returned character count is capped server-side and nextOffset is returned when
-more content remains.
+more content remains. Each truncated page also returns reusable continuation
+arguments for the next call. Tool input and output have independent
+continuations so a client can assemble either stream without guessing flags or
+offsets. The configured eventMaxChars value remains the per-call server-side
+maximum.
 
 ## 6. Retrieval And Indexing Strategy
 

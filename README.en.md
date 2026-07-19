@@ -154,7 +154,12 @@ default. Whitespace-separated terms must all match but do not need to be
 adjacent. `session_search` accepts `directory` to match a normalized recorded
 project path and returns `nextCursor` for continuing the same time-bounded
 snapshot. Normal search does not return reasoning; reasoning, tool input, and
-tool output require explicit opt-in and are always bounded server-side.
+tool output require explicit opt-in and are always bounded server-side. Default
+search diagnostics include every registered provider, including unavailable
+ones. `session_get` includes first and last visible-message previews so a title
+match normally provides an EventRef without an extra timeline call. Truncated
+`session_get_event` content includes reusable `continuation`/`continuations`
+arguments until `nextOffset` is null.
 
 Use the same AgentSession JSON config to reuse provider paths and the metadata
 directory. MCP output limits are optional and server-capped:

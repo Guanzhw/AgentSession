@@ -131,6 +131,10 @@ test("session-history service searches, pages events, honors exclusions, and req
 
   const overview = service.get({ session: { provider: "codex", sessionId: "root" } });
   assert.equal(overview.session.sessionId, "root");
+  assert.equal(overview.firstMessage.event.messageId, "m1");
+  assert.equal(overview.firstMessage.preview, "Needle in a user message");
+  assert.equal(overview.lastMessage.event.messageId, "m2");
+  assert.equal(overview.lastMessage.preview, "I will inspect it");
   assert.deepEqual(overview.children.map((child) => child.session.sessionId), ["child"]);
 
   const timeline = service.timeline({ session: { provider: "codex", sessionId: "root" }, limit: 2 });
@@ -164,11 +168,53 @@ test("session-history service searches, pages events, honors exclusions, and req
   });
   assert.equal(toolOutput.toolOutput.text, "tool out");
   assert.equal(toolOutput.toolOutput.nextOffset, 8);
+  assert.equal(toolOutput.toolOutput.totalChars, 28);
+  assert.deepEqual(toolOutput.continuations.toolOutput, {
+    event: { provider: "codex", sessionId: "root", messageId: "m3", segment: "tool" },
+    includeToolOutput: true,
+    offset: 8,
+    maxChars: 8
+  });
 
   assert.throws(
     () => service.get({ session: { provider: "codex", sessionId: "hidden" } }),
     (error) => error instanceof SessionHistoryError && error.code === "session_not_found"
   );
+});
+
+test("session-history default search diagnoses unavailable registered providers", () => {
+  const gemini = {
+    id: "gemini",
+    name: "Fixture Gemini",
+    icon: "",
+    detect: () => false,
+    getDataPath: () => null,
+    async *scan() {},
+    getSession: () => null,
+    getMessages: () => [],
+    getTokenStats: () => [],
+    searchMessages: () => []
+  };
+  const diagnosticService = createSessionHistoryService({
+    dependencies: {
+      getAvailableProviders: () => [],
+      getAllProviders: () => [gemini],
+      getExcludedIds: () => new Set(),
+      findIndexedSessionMetadata: () => [],
+      getIndexedSessionChildren: () => []
+    }
+  });
+  assert.deepEqual(diagnosticService.search({ query: "Needle" }).diagnostics, [
+    { provider: "gemini", status: "unavailable" }
+  ]);
+});
+
+test("session_get returns null previews when a session has no visible messages", () => {
+  const { service } = createFixture();
+  const overview = service.get({ session: { provider: "codex", sessionId: "child" } });
+  assert.equal(overview.messageCount, 0);
+  assert.equal(overview.firstMessage, null);
+  assert.equal(overview.lastMessage, null);
 });
 
 test("OpenCode SQLite search event references round-trip and session_get reports normalized message count", () => {

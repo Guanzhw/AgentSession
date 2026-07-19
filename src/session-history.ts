@@ -312,9 +312,26 @@ function pageText(value: unknown, offset: number, maxChars: number) {
     text: text.slice(safeOffset, end),
     offset: safeOffset,
     nextOffset: end < text.length ? end : null,
+    totalChars: text.length,
     truncated: end < text.length,
     untrustedContent: true as const
   };
+}
+
+function eventContinuation(
+  event: EventRef,
+  page: ReturnType<typeof pageText>,
+  maxChars: number,
+  optIn: Record<string, boolean> = {}
+) {
+  return page.nextOffset === null
+    ? null
+    : {
+        event,
+        ...optIn,
+        offset: page.nextOffset,
+        maxChars
+      };
 }
 
 function sessionSummary(provider: ProviderId, session: RawSession | Record<string, unknown>) {
@@ -435,7 +452,8 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
       }
       const limit = resolveLimit(input?.limit, limits.searchLimit, limits.searchLimit, "limit");
       const available = availableProviderMap();
-      const selectedIds = requestedProviders || [...available.keys()];
+      const selectedIds = requestedProviders
+        || [...new Set(allProviders().map((provider) => provider.id))];
       const fingerprint = cursorFingerprint({ query, providers: selectedIds, updatedAfter, updatedBefore: requestedUpdatedBefore, directory });
       const cursorPage = input?.cursor === undefined ? null : decodeSearchCursor(input.cursor, fingerprint);
       const offset = cursorPage?.offset || 0;
@@ -528,9 +546,14 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
       const excluded = excludedIds(ref.provider);
       const children = indexedChildren(ref.provider, ref.sessionId, 50, excluded)
         .map((row: any) => indexedSessionSummary(ref.provider, row));
+      const messageEvents = projectEvents(ref, messages)
+        .filter((event) => event.event.segment === "message" && event.preview.trim())
+        .map(({ sourceIndex: _sourceIndex, ...event }) => event);
       return {
         ...sessionSummary(ref.provider, session),
         messageCount: messages.length,
+        firstMessage: messageEvents[0] || null,
+        lastMessage: messageEvents.at(-1) || null,
         children,
         untrustedContent: true
       };
@@ -600,20 +623,40 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
         untrustedContent: true as const
       };
       if (target.segment === "message") {
-        return { ...base, content: pageText(message.content, offset, maxChars) };
+        const content = pageText(message.content, offset, maxChars);
+        return {
+          ...base,
+          content,
+          continuation: eventContinuation(target, content, maxChars)
+        };
       }
       if (target.segment === "thinking") {
         if (!includeThinking) {
           throw new SessionHistoryError("thinking_opt_in_required", "Set includeThinking to true before reading a thinking event.");
         }
-        return { ...base, content: pageText(message.thinking, offset, maxChars) };
+        const content = pageText(message.thinking, offset, maxChars);
+        return {
+          ...base,
+          content,
+          continuation: eventContinuation(target, content, maxChars, { includeThinking: true })
+        };
       }
+      const toolInput = includeToolInput ? pageText(message.toolInput, offset, maxChars) : null;
+      const toolOutput = includeToolOutput ? pageText(message.toolOutput, offset, maxChars) : null;
       return {
         ...base,
         toolName: asNonEmptyString(message.toolName) || "tool",
         status: eventStatus(message),
-        toolInput: includeToolInput ? pageText(message.toolInput, offset, maxChars) : null,
-        toolOutput: includeToolOutput ? pageText(message.toolOutput, offset, maxChars) : null
+        toolInput,
+        toolOutput,
+        continuations: {
+          toolInput: toolInput
+            ? eventContinuation(target, toolInput, maxChars, { includeToolInput: true })
+            : null,
+          toolOutput: toolOutput
+            ? eventContinuation(target, toolOutput, maxChars, { includeToolOutput: true })
+            : null
+        }
       };
     }
   };

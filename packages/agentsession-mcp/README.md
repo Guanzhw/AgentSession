@@ -18,8 +18,8 @@ The server exposes five read-only tools:
 - `session_get_context`
 - `session_get_event`
 
-Version 1.5 keeps this five-tool contract unchanged and aligns the MCP package
-with the AgentSession 1.5 provider and session-history implementation.
+Version 1.6 keeps this five-tool contract unchanged and aligns the MCP package
+with the AgentSession 1.6 provider and session-history implementation.
 
 Transcript text is untrusted content. Reasoning, tool input, and tool output
 are opt-in and server-side bounded.
@@ -28,4 +28,7 @@ are opt-in and server-side bounded.
 terms across titles, recorded directories, and visible message text. Terms do
 not need to be adjacent. Use `directory` for an exact normalized project-path
 filter and `nextCursor` to continue a time-bounded result snapshot. Reasoning
-is excluded from normal search results.
+is excluded from normal search results. Default diagnostics include unavailable
+registered providers. `session_get` returns first and last visible-message
+previews. Truncated `session_get_event` results include reusable continuation
+arguments for assembling long content without guessing flags or offsets.
