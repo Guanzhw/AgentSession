@@ -6,7 +6,9 @@ import { getLocale } from "./i18n.js";
 import { getProvider } from "./providers/index.js";
 import { isBinaryRuntime, readBinaryAsset } from "./binary-runtime.js";
 
-export const staticDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "static");
+export const staticDir = isBinaryRuntime()
+  ? ""
+  : path.join(path.dirname(fileURLToPath(import.meta.url)), "static");
 
 export function injectLocaleScript(body: string, contentType: string): string {
   if (typeof body !== "string" || !contentType.startsWith("text/html")) {

@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   readdirSync,
   rmSync,
   writeFileSync
@@ -2524,17 +2525,17 @@ test("OpenCode runtime environment resolves project and user agent extensions", 
     assert.ok(runtime.extensions.some((entry) => (
       entry.scope === "project"
       && entry.kind === "instruction"
-      && entry.sourcePath === path.join(projectPath, "AGENTS.md")
+      && entry.sourcePath === realpathSync(path.join(projectPath, "AGENTS.md"))
     )));
     assert.ok(runtime.extensions.some((entry) => (
       entry.scope === "project"
       && entry.kind === "instruction"
-      && entry.sourcePath === path.join(projectPath, "docs", "runtime.md")
+      && entry.sourcePath === realpathSync(path.join(projectPath, "docs", "runtime.md"))
     )));
     assert.ok(runtime.extensions.some((entry) => (
       entry.scope === "user"
       && entry.kind === "instruction"
-      && entry.sourcePath === path.join(userOpenCode, "AGENTS.md")
+      && entry.sourcePath === realpathSync(path.join(userOpenCode, "AGENTS.md"))
     )));
   } finally {
     if (previousConfigHome === undefined) {
@@ -2568,41 +2569,41 @@ test("provider runtime environments classify instruction files as runtime extens
   assert.ok(codex.extensions.some((entry) => (
     entry.scope === "user"
     && entry.kind === "instruction"
-    && entry.sourcePath === path.join(codexDir, "AGENTS.md")
+    && entry.sourcePath === realpathSync(path.join(codexDir, "AGENTS.md"))
   )));
   assert.ok(codex.extensions.some((entry) => (
     entry.scope === "project"
     && entry.kind === "instruction"
-    && entry.sourcePath === path.join(projectPath, "AGENTS.override.md")
+    && entry.sourcePath === realpathSync(path.join(projectPath, "AGENTS.override.md"))
   )));
 
   const claude = buildClaudeCodeRuntimeEnvironment("claude-session", projectPath, claudeDir);
   assert.ok(claude.extensions.some((entry) => (
     entry.scope === "user"
     && entry.kind === "instruction"
-    && entry.sourcePath === path.join(claudeDir, "CLAUDE.md")
+    && entry.sourcePath === realpathSync(path.join(claudeDir, "CLAUDE.md"))
   )));
   assert.ok(claude.extensions.some((entry) => (
     entry.scope === "project"
     && entry.kind === "instruction"
-    && entry.sourcePath === path.join(projectPath, "CLAUDE.md")
+    && entry.sourcePath === realpathSync(path.join(projectPath, "CLAUDE.md"))
   )));
   assert.ok(claude.extensions.some((entry) => (
     entry.scope === "project"
     && entry.kind === "rule"
-    && entry.sourcePath === path.join(projectPath, ".claude", "rules", "review.md")
+    && entry.sourcePath === realpathSync(path.join(projectPath, ".claude", "rules", "review.md"))
   )));
 
   const gemini = buildGeminiRuntimeEnvironment("gemini-session", projectPath, geminiDir);
   assert.ok(gemini.extensions.some((entry) => (
     entry.scope === "user"
     && entry.kind === "instruction"
-    && entry.sourcePath === path.join(geminiDir, "GEMINI.md")
+    && entry.sourcePath === realpathSync(path.join(geminiDir, "GEMINI.md"))
   )));
   assert.ok(gemini.extensions.some((entry) => (
     entry.scope === "project"
     && entry.kind === "instruction"
-    && entry.sourcePath === path.join(projectPath, "GEMINI.md")
+    && entry.sourcePath === realpathSync(path.join(projectPath, "GEMINI.md"))
   )));
 });
 
@@ -3403,7 +3404,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
   });
   assert.equal(
     path.dirname(run.runDir),
-    path.join(projectPath, ".agentsession", "analysis")
+    path.join(realpathSync(projectPath), ".agentsession", "analysis")
   );
   assert.equal(
     readFileSync(path.join(projectPath, ".agentsession", ".gitignore"), "utf-8"),
@@ -3944,7 +3945,7 @@ test("analysis run listing preserves legacy metadata-directory runs", () => {
 
   assert.equal(
     getAnalysisOutputRoot(projectPath, {}, metaDir),
-    path.join(projectPath, ".agentsession", "analysis")
+    path.join(realpathSync(projectPath), ".agentsession", "analysis")
   );
   const legacyProjectRunDir = path.join(projectPath, ".opensessionviewer", "analysis", "legacy-project-run");
   mkdirSync(legacyProjectRunDir, { recursive: true });
@@ -3972,7 +3973,7 @@ test("analysis run listing preserves legacy metadata-directory runs", () => {
   assert.equal(runs.find((run) => run.runId === "legacy-run")?.runDir, runDir);
   assert.equal(
     runs.find((run) => run.runId === "legacy-project-run")?.runDir,
-    legacyProjectRunDir
+    path.join(realpathSync(projectPath), ".opensessionviewer", "analysis", "legacy-project-run")
   );
 });
 
