@@ -5,7 +5,7 @@ import {
   type SessionHistoryService
 } from "@acetamido/agentsession/session-history";
 
-const providerSchema = z.enum(["opencode", "claude-code", "codex", "gemini"]);
+const providerSchema = z.enum(["opencode", "claude-code", "codex", "gemini", "pi"]);
 const sessionRefSchema = z.object({
   provider: providerSchema,
   sessionId: z.string().trim().min(1).max(1000)
@@ -53,7 +53,7 @@ function execute(summary: (result: any) => string, operation: () => unknown) {
 export function createSessionHistoryMcpServer(service: SessionHistoryService) {
   const server = new McpServer({
     name: "AgentSession-MCP",
-    version: "1.6.0"
+    version: "1.7.0"
   });
   const annotations = {
     readOnlyHint: true,

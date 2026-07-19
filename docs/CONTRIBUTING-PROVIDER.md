@@ -33,6 +33,7 @@ than product similarity.
 |---|---|---|
 | One JSON session per file | `src/providers/gemini/` | File store, incremental token statistics, and flat structured views. |
 | JSONL transcript | `src/providers/claude-code/` or `src/providers/codex/` | Defensive record parsing and explicit response/child-session boundaries. |
+| In-file branch-tree JSONL | `src/providers/pi/` | Reconstruct the active `id`/`parentId` branch before normalizing messages; preserve file-level `parentSession` fork identity. |
 | OpenCode-compatible SQLite | `src/providers/opencode/` and `src/providers/shared/sqlite-adapter.ts` | Share only schema-neutral SQLite behavior; keep schema enrichment provider-owned. |
 | Nested/sidechain agent transcripts | `src/providers/shared/linked-message-session.ts` | Canonical `parentId` plus explicit spawn references. |
 
@@ -279,6 +280,8 @@ the validation matrix in `AGENTS.md` for the changed surface.
 - `src/providers/gemini/` — compact JSON file-provider example.
 - `src/providers/claude-code/` and `src/providers/codex/` — JSONL and nested
   transcript examples.
+- `src/providers/pi/` — in-file branch-tree JSONL, compaction, tool-result,
+  usage, session-name, and forked-session example.
 - `src/providers/shared/file-adapter-helpers.ts` — file-store, token, and
   structured-view helpers.
 - `src/providers/shared/linked-message-session.ts` — nested session linking.

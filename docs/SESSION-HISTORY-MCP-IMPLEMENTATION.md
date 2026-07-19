@@ -85,6 +85,10 @@ type EventRef = SessionRef & {
 };
 ~~~
 
+The registered ProviderId set includes `opencode`, `claude-code`, `codex`,
+`gemini`, and `pi`. Pi uses the canonical session UUID from its JSONL header;
+event IDs come from active-branch entry IDs or source tool-call IDs.
+
 An event is a projection of the existing normalized Message contract:
 
 - A message event represents Message.content for user, assistant, or recorded

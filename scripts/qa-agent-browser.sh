@@ -83,7 +83,7 @@ ab "clear previous session" close --all >/dev/null || true
 
 ab "open centralized sessions" open "$BASE/sessions" >/dev/null
 ab "wait for centralized sessions" wait --text "Recent Sessions" >/dev/null
-global_session_state="$(read_ab "verify centralized session providers" eval "JSON.stringify({ filters: document.querySelectorAll('.provider-filter input[name=provider]:checked').length, badges: document.querySelectorAll('.session-provider-badge').length, badLinks: [...document.querySelectorAll('.session-card-title-link')].filter((link) => !/^\\/(opencode|claude-code|codex|gemini)\\/session\\//.test(link.getAttribute('href') || '')).length })")"
+global_session_state="$(read_ab "verify centralized session providers" eval "JSON.stringify({ filters: document.querySelectorAll('.provider-filter input[name=provider]:checked').length, badges: document.querySelectorAll('.session-provider-badge').length, badLinks: [...document.querySelectorAll('.session-card-title-link')].filter((link) => !/^\\/(opencode|claude-code|codex|gemini|pi)\\/session\\//.test(link.getAttribute('href') || '')).length })")"
 if ! printf '%s' "$global_session_state" | grep -Eq 'filters[^0-9]*[1-9][0-9]*' || ! printf '%s' "$global_session_state" | grep -Eq 'badLinks[^0-9]*0'; then
   echo "Centralized sessions should expose selected provider filters and canonical provider-owned detail links, got $global_session_state" >&2
   exit 1

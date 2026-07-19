@@ -1,6 +1,6 @@
 {
   "name": "agentsession-workspace",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "AgentSession — a local-first multi-provider viewer and manager for AI coding sessions.",
   "type": "module",
   "private": true,
@@ -29,6 +29,7 @@
     "claude-code",
     "codex",
     "gemini",
+    "pi-coding-agent",
     "session-viewer",
     "ai-coding",
     "session-manager",

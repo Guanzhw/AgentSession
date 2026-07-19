@@ -442,6 +442,7 @@ export const zh = {
   "provider.claude-code": "Claude Code",
   "provider.codex": "Codex CLI",
   "provider.gemini": "Gemini CLI",
+  "provider.pi": "Pi",
   "provider.read_only": "只读模式",
   "provider.not_detected": "未安装",
 };

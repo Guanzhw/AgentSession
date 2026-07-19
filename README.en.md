@@ -1,24 +1,18 @@
 # AgentSession
 
-> A local AI session archive for developers: one searchable, traceable, reviewable web UI for OpenCode, Claude Code, Codex CLI, and Gemini CLI sessions.
+> A local AI session archive for developers: one searchable, traceable, reviewable web UI for OpenCode, Claude Code, Codex CLI, Gemini CLI, and Pi sessions.
 
 [English](./README.en.md) · [中文](./README.md)
 
 ![Node.js >= 22.13.0](https://img.shields.io/badge/node-%3E%3D22.13.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.6.0](https://img.shields.io/badge/version-1.6.0-orange?style=flat-square)
+![v1.7.0](https://img.shields.io/badge/version-1.7.0-orange?style=flat-square)
 
-## What's New in 1.6.0
+## What's New in 1.7.0
 
-- Added cross-platform single-file Viewer and MCP binaries that require no system Node.js, published through GitHub Releases with SHA-256 checksums.
-- Windows executable paths now retain their basename on Linux and WSL, so cross-platform diagnostics and tests use consistent names.
-- The minimum Node.js version is corrected to 22.13.0 so `node:sqlite` works without an experimental flag.
-- `/sessions` and `/stats` are unified cross-provider entry points; providers are composable filters while detail pages retain canonical provider URLs.
-- The combined token trend exposes provider filters directly, and contribution cards can filter in place or open provider-specific advanced statistics.
-- Equivalent Windows, slash-normalized Windows, and WSL project paths merge into one cross-provider project filter.
-- Codex CLI sessions now support proposal-only analysis with Codex-owned session evidence and runtime extensions.
-- Session-detail tabs keep a stable content track, avoiding the page jump previously caused by showing or hiding the Conversation table of contents.
+- Pi is now a first-class provider with branch-tree JSONL parsing, active branches, forked sessions, reasoning, tool results, Token Explorer, flow, runtime extensions, resume commands, and MCP access.
+- MCP diagnostics now include unavailable providers by default; `session_get` returns first/last message previews and long events return reusable continuation arguments.
 
 See [CHANGELOG.md](./CHANGELOG.md) for the complete release notes.
 
@@ -47,6 +41,7 @@ The focus is no longer just “list my chats.” The goal is to help you reconst
 | Claude Code | Manageable | `~/.claude/transcripts/` + `~/.claude/projects/` | Browse, search, star, rename, delete, trash, Token Explorer, ReACT, trace, flow, subagents when sidechain transcripts exist, analysis prompt evidence, analysis |
 | Codex CLI | Manageable | `~/.codex/sessions/**/*.jsonl` | Browse, search, star, rename, delete, trash, Token Explorer, ReACT, flow, nested subagents, analysis |
 | Gemini CLI | Manageable | `~/.gemini/tmp/*/chats/*.json` | Browse, search, star, rename, delete, trash, Token Explorer, ReACT, flow |
+| Pi | Manageable | `~/.pi/agent/sessions/**/*.jsonl` | Browse, search, star, rename, delete, trash, Token Explorer, ReACT, flow, active branches, fork relationships, runtime extensions |
 
 Adding a provider? Follow the [provider contribution guide](./docs/CONTRIBUTING-PROVIDER.md) for the adapter, MCP, test, and release checklist.
 
@@ -58,7 +53,7 @@ All providers store stars, custom titles, soft deletes, and permanent exclusions
 - **Session list and search**: the global entry filters provider titles, viewer custom titles, and directories; provider pages retain message-content search, starring, and local management. A reversible title-type filter can separate displayed titles containing analysis/analyze signals from other sessions; it is a viewer heuristic, not provider metadata.
 - **Session detail review**: provider-owned response boundaries keep reasoning, action/tool calls, and observation/tool results together as ReACT turns.
 - **Stable detail tabs**: Overview, Conversation, Flow, Analysis, and Raw data share one content track. The Conversation table of contents fades without reflowing the title, actions, or tab bar and honors reduced-motion preferences.
-- **Recursive session tree**: OpenCode, Codex, and Claude Code sessions with stored sidechain transcripts render child sessions as nested containers with direct open links.
+- **Recursive session tree**: OpenCode, Codex, Pi, and Claude Code sessions with stored sidechain transcripts render child sessions as nested containers with direct open links.
 - **Tool Flow Tree**: the right-side Flow view shows root sessions, messages, tools, and subagent branches by hierarchy.
 - **Table of Contents**: long sessions get navigation for prompts, assistant turns, `task` / `subtask` / `spawn_agent` branches, and nested sessions.
 - **In-conversation search**: open the compact detail-page search from the action bar or press `/`; results report matching turns and text occurrences, highlight the exact text, and keep previous/next controls visible while navigating.
@@ -109,6 +104,7 @@ agentsession [options]
 --claude-dir <path>   Claude Code data directory
 --codex-dir <path>    Codex CLI data directory
 --gemini-dir <path>   Gemini CLI data directory
+--pi-dir <path>       Pi agent data directory
 --config <path>       AgentSession JSON config
 --disable-terminal-launch
                       Disable resume and analysis command launching
@@ -129,6 +125,7 @@ agentsession [options]
 | `CLAUDE_CONFIG_DIR` | Claude Code data directory |
 | `CODEX_HOME` | Codex CLI data directory |
 | `GEMINI_HOME` | Gemini CLI data directory |
+| `PI_CODING_AGENT_DIR` | Pi agent data directory, defaults to `~/.pi/agent` |
 | `AGENTSESSION_META_PATH` | AgentSession metadata DB path |
 | `AGENTSESSION_CONFIG` | AgentSession JSON config path |
 | `OPENSESSIONVIEWER_META_PATH` | Legacy metadata DB path |
@@ -138,7 +135,7 @@ agentsession [options]
 ## AgentSession-MCP: local session history for coding agents
 
 `@acetamido/agentsession-mcp` is a separate stdio MCP package for Codex, Claude Code,
-Gemini CLI, OpenCode, and other MCP hosts to query the session history from
+Gemini CLI, OpenCode, Pi, and other MCP hosts to query the session history from
 locally available providers. It starts no web server, binds no port, and never
 modifies provider-owned data.
 
@@ -205,6 +202,7 @@ All registered providers declare a default resume command:
 | Claude Code | `claude --resume {sessionId}` |
 | Codex CLI | `codex resume {sessionId}` |
 | Gemini CLI | `gemini --resume {sessionId}` |
+| Pi | `pi --session {sessionId}` |
 
 Every command and the PowerShell-compatible terminal shell can be overridden in
 `config.json` under the normal AgentSession config directory, or in the

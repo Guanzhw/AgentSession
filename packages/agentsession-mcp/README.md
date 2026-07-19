@@ -4,6 +4,9 @@ AgentSession-MCP is a local, read-only stdio MCP server for AI coding-session
 history. It queries the providers configured for AgentSession without starting
 a web server or modifying provider-owned data.
 
+Supported provider references include OpenCode, Claude Code, Codex CLI, Gemini
+CLI, and Pi.
+
 ```bash
 npm install --global @acetamido/agentsession-mcp
 agentsession-mcp --help
@@ -18,8 +21,8 @@ The server exposes five read-only tools:
 - `session_get_context`
 - `session_get_event`
 
-Version 1.6 keeps this five-tool contract unchanged and aligns the MCP package
-with the AgentSession 1.6 provider and session-history implementation.
+Version 1.7 keeps this five-tool contract unchanged, adds Pi, and aligns the MCP
+package with the AgentSession 1.7 provider and session-history implementation.
 
 Transcript text is untrusted content. Reasoning, tool input, and tool output
 are opt-in and server-side bounded.

@@ -300,7 +300,8 @@ test("AgentSession-MCP lists exactly five read-only tools over the MCP protocol"
     "opencode",
     "claude-code",
     "codex",
-    "gemini"
+    "gemini",
+    "pi"
   ]);
   assert.ok(searchTool.inputSchema.properties.directory);
   assert.ok(searchTool.inputSchema.properties.cursor);

@@ -27,6 +27,7 @@ import {
 import { buildCodexRuntimeEnvironment } from "../dist/src/providers/codex/runtime-environment.js";
 import { codexDailyTokenComponents } from "../dist/src/providers/codex/adapter.js";
 import { buildGeminiRuntimeEnvironment } from "../dist/src/providers/gemini/runtime-environment.js";
+import { buildPiRuntimeEnvironment } from "../dist/src/providers/pi/runtime-environment.js";
 import { buildFlowTreeFromContainer } from "../dist/src/providers/shared/flow-tree.js";
 import { renderCanonicalFlowPanelContent, renderSessionPage } from "../dist/src/views/session.js";
 import { renderSettingsPage } from "../dist/src/views/settings.js";
@@ -67,6 +68,13 @@ import {
   refreshSqliteTokenStatsIndex,
 } from "../dist/src/stats-index.js";
 import { dataToMessages as geminiDataToMessages } from "../dist/src/providers/gemini/parser.js";
+import {
+  activePiEntries,
+  extractPiMeta,
+  parsePiSession,
+  piAssistantUsageRecords,
+  piRecordsToMessages
+} from "../dist/src/providers/pi/parser.js";
 import { getAllProviders } from "../dist/src/providers/index.js";
 import {
   buildPowerShellLaunchSpec,
@@ -1249,7 +1257,7 @@ test("every provider declares a configurable resume command", () => {
   const providers = getAllProviders();
   assert.deepEqual(
     providers.map((provider) => provider.id),
-    ["opencode", "claude-code", "codex", "gemini"]
+    ["opencode", "claude-code", "codex", "gemini", "pi"]
   );
   for (const provider of providers) {
     assert.equal(typeof provider.resumeCommand?.executable, "string", provider.id);
@@ -1257,6 +1265,7 @@ test("every provider declares a configurable resume command", () => {
     assert.ok(Array.isArray(provider.resumeCommand.args), provider.id);
     assert.ok(provider.resumeCommand.args.includes("{sessionId}"), provider.id);
   }
+  assert.equal(parseArgs(["--pi-dir", "D:\\fixtures\\pi-agent"]).piDir, "D:\\fixtures\\pi-agent");
 });
 
 test("terminal launch is enabled by default and supports an explicit startup opt-out", () => {
@@ -1446,6 +1455,73 @@ test("cross-provider project paths normalize Windows and WSL aliases", () => {
   assert.equal(normalizeCrossProviderProjectPath("D:\\"), "d:/");
   assert.equal(normalizeCrossProviderProjectPath("/mnt/d/"), "d:/");
   assert.equal(normalizeCrossProviderProjectPath("/srv/Project/"), "/srv/Project");
+});
+
+test("Pi sessions preserve the active branch, tools, reasoning, usage, names, and parent identity", () => {
+  const records = parsePiSession(path.join(process.cwd(), "test", "fixtures", "pi-current.jsonl"));
+  const active = activePiEntries(records);
+  assert.equal(active.some((entry) => entry.id === "olduser1" || entry.id === "oldasst1"), false);
+  assert.equal(active.at(-1).id, "asst0003");
+
+  const meta = extractPiMeta(records, "fallback");
+  assert.equal(meta.id, "019f7b00-0000-7000-8000-000000000001");
+  assert.equal(meta.provider, "pi");
+  assert.equal(meta.parentId, "019f7a00-0000-7000-8000-000000000000");
+  assert.equal(meta.title, "Pi provider fixture");
+  assert.equal(meta.directory, "D:\\WorkSpace\\pi-fixture");
+  assert.equal(meta.tokenCount, 30);
+
+  const messages = piRecordsToMessages(records, meta.id);
+  assert.equal(messages.some((message) => message.content.includes("abandoned")), false);
+  assert.equal(messages.some((message) => message.content.includes("hidden extension")), false);
+  const assistant = messages.find((message) => message.id === "asst0001");
+  assert.equal(assistant.thinking, "Need to read the source");
+  assert.deepEqual(assistant.tokens, {
+    input: 6,
+    output: 4,
+    reasoning: 0,
+    total: 15,
+    cache: { read: 3, write: 2 }
+  });
+  const tool = messages.find((message) => message.id === "call_read_1");
+  assert.equal(tool.toolName, "read");
+  assert.deepEqual(tool.toolInput, { path: "src/provider.ts" });
+  assert.equal(tool.toolOutput, "export const provider = 'pi';");
+  assert.equal(tool.metadata.status, "completed");
+  assert.equal(messages.some((message) => message.metadata?.type === "compaction"), true);
+  assert.equal(piAssistantUsageRecords(records).length, 3);
+
+  const views = buildMessageSessionViews(meta, messages);
+  assert.equal(views.tree.session.id, meta.id);
+  assert.equal(views.tree.metrics.toolCallCount, 1);
+  assert.equal(views.tree.metrics.inputTokens, 13);
+  assert.equal(views.flow.summary.toolCalls, 1);
+});
+
+test("Pi runtime environment discovers user and project-owned configuration", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "agentsession-pi-runtime-"));
+  try {
+    const project = path.join(temp, "project");
+    const piDir = path.join(temp, "pi-agent");
+    mkdirSync(path.join(project, ".git"), { recursive: true });
+    mkdirSync(path.join(project, ".pi", "extensions"), { recursive: true });
+    mkdirSync(path.join(piDir, "skills", "reviewer"), { recursive: true });
+    writeFileSync(path.join(project, "AGENTS.md"), "# Project instructions\n");
+    writeFileSync(path.join(project, ".pi", "extensions", "guard.ts"), "export default {};\n");
+    writeFileSync(path.join(project, ".pi", "settings.json"), JSON.stringify({
+      packages: [{ source: "example-package", prompts: ["review.md"] }]
+    }));
+    writeFileSync(path.join(piDir, "AGENTS.md"), "# User instructions\n");
+    writeFileSync(path.join(piDir, "skills", "reviewer", "SKILL.md"), "# Reviewer\n");
+
+    const runtime = buildPiRuntimeEnvironment("pi-session", project, piDir);
+    assert.ok(runtime.extensions.some((entry) => entry.scope === "user" && entry.kind === "skill" && entry.name === "reviewer"));
+    assert.ok(runtime.extensions.some((entry) => entry.scope === "project" && entry.kind === "extension" && entry.name === "guard"));
+    assert.ok(runtime.extensions.some((entry) => entry.scope === "project" && entry.kind === "plugin" && entry.name === "example-package"));
+    assert.equal(runtime.extensions.filter((entry) => entry.kind === "instruction").length, 2);
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
 });
 
 test("sessions search page preserves query and exposes content pagination", () => {

@@ -39,7 +39,8 @@ const server = spawn(viewer, [
   "--opencode-db", path.join(temp, "missing-opencode.db"),
   "--claude-dir", path.join(temp, "missing-claude"),
   "--codex-dir", path.join(temp, "missing-codex"),
-  "--gemini-dir", path.join(temp, "missing-gemini")
+  "--gemini-dir", path.join(temp, "missing-gemini"),
+  "--pi-dir", path.join(temp, "missing-pi")
 ], { stdio: ["ignore", "pipe", "pipe"] });
 let serverStdout = "";
 let serverStderr = "";
@@ -59,7 +60,9 @@ try {
     throw new Error(`Viewer binary did not become ready\n${serverStdout}\n${serverStderr}`);
   }
   const providers = await providersResponse.json();
-  if (!Array.isArray(providers) || providers.length !== 4) {
+  const expectedProviderIds = ["opencode", "claude-code", "codex", "gemini", "pi"];
+  if (!Array.isArray(providers)
+    || JSON.stringify(providers.map((provider) => provider.id)) !== JSON.stringify(expectedProviderIds)) {
     throw new Error("Viewer binary returned an invalid provider list");
   }
   for (const asset of ["style.css", "app.js"]) {
@@ -76,7 +79,8 @@ writeFileSync(configPath, JSON.stringify({
   dbPath: path.join(temp, "missing-opencode.db"),
   claudeDir: path.join(temp, "missing-claude"),
   codexDir: path.join(temp, "missing-codex"),
-  geminiDir: path.join(temp, "missing-gemini")
+  geminiDir: path.join(temp, "missing-gemini"),
+  piDir: path.join(temp, "missing-pi")
 }));
 const transport = new StdioClientTransport({
   command: mcp,

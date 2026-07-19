@@ -1,4 +1,4 @@
-export type ProviderId = "opencode" | "claude-code" | "codex" | "gemini";
+export type ProviderId = "opencode" | "claude-code" | "codex" | "gemini" | "pi";
 
 export interface ResumeCommandSpec {
   executable: string;

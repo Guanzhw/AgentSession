@@ -84,6 +84,12 @@ function defaultGeminiDir() {
   return probePaths(candidates.filter(Boolean), fallback);
 }
 
+function defaultPiDir() {
+  const home = os.homedir();
+  const fallback = path.join(home, ".pi", "agent");
+  return probePaths([process.env.PI_CODING_AGENT_DIR, fallback].filter(Boolean), fallback);
+}
+
 const defaults = {
   port: 3456,
   dbPath: defaultDbPath(),
@@ -93,6 +99,7 @@ const defaults = {
   claudeDir: defaultClaudeDir(),
   codexDir: defaultCodexDir(),
   geminiDir: defaultGeminiDir(),
+  piDir: defaultPiDir(),
   reindex: false,
   allowTerminalLaunch: true,
   mcp: {
@@ -598,6 +605,8 @@ export function parseArgs(argv = process.argv.slice(2)) {
       config.codexDir = argv[++i];
     } else if (argv[i] === "--gemini-dir" && argv[i + 1]) {
       config.geminiDir = argv[++i];
+    } else if (argv[i] === "--pi-dir" && argv[i + 1]) {
+      config.piDir = argv[++i];
     } else if (argv[i] === "--reindex") {
       config.reindex = true;
     } else if (argv[i] === "--disable-terminal-launch") {
@@ -619,6 +628,7 @@ Options:
   --claude-dir <path>   Path to Claude CLI data dir (default: ~/.claude)
   --codex-dir <path>    Path to Codex data dir (default: ~/.codex)
   --gemini-dir <path>   Path to Gemini data dir (default: ~/.gemini)
+  --pi-dir <path>       Path to Pi agent data dir (default: ~/.pi/agent)
   --config <path>       Path to AgentSession JSON config
   --disable-terminal-launch
                         Disable resume and analysis command launching

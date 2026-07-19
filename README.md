@@ -1,24 +1,18 @@
 # AgentSession
 
-> 开发者的 AI 会话档案馆：把 OpenCode、Claude Code、Codex CLI、Gemini CLI 的本地会话集中到一个可搜索、可追踪、可复盘的 Web UI。
+> 开发者的 AI 会话档案馆：把 OpenCode、Claude Code、Codex CLI、Gemini CLI、Pi 的本地会话集中到一个可搜索、可追踪、可复盘的 Web UI。
 
 [English](./README.en.md) · [中文](./README.md)
 
 ![Node.js >= 22.13.0](https://img.shields.io/badge/node-%3E%3D22.13.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.6.0](https://img.shields.io/badge/version-1.6.0-orange?style=flat-square)
+![v1.7.0](https://img.shields.io/badge/version-1.7.0-orange?style=flat-square)
 
-## 1.6.0 更新
+## 1.7.0 更新
 
-- 新增无需系统 Node.js 的跨平台单文件 Viewer 与 MCP binary，并通过 GitHub Release 发布 SHA-256 校验和。
-- Windows 可执行文件路径现在可在 Linux/WSL 上正确提取文件名，跨平台测试不再依赖宿主路径语义。
-- 最低 Node.js 版本修正为 22.13.0，确保 `node:sqlite` 无需实验参数即可使用。
-- `/sessions` 和 `/stats` 现在是统一的跨 Provider 入口；Provider 是可组合的筛选条件，详情页仍保留 canonical Provider URL。
-- 统一 Token 趋势图直接提供 Provider 筛选，来源卡片可在同一页面下钻或打开 Provider 专属高级统计。
-- 等价的 Windows、斜杠规范化 Windows 和 WSL 项目路径会合并为一个跨 Provider 项目筛选项。
-- Codex CLI 会话现在支持 proposal-only 会话分析，并使用 Codex 自己的会话证据与 runtime extensions。
-- 会话详情标签切换保持稳定内容轨道，避免 Conversation 的目录栏出现/隐藏时引发整页横向跳动。
+- Pi 现已成为一等 Provider，支持分支树 JSONL、活动分支、fork 会话、reasoning、工具结果、Token Explorer、Flow、runtime extensions、恢复命令与 MCP 查询。
+- MCP 默认诊断现在包含未安装的 Provider；`session_get` 返回首末消息预览，长事件返回可直接复用的 continuation 参数。
 
 完整变更见 [CHANGELOG.md](./CHANGELOG.md)。
 
@@ -48,6 +42,7 @@ AgentSession 是一个本地优先的 AI 编程会话查看器。它不会修改
 | Claude Code | 可管理 | `~/.claude/transcripts/` + `~/.claude/projects/` | 浏览、搜索、收藏、重命名、删除、回收站、Token Explorer、ReACT、Trace、Flow、可用 transcript 的子 agent、分析提示词证据、分析 |
 | Codex CLI | 可管理 | `~/.codex/sessions/**/*.jsonl` | 浏览、搜索、收藏、重命名、删除、回收站、Token Explorer、ReACT、Flow、嵌套子 agent、分析 |
 | Gemini CLI | 可管理 | `~/.gemini/tmp/*/chats/*.json` | 浏览、搜索、收藏、重命名、删除、回收站、Token Explorer、ReACT、Flow |
+| Pi | 可管理 | `~/.pi/agent/sessions/**/*.jsonl` | 浏览、搜索、收藏、重命名、删除、回收站、Token Explorer、ReACT、Flow、活动分支、fork 关系、runtime extensions |
 
 想要新增 Provider？请阅读[新增 Provider 指南](./docs/CONTRIBUTING-PROVIDER.md)，其中包含适配器、MCP、测试和发布验收清单。
 
@@ -59,7 +54,7 @@ AgentSession 是一个本地优先的 AI 编程会话查看器。它不会修改
 - **会话列表与搜索**：全局入口筛选 Provider 标题、viewer 自定义标题和目录；Provider 页面继续提供消息内容搜索、收藏和本地管理。标题类型筛选可将带有 analysis/analyze 信号的显示标题与其他会话分开；它是可逆的查看器启发式，不是 Provider 元数据。
 - **详情页复盘**：按 Provider 保存的模型响应边界，把 reasoning、action/tool call 和 observation/tool result 组织在同一个 ReACT 回合中。
 - **稳定的详情标签**：Overview、Conversation、Flow、Analysis 和 Raw data 共用稳定内容轨道；Conversation 目录栏淡入淡出，不会让标题、操作区和标签栏重新排版，并尊重系统减少动态效果偏好。
-- **递归 Session Tree**：OpenCode、Codex，以及保存了 sidechain transcript 的 Claude Code child session 会被组织成嵌套结构；每个子会话还可独立打开。
+- **递归 Session Tree**：OpenCode、Codex、Pi，以及保存了 sidechain transcript 的 Claude Code child session 会被组织成嵌套结构；每个子会话还可独立打开。
 - **Tool Flow Tree**：右侧 Flow 视图按时间和层级展示 root、message、tool、subagent 分支。
 - **Table of Contents**：长会话自动生成可折叠导航，只索引用户消息、assistant 消息和 `task` / `subtask` / `spawn_agent` 子 agent。
 - **会话内搜索**：可从详情页操作栏打开紧凑搜索，或按 `/` 聚焦；结果会同时显示匹配回合与文本命中数，逐词高亮，并在上下跳转时保持控制条可见。
@@ -112,6 +107,7 @@ agentsession [options]
 --claude-dir <path>   Claude Code 数据目录
 --codex-dir <path>    Codex CLI 数据目录
 --gemini-dir <path>   Gemini CLI 数据目录
+--pi-dir <path>       Pi agent 数据目录
 --config <path>       AgentSession JSON 配置文件
 --disable-terminal-launch
                       禁止启动继续会话和分析命令
@@ -132,6 +128,7 @@ agentsession [options]
 | `CLAUDE_CONFIG_DIR` | Claude Code 数据目录 |
 | `CODEX_HOME` | Codex CLI 数据目录 |
 | `GEMINI_HOME` | Gemini CLI 数据目录 |
+| `PI_CODING_AGENT_DIR` | Pi agent 数据目录，默认 `~/.pi/agent` |
 | `AGENTSESSION_META_PATH` | AgentSession 元数据库路径 |
 | `AGENTSESSION_CONFIG` | AgentSession JSON 配置文件路径 |
 | `OPENSESSIONVIEWER_META_PATH` | 旧版兼容元数据库路径 |
@@ -140,7 +137,7 @@ agentsession [options]
 
 ## AgentSession-MCP：供 Coding Agent 查询会话历史
 
-`@acetamido/agentsession-mcp` 是一个独立的 stdio MCP 包，供 Codex、Claude Code、Gemini CLI、OpenCode 等 MCP Host 查询本机已注册 Provider 的会话历史。它不启动 Web 服务、不绑定端口，也不会修改任何 Provider 数据。
+`@acetamido/agentsession-mcp` 是一个独立的 stdio MCP 包，供 Codex、Claude Code、Gemini CLI、OpenCode、Pi 等 MCP Host 查询本机已注册 Provider 的会话历史。它不启动 Web 服务、不绑定端口，也不会修改任何 Provider 数据。
 
 ```bash
 npm install --global @acetamido/agentsession-mcp
@@ -188,6 +185,7 @@ fallback 信息，以及可用时的 launcher PID。
 | Claude Code | `claude --resume {sessionId}` |
 | Codex CLI | `codex resume {sessionId}` |
 | Gemini CLI | `gemini --resume {sessionId}` |
+| Pi | `pi --session {sessionId}` |
 
 每个命令和 PowerShell 兼容终端 shell 都可以在 AgentSession 配置目录的
 `config.json` 中覆盖，也可以通过 `--config` 指定文件：
@@ -551,7 +549,8 @@ src/
 │   ├── opencode/          # OpenCode SQLite 适配器与结构化视图
 │   ├── claude-code/       # Claude Code JSONL 适配器
 │   ├── codex/             # Codex CLI JSONL 适配器
-│   └── gemini/            # Gemini JSON 适配器
+│   ├── gemini/            # Gemini JSON 适配器
+│   └── pi/                # Pi 分支树 JSONL 适配器
 ├── db.ts                  # OpenCode-compatible DB 查询
 ├── meta.ts                # 收藏、重命名、删除等本地元数据
 ├── index-db.ts            # 跨 Provider 会话索引

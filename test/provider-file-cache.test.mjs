@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   statSync,
   utimesSync,
@@ -14,6 +15,7 @@ import test from "node:test";
 import { initConfig } from "../dist/src/config.js";
 import claudeCode from "../dist/src/providers/claude-code/adapter.js";
 import gemini from "../dist/src/providers/gemini/adapter.js";
+import pi from "../dist/src/providers/pi/adapter.js";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -172,6 +174,41 @@ test("Gemini file cache skips corrupt files, reuses parsed data, and refreshes c
     assert.match(gemini.getMessages("gemini-canonical")[0]?.content || "", /gemini refreshed marker/);
     assert.equal(gemini.searchMessages("gemini refreshed marker")[0]?.sessionId, "gemini-canonical");
     assert.ok(gemini.getTokenStats(30).some((day) => day.outputTokens === 17));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Pi file cache preserves active-branch sessions and the last good transcript", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "opensession-pi-cache-"));
+  try {
+    const sessions = path.join(root, "sessions", "--D-WorkSpace-pi-fixture--");
+    mkdirSync(sessions, { recursive: true });
+    const sessionFile = path.join(sessions, "2026-07-19T01-00-00-000Z_019f7b00-0000-7000-8000-000000000001.jsonl");
+    const fixture = readFileSync(path.join(process.cwd(), "test", "fixtures", "pi-current.jsonl"), "utf-8");
+    writeFileSync(sessionFile, fixture);
+    normalizeMtime(sessionFile);
+    initConfig(["--pi-dir", root]);
+
+    const scanned = await collect(pi.scan());
+    assert.deepEqual(scanned.map((session) => session.id), ["019f7b00-0000-7000-8000-000000000001"]);
+    assert.equal(pi.getSession("019f7b00-0000-7000-8000-000000000001")?.title, "Pi provider fixture");
+    assert.equal(pi.searchMessages("Pi provider fixture")[0]?.sessionId, "019f7b00-0000-7000-8000-000000000001");
+    assert.equal(pi.getMessages("019f7b00-0000-7000-8000-000000000001").some((message) => message.content.includes("abandoned")), false);
+    assert.ok(pi.getTokenStats(30).some((day) => day.outputTokens === 9 && day.cacheReadTokens === 6));
+    assert.match(JSON.stringify(pi.getSessionTree("019f7b00-0000-7000-8000-000000000001")), /call_read_1/);
+
+    writeFileSync(sessionFile, `${fixture}{"type":"message","id":`);
+    await sleep(1050);
+    assert.equal(pi.getSession("019f7b00-0000-7000-8000-000000000001")?.title, "Pi provider fixture");
+
+    writeFileSync(sessionFile, fixture.replace(
+      '"name":"Pi provider fixture"',
+      '"name":"Pi provider refreshed fixture"'
+    ));
+    await sleep(1050);
+    assert.equal(pi.getSession("019f7b00-0000-7000-8000-000000000001")?.title, "Pi provider refreshed fixture");
+    assert.equal(pi.searchMessages("provider is ready")[0]?.sessionId, "019f7b00-0000-7000-8000-000000000001");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

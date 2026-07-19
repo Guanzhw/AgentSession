@@ -20,7 +20,7 @@ The package is intentionally small:
 - No runtime npm dependencies.
 - Server-rendered HTML with plain browser JavaScript and CSS.
 - Node's built-in test runner.
-- Provider adapters for OpenCode, Claude Code, Codex CLI, and Gemini CLI.
+- Provider adapters for OpenCode, Claude Code, Codex CLI, Gemini CLI, and Pi.
 
 ## Non-Negotiable Invariants
 
@@ -138,6 +138,7 @@ src/
     claude-code/                 Claude transcript adapter/parser
     codex/                       Codex JSONL adapter/parser
     gemini/                      Gemini JSON adapter/parser
+    pi/                          Pi branch-aware JSONL adapter/parser
   views/                         server-rendered page and component templates
   static/                        browser JavaScript and CSS copied during build
   locales/                       English and Chinese UI strings
@@ -202,9 +203,10 @@ When adding or changing a provider:
 9. Update the provider table and `docs/CONTRIBUTING-PROVIDER.md` when the
    contract or supported capabilities change.
 
-Use Gemini as a compact file-provider example, Claude and Codex as JSONL
-examples, and OpenCode as the structured SQLite example. Read the actual
-adapter before copying a pattern because provider capabilities differ.
+Use Gemini as a compact file-provider example, Claude and Codex as linear
+JSONL examples, Pi as a branch-tree JSONL example, and OpenCode as the
+structured SQLite example. Read the actual adapter before copying a pattern
+because provider capabilities differ.
 
 ### Server and APIs
 

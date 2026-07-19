@@ -1,6 +1,6 @@
 {
   "name": "@acetamido/agentsession-mcp",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Read-only local coding-agent session history MCP server for AgentSession.",
   "type": "module",
   "bin": {
@@ -24,7 +24,8 @@
     "opencode",
     "claude-code",
     "codex",
-    "gemini"
+    "gemini",
+    "pi-coding-agent"
   ],
   "author": "Guanzhw",
   "license": "MIT",
@@ -35,7 +36,7 @@
   "homepage": "https://github.com/Guanzhw/AgentSession",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@acetamido/agentsession": "^1.6.0",
+    "@acetamido/agentsession": "^1.7.0",
     "zod": "^3.25.76"
   }
 }

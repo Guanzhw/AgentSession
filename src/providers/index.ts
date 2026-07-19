@@ -4,6 +4,7 @@ import opencode from "./opencode/adapter.js";
 import claudeCode from "./claude-code/adapter.js";
 import codex from "./codex/adapter.js";
 import gemini from "./gemini/adapter.js";
+import pi from "./pi/adapter.js";
 
 const ALL_PROVIDERS: ProviderAdapter[] = [];
 
@@ -28,3 +29,4 @@ registerProvider(opencode);
 registerProvider(claudeCode);
 registerProvider(codex);
 registerProvider(gemini);
+registerProvider(pi);

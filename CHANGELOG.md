@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.7.0 - 2026-07-19
+
+### Added
+
+- Added Pi as a first-class read-only provider with native JSONL tree parsing,
+  active-branch reconstruction, named and forked session identity, reasoning
+  and tool-result grouping, Token Explorer data, structured Flow views,
+  runtime-extension discovery, resume commands, and AgentSession-MCP access.
+
+### Changed
+
+- Made default MCP search diagnostics report unavailable registered providers,
+  added first/last visible-message previews to `session_get`, and returned
+  reusable continuation arguments for paginated `session_get_event` content.
+
 ## 1.6.0 - 2026-07-19
 
 ### Added
