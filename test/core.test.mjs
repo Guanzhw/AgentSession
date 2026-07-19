@@ -3495,13 +3495,15 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
     false
   );
   const skillArtifact = artifacts.files.find(
-    (file) => file.sourcePath === skillPath
+    (file) => file.sourcePath === realpathSync(skillPath)
   );
   const agentsArtifact = artifacts.files.find((file) => file.relativePath === "AGENTS.md");
   const projectRuntimeArtifact = artifacts.files.find(
-    (file) => file.sourcePath === projectRuntimeSkillPath
+    (file) => file.sourcePath === realpathSync(projectRuntimeSkillPath)
   );
-  const userRuntimeArtifact = artifacts.files.find((file) => file.sourcePath === userHookPath);
+  const userRuntimeArtifact = artifacts.files.find(
+    (file) => file.sourcePath === realpathSync(userHookPath)
+  );
   assert.match(skillArtifact.artifactId, /^artifact:/);
   assert.ok(existsSync(skillArtifact.snapshotPath));
   assert.equal(agentsArtifact.explicit, true);
