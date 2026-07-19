@@ -4,13 +4,14 @@
 
 [English](./README.en.md) · [中文](./README.md)
 
-![Node.js >= 22.5.0](https://img.shields.io/badge/node-%3E%3D22.5.0-brightgreen?style=flat-square&logo=node.js)
+![Node.js >= 22.13.0](https://img.shields.io/badge/node-%3E%3D22.13.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.5.0](https://img.shields.io/badge/version-1.5.0-orange?style=flat-square)
+![v1.5.1](https://img.shields.io/badge/version-1.5.1-orange?style=flat-square)
 
-## 1.5.0 更新
+## 1.5.1 更新
 
+- 最低 Node.js 版本修正为 22.13.0，确保 `node:sqlite` 无需实验参数即可使用。
 - `/sessions` 和 `/stats` 现在是统一的跨 Provider 入口；Provider 是可组合的筛选条件，详情页仍保留 canonical Provider URL。
 - 统一 Token 趋势图直接提供 Provider 筛选，来源卡片可在同一页面下钻或打开 Provider 专属高级统计。
 - 等价的 Windows、斜杠规范化 Windows 和 WSL 项目路径会合并为一个跨 Provider 项目筛选项。
@@ -622,7 +623,7 @@ SHA-256 完整性检查。
 
 ## 开发
 
-要求 Node.js `>= 22.5.0`。项目使用 TypeScript ESM、Node 内置测试运行器和
+要求 Node.js `>= 22.13.0`。项目使用 TypeScript ESM、Node 内置测试运行器和
 原生浏览器 JavaScript/CSS，并保持零 runtime npm dependencies。
 
 ```powershell

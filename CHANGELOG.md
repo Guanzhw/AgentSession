@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.1 - 2026-07-19
+
+### Fixed
+
+- Corrected the minimum supported Node.js version to 22.13.0, the first Node
+  22 release where `node:sqlite` is available without an experimental flag.
+- Added a tag-checked GitHub Actions release workflow that tests at the minimum
+  supported Node version, verifies publish artifacts, and publishes both npm
+  packages in dependency order with provenance.
+
 ## 1.5.0 - 2026-07-18
 
 ### Added

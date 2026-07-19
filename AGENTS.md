@@ -15,7 +15,7 @@ such as stars, custom titles, and deletion state in a separate local database.
 
 The package is intentionally small:
 
-- Node.js 22.5 or newer.
+- Node.js 22.13 or newer.
 - TypeScript compiled as ESM with `NodeNext`.
 - No runtime npm dependencies.
 - Server-rendered HTML with plain browser JavaScript and CSS.
