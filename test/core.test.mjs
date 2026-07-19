@@ -3764,7 +3764,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
         id: "update-agent-rules",
         kind: "skill-evolution",
         action: "edit",
-        artifactRoot: projectPath,
+        artifactRoot: realpathSync(projectPath),
         artifactPath: "AGENTS.md",
         description: "Require executable verification.",
         evidence: [rulesArtifactId],
