@@ -1,0 +1,73 @@
+name: Publish packages
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to publish (for example, v1.5.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.5.1
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Verify tag and package versions
+        id: release
+        shell: bash
+        env:
+          RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref_name }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          core_version="$(node -p "require('./packages/agentsession/package.json').version")"
+          mcp_version="$(node -p "require('./packages/agentsession-mcp/package.json').version")"
+          test "$version" = "$core_version"
+          test "$version" = "$mcp_version"
+          test "$RELEASE_REF" = "v$version"
+          if [[ "$version" == *-* ]]; then
+            echo "dist_tag=next" >> "$GITHUB_OUTPUT"
+          else
+            echo "dist_tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install and test
+        run: npm ci && npm test
+
+      - name: Verify publish artifacts
+        shell: bash
+        run: |
+          test -f packages/agentsession/dist/bin/cli.js
+          test -f packages/agentsession-mcp/dist/cli.js
+
+      - name: Publish AgentSession
+        run: npm publish --workspace=@acetamido/agentsession --access public --provenance --tag=${{ steps.release.outputs.dist_tag }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish AgentSession MCP
+        run: npm publish --workspace=@acetamido/agentsession-mcp --access public --provenance --tag=${{ steps.release.outputs.dist_tag }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
