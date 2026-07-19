@@ -7,9 +7,9 @@
 ![Node.js >= 22.13.0](https://img.shields.io/badge/node-%3E%3D22.13.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.5.2](https://img.shields.io/badge/version-1.5.2-orange?style=flat-square)
+![v1.5.3](https://img.shields.io/badge/version-1.5.3-orange?style=flat-square)
 
-## What's New in 1.5.2
+## What's New in 1.5.3
 
 - Windows executable paths now retain their basename on Linux and WSL, so cross-platform diagnostics and tests use consistent names.
 - The minimum Node.js version is corrected to 22.13.0 so `node:sqlite` works without an experimental flag.

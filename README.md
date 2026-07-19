@@ -7,9 +7,9 @@
 ![Node.js >= 22.13.0](https://img.shields.io/badge/node-%3E%3D22.13.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.5.2](https://img.shields.io/badge/version-1.5.2-orange?style=flat-square)
+![v1.5.3](https://img.shields.io/badge/version-1.5.3-orange?style=flat-square)
 
-## 1.5.2 更新
+## 1.5.3 更新
 
 - Windows 可执行文件路径现在可在 Linux/WSL 上正确提取文件名，跨平台测试不再依赖宿主路径语义。
 - 最低 Node.js 版本修正为 22.13.0，确保 `node:sqlite` 无需实验参数即可使用。

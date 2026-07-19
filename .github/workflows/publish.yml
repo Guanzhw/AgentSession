@@ -13,7 +13,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: publish-${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref_name }}
@@ -63,11 +62,11 @@ jobs:
           test -f packages/agentsession-mcp/dist/cli.js
 
       - name: Publish AgentSession
-        run: npm publish --workspace=@acetamido/agentsession --access public --provenance --tag=${{ steps.release.outputs.dist_tag }}
+        run: npm publish --workspace=@acetamido/agentsession --access public --tag=${{ steps.release.outputs.dist_tag }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish AgentSession MCP
-        run: npm publish --workspace=@acetamido/agentsession-mcp --access public --provenance --tag=${{ steps.release.outputs.dist_tag }}
+        run: npm publish --workspace=@acetamido/agentsession-mcp --access public --tag=${{ steps.release.outputs.dist_tag }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
