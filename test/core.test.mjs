@@ -3863,7 +3863,7 @@ test("session analysis snapshots artifacts and generates evaluation inputs", () 
 
   const generatedTargetProposal = JSON.parse(readFileSync(run.files.proposalsPath, "utf-8"));
   generatedTargetProposal.proposals[0].artifactPath = path.relative(
-    projectPath,
+    realpathSync(projectPath),
     run.files.reportPath
   );
   writeFileSync(run.files.proposalsPath, JSON.stringify(generatedTargetProposal));
