@@ -3,6 +3,10 @@ import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import type { ProviderAdapter, ResumeCommandSpec, ResumeShellSpec } from "./providers/interface.js";
 
+function executableBasename(executable: string) {
+  return path.win32.basename(path.posix.basename(executable));
+}
+
 function isCommandSpec(value: any): value is ResumeCommandSpec {
   return Boolean(
     value
@@ -288,13 +292,13 @@ export async function spawnPowerShellLaunch({ cwd, terminal, powershellArgs, env
       env: { ...process.env, ...env, ...launch.env }
     });
   } catch (error: any) {
-    throw new Error(`Terminal launch failed for ${path.basename(launch.executable)}: ${error?.message || error}`);
+    throw new Error(`Terminal launch failed for ${executableBasename(launch.executable)}: ${error?.message || error}`);
   }
   let result;
   try {
     result = await waitForLaunchConfirmation(child, { waitForExit: !launch.detached }) as { pid: number | null };
   } catch (error: any) {
-    throw new Error(`Terminal launch failed for ${path.basename(launch.executable)}: ${error?.message || error}`);
+    throw new Error(`Terminal launch failed for ${executableBasename(launch.executable)}: ${error?.message || error}`);
   }
   child.unref?.();
   return {
@@ -318,7 +322,7 @@ export async function launchPowerShellWithFallback({ cwd, terminal, powershellAr
         };
       } catch (fallbackError: any) {
         throw new Error(
-          `Failed to launch terminal via ${path.basename(terminal)} (${terminalError?.message || terminalError}) or direct PowerShell (${fallbackError?.message || fallbackError})`
+          `Failed to launch terminal via ${executableBasename(terminal)} (${terminalError?.message || terminalError}) or direct PowerShell (${fallbackError?.message || fallbackError})`
         );
       }
     }

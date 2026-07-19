@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.2 - 2026-07-19
+
+### Fixed
+
+- Made executable-name extraction independent of the host path syntax, so
+  Windows launch diagnostics remain concise when exercised on Linux or WSL.
+- Kept the MCP help smoke test strict about application stderr while allowing
+  the expected Node 22 `node:sqlite` experimental warning to be suppressed.
+
 ## 1.5.1 - 2026-07-19
 
 ### Fixed

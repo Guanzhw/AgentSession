@@ -289,7 +289,10 @@ test("compiled stdio executable initializes without polluting MCP stdout", async
 
 test("compiled MCP executable has MCP-specific help", () => {
   const executable = path.join(process.cwd(), "packages", "agentsession-mcp", "dist", "cli.js");
-  const result = spawnSync(process.execPath, [executable, "--help"], { encoding: "utf8" });
+  const result = spawnSync(process.execPath, [executable, "--help"], {
+    encoding: "utf8",
+    env: { ...process.env, NODE_NO_WARNINGS: "1" }
+  });
   assert.equal(result.status, 0);
   assert.match(result.stdout, /AgentSession-MCP/);
   assert.match(result.stdout, /Usage: agentsession-mcp \[options\]/);

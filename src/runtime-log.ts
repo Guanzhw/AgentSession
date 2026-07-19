@@ -212,7 +212,7 @@ export function runtimeErrorMessage(error: any) {
 
 export function runtimeExecutableName(command: any) {
   const executable = command?.resolvedExecutable || command?.executable || "";
-  return executable ? path.basename(String(executable)) : "";
+  return executable ? path.win32.basename(path.posix.basename(String(executable))) : "";
 }
 
 export function buildRuntimeEvent(input: any = {}, now = new Date()) {
