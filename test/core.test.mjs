@@ -4466,6 +4466,8 @@ test("session detail uses progressive, accessible tabs without duplicating analy
 
   const appJs = readFileSync(path.join(process.cwd(), "dist", "src", "static", "app.js"), "utf-8");
   assert.match(appJs, /session-flow-tab-open/);
+  assert.match(appJs, /openFlowMessagePreview/);
+  assert.match(appJs, /data-flow-open-conversation/);
   assert.match(appJs, /ArrowRight/);
   assert.match(appJs, /ArrowLeft/);
 });
@@ -4817,6 +4819,9 @@ test("session page can defer flow markup until the panel is opened", () => {
   assert.doesNotMatch(html, /flow-map-root-session/);
   assert.match(flowFragment, /flow-map-root-session/);
   assert.match(flowFragment, /flow-map-node-user/);
+  assert.match(flowFragment, /data-flow-preview-target="#msg-u1"/);
+  assert.match(flowFragment, /data-flow-inspector/);
+  assert.match(flowFragment, /data-flow-inspector-body/);
 });
 
 test("conversation flow inserts detached sessions as inferred branches", () => {

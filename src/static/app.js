@@ -50,6 +50,13 @@ const __I18N__ = {
     detail_tab_flow: "Flow",
     detail_tab_analysis: "Analysis",
     detail_tab_raw: "Raw data",
+    flow_subagent_detail: "Subagent Detail",
+    flow_subagent_detail_description: "Focused child-session flow",
+    flow_message_detail: "Message Detail",
+    flow_message_detail_description: "Source conversation message",
+    flow_open_conversation: "Open in Conversation",
+    flow_close_inspector: "Close flow inspector",
+    flow_message_unavailable: "The source message is unavailable.",
     resume_opened: "Terminal opened",
     resume_disabled: "Terminal launch is unavailable",
     analysis_opened: "Analysis launched. Tracking status below.",
@@ -199,6 +206,13 @@ const __I18N__ = {
     detail_tab_flow: "流程",
     detail_tab_analysis: "分析",
     detail_tab_raw: "原始数据",
+    flow_subagent_detail: "子代理详情",
+    flow_subagent_detail_description: "聚焦子会话流程",
+    flow_message_detail: "消息详情",
+    flow_message_detail_description: "来源会话消息",
+    flow_open_conversation: "在对话中打开",
+    flow_close_inspector: "关闭流程检查器",
+    flow_message_unavailable: "源消息不可用。",
     resume_opened: "终端已打开",
     resume_disabled: "无法启动终端",
     analysis_opened: "已启动分析，可在下方跟踪状态。",
@@ -1723,6 +1737,12 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.key === "Escape") {
     const flowPanel = document.getElementById("session-flow-panel");
+    const flowInspector = flowPanel?.querySelector("[data-flow-inspector]");
+    if (flowInspector && !flowInspector.classList.contains("hidden")) {
+      e.preventDefault();
+      flowInspector.querySelector("[data-flow-inspector-close]")?.click();
+      return;
+    }
     if (flowPanel && !flowPanel.classList.contains("hidden")) {
       flowPanel.classList.add("hidden");
       flowPanel.setAttribute("aria-hidden", "true");
@@ -2551,6 +2571,7 @@ if (sessionWorkbench) {
   let scrollTicking = false;
   let flowLoadPromise = null;
   let flowResizeTimer = null;
+  let flowInspectorOpener = null;
   let navLinksCache = [];
   let linkedTargetsCache = [];
   let navigationCacheDirty = true;
@@ -2561,8 +2582,10 @@ if (sessionWorkbench) {
   const getFlowOverviewWindow = () => getFlowPanel()?.querySelector("[data-flow-overview-window]");
   const getFlowRootLine = () => getFlowPanel()?.querySelector(".flow-map-root-session > .flow-map-line");
   const getFlowMap = () => getFlowPanel()?.querySelector(".flow-map");
-  const getFlowBranchDrawer = () => getFlowPanel()?.querySelector("[data-flow-branch-drawer]");
-  const getFlowBranchBody = () => getFlowPanel()?.querySelector("[data-flow-branch-body]");
+  const getFlowInspector = () => getFlowPanel()?.querySelector("[data-flow-inspector]");
+  const getFlowInspectorTitle = () => getFlowPanel()?.querySelector("[data-flow-inspector-title]");
+  const getFlowInspectorDescription = () => getFlowPanel()?.querySelector("[data-flow-inspector-description]");
+  const getFlowInspectorBody = () => getFlowPanel()?.querySelector("[data-flow-inspector-body]");
   const getNavLinks = () => {
     if (navigationCacheDirty) {
       navLinksCache = [...document.querySelectorAll(".session-toc a[href^='#'], .session-flow-panel a[href^='#']")];
@@ -2750,42 +2773,52 @@ if (sessionWorkbench) {
     const flowPanel = getFlowPanel();
     const flowMap = getFlowMap();
     flowMap?.classList.remove("flow-focus-active");
-    flowPanel?.classList.remove("flow-branch-detail-open");
+    flowPanel?.classList.remove("flow-inspector-open");
     flowPanel?.querySelectorAll(".flow-focused, .flow-focus-context").forEach((node) => {
       node.classList.remove("flow-focused", "flow-focus-context");
     });
   };
 
-  const closeFlowBranch = () => {
-    const flowBranchDrawer = getFlowBranchDrawer();
-    const flowBranchBody = getFlowBranchBody();
-    if (!flowBranchDrawer || !flowBranchBody) return;
-    flowBranchDrawer.classList.add("hidden");
-    flowBranchDrawer.setAttribute("aria-hidden", "true");
-    flowBranchBody.replaceChildren();
+  const closeFlowInspector = ({ restoreFocus = true } = {}) => {
+    const flowInspector = getFlowInspector();
+    const flowInspectorBody = getFlowInspectorBody();
+    const opener = flowInspectorOpener;
+    flowInspectorOpener = null;
+    if (flowInspector && flowInspectorBody) {
+      flowInspector.classList.add("hidden");
+      flowInspector.setAttribute("aria-hidden", "true");
+      flowInspectorBody.replaceChildren();
+    }
     clearFlowFocus();
-    requestAnimationFrame(layoutFlowRows);
+    requestAnimationFrame(() => {
+      layoutFlowRows();
+      if (restoreFocus && opener?.isConnected) {
+        opener.focus({ preventScroll: true });
+      }
+    });
   };
 
-  const openFlowBranch = (button) => {
+  const openFlowInspector = ({ title, description, content, source }) => {
     const flowPanel = getFlowPanel();
     const flowMap = getFlowMap();
     const flowRootLine = getFlowRootLine();
-    const flowBranchDrawer = getFlowBranchDrawer();
-    const flowBranchBody = getFlowBranchBody();
-    if (!flowBranchDrawer || !flowBranchBody) return;
-    const templateId = button.dataset.flowBranchOpen;
-    const template = templateId ? document.getElementById(templateId) : null;
-    if (!(template instanceof HTMLTemplateElement)) return;
+    const flowInspector = getFlowInspector();
+    const flowInspectorTitle = getFlowInspectorTitle();
+    const flowInspectorDescription = getFlowInspectorDescription();
+    const flowInspectorBody = getFlowInspectorBody();
+    if (!flowInspector || !flowInspectorTitle || !flowInspectorDescription || !flowInspectorBody) return;
 
     clearFlowFocus();
-    flowBranchBody.replaceChildren(template.content.cloneNode(true));
-    flowBranchDrawer.classList.remove("hidden");
-    flowBranchDrawer.setAttribute("aria-hidden", "false");
-    flowPanel?.classList.add("flow-branch-detail-open");
+    flowInspectorOpener = source instanceof HTMLElement ? source : null;
+    flowInspectorTitle.textContent = title;
+    flowInspectorDescription.textContent = description;
+    flowInspectorBody.replaceChildren(content);
+    flowInspector.classList.remove("hidden");
+    flowInspector.setAttribute("aria-hidden", "false");
+    flowPanel?.classList.add("flow-inspector-open");
     flowMap?.classList.add("flow-focus-active");
 
-    const focusedStep = button.closest(".flow-map-step");
+    const focusedStep = source?.closest(".flow-map-step");
     focusedStep?.classList.add("flow-focused");
     const rootSteps = flowRootLine
       ? [...flowRootLine.querySelectorAll(".flow-map-step")].filter((step) => step.closest(".flow-map-root-session") === flowRootLine.closest(".flow-map-root-session"))
@@ -2794,7 +2827,93 @@ if (sessionWorkbench) {
     if (focusedIndex >= 0 && rootSteps[focusedIndex + 1]) {
       rootSteps[focusedIndex + 1].classList.add("flow-focus-context");
     }
-    requestAnimationFrame(layoutFlowRows);
+    requestAnimationFrame(() => {
+      layoutFlowRows();
+      if (flowInspector.classList.contains("hidden")) return;
+      const focusTarget = flowInspector.querySelector("[data-flow-open-conversation]")
+        || flowInspector.querySelector("[data-flow-inspector-close]");
+      focusTarget?.focus({ preventScroll: true });
+    });
+  };
+
+  const openFlowBranch = (button) => {
+    const templateId = button.dataset.flowBranchOpen;
+    const template = templateId ? document.getElementById(templateId) : null;
+    if (!(template instanceof HTMLTemplateElement)) return;
+    openFlowInspector({
+      title: ft("flow_subagent_detail"),
+      description: ft("flow_subagent_detail_description"),
+      content: template.content.cloneNode(true),
+      source: button
+    });
+  };
+
+  const openFlowMessagePreview = (link) => {
+    const targetId = String(link.dataset.flowPreviewTarget || "").replace(/^#/, "");
+    const target = targetId ? document.getElementById(targetId) : null;
+    const sourceMessage = target?.matches(".message-turn") ? target : target?.closest(".message-turn");
+    const content = document.createElement("div");
+    content.className = "flow-message-preview";
+
+    if (!sourceMessage) {
+      const unavailable = document.createElement("p");
+      unavailable.className = "toc-empty";
+      unavailable.setAttribute("role", "status");
+      unavailable.textContent = ft("flow_message_unavailable");
+      content.append(unavailable);
+    } else {
+      const actions = document.createElement("div");
+      actions.className = "flow-inspector-actions";
+      const openConversation = document.createElement("button");
+      openConversation.type = "button";
+      openConversation.className = "flow-inspector-open-conversation";
+      openConversation.dataset.flowOpenConversation = target?.id || sourceMessage.id;
+      openConversation.textContent = ft("flow_open_conversation");
+      actions.append(openConversation);
+
+      const preview = sourceMessage.cloneNode(true);
+      if (preview instanceof HTMLElement) {
+        preview.removeAttribute("id");
+        preview.querySelectorAll("[id]").forEach((node) => node.removeAttribute("id"));
+        preview.querySelectorAll(".message-controls, .subagent-actions").forEach((node) => node.remove());
+        preview.classList.add("flow-message-preview-turn");
+      }
+      content.append(actions, preview);
+    }
+
+    openFlowInspector({
+      title: ft("flow_message_detail"),
+      description: ft("flow_message_detail_description"),
+      content,
+      source: link
+    });
+  };
+
+  const hideFlowPanel = () => {
+    const flowPanel = getFlowPanel();
+    if (!flowPanel) return;
+    closeFlowInspector({ restoreFocus: false });
+    flowPanel.classList.add("hidden");
+    flowPanel.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("flow-panel-open");
+    document.querySelectorAll(".flow-open-btn[aria-expanded='true']").forEach((btn) => {
+      btn.setAttribute("aria-expanded", "false");
+    });
+  };
+
+  const openFlowTargetInConversation = (targetId) => {
+    const target = targetId ? document.getElementById(targetId) : null;
+    hideFlowPanel();
+    document.getElementById("tab-btn-conversation")?.click();
+    if (!target) return;
+    requestAnimationFrame(() => {
+      lastManualNav = Date.now();
+      history.pushState(null, "", `#${target.id}`);
+      target.scrollIntoView({ block: "start", behavior: "auto" });
+      target.classList.add("anchor-flash");
+      setActiveTarget(target.id);
+      setTimeout(() => target.classList.remove("anchor-flash"), 900);
+    });
   };
 
   const bindFlowPanelControls = () => {
@@ -2947,19 +3066,13 @@ if (sessionWorkbench) {
     const flowClose = event.target.closest("[data-flow-close]");
     const flowPanel = getFlowPanel();
     if (flowClose && flowPanel) {
-      closeFlowBranch();
-      flowPanel.classList.add("hidden");
-      flowPanel.setAttribute("aria-hidden", "true");
-      document.body.classList.remove("flow-panel-open");
-      document.querySelectorAll(".flow-open-btn[aria-expanded='true']").forEach((btn) => {
-        btn.setAttribute("aria-expanded", "false");
-      });
+      hideFlowPanel();
       return;
     }
 
-    const flowBranchClose = event.target.closest("[data-flow-branch-close]");
-    if (flowBranchClose) {
-      closeFlowBranch();
+    const flowInspectorClose = event.target.closest("[data-flow-inspector-close]");
+    if (flowInspectorClose) {
+      closeFlowInspector();
       return;
     }
 
@@ -2969,6 +3082,22 @@ if (sessionWorkbench) {
       const loaded = await ensureFlowLoaded();
       if (!loaded) return;
       openFlowBranch(flowBranchOpen);
+      return;
+    }
+
+    const flowPreview = event.target.closest("[data-flow-preview-target]");
+    if (flowPreview) {
+      event.preventDefault();
+      const loaded = await ensureFlowLoaded();
+      if (!loaded) return;
+      openFlowMessagePreview(flowPreview);
+      return;
+    }
+
+    const flowOpenConversation = event.target.closest("[data-flow-open-conversation]");
+    if (flowOpenConversation) {
+      event.preventDefault();
+      openFlowTargetInConversation(flowOpenConversation.dataset.flowOpenConversation);
       return;
     }
 
@@ -2982,6 +3111,7 @@ if (sessionWorkbench) {
         btn.setAttribute("aria-expanded", btn === flowButton && shouldOpen ? "true" : "false");
       });
       if (shouldOpen) {
+        document.getElementById("tab-btn-flow")?.click();
         flowPanel.classList.remove("hidden");
         flowPanel.setAttribute("aria-hidden", "false");
         document.body.classList.add("flow-panel-open");
@@ -2997,10 +3127,7 @@ if (sessionWorkbench) {
         flowPanel.focus({ preventScroll: true });
         requestAnimationFrame(layoutFlowRows);
       } else {
-        closeFlowBranch();
-        flowPanel.classList.add("hidden");
-        flowPanel.setAttribute("aria-hidden", "true");
-        document.body.classList.remove("flow-panel-open");
+        hideFlowPanel();
       }
       return;
     }

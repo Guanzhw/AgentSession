@@ -1457,7 +1457,7 @@ body.flow-panel-open {
   filter: drop-shadow(0 0 8px color-mix(in srgb, var(--trace-agent) 35%, transparent));
 }
 
-.flow-branch-drawer {
+.flow-inspector {
   position: absolute;
   z-index: 20;
   top: 116px;
@@ -1473,11 +1473,11 @@ body.flow-panel-open {
   box-shadow: 0 16px 45px color-mix(in srgb, #000 45%, transparent);
 }
 
-.flow-branch-drawer.hidden {
+.flow-inspector.hidden {
   display: none;
 }
 
-.flow-branch-drawer-header {
+.flow-inspector-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -1486,19 +1486,19 @@ body.flow-panel-open {
   border-bottom: 1px solid var(--border-color);
 }
 
-.flow-branch-drawer-header h3 {
+.flow-inspector-header h3 {
   margin: 0;
   color: var(--trace-agent);
   font-size: 12px;
 }
 
-.flow-branch-drawer-header p {
+.flow-inspector-header p {
   margin: 3px 0 0;
   color: var(--text-muted);
   font-size: 9px;
 }
 
-.flow-branch-drawer-close {
+.flow-inspector-close {
   width: 24px;
   height: 24px;
   border: 1px solid var(--border-color);
@@ -1508,11 +1508,36 @@ body.flow-panel-open {
   cursor: pointer;
 }
 
-.flow-branch-drawer-body {
+.flow-inspector-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   padding: 14px;
+}
+
+.flow-inspector-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.flow-inspector-open-conversation {
+  padding: 6px 9px;
+  border: 1px solid color-mix(in srgb, var(--trace-agent) 65%, var(--border-color));
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--trace-agent) 12%, var(--bg-secondary));
+  color: var(--trace-agent);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.flow-inspector-open-conversation:hover {
+  background: color-mix(in srgb, var(--trace-agent) 22%, var(--bg-secondary));
+}
+
+.flow-message-preview-turn {
+  margin: 0;
 }
 
 .flow-branch-detail-heading {
@@ -1538,7 +1563,7 @@ body.flow-panel-open {
   min-width: max-content;
 }
 
-.session-flow-panel.flow-branch-detail-open .flow-map-scroll {
+.session-flow-panel.flow-inspector-open .flow-map-scroll {
   margin-right: min(640px, 48vw);
 }
 
@@ -5682,7 +5707,7 @@ pre code.hljs {
     padding: 12px;
   }
 
-  .flow-branch-drawer {
+  .flow-inspector {
     top: calc(var(--topbar-height) + 60px);
     right: 8px;
     bottom: 8px;
@@ -5691,7 +5716,7 @@ pre code.hljs {
     min-width: 0;
   }
 
-  .session-flow-panel.flow-branch-detail-open .flow-map-scroll {
+  .session-flow-panel.flow-inspector-open .flow-map-scroll {
     margin-right: 0;
   }
 }

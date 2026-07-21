@@ -435,6 +435,12 @@ if [[ "$flow_open_state" != "true" && "$flow_open_state" != '"true"' ]]; then
   exit 1
 fi
 
+flow_tab_selected="$(read_ab "verify flow button selects Flow tab" get attr "#tab-btn-flow" aria-selected)"
+if [[ "$flow_tab_selected" != "true" && "$flow_tab_selected" != '"true"' ]]; then
+  echo "Flow button should reveal the Flow tab, got state $flow_tab_selected" >&2
+  exit 1
+fi
+
 flow_loaded="0"
 for _ in $(seq 1 40); do
   flow_loaded="$(read_ab "wait for flow root line" get count "#session-flow-panel .flow-map-root-session > .flow-map-line")"
@@ -491,9 +497,62 @@ if [[ "$flow_expanded_branch_count" != "0" ]]; then
   exit 1
 fi
 
-flow_branch_drawer_count="$(read_ab "count flow branch drawers" get count "#session-flow-panel [data-flow-branch-drawer]")"
-if [[ "$flow_branch_drawer_count" != "1" ]]; then
-  echo "Flow should include one reusable branch detail drawer, got $flow_branch_drawer_count" >&2
+flow_preview_node_count="$(read_ab "count flow message preview nodes" get count "#session-flow-panel [data-flow-preview-target]")"
+assert_positive_count "flow message preview nodes" "$flow_preview_node_count"
+
+flow_inspector_count="$(read_ab "count flow inspectors" get count "#session-flow-panel [data-flow-inspector]")"
+if [[ "$flow_inspector_count" != "1" ]]; then
+  echo "Flow should include one reusable side inspector, got $flow_inspector_count" >&2
+  exit 1
+fi
+
+flow_preview_triggered="$(read_ab "trigger flow message preview" eval "(() => { const node = document.querySelector('#session-flow-panel [data-flow-preview-target]'); node?.click(); return node ? 'clicked' : 'missing'; })()")"
+if [[ "$flow_preview_triggered" != "clicked" && "$flow_preview_triggered" != '"clicked"' ]]; then
+  echo "Flow should expose a message node to preview, got $flow_preview_triggered" >&2
+  exit 1
+fi
+sleep 0.2
+
+flow_preview_open="$(read_ab "verify flow message preview" eval "(() => { const inspector = document.querySelector('#session-flow-panel [data-flow-inspector]'); return inspector && !inspector.classList.contains('hidden') && inspector.querySelector('.flow-message-preview-turn') && inspector.querySelector('[data-flow-open-conversation]') ? 'open' : 'closed'; })()")"
+if [[ "$flow_preview_open" != "open" && "$flow_preview_open" != '"open"' ]]; then
+  echo "Flow message nodes should open a side inspector preview, got $flow_preview_open" >&2
+  exit 1
+fi
+
+flow_preview_focus="other"
+for _ in $(seq 1 10); do
+  flow_preview_focus="$(read_ab "verify flow preview focus" eval "document.activeElement?.matches('[data-flow-open-conversation]') ? 'action' : 'other'")"
+  if [[ "$flow_preview_focus" == "action" || "$flow_preview_focus" == '"action"' ]]; then
+    break
+  fi
+  sleep 0.1
+done
+if [[ "$flow_preview_focus" != "action" && "$flow_preview_focus" != '"action"' ]]; then
+  echo "Flow message preview should focus its explicit conversation action, got $flow_preview_focus" >&2
+  exit 1
+fi
+
+flow_preview_context="$(read_ab "verify flow remains visible with preview" eval "(() => !document.querySelector('#session-flow-panel')?.classList.contains('hidden') ? 'visible' : 'hidden')()")"
+if [[ "$flow_preview_context" != "visible" && "$flow_preview_context" != '"visible"' ]]; then
+  echo "Opening a flow message preview should keep the flow visible, got $flow_preview_context" >&2
+  exit 1
+fi
+
+flow_preview_navigation_triggered="$(read_ab "open preview source in conversation" eval "(() => { const action = document.querySelector('[data-flow-open-conversation]'); window.__qaFlowPreviewTarget = action?.dataset.flowOpenConversation || ''; action?.click(); return window.__qaFlowPreviewTarget ? 'clicked' : 'missing'; })()")"
+if [[ "$flow_preview_navigation_triggered" != "clicked" && "$flow_preview_navigation_triggered" != '"clicked"' ]]; then
+  echo "Flow message preview should expose an explicit conversation action, got $flow_preview_navigation_triggered" >&2
+  exit 1
+fi
+flow_preview_navigation="not-opened"
+for _ in $(seq 1 10); do
+  flow_preview_navigation="$(read_ab "verify preview source conversation" eval "(() => { const target = window.__qaFlowPreviewTarget; const panelHidden = document.querySelector('#session-flow-panel')?.classList.contains('hidden'); const conversationSelected = document.querySelector('#tab-btn-conversation')?.getAttribute('aria-selected') === 'true'; return target && panelHidden && conversationSelected && location.hash === '#' + target && document.getElementById(target) ? 'opened' : 'not-opened'; })()")"
+  if [[ "$flow_preview_navigation" == "opened" || "$flow_preview_navigation" == '"opened"' ]]; then
+    break
+  fi
+  sleep 0.1
+done
+if [[ "$flow_preview_navigation" != "opened" && "$flow_preview_navigation" != '"opened"' ]]; then
+  echo "Opening a preview source should switch to and anchor the conversation, got $flow_preview_navigation" >&2
   exit 1
 fi
 

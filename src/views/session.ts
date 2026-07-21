@@ -553,6 +553,22 @@ function flowHref(node: any) {
   return "#";
 }
 
+function flowPreviewTarget(node: any) {
+  const target = node?.target;
+  if (target?.kind !== "msg" && target?.kind !== "part") {
+    return "";
+  }
+  return flowHref(node);
+}
+
+function flowPreviewAttributes(node: any) {
+  const target = flowPreviewTarget(node);
+  if (!target) {
+    return "";
+  }
+  return ` data-flow-preview-target="${escapeHtml(target)}" aria-controls="flow-inspector" aria-haspopup="dialog"`;
+}
+
 function flowNodeDetails(node: any) {
   const metrics = node?.metrics || {};
   const operationalMeta = [
@@ -580,21 +596,21 @@ function renderFlowMapNode(node: any) {
 
   if (kind === "agent") {
     const agentClasses = `${classes} ${node.emphasis === "final" ? "flow-map-node-agent-final" : ""}`.trim();
-    return `<a class="${agentClasses}" href="${escapeHtml(flowHref(node))}" title="${escapeHtml(accessibleTitle)}" aria-label="${escapeHtml(accessibleTitle)}">
+    return `<a class="${agentClasses}" href="${escapeHtml(flowHref(node))}"${flowPreviewAttributes(node)} title="${escapeHtml(accessibleTitle)}" aria-label="${escapeHtml(accessibleTitle)}">
       <span class="flow-map-agent-label">${escapeHtml(label)}</span>
       ${details ? `<span class="flow-map-agent-meta">${escapeHtml(details)}</span>` : ""}
     </a>`;
   }
 
   if (kind === "return") {
-    return `<a class="${classes}" href="${escapeHtml(flowHref(node))}" title="${escapeHtml(accessibleTitle)}" aria-label="${escapeHtml(accessibleTitle)}">
+    return `<a class="${classes}" href="${escapeHtml(flowHref(node))}"${flowPreviewAttributes(node)} title="${escapeHtml(accessibleTitle)}" aria-label="${escapeHtml(accessibleTitle)}">
       <span class="flow-map-return-mark"></span>
       <span class="flow-map-node-popover">Return</span>
     </a>`;
   }
 
   const typeLabel = kind === "user" ? "User" : "Subagent";
-  return `<a class="${classes}" href="${escapeHtml(flowHref(node))}" title="${escapeHtml(accessibleTitle)}">
+  return `<a class="${classes}" href="${escapeHtml(flowHref(node))}"${flowPreviewAttributes(node)} title="${escapeHtml(accessibleTitle)}">
     <span class="flow-map-node-kind">${escapeHtml(typeLabel)}</span>
     <span class="flow-map-node-label">${escapeHtml(label)}</span>
     ${details ? `<span class="flow-map-node-meta">${escapeHtml(details)}</span>` : ""}
@@ -748,15 +764,15 @@ export function renderCanonicalFlowPanelContent(sessionFlow: any) {
     <div class="flow-map-scroll">
       <div class="flow-map">${renderFlowMapSession(sessionFlow.root)}</div>
     </div>
-    <aside class="flow-branch-drawer hidden" data-flow-branch-drawer aria-hidden="true">
-      <div class="flow-branch-drawer-header">
+    <aside id="flow-inspector" class="flow-inspector hidden" data-flow-inspector role="dialog" aria-modal="false" aria-hidden="true" aria-labelledby="flow-inspector-title">
+      <div class="flow-inspector-header">
         <div>
-          <h3>Subagent Detail</h3>
-          <p>Focused child-session flow</p>
+          <h3 id="flow-inspector-title" data-flow-inspector-title>${t("detail.flow_subagent_detail")}</h3>
+          <p data-flow-inspector-description>${t("detail.flow_subagent_detail_description")}</p>
         </div>
-        <button type="button" class="flow-branch-drawer-close" data-flow-branch-close aria-label="Close subagent detail">x</button>
+        <button type="button" class="flow-inspector-close" data-flow-inspector-close aria-label="${t("detail.flow_close_inspector")}">x</button>
       </div>
-      <div class="flow-branch-drawer-body" data-flow-branch-body></div>
+      <div class="flow-inspector-body" data-flow-inspector-body></div>
     </aside>
   `;
 }
