@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.7.2 - 2026-07-22
+
+### Fixed
+
+- Kept Token Explorer trend tooltips inside the visible chart area at the
+  right edge and on narrow screens, so hovering a bar no longer introduces an
+  unexpected horizontal scrollbar.
+- Restored normal document scrolling when opening a session Flow and suppressed
+  the tab bar's accidental vertical scrollbar.
+
+### Changed
+
+- Flow nodes now open their message or child-session details in an in-place
+  side inspector, with a direct route back to the source conversation.
+
 ## 1.7.1 - 2026-07-20
 
 ### Fixed

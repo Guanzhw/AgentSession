@@ -103,6 +103,12 @@ if ! printf '%s' "$global_usage_state" | grep -Eq 'providers[^0-9]*[1-9][0-9]*' 
   exit 1
 fi
 
+trend_tooltip_bounds="$(read_ab "verify trend tooltip stays within its scroll viewport" eval "(() => { const body = document.querySelector('.stats-chart-body'); const hits = [...document.querySelectorAll('.trend-day-hit')]; if (!body || hits.length === 0) return 'missing'; const tooltip = document.getElementById('trend-tooltip'); const bodyRect = body.getBoundingClientRect(); const probe = (hit, clientX, clientY) => { hit.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX, clientY })); const tooltipRect = tooltip?.getBoundingClientRect(); return tooltipRect && tooltipRect.left >= bodyRect.left - 1 && tooltipRect.right <= bodyRect.right + 1 && tooltipRect.top >= bodyRect.top - 1 && tooltipRect.bottom <= bodyRect.bottom + 1; }; const firstRect = hits[0].getBoundingClientRect(); const lastRect = hits.at(-1).getBoundingClientRect(); const withinBounds = probe(hits[0], firstRect.left + 1, firstRect.top + 1) && probe(hits.at(-1), lastRect.right - 1, lastRect.bottom - 1); return JSON.stringify({ visible: !tooltip?.hidden, noOverflow: body.scrollWidth <= body.clientWidth + 1, withinBounds }); })()")"
+if ! printf '%s' "$trend_tooltip_bounds" | grep -Eq 'visible[^a-z]*true' || ! printf '%s' "$trend_tooltip_bounds" | grep -Eq 'noOverflow[^a-z]*true' || ! printf '%s' "$trend_tooltip_bounds" | grep -Eq 'withinBounds[^a-z]*true'; then
+  echo "Trend tooltip should not create horizontal overflow or leave its chart viewport, got $trend_tooltip_bounds" >&2
+  exit 1
+fi
+
 usage_drilldown_started="$(read_ab "drill into one usage provider" eval "(() => { const link = document.querySelector('.stats-provider-filter-link'); if (!link) return false; link.click(); return true; })()")"
 if [[ "$usage_drilldown_started" != "true" ]]; then
   echo "Centralized Usage should provide a provider drill-down card" >&2
@@ -438,6 +444,12 @@ fi
 flow_tab_selected="$(read_ab "verify flow button selects Flow tab" get attr "#tab-btn-flow" aria-selected)"
 if [[ "$flow_tab_selected" != "true" && "$flow_tab_selected" != '"true"' ]]; then
   echo "Flow button should reveal the Flow tab, got state $flow_tab_selected" >&2
+  exit 1
+fi
+
+flow_scroll_state="$(read_ab "verify flow button leaves document scrolling enabled" eval "JSON.stringify({ bodyLocked: document.body.classList.contains('flow-panel-open'), tabOverflowY: getComputedStyle(document.querySelector('.tab-bar')).overflowY })")"
+if ! printf '%s' "$flow_scroll_state" | grep -Eq 'bodyLocked[^a-z]*false' || ! printf '%s' "$flow_scroll_state" | grep -Eq 'tabOverflowY[^a-z]*hidden'; then
+  echo "Flow should not lock document scrolling or create a vertical tab-bar scrollbar, got $flow_scroll_state" >&2
   exit 1
 fi
 

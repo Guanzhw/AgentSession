@@ -1746,7 +1746,6 @@ document.addEventListener("keydown", (e) => {
     if (flowPanel && !flowPanel.classList.contains("hidden")) {
       flowPanel.classList.add("hidden");
       flowPanel.setAttribute("aria-hidden", "true");
-      document.body.classList.remove("flow-panel-open");
       document.querySelectorAll(".flow-open-btn[aria-expanded='true']").forEach((btn) => {
         btn.setAttribute("aria-expanded", "false");
       });
@@ -2895,7 +2894,6 @@ if (sessionWorkbench) {
     closeFlowInspector({ restoreFocus: false });
     flowPanel.classList.add("hidden");
     flowPanel.setAttribute("aria-hidden", "true");
-    document.body.classList.remove("flow-panel-open");
     document.querySelectorAll(".flow-open-btn[aria-expanded='true']").forEach((btn) => {
       btn.setAttribute("aria-expanded", "false");
     });
@@ -3114,7 +3112,6 @@ if (sessionWorkbench) {
         document.getElementById("tab-btn-flow")?.click();
         flowPanel.classList.remove("hidden");
         flowPanel.setAttribute("aria-hidden", "false");
-        document.body.classList.add("flow-panel-open");
         const loaded = await ensureFlowLoaded();
         if (!loaded) return;
         const anchor = flowButton.dataset.flowAnchor;
@@ -3390,8 +3387,9 @@ if (sessionWorkbench) {
   reflowTrendChart();
 
   const tooltip = document.getElementById("trend-tooltip");
-  if (tooltip) {
-    if (chartSvg) {
+  const chartBody = chartSvg?.closest(".stats-chart-body");
+  if (chartBody) chartBody.style.position = "relative";
+  if (tooltip && chartSvg && chartBody) {
       const seriesLabels = {
         total: ft("stats.legend_total"),
         output: ft("stats.legend_output"),
@@ -3424,12 +3422,18 @@ if (sessionWorkbench) {
           "<b>" + formatText(ft("stats.tooltip_total"), { total: total.toLocaleString() }) + "</b>";
         tooltip.hidden = false;
 
-        const svgRect = chartSvg.getBoundingClientRect();
+        const chartBodyRect = chartBody.getBoundingClientRect();
         const hitRect = hit.getBoundingClientRect();
-        const x = Number.isFinite(clientX) ? clientX - svgRect.left + 12 : hitRect.left - svgRect.left + hitRect.width / 2 + 12;
-        const y = Number.isFinite(clientY) ? clientY - svgRect.top - 40 : hitRect.top - svgRect.top - 44;
-        tooltip.style.left = Math.max(0, x) + "px";
-        tooltip.style.top = Math.max(0, y) + "px";
+        const anchorX = Number.isFinite(clientX) ? clientX : hitRect.left + hitRect.width / 2;
+        const anchorY = Number.isFinite(clientY) ? clientY : hitRect.top + hitRect.height / 2;
+        const rawLeft = anchorX - chartBodyRect.left + chartBody.scrollLeft + 12;
+        const rawTop = anchorY - chartBodyRect.top + chartBody.scrollTop - tooltip.offsetHeight - 12;
+        const minLeft = chartBody.scrollLeft;
+        const maxLeft = Math.max(minLeft, chartBody.scrollLeft + chartBody.clientWidth - tooltip.offsetWidth);
+        const minTop = chartBody.scrollTop;
+        const maxTop = Math.max(minTop, chartBody.scrollTop + chartBody.clientHeight - tooltip.offsetHeight);
+        tooltip.style.left = Math.min(maxLeft, Math.max(minLeft, rawLeft)) + "px";
+        tooltip.style.top = Math.min(maxTop, Math.max(minTop, rawTop)) + "px";
       };
 
       chartSvg.addEventListener("mousemove", function (e) {
@@ -3452,10 +3456,6 @@ if (sessionWorkbench) {
       chartSvg.addEventListener("mouseleave", function () {
         tooltip.hidden = true;
       });
-    }
-
-    const chartBody = document.querySelector(".trend-chart")?.closest(".stats-chart-body");
-    if (chartBody) chartBody.style.position = "relative";
   }
 
   document.querySelectorAll(".stats-filter-scope-label input[type='radio']").forEach((radio) => {

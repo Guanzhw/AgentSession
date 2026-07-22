@@ -2381,6 +2381,7 @@ test("Token Explorer JS interactivity hooks are present", () => {
   assert.match(appJs, /trend-legend-toggle/);
   assert.match(appJs, /trend-hit/);
   assert.match(appJs, /trend-tooltip/);
+  assert.match(appJs, /chartBody\.scrollLeft \+ chartBody\.clientWidth - tooltip\.offsetWidth/);
   assert.match(appJs, /stats-preset-radio/);
   assert.match(appJs, /stats-filter-custom-dates/);
 });
@@ -4468,6 +4469,7 @@ test("session detail uses progressive, accessible tabs without duplicating analy
   assert.match(appJs, /session-flow-tab-open/);
   assert.match(appJs, /openFlowMessagePreview/);
   assert.match(appJs, /data-flow-open-conversation/);
+  assert.doesNotMatch(appJs, /classList\.add\("flow-panel-open"\)/);
   assert.match(appJs, /ArrowRight/);
   assert.match(appJs, /ArrowLeft/);
 });

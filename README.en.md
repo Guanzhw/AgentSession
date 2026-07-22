@@ -7,12 +7,12 @@
 ![Node.js >= 22.13.0](https://img.shields.io/badge/node-%3E%3D22.13.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.7.1](https://img.shields.io/badge/version-1.7.1-orange?style=flat-square)
+![v1.7.2](https://img.shields.io/badge/version-1.7.2-orange?style=flat-square)
 
-## What's New in 1.7.1
+## What's New in 1.7.2
 
-- File-backed providers now keep tool-only continuation calls with the preceding assistant ReAct turn. Codex cumulative reasoning snapshots render once at their latest state, and merged token summaries disclose how many model requests they aggregate.
-- Session-list filters apply immediately; title search still requires Enter or Apply and now sits beside Apply.
+- Token Explorer trend tooltips stay within the visible chart, so hovering the rightmost bars no longer creates an unexpected horizontal scrollbar.
+- Session Flow restores normal page scrolling and removes the tab bar's accidental vertical scrollbar. Flow nodes now preview message or child-session details in a side inspector with a direct route back to the source conversation.
 
 ### 1.7.0
 
