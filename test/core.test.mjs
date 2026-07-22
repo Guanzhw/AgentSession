@@ -59,7 +59,9 @@ import {
 } from "../dist/src/providers/codex/parser.js";
 import { buildMessageSessionViews } from "../dist/src/providers/shared/message-session.js";
 import { buildLinkedMessageSessionViews } from "../dist/src/providers/shared/linked-message-session.js";
+import { buildAgentLoop, buildAgentLoopTrace } from "../dist/src/providers/shared/agent-loop.js";
 import { createIncrementalTokenStats, createSessionFileStore } from "../dist/src/providers/shared/file-adapter-helpers.js";
+import { providerFeatureMatrix } from "../dist/src/providers/kinds.js";
 import { createStatsCache } from "../dist/src/stats-cache.js";
 import {
   getIndexedModelDistribution,
@@ -271,6 +273,75 @@ test("normalized message providers build structured tree, metrics, flow, and mod
     views.tree.messages.find((message) => message.data.tokens)?.data.model.modelID,
     "claude-sonnet"
   );
+  assert.equal(views.trace.summary.totalSteps, 2);
+  assert.equal(views.metrics.steps[0]?.reason, "tool-calls");
+});
+
+test("Agent Loop folds common coding-agent turns into provider-neutral trace steps", () => {
+  const messages = [
+    {
+      id: "user-1", sessionId: "loop-session", role: "user", content: "Inspect the repository.",
+      thinking: null, toolName: null, toolInput: null, toolOutput: null, timestamp: 1000, tokens: null, metadata: null
+    },
+    {
+      id: "assistant-1", sessionId: "loop-session", role: "assistant", content: "", thinking: "I will inspect the files.",
+      toolName: "read", toolInput: { path: "README.md" }, toolOutput: null, timestamp: 2000,
+      tokens: { input: 5, output: 3, total: 8, cache: { read: 0, write: 0 } },
+      metadata: { turnId: "response-1", callId: "read-1", model: "fixture-model" }
+    },
+    {
+      id: "tool-result-1", sessionId: "loop-session", role: "tool", content: "AgentSession", thinking: null,
+      toolName: "read", toolInput: null, toolOutput: "AgentSession", timestamp: 3000, tokens: null,
+      metadata: { toolUseId: "read-1" }
+    },
+    {
+      id: "assistant-2", sessionId: "loop-session", role: "assistant", content: "The repository is ready.", thinking: null,
+      toolName: null, toolInput: null, toolOutput: null, timestamp: 4000,
+      tokens: { input: 2, output: 4, total: 6, cache: { read: 0, write: 0 } },
+      metadata: { turnId: "response-2", model: "fixture-model" }
+    }
+  ];
+  const loop = buildAgentLoop(messages);
+  const trace = buildAgentLoopTrace("loop-session", loop);
+
+  assert.deepEqual(loop.turns.map((turn) => [turn.role, turn.events.map((event) => event.kind)]), [
+    ["user", ["text"]],
+    ["assistant", ["reasoning", "tool"]],
+    ["assistant", ["text"]]
+  ]);
+  assert.equal(loop.turns[1].events[1].output, "AgentSession");
+  assert.equal(trace.summary.totalSteps, 2);
+  assert.equal(trace.steps[0].reason, "tool-calls");
+  assert.equal(trace.steps[0].spans[1].output, "AgentSession");
+  assert.equal(trace.steps[1].tokens.total, 6);
+});
+
+test("Agent Loop clears implicit tool continuation at a system boundary", () => {
+  const messages = [
+    {
+      id: "assistant", sessionId: "loop-boundary", role: "assistant", content: "Running tools.",
+      thinking: null, toolName: null, toolInput: null, toolOutput: null, timestamp: 1000, tokens: null, metadata: null
+    },
+    {
+      id: "tool-before", sessionId: "loop-boundary", role: "tool", content: "before", thinking: null,
+      toolName: "read", toolInput: null, toolOutput: "before", timestamp: 2000, tokens: null, metadata: null
+    },
+    {
+      id: "compaction", sessionId: "loop-boundary", role: "system", content: "Compacted context.", thinking: null,
+      toolName: null, toolInput: null, toolOutput: null, timestamp: 3000, tokens: null, metadata: null
+    },
+    {
+      id: "tool-after", sessionId: "loop-boundary", role: "tool", content: "after", thinking: null,
+      toolName: "write", toolInput: null, toolOutput: "after", timestamp: 4000, tokens: null, metadata: null
+    }
+  ];
+  const loop = buildAgentLoop(messages);
+
+  assert.deepEqual(loop.turns.map((turn) => [turn.role, turn.events.map((event) => event.tool || event.kind)]), [
+    ["assistant", ["text", "read"]],
+    ["system", ["text"]],
+    ["tool", ["write"]]
+  ]);
 });
 
 test("Claude Code views reconstruct trace and metrics steps from transcript tools", () => {
@@ -1413,6 +1484,20 @@ test("every provider declares a configurable resume command", () => {
   assert.equal(parseArgs(["--pi-dir", "D:\\fixtures\\pi-agent"]).piDir, "D:\\fixtures\\pi-agent");
 });
 
+test("every provider exposes the complete shared Agent Loop capability surface", () => {
+  for (const provider of getAllProviders()) {
+    const features = providerFeatureMatrix(provider);
+    assert.equal(features.localManagement, true, provider.id);
+    assert.equal(features.sessionAnalysis, true, provider.id);
+    assert.equal(features.agentLoopViews, true, provider.id);
+    assert.equal(features.sessionTrace, true, provider.id);
+    assert.equal(features.systemPromptEvidence, true, provider.id);
+    assert.equal(features.runtimeEnvironment, true, provider.id);
+    assert.equal(features.resume, true, provider.id);
+    assert.equal(features.sqliteSessionStore, provider.id === "opencode", provider.id);
+  }
+});
+
 test("terminal launch is enabled by default and supports an explicit startup opt-out", () => {
   const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-config-"));
   const configPath = path.join(temp, "config.json");
@@ -2340,6 +2425,26 @@ test("session detail shows a safe source breadcrumb and activates Usage for a st
   assert.match(html, /nav-link nav-link-stats active/);
 });
 
+test("session raw data exposes an opaque project key and configured directory provenance", () => {
+  const html = renderSessionPage({
+    session: {
+      id: "gemini-project-key",
+      title: "Mapped Gemini session",
+      directory: "D:\\WorkSpace\\project",
+      time_created: 1,
+      metadata: {
+        projectKey: "opaque-project-key",
+        projectDirectorySource: "configured"
+      }
+    },
+    provider: "gemini"
+  });
+
+  assert.match(html, /Project key/);
+  assert.match(html, /opaque-project-key/);
+  assert.match(html, /Directory supplied by an AgentSession mapping/);
+});
+
 test("Token Explorer renders with no data without crashing", () => {
   const html = renderStatsPage({
     tokenStats: [],
@@ -2871,6 +2976,9 @@ test("settings configuration validates, persists, and applies runtime fields", (
           command: {
             executable: "opencode",
             args: ["run", "--file", "{promptPath}"]
+          },
+          projectPaths: {
+            "opaque-project-key": process.cwd()
           }
         }
       }
@@ -2914,6 +3022,7 @@ test("settings configuration validates, persists, and applies runtime fields", (
           opencode: {
             defaultTargets: [],
             command: { executable: "", args: "run" },
+            projectPaths: [],
             targets: {
               skills: {
                 artifactRoots: "skills"
@@ -2930,8 +3039,21 @@ test("settings configuration validates, persists, and applies runtime fields", (
       "analysis.providers.opencode.defaultTargets must contain at least one target.",
       "analysis.providers.opencode.command.executable must be a non-empty string.",
       "analysis.providers.opencode.command.args must be an array of strings.",
+      "analysis.providers.opencode.projectPaths must be an object of string values.",
       "analysis.providers.opencode.targets.skills.artifactRoots must be an array of strings."
     ]
+  );
+  assert.deepEqual(
+    validateUserConfig({
+      analysis: {
+        providers: {
+          gemini: {
+            projectPaths: { "opaque-project-key": "relative-project" }
+          }
+        }
+      }
+    }),
+    ["analysis.providers.gemini.projectPaths.opaque-project-key must be an absolute path."]
   );
   assert.deepEqual(
     validateUserConfig({
@@ -4210,7 +4332,10 @@ test("session analysis requires a provider capability and an enabled target", ()
   const claude = { id: "claude-code", capabilities: { sessionAnalysis: true } };
   const codex = getAllProviders().find((provider) => provider.id === "codex");
   const gemini = getAllProviders().find((provider) => provider.id === "gemini");
+  const pi = getAllProviders().find((provider) => provider.id === "pi");
   assert.equal(codex.capabilities.sessionAnalysis, true);
+  assert.equal(gemini.capabilities.sessionAnalysis, true);
+  assert.equal(pi.capabilities.sessionAnalysis, true);
   assert.equal(typeof codex.getRuntimeEnvironment, "function");
   assert.equal(resolveAnalysisSettings(opencode, { enabled: false }), null);
   assert.equal(resolveAnalysisSettings(opencode, {
@@ -4233,7 +4358,7 @@ test("session analysis requires a provider capability and an enabled target", ()
         command: { executable: "codex", args: ["exec"] }
       }
     }
-  }), null);
+  }).command.executable, "opencode");
   assert.equal(resolveAnalysisSettings(opencode, {
     enabled: true
   }).command.executable, "opencode");
@@ -4241,6 +4366,9 @@ test("session analysis requires a provider capability and an enabled target", ()
     enabled: true
   }).command.executable, "opencode");
   assert.equal(resolveAnalysisSettings(codex, {
+    enabled: true
+  }).command.executable, "opencode");
+  assert.equal(resolveAnalysisSettings(pi, {
     enabled: true
   }).command.executable, "opencode");
 });

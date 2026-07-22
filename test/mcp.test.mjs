@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import test from "node:test";
@@ -15,6 +15,13 @@ const { closeDb } = await import("../dist/src/db.js");
 const { createSessionHistoryService, SessionHistoryError } = await import("../dist/src/session-history.js");
 const { createSqliteSessionAdapter } = await import("../dist/src/providers/shared/sqlite-adapter.js");
 const { createSessionHistoryMcpServer } = await import("../packages/agentsession-mcp/dist/session-history-server.js");
+const {
+  AUTO_UPDATE_PACKAGE,
+  createAutoUpdateLauncher,
+  getInstallConfigPath,
+  installIntoTarget,
+  parseInstallerCommand
+} = await import("../packages/agentsession-mcp/dist/installer.js");
 const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
 const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
 const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
@@ -334,6 +341,112 @@ test("compiled stdio executable initializes without polluting MCP stdout", async
   assert.equal(search.isError, undefined);
 });
 
+test("interactive installer writes user-scoped auto-updating MCP configurations", () => {
+  const home = mkdtempSync(path.join(temp, "mcp-installer-"));
+  const agentConfig = path.join(home, "agentsession.json");
+  writeFileSync(agentConfig, JSON.stringify({ mcp: { searchLimit: 10 } }));
+  const context = { home, cwd: home, env: {}, platform: "linux" };
+
+  const codexPath = getInstallConfigPath("codex", context);
+  mkdirSync(path.dirname(codexPath), { recursive: true });
+  writeFileSync(codexPath, "[mcp_servers.other]\ncommand = \"other-server\"\n");
+
+  for (const target of ["codex", "claude-code", "gemini", "opencode"]) {
+    const result = installIntoTarget(target, { ...context, configPath: agentConfig });
+    assert.equal(result.status, "installed");
+  }
+
+  const codex = readFileSync(codexPath, "utf8");
+  assert.match(codex, /\[mcp_servers\.other\]/);
+  assert.match(codex, /\[mcp_servers\.agentsession\]/);
+  assert.match(codex, new RegExp(AUTO_UPDATE_PACKAGE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(codex, /--prefer-online/);
+  assert.match(codex, /AGENTSESSION_CONFIG/);
+
+  const claude = JSON.parse(readFileSync(getInstallConfigPath("claude-code", context), "utf8"));
+  const gemini = JSON.parse(readFileSync(getInstallConfigPath("gemini", context), "utf8"));
+  const opencode = JSON.parse(readFileSync(getInstallConfigPath("opencode", context), "utf8"));
+  for (const config of [claude, gemini]) {
+    assert.equal(config.mcpServers.agentsession.command, "npx");
+    assert.ok(config.mcpServers.agentsession.args.includes(AUTO_UPDATE_PACKAGE));
+    assert.equal(config.mcpServers.agentsession.env.AGENTSESSION_CONFIG, agentConfig);
+  }
+  assert.deepEqual(opencode.mcp.agentsession.command.slice(0, 2), ["npx", "--yes"]);
+  assert.ok(opencode.mcp.agentsession.command.includes(AUTO_UPDATE_PACKAGE));
+  assert.equal(opencode.mcp.agentsession.environment.AGENTSESSION_CONFIG, agentConfig);
+
+  assert.equal(installIntoTarget("gemini", { ...context, configPath: agentConfig }).status, "already-installed");
+  assert.equal(installIntoTarget("gemini", { ...context, configPath: agentConfig, update: true }).status, "updated");
+  const legacyGeminiPath = getInstallConfigPath("gemini", context);
+  const legacyGemini = JSON.parse(readFileSync(legacyGeminiPath, "utf8"));
+  legacyGemini.mcpServers.agentsession = { command: "legacy-mcp", args: [] };
+  writeFileSync(legacyGeminiPath, `${JSON.stringify(legacyGemini)}\n`);
+  assert.equal(installIntoTarget("gemini", { ...context, configPath: agentConfig }).status, "needs-replace");
+  assert.equal(installIntoTarget("gemini", { ...context, configPath: agentConfig, update: true }).status, "needs-replace");
+  assert.equal(installIntoTarget("gemini", { ...context, configPath: agentConfig, replace: true }).status, "updated");
+});
+
+test("installer recognizes a commented Codex table header before replacing it", () => {
+  const home = mkdtempSync(path.join(temp, "mcp-installer-toml-"));
+  const context = { home, cwd: home, env: {}, platform: "linux" };
+  const codexPath = getInstallConfigPath("codex", context);
+  mkdirSync(path.dirname(codexPath), { recursive: true });
+  writeFileSync(codexPath, [
+    "[mcp_servers.agentsession] # legacy entry",
+    "command = \"legacy-mcp\"",
+    "",
+    "[mcp_servers.other] # preserve this entry",
+    "command = \"other-mcp\"",
+    ""
+  ].join("\n"));
+
+  assert.equal(installIntoTarget("codex", context).status, "needs-replace");
+  assert.equal(installIntoTarget("codex", { ...context, replace: true }).status, "updated");
+  const config = readFileSync(codexPath, "utf8");
+  assert.equal([...config.matchAll(/\[mcp_servers\.agentsession\]/g)].length, 1);
+  assert.match(config, /\[mcp_servers\.other\] # preserve this entry/);
+});
+
+test("installer parses an explicit update and uses a Windows-safe launcher", () => {
+  assert.deepEqual(parseInstallerCommand(["update", "--target", "codex,gemini", "--yes"]), {
+    action: "update",
+    options: { targets: ["codex", "gemini"], yes: true }
+  });
+  assert.deepEqual(createAutoUpdateLauncher(undefined, { platform: "win32" }), {
+    command: "cmd.exe",
+    args: [
+      "/d",
+      "/v:off",
+      "/s",
+      "/c",
+      `npx.cmd --yes --prefer-online ${AUTO_UPDATE_PACKAGE}`
+    ]
+  });
+});
+
+test("compiled CLI configures a selected host without an interactive prompt", () => {
+  const home = mkdtempSync(path.join(temp, "mcp-installer-cli-"));
+  const agentConfig = path.join(home, "agentsession.json");
+  const codexHome = path.join(home, "codex-home");
+  writeFileSync(agentConfig, JSON.stringify({ mcp: { searchLimit: 10 } }));
+  const executable = path.join(process.cwd(), "packages", "agentsession-mcp", "dist", "cli.js");
+  const result = spawnSync(process.execPath, [
+    executable,
+    "install",
+    "--target", "codex",
+    "--config", agentConfig,
+    "--yes"
+  ], {
+    encoding: "utf8",
+    env: { ...process.env, CODEX_HOME: codexHome, HOME: home, USERPROFILE: home }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Codex: installed auto-updating MCP config/);
+  const config = readFileSync(path.join(codexHome, "config.toml"), "utf8");
+  assert.match(config, /AGENTSESSION_CONFIG/);
+  assert.match(config, /--prefer-online/);
+});
+
 test("compiled MCP executable has MCP-specific help", () => {
   const executable = path.join(process.cwd(), "packages", "agentsession-mcp", "dist", "cli.js");
   const result = spawnSync(process.execPath, [executable, "--help"], {
@@ -342,7 +455,8 @@ test("compiled MCP executable has MCP-specific help", () => {
   });
   assert.equal(result.status, 0);
   assert.match(result.stdout, /AgentSession-MCP/);
-  assert.match(result.stdout, /Usage: agentsession-mcp \[options\]/);
+  assert.match(result.stdout, /agentsession-mcp \[options\]/);
+  assert.match(result.stdout, /agentsession-mcp install/);
   assert.equal(result.stderr, "");
 });
 

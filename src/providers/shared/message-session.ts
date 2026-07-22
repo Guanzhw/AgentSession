@@ -1,4 +1,10 @@
 import type { Message, RawSession, TokenUsage } from "../interface.js";
+import {
+  buildAgentLoop,
+  buildAgentLoopTrace,
+  type AgentLoop,
+  type AgentLoopEvent
+} from "./agent-loop.js";
 import { asNumber } from "./parser.js";
 import { buildFlowTreeFromContainer } from "./flow-tree.js";
 import { treeToContainer } from "./session-container.js";
@@ -12,127 +18,6 @@ import type {
 
 type Row = Record<string, any>;
 
-function cloneTokenUsage(tokens: TokenUsage): TokenUsage {
-  return {
-    input: asNumber(tokens.input),
-    output: asNumber(tokens.output),
-    reasoning: asNumber(tokens.reasoning),
-    total: asNumber(tokens.total),
-    cache: {
-      read: asNumber(tokens.cache?.read),
-      write: asNumber(tokens.cache?.write)
-    }
-  };
-}
-
-function tokenUsageTotal(tokens: TokenUsage) {
-  const total = asNumber(tokens.total);
-  return total || (
-    asNumber(tokens.input)
-    + asNumber(tokens.output)
-    + asNumber(tokens.reasoning)
-    + asNumber(tokens.cache?.read)
-    + asNumber(tokens.cache?.write)
-  );
-}
-
-function sumTokenUsage(values: TokenUsage[]): TokenUsage | null {
-  if (!values.length) return null;
-  return values.reduce<TokenUsage>((total, tokens) => ({
-    input: asNumber(total.input) + asNumber(tokens.input),
-    output: asNumber(total.output) + asNumber(tokens.output),
-    reasoning: asNumber(total.reasoning) + asNumber(tokens.reasoning),
-    total: tokenUsageTotal(total) + tokenUsageTotal(tokens),
-    cache: {
-      read: asNumber(total.cache?.read) + asNumber(tokens.cache?.read),
-      write: asNumber(total.cache?.write) + asNumber(tokens.cache?.write)
-    }
-  }), {
-    input: 0,
-    output: 0,
-    reasoning: 0,
-    total: 0,
-    cache: { read: 0, write: 0 }
-  });
-}
-
-function messageData(message: Message): Row {
-  const metadata = message.metadata && typeof message.metadata === "object"
-    ? message.metadata
-    : {};
-  const model = metadata.model;
-  const tokens = message.tokens ? cloneTokenUsage(message.tokens) : null;
-  return {
-    role: message.role,
-    time: { created: message.timestamp },
-    tokens,
-    tokenRequestCount: tokens ? 1 : 0,
-    tokenRequests: tokens ? [tokens] : [],
-    ...metadata,
-    model: typeof model === "string"
-      ? { modelID: model, providerID: metadata.provider || null }
-      : model || null
-  };
-}
-
-function messageParts(message: Message, index: number): SessionPartNode[] {
-  const parts: SessionPartNode[] = [];
-  const prefix = message.id || `${message.sessionId}:message:${index}`;
-
-  if (message.thinking) {
-    parts.push({
-      id: `${prefix}:reasoning`,
-      messageId: prefix,
-      sessionId: message.sessionId,
-      type: "reasoning",
-      tool: null,
-      data: { type: "reasoning", text: message.thinking },
-      timeStart: message.timestamp,
-      timeEnd: message.timestamp,
-      childSessions: []
-    });
-  }
-
-  if (message.role === "tool" || message.toolName) {
-    const isError = Boolean(message.metadata?.isError) || message.metadata?.status === "error";
-    parts.push({
-      id: `${prefix}:tool`,
-      messageId: prefix,
-      sessionId: message.sessionId,
-      type: "tool",
-      tool: message.toolName || "tool",
-      data: {
-        type: "tool",
-        tool: message.toolName || "tool",
-        metadata: message.metadata || null,
-        state: {
-          input: message.toolInput,
-          output: message.toolOutput ?? message.content ?? "",
-          status: isError ? "error" : "completed",
-          time: { start: message.timestamp, end: message.timestamp }
-        }
-      },
-      timeStart: message.timestamp,
-      timeEnd: message.timestamp,
-      childSessions: []
-    });
-  } else if (message.content) {
-    parts.push({
-      id: `${prefix}:text`,
-      messageId: prefix,
-      sessionId: message.sessionId,
-      type: "text",
-      tool: null,
-      data: { type: "text", text: message.content },
-      timeStart: message.timestamp,
-      timeEnd: message.timestamp,
-      childSessions: []
-    });
-  }
-
-  return parts;
-}
-
 function addUsage(target: SessionTreeMetrics, tokens: TokenUsage | null) {
   if (!tokens) return;
   target.inputTokens += asNumber(tokens.input);
@@ -142,97 +27,70 @@ function addUsage(target: SessionTreeMetrics, tokens: TokenUsage | null) {
   target.cacheWriteTokens += asNumber(tokens.cache?.write);
 }
 
-function responseGroupId(message: Message) {
-  const value = message.metadata?.turnId ?? message.metadata?.responseGroupId;
-  return typeof value === "string" && value ? value : null;
-}
-
-function mergeMessageData(target: Row, message: Message) {
-  const incoming = messageData(message);
-  if (incoming.tokens) {
-    const existingRequests = Array.isArray(target.tokenRequests)
-      ? target.tokenRequests.filter((tokens: any) => tokens && typeof tokens === "object")
-      : target.tokens && typeof target.tokens === "object"
-        ? [target.tokens]
-        : [];
-    const tokenRequests = [...existingRequests, incoming.tokens as TokenUsage];
-    target.tokenRequests = tokenRequests;
-    target.tokenRequestCount = tokenRequests.length;
-    target.tokens = sumTokenUsage(tokenRequests);
-  }
-  if (!target.model && incoming.model) target.model = incoming.model;
-  for (const [key, value] of Object.entries(incoming)) {
-    if (["tokens", "tokenRequestCount", "tokenRequests"].includes(key)) continue;
-    if (target[key] == null && value != null) target[key] = value;
-  }
-}
-
-export function buildMessageSessionTree(session: RawSession | Row, messages: Message[]): SessionTree {
-  const sessionRow = session as Row;
-  const nodes: SessionMessageNode[] = [];
-  const toolPartsById = new Map<string, SessionPartNode>();
-  let previousGroupId: string | null = null;
-  let previousGroupNode: SessionMessageNode | null = null;
-  let activeAssistantNode: SessionMessageNode | null = null;
-  messages.forEach((message, index) => {
-    const toolUseId = message.metadata?.toolUseId;
-    if (typeof toolUseId === "string" && toolUseId) {
-      const call = toolPartsById.get(toolUseId);
-      if (call) {
-        call.data.state.output = message.toolOutput ?? message.content ?? "";
-        call.data.state.status = message.metadata?.isError ? "error" : "completed";
-        return;
-      }
-    }
-
-    const id = message.id || `${message.sessionId}:message:${index}`;
-    const parts = messageParts(message, index);
-    const toolPart = parts.find((part) => part.type === "tool");
-    if (toolPart) {
-      toolPartsById.set(id, toolPart);
-      const callId = message.metadata?.callId;
-      if (typeof callId === "string" && callId) toolPartsById.set(callId, toolPart);
-    }
-    const groupId = responseGroupId(message);
-    const role = String(message.role || "").toLowerCase();
-    const groupable = Boolean(groupId) && ["assistant", "tool"].includes(role);
-    const groupedWithPrevious = groupable && previousGroupNode && previousGroupId === groupId;
-    // Providers can persist a tool-only continuation after a progress update
-    // with a new response id (for example, Codex emits token_count between
-    // individual exec calls). Keep that tool in the visible assistant card.
-    // A new reasoning record starts its own ReAct observation/decision card:
-    // it must not be folded into a prior assistant response just because no
-    // visible text was emitted between the two requests.
-    const implicitContinuation = Boolean(activeAssistantNode) && role === "tool";
-    const continuationTarget = groupedWithPrevious
-      ? previousGroupNode
-      : implicitContinuation
-        ? activeAssistantNode
-        : null;
-    if (continuationTarget) {
-      continuationTarget.parts.push(...parts);
-      continuationTarget.timeCreated = Math.min(continuationTarget.timeCreated || message.timestamp, message.timestamp || continuationTarget.timeCreated);
-      mergeMessageData(continuationTarget.data, message);
-      if (groupable) {
-        previousGroupId = groupId;
-        previousGroupNode = continuationTarget;
-      }
-      return;
-    }
-
-    const node: SessionMessageNode = {
-      id,
-      sessionId: message.sessionId,
-      role: groupable ? "assistant" : String(message.role || "unknown"),
-      data: messageData(message),
-      timeCreated: asNumber(message.timestamp),
-      parts
+function loopEventToPart(event: AgentLoopEvent, turnId: string, sessionId: string): SessionPartNode {
+  if (event.kind === "reasoning") {
+    return {
+      id: event.id,
+      messageId: turnId,
+      sessionId,
+      type: "reasoning",
+      tool: null,
+      data: { type: "reasoning", text: event.text },
+      timeStart: event.timeStart,
+      timeEnd: event.timeEnd,
+      childSessions: []
     };
-    nodes.push(node);
-    activeAssistantNode = ["assistant", "tool"].includes(role) ? node : null;
-    previousGroupId = groupable ? groupId : null;
-    previousGroupNode = groupable ? node : null;
-  });
+  }
+  if (event.kind === "text") {
+    return {
+      id: event.id,
+      messageId: turnId,
+      sessionId,
+      type: "text",
+      tool: null,
+      data: { type: "text", text: event.text },
+      timeStart: event.timeStart,
+      timeEnd: event.timeEnd,
+      childSessions: []
+    };
+  }
+  return {
+    id: event.id,
+    messageId: turnId,
+    sessionId,
+    type: "tool",
+    tool: event.tool || "tool",
+    data: {
+      type: "tool",
+      tool: event.tool || "tool",
+      metadata: event.metadata,
+      state: {
+        input: event.input,
+        output: event.output,
+        status: event.status,
+        time: { start: event.timeStart, end: event.timeEnd }
+      }
+    },
+    timeStart: event.timeStart,
+    timeEnd: event.timeEnd,
+    childSessions: []
+  };
+}
+
+export function buildMessageSessionTree(
+  session: RawSession | Row,
+  messages: Message[],
+  loop = buildAgentLoop(messages)
+): SessionTree {
+  const sessionRow = session as Row;
+  const nodes: SessionMessageNode[] = loop.turns.map((turn) => ({
+    id: turn.id,
+    sessionId: turn.sessionId,
+    role: turn.role,
+    data: turn.data,
+    timeCreated: turn.timeCreated,
+    parts: turn.events.map((event) => loopEventToPart(event, turn.id, turn.sessionId))
+  }));
   const times = [
     asNumber(sessionRow.timeCreated ?? sessionRow.time_created),
     asNumber(sessionRow.timeUpdated ?? sessionRow.time_updated),
@@ -263,7 +121,7 @@ export function buildMessageSessionTree(session: RawSession | Row, messages: Mes
   metrics.runtimeMs = metrics.timeStart && metrics.timeEnd
     ? Math.max(0, metrics.timeEnd - metrics.timeStart)
     : 0;
-  messages.forEach((message) => addUsage(metrics, message.tokens));
+  nodes.forEach((message) => addUsage(metrics, message.data?.tokens || null));
 
   return {
     session: {
@@ -346,17 +204,18 @@ function collectToolCounts(tree: SessionTree, toolCounts = new Map<string, numbe
   return toolCounts;
 }
 
-export function buildMessageSessionViewsFromTree(tree: SessionTree) {
+export function buildMessageSessionViewsFromTree(tree: SessionTree, loop: AgentLoop) {
   refreshMessageSessionTreeMetrics(tree);
   const container = treeToContainer(tree);
   const toolCounts = collectToolCounts(tree);
+  const trace = buildAgentLoopTrace(String(tree.session.id), loop);
   const metrics: SessionMetricsView = {
     sessionId: String(tree.session.id),
     totals: {
       messages: tree.metrics.totalMessages,
       toolCalls: tree.metrics.totalToolCalls,
       branches: tree.metrics.descendantCount,
-      steps: 0,
+      steps: trace.steps.length,
       inputTokens: tree.metrics.inputTokens,
       outputTokens: tree.metrics.outputTokens,
       reasoningTokens: tree.metrics.reasoningTokens,
@@ -373,17 +232,33 @@ export function buildMessageSessionViewsFromTree(tree: SessionTree) {
     tools: [...toolCounts.entries()]
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .map(([name, count]) => ({ name, count })),
-    steps: []
+    steps: trace.steps.map((step, index) => ({
+      index: index + 1,
+      messageId: step.messageId,
+      snapshotId: null,
+      reason: step.reason,
+      duration: step.duration,
+      totalTokens: step.tokens.total || 0,
+      inputTokens: step.tokens.input || 0,
+      outputTokens: step.tokens.output || 0,
+      reasoningTokens: step.tokens.reasoning || 0,
+      cacheReadTokens: step.tokens.cache?.read || 0,
+      cacheWriteTokens: step.tokens.cache?.write || 0,
+      cost: step.cost,
+      contextItems: step.spans.length
+    }))
   };
 
   return {
     tree,
     container,
     metrics,
-    flow: buildFlowTreeFromContainer(container, metrics)
+    flow: buildFlowTreeFromContainer(container, metrics),
+    trace
   };
 }
 
 export function buildMessageSessionViews(session: RawSession | Row, messages: Message[]) {
-  return buildMessageSessionViewsFromTree(buildMessageSessionTree(session, messages));
+  const loop = buildAgentLoop(messages);
+  return buildMessageSessionViewsFromTree(buildMessageSessionTree(session, messages, loop), loop);
 }

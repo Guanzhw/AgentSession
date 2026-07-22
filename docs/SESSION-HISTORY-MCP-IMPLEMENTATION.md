@@ -312,11 +312,19 @@ The package exposes this stdio binary:
 agentsession-mcp --config <same-config.json> [provider path options]
 ~~~
 
-The normal user installation is:
+For a global/manual server installation, use:
 
 ~~~text
 npm install -g @acetamido/agentsession-mcp
 ~~~
+
+The package also exposes an explicit interactive installer outside the MCP
+protocol. `npx --yes --prefer-online @acetamido/agentsession-mcp@latest install`
+lets a user select Codex, Claude Code, Gemini CLI, or OpenCode, then writes a
+user-level MCP configuration that launches the `@latest` package through
+`npx --prefer-online`. This keeps the read-only five-tool MCP contract intact:
+installation and host-configuration writes occur only through the explicit CLI
+subcommand, never through an MCP tool call.
 
 The AgentSession package publishes a small public session-history factory,
 `@acetamido/agentsession/session-history`. The MCP package depends on that

@@ -17,7 +17,12 @@ import {
   missingProviderResponse,
   send
 } from "../server-helpers.js";
-import { usesSqliteSessionStore, supportsStructuredSessionViews } from "../providers/kinds.js";
+import {
+  supportsAgentLoopViews,
+  supportsSessionTrace,
+  supportsSystemPromptEvidence,
+  usesSqliteSessionStore
+} from "../providers/kinds.js";
 import { getResumeCommand } from "../resume.js";
 import { getSessionAnalysisAction, listSessionAnalysisRuns } from "../analysis.js";
 import { renderSessionPage, renderCanonicalFlowPanelContent } from "../views/session.js";
@@ -357,7 +362,7 @@ export function registerSessionDetail(
       return json(res, missing.body, missing.status);
     }
 
-    if (!supportsStructuredSessionViews(adapter)) {
+    if (!supportsAgentLoopViews(adapter)) {
       return json(res, { sessionId, totals: null, tools: [], steps: [] });
     }
 
@@ -383,7 +388,7 @@ export function registerSessionDetail(
       return json(res, missing.body, missing.status);
     }
 
-    if (!supportsStructuredSessionViews(adapter)) {
+    if (!supportsAgentLoopViews(adapter)) {
       return send(res, 200, renderCanonicalFlowPanelContent(null));
     }
 
@@ -409,7 +414,7 @@ export function registerSessionDetail(
       return json(res, missing.body, missing.status);
     }
 
-    if (!supportsStructuredSessionViews(adapter)) {
+    if (!supportsAgentLoopViews(adapter)) {
       return json(res, { sessionId, root: null, summary: null });
     }
 
@@ -436,7 +441,7 @@ export function registerSessionDetail(
     }
 
     try {
-      if (supportsStructuredSessionViews(adapter) && adapter.getTrace) {
+      if (supportsSessionTrace(adapter)) {
         return json(res, {
           ...adapter.getTrace(sessionId),
           flow: adapter.getSessionFlow?.(sessionId) || null
@@ -447,6 +452,37 @@ export function registerSessionDetail(
         steps: [],
         summary: { totalSteps: 0, totalSpans: 0, totalDuration: 0, totalCost: 0, totalTokens: 0 }
       });
+    } catch (err: any) {
+      console.error(`Route error: ${err.message}`);
+      return json(res, { error: "Internal server error" }, 500);
+    }
+  });
+
+  // API: evidence-backed system prompt sources. This is deliberately separate
+  // from transcript retrieval: adapters only return locally resolvable sources
+  // and never claim to recover a provider-hidden prompt.
+  app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/system-prompts$/, async (_req: any, res: any, match: RegExpMatchArray) => {
+    const providerId = match[1];
+    const sessionId = decodeURIComponent(match[2]);
+    const adapter = providerMap.get(providerId);
+    if (!adapter) {
+      const missing = missingProviderResponse(providerId);
+      return json(res, missing.body, missing.status);
+    }
+    if (!supportsSystemPromptEvidence(adapter)) {
+      return json(res, {
+        sessionId,
+        hiddenPromptStored: false,
+        note: "This provider has no locally resolvable system prompt evidence.",
+        sections: []
+      });
+    }
+    try {
+      const prompts = adapter.getSystemPrompts?.(sessionId);
+      if (!prompts) {
+        return json(res, { ok: false, error: "Not found" }, 404);
+      }
+      return json(res, prompts);
     } catch (err: any) {
       console.error(`Route error: ${err.message}`);
       return json(res, { error: "Internal server error" }, 500);

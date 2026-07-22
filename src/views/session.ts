@@ -1611,6 +1611,16 @@ ${actions}
     ? renderSessionTree(sessionTree, 0, provider)
     : renderRawMessageGroups(messages, partsByMessage, provider);
 
+  const sessionMetadata = session.metadata && typeof session.metadata === "object"
+    ? session.metadata as Record<string, unknown>
+    : {};
+  const projectKey = typeof sessionMetadata.projectKey === "string" && sessionMetadata.projectKey.trim()
+    ? sessionMetadata.projectKey.trim()
+    : null;
+  const projectKeyDetails = projectKey ? `
+    <p><strong>${t("detail.project_key")}</strong> <code>${escapeHtml(projectKey)}</code>${sessionMetadata.projectDirectorySource === "configured" ? ` · ${t("detail.project_directory_configured")}` : ""}</p>
+  ` : "";
+
   // Raw data tab content
   const rawDataContent = `
     <div class="raw-data-section">
@@ -1618,6 +1628,7 @@ ${actions}
       <p><strong>${t("detail.updated")}</strong> ${escapeHtml(new Date(Number(session.time_updated) || Date.now()).toLocaleString())}</p>
       <p><strong>${t("detail.files")}</strong> ${escapeHtml(String(Number(session.summary_files) || 0))} / ${t("detail.additions")} +${escapeHtml(String(Number(session.summary_additions) || 0))} / ${t("detail.deletions")} -${escapeHtml(String(Number(session.summary_deletions) || 0))}</p>
       ${session.directory ? `<p><strong>Directory</strong> ${escapeHtml(session.directory)}</p>` : ""}
+      ${projectKeyDetails}
       <p><strong>Session ID</strong> <code>${escapeHtml(session.id)}</code></p>
     </div>
     <div class="raw-data-export">

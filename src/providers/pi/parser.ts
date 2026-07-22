@@ -68,6 +68,8 @@ function usageToTokens(usage: unknown): TokenUsage | null {
   return {
     input,
     output,
+    // Pi preserves thinking blocks but its usage object has no independent
+    // reasoning-token field, so do not manufacture a number from text length.
     reasoning: 0,
     total,
     cache: { read: cacheRead, write: cacheWrite }

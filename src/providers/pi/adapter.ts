@@ -2,14 +2,15 @@ import { existsSync, lstatSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { getConfig } from "../../config.js";
 import { icons } from "../../icons.js";
-import type { MessageRole, ProviderAdapter } from "../interface.js";
+import type { ProviderAdapter } from "../interface.js";
 import { buildLinkedMessageSessionViews } from "../shared/linked-message-session.js";
-import { createSnippet, matchesSearchQuery } from "../shared/parser.js";
+import { buildResolvedSystemPromptEvidence } from "../shared/system-prompt-evidence.js";
 import {
   createIncrementalTokenStats,
   createSessionFileStore,
   createStructuredViewCache,
   createStructuredViewMethods,
+  searchNormalizedMessages,
   type TokenFieldMapping
 } from "../shared/file-adapter-helpers.js";
 import {
@@ -92,6 +93,7 @@ const piTokenMapping: TokenFieldMapping = {
       + (Number(entry.message?.usage?.output) || 0)
       + (Number(entry.message?.usage?.cacheRead) || 0)
       + (Number(entry.message?.usage?.cacheWrite) || 0),
+  // Pi stores thinking content but does not report a separate reasoning-token field.
   reasoningTokens: () => 0,
   cacheReadTokens: (entry) => Number(entry.message?.usage?.cacheRead) || 0,
   cacheWriteTokens: (entry) => Number(entry.message?.usage?.cacheWrite) || 0
@@ -113,6 +115,7 @@ const pi = {
   },
   capabilities: {
     localManagement: true,
+    sessionAnalysis: true,
     structuredSessionViews: true
   },
 
@@ -143,6 +146,21 @@ const pi = {
       : null;
   },
 
+  getSystemPrompts(sessionId) {
+    const entry = sessionFiles.get(sessionId);
+    if (!entry) return null;
+    const runtimeEnvironment = entry.session.directory
+      ? buildPiRuntimeEnvironment(entry.session.id, entry.session.directory, getPiDir())
+      : null;
+    return buildResolvedSystemPromptEvidence({
+      providerName: "Pi",
+      mode: "pi-resolved",
+      session: entry.session,
+      messages: entry.messages,
+      runtimeEnvironment
+    });
+  },
+
   ...createStructuredViewMethods(getPiViews),
 
   getTokenStats(days = 30) {
@@ -154,24 +172,7 @@ const pi = {
   },
 
   searchMessages(query, limit = 20) {
-    if (!String(query || "").trim()) return [];
-    const results = [];
-    for (const entry of sessionFiles.list()) {
-      if (results.length >= limit) break;
-      for (const message of entry.messages) {
-        if (results.length >= limit) break;
-        if (!(["user", "assistant"] as MessageRole[]).includes(message.role)) continue;
-        if (!matchesSearchQuery(message.content, query)) continue;
-        results.push({
-          sessionId: entry.session.id,
-          messageId: message.id,
-          role: message.role,
-          snippet: createSnippet(message.content, query),
-          timestamp: message.timestamp
-        });
-      }
-    }
-    return results;
+    return searchNormalizedMessages(sessionFiles.list(), query, limit);
   }
 } satisfies ProviderAdapter;
 

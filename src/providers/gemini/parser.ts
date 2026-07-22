@@ -35,7 +35,10 @@ export function extractMeta(data: any): RawSession {
     timeCreated: data.startTime ? new Date(data.startTime).getTime() : 0,
     timeUpdated: data.lastUpdated ? new Date(data.lastUpdated).getTime() : 0,
     messageCount,
-    tokenCount: totalTokens || null
+    tokenCount: totalTokens || null,
+    metadata: typeof data.projectHash === "string" && data.projectHash.trim()
+      ? { projectKey: data.projectHash.trim() }
+      : null
   };
 }
 

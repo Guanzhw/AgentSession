@@ -242,6 +242,48 @@ test("session exports stay complete and keep the HTTP server alive", async (t) =
   assert.deepEqual(requestErrors, []);
 });
 
+test("system prompt endpoint returns only adapter-resolved evidence", async () => {
+  const provider = {
+    id: "codex",
+    capabilities: {},
+    getSystemPrompts(sessionId) {
+      return sessionId === "session-1" ? {
+        sessionId,
+        hiddenPromptStored: false,
+        note: "Resolved local evidence only.",
+        sections: [{
+          title: "Instructions",
+          note: "Fixture",
+          items: [{
+            kind: "instruction",
+            title: "AGENTS.md",
+            preview: "Use focused tests.",
+            source: "D:\\fixture\\AGENTS.md",
+            time: 1000
+          }]
+        }]
+      } : null;
+    }
+  };
+  const routes = captureGetRoutes(registerSessionDetail, {
+    appConfig: { port: 0, metaDir: temp, analysis: {}, resumeCommands: {}, allowTerminalLaunch: false },
+    providerMap: new Map([[provider.id, provider]]),
+    providerInfo: []
+  });
+  const route = routes.find(({ pattern }) => pattern instanceof RegExp && pattern.source.includes("system-prompts"));
+  assert.ok(route);
+  const response = createResponseCapture();
+  await route.handler(
+    { url: "/api/codex/session/session-1/system-prompts" },
+    response,
+    ["", "codex", "session-1"]
+  );
+  assert.equal(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.equal(body.hiddenPromptStored, false);
+  assert.equal(body.sections[0].items[0].title, "AGENTS.md");
+});
+
 test("provider page keeps unavailable paths and management capability provider-owned", async () => {
   const providers = ["gemini"].map((providerId) => getProvider(providerId));
   assert.ok(providers.every(Boolean));

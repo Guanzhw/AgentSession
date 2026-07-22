@@ -12,13 +12,14 @@ import {
 import { icons } from "../../icons.js";
 import type { Message, ProviderAdapter, RawSession } from "../interface.js";
 import { buildLinkedMessageSessionViews } from "../shared/linked-message-session.js";
+import { buildResolvedSystemPromptEvidence } from "../shared/system-prompt-evidence.js";
 import { buildCodexRuntimeEnvironment } from "./runtime-environment.js";
-import { createSnippet, matchesSearchQuery } from "../shared/parser.js";
 import {
   createStructuredViewCache,
   createStructuredViewMethods,
   createSessionFileStore,
   createIncrementalTokenStats,
+  searchNormalizedMessages,
   type TokenFieldMapping
 } from "../shared/file-adapter-helpers.js";
 
@@ -186,6 +187,22 @@ const codex = {
       : null;
   },
 
+  getSystemPrompts(sessionId) {
+    const entry = sessionFiles.get(sessionId);
+    if (!entry) return null;
+    const resolved = resolveEntry(entry);
+    const runtimeEnvironment = resolved.session.directory
+      ? buildCodexRuntimeEnvironment(resolved.session.id, resolved.session.directory as string, getCodexDir())
+      : null;
+    return buildResolvedSystemPromptEvidence({
+      providerName: "Codex CLI",
+      mode: "codex-resolved",
+      session: resolved.session,
+      messages: resolved.messages,
+      runtimeEnvironment
+    });
+  },
+
   getMessages(sessionId) {
     const entry = sessionFiles.get(sessionId);
     return entry ? resolveEntry(entry).messages : [];
@@ -202,27 +219,11 @@ const codex = {
   },
 
   searchMessages(query, limit = 20) {
-    if (!String(query || "").trim()) return [];
-    const results = [];
-    for (const entry of sessionFiles.list()) {
-      if (results.length >= limit) break;
-      const { session, messages } = resolveEntry(entry);
-      for (const message of messages) {
-        if (results.length >= limit) break;
-        if (!["user", "assistant"].includes(message.role)) continue;
-        const text = message.content || "";
-        if (matchesSearchQuery(text, query)) {
-          results.push({
-            sessionId: session.id,
-            messageId: message.id,
-            role: message.role,
-            snippet: createSnippet(text, query),
-            timestamp: message.timestamp
-          });
-        }
-      }
-    }
-    return results;
+    return searchNormalizedMessages(
+      sessionFiles.list().map((entry) => resolveEntry(entry)),
+      query,
+      limit
+    );
   },
 
 } satisfies ProviderAdapter;

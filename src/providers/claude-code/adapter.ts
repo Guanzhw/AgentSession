@@ -2,7 +2,6 @@ import { existsSync, readdirSync, lstatSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { getConfig } from "../../config.js";
-import type { MessageRole } from "../interface.js";
 import {
   parseTranscript,
   extractSessionMeta,
@@ -13,13 +12,13 @@ import {
 import { icons } from "../../icons.js";
 import type { ProviderAdapter } from "../interface.js";
 import { buildClaudeCodeRuntimeEnvironment } from "./runtime-environment.js";
-import { createSnippet, matchesSearchQuery } from "../shared/parser.js";
 import {
   buildLinkedClaudeCodeSessionViews,
   buildClaudeCodeSystemPrompts
 } from "./views.js";
 import {
   createSessionFileStore,
+  searchNormalizedMessages,
   createStructuredViewCache,
   createStructuredViewMethods,
   createIncrementalTokenStats,
@@ -205,29 +204,7 @@ const claudeCode = {
   },
 
   searchMessages(query, limit = 20) {
-    if (!String(query || "").trim()) return [];
-    const results = [];
-
-    for (const entry of sessionFiles.list()) {
-      if (results.length >= limit) break;
-      for (const r of entry.records) {
-        if (results.length >= limit) break;
-        let text = "";
-        if (r.type === "user") text = extractTextFromRecord(r);
-        if (r.type === "assistant") text = extractTextFromRecord(r);
-        if (matchesSearchQuery(text, query)) {
-          results.push({
-            sessionId: entry.session.id,
-            messageId: r.uuid || "",
-            role: (r.type === "user" ? "user" : "assistant") as MessageRole,
-            snippet: createSnippet(text, query),
-            timestamp: r.timestamp ? new Date(r.timestamp).getTime() : 0
-          });
-        }
-      }
-    }
-
-    return results;
+    return searchNormalizedMessages(sessionFiles.list(), query, limit);
   },
 
   ...createStructuredViewMethods(getClaudeViews),
@@ -263,19 +240,5 @@ const claudeCode = {
     return null;
   }
 } satisfies ProviderAdapter;
-
-function extractTextFromRecord(r: any) {
-  if (r.type === "user") {
-    const content = r.message?.content ?? r.content;
-    if (typeof content === "string") return content;
-    if (Array.isArray(content)) return content.filter((b) => b.type === "text").map((b) => b.text).join("");
-  }
-  if (r.type === "assistant") {
-    const content = r.message?.content ?? r.content ?? [];
-    if (typeof content === "string") return content;
-    return content.filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
-  }
-  return "";
-}
 
 export default claudeCode;

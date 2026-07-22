@@ -131,6 +131,7 @@ const __I18N__ = {
     settings_prompt_file_loaded: "prompt file loaded: {path}",
     settings_prompt_file_missing: "prompt file missing: {path}",
     settings_prompt_preview_meta: "Target guidance: {source}. {file}.",
+    settings_project_paths_invalid: "Each project path mapping must use project-key=absolute-path.",
     settings_select_target: "Select at least one analysis target",
     settings_reset_applied: "Reset to the inherited default",
     settings_artifact_none: "None",
@@ -287,6 +288,7 @@ const __I18N__ = {
     settings_prompt_file_loaded: "已加载提示词文件：{path}",
     settings_prompt_file_missing: "提示词文件不存在：{path}",
     settings_prompt_preview_meta: "目标指引来源：{source}。{file}。",
+    settings_project_paths_invalid: "每个项目路径映射必须使用 项目键=绝对路径。",
     settings_select_target: "请至少选择一个分析目标",
     settings_reset_applied: "已恢复为继承的默认值",
     settings_artifact_none: "无",
@@ -795,6 +797,18 @@ if (settingsForm) {
     else delete targetDrafts[targetId];
   };
 
+  const readProjectPaths = () => {
+    const projectPaths = {};
+    for (const line of readLines("settings-project-paths")) {
+      const separator = line.indexOf("=");
+      const key = separator > 0 ? line.slice(0, separator).trim() : "";
+      const directory = separator > 0 ? line.slice(separator + 1).trim() : "";
+      if (!key || !directory) throw new Error(ft("settings_project_paths_invalid"));
+      projectPaths[key] = directory;
+    }
+    return projectPaths;
+  };
+
   const loadTargetDraft = (targetId) => {
     const target = resolvedTargetDefaults(targetId);
     setValue("settings-target-label", target.label || `Analyze ${targetId}`);
@@ -923,6 +937,13 @@ if (settingsForm) {
     } else {
       setLines("settings-analyzer-args", commandArgs);
     }
+    setLines(
+      "settings-project-paths",
+      Object.entries(asObject(providerSettings.projectPaths))
+        .filter(([key, directory]) => typeof key === "string" && key && typeof directory === "string" && directory)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, directory]) => `${key}=${directory}`)
+    );
 
     const resumeCommands = asObject(config.resumeCommands);
     const configuredResume = resumeCommands[providerId];
@@ -991,6 +1012,9 @@ if (settingsForm) {
     } else {
       delete providerSettings.command;
     }
+    const projectPaths = readProjectPaths();
+    if (Object.keys(projectPaths).length) providerSettings.projectPaths = projectPaths;
+    else delete providerSettings.projectPaths;
     if (Object.keys(providerSettings).length) analysisProviders[providerId] = providerSettings;
     else delete analysisProviders[providerId];
     if (Object.keys(analysisProviders).length) analysis.providers = analysisProviders;
@@ -1135,6 +1159,7 @@ if (settingsForm) {
         usesOpenCodeAnalyzerPreset ? withoutModel(analysisDefaultArgs) : analysisDefaultArgs
       );
     }
+    if (key === "project-paths") setLines("settings-project-paths", []);
     if (key === "resume-enabled") {
       setChecked("settings-resume-enabled", Boolean(resumeDefault.executable));
     }

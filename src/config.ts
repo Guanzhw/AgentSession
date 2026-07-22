@@ -243,6 +243,30 @@ function validateStringArray(value: any, field: any, errors: any) {
   }
 }
 
+function validateStringMap(value: any, field: string, errors: any[]) {
+  if (!isObject(value)) {
+    errors.push(`${field} must be an object of string values.`);
+    return;
+  }
+  for (const [key, item] of Object.entries(value)) {
+    if (!key.trim() || typeof item !== "string" || !item.trim()) {
+      errors.push(`${field} entries must use non-empty string keys and values.`);
+      return;
+    }
+  }
+}
+
+function validateProjectPathMap(value: any, field: string, errors: any[]) {
+  validateStringMap(value, field, errors);
+  if (!isObject(value)) return;
+  for (const [key, directory] of Object.entries(value)) {
+    if (typeof directory === "string" && directory.trim() && !path.isAbsolute(directory)) {
+      errors.push(`${field}.${key} must be an absolute path.`);
+      return;
+    }
+  }
+}
+
 function validateShell(value: any, field: any, errors: any) {
   if (!isObject(value)) {
     errors.push(`${field} must be an object.`);
@@ -449,6 +473,13 @@ export function validateUserConfig(config: any) {
             }
             if (providerSettings.command !== undefined) {
               validateCommand(providerSettings.command, `analysis.providers.${providerId}.command`, errors);
+            }
+            if (providerSettings.projectPaths !== undefined) {
+              validateProjectPathMap(
+                providerSettings.projectPaths,
+                `analysis.providers.${providerId}.projectPaths`,
+                errors
+              );
             }
             if (providerSettings.shell !== undefined) {
               validateShell(providerSettings.shell, `analysis.providers.${providerId}.shell`, errors);

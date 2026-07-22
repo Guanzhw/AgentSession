@@ -7,6 +7,32 @@ a web server or modifying provider-owned data.
 Supported provider references include OpenCode, Claude Code, Codex CLI, Gemini
 CLI, and Pi.
 
+## Install into coding agents
+
+Run the interactive installer directly from npm:
+
+```bash
+npx --yes --prefer-online @acetamido/agentsession-mcp@latest install
+```
+
+It detects and configures the user-level MCP settings for Codex, Claude Code,
+Gemini CLI, and OpenCode. The generated launcher uses
+`npx --prefer-online @acetamido/agentsession-mcp@latest`, which checks for a
+new published package whenever the host starts. Existing `agentsession` entries
+are never overwritten by `install`, and `update` refreshes only installer-managed
+entries. Migrate a manual or legacy entry deliberately with:
+
+```bash
+npx --yes --prefer-online @acetamido/agentsession-mcp@latest update --target all --replace --yes
+```
+
+Use `--target codex,claude-code,gemini,opencode` to select hosts, and use
+`--config /path/to/config.json` to pass the AgentSession config via
+`AGENTSESSION_CONFIG`. Pi has no native upstream MCP configuration surface, so
+it needs an extension-provided bridge and is not an installer target.
+
+## Manual server installation
+
 ```bash
 npm install --global @acetamido/agentsession-mcp
 agentsession-mcp --help

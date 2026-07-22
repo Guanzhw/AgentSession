@@ -18,7 +18,8 @@ A provider is analysis-capable only when all of these are true:
 - The adapter declares `capabilities.sessionAnalysis: true`.
 - `analysis.enabled` is true and the selected target resolves to a valid
   command for that provider.
-- The session has a valid project directory.
+- The session has a valid project directory recorded by the source or resolved
+  from an explicit viewer-owned mapping keyed by source evidence.
 - A live analysis run reaches `manifest.state === "completed"` with
   `manifest.validation.ok === true`.
 - The run contains valid `outputs/report.md`,
@@ -30,12 +31,16 @@ Do not call analysis support done just because the launch endpoint returns
 `ok: true`. The launch response only proves that a local process was started.
 The validator result in `manifest.json` is the success gate.
 
-The currently verified analysis-capable adapters are OpenCode, Claude Code,
-and Codex CLI. The source provider and analyzer are separate concerns: the
-provider owns the normalized session evidence and runtime extensions, while
-the configured analyzer command executes the proposal workflow. For example,
-a Codex session may be evaluated by a configured OpenCode-backed analyzer
-without changing the evidence provider or writing to Codex-owned data.
+All first-class adapters—OpenCode, Claude Code, Codex CLI, Gemini CLI, and
+Pi—are analysis-capable. The source provider and analyzer are separate
+concerns: the provider owns the normalized session evidence and runtime
+extensions, while the configured analyzer command executes the proposal
+workflow. Gemini records an opaque project key rather than a working directory,
+so a session needs an explicit `analysis.providers.gemini.projectPaths` mapping
+before directory-dependent runtime capture or analysis is available. For
+example, a Gemini or Pi session may be evaluated by a configured OpenCode-backed
+analyzer without changing the evidence provider or writing to provider-owned
+data.
 
 ## Architecture
 
@@ -104,8 +109,9 @@ capabilities: {
 ```
 
 This is only safe after the provider returns canonical session IDs, stable
-message IDs, a valid project directory, normalized messages, and defensively
-handles corrupt source records.
+message IDs, a valid project directory from source data or an explicit
+project-key mapping, normalized messages, and defensively handles corrupt source
+records.
 
 ## Evidence Quality Ladder
 
@@ -147,7 +153,9 @@ Recommended methods:
 - `getSessionMetrics(sessionId)`
 - `getSessionFlow(sessionId)`
 
-The evidence writer prefers `getSessionContainer()` when it exists. A useful
+The shared Agent Loop first turns normalized messages into user/agent turns,
+reasoning, tool calls, tool results, and optional subagent branches. The
+evidence writer prefers `getSessionContainer()` when it exists. A useful
 container preserves:
 
 - root session metadata
@@ -197,7 +205,7 @@ contain an immutable historical extension manifest, describe the result as
 
 ### Level 4: System Prompt and Trace Evidence
 
-Optional methods:
+Complete first-class providers expose:
 
 - `getSystemPrompts(sessionId)`
 - `getTrace(sessionId)`
@@ -207,8 +215,10 @@ sources. Do not claim to recover hidden provider prompts. Preserve source paths,
 availability, and resolution metadata so the UI and analyzer can distinguish
 resolved content from unavailable content.
 
-Use `getTrace()` when the provider has richer step/span data that cannot be
-represented as ordinary message parts.
+File-backed providers receive a bounded generic trace from the shared Agent
+Loop. Override `getTrace()` only when the provider has richer step/span data
+that cannot be represented as ordinary message parts; do not return a less
+complete trace than the generic version.
 
 ## Implementation Steps
 
@@ -219,7 +229,10 @@ Before adding analysis, verify:
 - `scan()` yields sessions without throwing on one bad file.
 - `getSession(id)` and `getMessages(id)` use the same canonical ID.
 - `getSession(id).directory` resolves to a real project directory for sessions
-  that should be analyzable.
+  that should be analyzable. If the source only has an opaque project key,
+  retain it as `metadata.projectKey` and resolve a directory only through the
+  explicit `analysis.providers.<id>.projectPaths` mapping; never derive one
+  from the key.
 - Messages are ordered and timestamps use Unix milliseconds.
 - Tool results carry enough status to separate success from failure.
 - Provider source files are never written.
@@ -315,7 +328,8 @@ The UI only shows analysis controls when:
 - `analysis.enabled === true`
 - the selected target resolves
 - the configured executable is available
-- the session has a valid project directory
+- the session has a valid project directory recorded by the source or resolved
+  by an explicit project-key mapping
 - terminal launch is enabled
 
 Global defaults are inherited by all analysis-capable providers. If the default
@@ -354,6 +368,32 @@ provider override:
   }
 }
 ```
+
+### Project-key mappings for directory-less transcripts
+
+When a transcript format stores only an opaque project key, add a mapping under
+the same provider override. The key must come directly from the normalized
+session's `metadata.projectKey`; the value must be an existing absolute local
+directory. The shared resolver canonicalizes that directory at use time and
+does not write it to the transcript:
+
+```json
+{
+  "analysis": {
+    "providers": {
+      "gemini": {
+        "projectPaths": {
+          "opaque-project-key": "D:\\WorkSpace\\my-project"
+        }
+      }
+    }
+  }
+}
+```
+
+This is a directory-resolution capability, not a claim that the provider saved
+the original CWD. It enables the generic runtime, resume, and analysis paths
+only for the mapped session.
 
 Supported analysis placeholders include:
 
@@ -563,7 +603,8 @@ Minimum coverage:
   provider can produce useful evidence.
 - `resolveAnalysisSettings(provider, { enabled: true }, target)` returns a
   setting for the provider.
-- A provider without `sessionAnalysis` returns `null`.
+- A deliberately non-analysis provider returns `null`; all registered
+  first-class providers resolve a setting when `analysis.enabled` is true.
 - `getSessionAnalysisAction()` exposes target metadata for an available command.
 - `prepareSessionAnalysis()` writes the categorized run layout.
 - `evidence/session-index.json` contains the canonical root session ID.

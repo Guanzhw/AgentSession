@@ -41,7 +41,10 @@ For file-backed sources, prefer `createSessionFileStore()`,
 `createStructuredViewCache()`, `createStructuredViewMethods()`, and
 `createIncrementalTokenStats()` from
 `src/providers/shared/file-adapter-helpers.ts`. They avoid reparsing unchanged
-files and keep detail views consistent.
+files and keep detail views consistent. `src/providers/shared/agent-loop.ts`
+is the shared semantic layer: normalized `Message[]` becomes user/agent turns,
+reasoning, tool calls, results, and optional subagent branches before the
+Tree/Container/Metrics/Flow/Trace views are derived.
 
 ## Non-negotiable data rules
 
@@ -56,6 +59,10 @@ files and keep detail views consistent.
   know the provider's source schema.
 - Reveal System Prompts and runtime configuration only from resolvable local
   evidence. Never claim to recover hidden provider prompts.
+- When a source has an opaque but stable project identifier instead of a
+  working directory, preserve it as `metadata.projectKey`. Use the shared
+  `withConfiguredProjectDirectory()` helper only with an explicit
+  viewer-owned mapping; never reverse, hash-match, or otherwise guess a path.
 
 ## The ProviderAdapter contract
 
@@ -128,16 +135,19 @@ implementation and tests support it.
 |---|---|
 | `localManagement` | Canonical session IDs are stable enough for viewer metadata. It never authorizes source writes. |
 | `sqliteSessionStore` | The provider uses the compatible SQLite session-store behavior. |
-| `sessionAnalysis` | A provider-owned analysis launch and validation path exists. |
+| `sessionAnalysis` | The adapter can enter the provider-neutral, proposal-only analysis lifecycle with a configured command and a real project directory from source data or an explicit viewer-owned mapping. |
 | `structuredSessionViews` | All four methods exist: `getSessionTree`, `getSessionContainer`, `getSessionMetrics`, and `getSessionFlow`. |
 | `resumeCommand` | A safe structured executable/argument command with `{sessionId}` and `{directory}` placeholders is known. |
 | `getStatsRevision()` | A file-backed source can report changed statistics input. |
 | `getRuntimeEnvironment()` | Locally resolvable instruction/skill/agent/command/plugin/hook/rule evidence exists. |
-| `getSystemPrompts()` / `getTrace()` | Provider-owned, evidence-backed prompt or trace views exist. |
+| `getSystemPrompts()` / `getTrace()` | All complete providers expose locally evidence-backed prompt sources and a bounded trace. File-backed adapters receive the generic Agent Loop trace; providers can override it only with richer native step evidence. |
 
 For flat histories, compose `buildMessageSessionViews()` with
-`createStructuredViewMethods()`. For child sessions, use the linked-session
-helper instead of guessing from display order.
+`createStructuredViewMethods()`; it delegates Tree, Container, Metrics, Flow,
+and the generic Agent Loop Trace together. For child sessions, use the
+linked-session helper instead of guessing from display order. Use
+`buildResolvedSystemPromptEvidence()` with the provider-owned runtime resolver
+when the source itself does not store an explicit, recoverable prompt.
 
 ## End-to-end change checklist
 
@@ -149,6 +159,11 @@ helper instead of guessing from display order.
   `src/config.ts` if users need to configure the provider root.
 - [ ] When the path is configurable, add its CLI flag, help text, environment
   variable, config validation, and both README entries.
+- [ ] If the source omits a working directory but retains an opaque stable
+  project key, normalize it as `metadata.projectKey` and wire
+  `withConfiguredProjectDirectory()` through `scan()` and `getSession()`. The
+  mapping belongs at `analysis.providers.<id>.projectPaths` and must be an
+  existing absolute directory; it is never a source-data write.
 - [ ] Add an icon in `src/icons.ts`.
 
 ### 2. Create a provider-owned parser and adapter
@@ -220,7 +235,9 @@ instructions were recovered.
 Set `sessionAnalysis` only after provider-owned launch configuration, bounded
 runtime capture, and the validator lifecycle in
 `docs/ANALYSIS-PROVIDER-IMPLEMENTATION.md` are in place. A provider is useful
-without analysis support.
+without analysis support. If the source does not record a directory, do not
+advertise per-session resume, runtime inventory, or analysis until a configured
+project-key mapping has resolved an existing local directory.
 
 ### 6. Update public documentation
 
@@ -239,7 +256,7 @@ data directory.
 |---|---|
 | Parser | Current and legacy shapes; canonical ID; `parentId`; timestamps; every nullable Message field; tools/reasoning/models/tokens when present. |
 | Corruption and cache | One malformed file is skipped; unchanged files are reused; changed files reparse; deleted files disappear. |
-| Adapter | Absent-data `detect()`; scan/get/messages/search agreement; token fragments are not double counted. |
+| Adapter | Absent-data `detect()`; scan/get/messages/search agreement; token fragments are not double counted; opaque project keys remain opaque until an explicit mapping resolves an existing directory. |
 | Nested agents | Explicit child IDs link correctly; copied parent context does not become child content; multiple children do not cross-contaminate. |
 | Capabilities | Every declared capability has a matching view, resume, runtime, or analysis test. |
 | Viewer routes | Unavailable state, detail, search, metadata management, and structured views work without central provider-ID branches. |

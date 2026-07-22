@@ -1,6 +1,7 @@
 import { statSync } from "node:fs";
 import path from "node:path";
-import type { ProviderAdapter, DailyTokenStat } from "../interface.js";
+import type { ProviderAdapter, DailyTokenStat, Message, SearchResult } from "../interface.js";
+import { createSnippet, matchesSearchQuery } from "./parser.js";
 
 export interface SessionFileDescriptor {
   sessionId: string;
@@ -163,22 +164,53 @@ export function createStructuredViewCache<T>(
 }
 
 /**
- * Create the four structured-view delegate methods from a pre-cached
+ * Create the structured Agent Loop view delegate methods from a pre-cached
  * view getter. Callers use {@link createStructuredViewCache} to wrap
  * their provider-specific builder, then pass the cached getter here.
  *
- * Providers that need additional view facets (e.g. `getTrace` in
- * Claude Code) can reference the same cached getter directly.
+ * Providers can override a generated trace when their source stores a richer,
+ * provider-native step model (for example OpenCode and Claude Code).
  */
 export function createStructuredViewMethods(
   getViews: (sessionId: string) => Record<string, any> | null
-): Pick<ProviderAdapter, "getSessionTree" | "getSessionContainer" | "getSessionMetrics" | "getSessionFlow"> {
+): Pick<ProviderAdapter, "getSessionTree" | "getSessionContainer" | "getSessionMetrics" | "getSessionFlow" | "getTrace"> {
   return {
     getSessionTree(sessionId: string) { return getViews(sessionId)?.tree || null; },
     getSessionContainer(sessionId: string) { return getViews(sessionId)?.container || null; },
     getSessionMetrics(sessionId: string) { return getViews(sessionId)?.metrics || null; },
     getSessionFlow(sessionId: string) { return getViews(sessionId)?.flow || null; },
+    getTrace(sessionId: string) { return getViews(sessionId)?.trace || null; },
   };
+}
+
+/**
+ * Search the normalized conversational surface shared by file-backed
+ * providers. Tool and system records stay available in the session detail
+ * view, but do not leak provider-specific diagnostic text into global search.
+ */
+export function searchNormalizedMessages(
+  entries: Iterable<{ session: { id: string }; messages: Message[] }>,
+  query: string,
+  limit = 20
+): SearchResult[] {
+  if (!String(query || "").trim()) return [];
+  const results: SearchResult[] = [];
+  for (const entry of entries) {
+    if (results.length >= limit) break;
+    for (const message of entry.messages) {
+      if (results.length >= limit) break;
+      if (message.role !== "user" && message.role !== "assistant") continue;
+      if (!matchesSearchQuery(message.content, query)) continue;
+      results.push({
+        sessionId: entry.session.id,
+        messageId: message.id,
+        role: message.role,
+        snippet: createSnippet(message.content, query),
+        timestamp: message.timestamp
+      });
+    }
+  }
+  return results;
 }
 
 /**

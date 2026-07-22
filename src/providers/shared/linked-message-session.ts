@@ -4,6 +4,7 @@ import {
   buildMessageSessionTree,
   buildMessageSessionViewsFromTree
 } from "./message-session.js";
+import { buildAgentLoop } from "./agent-loop.js";
 import type { SessionPartNode, SessionTree } from "./session-tree.js";
 
 type Row = Record<string, any>;
@@ -136,5 +137,8 @@ export function buildLinkedMessageSessionViews(rootSessionId: string, bundles: M
   };
 
   const tree = build(rootSessionId);
-  return tree ? buildMessageSessionViewsFromTree(tree) : null;
+  const root = byId.get(rootSessionId);
+  return tree && root
+    ? buildMessageSessionViewsFromTree(tree, buildAgentLoop(root.messages))
+    : null;
 }

@@ -42,11 +42,29 @@ The focus is no longer just “list my chats.” The goal is to help you reconst
 
 | Provider | Status | Default Source | Capabilities |
 |:---|:---:|:---|:---|
-| OpenCode | Full | `$XDG_DATA_HOME/opencode/opencode.db` or `~/.local/share/opencode/opencode.db` | Browse, search, star, rename, delete, trash, export, stats, trace, nested sessions, analysis |
-| Claude Code | Manageable | `~/.claude/transcripts/` + `~/.claude/projects/` | Browse, search, star, rename, delete, trash, Token Explorer, ReACT, trace, flow, subagents when sidechain transcripts exist, analysis prompt evidence, analysis |
-| Codex CLI | Manageable | `~/.codex/sessions/**/*.jsonl` | Browse, search, star, rename, delete, trash, Token Explorer, ReACT, flow, nested subagents, analysis |
-| Gemini CLI | Manageable | `~/.gemini/tmp/*/chats/*.json` | Browse, search, star, rename, delete, trash, Token Explorer, ReACT, flow |
-| Pi | Manageable | `~/.pi/agent/sessions/**/*.jsonl` | Browse, search, star, rename, delete, trash, Token Explorer, ReACT, flow, active branches, fork relationships, runtime extensions |
+| OpenCode | Full shared support | `$XDG_DATA_HOME/opencode/opencode.db` or `~/.local/share/opencode/opencode.db` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis; plus SQLite-native advanced statistics |
+| Claude Code | Full shared support | `~/.claude/transcripts/` + `~/.claude/projects/` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis; sidechain subagents when transcripts retain them |
+| Codex CLI | Full shared support | `~/.codex/sessions/**/*.jsonl` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis, nested subagents |
+| Gemini CLI | Full shared support | `~/.gemini/tmp/*/chats/*.json` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis; resume/runtime/analysis use an explicit project-key mapping when the transcript has no working directory |
+| Pi | Full shared support | `~/.pi/agent/sessions/**/*.jsonl` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis, active branches, and fork relationships |
+
+Every provider has the same common surface: browse, content search, viewer-only
+metadata management, Markdown/JSON export, daily token statistics, resume,
+Tree/Container/Metrics/Flow/Trace, local prompt evidence, runtime inventory,
+and proposal-only analysis. Command-launching features require a valid project
+directory recorded by the source or supplied by an explicit viewer-owned
+project-key mapping. Provider-owned source data remains read-only.
+Advanced statistics remain source-native: AgentSession does not invent project,
+model, or cost dimensions that a transcript does not actually record.
+
+### Shared Agent Loop
+
+Providers normalize their raw records into one provider-neutral coding-agent
+loop: user input → agent turn → reasoning/text/tool calls → tool results →
+optional subagent branches. Tree, Container, Metrics, Flow, and the generic
+Trace derive from that loop. A provider may override the generated Trace only
+when its source contains a richer native step model; it cannot weaken the
+common response-boundary or tool-result semantics.
 
 Adding a provider? Follow the [provider contribution guide](./docs/CONTRIBUTING-PROVIDER.md) for the adapter, MCP, test, and release checklist.
 
@@ -63,6 +81,7 @@ All providers store stars, custom titles, soft deletes, and permanent exclusions
 - **Table of Contents**: long sessions get navigation for prompts, assistant turns, `task` / `subtask` / `spawn_agent` branches, and nested sessions.
 - **In-conversation search**: open the compact detail-page search from the action bar or press `/`; results report matching turns and text occurrences, highlight the exact text, and keep previous/next controls visible while navigating.
 - **Trace API**: step/span summaries classify tools, skills, agents, MCP calls, and LSP activity.
+- **System-prompt evidence API**: `GET /api/:provider/session/:id/system-prompts` exposes only current locally resolvable instructions, rules, and runtime sources; it never claims to recover a hidden provider prompt.
 - **Unified Usage entry**: `/stats` aggregates selected providers through one daily token-composition contract. The total trend exposes provider filters directly, while contribution cards apply a single-provider filter in place or open provider-specific details. Provider detail pages retain top sessions, period comparison, model ranking, day drill-down, and optional cost estimates. File-backed providers expose only dimensions present in their transcripts.
 - **Local management**: every provider supports starring, renaming, batch actions, soft delete, restore, and permanent exclusion; these actions only mutate viewer metadata.
 - **Export**: OpenCode sessions expose one Export menu for Markdown or JSON, with JSON including the session tree.
@@ -140,9 +159,46 @@ agentsession [options]
 ## AgentSession-MCP: local session history for coding agents
 
 `@acetamido/agentsession-mcp` is a separate stdio MCP package for Codex, Claude Code,
-Gemini CLI, OpenCode, Pi, and other MCP hosts to query the session history from
+Gemini CLI, OpenCode, and other MCP hosts to query the session history from
 locally available providers. It starts no web server, binds no port, and never
 modifies provider-owned data.
+
+### Interactive install and automatic updates
+
+No global install is required. This command detects local coding agents, asks
+which ones to configure, and writes only the user-level MCP configurations you
+confirm:
+
+```bash
+npx --yes --prefer-online @acetamido/agentsession-mcp@latest install
+```
+
+Codex, Claude Code, Gemini CLI, and OpenCode are supported. The generated MCP
+configuration launches `npx --prefer-online @acetamido/agentsession-mcp@latest`,
+so every coding-agent startup forces npm to check cached package metadata and
+uses the latest published MCP. `install` never overwrites an existing server
+named `agentsession`, and `update` refreshes only an entry created by this
+installer. To migrate a manual or legacy entry, explicitly add `--replace`:
+
+```bash
+# Non-interactive install. --config is forwarded to the MCP as AGENTSESSION_CONFIG.
+npx --yes --prefer-online @acetamido/agentsession-mcp@latest install \
+  --target codex,claude-code --config /path/to/config.json --yes
+
+# Refresh installer-managed auto-updating entries.
+npx --yes --prefer-online @acetamido/agentsession-mcp@latest update \
+  --target all --yes
+
+# Intentionally migrate a manual or legacy agentsession entry.
+npx --yes --prefer-online @acetamido/agentsession-mcp@latest update \
+  --target all --replace --yes
+```
+
+Pi's upstream CLI currently has no native MCP configuration surface, so the
+installer does not claim to install into Pi. A Pi extension must explicitly
+provide an MCP bridge before it can be supported.
+
+### Manual installation
 
 ```bash
 npm install --global @acetamido/agentsession-mcp
@@ -177,7 +233,7 @@ directory. MCP output limits are optional and server-capped:
 }
 ```
 
-Register it in an MCP host with the `agentsession-mcp` command and optional
+For manual registration, use the `agentsession-mcp` command and optional
 `--config` argument. For example, in Codex CLI:
 
 ```bash
@@ -187,8 +243,8 @@ codex mcp add agentsession -- agentsession-mcp --config /path/to/config.json
 ## Resume Commands
 
 Session detail pages always show a copyable session ID. When a provider has a
-known resume command and a valid recorded project directory, the page can open
-the command in a terminal. Before launching, the page exposes the resolved
+known resume command and a valid project directory from the source or a
+configured mapping, the page can open the command in a terminal. Before launching, the page exposes the resolved
 command and working directory in a copyable disclosure. Command launching is
 enabled by default; start with
 `--disable-terminal-launch` to hide and disable resume and analysis launches.
@@ -273,6 +329,33 @@ The estimate appears only when the stats page is filtered to one model:
 }
 ```
 
+### Project key mappings
+
+Some transcript formats retain a stable but opaque project key instead of the
+working directory. Gemini CLI is one example. AgentSession never derives a
+folder from that key. Instead, copy the key from the session's **Raw data** tab
+and add one `project-key=absolute-path` line under **Settings → Project
+directory mappings**, or save the equivalent viewer-owned configuration:
+
+```json
+{
+  "analysis": {
+    "providers": {
+      "gemini": {
+        "projectPaths": {
+          "opaque-project-key-from-raw-data": "D:\\WorkSpace\\my-project"
+        }
+      }
+    }
+  }
+}
+```
+
+At use time, AgentSession uses only an existing absolute directory,
+canonicalizes it locally, marks it as a configured mapping in the session
+details, and never writes it back to the provider transcript. The mapping then
+enables Gemini runtime resolution, resume, and analysis for matching sessions.
+
 `currency` must be a three-letter code, rates must be finite and non-negative,
 and `sourceUrl` must be an absolute HTTP/HTTPS URL. Unpriced reasoning/cache
 dimensions are reported as omitted instead of silently treated as free. Use the
@@ -297,10 +380,13 @@ own `diagnostics/` directory.
 
 ## Session Analysis And Evaluation Proposals
 
-AgentSession can launch a configured analyzer non-interactively from
-provider detail pages that declare session-analysis support, currently OpenCode,
-Claude Code, and Codex CLI. Other providers keep their read-only viewer features until
-their adapters declare the same capability. The analysis run is proposal-only:
+AgentSession can launch a configured analyzer non-interactively from every
+provider detail page. The default runner is OpenCode's non-interactive command,
+but it is configurable globally or per provider, so Gemini CLI and Pi sessions
+can use the same bounded, proposal-only analysis lifecycle rather than losing
+analysis support. A Gemini transcript without a recorded working directory
+needs the explicit [project key mapping](#project-key-mappings) above before its
+runtime inventory or analysis action can be resolved. The analysis run:
 it snapshots the session as indexed JSONL
 evidence, snapshots selected artifacts, creates an evaluation seed, and asks
 the analyzer to write:
@@ -415,7 +501,7 @@ preserved for follow-up queries and validation:
 - `artifact_list`
 - `artifact_get`
 
-`extension_*` queries inspect the captured OpenCode runtime context.
+`extension_*` queries inspect the captured provider runtime context.
 `artifact_*` queries inspect the bounded snapshots produced from both
 configured analysis materials and automatically captured runtime extensions.
 The `runtimeExtensionIds` field identifies snapshots that came from runtime

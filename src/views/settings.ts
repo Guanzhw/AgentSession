@@ -128,6 +128,10 @@ export function renderSettingsPage({
       : "skills";
   const analysisProviders = asObject(analysis.providers);
   const analysisProvider = asObject(analysisProviders[provider]);
+  const projectPathLines = Object.entries(asObject(analysisProvider.projectPaths))
+    .filter(([key, value]) => typeof key === "string" && key.trim() && typeof value === "string" && value.trim())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}=${value}`);
   const defaultTargetId = Array.isArray(analysisProvider.defaultTargets) && analysisProvider.defaultTargets.length
     ? analysisProvider.defaultTargets.find((id: any) => typeof id === "string" && id)
     : typeof analysisProvider.defaultTarget === "string" && analysisProvider.defaultTarget
@@ -406,6 +410,14 @@ export function renderSettingsPage({
               reset: "analyzer-args"
             })}
           </div>
+          ${textareaField({
+            id: "settings-project-paths",
+            label: t("settings.project_paths"),
+            values: projectPathLines,
+            help: t("settings.project_paths_help"),
+            placeholder: t("settings.project_paths_placeholder"),
+            reset: "project-paths"
+          })}
           ${usesOpenCodeAnalyzerPreset ? `
             <button type="button" class="btn settings-preset-btn" id="settings-analysis-preset">${t("settings.use_opencode_preset")}</button>
           ` : ""}

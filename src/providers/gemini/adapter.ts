@@ -6,12 +6,14 @@ import { icons } from "../../icons.js";
 import type { ProviderAdapter } from "../interface.js";
 import { buildGeminiRuntimeEnvironment } from "./runtime-environment.js";
 import { buildMessageSessionViews } from "../shared/message-session.js";
-import { createSnippet, matchesSearchQuery } from "../shared/parser.js";
+import { buildResolvedSystemPromptEvidence } from "../shared/system-prompt-evidence.js";
+import { withConfiguredProjectDirectory } from "../shared/project-directory.js";
 import {
   createSessionFileStore,
   createStructuredViewCache,
   createStructuredViewMethods,
   createIncrementalTokenStats,
+  searchNormalizedMessages,
   type TokenFieldMapping
 } from "../shared/file-adapter-helpers.js";
 
@@ -66,10 +68,19 @@ const sessionFiles = createSessionFileStore({
   }
 });
 
+function configuredGeminiSession(session: ReturnType<typeof extractMeta>) {
+  return withConfiguredProjectDirectory("gemini", session, getConfig());
+}
+
+function getConfiguredGeminiSession(sessionId: string) {
+  const session = sessionFiles.get(sessionId)?.session;
+  return session ? configuredGeminiSession(session) : null;
+}
+
 function generateGeminiViews(sessionId: string) {
   const entry = sessionFiles.get(sessionId);
   return entry
-    ? buildMessageSessionViews(entry.session, entry.messages)
+    ? buildMessageSessionViews(configuredGeminiSession(entry.session), entry.messages)
     : null;
 }
 
@@ -103,6 +114,7 @@ const gemini = {
   },
   capabilities: {
     localManagement: true,
+    sessionAnalysis: true,
     structuredSessionViews: true
   },
 
@@ -116,19 +128,35 @@ const gemini = {
 
   async *scan() {
     for (const entry of sessionFiles.list()) {
-      yield entry.session;
+      yield configuredGeminiSession(entry.session);
     }
   },
 
   getSession(sessionId) {
-    return sessionFiles.get(sessionId)?.session || null;
+    return getConfiguredGeminiSession(sessionId);
   },
 
   getRuntimeEnvironment(sessionId) {
-    const session = sessionFiles.get(sessionId)?.session;
+    const session = getConfiguredGeminiSession(sessionId);
     return session?.directory
       ? buildGeminiRuntimeEnvironment(session.id, session.directory as string, getGeminiDir())
       : null;
+  },
+
+  getSystemPrompts(sessionId) {
+    const entry = sessionFiles.get(sessionId);
+    if (!entry) return null;
+    const session = configuredGeminiSession(entry.session);
+    const runtimeEnvironment = session.directory
+      ? buildGeminiRuntimeEnvironment(session.id, session.directory as string, getGeminiDir())
+      : null;
+    return buildResolvedSystemPromptEvidence({
+      providerName: "Gemini CLI",
+      mode: "gemini-resolved",
+      session,
+      messages: entry.messages,
+      runtimeEnvironment
+    });
   },
 
   getMessages(sessionId) {
@@ -146,25 +174,7 @@ const gemini = {
   },
 
   searchMessages(query, limit = 20) {
-    if (!String(query || "").trim()) return [];
-    const results = [];
-    for (const entry of sessionFiles.list()) {
-      if (results.length >= limit) break;
-      for (const m of entry.records.messages || []) {
-        if (results.length >= limit) break;
-        const text = m.text || "";
-        if (matchesSearchQuery(text, query)) {
-          results.push({
-            sessionId: entry.session.id,
-            messageId: m.id || "",
-            role: (m.type === "user" ? "user" : "assistant") as import("../interface.js").MessageRole,
-            snippet: createSnippet(text, query),
-            timestamp: m.timestamp ? new Date(m.timestamp).getTime() : 0
-          });
-        }
-      }
-    }
-    return results;
+    return searchNormalizedMessages(sessionFiles.list(), query, limit);
   },
 
 } satisfies ProviderAdapter;
