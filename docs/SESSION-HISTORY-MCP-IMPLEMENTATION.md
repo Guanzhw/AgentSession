@@ -86,7 +86,7 @@ type EventRef = SessionRef & {
 ~~~
 
 The registered ProviderId set includes `opencode`, `claude-code`, `codex`,
-`gemini`, and `pi`. Pi uses the canonical session UUID from its JSONL header;
+`copilot`, `gemini`, and `pi`. Pi uses the canonical session UUID from its JSONL header;
 event IDs come from active-branch entry IDs or source tool-call IDs.
 
 An event is a projection of the existing normalized Message contract:
@@ -320,7 +320,7 @@ npm install -g @acetamido/agentsession-mcp
 
 The package also exposes an explicit interactive installer outside the MCP
 protocol. `npx --yes --prefer-online @acetamido/agentsession-mcp@latest install`
-lets a user select Codex, Claude Code, Gemini CLI, or OpenCode, then writes a
+lets a user select Codex, Claude Code, GitHub Copilot CLI, or OpenCode, then writes a
 user-level MCP configuration that launches the `@latest` package through
 `npx --prefer-online`. This keeps the read-only five-tool MCP contract intact:
 installation and host-configuration writes occur only through the explicit CLI

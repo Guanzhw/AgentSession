@@ -32,7 +32,7 @@ export interface SessionContainer {
   id: string;
   title: string;
   depth: number;
-  attachMode: "root" | "task" | "detached";
+  attachMode: "root" | "task" | "inferred" | "detached";
   session: Row;
   messages: MessageContainer[];
   detachedChildren: SessionContainer[];
@@ -82,7 +82,11 @@ function convertPart(part: SessionPartNode, depth: number): PartContainer {
     title: partTitle(part),
     timeStart: part.timeStart,
     timeEnd: part.timeEnd,
-    childSessions: part.childSessions.map((child) => treeToContainer(child, depth + 1, "task")),
+    childSessions: part.childSessions.map((child) => treeToContainer(
+      child,
+      depth + 1,
+      part.inferredChildSessionIds?.has(String(child.session?.id)) ? "inferred" : "task"
+    )),
     data: part.data
   };
 }

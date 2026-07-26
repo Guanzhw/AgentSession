@@ -5,7 +5,7 @@ import {
   type SessionHistoryService
 } from "@acetamido/agentsession/session-history";
 
-const providerSchema = z.enum(["opencode", "claude-code", "codex", "gemini", "pi"]);
+const providerSchema = z.enum(["opencode", "claude-code", "codex", "copilot", "gemini", "pi"]);
 const sessionRefSchema = z.object({
   provider: providerSchema,
   sessionId: z.string().trim().min(1).max(1000)

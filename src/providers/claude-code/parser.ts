@@ -74,6 +74,27 @@ function textFromContent(content: any) {
     .join("");
 }
 
+function taskNotificationFromText(content: any) {
+  if (typeof content !== "string") return null;
+  const text = content.trim();
+  if (!text.startsWith("<task-notification>") || !text.endsWith("</task-notification>")) return null;
+
+  const field = (name: string) => {
+    const match = text.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`));
+    return match?.[1]?.trim() || null;
+  };
+  const taskId = field("task-id");
+  const toolUseId = field("tool-use-id");
+  if (!taskId || !toolUseId) return null;
+
+  return {
+    taskId,
+    toolUseId,
+    status: field("status"),
+    summary: field("summary")
+  };
+}
+
 function titleFromRecords(records: any) {
   const custom = [...records].reverse().find((record) => (
     (record.type === "custom-title" || record.type === "custom_title") && record.customTitle
@@ -87,7 +108,10 @@ function titleFromRecords(records: any) {
     return String(summary.summary).slice(0, 160);
   }
 
-  const firstUser = records.find((record: any) => record.type === "user");
+  const firstUser = records.find((record: any) => (
+    record.type === "user"
+    && !taskNotificationFromText(textFromContent(record.message?.content ?? record.content))
+  ));
   const firstText = textFromContent(firstUser?.message?.content ?? firstUser?.content).trim();
   return firstText ? firstText.slice(0, 120) : null;
 }
@@ -184,7 +208,33 @@ export function recordsToMessages(records: any, sessionId: any): Message[] {
     if (r.type === "user") {
       const blocks = contentBlocks(r.message?.content ?? r.content);
       const text = textFromContent(blocks);
-      if (text) {
+      const taskNotification = taskNotificationFromText(text);
+      if (taskNotification) {
+        const status = taskNotification.status?.toLowerCase() || "";
+        messages.push({
+          id: r.uuid || `task-notification-${msgIndex++}`,
+          sessionId,
+          role: "tool",
+          content: taskNotification.summary || taskNotification.status || "Subagent completed",
+          thinking: null,
+          toolName: "task_notification",
+          toolInput: null,
+          toolOutput: {
+            taskId: taskNotification.taskId,
+            status: taskNotification.status,
+            summary: taskNotification.summary
+          },
+          timestamp: ts,
+          tokens: null,
+          metadata: {
+            source: "task_notification",
+            taskId: taskNotification.taskId,
+            toolUseId: taskNotification.toolUseId,
+            status: taskNotification.status,
+            isError: ["error", "failed", "cancelled"].includes(status)
+          }
+        });
+      } else if (text) {
         messages.push({
           id: r.uuid || `msg-${msgIndex++}`,
           sessionId,

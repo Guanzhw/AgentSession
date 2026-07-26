@@ -1,5 +1,6 @@
 import type { Message, TokenUsage } from "../interface.js";
 import { asNumber } from "./parser.js";
+import { classifySharedTool } from "./subagent-tools.js";
 
 type Row = Record<string, any>;
 
@@ -79,8 +80,6 @@ export interface AgentLoopTrace {
 }
 
 const MAX_TRACE_STEPS = 200;
-const SUBAGENT_TOOLS = new Set(["task", "subtask", "spawn_agent", "delegate_task"]);
-
 function asRow(value: unknown): Row {
   return value && typeof value === "object" ? value as Row : {};
 }
@@ -244,8 +243,9 @@ export function buildAgentLoop(messages: Message[]): AgentLoop {
 
   messages.forEach((message, index) => {
     const metadata = asRow(message.metadata);
+    const role = String(message.role || "").toLowerCase();
     const toolUseId = metadata.toolUseId;
-    if (typeof toolUseId === "string" && toolUseId) {
+    if (role === "tool" && typeof toolUseId === "string" && toolUseId) {
       const call = toolEventsById.get(toolUseId);
       if (call) {
         call.output = message.toolOutput ?? message.content ?? "";
@@ -265,7 +265,6 @@ export function buildAgentLoop(messages: Message[]): AgentLoop {
     }
 
     const groupId = responseGroupId(message);
-    const role = String(message.role || "").toLowerCase();
     const groupable = Boolean(groupId) && ["assistant", "tool"].includes(role);
     const groupedWithPrevious = groupable && previousGroupTurn && previousGroupId === groupId;
     const implicitContinuation = Boolean(activeAgentTurn) && role === "tool";
@@ -331,22 +330,6 @@ function modelLabel(data: Row) {
   return typeof data.modelID === "string" ? data.modelID : null;
 }
 
-function classifyTool(tool: string) {
-  const normalized = tool.toLowerCase();
-  if (SUBAGENT_TOOLS.has(normalized)) return { category: "agent" as const, mcpServer: null };
-  if (normalized === "skill") return { category: "skill" as const, mcpServer: null };
-  if (normalized.startsWith("lsp_")) return { category: "lsp" as const, mcpServer: null };
-  if (normalized.startsWith("mcp__")) {
-    const [, server] = tool.split("__");
-    return { category: "mcp" as const, mcpServer: server || null };
-  }
-  if (normalized.includes("__")) {
-    const [server] = tool.split("__");
-    return { category: "mcp" as const, mcpServer: server || null };
-  }
-  return { category: "tool" as const, mcpServer: null };
-}
-
 function traceSpan(event: AgentLoopEvent, fallbackTime: number): AgentLoopTraceSpan {
   const timeStart = asNumber(event.timeStart) || fallbackTime;
   const timeEnd = asNumber(event.timeEnd) || timeStart;
@@ -381,7 +364,7 @@ function traceSpan(event: AgentLoopEvent, fallbackTime: number): AgentLoopTraceS
   }
 
   const tool = event.tool || "tool";
-  const classification = classifyTool(tool);
+  const classification = classifySharedTool(tool, event.metadata);
   const metadata = event.metadata || {};
   return {
     id: event.id,

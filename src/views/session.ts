@@ -1,7 +1,7 @@
 import { t } from "../i18n.js";
 import { escapeHtml } from "../markdown.js";
 import type { SessionPartNode, SessionTree } from "../providers/opencode/session-tree.js";
-import { isSubagentToolName } from "../providers/shared/linked-message-session.js";
+import { isSubagentTool, mergeToolMetadata } from "../providers/shared/subagent-tools.js";
 import { formatDuration, formatTime, formatTokens, messageBubble, messageHeader, reasoningBlock, todoList, toolCallBlock } from "./components.js";
 import { layout } from "./layout.js";
 import type { SessionNavigationContext } from "../navigation-context.js";
@@ -140,8 +140,11 @@ function isErrorPart(partData: any) {
   return partStatus(partData) === "error" || Boolean(partData?.error);
 }
 
-function isTaskTool(tool: any) {
-  return isSubagentToolName(tool);
+function isTaskTool(partData: any) {
+  return isSubagentTool(
+    partData?.tool,
+    mergeToolMetadata(partData?.state?.metadata, partData?.metadata)
+  );
 }
 
 function formatPercent(value: any) {
@@ -172,7 +175,7 @@ function childSessionCountLabel(count: any) {
 }
 
 function toolTitle(partData: any) {
-  if (partData?.type === "tool" && isTaskTool(partData?.tool)) {
+  if (partData?.type === "tool" && isTaskTool(partData)) {
     return taskTitle(partData);
   }
 
@@ -224,11 +227,12 @@ function renderMetric(label: any, value: any) {
   return `<span class="session-stat"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></span>`;
 }
 
-function renderSubsessionHeader(tree: SessionTree) {
+function renderSubsessionHeader(tree: SessionTree, inferred = false) {
   const session = tree.session || {};
   const title = session.title || session.slug || session.id;
   const metrics = tree.metrics;
   const pieces = [
+    inferred ? t("detail.inferred_link") : "",
     `${formatCount(metrics.totalMessages)} messages`,
     `${formatCount(metrics.totalToolCalls)} tools`
   ];
@@ -240,15 +244,19 @@ function renderSubsessionHeader(tree: SessionTree) {
     pieces.push(formatDuration(metrics.timeStart, metrics.timeEnd));
   }
 
-  return `<summary class="subsession-summary" aria-label="${escapeHtml(`Toggle subsession ${title}`)}">
-    <span class="subsession-kicker">subsession</span>
+  const kind = inferred ? t("detail.linked_session") : t("detail.subsession");
+  return `<summary class="subsession-summary" aria-label="${escapeHtml(`Toggle ${kind} ${title}`)}">
+    <span class="subsession-kicker">${escapeHtml(kind)}</span>
     <span class="subsession-title">${escapeHtml(title)}</span>
-    <span class="subsession-meta">${escapeHtml(pieces.join(" · "))}</span>
+    <span class="subsession-meta">${escapeHtml(pieces.filter(Boolean).join(" · "))}</span>
   </summary>`;
 }
 
 function renderSubagentExportActions(part: SessionPartNode, provider: string) {
   const childSession = part.childSessions[0]?.session;
+  if (childSession?.metadata?.embedded === true) {
+    return "";
+  }
   const childId = childSession?.id;
   if (!childId) {
     return "";
@@ -268,7 +276,9 @@ function renderSubagentBranch(part: SessionPartNode, childMarkup: string, provid
   const title = taskTitle(data);
   const status = partStatus(data);
   const duration = part.timeStart && part.timeEnd ? formatDuration(part.timeStart, part.timeEnd) : "";
-  const childMetrics = part.childSessions[0]?.metrics;
+  const childSessionTree = part.childSessions[0];
+  const inferred = Boolean(childSessionTree && part.inferredChildSessionIds?.has(String(childSessionTree.session?.id)));
+  const childMetrics = childSessionTree?.metrics;
   const childTokens = childMetrics ? {
     input: childMetrics.inputTokens,
     output: childMetrics.outputTokens,
@@ -285,14 +295,16 @@ function renderSubagentBranch(part: SessionPartNode, childMarkup: string, provid
   } : null;
   const tokenMarkup = formatTokens(childTokens);
   const meta = [
+    inferred ? t("detail.inferred_link") : "",
     childSessionCountLabel(part.childSessions.length),
     status,
     duration
   ].filter(Boolean).join(" · ");
 
-  return `<details class="subagent-branch" data-subsession-container="task" data-parent-part-id="${escapeHtml(part.id)}" open>
-    <summary class="subagent-summary" aria-label="${escapeHtml(`Toggle subagent ${title || "task"}`)}">
-      <span class="subsession-kicker">subagent</span>
+  const kind = inferred ? t("detail.linked_session") : "subagent";
+  return `<details class="subagent-branch${inferred ? " subagent-branch-inferred" : ""}" data-subsession-container="task" data-subagent-relationship="${inferred ? "inferred" : "explicit"}" data-parent-part-id="${escapeHtml(part.id)}" open>
+    <summary class="subagent-summary" aria-label="${escapeHtml(`Toggle ${kind} ${title || "task"}`)}">
+      <span class="subsession-kicker">${escapeHtml(kind)}</span>
       ${title ? `<span class="subsession-title">${escapeHtml(title)}</span>` : ""}
       ${meta ? `<span class="subsession-meta">${escapeHtml(meta)}</span>` : ""}
       ${tokenMarkup ? `<span class="message-tokens subagent-tokens" title="Subagent session token usage">${tokenMarkup}</span>` : ""}
@@ -344,7 +356,7 @@ function renderMessageGroup(message: any, markup: any, provider: string) {
   return `<article id="${messageAnchor}" class="message-group message-turn message-turn-${escapeHtml(role)}" data-role="${escapeHtml(role)}">${renderMessageControls(message, provider)}${toolOnlyHeader}${markup}</article>`;
 }
 
-function renderSubagentChildSession(tree: SessionTree, provider: string): string {
+function renderSubagentChildSession(tree: SessionTree, provider: string, depth = 1): string {
   const messageBlocks = [];
   let previousCacheUsage = null;
 
@@ -354,7 +366,7 @@ function renderSubagentChildSession(tree: SessionTree, provider: string): string
     if (annotated.usage && messageTurnRole(message.role) === "assistant") {
       previousCacheUsage = annotated.usage;
     }
-    const result: any = renderMessagePartsResult(message, 0, provider);
+    const result: any = renderMessagePartsResult(message, depth, provider);
     if (result.hasVisibleContent && result.markup) {
       const group: any = [renderMessageGroup(message, result.markup, provider)];
       attachPendingReasoning(group, result.pendingReasoning);
@@ -374,7 +386,7 @@ function renderSubagentChildSession(tree: SessionTree, provider: string): string
   const messageMarkup: any = messageBlocks.filter(Boolean).join("\n");
 
   const detachedMarkup: any = tree.detachedChildren
-    .map((child) => renderSubagentChildSession(child, provider))
+    .map((child) => renderSessionTree(child, depth + 1, provider, true))
     .filter(Boolean)
     .join("\n");
   return [messageMarkup, detachedMarkup].filter(Boolean).join("\n");
@@ -395,7 +407,7 @@ function collectMessageTaskTocNodes(message: any, parentAgentDepth: any): any[] 
   const nodes: any[] = [];
 
   for (const part of message.parts) {
-    if (part.type === "tool" && isTaskTool(part.tool)) {
+    if (part.type === "tool" && isTaskTool(part.data)) {
       const children = part.childSessions.flatMap((child: any) => collectTocNodes(child, parentAgentDepth));
       nodes.push(makeTocNode(
         anchorId("part", part.id),
@@ -408,7 +420,7 @@ function collectMessageTaskTocNodes(message: any, parentAgentDepth: any): any[] 
     }
 
     for (const child of part.childSessions) {
-      if (!(part.type === "tool" && isTaskTool(part.tool))) {
+      if (!(part.type === "tool" && isTaskTool(part.data))) {
         nodes.push(...collectTocNodes(child, parentAgentDepth));
       }
     }
@@ -872,7 +884,7 @@ function renderPart(messageData: any, partData: any, partId: any, reasoningMarku
 }
 
 function renderPartNode(messageData: any, part: SessionPartNode, depth = 0, provider = "opencode", reasoningMarkup = ""): string {
-  const isTaskWithSession = part.type === "tool" && isTaskTool(part.tool) && part.childSessions.length > 0;
+  const isTaskWithSession = part.type === "tool" && isTaskTool(part.data) && part.childSessions.length > 0;
   const renderedPart = isTaskWithSession ? "" : renderPart(messageData, part.data, part.id, reasoningMarkup);
   const partAnchor = escapeHtml(anchorId("part", part.id));
   const anchoredPart = renderedPart
@@ -886,7 +898,7 @@ function renderPartNode(messageData: any, part: SessionPartNode, depth = 0, prov
     const branches: any = part.childSessions.map((child, index) => (
       renderSubagentBranch(
         { ...part, childSessions: [child] },
-        renderSubagentChildSession(child, provider),
+        renderSubagentChildSession(child, provider, depth + 1),
         provider,
         index === 0 ? reasoningMarkup : ""
       )
@@ -895,7 +907,7 @@ function renderPartNode(messageData: any, part: SessionPartNode, depth = 0, prov
   }
 
   const childMarkup = part.childSessions
-    .map((child) => renderSubagentChildSession(child, provider))
+    .map((child) => renderSubagentChildSession(child, provider, depth + 1))
     .filter(Boolean)
     .join("\n");
   if (!childMarkup && !renderedPart) {
@@ -997,7 +1009,7 @@ function renderMessageParts(message: any, depth = 0, provider = "opencode") {
   return renderedParts.filter(Boolean).join("\n");
 }
 
-function renderSessionTree(tree: SessionTree, depth = 0, provider = "opencode"): string {
+function renderSessionTree(tree: SessionTree, depth = 0, provider = "opencode", inferred = false): string {
   const messageBlocks = [];
   let previousCacheUsage = null;
 
@@ -1027,7 +1039,7 @@ function renderSessionTree(tree: SessionTree, depth = 0, provider = "opencode"):
   const messageMarkup = messageBlocks.filter(Boolean).join("\n");
 
   const detachedMarkup: any = tree.detachedChildren
-    .map((child) => renderSessionTree(child, depth + 1, provider))
+    .map((child) => renderSessionTree(child, depth + 1, provider, true))
     .filter(Boolean)
     .join("\n");
   const body: any = [messageMarkup, detachedMarkup].filter(Boolean).join("\n");
@@ -1036,8 +1048,8 @@ function renderSessionTree(tree: SessionTree, depth = 0, provider = "opencode"):
     return body;
   }
 
-  return `<details id="${escapeHtml(anchorId("session", tree.session.id || ""))}" class="subsession-container" data-session-id="${escapeHtml(tree.session.id || "")}" data-depth="${depth}">
-    ${renderSubsessionHeader(tree)}
+  return `<details id="${escapeHtml(anchorId("session", tree.session.id || ""))}" class="subsession-container${inferred ? " subsession-container-inferred" : ""}" data-session-id="${escapeHtml(tree.session.id || "")}" data-session-relationship="${inferred ? "inferred" : "nested"}" data-depth="${depth}">
+    ${renderSubsessionHeader(tree, inferred)}
     <div class="subsession-body">
       ${body || `<p class="empty-state">${t("detail.no_messages")}</p>`}
     </div>

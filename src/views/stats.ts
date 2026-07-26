@@ -885,7 +885,7 @@ export function renderStatsPage(data: TokenExplorerData & { dayDrill?: string | 
     ${[...statsFiltersToParams(filters).entries()].filter(([key]) => !["project", "model", "scope", "comparea", "compareb"].includes(key)).map(([key, value]) => `<input type="hidden" name="${escapeHtml(key)}" value="${escapeHtml(value)}">`).join("")}
     ${(providers || []).map((p: any) => `<label class="stats-provider-item${p.available === false ? " disabled" : ""}">
       <input type="checkbox" name="provider" value="${escapeHtml(p.id)}" ${selectedProviders.includes(p.id) ? "checked" : ""} ${p.available === false ? "disabled" : ""}>
-      <span>${escapeHtml(p.name || p.id)}</span>
+      <span>${escapeHtml(p.name || p.id)}${p.lifecycle === "legacy" ? ` <span class="provider-legacy-badge">${escapeHtml(t("provider.legacy"))}</span>` : ""}</span>
     </label>`).join("")}
     <button class="stats-filter-btn stats-filter-apply" type="submit">${escapeHtml(t("stats.filter_apply"))}</button>
   </form>` : "";
@@ -902,9 +902,9 @@ export function renderStatsPage(data: TokenExplorerData & { dayDrill?: string | 
             const isCurrent = p.id === provider;
             const className = `stats-provider-item${isCurrent ? " current" : ""}${p.available === false ? " disabled" : ""}`;
             if (p.available === false) {
-              return `<span class="${className}" aria-disabled="true">${escapeHtml(p.name || p.id)}</span>`;
+              return `<span class="${className}" aria-disabled="true">${escapeHtml(p.name || p.id)}${p.lifecycle === "legacy" ? ` <span class="provider-legacy-badge">${escapeHtml(t("provider.legacy"))}</span>` : ""}</span>`;
             }
-            return `<a href="/stats?provider=${encodeURIComponent(p.id)}&${rangeQuery}" class="${className}"${isCurrent ? ' aria-current="page"' : ""}>${escapeHtml(p.name || p.id)}</a>`;
+            return `<a href="/stats?provider=${encodeURIComponent(p.id)}&${rangeQuery}" class="${className}"${isCurrent ? ' aria-current="page"' : ""}>${escapeHtml(p.name || p.id)}${p.lifecycle === "legacy" ? ` <span class="provider-legacy-badge">${escapeHtml(t("provider.legacy"))}</span>` : ""}</a>`;
           }).join("")}
         </div>
       </div>`}

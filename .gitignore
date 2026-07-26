@@ -12,4 +12,6 @@ tmp/
 .codecheckcli/
 .opencode/
 .codeagentsession/
+.agentsession/
+.pi/
 .opensessionviewer/

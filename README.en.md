@@ -1,6 +1,6 @@
 # AgentSession
 
-> A local AI session archive for developers: one searchable, traceable, reviewable web UI for OpenCode, Claude Code, Codex CLI, Gemini CLI, and Pi sessions.
+> A local AI session archive for developers: one searchable, traceable, reviewable web UI for OpenCode, Claude Code, Codex CLI, GitHub Copilot CLI, Pi, and legacy Gemini CLI sessions.
 
 [English](./README.en.md) · [中文](./README.md)
 
@@ -45,15 +45,20 @@ The focus is no longer just “list my chats.” The goal is to help you reconst
 | OpenCode | Full shared support | `$XDG_DATA_HOME/opencode/opencode.db` or `~/.local/share/opencode/opencode.db` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis; plus SQLite-native advanced statistics |
 | Claude Code | Full shared support | `~/.claude/transcripts/` + `~/.claude/projects/` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis; sidechain subagents when transcripts retain them |
 | Codex CLI | Full shared support | `~/.codex/sessions/**/*.jsonl` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis, nested subagents |
-| Gemini CLI | Full shared support | `~/.gemini/tmp/*/chats/*.json` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis; resume/runtime/analysis use an explicit project-key mapping when the transcript has no working directory |
-| Pi | Full shared support | `~/.pi/agent/sessions/**/*.jsonl` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis, active branches, and fork relationships |
+| GitHub Copilot CLI | Full shared support | `~/.copilot/session-state/*/events.jsonl` + `~/.copilot/session-store.db` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis, resume, and source-linked inline subagent branches. The event log is transcript-canonical; the read-only SQLite store adds catalog paths and token telemetry. |
+| Gemini CLI | Legacy history support | `~/.gemini/tmp/*/chats/*.json` | Browse, search, export, token statistics, shared views, and local prompt/runtime evidence for existing histories. It has no default resume or analysis action, and its flat chat format has no child-session relationship, so AgentSession does not invent embedded subagent branches. |
+| Pi | Full shared support | `~/.pi/agent/sessions/**/*.jsonl` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis, active branches, and fork relationships. A recorded subagent launcher embeds the child at that call; a source-only fork relationship remains explicitly inferred. |
 
-Every provider has the same common surface: browse, content search, viewer-only
-metadata management, Markdown/JSON export, daily token statistics, resume,
-Tree/Container/Metrics/Flow/Trace, local prompt evidence, runtime inventory,
-and proposal-only analysis. Command-launching features require a valid project
-directory recorded by the source or supplied by an explicit viewer-owned
-project-key mapping. Provider-owned source data remains read-only.
+Every provider has browse, content search, viewer-only metadata management,
+Markdown/JSON export, daily token statistics, Tree/Container/Metrics/Flow/Trace,
+and local prompt/runtime evidence. Active providers additionally expose resume
+and proposal-only analysis when a valid project directory is available. Recursive
+embedded branches are shown only when a
+source records a parent/child relationship; AgentSession labels source-only
+relationships as inferred instead of fabricating an invocation. Command-launching
+features require a valid project directory recorded by the source or supplied by
+an explicit viewer-owned project-key mapping. Provider-owned source data remains
+read-only.
 Advanced statistics remain source-native: AgentSession does not invent project,
 model, or cost dimensions that a transcript does not actually record.
 
@@ -76,9 +81,9 @@ All providers store stars, custom titles, soft deletes, and permanent exclusions
 - **Session list and search**: the global entry filters provider titles, viewer custom titles, and directories; provider pages retain message-content search, starring, and local management. A reversible title-type filter can separate displayed titles containing analysis/analyze signals from other sessions; it is a viewer heuristic, not provider metadata.
 - **Session detail review**: provider-owned response boundaries keep reasoning, action/tool calls, and observation/tool results together as ReACT turns.
 - **Stable detail tabs**: Overview, Conversation, Flow, Analysis, and Raw data share one content track. The Conversation table of contents fades without reflowing the title, actions, or tab bar and honors reduced-motion preferences.
-- **Recursive session tree**: OpenCode, Codex, Pi, and Claude Code sessions with stored sidechain transcripts render child sessions as nested containers with direct open links.
-- **Tool Flow Tree**: the right-side Flow view shows root sessions, messages, tools, and subagent branches by hierarchy.
-- **Table of Contents**: long sessions get navigation for prompts, assistant turns, `task` / `subtask` / `spawn_agent` branches, and nested sessions.
+- **Recursive session tree**: OpenCode, Codex, Copilot, Pi, and Claude Code sessions with stored parent/child evidence render child sessions as nested containers; inline Copilot agents remain embedded because they are not independently resumable sessions. Source-only relationships remain visibly inferred.
+- **Tool Flow Tree**: the right-side Flow view shows root sessions, messages, tools, and subagent branches by hierarchy, including `Agent`, `task`, `subtask`, `spawn_agent`, and `delegate_task` launchers plus provider-marked custom agents.
+- **Table of Contents**: long sessions get navigation for prompts, assistant turns, known launcher branches or provider-marked custom agents, and nested sessions.
 - **In-conversation search**: open the compact detail-page search from the action bar or press `/`; results report matching turns and text occurrences, highlight the exact text, and keep previous/next controls visible while navigating.
 - **Trace API**: step/span summaries classify tools, skills, agents, MCP calls, and LSP activity.
 - **System-prompt evidence API**: `GET /api/:provider/session/:id/system-prompts` exposes only current locally resolvable instructions, rules, and runtime sources; it never claims to recover a hidden provider prompt.
@@ -127,6 +132,7 @@ agentsession [options]
 --opencode-db <path>  OpenCode database path, alias --db
 --claude-dir <path>   Claude Code data directory
 --codex-dir <path>    Codex CLI data directory
+--copilot-dir <path>  GitHub Copilot CLI data directory
 --gemini-dir <path>   Gemini CLI data directory
 --pi-dir <path>       Pi agent data directory
 --config <path>       AgentSession JSON config
@@ -148,6 +154,7 @@ agentsession [options]
 | `XDG_DATA_HOME` | XDG data root for OpenCode |
 | `CLAUDE_CONFIG_DIR` | Claude Code data directory |
 | `CODEX_HOME` | Codex CLI data directory |
+| `COPILOT_HOME` | GitHub Copilot CLI data directory |
 | `GEMINI_HOME` | Gemini CLI data directory |
 | `PI_CODING_AGENT_DIR` | Pi agent data directory, defaults to `~/.pi/agent` |
 | `AGENTSESSION_META_PATH` | AgentSession metadata DB path |
@@ -159,7 +166,7 @@ agentsession [options]
 ## AgentSession-MCP: local session history for coding agents
 
 `@acetamido/agentsession-mcp` is a separate stdio MCP package for Codex, Claude Code,
-Gemini CLI, OpenCode, and other MCP hosts to query the session history from
+GitHub Copilot CLI, OpenCode, and other MCP hosts to query the session history from
 locally available providers. It starts no web server, binds no port, and never
 modifies provider-owned data.
 
@@ -173,7 +180,7 @@ confirm:
 npx --yes --prefer-online @acetamido/agentsession-mcp@latest install
 ```
 
-Codex, Claude Code, Gemini CLI, and OpenCode are supported. The generated MCP
+Codex, Claude Code, GitHub Copilot CLI, and OpenCode are supported. The generated MCP
 configuration launches `npx --prefer-online @acetamido/agentsession-mcp@latest`,
 so every coding-agent startup forces npm to check cached package metadata and
 uses the latest published MCP. `install` never overwrites an existing server
@@ -255,14 +262,15 @@ before returning success. If the host cannot start, the page shows an error
 instead of a success toast. Runtime launch logs include the selected host,
 fallback information, and the launcher PID when available.
 
-All registered providers declare a default resume command:
+Active providers declare a default resume command:
 
 | Provider | Default command |
 |---|---|
 | OpenCode | `opencode --session {sessionId}` |
 | Claude Code | `claude --resume {sessionId}` |
 | Codex CLI | `codex resume {sessionId}` |
-| Gemini CLI | `gemini --resume {sessionId}` |
+| GitHub Copilot CLI | `copilot --resume {sessionId}` |
+| Gemini CLI | Legacy history only; no default launch |
 | Pi | `pi --session {sessionId}` |
 
 Every command and the PowerShell-compatible terminal shell can be overridden in
@@ -354,7 +362,7 @@ directory mappings**, or save the equivalent viewer-owned configuration:
 At use time, AgentSession uses only an existing absolute directory,
 canonicalizes it locally, marks it as a configured mapping in the session
 details, and never writes it back to the provider transcript. The mapping then
-enables Gemini runtime resolution, resume, and analysis for matching sessions.
+enables Gemini runtime resolution for matching legacy sessions.
 
 `currency` must be a three-letter code, rates must be finite and non-negative,
 and `sourceUrl` must be an absolute HTTP/HTTPS URL. Unpriced reasoning/cache
@@ -381,12 +389,11 @@ own `diagnostics/` directory.
 ## Session Analysis And Evaluation Proposals
 
 AgentSession can launch a configured analyzer non-interactively from every
-provider detail page. The default runner is OpenCode's non-interactive command,
-but it is configurable globally or per provider, so Gemini CLI and Pi sessions
-can use the same bounded, proposal-only analysis lifecycle rather than losing
-analysis support. A Gemini transcript without a recorded working directory
-needs the explicit [project key mapping](#project-key-mappings) above before its
-runtime inventory or analysis action can be resolved. The analysis run:
+active provider detail page. The default runner is OpenCode's non-interactive
+command, but it is configurable globally or per active provider, so Copilot CLI
+and Pi sessions can use the same bounded, proposal-only analysis lifecycle.
+Gemini CLI remains a legacy history provider and intentionally has no default
+analysis action. The analysis run:
 it snapshots the session as indexed JSONL
 evidence, snapshots selected artifacts, creates an evaluation seed, and asks
 the analyzer to write:
@@ -703,6 +710,7 @@ src/
 │   ├── opencode/          # OpenCode-compatible SQLite adapter factory
 │   ├── claude-code/       # Claude Code JSONL adapter
 │   ├── codex/             # Codex CLI JSONL adapter
+│   ├── copilot/           # GitHub Copilot CLI event-log adapter
 │   └── gemini/            # Gemini JSON adapter
 ├── db.ts                  # OpenCode-compatible DB queries
 ├── meta.ts                # Local metadata for star, rename, delete, trash

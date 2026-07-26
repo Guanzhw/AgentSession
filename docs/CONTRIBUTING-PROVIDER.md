@@ -33,6 +33,7 @@ than product similarity.
 |---|---|---|
 | One JSON session per file | `src/providers/gemini/` | File store, incremental token statistics, and flat structured views. |
 | JSONL transcript | `src/providers/claude-code/` or `src/providers/codex/` | Defensive record parsing and explicit response/child-session boundaries. |
+| Inline agent event log plus telemetry SQLite | `src/providers/copilot/` | Keep transcript events canonical; read catalog/token rows read-only and represent in-file agents as view-only embedded bundles. |
 | In-file branch-tree JSONL | `src/providers/pi/` | Reconstruct the active `id`/`parentId` branch before normalizing messages; preserve file-level `parentSession` fork identity. |
 | OpenCode-compatible SQLite | `src/providers/opencode/` and `src/providers/shared/sqlite-adapter.ts` | Share only schema-neutral SQLite behavior; keep schema enrichment provider-owned. |
 | Nested/sidechain agent transcripts | `src/providers/shared/linked-message-session.ts` | Canonical `parentId` plus explicit spawn references. |
@@ -257,7 +258,7 @@ data directory.
 | Parser | Current and legacy shapes; canonical ID; `parentId`; timestamps; every nullable Message field; tools/reasoning/models/tokens when present. |
 | Corruption and cache | One malformed file is skipped; unchanged files are reused; changed files reparse; deleted files disappear. |
 | Adapter | Absent-data `detect()`; scan/get/messages/search agreement; token fragments are not double counted; opaque project keys remain opaque until an explicit mapping resolves an existing directory. |
-| Nested agents | Explicit child IDs link correctly; copied parent context does not become child content; multiple children do not cross-contaminate. |
+| Nested agents | Explicit child IDs link correctly; copied parent context does not become child content; multiple children do not cross-contaminate. For every provider launcher name (`Agent`, `Task`, `task`, `subtask`, `spawn_agent`, `delegate_task`, or a documented equivalent), verify both the embedded conversation branch and the Flow fork/return pair. When a provider permits configured or arbitrary agent tool names, its parser must set normalized `metadata.subagent: true`; shared code must not guess from the name. Claude Code `task-notification` records must bind by their `task-id` and `tool-use-id`, rather than render as user text. |
 | Capabilities | Every declared capability has a matching view, resume, runtime, or analysis test. |
 | Viewer routes | Unavailable state, detail, search, metadata management, and structured views work without central provider-ID branches. |
 | MCP | Both static validators accept the ID; the five read-only tools remain bounded and untrusted-content safe. |
@@ -295,6 +296,7 @@ the validation matrix in `AGENTS.md` for the changed surface.
 
 - `src/providers/interface.ts` — authoritative adapter contract.
 - `src/providers/gemini/` — compact JSON file-provider example.
+- `src/providers/copilot/` — event-log transcript, read-only catalog telemetry, and inline subagent example.
 - `src/providers/claude-code/` and `src/providers/codex/` — JSONL and nested
   transcript examples.
 - `src/providers/pi/` — in-file branch-tree JSONL, compaction, tool-result,

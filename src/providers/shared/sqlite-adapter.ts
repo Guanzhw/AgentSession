@@ -10,6 +10,7 @@ import {
   getTokenStats as dbGetTokenStats,
 } from "../../db.js";
 import { parseJson } from "./parser.js";
+import { isSubagentTool, mergeToolMetadata } from "./subagent-tools.js";
 import type { ProviderAdapter, ProviderId } from "../interface.js";
 
 function stringifyMessageContent(value: any) {
@@ -188,9 +189,9 @@ export function createSqliteSessionAdapter({
       return Number.isFinite(n) ? n : 0;
     };
 
-    const classifyTool = (tool: any) => {
+    const classifyTool = (tool: any, metadata: any = null) => {
       if (tool === "skill") return { category: "skill", mcpServer: null };
-      if (tool === "task") return { category: "agent", mcpServer: null };
+      if (isSubagentTool(tool, metadata)) return { category: "agent", mcpServer: null };
       if (tool === "invalid") return { category: "invalid", mcpServer: null };
       if (tool.startsWith("lsp_")) return { category: "lsp", mcpServer: null };
       if (tool.includes("_") && !knownBuiltins.has(tool)) {
@@ -272,7 +273,7 @@ export function createSqliteSessionAdapter({
           const toolName = typeof pd.tool === "string" ? pd.tool : "";
           if (toolName) {
             name = toolName;
-            const classification = classifyTool(toolName);
+            const classification = classifyTool(toolName, mergeToolMetadata(pd.state?.metadata, pd.metadata));
             category = classification.category;
             mcpServer = classification.mcpServer;
           }

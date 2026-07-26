@@ -114,7 +114,8 @@ export async function startServer(config = getConfig()) {
       name: p.name,
       icon: p.icon,
       available: availableIds.has(p.id),
-      manageable: supportsLocalManagement(p)
+      manageable: supportsLocalManagement(p),
+      lifecycle: p.lifecycle || "active"
     }));
 
     // Build router with populated deps

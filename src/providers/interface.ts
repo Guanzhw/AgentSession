@@ -1,4 +1,6 @@
-export type ProviderId = "opencode" | "claude-code" | "codex" | "gemini" | "pi";
+export type ProviderId = "opencode" | "claude-code" | "codex" | "copilot" | "gemini" | "pi";
+
+export type ProviderLifecycle = "active" | "legacy";
 
 export interface ResumeCommandSpec {
   executable: string;
@@ -118,6 +120,8 @@ export interface ProviderAdapter {
   id: ProviderId;
   name: string;
   icon: string;
+  /** Legacy adapters remain readable for historic sessions but are not a current host integration. */
+  lifecycle?: ProviderLifecycle;
   resumeCommand?: ResumeCommandSpec;
   capabilities?: {
     localManagement?: boolean;

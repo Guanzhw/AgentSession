@@ -108,13 +108,10 @@ const gemini = {
   id: "gemini",
   name: "Gemini CLI",
   icon: icons.gemini,
-  resumeCommand: {
-    executable: "gemini",
-    args: ["--resume", "{sessionId}"]
-  },
+  lifecycle: "legacy",
   capabilities: {
     localManagement: true,
-    sessionAnalysis: true,
+    sessionAnalysis: false,
     structuredSessionViews: true
   },
 

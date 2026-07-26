@@ -463,14 +463,15 @@ test("stats route reads filters from the request URL and degrades file-provider 
 });
 
 test("centralized Usage page aggregates selected providers and preserves component totals", async () => {
+  const currentDay = new Date().toISOString().slice(0, 10);
   const providers = [
     {
       id: "codex", name: "Codex", icon: "", capabilities: {},
-      getTokenStats() { return [{ day: "2026-07-18", inputTokens: 10, outputTokens: 4, reasoningTokens: 2, cacheReadTokens: 5, cacheWriteTokens: 0, totalTokens: 21, messageCount: 2 }]; }
+      getTokenStats() { return [{ day: currentDay, inputTokens: 10, outputTokens: 4, reasoningTokens: 2, cacheReadTokens: 5, cacheWriteTokens: 0, totalTokens: 21, messageCount: 2 }]; }
     },
     {
       id: "gemini", name: "Gemini", icon: "", capabilities: {},
-      getTokenStats() { return [{ day: "2026-07-18", inputTokens: 7, outputTokens: 3, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 1, totalTokens: 11, messageCount: 1 }]; }
+      getTokenStats() { return [{ day: currentDay, inputTokens: 7, outputTokens: 3, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 1, totalTokens: 11, messageCount: 1 }]; }
     }
   ];
   const providerInfo = providers.map((provider) => ({ id: provider.id, name: provider.name, icon: "", available: true, manageable: false }));

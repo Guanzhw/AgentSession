@@ -12,11 +12,13 @@ import {
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
 
 import { initConfig } from "../dist/src/config.js";
 import { getSessionAnalysisAction } from "../dist/src/analysis.js";
 import claudeCode from "../dist/src/providers/claude-code/adapter.js";
 import codex from "../dist/src/providers/codex/adapter.js";
+import copilot from "../dist/src/providers/copilot/adapter.js";
 import gemini from "../dist/src/providers/gemini/adapter.js";
 import pi from "../dist/src/providers/pi/adapter.js";
 
@@ -194,6 +196,182 @@ test("Codex file cache exposes shared Agent Loop trace and prompt evidence", asy
   }
 });
 
+function copilotRecords(marker) {
+  return [
+    {
+      type: "session.start",
+      id: "copilot-start",
+      timestamp: "2026-07-26T16:30:00.000Z",
+      data: { sessionId: "copilot-canonical", copilotVersion: "1.0.75", contextTier: "default" }
+    },
+    {
+      type: "system.message",
+      id: "copilot-system",
+      timestamp: "2026-07-26T16:30:01.000Z",
+      data: { content: "copilot-hidden-system-marker" }
+    },
+    {
+      type: "user.message",
+      id: "copilot-user",
+      timestamp: "2026-07-26T16:30:02.000Z",
+      data: { content: marker, transformedContent: "copilot-transformed-marker" }
+    },
+    {
+      type: "assistant.message",
+      id: "copilot-parent-tool-turn",
+      timestamp: "2026-07-26T16:30:03.000Z",
+      data: { turnId: "0", content: "I will delegate this check.", model: "fixture-model", outputTokens: 20, reasoningOpaque: "copilot-opaque-reasoning-marker" }
+    },
+    {
+      type: "tool.execution_start",
+      id: "copilot-task-start",
+      timestamp: "2026-07-26T16:30:04.000Z",
+      data: {
+        turnId: "0",
+        toolCallId: "copilot-agent-call",
+        toolName: "task",
+        arguments: { name: "explore", description: "Inspect the fixture", prompt: "Find the nested marker" }
+      }
+    },
+    {
+      type: "subagent.started",
+      id: "copilot-agent-start",
+      agentId: "copilot-agent-call",
+      timestamp: "2026-07-26T16:30:05.000Z",
+      data: { toolCallId: "copilot-agent-call", agentName: "explore", agentDisplayName: "Explore Agent" }
+    },
+    {
+      type: "system.message",
+      id: "copilot-child-system",
+      agentId: "copilot-agent-call",
+      timestamp: "2026-07-26T16:30:06.000Z",
+      data: { content: "copilot-child-hidden-system-marker" }
+    },
+    {
+      type: "user.message",
+      id: "copilot-child-user",
+      agentId: "copilot-agent-call",
+      timestamp: "2026-07-26T16:30:07.000Z",
+      data: { content: "Copilot child visible marker", transformedContent: "copilot-child-transformed-marker" }
+    },
+    {
+      type: "assistant.message",
+      id: "copilot-child-assistant",
+      agentId: "copilot-agent-call",
+      timestamp: "2026-07-26T16:30:08.000Z",
+      data: { turnId: "0", parentToolCallId: "copilot-agent-call", content: "Child result is ready.", model: "fixture-model", outputTokens: 8, encryptedContent: "copilot-encrypted-marker" }
+    },
+    {
+      type: "subagent.completed",
+      id: "copilot-agent-complete",
+      agentId: "copilot-agent-call",
+      timestamp: "2026-07-26T16:30:09.000Z",
+      data: { toolCallId: "copilot-agent-call", agentName: "explore", agentDisplayName: "Explore Agent" }
+    },
+    {
+      type: "tool.execution_complete",
+      id: "copilot-task-complete",
+      timestamp: "2026-07-26T16:30:10.000Z",
+      data: { turnId: "0", toolCallId: "copilot-agent-call", success: true, result: { content: "Child result is ready.", detailedContent: "copilot-detailed-marker" } }
+    },
+    {
+      type: "assistant.message",
+      id: "copilot-parent-final",
+      timestamp: "2026-07-26T16:30:11.000Z",
+      data: { turnId: "1", content: "The parent answer is complete.", model: "fixture-model", outputTokens: 4 }
+    }
+  ];
+}
+
+function createCopilotStore(filePath, project) {
+  const db = new DatabaseSync(filePath);
+  db.exec(`
+    CREATE TABLE sessions (
+      id TEXT PRIMARY KEY, cwd TEXT, repository TEXT, branch TEXT,
+      summary TEXT, created_at TEXT, updated_at TEXT
+    );
+    CREATE TABLE assistant_usage_events (
+      session_id TEXT, turn_index INTEGER, agent_id TEXT,
+      input_tokens INTEGER, output_tokens INTEGER, cache_read_tokens INTEGER,
+      cache_write_tokens INTEGER, reasoning_tokens INTEGER, created_at TEXT
+    );
+  `);
+  db.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+    "copilot-canonical", project, "fixture-repository", "main", "Catalog fallback title",
+    "2026-07-26T16:30:00.000Z", "2026-07-26T16:30:11.000Z"
+  );
+  const insert = db.prepare("INSERT INTO assistant_usage_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+  insert.run("copilot-canonical", 0, null, 100, 20, 50, 10, 5, "2026-07-26T16:30:03.000Z");
+  insert.run("copilot-canonical", 0, "copilot-agent-call", 20, 8, 0, 0, 0, "2026-07-26T16:30:08.000Z");
+  insert.run("copilot-canonical", 1, null, 30, 4, 0, 0, 0, "2026-07-26T16:30:11.000Z");
+  db.close();
+}
+
+test("Copilot CLI embeds inline subagents, reads catalog telemetry, and excludes internal fields", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "opensession-copilot-cache-"));
+  try {
+    const project = path.join(root, "fixture-project");
+    const sessionDir = path.join(root, "session-state", "copilot-alias");
+    const corruptDir = path.join(root, "session-state", "corrupt");
+    mkdirSync(sessionDir, { recursive: true });
+    mkdirSync(corruptDir, { recursive: true });
+    mkdirSync(project, { recursive: true });
+    writeFileSync(path.join(project, "AGENTS.md"), "Fixture Copilot instruction");
+    const eventsPath = path.join(sessionDir, "events.jsonl");
+    writeJsonLines(eventsPath, copilotRecords("Copilot root visible marker"));
+    writeFileSync(path.join(corruptDir, "events.jsonl"), "{not-json");
+    createCopilotStore(path.join(root, "session-store.db"), project);
+    normalizeMtime(eventsPath);
+    initConfig(["--copilot-dir", root]);
+
+    const scanned = await collect(copilot.scan());
+    assert.deepEqual(scanned.map((session) => session.id), ["copilot-canonical"]);
+    assert.equal(copilot.getSession("copilot-alias")?.directory, project);
+    assert.equal(copilot.getSession("copilot-canonical")?.tokenCount, 182);
+    assert.equal(copilot.getSession("copilot-canonical")?.metadata?.repository, "fixture-repository");
+
+    const rootMessages = copilot.getMessages("copilot-canonical");
+    assert.deepEqual(rootMessages.map((message) => message.role), ["user", "assistant", "tool", "tool", "assistant"]);
+    assert.equal(rootMessages.some((message) => /copilot-(hidden-system|transformed|opaque|encrypted|detailed)-marker/.test(message.content)), false);
+    assert.equal(rootMessages.find((message) => message.role === "assistant")?.tokens?.total, 120);
+    assert.equal(copilot.searchMessages("Copilot child visible marker")[0]?.sessionId, "copilot-canonical");
+    assert.deepEqual(copilot.searchMessages("copilot-hidden-system-marker"), []);
+
+    const tree = copilot.getSessionTree("copilot-canonical");
+    const task = tree.messages.flatMap((message) => message.parts).find((part) => part.tool === "task");
+    assert.equal(task?.childSessions.length, 1);
+    assert.equal(task?.childSessions[0]?.session?.title, "Explore Agent");
+    assert.equal(task?.childSessions[0]?.session?.metadata?.embedded, true);
+    assert.equal(tree.detachedChildren.length, 0);
+    assert.match(JSON.stringify(tree), /Copilot child visible marker/);
+    assert.doesNotMatch(JSON.stringify(tree), /copilot-(hidden-system|transformed|opaque|encrypted|detailed)-marker/);
+    assert.equal(copilot.getSessionFlow("copilot-canonical")?.summary?.subagents, 1);
+    assert.equal(copilot.getTrace("copilot-canonical")?.summary?.totalSteps, 2);
+    assert.equal(copilot.getSystemPrompts("copilot-canonical")?.mode, "copilot-resolved");
+    assert.match(JSON.stringify(copilot.getRuntimeEnvironment("copilot-canonical")), /AGENTS\.md/);
+    const day = copilot.getTokenStats(30).find((item) => item.day === "2026-07-26");
+    assert.deepEqual(day && {
+      input: day.inputTokens,
+      output: day.outputTokens,
+      reasoning: day.reasoningTokens,
+      cacheRead: day.cacheReadTokens,
+      cacheWrite: day.cacheWriteTokens,
+      total: day.totalTokens,
+      messages: day.messageCount
+    }, {
+      input: 90,
+      output: 27,
+      reasoning: 5,
+      cacheRead: 50,
+      cacheWrite: 10,
+      total: 182,
+      messages: 3
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function geminiRecord(marker, output = 5) {
   return {
     sessionId: "gemini-canonical",
@@ -269,7 +447,9 @@ test("Gemini file cache skips corrupt files, reuses parsed data, and refreshes c
       gemini.getSession("gemini-canonical")?.directory,
       { enabled: true, providers: { gemini: { command: { executable: process.execPath, args: ["--version"] } } } }
     );
-    assert.equal(action?.projectPath, realpathSync(project));
+    assert.equal(gemini.lifecycle, "legacy");
+    assert.equal(gemini.resumeCommand, undefined);
+    assert.equal(action, null);
 
     writeFileSync(sessionFile, JSON.stringify(geminiRecord("gemini refreshed marker with a different size", 17)));
     await sleep(1050);

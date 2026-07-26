@@ -10,5 +10,7 @@ export const icons = {
 
   gemini: `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"/></svg>`,
 
+  copilot: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 5.5a4.5 4.5 0 0 1 8.5 2v1.2A4.3 4.3 0 0 1 19 13v2.5A3.5 3.5 0 0 1 15.5 19h-7A3.5 3.5 0 0 1 5 15.5V13a4.3 4.3 0 0 1 3.5-4.3V7.5A2.5 2.5 0 0 0 7 5.5Z"/><path d="M9 13h.01M15 13h.01"/><path d="M10 16h4"/></svg>`,
+
   pi: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14"/><path d="M8 7v10"/><path d="M16 7v8c0 1.5.7 2 2 2"/></svg>`
 };

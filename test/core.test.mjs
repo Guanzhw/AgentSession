@@ -19,9 +19,11 @@ import { EventEmitter } from "node:events";
 
 import { closeDb, getFilteredSessionCount, getModelDistribution, getModelPairs, getStatsProjects, getTokenCoverage, getTokenStats, getTopTokenSessions, listSessionProjects, listSessions, searchMessages } from "../dist/src/db.js";
 import { buildOpenCodeRuntimeEnvironment } from "../dist/src/providers/opencode/runtime-environment.js";
+import { buildOpenCodeSessionTree } from "../dist/src/providers/opencode/session-tree.js";
 import { buildClaudeCodeRuntimeEnvironment } from "../dist/src/providers/claude-code/runtime-environment.js";
 import {
   buildClaudeCodeSessionViews,
+  buildLinkedClaudeCodeSessionViews,
   buildClaudeCodeSystemPrompts
 } from "../dist/src/providers/claude-code/views.js";
 import { buildCodexRuntimeEnvironment } from "../dist/src/providers/codex/runtime-environment.js";
@@ -60,6 +62,12 @@ import {
 import { buildMessageSessionViews } from "../dist/src/providers/shared/message-session.js";
 import { buildLinkedMessageSessionViews } from "../dist/src/providers/shared/linked-message-session.js";
 import { buildAgentLoop, buildAgentLoopTrace } from "../dist/src/providers/shared/agent-loop.js";
+import {
+  classifySharedTool,
+  isSubagentTool,
+  mergeToolMetadata
+} from "../dist/src/providers/shared/subagent-tools.js";
+import { createSqliteSessionAdapter } from "../dist/src/providers/shared/sqlite-adapter.js";
 import { createIncrementalTokenStats, createSessionFileStore } from "../dist/src/providers/shared/file-adapter-helpers.js";
 import { providerFeatureMatrix } from "../dist/src/providers/kinds.js";
 import { createStatsCache } from "../dist/src/stats-cache.js";
@@ -225,6 +233,59 @@ test("Claude fragmented assistant records preserve reasoning and count repeated 
   });
 });
 
+test("Claude task notifications bind Agent calls without becoming user messages", () => {
+  const parentRecords = [
+    {
+      type: "user",
+      uuid: "parent-user",
+      timestamp: "2026-07-25T00:00:00.000Z",
+      message: { content: "Delegate a review." }
+    },
+    {
+      type: "assistant",
+      uuid: "agent-call-record",
+      timestamp: "2026-07-25T00:00:01.000Z",
+      message: {
+        id: "response-1",
+        content: [{ type: "tool_use", id: "agent-call", name: "Agent", input: { description: "Review" } }]
+      }
+    },
+    {
+      type: "user",
+      uuid: "task-notification",
+      timestamp: "2026-07-25T00:00:02.000Z",
+      message: {
+        content: "<task-notification><task-id>claude-agent-1</task-id><tool-use-id>agent-call</tool-use-id><status>completed</status><summary>Review complete</summary></task-notification>"
+      }
+    }
+  ];
+  const childRecords = [{
+    type: "assistant",
+    uuid: "child-answer",
+    isSidechain: true,
+    agentId: "claude-agent-1",
+    sessionId: "claude-parent",
+    timestamp: "2026-07-25T00:00:03.000Z",
+    message: { content: [{ type: "text", text: "Review complete" }] }
+  }];
+  const parent = extractSessionMeta(parentRecords, "claude-parent");
+  const child = extractSessionMeta(childRecords, "agent-claude-agent-1");
+  const parentMessages = recordsToMessages(parentRecords, parent.id);
+  const views = buildLinkedClaudeCodeSessionViews(parent.id, [
+    { session: parent, messages: parentMessages },
+    { session: child, messages: recordsToMessages(childRecords, child.id) }
+  ]);
+
+  assert.deepEqual(parentMessages.map((message) => message.role), ["user", "tool", "tool"]);
+  assert.equal(parentMessages[2].metadata?.source, "task_notification");
+  assert.equal(parentMessages[2].metadata?.taskId, "claude-agent-1");
+  assert.equal(views?.tree.messages.filter((message) => message.role === "user").length, 1);
+  assert.doesNotMatch(JSON.stringify(views?.tree), /task-notification/);
+  assert.equal(views?.tree.messages[1].parts[0].childSessions[0].session.id, "claude-agent-1");
+  assert.equal(views?.tree.detachedChildren.length, 0);
+  assert.equal(views?.flow.root.line.some((node) => node.inferred), false);
+});
+
 test("Claude token usage keeps optional fields numeric and deduplicates response fragments", () => {
   const records = [
     {
@@ -314,6 +375,49 @@ test("Agent Loop folds common coding-agent turns into provider-neutral trace ste
   assert.equal(trace.steps[0].reason, "tool-calls");
   assert.equal(trace.steps[0].spans[1].output, "AgentSession");
   assert.equal(trace.steps[1].tokens.total, 6);
+});
+
+test("Agent Loop classifies every supported subagent launcher as an agent", () => {
+  for (const toolName of ["agent", "task", "subtask", "spawn_agent", "delegate_task"]) {
+    const loop = buildAgentLoop([{
+      id: `${toolName}-assistant`, sessionId: "launcher-loop", role: "assistant", content: "", thinking: null,
+      toolName, toolInput: { description: `Run ${toolName}` }, toolOutput: "done", timestamp: 1000, tokens: null,
+      metadata: { callId: `${toolName}-call` }
+    }]);
+    const trace = buildAgentLoopTrace("launcher-loop", loop);
+
+    assert.equal(trace.steps[0].spans[0].name, toolName);
+    assert.equal(trace.steps[0].spans[0].category, "agent");
+  }
+});
+
+test("shared tool classification preserves semantic metadata and generic tool categories", () => {
+  const metadata = mergeToolMetadata({ subagent: true }, { turnId: "response-1" });
+
+  assert.equal(isSubagentTool("custom-reviewer", metadata), true);
+  assert.equal(isSubagentTool("custom-reviewer", mergeToolMetadata({ subagent: true }, { subagent: false })), true);
+  assert.deepEqual(classifySharedTool("custom-reviewer", metadata), { category: "agent", mcpServer: null });
+  assert.deepEqual(classifySharedTool("skill"), { category: "skill", mcpServer: null });
+  assert.deepEqual(classifySharedTool("lsp_definition"), { category: "lsp", mcpServer: null });
+  assert.deepEqual(classifySharedTool("mcp__github__search_issues"), { category: "mcp", mcpServer: "github" });
+});
+
+test("Agent Loop only folds tool-role results into a matching tool call", () => {
+  const loop = buildAgentLoop([
+    {
+      id: "assistant-tool", sessionId: "loop-role-guard", role: "assistant", content: "", thinking: null,
+      toolName: "read", toolInput: { path: "README.md" }, toolOutput: null, timestamp: 1000, tokens: null,
+      metadata: { callId: "read-call" }
+    },
+    {
+      id: "user-with-coincidental-id", sessionId: "loop-role-guard", role: "user", content: "This is a new prompt.", thinking: null,
+      toolName: null, toolInput: null, toolOutput: null, timestamp: 2000, tokens: null,
+      metadata: { toolUseId: "read-call" }
+    }
+  ]);
+
+  assert.deepEqual(loop.turns.map((turn) => turn.role), ["assistant", "user"]);
+  assert.equal(loop.turns[1].events[0].text, "This is a new prompt.");
 });
 
 test("Agent Loop clears implicit tool continuation at a system boundary", () => {
@@ -433,6 +537,34 @@ test("Claude Code trace splits independent turns and classifies MCP tools", () =
   assert.equal(mcpSpan?.category, "mcp");
   assert.equal(mcpSpan?.mcpServer, "github");
   assert.equal(mcpSpan?.output, "issue #123");
+});
+
+test("Claude Code trace classifies every supported subagent launcher as an agent", () => {
+  for (const toolName of ["Agent", "task", "subtask", "spawn_agent", "delegate_task"]) {
+    const records = [
+      {
+        type: "assistant",
+        uuid: `${toolName}-assistant`,
+        timestamp: "2026-06-06T00:00:01.000Z",
+        message: {
+          model: "claude-sonnet",
+          usage: { input_tokens: 3, output_tokens: 2 },
+          content: [{ type: "tool_use", id: `${toolName}-call`, name: toolName, input: { description: "Run child" } }]
+        }
+      },
+      {
+        type: "user",
+        uuid: `${toolName}-result`,
+        timestamp: "2026-06-06T00:00:02.000Z",
+        message: { content: [{ type: "tool_result", tool_use_id: `${toolName}-call`, content: "done", is_error: false }] }
+      }
+    ];
+    const session = extractSessionMeta(records, `claude-${toolName}`);
+    const views = buildClaudeCodeSessionViews(session, recordsToMessages(records, `claude-${toolName}`));
+    const span = views.trace.steps[0].spans.find((candidate) => candidate.name === toolName);
+
+    assert.equal(span?.category, "agent", toolName);
+  }
 });
 
 test("Claude Code system prompt evidence resolves local runtime sources without hidden prompt claims", () => {
@@ -836,6 +968,65 @@ test("file session store reuses parsed transcripts, refreshes changed files, and
   }
 });
 
+test("OpenCode attaches every supported launcher to its child session and trace", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "agentsession-subagent-launchers-"));
+  const dbPath = path.join(temp, "sessions.db");
+  try {
+    const db = new DatabaseSync(dbPath);
+    db.exec(`
+      CREATE TABLE session (
+        id TEXT PRIMARY KEY,
+        parent_id TEXT,
+        time_created INTEGER,
+        time_updated INTEGER,
+        time_archived INTEGER
+      );
+      CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT);
+      CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, data TEXT);
+    `);
+    const insertSession = db.prepare("INSERT INTO session VALUES (?, ?, ?, ?, NULL)");
+    const insertMessage = db.prepare("INSERT INTO message VALUES (?, ?, ?)");
+    const insertPart = db.prepare("INSERT INTO part VALUES (?, ?, ?, ?)");
+
+    for (const [index, toolName] of ["task", "subtask", "spawn_agent", "delegate_task"].entries()) {
+      const rootId = `root-${toolName}`;
+      const childId = `ses${index}child`;
+      const messageId = `message-${toolName}`;
+      insertSession.run(rootId, null, 1000 + index * 100, 1090 + index * 100);
+      insertSession.run(childId, rootId, 1020 + index * 100, 1080 + index * 100);
+      insertMessage.run(messageId, rootId, JSON.stringify({ role: "assistant", time: { created: 1000 + index * 100 } }));
+      insertMessage.run(`child-message-${toolName}`, childId, JSON.stringify({ role: "assistant", time: { created: 1020 + index * 100 } }));
+      insertPart.run(`part-${toolName}`, messageId, rootId, JSON.stringify({
+        type: "tool",
+        tool: toolName,
+        state: {
+          status: "completed",
+          metadata: { sessionId: childId },
+          time: { start: 1001 + index * 100, end: 1080 + index * 100 }
+        }
+      }));
+    }
+    db.close();
+
+    const adapter = createSqliteSessionAdapter({
+      id: "opencode",
+      name: "OpenCode launcher fixture",
+      defaultDataPath: () => dbPath
+    });
+    for (const toolName of ["task", "subtask", "spawn_agent", "delegate_task"]) {
+      const rootId = `root-${toolName}`;
+      const tree = buildOpenCodeSessionTree(rootId, dbPath);
+      const trace = adapter.getTrace(rootId);
+
+      assert.equal(tree?.messages[0].parts[0].childSessions[0].session.id, `ses${["task", "subtask", "spawn_agent", "delegate_task"].indexOf(toolName)}child`);
+      assert.equal(trace?.steps[0].spans[0].category, "agent", toolName);
+    }
+  } finally {
+    closeDb(dbPath);
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
 test("Codex daily stats make cached input and reasoning mutually exclusive", () => {
   assert.deepEqual(codexDailyTokenComponents({
     input_tokens: 53123,
@@ -1068,6 +1259,204 @@ test("linked message sessions attach Codex-style spawn tools to child conversati
   assert.equal(views.metrics.totals.messages, 3);
 });
 
+test("linked message sessions attach every shared subagent launcher", () => {
+  const session = (id, parentId, timeCreated) => ({
+    id,
+    provider: "fixture",
+    parentId,
+    title: id,
+    directory: "D:\\WorkSpace",
+    timeCreated,
+    timeUpdated: timeCreated + 10,
+    messageCount: 1,
+    tokenCount: null
+  });
+  const message = (id, sessionId, role, toolName = null, toolOutput = null) => ({
+    id,
+    sessionId,
+    role,
+    content: role === "assistant" ? "Child result" : "",
+    thinking: null,
+    toolName,
+    toolInput: toolName ? { description: "Run child" } : null,
+    toolOutput,
+    timestamp: role === "tool" ? 2000 : 2100,
+    tokens: null,
+    metadata: toolName ? { turnId: `${sessionId}:turn` } : null
+  });
+
+  for (const toolName of ["agent", "task", "subtask", "spawn_agent", "delegate_task"]) {
+    const views = buildLinkedMessageSessionViews("parent-session", [
+      {
+        session: session("parent-session", null, 1000),
+        messages: [message(
+          `${toolName}-call`,
+          "parent-session",
+          "tool",
+          toolName,
+          '{"session_id":"child-session"}'
+        )]
+      },
+      {
+        session: session("child-session", "parent-session", 2050),
+        messages: [message(`${toolName}-answer`, "child-session", "assistant")]
+      }
+    ]);
+    const part = views?.tree.messages[0].parts[0];
+
+    assert.equal(part?.childSessions[0].session.id, "child-session", toolName);
+    assert.equal(views?.tree.detachedChildren.length, 0, toolName);
+  }
+});
+
+test("shared views preserve provider-marked custom subagent tools across Tree, Flow, Trace, and rendering", () => {
+  const session = (id, parentId, title, timeCreated) => ({
+    id,
+    provider: "fixture",
+    parentId,
+    title,
+    directory: "D:\\WorkSpace",
+    timeCreated,
+    timeUpdated: timeCreated + 100,
+    messageCount: 1,
+    tokenCount: null
+  });
+  const message = ({ id, sessionId, role, content = "", toolName = null, toolInput = null, toolOutput = null, timestamp, metadata = null }) => ({
+    id,
+    sessionId,
+    role,
+    content,
+    thinking: null,
+    toolName,
+    toolInput,
+    toolOutput,
+    timestamp,
+    tokens: null,
+    metadata
+  });
+  const views = buildLinkedMessageSessionViews("root-custom", [
+    {
+      session: session("root-custom", null, "Root", 1000),
+      messages: [
+        message({
+          id: "root-assistant", sessionId: "root-custom", role: "assistant", content: "I will delegate both reviews.", timestamp: 1100,
+          metadata: { turnId: "root-turn" }
+        }),
+        message({
+          id: "security-call", sessionId: "root-custom", role: "tool", toolName: "security-auditor",
+          toolInput: { description: "Security review" }, toolOutput: "complete", timestamp: 1200,
+          metadata: { turnId: "root-turn", callId: "security-call", agentId: "child-security", subagent: true }
+        }),
+        message({
+          id: "performance-call", sessionId: "root-custom", role: "tool", toolName: "performance-auditor",
+          toolInput: { description: "Performance review" }, toolOutput: "complete", timestamp: 1300,
+          metadata: { turnId: "root-turn", callId: "performance-call", agentId: "child-performance", subagent: true }
+        })
+      ]
+    },
+    // Deliberately reverse bundle and creation order: explicit agentId links
+    // must win over chronological fallback attachment.
+    {
+      session: session("child-performance", "root-custom", "Performance", 1150),
+      messages: [message({ id: "performance-result", sessionId: "child-performance", role: "assistant", content: "Performance audit complete.", timestamp: 1400 })]
+    },
+    {
+      session: session("child-security", "root-custom", "Security", 1350),
+      messages: [message({ id: "security-result", sessionId: "child-security", role: "assistant", content: "Security audit complete.", timestamp: 1500 })]
+    }
+  ]);
+
+  assert.equal(isSubagentTool("security-auditor"), false, "names alone stay provider-owned");
+  assert.equal(isSubagentTool("security-auditor", { subagent: true }), true);
+  const taskParts = views.tree.messages[0].parts.filter((part) => part.type === "tool");
+  assert.deepEqual(taskParts.map((part) => [part.tool, part.childSessions.map((child) => child.session.id)]), [
+    ["security-auditor", ["child-security"]],
+    ["performance-auditor", ["child-performance"]]
+  ]);
+  assert.equal(views.tree.detachedChildren.length, 0);
+  assert.equal(views.metrics.totals.branches, 2);
+  assert.deepEqual(
+    views.trace.steps[0].spans.filter((span) => span.category === "agent").map((span) => span.name),
+    ["security-auditor", "performance-auditor"]
+  );
+  const invocations = views.flow.root.line.filter((node) => node.kind === "invocation");
+  const returns = views.flow.root.line.filter((node) => node.kind === "return");
+  assert.deepEqual(invocations.map((node) => node.branches[0].id), ["session:child-security", "session:child-performance"]);
+  assert.deepEqual(invocations.map((node) => node.returnId), returns.map((node) => node.id));
+  const html = renderSessionPage({ session: views.tree.session, sessionTree: views.tree, provider: "fixture" });
+  assert.match(html, /subagent-branch/);
+  assert.match(html, /Security audit complete\./);
+  assert.match(html, /Performance audit complete\./);
+});
+
+test("chronological child fallback remains visibly inferred across detail and Flow", () => {
+  const session = (id, parentId, timeCreated) => ({
+    id,
+    provider: "fixture",
+    parentId,
+    title: id,
+    directory: "D:\\WorkSpace",
+    timeCreated,
+    timeUpdated: timeCreated + 100,
+    messageCount: 1,
+    tokenCount: null
+  });
+  const rootTool = {
+    id: "root-custom-launch", sessionId: "root-fallback", role: "tool", content: "", thinking: null,
+    toolName: "custom-reviewer", toolInput: { description: "Review the changes" }, toolOutput: "completed", timestamp: 1100,
+    tokens: null, metadata: { subagent: true }
+  };
+  const childAnswer = {
+    id: "fallback-answer", sessionId: "child-fallback", role: "assistant", content: "Review complete.", thinking: null,
+    toolName: null, toolInput: null, toolOutput: null, timestamp: 1200, tokens: null, metadata: null
+  };
+  const views = buildLinkedMessageSessionViews("root-fallback", [
+    { session: session("root-fallback", null, 1000), messages: [rootTool] },
+    { session: session("child-fallback", "root-fallback", 1150), messages: [childAnswer] }
+  ]);
+  const part = views.tree.messages[0].parts[0];
+  const invocation = views.flow.root.line.find((node) => node.kind === "invocation");
+  const html = renderSessionPage({ session: views.tree.session, sessionTree: views.tree, provider: "fixture" });
+
+  assert.equal(part.inferredChildSessionIds?.has("child-fallback"), true);
+  assert.equal(invocation?.inferred, true);
+  assert.match(invocation?.meta || "", /1 inferred link/);
+  assert.match(html, /data-subagent-relationship="inferred"/);
+  assert.match(html, /Linked session/);
+  assert.match(html, /Inferred relationship/);
+});
+
+test("linked message sessions break cyclic parent metadata without duplicating descendants", () => {
+  const session = (id, parentId) => ({
+    id,
+    provider: "fixture",
+    parentId,
+    title: id,
+    directory: "D:\\WorkSpace",
+    timeCreated: 1000,
+    timeUpdated: 2000,
+    messageCount: 1,
+    tokenCount: null
+  });
+  const tool = {
+    id: "root-agent-call", sessionId: "root-cycle", role: "tool", content: "", thinking: null,
+    toolName: "agent", toolInput: { description: "Child" }, toolOutput: "done", timestamp: 1100, tokens: null,
+    metadata: { agentId: "child-cycle", subagent: true }
+  };
+  const answer = (id, sessionId) => ({
+    id, sessionId, role: "assistant", content: "done", thinking: null,
+    toolName: null, toolInput: null, toolOutput: null, timestamp: 1200, tokens: null, metadata: null
+  });
+  const views = buildLinkedMessageSessionViews("root-cycle", [
+    { session: session("root-cycle", "child-cycle"), messages: [tool] },
+    { session: session("child-cycle", "root-cycle"), messages: [answer("child-answer", "child-cycle")] }
+  ]);
+
+  assert.equal(views.tree.metrics.descendantCount, 1);
+  assert.deepEqual(views.tree.messages[0].parts[0].childSessions.map((child) => child.session.id), ["child-cycle"]);
+  assert.equal(views.tree.messages[0].parts[0].childSessions[0].metrics.descendantCount, 0);
+});
+
 test("Codex subagent transcripts exclude copied parent context and expose encrypted task envelopes", () => {
   const records = [
     {
@@ -1128,6 +1517,8 @@ test("Codex subagent transcripts exclude copied parent context and expose encryp
   assert.deepEqual(messages.map((message) => message.role), ["user", "assistant"]);
   assert.match(messages[0].content, /Subagent task: \/root\/reviewer/);
   assert.match(messages[0].content, /encrypted in the Codex transcript/);
+  assert.equal(messages[0].toolName, null);
+  assert.equal(messages[0].metadata?.source, "subagent_task");
   assert.equal(messages[0].metadata?.promptAvailable, false);
   assert.equal(messages[1].content, "Child review complete");
   assert.doesNotMatch(JSON.stringify(messages), /Parent prompt|Parent answer/);
@@ -1469,31 +1860,34 @@ test("windows executable resolution prefers runnable command shims", () => {
   );
 });
 
-test("every provider declares a configurable resume command", () => {
+test("active providers declare a configurable resume command while legacy providers stay read-only", () => {
   const providers = getAllProviders();
   assert.deepEqual(
     providers.map((provider) => provider.id),
-    ["opencode", "claude-code", "codex", "gemini", "pi"]
+    ["opencode", "claude-code", "codex", "copilot", "gemini", "pi"]
   );
-  for (const provider of providers) {
+  for (const provider of providers.filter((provider) => provider.lifecycle !== "legacy")) {
     assert.equal(typeof provider.resumeCommand?.executable, "string", provider.id);
     assert.ok(provider.resumeCommand.executable, provider.id);
     assert.ok(Array.isArray(provider.resumeCommand.args), provider.id);
     assert.ok(provider.resumeCommand.args.includes("{sessionId}"), provider.id);
   }
+  assert.equal(providers.find((provider) => provider.id === "gemini")?.resumeCommand, undefined);
+  assert.equal(providers.find((provider) => provider.id === "gemini")?.lifecycle, "legacy");
   assert.equal(parseArgs(["--pi-dir", "D:\\fixtures\\pi-agent"]).piDir, "D:\\fixtures\\pi-agent");
+  assert.equal(parseArgs(["--copilot-dir", "D:\\fixtures\\copilot"]).copilotDir, "D:\\fixtures\\copilot");
 });
 
 test("every provider exposes the complete shared Agent Loop capability surface", () => {
   for (const provider of getAllProviders()) {
     const features = providerFeatureMatrix(provider);
     assert.equal(features.localManagement, true, provider.id);
-    assert.equal(features.sessionAnalysis, true, provider.id);
+    assert.equal(features.sessionAnalysis, provider.lifecycle !== "legacy", provider.id);
     assert.equal(features.agentLoopViews, true, provider.id);
     assert.equal(features.sessionTrace, true, provider.id);
     assert.equal(features.systemPromptEvidence, true, provider.id);
     assert.equal(features.runtimeEnvironment, true, provider.id);
-    assert.equal(features.resume, true, provider.id);
+    assert.equal(features.resume, provider.lifecycle !== "legacy", provider.id);
     assert.equal(features.sqliteSessionStore, provider.id === "opencode", provider.id);
   }
 });
@@ -4334,7 +4728,7 @@ test("session analysis requires a provider capability and an enabled target", ()
   const gemini = getAllProviders().find((provider) => provider.id === "gemini");
   const pi = getAllProviders().find((provider) => provider.id === "pi");
   assert.equal(codex.capabilities.sessionAnalysis, true);
-  assert.equal(gemini.capabilities.sessionAnalysis, true);
+  assert.equal(gemini.capabilities.sessionAnalysis, false);
   assert.equal(pi.capabilities.sessionAnalysis, true);
   assert.equal(typeof codex.getRuntimeEnvironment, "function");
   assert.equal(resolveAnalysisSettings(opencode, { enabled: false }), null);
@@ -4358,7 +4752,7 @@ test("session analysis requires a provider capability and an enabled target", ()
         command: { executable: "codex", args: ["exec"] }
       }
     }
-  }).command.executable, "opencode");
+  }), null);
   assert.equal(resolveAnalysisSettings(opencode, {
     enabled: true
   }).command.executable, "opencode");
@@ -4921,6 +5315,79 @@ test("conversation flow renders recursive subagents as fork-and-join pairs", () 
   assert.equal(invocation.branches[0].line[2].branches[0].id, "session:grandchild");
   assert.equal(flow.summary.subagents, 3);
   assert.equal(flow.root.line[4].emphasis, "final");
+});
+
+test("conversation flow recognizes every shared subagent launcher", () => {
+  for (const tool of ["agent", "task", "subtask", "spawn_agent", "delegate_task"]) {
+    const child = flowSession(`${tool}-child`, [
+      flowMessage(`${tool}-user`, "user", 1100),
+      flowMessage(`${tool}-assistant`, "assistant", 1200)
+    ], {
+      depth: 1,
+      attachMode: "task",
+      metrics: { timeStart: 1100, timeEnd: 1200, runtimeMs: 100 }
+    });
+    const launcher = flowTool(`${tool}-launcher`, {
+      tool,
+      messageId: `${tool}-root-agent`,
+      childSessions: [child],
+      timeStart: 1050,
+      timeEnd: 1250
+    });
+    const parent = flowSession(`${tool}-root`, [
+      flowMessage(`${tool}-root-user`, "user", 1000),
+      flowMessage(`${tool}-root-agent`, "assistant", 1040, [launcher])
+    ], {
+      metrics: {
+        partCount: 1,
+        toolCallCount: 1,
+        totalToolCalls: 1,
+        descendantCount: 1,
+        timeStart: 1000,
+        timeEnd: 1300,
+        runtimeMs: 300
+      }
+    });
+
+    const flow = buildFlowTreeFromContainer(parent);
+    const invocation = flow.root.line.find((node) => node.kind === "invocation");
+    const returned = flow.root.line.find((node) => node.kind === "return");
+
+    assert.ok(invocation, `${tool} should render a subagent fork`);
+    assert.ok(returned, `${tool} should render a matching return`);
+    assert.equal(invocation.branches[0].id, `session:${tool}-child`);
+    assert.equal(invocation.returnId, returned.id);
+    assert.equal(flow.summary.subagents, 1);
+  }
+});
+
+test("detached child sessions visibly identify inferred source relationships", () => {
+  const child = {
+    session: { id: "fork", title: "Pi fork", time_created: 1100, time_updated: 1200 },
+    detachedChildren: [],
+    metrics: flowMetrics({ messageCount: 2, totalMessages: 2, timeStart: 1100, timeEnd: 1200 }),
+    messages: [
+      flowMessage("fork-user", "user", 1100),
+      flowMessage("fork-agent", "assistant", 1200)
+    ]
+  };
+  const sessionTree = {
+    session: { id: "root", title: "Root", time_created: 1000, time_updated: 1300 },
+    detachedChildren: [child],
+    metrics: flowMetrics({ messageCount: 1, totalMessages: 3, descendantCount: 1, timeStart: 1000, timeEnd: 1300 }),
+    messages: [flowMessage("root-user", "user", 1000)]
+  };
+
+  const html = renderSessionPage({
+    session: sessionTree.session,
+    sessionTree,
+    provider: "pi"
+  });
+
+  assert.match(html, /data-session-relationship="inferred"/);
+  assert.match(html, /Linked session/);
+  assert.match(html, /Inferred relationship/);
+  assert.match(html, /Pi fork/);
 });
 
 test("session page can defer flow markup until the panel is opened", () => {

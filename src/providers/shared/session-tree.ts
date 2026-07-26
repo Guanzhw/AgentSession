@@ -1,5 +1,6 @@
 import { getChildSessionsSafe, getMessages, getParts, getSessionSafe } from "../../db.js";
 import { asNumber, parseJson } from "./parser.js";
+import { isSubagentTool, mergeToolMetadata } from "./subagent-tools.js";
 
 type Row = Record<string, any>;
 
@@ -13,6 +14,11 @@ export interface SessionPartNode {
   timeStart: number;
   timeEnd: number;
   childSessions: SessionTree[];
+  /**
+   * Child sessions paired only by a provider's parent relation and chronology,
+   * rather than an explicit source-side call/session reference.
+   */
+  inferredChildSessionIds?: Set<string>;
 }
 
 export interface SessionMessageNode {
@@ -74,12 +80,13 @@ function readTimeEnd(data: Row): number {
 }
 
 function extractTaskSessionIds(data: Row): string[] {
-  if (data.type !== "tool" || !["task", "subtask"].includes(data.tool)) {
+  const metadata = mergeToolMetadata(data.state?.metadata, data.metadata);
+  if (data.type !== "tool" || !isSubagentTool(data.tool, metadata)) {
     return [];
   }
 
   const ids = new Set<string>();
-  const metadataSessionId = data.state?.metadata?.sessionId;
+  const metadataSessionId = metadata?.sessionId;
   if (typeof metadataSessionId === "string" && metadataSessionId) {
     ids.add(metadataSessionId);
   }

@@ -100,7 +100,7 @@ export function renderSessionsPage({
     <legend>${escapeHtml(t("filter.providers"))}</legend>
     ${providers.map((item: any) => `<label class="provider-filter-option${item.available === false ? " disabled" : ""}">
       <input type="checkbox" name="provider" value="${escapeHtml(item.id)}" data-session-filter-auto ${selectedProviders.includes(item.id) ? "checked" : ""} ${item.available === false ? "disabled" : ""}>
-      <span>${item.icon || ""} ${escapeHtml(item.name || item.id)}</span>
+      <span>${item.icon || ""} ${escapeHtml(item.name || item.id)}${item.lifecycle === "legacy" ? ` <span class="provider-legacy-badge">${escapeHtml(t("provider.legacy"))}</span>` : ""}</span>
     </label>`).join("")}
   </fieldset>` : "";
   const filterBar = isAvailable ? `<form class="session-filter" data-session-filter action="${filterAction}" method="GET">

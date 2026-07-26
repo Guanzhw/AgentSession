@@ -84,6 +84,12 @@ function defaultGeminiDir() {
   return probePaths(candidates.filter(Boolean), fallback);
 }
 
+function defaultCopilotDir() {
+  const home = os.homedir();
+  const fallback = path.join(home, ".copilot");
+  return probePaths([process.env.COPILOT_HOME, fallback].filter(Boolean), fallback);
+}
+
 function defaultPiDir() {
   const home = os.homedir();
   const fallback = path.join(home, ".pi", "agent");
@@ -98,6 +104,7 @@ const defaults = {
   open: false,
   claudeDir: defaultClaudeDir(),
   codexDir: defaultCodexDir(),
+  copilotDir: defaultCopilotDir(),
   geminiDir: defaultGeminiDir(),
   piDir: defaultPiDir(),
   reindex: false,
@@ -634,6 +641,8 @@ export function parseArgs(argv = process.argv.slice(2)) {
       config.claudeDir = argv[++i];
     } else if (argv[i] === "--codex-dir" && argv[i + 1]) {
       config.codexDir = argv[++i];
+    } else if (argv[i] === "--copilot-dir" && argv[i + 1]) {
+      config.copilotDir = argv[++i];
     } else if (argv[i] === "--gemini-dir" && argv[i + 1]) {
       config.geminiDir = argv[++i];
     } else if (argv[i] === "--pi-dir" && argv[i + 1]) {
@@ -658,6 +667,7 @@ Options:
   --opencode-db <path>  Path to opencode.db (alias: --db, env: SESSION_VIEWER_DB_PATH)
   --claude-dir <path>   Path to Claude CLI data dir (default: ~/.claude)
   --codex-dir <path>    Path to Codex data dir (default: ~/.codex)
+  --copilot-dir <path>  Path to GitHub Copilot CLI data dir (default: ~/.copilot)
   --gemini-dir <path>   Path to Gemini data dir (default: ~/.gemini)
   --pi-dir <path>       Path to Pi agent data dir (default: ~/.pi/agent)
   --config <path>       Path to AgentSession JSON config

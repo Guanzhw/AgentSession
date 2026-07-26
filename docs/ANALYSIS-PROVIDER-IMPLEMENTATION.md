@@ -31,16 +31,14 @@ Do not call analysis support done just because the launch endpoint returns
 `ok: true`. The launch response only proves that a local process was started.
 The validator result in `manifest.json` is the success gate.
 
-All first-class adapters—OpenCode, Claude Code, Codex CLI, Gemini CLI, and
-Pi—are analysis-capable. The source provider and analyzer are separate
+Active first-class adapters—OpenCode, Claude Code, Codex CLI, GitHub Copilot
+CLI, and Pi—are analysis-capable. Gemini CLI remains a legacy history adapter
+and intentionally does not advertise analysis. The source provider and analyzer are separate
 concerns: the provider owns the normalized session evidence and runtime
 extensions, while the configured analyzer command executes the proposal
-workflow. Gemini records an opaque project key rather than a working directory,
-so a session needs an explicit `analysis.providers.gemini.projectPaths` mapping
-before directory-dependent runtime capture or analysis is available. For
-example, a Gemini or Pi session may be evaluated by a configured OpenCode-backed
-analyzer without changing the evidence provider or writing to provider-owned
-data.
+workflow. For example, a Copilot or Pi session may be evaluated by a configured
+OpenCode-backed analyzer without changing the evidence provider or writing to
+provider-owned data.
 
 ## Architecture
 
@@ -392,8 +390,9 @@ does not write it to the transcript:
 ```
 
 This is a directory-resolution capability, not a claim that the provider saved
-the original CWD. It enables the generic runtime, resume, and analysis paths
-only for the mapped session.
+the original CWD. It enables only capabilities the adapter explicitly declares
+for the mapped session. Gemini's legacy mapping is limited to runtime evidence;
+it does not restore default resume or analysis actions.
 
 Supported analysis placeholders include:
 

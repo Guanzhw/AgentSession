@@ -1,4 +1,5 @@
 import { asNumber } from "./parser.js";
+import { isSubagentTool, mergeToolMetadata } from "./subagent-tools.js";
 import type { MessageContainer, PartContainer, SessionContainer } from "./session-container.js";
 import type { SessionMetricsView } from "./session-metrics.js";
 
@@ -106,7 +107,10 @@ function isErrorPart(part: PartContainer) {
 }
 
 function isTaskPart(part: PartContainer) {
-  return part.partType === "tool" && ["task", "subtask"].includes(String(part.tool || ""));
+  return part.partType === "tool" && isSubagentTool(
+    part.tool,
+    mergeToolMetadata(part.data?.state?.metadata, part.data?.metadata)
+  );
 }
 
 function toolParts(message: MessageContainer) {
@@ -242,6 +246,7 @@ function invocationPair(
 
 function taskPair(part: PartContainer): [FlowInvocationNode, FlowReturnNode] {
   const branches = part.childSessions.map((child) => sessionNode(child));
+  const inferredCount = part.childSessions.filter((child) => child.attachMode === "inferred").length;
   const errors = isErrorPart(part) ? 1 : 0;
   return invocationPair(
     part.id,
@@ -249,6 +254,7 @@ function taskPair(part: PartContainer): [FlowInvocationNode, FlowReturnNode] {
     { kind: "part", id: part.id },
     branches,
     {
+      inferred: inferredCount > 0,
       status: partStatus(part),
       timeStart: part.timeStart,
       timeEnd: part.timeEnd,
@@ -256,6 +262,7 @@ function taskPair(part: PartContainer): [FlowInvocationNode, FlowReturnNode] {
       errors,
       meta: [
         branches.length ? `${branches.length} ${branches.length === 1 ? "subagent" : "subagents"}` : "",
+        inferredCount ? `${inferredCount} inferred link${inferredCount === 1 ? "" : "s"}` : "",
         part.tool || "task",
         errors ? "error" : ""
       ].filter(Boolean).join(" · ")

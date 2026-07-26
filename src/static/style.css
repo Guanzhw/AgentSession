@@ -2473,6 +2473,30 @@ details[open] summary {
   scroll-margin-top: var(--session-anchor-offset);
 }
 
+.subagent-branch-inferred {
+  border-left-color: var(--text-muted);
+}
+
+.subagent-branch-inferred .subagent-summary {
+  background: color-mix(in srgb, var(--text-muted) 9%, var(--bg-secondary));
+}
+
+.subagent-branch-inferred .subsession-kicker {
+  color: var(--text-muted);
+}
+
+.subsession-container-inferred {
+  border-left-color: var(--text-muted);
+}
+
+.subsession-container-inferred .subsession-summary {
+  background: color-mix(in srgb, var(--text-muted) 9%, var(--bg-secondary));
+}
+
+.subsession-container-inferred .subsession-kicker {
+  color: var(--text-muted);
+}
+
 .subsession-summary {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -3260,6 +3284,7 @@ a.model-rank-row:hover { background: var(--bg-secondary); }
 .stats-chart-provider-filter .stats-provider-label { margin-right: 0.15rem; }
 
 .provider-context { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.3rem 0.55rem; border: 1px solid var(--border-color); border-radius: 999px; color: var(--text-secondary); font-size: 0.78rem; white-space: nowrap; }
+.provider-legacy-badge { display: inline-flex; align-items: center; margin-left: 0.28rem; padding: 0.04rem 0.3rem; border: 1px solid currentColor; border-radius: 999px; font-size: 0.68em; font-weight: 700; line-height: 1.25; opacity: 0.8; vertical-align: middle; }
 .provider-filter { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; border: 0; padding: 0; }
 .provider-filter legend { float: left; margin-right: 0.35rem; color: var(--text-muted); font-size: 0.78rem; font-weight: 700; }
 .provider-filter-option { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.6rem; border: 1px solid var(--border-color); border-radius: 999px; cursor: pointer; font-size: 0.82rem; }

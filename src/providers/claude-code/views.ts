@@ -3,6 +3,7 @@ import type { Message, RawSession, RuntimeEnvironmentView, RuntimeExtensionRefer
 import { asNumber } from "../shared/parser.js";
 import { buildFlowTreeFromContainer } from "../shared/flow-tree.js";
 import { buildMessageSessionViews } from "../shared/message-session.js";
+import { classifySharedTool, mergeToolMetadata } from "../shared/subagent-tools.js";
 import {
   buildLinkedMessageSessionViews,
   type MessageSessionBundle
@@ -255,20 +256,6 @@ function modelLabel(data: Row) {
   return data.modelID || null;
 }
 
-function classifyTool(tool: string) {
-  const normalized = tool.toLowerCase();
-  if (normalized === "task") return { category: "agent", mcpServer: null };
-  if (normalized.startsWith("mcp__")) {
-    const [, server] = tool.split("__");
-    return { category: "mcp", mcpServer: server || null };
-  }
-  if (normalized.includes("__")) {
-    const [server] = tool.split("__");
-    return { category: "mcp", mcpServer: server || null };
-  }
-  return { category: "tool", mcpServer: null };
-}
-
 function spanTime(part: Row, fallback = 0) {
   const timeStart = asNumber(part.timeStart) || asNumber(part.data?.state?.time?.start) || fallback;
   const timeEnd = asNumber(part.timeEnd) || asNumber(part.data?.state?.time?.end) || timeStart;
@@ -309,7 +296,7 @@ function traceSpan(part: Row, fallbackTime = 0): ClaudeCodeTraceSpan {
   }
 
   const tool = String(part.tool || data.tool || partType);
-  const classification = classifyTool(tool);
+  const classification = classifySharedTool(tool, mergeToolMetadata(data.state?.metadata, data.metadata));
   const state = data.state || {};
   return {
     id: String(part.id),

@@ -3,6 +3,7 @@ import type { ProviderAdapter } from "./interface.js";
 import opencode from "./opencode/adapter.js";
 import claudeCode from "./claude-code/adapter.js";
 import codex from "./codex/adapter.js";
+import copilot from "./copilot/adapter.js";
 import gemini from "./gemini/adapter.js";
 import pi from "./pi/adapter.js";
 
@@ -28,5 +29,6 @@ export function getAllProviders() {
 registerProvider(opencode);
 registerProvider(claudeCode);
 registerProvider(codex);
+registerProvider(copilot);
 registerProvider(gemini);
 registerProvider(pi);

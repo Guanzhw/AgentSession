@@ -1,7 +1,7 @@
 # AgentSession
 
 AgentSession is a local-first, read-only viewer and manager for AI coding
-sessions from OpenCode, Claude Code, Codex CLI, Gemini CLI, and Pi.
+sessions from OpenCode, Claude Code, Codex CLI, GitHub Copilot CLI, Pi, and legacy Gemini CLI histories.
 
 ```bash
 npm install --global @acetamido/agentsession

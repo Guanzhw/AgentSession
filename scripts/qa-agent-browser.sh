@@ -11,10 +11,18 @@ TERMINAL_LAUNCH="${OPENSESSIONVIEWER_QA_TERMINAL_LAUNCH:-enabled}"
 
 mkdir -p "$ROOT/tmp" "$ROOT/logs"
 export npm_config_cache="$ROOT/tmp/npm-cache"
-NPX_CMD="${OPENSESSIONVIEWER_QA_NPX:-npx}"
+browser() {
+  if [[ -n "${OPENSESSIONVIEWER_QA_NPX:-}" ]]; then
+    "${OPENSESSIONVIEWER_QA_NPX}" --yes agent-browser "$@"
+  elif command -v agent-browser >/dev/null 2>&1; then
+    agent-browser "$@"
+  else
+    npx --yes agent-browser "$@"
+  fi
+}
 
 cleanup() {
-  "$NPX_CMD" --yes agent-browser --session "$SESSION_NAME" close --all >/dev/null 2>&1 || true
+  browser --session "$SESSION_NAME" close --all >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -34,7 +42,7 @@ ab() {
   local label="$1"
   shift
   echo "[qa] agent-browser: $label" >&2
-  "$NPX_CMD" --yes agent-browser --session "$SESSION_NAME" "$@"
+  browser --session "$SESSION_NAME" "$@"
 }
 
 read_ab() {
@@ -44,7 +52,7 @@ read_ab() {
   slug="$(printf '%s' "$label" | tr -cs 'A-Za-z0-9_-' '-' | tr 'A-Z' 'a-z')"
   local out="$ROOT/tmp/qa-agent-browser-$slug.out.txt"
   echo "[qa] agent-browser: $label" >&2
-  "$NPX_CMD" --yes agent-browser --session "$SESSION_NAME" "$@" > "$out"
+  browser --session "$SESSION_NAME" "$@" > "$out"
   cat "$out"
 }
 
@@ -83,7 +91,7 @@ ab "clear previous session" close --all >/dev/null || true
 
 ab "open centralized sessions" open "$BASE/sessions" >/dev/null
 ab "wait for centralized sessions" wait --text "Recent Sessions" >/dev/null
-global_session_state="$(read_ab "verify centralized session providers" eval "JSON.stringify({ filters: document.querySelectorAll('.provider-filter input[name=provider]:checked').length, badges: document.querySelectorAll('.session-provider-badge').length, badLinks: [...document.querySelectorAll('.session-card-title-link')].filter((link) => !/^\\/(opencode|claude-code|codex|gemini|pi)\\/session\\//.test(link.getAttribute('href') || '')).length })")"
+global_session_state="$(read_ab "verify centralized session providers" eval "JSON.stringify({ filters: document.querySelectorAll('.provider-filter input[name=provider]:checked').length, badges: document.querySelectorAll('.session-provider-badge').length, badLinks: [...document.querySelectorAll('.session-card-title-link')].filter((link) => !/^\\/(opencode|claude-code|codex|copilot|gemini|pi)\\/session\\//.test(link.getAttribute('href') || '')).length })")"
 if ! printf '%s' "$global_session_state" | grep -Eq 'filters[^0-9]*[1-9][0-9]*' || ! printf '%s' "$global_session_state" | grep -Eq 'badLinks[^0-9]*0'; then
   echo "Centralized sessions should expose selected provider filters and canonical provider-owned detail links, got $global_session_state" >&2
   exit 1
@@ -294,7 +302,7 @@ if [[ "$transcript_search_close_state" != "true" ]]; then
   exit 1
 fi
 echo "[qa] agent-browser: reopen transcript search with shortcut" >&2
-MSYS2_ARG_CONV_EXCL='*' "$NPX_CMD" --yes agent-browser --session "$SESSION_NAME" press / >/dev/null
+MSYS2_ARG_CONV_EXCL='*' browser --session "$SESSION_NAME" press / >/dev/null
 # A browser-side wait here can wedge the Windows agent-browser transport after
 # a synthetic key press. Let the native details/focus events settle briefly,
 # then keep the same strict state assertion below.

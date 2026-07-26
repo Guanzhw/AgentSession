@@ -1,6 +1,6 @@
 # AgentSession
 
-> 开发者的 AI 会话档案馆：把 OpenCode、Claude Code、Codex CLI、Gemini CLI、Pi 的本地会话集中到一个可搜索、可追踪、可复盘的 Web UI。
+> 开发者的 AI 会话档案馆：把 OpenCode、Claude Code、Codex CLI、GitHub Copilot CLI、Pi 和历史 Gemini CLI 的本地会话集中到一个可搜索、可追踪、可复盘的 Web UI。
 
 [English](./README.en.md) · [中文](./README.md)
 
@@ -46,13 +46,17 @@ AgentSession 是一个本地优先的 AI 编程会话查看器。它不会修改
 | OpenCode | 完整共享能力 | `$XDG_DATA_HOME/opencode/opencode.db` 或 `~/.local/share/opencode/opencode.db` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析；另有 SQLite 原生高级统计 |
 | Claude Code | 完整共享能力 | `~/.claude/transcripts/` + `~/.claude/projects/` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析；保留 sidechain transcript 时支持子 agent |
 | Codex CLI | 完整共享能力 | `~/.codex/sessions/**/*.jsonl` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析、嵌套子 agent |
-| Gemini CLI | 完整共享能力 | `~/.gemini/tmp/*/chats/*.json` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析；当 transcript 未记录工作目录时，通过显式项目键映射启用继续会话、运行时与分析 |
-| Pi | 完整共享能力 | `~/.pi/agent/sessions/**/*.jsonl` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析、活动分支与 fork 关系 |
+| GitHub Copilot CLI | 完整共享能力 | `~/.copilot/session-state/*/events.jsonl` + `~/.copilot/session-store.db` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析、恢复命令与来源关联的内嵌子 agent 分支。事件日志是 transcript 正本；只读 SQLite store 补充目录与 Token 遥测。 |
+| Gemini CLI | 历史会话支持 | `~/.gemini/tmp/*/chats/*.json` | 可浏览、搜索、导出、查看 Token 统计、共享视图和本地提示词/运行时证据。默认不提供继续会话或分析动作；其扁平 chat 格式没有 child-session 关系，因此 AgentSession 不会伪造嵌入式子 agent 分支。 |
+| Pi | 完整共享能力 | `~/.pi/agent/sessions/**/*.jsonl` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析、活动分支与 fork 关系。若记录了子 agent 启动工具，会在对应调用处嵌入 child；只有来源记录的 fork 关系会明确标为推断。 |
 
-所有 Provider 都提供同一组共同能力：浏览、内容搜索、仅 viewer 的元数据管理、
-Markdown/JSON 导出、每日 Token 统计、继续会话、Tree/Container/Metrics/Flow/Trace、
-本地提示词证据、运行时清单和只产出提案的分析。需要启动命令的能力要求来源记录了
-有效项目目录，或由显式、仅 viewer 的项目键映射提供目录；Provider 原始数据始终保持只读。
+所有 Provider 都提供浏览、内容搜索、仅 viewer 的元数据管理、Markdown/JSON 导出、
+每日 Token 统计、Tree/Container/Metrics/Flow/Trace 和本地提示词/运行时证据。活跃
+Provider 在有有效项目目录时还提供继续会话和只产出提案的分析。只有来源记录了
+parent/child 关系时才会
+递归嵌入分支；仅能从来源关系推断的连接会明确标注为推断，而不会伪造一次调用。需要启动
+命令的能力要求来源记录了有效项目目录，或由显式、仅 viewer 的项目键映射提供目录；Provider
+原始数据始终保持只读。
 高级统计仍遵从来源本身：AgentSession 不会伪造 transcript 未记录的项目、模型或费用维度。
 
 ### 共享 Agent Loop
@@ -72,9 +76,9 @@ Flow 与通用 Trace 都由这层派生。只有当来源保存了更丰富的�
 - **会话列表与搜索**：全局入口筛选 Provider 标题、viewer 自定义标题和目录；Provider 页面继续提供消息内容搜索、收藏和本地管理。标题类型筛选可将带有 analysis/analyze 信号的显示标题与其他会话分开；它是可逆的查看器启发式，不是 Provider 元数据。
 - **详情页复盘**：按 Provider 保存的模型响应边界，把 reasoning、action/tool call 和 observation/tool result 组织在同一个 ReACT 回合中。
 - **稳定的详情标签**：Overview、Conversation、Flow、Analysis 和 Raw data 共用稳定内容轨道；Conversation 目录栏淡入淡出，不会让标题、操作区和标签栏重新排版，并尊重系统减少动态效果偏好。
-- **递归 Session Tree**：OpenCode、Codex、Pi，以及保存了 sidechain transcript 的 Claude Code child session 会被组织成嵌套结构；每个子会话还可独立打开。
-- **Tool Flow Tree**：右侧 Flow 视图按时间和层级展示 root、message、tool、subagent 分支。
-- **Table of Contents**：长会话自动生成可折叠导航，只索引用户消息、assistant 消息和 `task` / `subtask` / `spawn_agent` 子 agent。
+- **递归 Session Tree**：当 OpenCode、Codex、Copilot、Pi 或保存了 sidechain transcript 的 Claude Code 记录 parent/child 证据时，会被组织成嵌套结构；Copilot 的内嵌 agent 仍保持在主会话中，因为它们不是可独立恢复的会话。只有来源关系的连接会明确标为推断。
+- **Tool Flow Tree**：右侧 Flow 视图按时间和层级展示 root、message、tool、subagent 分支，覆盖 `Agent`、`task`、`subtask`、`spawn_agent` 与 `delegate_task` 启动器，以及由 provider 明确标记的自定义 agent。
+- **Table of Contents**：长会话自动生成可折叠导航，只索引用户消息、assistant 消息、已知启动器或由 provider 明确标记的自定义子 agent。
 - **会话内搜索**：可从详情页操作栏打开紧凑搜索，或按 `/` 聚焦；结果会同时显示匹配回合与文本命中数，逐词高亮，并在上下跳转时保持控制条可见。
 - **系统提示词证据 API**：`GET /api/:provider/session/:id/system-prompts` 只暴露当前本地可解析的指令、规则与运行时来源；不会声称恢复隐藏的 Provider prompt。
 - **Trace API**：暴露 step/span summary，聚合 tool、skill、agent、MCP、LSP 等调用。
@@ -124,6 +128,7 @@ agentsession [options]
 --opencode-db <path>  OpenCode 数据库路径，别名 --db
 --claude-dir <path>   Claude Code 数据目录
 --codex-dir <path>    Codex CLI 数据目录
+--copilot-dir <path>  GitHub Copilot CLI 数据目录
 --gemini-dir <path>   Gemini CLI 数据目录
 --pi-dir <path>       Pi agent 数据目录
 --config <path>       AgentSession JSON 配置文件
@@ -145,6 +150,7 @@ agentsession [options]
 | `XDG_DATA_HOME` | OpenCode 的 XDG 数据根目录 |
 | `CLAUDE_CONFIG_DIR` | Claude Code 数据目录 |
 | `CODEX_HOME` | Codex CLI 数据目录 |
+| `COPILOT_HOME` | GitHub Copilot CLI 数据目录 |
 | `GEMINI_HOME` | Gemini CLI 数据目录 |
 | `PI_CODING_AGENT_DIR` | Pi agent 数据目录，默认 `~/.pi/agent` |
 | `AGENTSESSION_META_PATH` | AgentSession 元数据库路径 |
@@ -155,7 +161,7 @@ agentsession [options]
 
 ## AgentSession-MCP：供 Coding Agent 查询会话历史
 
-`@acetamido/agentsession-mcp` 是一个独立的 stdio MCP 包，供 Codex、Claude Code、Gemini CLI、OpenCode 等 MCP Host 查询本机已注册 Provider 的会话历史。它不启动 Web 服务、不绑定端口，也不会修改任何 Provider 数据。
+`@acetamido/agentsession-mcp` 是一个独立的 stdio MCP 包，供 Codex、Claude Code、GitHub Copilot CLI、OpenCode 等 MCP Host 查询本机已注册 Provider 的会话历史。它不启动 Web 服务、不绑定端口，也不会修改任何 Provider 数据。
 
 ### 交互式一键安装与自动更新
 
@@ -165,7 +171,7 @@ agentsession [options]
 npx --yes --prefer-online @acetamido/agentsession-mcp@latest install
 ```
 
-支持 Codex、Claude Code、Gemini CLI 和 OpenCode。安装后的配置会使用
+支持 Codex、Claude Code、GitHub Copilot CLI 和 OpenCode。安装后的配置会使用
 `npx --prefer-online @acetamido/agentsession-mcp@latest` 启动 MCP，因此每次
 Coding Agent 启动时都会强制检查 npm 缓存的新鲜度并获取最新已发布版本。
 已有同名配置不会被 `install` 覆盖；`update` 只刷新安装器已创建的配置。如需迁移
@@ -227,14 +233,15 @@ API 会等待终端 Host 或 PowerShell wrapper 确认启动后才返回成功�
 无法启动，页面会显示错误，而不是弹出成功提示。运行时启动日志会记录所选 Host、
 fallback 信息，以及可用时的 launcher PID。
 
-所有已注册 Provider 都声明了默认继续命令：
+活跃 Provider 都声明了默认继续命令：
 
 | Provider | 默认命令 |
 |---|---|
 | OpenCode | `opencode --session {sessionId}` |
 | Claude Code | `claude --resume {sessionId}` |
 | Codex CLI | `codex resume {sessionId}` |
-| Gemini CLI | `gemini --resume {sessionId}` |
+| GitHub Copilot CLI | `copilot --resume {sessionId}` |
+| Gemini CLI | 历史会话模式；默认不启动 |
 | Pi | `pi --session {sessionId}` |
 
 每个命令和 PowerShell 兼容终端 shell 都可以在 AgentSession 配置目录的
@@ -318,8 +325,8 @@ AgentSession 不会根据该键猜测目录。请从会话的 **原始数据** �
 ```
 
 AgentSession 会在使用时只采用实际存在的绝对目录，并在本机规范化该路径、在会话详情中
-标记为“由配置映射提供”；绝不会把目录写回 Provider transcript。匹配的 Gemini 会话随后可
-使用运行时解析、继续会话和分析。
+标记为“由配置映射提供”；绝不会把目录写回 Provider transcript。匹配的 Gemini 历史会话随后可
+使用运行时解析。
 
 `currency` 必须是三个字母的货币代码；价格必须为非负有限数；`sourceUrl`
 只能使用绝对 HTTP/HTTPS URL。未配置的 reasoning/cache 维度会明确标为未计价，
@@ -341,11 +348,10 @@ cookie、token 或 secret。单个分析任务的 stdout/stderr 与证据快照�
 
 ## 会话分析与评估提案
 
-AgentSession 可以从所有 Provider 的详情页以非交互方式启动已配置的 Analyzer。默认
-Runner 是 OpenCode 的非交互命令，但可以全局或按 Provider 覆盖，因此 Gemini CLI 和 Pi
-会话也能使用同一条有边界、只产出提案的分析生命周期。若 Gemini transcript 没有记录
-工作目录，需要先配置上面的[项目键映射](#项目键映射)，才能解析该会话的运行时清单和
-分析动作。分析任务会把会话保存为带索引的 JSONL 证据、保存选定工件快照、创建评估种子，
+AgentSession 可以从所有活跃 Provider 的详情页以非交互方式启动已配置的 Analyzer。默认
+Runner 是 OpenCode 的非交互命令，但可以全局或按活跃 Provider 覆盖，因此 Copilot CLI 和 Pi
+会话也能使用同一条有边界、只产出提案的分析生命周期。Gemini CLI 保持历史会话 Provider，
+默认不显示分析动作。分析任务会把会话保存为带索引的 JSONL 证据、保存选定工件快照、创建评估种子，
 并要求 Analyzer 输出：
 
 - `report.md`：主要的、面向人的分析结果
@@ -625,6 +631,7 @@ src/
 │   ├── opencode/          # OpenCode SQLite 适配器与结构化视图
 │   ├── claude-code/       # Claude Code JSONL 适配器
 │   ├── codex/             # Codex CLI JSONL 适配器
+│   ├── copilot/           # GitHub Copilot CLI 事件日志适配器
 │   ├── gemini/            # Gemini JSON 适配器
 │   └── pi/                # Pi 分支树 JSONL 适配器
 ├── db.ts                  # OpenCode-compatible DB 查询

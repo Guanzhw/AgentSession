@@ -5,6 +5,7 @@ import {
   buildMessageSessionViewsFromTree
 } from "./message-session.js";
 import { buildAgentLoop } from "./agent-loop.js";
+import { isSubagentTool, mergeToolMetadata } from "./subagent-tools.js";
 import type { SessionPartNode, SessionTree } from "./session-tree.js";
 
 type Row = Record<string, any>;
@@ -14,11 +15,7 @@ export interface MessageSessionBundle {
   messages: Message[];
 }
 
-const SUBAGENT_TOOLS = new Set(["task", "subtask", "spawn_agent", "delegate_task"]);
-
-export function isSubagentToolName(tool: unknown) {
-  return SUBAGENT_TOOLS.has(String(tool || "").toLowerCase());
-}
+export { isSubagentTool, isSubagentToolName } from "./subagent-tools.js";
 
 function aliasesForSession(session: Row) {
   const metadata = session.metadata && typeof session.metadata === "object" ? session.metadata : {};
@@ -33,7 +30,7 @@ function aliasesForSession(session: Row) {
 }
 
 const REFERENCE_KEYS = new Set([
-  "agent_id", "agentId", "agent_path", "agentPath", "session_id", "sessionId", "task_name", "taskName"
+  "agent_id", "agentId", "agent_path", "agentPath", "session_id", "sessionId", "task_id", "taskId", "task_name", "taskName"
 ]);
 
 function partReferences(part: SessionPartNode) {
@@ -51,6 +48,7 @@ function partReferences(part: SessionPartNode) {
   };
   visit(part.data?.state?.input, "input");
   visit(part.data?.state?.output, "output");
+  visit(part.data?.metadata, "metadata");
   visit(part.data?.state?.metadata, "metadata");
   return references;
 }
@@ -73,7 +71,10 @@ function explicitlyReferencesChild(part: SessionPartNode, child: SessionTree) {
 function attachDirectChildren(tree: SessionTree, children: SessionTree[]) {
   const taskParts = tree.messages
     .flatMap((message) => message.parts)
-    .filter((part) => part.type === "tool" && isSubagentToolName(part.tool));
+    .filter((part) => part.type === "tool" && isSubagentTool(
+      part.tool,
+      mergeToolMetadata(part.data?.state?.metadata, part.data?.metadata)
+    ));
   const attached = new Set<string>();
   const partsWithChildren = new Set<SessionPartNode>();
 
@@ -103,6 +104,9 @@ function attachDirectChildren(tree: SessionTree, children: SessionTree[]) {
     const part = unmatchedParts.splice(partIndex, 1)[0];
     if (!part) continue;
     part.childSessions.push(child);
+    const inferredChildSessionIds = part.inferredChildSessionIds || new Set<string>();
+    inferredChildSessionIds.add(String(child.session.id));
+    part.inferredChildSessionIds = inferredChildSessionIds;
     attached.add(String(child.session.id));
   }
 
