@@ -215,16 +215,19 @@ function projectEvents(ref: SessionRef, messages: Message[]): Array<ProjectedEve
     const role = normalizedRole(message.role);
     const timestamp = asTimestamp(message.timestamp);
     if (!isToolMessage(message)) {
-      events.push({
-        event: { ...ref, messageId, segment: "message" },
-        timestamp,
-        role,
-        toolName: null,
-        status: null,
-        preview: boundedText(message.content, HARD_LIMITS.previewChars),
-        untrustedContent: true,
-        sourceIndex
-      });
+      const messagePreview = boundedText(message.content, HARD_LIMITS.previewChars);
+      if (messagePreview.trim()) {
+        events.push({
+          event: { ...ref, messageId, segment: "message" },
+          timestamp,
+          role,
+          toolName: null,
+          status: null,
+          preview: messagePreview,
+          untrustedContent: true,
+          sourceIndex
+        });
+      }
     }
     if (typeof message.thinking === "string" && message.thinking) {
       events.push({

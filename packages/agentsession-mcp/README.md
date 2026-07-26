@@ -61,3 +61,5 @@ is excluded from normal search results. Default diagnostics include unavailable
 registered providers. `session_get` returns first and last visible-message
 previews. Truncated `session_get_event` results include reusable continuation
 arguments for assembling long content without guessing flags or offsets.
+`session_timeline` omits blank message segments; tool and requested thinking
+segments remain separate events.

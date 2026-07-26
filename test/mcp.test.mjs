@@ -53,6 +53,7 @@ function createFixture() {
     ["root", [
       { id: "m1", sessionId: "root", role: "user", content: "Needle in a user message", thinking: null, toolName: null, toolInput: null, toolOutput: null, timestamp: 10, tokens: null, metadata: null },
       { id: "m2", sessionId: "root", role: "assistant", content: "I will inspect it", thinking: "Need a bounded plan", toolName: null, toolInput: null, toolOutput: null, timestamp: 20, tokens: null, metadata: null },
+      { id: "m-empty", sessionId: "root", role: "assistant", content: " \n\t ", thinking: null, toolName: null, toolInput: null, toolOutput: null, timestamp: 25, tokens: null, metadata: null },
       { id: "m3", sessionId: "root", role: "tool", content: "tool output must stay opt-in", thinking: null, toolName: "Read", toolInput: { path: "secret.txt" }, toolOutput: "tool output must stay opt-in", timestamp: 30, tokens: null, metadata: { status: "error" } }
     ]],
     ["content", [
@@ -149,6 +150,15 @@ test("session-history service searches, pages events, honors exclusions, and req
   assert.ok(timeline.nextCursor);
   const next = service.timeline({ session: { provider: "codex", sessionId: "root" }, limit: 2, cursor: timeline.nextCursor });
   assert.deepEqual(next.events.map((event) => event.event.segment), ["tool"]);
+  assert.equal(
+    service.timeline({ session: { provider: "codex", sessionId: "root" }, segments: ["message"] }).events
+      .some((event) => event.event.messageId === "m-empty"),
+    false
+  );
+  assert.throws(
+    () => service.getEvent({ event: { provider: "codex", sessionId: "root", messageId: "m-empty", segment: "message" } }),
+    (error) => error instanceof SessionHistoryError && error.code === "event_not_found"
+  );
   assert.throws(
     () => service.timeline({ session: { provider: "codex", sessionId: "root" }, segments: ["thinking"], cursor: timeline.nextCursor }),
     (error) => error instanceof SessionHistoryError && error.code === "invalid_cursor"

@@ -222,9 +222,10 @@ snapshot. Normal search does not return reasoning; reasoning, tool input, and
 tool output require explicit opt-in and are always bounded server-side. Default
 search diagnostics include every registered provider, including unavailable
 ones. `session_get` includes first and last visible-message previews so a title
-match normally provides an EventRef without an extra timeline call. Truncated
-`session_get_event` content includes reusable `continuation`/`continuations`
-arguments until `nextOffset` is null.
+match normally provides an EventRef without an extra timeline call.
+`session_timeline` omits blank message segments; tool and requested thinking
+segments remain separate events. Truncated `session_get_event` content includes
+reusable `continuation`/`continuations` arguments until `nextOffset` is null.
 
 Use the same AgentSession JSON config to reuse provider paths and the metadata
 directory. MCP output limits are optional and server-capped:
