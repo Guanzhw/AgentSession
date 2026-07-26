@@ -723,13 +723,19 @@ src/
 
 ## Current Validation
 
-The latest real-data validation used:
+Real-data validation is intentionally environment-provided rather than recorded
+as a repository-specific database path, session ID, or result count. Run it
+against a local server and a real OpenCode session with reasoning, tools,
+tokens, and subagent activity:
 
-```text
-OpenCode DB: C:\Users\QQ110\.local\share\opencode\opencode.db
-Server: http://127.0.0.1:3456/sessions
-Data: 24 sessions, 1903 messages
+```powershell
+$env:OPENSESSIONVIEWER_QA_BASE_URL = 'http://127.0.0.1:3456'
+$env:OPENSESSIONVIEWER_QA_SESSION_ID = '<real-session-id>'
+npm run qa:e2e
 ```
+
+`OPENSESSIONVIEWER_QA_SESSION_ID` is required; the repository intentionally
+does not include a machine-specific fallback.
 
 Validated coverage:
 

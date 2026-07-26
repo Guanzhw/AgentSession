@@ -398,13 +398,13 @@ terminal-launch-disabled behavior.
 
 ```powershell
 $env:OPENSESSIONVIEWER_QA_BASE_URL = 'http://127.0.0.1:3456'
-$env:OPENSESSIONVIEWER_QA_SESSION_ID = 'ses_1ddf03616ffeTE5c6cbpUPMY3n'
+$env:OPENSESSIONVIEWER_QA_SESSION_ID = '<real-session-id>'
 npm run qa:e2e
 ```
 
 Set `OPENSESSIONVIEWER_QA_SESSION_ID` to a real OpenCode session that includes
-reasoning, tools, tokens, and subagent activity. The checked-in default is
-machine-specific and may not exist elsewhere.
+reasoning, tools, tokens, and subagent activity. It is intentionally required:
+the repository does not embed a machine-specific session ID.
 
 On Windows, `npm run qa:e2e` calls `scripts/qa-agent-browser.cmd`, which selects
 Git Bash or Cygwin Bash. If Bash is elsewhere:

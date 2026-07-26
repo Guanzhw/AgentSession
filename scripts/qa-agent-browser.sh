@@ -4,10 +4,15 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PORT="${OPENSESSIONVIEWER_QA_PORT:-3470}"
 DB_PATH="${OPENSESSIONVIEWER_QA_DB_PATH:-${SESSION_VIEWER_DB_PATH:-$HOME/.local/share/opencode/opencode.db}}"
-SAMPLE_SESSION_ID="${OPENSESSIONVIEWER_QA_SESSION_ID:-ses_1ddf03616ffeTE5c6cbpUPMY3n}"
+SAMPLE_SESSION_ID="${OPENSESSIONVIEWER_QA_SESSION_ID:-}"
 SESSION_NAME="${OPENSESSIONVIEWER_QA_BROWSER_SESSION:-opensessionviewer-qa-$PORT-$$}"
 BASE="${OPENSESSIONVIEWER_QA_BASE_URL:-http://127.0.0.1:$PORT}"
 TERMINAL_LAUNCH="${OPENSESSIONVIEWER_QA_TERMINAL_LAUNCH:-enabled}"
+
+if [[ -z "$SAMPLE_SESSION_ID" ]]; then
+  echo "OPENSESSIONVIEWER_QA_SESSION_ID is required. Set it to a real OpenCode session with reasoning, tools, tokens, and subagent activity." >&2
+  exit 2
+fi
 
 mkdir -p "$ROOT/tmp" "$ROOT/logs"
 export npm_config_cache="$ROOT/tmp/npm-cache"

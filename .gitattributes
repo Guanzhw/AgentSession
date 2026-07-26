@@ -1,0 +1,2 @@
+# Bash scripts must retain LF endings for Git Bash, WSL, and POSIX CI.
+*.sh text eol=lf

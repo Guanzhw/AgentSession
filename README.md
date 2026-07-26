@@ -682,6 +682,8 @@ $env:OPENSESSIONVIEWER_QA_SESSION_ID = '<real-session-id>'
 npm run qa:e2e
 ```
 
+`OPENSESSIONVIEWER_QA_SESSION_ID` 是必填项；仓库不会内置任何机器相关的真实会话 ID。
+
 E2E 覆盖：
 
 - dashboard、session list、search、stats、session detail
