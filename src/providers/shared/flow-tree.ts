@@ -2,6 +2,7 @@ import { asNumber } from "./parser.js";
 import { isSubagentTool, mergeToolMetadata } from "./subagent-tools.js";
 import type { MessageContainer, PartContainer, SessionContainer } from "./session-container.js";
 import type { SessionMetricsView } from "./session-metrics.js";
+import { aggregateSessionContainerTokenUsage } from "./session-usage.js";
 
 export interface FlowMetrics {
   duration: number;
@@ -295,13 +296,15 @@ function insertDetachedPair(line: FlowLineNode[], pair: [FlowInvocationNode, Flo
   line.splice(index, 0, ...pair);
 }
 
-function aggregateSessionMetrics(container: SessionContainer): FlowMetrics {
+function aggregateSessionMetrics(container: SessionContainer, detailMetrics: SessionMetricsView | null = null): FlowMetrics {
   const toolCalls = container.metrics.totalToolCalls;
   const errors = countContainerErrors(container);
   return emptyMetrics({
     duration: container.metrics.runtimeMs,
     cost: container.metrics.cost,
-    tokens: container.metrics.inputTokens + container.metrics.outputTokens + container.metrics.reasoningTokens,
+    // Detail and Flow use the same source-total aggregation when a transcript
+    // cannot expose every component needed for the stacked breakdown.
+    tokens: detailMetrics ? detailMetrics.totals.totalTokens : (aggregateSessionContainerTokenUsage(container).total || 0),
     toolCalls,
     errors,
     subagents: container.metrics.descendantCount
@@ -363,7 +366,7 @@ function sessionNode(
     timeEnd: container.metrics.timeEnd,
     inferred,
     target: { kind: "session", id: container.id },
-    metrics: aggregateSessionMetrics(container),
+    metrics: aggregateSessionMetrics(container, metrics),
     line
   };
 }

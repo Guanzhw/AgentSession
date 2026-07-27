@@ -330,10 +330,7 @@ export function renderSettingsPage({
             ${textareaField({
               id: "settings-file-extensions",
               label: t("settings.file_extensions"),
-              values: stringList(
-                target.fileExtensions || (target as any).extensions,
-                builtinTargets.skills.fileExtensions
-              ),
+              values: stringList(target.fileExtensions, builtinTargets.skills.fileExtensions),
               help: t("settings.one_per_line"),
               reset: "file-extensions"
             })}

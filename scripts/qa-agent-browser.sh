@@ -2,23 +2,23 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PORT="${OPENSESSIONVIEWER_QA_PORT:-3470}"
-DB_PATH="${OPENSESSIONVIEWER_QA_DB_PATH:-${SESSION_VIEWER_DB_PATH:-$HOME/.local/share/opencode/opencode.db}}"
-SAMPLE_SESSION_ID="${OPENSESSIONVIEWER_QA_SESSION_ID:-}"
-SESSION_NAME="${OPENSESSIONVIEWER_QA_BROWSER_SESSION:-opensessionviewer-qa-$PORT-$$}"
-BASE="${OPENSESSIONVIEWER_QA_BASE_URL:-http://127.0.0.1:$PORT}"
-TERMINAL_LAUNCH="${OPENSESSIONVIEWER_QA_TERMINAL_LAUNCH:-enabled}"
+PORT="${AGENTSESSION_QA_PORT:-3470}"
+DB_PATH="${AGENTSESSION_QA_DB_PATH:-${AGENTSESSION_DB_PATH:-$HOME/.local/share/opencode/opencode.db}}"
+SAMPLE_SESSION_ID="${AGENTSESSION_QA_SESSION_ID:-}"
+SESSION_NAME="${AGENTSESSION_QA_BROWSER_SESSION:-agentsession-qa-$PORT-$$}"
+BASE="${AGENTSESSION_QA_BASE_URL:-http://127.0.0.1:$PORT}"
+TERMINAL_LAUNCH="${AGENTSESSION_QA_TERMINAL_LAUNCH:-enabled}"
 
 if [[ -z "$SAMPLE_SESSION_ID" ]]; then
-  echo "OPENSESSIONVIEWER_QA_SESSION_ID is required. Set it to a real OpenCode session with reasoning, tools, tokens, and subagent activity." >&2
+  echo "AGENTSESSION_QA_SESSION_ID is required. Set it to a real OpenCode session with reasoning, tools, tokens, and subagent activity." >&2
   exit 2
 fi
 
 mkdir -p "$ROOT/tmp" "$ROOT/logs"
 export npm_config_cache="$ROOT/tmp/npm-cache"
 browser() {
-  if [[ -n "${OPENSESSIONVIEWER_QA_NPX:-}" ]]; then
-    "${OPENSESSIONVIEWER_QA_NPX}" --yes agent-browser "$@"
+  if [[ -n "${AGENTSESSION_QA_NPX:-}" ]]; then
+    "${AGENTSESSION_QA_NPX}" --yes agent-browser "$@"
   elif command -v agent-browser >/dev/null 2>&1; then
     agent-browser "$@"
   else
@@ -217,7 +217,7 @@ if [[ "$stats_advanced_count" != "1" ]]; then
   echo "SQLite Token Explorer should expose one progressive advanced section, got $stats_advanced_count" >&2
   exit 1
 fi
-saved_view_result="$(read_ab "save and delete a stats view" eval "(() => { const key = 'osv-saved-views-opencode'; localStorage.removeItem(key); document.getElementById('save-view-btn')?.click(); const dialog = document.querySelector('.saved-view-dialog'); const input = dialog?.querySelector('.saved-view-input'); if (!dialog?.open || !input) return 'dialog-missing'; input.value = 'QA 7 days'; dialog.querySelector('.saved-view-dialog-save')?.click(); const saved = JSON.parse(localStorage.getItem(key) || '[]'); const link = document.querySelector('.saved-view-link'); const ok = saved.length === 1 && saved[0].name === 'QA 7 days' && link?.getAttribute('href')?.includes('/opencode/stats'); document.querySelector('.saved-view-delete')?.click(); return ok && JSON.parse(localStorage.getItem(key) || '[]').length === 0 ? 'ok' : 'failed'; })()")"
+saved_view_result="$(read_ab "save and delete a stats view" eval "(() => { const key = 'agentsession-saved-views-opencode'; localStorage.removeItem(key); document.getElementById('save-view-btn')?.click(); const dialog = document.querySelector('.saved-view-dialog'); const input = dialog?.querySelector('.saved-view-input'); if (!dialog?.open || !input) return 'dialog-missing'; input.value = 'QA 7 days'; dialog.querySelector('.saved-view-dialog-save')?.click(); const saved = JSON.parse(localStorage.getItem(key) || '[]'); const link = document.querySelector('.saved-view-link'); const ok = saved.length === 1 && saved[0].name === 'QA 7 days' && link?.getAttribute('href')?.includes('/opencode/stats'); document.querySelector('.saved-view-delete')?.click(); return ok && JSON.parse(localStorage.getItem(key) || '[]').length === 0 ? 'ok' : 'failed'; })()")"
 if [[ "$saved_view_result" != "ok" && "$saved_view_result" != '"ok"' ]]; then
   echo "Saved views should persist the current provider URL and remain deletable, got $saved_view_result" >&2
   exit 1

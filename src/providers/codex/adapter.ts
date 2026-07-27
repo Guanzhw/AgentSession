@@ -6,6 +6,7 @@ import {
   extractCodexSessionId,
   extractMeta,
   recordsToMessages,
+  codexOwnedTokenUsageRecords,
   resolveCodexInheritedContext,
   countCodexRenderedMessages
 } from "./parser.js";
@@ -115,14 +116,16 @@ export function codexDailyTokenComponents(usage: any) {
   const output = Number(usage?.output_tokens) || 0;
   const reasoning = Number(usage?.reasoning_output_tokens) || 0;
   const cacheRead = Number(usage?.cached_input_tokens) || 0;
-  const uncachedInput = Math.max(0, input - cacheRead);
+  const cacheWrite = Number(usage?.cache_write_input_tokens) || 0;
+  const uncachedInput = Math.max(0, input - cacheRead - cacheWrite);
   const visibleOutput = Math.max(0, output - reasoning);
   return {
     input: uncachedInput,
     output: visibleOutput,
     reasoning,
     cacheRead,
-    total: Number(usage?.total_tokens) || uncachedInput + visibleOutput + reasoning + cacheRead,
+    cacheWrite,
+    total: Number(usage?.total_tokens) || uncachedInput + visibleOutput + reasoning + cacheRead + cacheWrite,
   };
 }
 
@@ -135,15 +138,18 @@ const codexTokenMapping: TokenFieldMapping = {
   outputTokens: (r) => {
     return codexDailyTokenComponents(r.payload.info?.last_token_usage).output;
   },
-  totalTokens: (r) => (r.payload.info?.last_token_usage || {}).total_tokens || 0,
-  reasoningTokens: (r) => (r.payload.info?.last_token_usage || {}).reasoning_output_tokens || 0,
-  cacheReadTokens: (r) => (r.payload.info?.last_token_usage || {}).cached_input_tokens || 0,
-  cacheWriteTokens: () => 0,
+  totalTokens: (r) => codexDailyTokenComponents(r.payload.info?.last_token_usage).total,
+  reasoningTokens: (r) => codexDailyTokenComponents(r.payload.info?.last_token_usage).reasoning,
+  cacheReadTokens: (r) => codexDailyTokenComponents(r.payload.info?.last_token_usage).cacheRead,
+  cacheWriteTokens: (r) => codexDailyTokenComponents(r.payload.info?.last_token_usage).cacheWrite,
 };
 
 const getCodexTokenStats = createIncrementalTokenStats(
   () => sessionFiles.getFileSignatures(),
-  (filePath) => sessionFiles.getByFilePath(filePath)?.records || [],
+  (filePath) => {
+    const records = sessionFiles.getByFilePath(filePath)?.records || [];
+    return codexOwnedTokenUsageRecords(records);
+  },
   codexTokenMapping,
 );
 

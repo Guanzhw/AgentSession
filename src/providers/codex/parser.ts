@@ -2,18 +2,19 @@ import { readFileSync } from "node:fs";
 import type { Message, RawSession } from "../interface.js";
 import { asNumber } from "../shared/parser.js";
 
-function usageToTokens(usage: any) {
+export function codexUsageToTokens(usage: any) {
   if (!usage || typeof usage !== "object") return null;
   const cached = asNumber(usage.cached_input_tokens);
-  const input = Math.max(0, asNumber(usage.input_tokens) - cached);
-  const output = asNumber(usage.output_tokens);
+  const cacheWrite = asNumber(usage.cache_write_input_tokens);
+  const input = Math.max(0, asNumber(usage.input_tokens) - cached - cacheWrite);
   const reasoning = asNumber(usage.reasoning_output_tokens);
+  const output = Math.max(0, asNumber(usage.output_tokens) - reasoning);
   return {
     input,
     output,
     reasoning,
-    cache: { read: cached, write: 0 },
-    total: asNumber(usage.total_tokens) || input + cached + output
+    cache: { read: cached, write: cacheWrite },
+    total: asNumber(usage.total_tokens) || input + cached + cacheWrite + output + reasoning
   };
 }
 
@@ -101,6 +102,17 @@ export function classifyCodexRecordProvenance(records: any[]) {
     provenance.set(record, insideInheritedParentContext ? "inherited-parent-context" : "session");
   }
   return provenance;
+}
+
+/** Token events in a subagent transcript can begin with a copied parent
+ * segment. Keep only requests that are owned by the transcript's session. */
+export function codexOwnedTokenUsageRecords(records: any[]) {
+  const provenance = classifyCodexRecordProvenance(records);
+  return records.filter((record) => (
+    record.type === "event_msg"
+    && record.payload?.type === "token_count"
+    && provenance.get(record) !== "inherited-parent-context"
+  ));
 }
 
 /** Mark copied parent user records as candidates. The adapter confirms the
@@ -196,6 +208,7 @@ export function extractMeta(records: any, fallbackId: any, normalizedMessages?: 
   let metadata = null;
   let sessionMetaSeen = false;
   const messageProvenance = classifyCodexMessageProvenance(records);
+  const recordProvenance = classifyCodexRecordProvenance(records);
 
   for (const r of records) {
     const ts = r.timestamp ? new Date(r.timestamp).getTime() : 0;
@@ -236,8 +249,8 @@ export function extractMeta(records: any, fallbackId: any, normalizedMessages?: 
       }
     }
     if (r.type === "event_msg" && r.payload?.type === "token_count") {
-      const usage = r.payload.info?.total_token_usage;
-      if (usage?.total_tokens) totalTokens = usage.total_tokens; // Use latest cumulative total
+      if (recordProvenance.get(r) === "inherited-parent-context") continue;
+      totalTokens += codexUsageToTokens(r.payload.info?.last_token_usage)?.total || 0;
     }
   }
 
@@ -273,6 +286,52 @@ export function countCodexRenderedMessages(messages: Message[]) {
   return count;
 }
 
+function tokenUsageTotal(tokens: any) {
+  return asNumber(tokens?.total) || (
+    asNumber(tokens?.input)
+    + asNumber(tokens?.output)
+    + asNumber(tokens?.reasoning)
+    + asNumber(tokens?.cache?.read)
+    + asNumber(tokens?.cache?.write)
+  );
+}
+
+function mergeTokenUsage(values: any[]) {
+  return values.reduce((total, tokens) => ({
+    input: asNumber(total.input) + asNumber(tokens.input),
+    output: asNumber(total.output) + asNumber(tokens.output),
+    reasoning: asNumber(total.reasoning) + asNumber(tokens.reasoning),
+    total: tokenUsageTotal(total) + tokenUsageTotal(tokens),
+    cache: {
+      read: asNumber(total.cache?.read) + asNumber(tokens.cache?.read),
+      write: asNumber(total.cache?.write) + asNumber(tokens.cache?.write)
+    }
+  }), {
+    input: 0,
+    output: 0,
+    reasoning: 0,
+    total: 0,
+    cache: { read: 0, write: 0 }
+  });
+}
+
+/** A token event is a model request, not necessarily a visible transcript
+ * record. Preserve every adjacent request on its closest rendered target. */
+function appendTokenUsage(target: any, tokens: any, attribution = "direct") {
+  const existing = Array.isArray(target.metadata?.tokenRequests)
+    ? target.metadata.tokenRequests.filter((value: unknown) => value && typeof value === "object")
+    : target.tokens
+      ? [target.tokens]
+      : [];
+  const tokenRequests = [...existing, tokens];
+  target.tokens = mergeTokenUsage(tokenRequests);
+  target.metadata = {
+    ...(target.metadata || {}),
+    tokenRequests,
+    tokenAttribution: existing.length > 0 ? "adjacent" : target.metadata?.tokenAttribution || attribution
+  };
+}
+
 /**
  * Convert records to unified Message[] format.
  * @param {object[]} records
@@ -284,6 +343,8 @@ export function recordsToMessages(records: any, sessionId: any): Message[] {
   let idx = 0;
   let model = null;
   let pendingUsageTarget: any = null;
+  let lastUsageTarget: any = null;
+  let lastUserTarget: any = null;
   let responseIndex = 0;
   let responseGroup: any = null;
   const toolCalls = new Map();
@@ -316,7 +377,7 @@ export function recordsToMessages(records: any, sessionId: any): Message[] {
     if (r.type === "event_msg" && r.payload?.type === "user_message") {
       responseGroup = null;
       const provenance = messageProvenance.get(r) || "session";
-      messages.push({
+      const message = {
         id: `msg-${idx++}`,
         sessionId,
         role: "user",
@@ -328,7 +389,85 @@ export function recordsToMessages(records: any, sessionId: any): Message[] {
         timestamp: ts,
         tokens: null,
         metadata: { images: r.payload.images, provenance }
-      });
+      };
+      messages.push(message);
+      // A token_count can arrive after an interrupted request, before Codex
+      // emits any assistant item. It belongs to this new user request, never
+      // to the preceding assistant turn.
+      pendingUsageTarget = null;
+      lastUsageTarget = null;
+      lastUserTarget = message;
+    }
+
+    // Older Codex transcripts persist visible agent output as event messages
+    // rather than response_item records. They are still the nearest durable
+    // anchor for the following model-usage events.
+    if (r.type === "event_msg" && r.payload?.type === "agent_message") {
+      const content = String(r.payload.message || "");
+      if (content) {
+        const previous: any = messages.at(-1);
+        const duplicate = previous?.role === "assistant"
+          && previous.metadata?.source === "codex_agent_message"
+          && previous.content === content;
+        const message = duplicate ? previous : {
+          id: `agent-message-${idx++}`,
+          sessionId,
+          role: "assistant",
+          content,
+          thinking: null,
+          toolName: null,
+          toolInput: null,
+          toolOutput: null,
+          timestamp: ts,
+          tokens: null,
+          metadata: {
+            model,
+            provider: "openai",
+            provenance: "session",
+            source: "codex_agent_message",
+            turnId: currentResponseGroup()
+          }
+        };
+        if (!duplicate) messages.push(message);
+        pendingUsageTarget = message;
+        lastUsageTarget = message;
+      }
+    }
+
+    if (r.type === "event_msg" && r.payload?.type === "agent_reasoning") {
+      const thinking = String(r.payload.text || "");
+      if (thinking) {
+        const previous: any = messages.at(-1);
+        const isProgressiveSnapshot = previous?.role === "assistant"
+          && previous.metadata?.source === "codex_agent_reasoning"
+          && (thinking.startsWith(previous.thinking || "") || (previous.thinking || "").startsWith(thinking));
+        const message = isProgressiveSnapshot ? previous : {
+          id: `agent-reasoning-${idx++}`,
+          sessionId,
+          role: "assistant",
+          content: "",
+          thinking,
+          toolName: null,
+          toolInput: null,
+          toolOutput: null,
+          timestamp: ts,
+          tokens: null,
+          metadata: {
+            model,
+            provider: "openai",
+            provenance: "session",
+            source: "codex_agent_reasoning",
+            turnId: currentResponseGroup()
+          }
+        };
+        if (isProgressiveSnapshot && thinking.length > String(previous.thinking || "").length) {
+          previous.thinking = thinking;
+        } else if (!isProgressiveSnapshot) {
+          messages.push(message);
+        }
+        pendingUsageTarget = message;
+        lastUsageTarget = message;
+      }
     }
 
     if (isSubagentTaskEnvelope(r, primaryMeta)) {
@@ -337,7 +476,7 @@ export function recordsToMessages(records: any, sessionId: any): Message[] {
       const taskKey = `${task.taskName || ""}\u0000${task.content}`;
       if (seenSubagentTaskEnvelopes.has(taskKey)) continue;
       seenSubagentTaskEnvelopes.add(taskKey);
-      messages.push({
+      const message = {
         id: r.payload.id || `subagent-task-${idx++}`,
         sessionId,
         role: "user",
@@ -354,14 +493,22 @@ export function recordsToMessages(records: any, sessionId: any): Message[] {
           taskName: task.taskName,
           promptAvailable: task.promptAvailable
         }
-      });
+      };
+      messages.push(message);
+      pendingUsageTarget = null;
+      lastUsageTarget = null;
+      lastUserTarget = message;
     }
 
     // Assistant text response
     if (r.type === "response_item" && r.payload?.type === "message" && r.payload?.role === "assistant") {
       const text = responseText(r.payload);
       if (text) {
-        const message = {
+        const previous: any = messages.at(-1);
+        const duplicate = previous?.role === "assistant"
+          && previous.metadata?.source === "codex_agent_message"
+          && previous.content === text;
+        const message = duplicate ? previous : {
           id: r.payload.id || `msg-${idx++}`,
           sessionId,
           role: "assistant",
@@ -374,8 +521,9 @@ export function recordsToMessages(records: any, sessionId: any): Message[] {
           tokens: null,
           metadata: { model, provider: "openai", provenance: "session", turnId: currentResponseGroup() }
         };
-        messages.push(message);
+        if (!duplicate) messages.push(message);
         pendingUsageTarget = message;
+        lastUsageTarget = message;
       }
     }
 
@@ -398,6 +546,7 @@ export function recordsToMessages(records: any, sessionId: any): Message[] {
         if (replacesProgressiveSnapshot) {
           if (thinking.length > previousThinking.length) previous.thinking = thinking;
           pendingUsageTarget = previous;
+          lastUsageTarget = previous;
           continue;
         }
         const message: any = {
@@ -415,6 +564,7 @@ export function recordsToMessages(records: any, sessionId: any): Message[] {
         };
         messages.push(message);
         pendingUsageTarget = message;
+        lastUsageTarget = message;
       }
     }
 
@@ -456,6 +606,7 @@ export function recordsToMessages(records: any, sessionId: any): Message[] {
       };
       messages.push(message);
       pendingUsageTarget = message;
+      lastUsageTarget = message;
       if (r.payload.call_id) toolCalls.set(r.payload.call_id, message);
     }
 
@@ -470,11 +621,13 @@ export function recordsToMessages(records: any, sessionId: any): Message[] {
     }
 
     if (r.type === "event_msg" && r.payload?.type === "token_count") {
-      const tokens = usageToTokens(r.payload.info?.last_token_usage);
-      if (tokens && pendingUsageTarget) {
-        pendingUsageTarget.tokens = tokens;
-        pendingUsageTarget = null;
+      const tokens = codexUsageToTokens(r.payload.info?.last_token_usage);
+      const target = pendingUsageTarget || lastUsageTarget || lastUserTarget;
+      if (tokens && target) {
+        appendTokenUsage(target, tokens, target === lastUserTarget ? "request-start" : "direct");
+        lastUsageTarget = target;
       }
+      pendingUsageTarget = null;
       responseGroup = null;
     }
   }

@@ -33,12 +33,24 @@ const viewerEntry = path.join(workDir, "agentsession.mjs");
 const mcpEntry = path.join(workDir, "agentsession-mcp.mjs");
 const analysisToolAsset = path.join(workDir, "analysis-tools.js");
 const analysisLayoutAsset = path.join(workDir, "analysis-layout.js");
+const staticAppAsset = path.join(workDir, "app.js");
 
 await Promise.all([
   bundle("bin/binary.ts", viewerEntry),
   bundle("packages/agentsession-mcp/src/cli.ts", mcpEntry),
   bundle("src/analysis-tools.ts", analysisToolAsset),
-  bundle("src/analysis-layout.ts", analysisLayoutAsset)
+  bundle("src/analysis-layout.ts", analysisLayoutAsset),
+  build({
+    entryPoints: [path.join(root, "src", "static", "app.js")],
+    outfile: staticAppAsset,
+    bundle: true,
+    platform: "browser",
+    format: "iife",
+    target: "es2022",
+    sourcemap: false,
+    minify: false,
+    legalComments: "none"
+  })
 ]);
 
 const extension = process.platform === "win32" ? ".exe" : "";
@@ -48,7 +60,7 @@ const targets = [
     main: viewerEntry,
     output: path.join(outDir, `agentsession${extension}`),
     assets: {
-      "static/app.js": path.join(root, "src", "static", "app.js"),
+      "static/app.js": staticAppAsset,
       "static/style.css": path.join(root, "src", "static", "style.css"),
       "analysis-tools.js": analysisToolAsset,
       "analysis-layout.js": analysisLayoutAsset

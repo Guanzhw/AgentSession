@@ -82,7 +82,7 @@ Flow 与通用 Trace 都由这层派生。只有当来源保存了更丰富的�
 - **会话内搜索**：可从详情页操作栏打开紧凑搜索，或按 `/` 聚焦；结果会同时显示匹配回合与文本命中数，逐词高亮，并在上下跳转时保持控制条可见。
 - **系统提示词证据 API**：`GET /api/:provider/session/:id/system-prompts` 只暴露当前本地可解析的指令、规则与运行时来源；不会声称恢复隐藏的 Provider prompt。
 - **Trace API**：暴露 step/span summary，聚合 tool、skill、agent、MCP、LSP 等调用。
-- **统一用量入口**：`/stats` 使用同一份每日 Token 组成契约聚合所有已选 Provider；总量趋势图直接提供 Provider 筛选，来源卡片可在同一页面应用单 Provider 筛选或进入 Provider 专属明细。单 Provider 明细继续提供 Top 会话、周期对比、模型排名、按日下钻和可选费用估算。文件型 Provider 只展示 transcript 实际提供的维度，不伪造能力。
+- **统一用量入口**：`/stats` 使用同一份每日 Token 组成契约聚合所有已选 Provider；总量趋势图直接提供 Provider 筛选，来源卡片可在同一页面应用单 Provider 筛选或进入 Provider 专属明细。单 Provider 明细继续提供 Top 会话、周期对比、模型排名、按日下钻和可选费用估算。对于含子 agent 的文件型 transcript，只统计该文件自有的请求并排除复制的父会话历史；即使来源未给出完整组成字段，也保留记录的请求总量。文件型 Provider 只展示 transcript 实际提供的维度，不伪造能力。
 - **本地管理**：所有 Provider 都支持收藏、重命名、批量操作、软删除、回收站恢复和永久排除；这些操作只修改 viewer 元数据。
 - **导出**：OpenCode 在详情页提供一个 Export 菜单，可选择 Markdown
   或 JSON 导出，JSON 包含 session tree。
@@ -125,7 +125,7 @@ npm start
 agentsession [options]
 
 --port <number>       服务端口，默认 3456
---opencode-db <path>  OpenCode 数据库路径，别名 --db
+--opencode-db <path>  OpenCode 数据库路径
 --claude-dir <path>   Claude Code 数据目录
 --codex-dir <path>    Codex CLI 数据目录
 --copilot-dir <path>  GitHub Copilot CLI 数据目录
@@ -145,19 +145,15 @@ agentsession [options]
 | 变量 | 作用 |
 |:---|:---|
 | `PORT` | 默认服务端口 |
-| `SESSION_VIEWER_DB_PATH` | OpenCode DB 路径，低于 `--opencode-db` 优先级 |
-| `OPENCODE_DB_PATH` | OpenCode DB 备选环境变量 |
+| `AGENTSESSION_DB_PATH` | OpenCode DB 路径，低于 `--opencode-db` 优先级 |
 | `XDG_DATA_HOME` | OpenCode 的 XDG 数据根目录 |
 | `CLAUDE_CONFIG_DIR` | Claude Code 数据目录 |
 | `CODEX_HOME` | Codex CLI 数据目录 |
 | `COPILOT_HOME` | GitHub Copilot CLI 数据目录 |
 | `GEMINI_HOME` | Gemini CLI 数据目录 |
 | `PI_CODING_AGENT_DIR` | Pi agent 数据目录，默认 `~/.pi/agent` |
-| `AGENTSESSION_META_PATH` | AgentSession 元数据库路径 |
+| `AGENTSESSION_META_PATH` | AgentSession 元数据库路径；未指定 `AGENTSESSION_CONFIG` 时，配置文件也放在同一目录 |
 | `AGENTSESSION_CONFIG` | AgentSession JSON 配置文件路径 |
-| `OPENSESSIONVIEWER_META_PATH` | 旧版兼容元数据库路径 |
-| `OH_MY_OPENSESSION_META_PATH` | 更早版本兼容元数据库路径 |
-| `OPENSESSIONVIEWER_CONFIG` | 旧版兼容 JSON 配置文件路径 |
 
 ## AgentSession-MCP：供 Coding Agent 查询会话历史
 
@@ -552,15 +548,12 @@ OpenCode 权限，使其只能写入分析输出目录。`--dangerously-skip-per
 `~/.claude/skills`、`AGENTS.md` 和 `CLAUDE.md` 等 Provider 运行时路径不应
 在这里重复配置；Provider Adapter 会将它们解析为运行时扩展。分析文件使用
 有大小限制的快照，因此即使原始材料后续发生变化，分析证据仍可审查。
-`fileExtensions` 仅用于筛选这些分析材料目录中的文件名后缀；已有配置中的
-旧字段 `extensions` 仍继续兼容。
-历史内置配置或文档示例中精确匹配的混合路径会在加载时被标准化，并在下次
-保存设置时移除；其他自定义路径保持不变。
+`fileExtensions` 仅用于筛选这些分析材料目录中的文件名后缀。
 
 未配置 `analysis.outputDir` 时，run 默认写入会话项目下的
 `.agentsession/analysis`。AgentSession 会写入
 `.agentsession/.gitignore`，即使目标项目尚未忽略该目录，生成的 run 也不会
-进入版本控制。已有的 `.opensessionviewer/analysis` run 仍会继续被发现以保持兼容。
+进入版本控制。
 每个 run 都会在自己的 `tools/` 目录中携带只读 evidence 查询工具及其本地依赖，
 因此 Analyzer 不需要读取 AgentSession 的安装目录。显式绝对 `outputDir`
 仍受支持，但如果 Analyzer 采用仅允许访问项目目录的 sandbox，该目录也必须对
@@ -677,12 +670,12 @@ node dist/bin/cli.js
 运行浏览器 E2E：
 
 ```powershell
-$env:OPENSESSIONVIEWER_QA_BASE_URL = 'http://127.0.0.1:3456'
-$env:OPENSESSIONVIEWER_QA_SESSION_ID = '<real-session-id>'
+$env:AGENTSESSION_QA_BASE_URL = 'http://127.0.0.1:3456'
+$env:AGENTSESSION_QA_SESSION_ID = '<real-session-id>'
 npm run qa:e2e
 ```
 
-`OPENSESSIONVIEWER_QA_SESSION_ID` 是必填项；仓库不会内置任何机器相关的真实会话 ID。
+`AGENTSESSION_QA_SESSION_ID` 是必填项；仓库不会内置任何机器相关的真实会话 ID。
 
 E2E 覆盖：
 

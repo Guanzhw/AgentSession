@@ -163,7 +163,6 @@ export function registerAnalysisRoutes(
         sessionId,
         directory: session.directory,
         analysisConfig: appConfig.analysis,
-        metaDir: appConfig.metaDir,
         targetId: analysisTargetId
       });
       if (activeRun) {
@@ -183,7 +182,6 @@ export function registerAnalysisRoutes(
         provider: adapter,
         sessionId,
         analysisConfig: appConfig.analysis,
-        metaDir: appConfig.metaDir,
         configPath: appConfig.configPath,
         targetId: analysisTargetId,
         runtimeExtensionIds
@@ -274,7 +272,6 @@ export function registerAnalysisRoutes(
         provider: adapter,
         sessionId,
         analysisConfig: appConfig.analysis,
-        metaDir: appConfig.metaDir,
         runId
       });
       preparedImplementationRun = run;
@@ -343,7 +340,6 @@ export function registerAnalysisRoutes(
         sessionId,
         directory: session.directory,
         analysisConfig: appConfig.analysis,
-        metaDir: appConfig.metaDir,
         limit: 50
       });
       const run = runs.find((item: any) => item.runId === runId);
@@ -396,7 +392,6 @@ export function registerAnalysisRoutes(
         sessionId,
         directory: session.directory,
         analysisConfig: appConfig.analysis,
-        metaDir: appConfig.metaDir,
         limit: 50
       });
       const run = runs.find((item: any) => item.runId === runId);
@@ -446,7 +441,6 @@ export function registerAnalysisRoutes(
         sessionId,
         directory: session.directory,
         analysisConfig: appConfig.analysis,
-        metaDir: appConfig.metaDir,
         limit: 10
       });
       return json(res, { ok: true, runs });

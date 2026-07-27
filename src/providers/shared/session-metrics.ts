@@ -1,6 +1,7 @@
 import { asNumber } from "./parser.js";
 import type { SessionContainer } from "./session-container.js";
 import type { SessionContextView } from "./context.js";
+import { aggregateSessionContainerTokenUsage } from "./session-usage.js";
 
 export interface SessionMetricsView {
   sessionId: string;
@@ -112,7 +113,9 @@ export function buildSessionMetrics(
       reasoningTokens: metrics.reasoningTokens,
       cacheReadTokens: metrics.cacheReadTokens,
       cacheWriteTokens: metrics.cacheWriteTokens,
-      totalTokens: metrics.inputTokens + metrics.outputTokens + metrics.reasoningTokens + metrics.cacheReadTokens + metrics.cacheWriteTokens,
+      // A provider-reported total remains authoritative if an older record
+      // cannot expose every component needed for the stacked breakdown.
+      totalTokens: aggregateSessionContainerTokenUsage(container).total || 0,
       cost: metrics.cost,
       runtimeMs: metrics.runtimeMs
     },

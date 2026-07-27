@@ -87,7 +87,7 @@ All providers store stars, custom titles, soft deletes, and permanent exclusions
 - **In-conversation search**: open the compact detail-page search from the action bar or press `/`; results report matching turns and text occurrences, highlight the exact text, and keep previous/next controls visible while navigating.
 - **Trace API**: step/span summaries classify tools, skills, agents, MCP calls, and LSP activity.
 - **System-prompt evidence API**: `GET /api/:provider/session/:id/system-prompts` exposes only current locally resolvable instructions, rules, and runtime sources; it never claims to recover a hidden provider prompt.
-- **Unified Usage entry**: `/stats` aggregates selected providers through one daily token-composition contract. The total trend exposes provider filters directly, while contribution cards apply a single-provider filter in place or open provider-specific details. Provider detail pages retain top sessions, period comparison, model ranking, day drill-down, and optional cost estimates. File-backed providers expose only dimensions present in their transcripts.
+- **Unified Usage entry**: `/stats` aggregates selected providers through one daily token-composition contract. The total trend exposes provider filters directly, while contribution cards apply a single-provider filter in place or open provider-specific details. Provider detail pages retain top sessions, period comparison, model ranking, day drill-down, and optional cost estimates. For file-backed subagent transcripts, it counts only requests owned by that transcript and excludes copied parent history; a recorded request total is retained even when its component breakdown is incomplete. File-backed providers expose only dimensions present in their transcripts.
 - **Local management**: every provider supports starring, renaming, batch actions, soft delete, restore, and permanent exclusion; these actions only mutate viewer metadata.
 - **Export**: OpenCode sessions expose one Export menu for Markdown or JSON, with JSON including the session tree.
 - **Bilingual UI**: use `--lang en` or `--lang zh`.
@@ -129,7 +129,7 @@ npm start
 agentsession [options]
 
 --port <number>       Server port, default 3456
---opencode-db <path>  OpenCode database path, alias --db
+--opencode-db <path>  OpenCode database path
 --claude-dir <path>   Claude Code data directory
 --codex-dir <path>    Codex CLI data directory
 --copilot-dir <path>  GitHub Copilot CLI data directory
@@ -149,19 +149,15 @@ agentsession [options]
 | Variable | Purpose |
 |:---|:---|
 | `PORT` | Default server port |
-| `SESSION_VIEWER_DB_PATH` | OpenCode DB path, lower priority than `--opencode-db` |
-| `OPENCODE_DB_PATH` | Alternative OpenCode DB env var |
+| `AGENTSESSION_DB_PATH` | OpenCode DB path, lower priority than `--opencode-db` |
 | `XDG_DATA_HOME` | XDG data root for OpenCode |
 | `CLAUDE_CONFIG_DIR` | Claude Code data directory |
 | `CODEX_HOME` | Codex CLI data directory |
 | `COPILOT_HOME` | GitHub Copilot CLI data directory |
 | `GEMINI_HOME` | Gemini CLI data directory |
 | `PI_CODING_AGENT_DIR` | Pi agent data directory, defaults to `~/.pi/agent` |
-| `AGENTSESSION_META_PATH` | AgentSession metadata DB path |
+| `AGENTSESSION_META_PATH` | AgentSession metadata DB path; the default config is stored beside it unless `AGENTSESSION_CONFIG` is set |
 | `AGENTSESSION_CONFIG` | AgentSession JSON config path |
-| `OPENSESSIONVIEWER_META_PATH` | Legacy metadata DB path |
-| `OH_MY_OPENSESSION_META_PATH` | Older metadata DB compatibility path |
-| `OPENSESSIONVIEWER_CONFIG` | Legacy JSON config path |
 
 ## AgentSession-MCP: local session history for coding agents
 
@@ -622,18 +618,13 @@ such as `.opencode/skills`, `.claude/skills`, `~/.claude/skills`, `AGENTS.md`,
 and `CLAUDE.md` should not be repeated here; the provider adapter discovers
 them as runtime extensions. Files are copied into a bounded snapshot so the
 analysis remains reviewable even if the original material changes later.
-`fileExtensions` controls filename suffix filtering for those artifact roots;
-the older `extensions` field remains accepted for existing configurations.
-Exact legacy built-in/example arrays that mixed runtime paths into artifacts
-are normalized on load and removed the next time settings are saved. Other
-custom paths are preserved.
+`fileExtensions` controls filename suffix filtering for those artifact roots.
 
 When `analysis.outputDir` is omitted, runs default to
 `.agentsession/analysis` inside the session project. AgentSession writes
 `.agentsession/.gitignore` so generated runs stay out of source control even
-when the project does not already ignore that directory. Existing
-`.opensessionviewer/analysis` runs remain discoverable for compatibility. Each
-run carries the read-only evidence query tool and its local dependency in its
+when the project does not already ignore that directory. Each run carries the
+read-only evidence query tool and its local dependency in its
 own `tools/` directory, so the analyzer does not need access to the
 AgentSession installation directory. Explicit absolute output directories
 remain supported, but a project-scoped analyzer sandbox must also be able to
@@ -730,12 +721,12 @@ against a local server and a real OpenCode session with reasoning, tools,
 tokens, and subagent activity:
 
 ```powershell
-$env:OPENSESSIONVIEWER_QA_BASE_URL = 'http://127.0.0.1:3456'
-$env:OPENSESSIONVIEWER_QA_SESSION_ID = '<real-session-id>'
+$env:AGENTSESSION_QA_BASE_URL = 'http://127.0.0.1:3456'
+$env:AGENTSESSION_QA_SESSION_ID = '<real-session-id>'
 npm run qa:e2e
 ```
 
-`OPENSESSIONVIEWER_QA_SESSION_ID` is required; the repository intentionally
+`AGENTSESSION_QA_SESSION_ID` is required; the repository intentionally
 does not include a machine-specific fallback.
 
 Validated coverage:

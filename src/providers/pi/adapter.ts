@@ -17,6 +17,7 @@ import {
   extractPiMeta,
   parsePiSession,
   piAssistantUsageRecords,
+  piUsageToTokens,
   piRecordsToMessages
 } from "./parser.js";
 import { buildPiRuntimeEnvironment } from "./runtime-environment.js";
@@ -86,17 +87,12 @@ const getPiViews = createStructuredViewCache(generatePiViews);
 const piTokenMapping: TokenFieldMapping = {
   filterRecord: (entry) => entry.type === "message" && entry.message?.role === "assistant" && Boolean(entry.message?.usage),
   getTimestamp: (entry) => Number(entry.message?.timestamp) || (entry.timestamp ? new Date(entry.timestamp).getTime() : 0),
-  inputTokens: (entry) => Number(entry.message?.usage?.input) || 0,
-  outputTokens: (entry) => Number(entry.message?.usage?.output) || 0,
-  totalTokens: (entry) => Number(entry.message?.usage?.totalTokens)
-    || (Number(entry.message?.usage?.input) || 0)
-      + (Number(entry.message?.usage?.output) || 0)
-      + (Number(entry.message?.usage?.cacheRead) || 0)
-      + (Number(entry.message?.usage?.cacheWrite) || 0),
-  // Pi stores thinking content but does not report a separate reasoning-token field.
-  reasoningTokens: () => 0,
-  cacheReadTokens: (entry) => Number(entry.message?.usage?.cacheRead) || 0,
-  cacheWriteTokens: (entry) => Number(entry.message?.usage?.cacheWrite) || 0
+  inputTokens: (entry) => piUsageToTokens(entry.message?.usage)?.input || 0,
+  outputTokens: (entry) => piUsageToTokens(entry.message?.usage)?.output || 0,
+  totalTokens: (entry) => piUsageToTokens(entry.message?.usage)?.total || 0,
+  reasoningTokens: (entry) => piUsageToTokens(entry.message?.usage)?.reasoning || 0,
+  cacheReadTokens: (entry) => piUsageToTokens(entry.message?.usage)?.cache?.read || 0,
+  cacheWriteTokens: (entry) => piUsageToTokens(entry.message?.usage)?.cache?.write || 0
 };
 
 const getPiTokenStats = createIncrementalTokenStats(

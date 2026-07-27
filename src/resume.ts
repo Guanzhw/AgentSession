@@ -39,7 +39,7 @@ function quoteDisplayArg(value: any) {
 }
 
 const WINDOWS_EXECUTABLE_EXTENSIONS = [".exe", ".cmd", ".bat"];
-const DIRECT_POWERSHELL_LAUNCH_ENV = "OPENSESSIONVIEWER_DIRECT_POWERSHELL_LAUNCH_SPEC";
+const DIRECT_POWERSHELL_LAUNCH_ENV = "AGENTSESSION_DIRECT_POWERSHELL_LAUNCH_SPEC";
 const TERMINAL_LAUNCH_CONFIRM_TIMEOUT_MS = 5000;
 const DETACHED_TERMINAL_OBSERVE_MS = 500;
 
@@ -131,7 +131,7 @@ export function getResumeCommand(provider: ProviderAdapter, sessionId: any, dire
 
 export function buildPowerShellResumeArgs(powershell: any, shellArgs = ["-NoExit", "-NoLogo"]) {
   const script = [
-    "$json=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:OPENSESSIONVIEWER_RESUME_SPEC))",
+    "$json=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:AGENTSESSION_RESUME_SPEC))",
     "$spec=$json|ConvertFrom-Json",
     "Set-Location -LiteralPath $spec.cwd",
     "& $spec.executable @($spec.args)"
@@ -352,6 +352,6 @@ export async function launchResumeCommand(command: any, configuredShell = null) 
     cwd: command.cwd,
     terminal: launchHost.terminal,
     powershellArgs: buildPowerShellResumeArgs(launchHost.powershell, launchHost.shellArgs),
-    env: { OPENSESSIONVIEWER_RESUME_SPEC: payload }
+    env: { AGENTSESSION_RESUME_SPEC: payload }
   });
 }

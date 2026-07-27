@@ -5,8 +5,8 @@ import path from "node:path";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 
-const temp = mkdtempSync(path.join(os.tmpdir(), "opensessionviewer-management-"));
-process.env.OPENSESSIONVIEWER_META_PATH = path.join(temp, "meta.db");
+const temp = mkdtempSync(path.join(os.tmpdir(), "agentsession-management-"));
+process.env.AGENTSESSION_META_PATH = path.join(temp, "meta.db");
 
 const { initConfig } = await import("../dist/src/config.js");
 initConfig([]);

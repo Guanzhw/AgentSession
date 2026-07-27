@@ -31,28 +31,6 @@ const CATEGORIZED_FILES = {
   artifactSnapshotsDir: "evidence/artifact-snapshots"
 };
 
-const LEGACY_FILES = {
-  reportPath: "report.md",
-  evaluationPath: "evaluation-proposals.json",
-  proposalsPath: "artifact-proposals.json",
-  sessionPath: "session.json",
-  evaluationSeedPath: "evaluation-seed.json",
-  promptPath: "analysis-request.md",
-  sessionIndexPath: "session-index.json",
-  evidenceIndexPath: "evidence-index.json",
-  evidencePath: "evidence.jsonl",
-  artifactsPath: "artifacts.json",
-  messagesPath: "messages.json",
-  treePath: "tree.json",
-  containerPath: "container.json",
-  metricsPath: "metrics.json",
-  flowPath: "flow.json",
-  tracePath: "trace.json",
-  analyzerStdoutPath: "diagnostics/analyzer.stdout.log",
-  analyzerStderrPath: "diagnostics/analyzer.stderr.log",
-  artifactSnapshotsDir: "artifacts"
-};
-
 function isInsideRun(runDir: string, candidate: string) {
   const root = path.resolve(runDir);
   const resolved = path.resolve(candidate);
@@ -95,8 +73,7 @@ export function resolveAnalysisRunPath(
 ) {
   const candidates = [
     (manifest?.files as Record<string, string> | undefined)?.[key],
-    path.join(runDir, (CATEGORIZED_FILES as Record<string, string>)[key]),
-    (LEGACY_FILES as Record<string, string>)[key] ? path.join(runDir, (LEGACY_FILES as Record<string, string>)[key]) : null
+    path.join(runDir, (CATEGORIZED_FILES as Record<string, string>)[key])
   ];
   for (const candidate of candidates) {
     if (typeof candidate !== "string" || !candidate) {

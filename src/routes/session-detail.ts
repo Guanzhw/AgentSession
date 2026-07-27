@@ -87,8 +87,7 @@ export function registerSessionDetail(
           providerId: providerSegment,
           sessionId,
           directory: enrichedSession.directory,
-          analysisConfig: appConfig.analysis,
-          metaDir: appConfig.metaDir
+          analysisConfig: appConfig.analysis
         });
         return {
           status: 200,
@@ -138,8 +137,7 @@ export function registerSessionDetail(
         providerId: providerSegment,
         sessionId,
         directory: normalizedSession.directory,
-        analysisConfig: appConfig.analysis,
-        metaDir: appConfig.metaDir
+        analysisConfig: appConfig.analysis
       });
       return {
         status: 200,

@@ -57,20 +57,21 @@ function toolCalls(value: unknown): Row[] {
     : [];
 }
 
-function usageToTokens(usage: unknown): TokenUsage | null {
+export function piUsageToTokens(usage: unknown): TokenUsage | null {
   const value = usage && typeof usage === "object" ? usage as Row : null;
   if (!value) return null;
   const input = Number(value.input) || 0;
   const output = Number(value.output) || 0;
+  const reasoning = Number(value.reasoning) || 0;
   const cacheRead = Number(value.cacheRead) || 0;
   const cacheWrite = Number(value.cacheWrite) || 0;
   const total = Number(value.totalTokens) || input + output + cacheRead + cacheWrite;
   return {
     input,
-    output,
-    // Pi preserves thinking blocks but its usage object has no independent
-    // reasoning-token field, so do not manufacture a number from text length.
-    reasoning: 0,
+    // Pi reports reasoning as a subset of output. Keep components exclusive
+    // so shared metrics and stacked charts retain the source total.
+    output: Math.max(0, output - reasoning),
+    reasoning,
     total,
     cache: { read: cacheRead, write: cacheWrite }
   };
@@ -140,7 +141,7 @@ export function piRecordsToMessages(records: Row[], sessionId: string): Message[
           toolInput: null,
           toolOutput: null,
           timestamp: eventTime,
-          tokens: usageToTokens(source.usage),
+          tokens: piUsageToTokens(source.usage),
           metadata: {
             model: source.model || null,
             provider: source.provider || null,

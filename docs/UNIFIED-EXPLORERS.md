@@ -40,6 +40,12 @@ range.
 File-backed providers honor custom ranges by filtering their daily aggregates
 after bounded collection.
 
+When a provider stores copied parent history inside a subagent transcript, the
+adapter excludes those copied requests before aggregation. A provider-reported
+request total remains authoritative even when a legacy record does not expose a
+complete input/output/cache breakdown, so a session, Flow summary, and daily
+usage total use the same source-backed amount.
+
 The global page exposes only capabilities whose meaning is provider-neutral.
 Project/model filters, coverage, session rankings, cost estimates, and day
 drill-down remain on provider-specific statistics pages until every adapter can

@@ -21,7 +21,7 @@ function defaultDbPath() {
   const xdgData = process.env.XDG_DATA_HOME || path.join(home, ".local", "share");
   const fallback = path.join(xdgData, "opencode", "opencode.db");
   const candidates = [
-    process.env.SESSION_VIEWER_DB_PATH || process.env.OPENCODE_DB_PATH,
+    process.env.AGENTSESSION_DB_PATH,
     fallback,
   ];
   if (process.platform === "win32") {
@@ -34,15 +34,9 @@ function defaultDbPath() {
 }
 
 function defaultMetaDir() {
-  const legacyDir = process.platform === "win32"
-    ? path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "opensessionviewer")
-    : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "opensessionviewer");
-  const agentSessionDir = process.platform === "win32"
+  return process.platform === "win32"
     ? path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "agentsession")
     : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "agentsession");
-  if (existsSync(agentSessionDir)) return agentSessionDir;
-  if (existsSync(legacyDir)) return legacyDir;
-  return agentSessionDir;
 }
 
 function defaultClaudeDir() {
@@ -121,83 +115,6 @@ function isObject(value: any) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-const LEGACY_ANALYSIS_MATERIALS = {
-  skills: {
-    roots: [
-      ["skills", ".agents/skills", ".codex/skills"],
-      [".opencode/skills", ".agents/skills", ".codex/skills"]
-    ],
-    files: [["AGENTS.md"]]
-  },
-  prompts: {
-    roots: [["prompts", ".agents/prompts", ".codex/prompts"]]
-  },
-  agents: {
-    roots: [[".agents/agents", ".codex/agents", ".claude/agents"]]
-  },
-  rules: {
-    roots: [[".agents", ".codex", ".claude"]],
-    files: [["AGENTS.md", "CLAUDE.md", "GEMINI.md", ".cursorrules"]]
-  }
-};
-
-function sameStringArray(left: any, right: any) {
-  return Array.isArray(left)
-    && left.length === right.length
-    && left.every((value, index) => value === right[index]);
-}
-
-const DEFAULT_ANALYSIS_OUTPUT_DIR = ".agentsession/analysis";
-const LEGACY_DEFAULT_ANALYSIS_OUTPUT_DIR = ".opensessionviewer/analysis";
-
-function migrateLegacyTargetMaterials(targetId: any, target: any) {
-  if (!isObject(target)) return;
-  const legacy = (LEGACY_ANALYSIS_MATERIALS as Record<string, any>)[targetId];
-  if (!legacy) return;
-  const legacyRootsMatched = legacy.roots?.some(
-    (roots: any) => sameStringArray(target.artifactRoots, roots)
-  );
-  if (legacyRootsMatched) {
-    delete target.artifactRoots;
-  }
-  if (
-    legacyRootsMatched
-    && legacy.files?.some((files: any) => sameStringArray(target.artifactFiles, files))
-  ) {
-    delete target.artifactFiles;
-  }
-}
-
-function migrateLegacyAnalysisMaterials(config: any) {
-  const analysis = isObject(config.analysis) ? config.analysis : null;
-  if (!analysis) return config;
-  const outputDir = typeof analysis.outputDir === "string"
-    ? analysis.outputDir.replaceAll("\\", "/")
-    : "";
-  if (
-    outputDir === LEGACY_DEFAULT_ANALYSIS_OUTPUT_DIR
-    || outputDir === DEFAULT_ANALYSIS_OUTPUT_DIR
-  ) {
-    delete analysis.outputDir;
-  }
-  const targetGroups = [analysis.targets];
-  if (isObject(analysis.providers)) {
-    for (const provider of Object.values(analysis.providers)) {
-      if (isObject(provider)) {
-        const providerSettings: any = provider;
-        targetGroups.push(providerSettings.targets);
-      }
-    }
-  }
-  for (const targets of targetGroups) {
-    if (!isObject(targets)) continue;
-    for (const [targetId, target] of Object.entries(targets)) {
-      migrateLegacyTargetMaterials(targetId, target);
-    }
-  }
-  return config;
-}
-
 export function readUserConfigDocument(configPath: any) {
   if (!configPath || !existsSync(configPath)) {
     return {
@@ -223,7 +140,7 @@ export function readUserConfigDocument(configPath: any) {
     return {
       exists: true,
       raw,
-      config: migrateLegacyAnalysisMaterials(parsed),
+      config: parsed,
       error: ""
     };
   } catch (error: any) {
@@ -353,7 +270,10 @@ function validateAnalysisTargets(value: any, field: any, errors: any) {
       continue;
     }
     const targetSettings: any = target;
-    for (const listField of ["artifactRoots", "artifactFiles", "fileExtensions", "extensions"]) {
+    if (targetSettings.extensions !== undefined) {
+      errors.push(`${field}.${targetId}.extensions is not supported; use fileExtensions.`);
+    }
+    for (const listField of ["artifactRoots", "artifactFiles", "fileExtensions"]) {
       if (targetSettings[listField] !== undefined) {
         validateStringArray(targetSettings[listField], `${field}.${targetId}.${listField}`, errors);
       }
@@ -584,13 +504,11 @@ export function writeUserConfig(configPath: any, config: any) {
     error.validationErrors = errors;
     throw error;
   }
-  migrateLegacyAnalysisMaterials(config);
   mkdirSync(path.dirname(configPath), { recursive: true });
   writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf-8");
 }
 
 export function applyRuntimeUserConfig(config: any, fileConfig: any) {
-  migrateLegacyAnalysisMaterials(fileConfig);
   config.resumeCommands = isObject(fileConfig.resumeCommands) ? fileConfig.resumeCommands : {};
   config.resumeShell = isObject(fileConfig.resumeShell) ? fileConfig.resumeShell : null;
   config.analysis = isObject(fileConfig.analysis) ? fileConfig.analysis : { enabled: false };
@@ -605,17 +523,22 @@ function detectLang() {
 }
 
 export function parseArgs(argv = process.argv.slice(2)) {
-  let configPath = process.env.AGENTSESSION_CONFIG || process.env.OPENSESSIONVIEWER_CONFIG || "";
+  const configuredMetaPath = process.env.AGENTSESSION_META_PATH
+    ? path.resolve(process.env.AGENTSESSION_META_PATH)
+    : path.join(defaultMetaDir(), "meta.db");
+  const configuredMetaDir = path.dirname(configuredMetaPath);
+  let configPath = process.env.AGENTSESSION_CONFIG || "";
   const explicitConfigIndex = argv.indexOf("--config");
   if (explicitConfigIndex >= 0 && argv[explicitConfigIndex + 1]) {
     configPath = argv[explicitConfigIndex + 1];
   }
 
-  const resolvedConfigPath = configPath || path.join(defaultMetaDir(), "config.json");
+  const resolvedConfigPath = configPath || path.join(configuredMetaDir, "config.json");
   const fileConfig = readUserConfig(resolvedConfigPath);
   const config = {
     ...defaults,
     ...fileConfig,
+    metaDir: configuredMetaDir,
     lang: detectLang(),
     metaPath: "",
     configPath: resolvedConfigPath,
@@ -635,7 +558,7 @@ export function parseArgs(argv = process.argv.slice(2)) {
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--port" && argv[i + 1]) {
       config.port = Number(argv[++i]) || defaults.port;
-    } else if ((argv[i] === "--opencode-db" || argv[i] === "--db") && argv[i + 1]) {
+    } else if (argv[i] === "--opencode-db" && argv[i + 1]) {
       config.dbPath = argv[++i];
     } else if (argv[i] === "--claude-dir" && argv[i + 1]) {
       config.claudeDir = argv[++i];
@@ -664,7 +587,7 @@ Usage: agentsession [options]
 
 Options:
   --port <number>       Server port (default: 3456, env: PORT)
-  --opencode-db <path>  Path to opencode.db (alias: --db, env: SESSION_VIEWER_DB_PATH)
+  --opencode-db <path>  Path to opencode.db (env: AGENTSESSION_DB_PATH)
   --claude-dir <path>   Path to Claude CLI data dir (default: ~/.claude)
   --codex-dir <path>    Path to Codex data dir (default: ~/.codex)
   --copilot-dir <path>  Path to GitHub Copilot CLI data dir (default: ~/.copilot)
@@ -685,14 +608,10 @@ Options:
   if (!argv.includes("--port") && process.env.PORT) {
     config.port = Number(process.env.PORT) || defaults.port;
   }
-  if (!argv.includes("--db") && !argv.includes("--opencode-db") && process.env.SESSION_VIEWER_DB_PATH) {
-    config.dbPath = process.env.SESSION_VIEWER_DB_PATH;
+  if (!argv.includes("--opencode-db") && process.env.AGENTSESSION_DB_PATH) {
+    config.dbPath = process.env.AGENTSESSION_DB_PATH;
   }
-  if (process.env.AGENTSESSION_META_PATH || process.env.OPENSESSIONVIEWER_META_PATH || process.env.OH_MY_OPENSESSION_META_PATH) {
-    config.metaDir = path.dirname(process.env.AGENTSESSION_META_PATH || process.env.OPENSESSIONVIEWER_META_PATH || process.env.OH_MY_OPENSESSION_META_PATH || "");
-  }
-
-  config.metaPath = path.join(config.metaDir, "meta.db");
+  config.metaPath = configuredMetaPath;
 
   // Ensure meta directory exists
   mkdirSync(config.metaDir, { recursive: true });

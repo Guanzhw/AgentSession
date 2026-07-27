@@ -1,6 +1,7 @@
 import type { Message, TokenUsage } from "../interface.js";
 import { asNumber } from "./parser.js";
 import { classifySharedTool } from "./subagent-tools.js";
+import { cloneTokenUsage, sumTokenUsage, tokenUsageTotal } from "./token-usage.js";
 
 type Row = Record<string, any>;
 
@@ -84,61 +85,33 @@ function asRow(value: unknown): Row {
   return value && typeof value === "object" ? value as Row : {};
 }
 
-function cloneTokenUsage(tokens: TokenUsage): TokenUsage {
-  return {
-    input: asNumber(tokens.input),
-    output: asNumber(tokens.output),
-    reasoning: asNumber(tokens.reasoning),
-    total: asNumber(tokens.total),
-    cache: {
-      read: asNumber(tokens.cache?.read),
-      write: asNumber(tokens.cache?.write)
-    }
-  };
-}
-
-function tokenUsageTotal(tokens: TokenUsage) {
-  const total = asNumber(tokens.total);
-  return total || (
-    asNumber(tokens.input)
-    + asNumber(tokens.output)
-    + asNumber(tokens.reasoning)
-    + asNumber(tokens.cache?.read)
-    + asNumber(tokens.cache?.write)
-  );
-}
-
-function sumTokenUsage(values: TokenUsage[]): TokenUsage | null {
-  if (!values.length) return null;
-  return values.reduce<TokenUsage>((total, tokens) => ({
-    input: asNumber(total.input) + asNumber(tokens.input),
-    output: asNumber(total.output) + asNumber(tokens.output),
-    reasoning: asNumber(total.reasoning) + asNumber(tokens.reasoning),
-    total: tokenUsageTotal(total) + tokenUsageTotal(tokens),
-    cache: {
-      read: asNumber(total.cache?.read) + asNumber(tokens.cache?.read),
-      write: asNumber(total.cache?.write) + asNumber(tokens.cache?.write)
-    }
-  }), {
-    input: 0,
-    output: 0,
-    reasoning: 0,
-    total: 0,
-    cache: { read: 0, write: 0 }
-  });
-}
-
 function messageData(message: Message): Row {
   const metadata = asRow(message.metadata);
   const model = metadata.model;
-  const tokens = message.tokens ? cloneTokenUsage(message.tokens) : null;
+  const metadataRequests = Array.isArray(metadata.tokenRequests)
+    ? metadata.tokenRequests
+      .filter((tokens: unknown) => Boolean(tokens) && typeof tokens === "object")
+      .map((tokens: TokenUsage) => cloneTokenUsage(tokens))
+    : [];
+  const tokenRequests = metadataRequests.length > 0
+    ? metadataRequests
+    : message.tokens
+      ? [cloneTokenUsage(message.tokens)]
+      : [];
+  const tokens = tokenRequests.length ? sumTokenUsage(tokenRequests) : null;
+  const {
+    tokenRequests: _tokenRequests,
+    tokenRequestCount: _tokenRequestCount,
+    tokens: _metadataTokens,
+    ...messageMetadata
+  } = metadata;
   return {
     role: message.role,
     time: { created: message.timestamp },
     tokens,
-    tokenRequestCount: tokens ? 1 : 0,
-    tokenRequests: tokens ? [tokens] : [],
-    ...metadata,
+    tokenRequestCount: tokenRequests.length,
+    tokenRequests,
+    ...messageMetadata,
     model: typeof model === "string"
       ? { modelID: model, providerID: metadata.provider || null }
       : model || null
@@ -208,13 +181,18 @@ function responseGroupId(message: Message) {
 
 function mergeTurnData(target: Row, message: Message) {
   const incoming = messageData(message);
-  if (incoming.tokens) {
+  const incomingRequests = Array.isArray(incoming.tokenRequests)
+    ? incoming.tokenRequests.filter((tokens: any) => tokens && typeof tokens === "object")
+    : incoming.tokens && typeof incoming.tokens === "object"
+      ? [incoming.tokens]
+      : [];
+  if (incomingRequests.length > 0) {
     const existingRequests = Array.isArray(target.tokenRequests)
       ? target.tokenRequests.filter((tokens: any) => tokens && typeof tokens === "object")
       : target.tokens && typeof target.tokens === "object"
         ? [target.tokens]
         : [];
-    const tokenRequests = [...existingRequests, incoming.tokens as TokenUsage];
+    const tokenRequests = [...existingRequests, ...incomingRequests] as TokenUsage[];
     target.tokenRequests = tokenRequests;
     target.tokenRequestCount = tokenRequests.length;
     target.tokens = sumTokenUsage(tokenRequests);

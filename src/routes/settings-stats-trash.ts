@@ -2,28 +2,18 @@ import {
   getCompareModelStats,
   getModelPairs,
   getPreviousPeriodAggregates,
-  getSessionsByIds,
   getStatsProjects,
   getTokenCoverage,
   getTopTokenSessions,
 } from "../db.js";
 import { statSync } from "node:fs";
-import { getAllMeta, getDeletedIds } from "../meta.js";
-import { getIndexedSessions } from "../index-db.js";
-import {
-  normalizeSessionRecord,
-  enrichSession,
-} from "../session-queries.js";
 import { json, missingProviderResponse, send } from "../server-helpers.js";
-import { usesSqliteSessionStore, supportsLocalManagement } from "../providers/kinds.js";
-import { supportsSessionAnalysis } from "../providers/kinds.js";
-import { OPENCODE_ANALYSIS_COMMAND } from "../analysis.js";
-import { readUserConfigDocument } from "../config.js";
-import { getProvider } from "../providers/index.js";
-import { renderSettingsPage } from "../views/settings.js";
+import { usesSqliteSessionStore } from "../providers/kinds.js";
 import { renderStatsDeferredSection, renderStatsPage } from "../views/stats.js";
-import { renderTrashPage } from "../views/trash.js";
 import { providerRenderContext } from "./provider-context.js";
+import { registerSettingsRoutes } from "./settings.js";
+import { registerTrashRoutes } from "./trash.js";
+import type { ProviderRouteDeps } from "./route-deps.js";
 import {
   parseStatsFilters,
   parseStatsDay,
@@ -48,14 +38,12 @@ import {
 
 export function registerSettingsStatsTrash(
   app: any,
-  deps: {
-    appConfig: any;
-    providerMap: Map<string, any>;
-    providerInfo: any[];
-  }
+  deps: ProviderRouteDeps
 ) {
   const { appConfig, providerMap, providerInfo } = deps;
   const statsCache = createStatsCache();
+
+  registerSettingsRoutes(app, deps);
 
   function statsSourceFingerprint(adapter: any) {
     const revision = adapter.getStatsRevision?.();
@@ -75,33 +63,6 @@ export function registerSettingsStatsTrash(
     );
     return `${detail}:${providerId}:${new URLSearchParams(pairs).toString()}`;
   }
-
-  // Settings page
-  app.get("/:provider/settings", async (_req: any, _res: any, params: any) => {
-    const providerSegment = params.provider;
-    const currentProvider = getProvider(providerSegment);
-    const adapter = providerMap.get(providerSegment);
-
-    if (!currentProvider) {
-      return { status: 404, body: "<h1>Provider not found</h1>", contentType: "text/html; charset=utf-8" };
-    }
-
-    const configDocument = readUserConfigDocument(appConfig.configPath);
-    return {
-      status: 200,
-      body: renderSettingsPage({
-        configPath: appConfig.configPath,
-        configDocument,
-        terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),
-        providerName: currentProvider.name,
-        resumeDefault: currentProvider.resumeCommand || null,
-        analysisDefaultCommand: supportsSessionAnalysis(currentProvider) ? OPENCODE_ANALYSIS_COMMAND : null,
-        providerAvailable: Boolean(adapter),
-        ...providerRenderContext(providerSegment, providerInfo, adapter)
-      }),
-      contentType: "text/html; charset=utf-8"
-    };
-  });
 
   // ── Helper: build Token Explorer data for SQLite providers ────────────────
 
@@ -602,35 +563,6 @@ export function registerSettingsStatsTrash(
     }
   });
 
-  // Trash page
-  app.get("/:provider/trash", async (_req: any, _res: any, params: any) => {
-    const providerSegment = params.provider;
-    const adapter = providerMap.get(providerSegment);
-
-    if (!supportsLocalManagement(adapter)) {
-      return { status: 404, body: "<h1>Not found</h1>", contentType: "text/html; charset=utf-8" };
-    }
-
-    const renderContext = providerRenderContext(providerSegment, providerInfo, adapter);
-
-    try {
-      const deletedIds = getDeletedIds(providerSegment);
-      const sessions = usesSqliteSessionStore(adapter)
-        ? getSessionsByIds(deletedIds, adapter.getDataPath())
-        : getIndexedSessions(providerSegment, Math.max(1, deletedIds.length), 0, "", "", "", "updated-desc", deletedIds).sessions;
-      const metaMap = getAllMeta(providerSegment);
-      const enriched = sessions.map((session: any) => normalizeSessionRecord(enrichSession(session, metaMap)));
-      return {
-        status: 200,
-        body: renderTrashPage({ sessions: enriched, ...renderContext }),
-        contentType: "text/html; charset=utf-8"
-      };
-    } catch (err: any) {
-      console.error(`Route error: ${err.message}`);
-      return { status: 500, body: JSON.stringify({ error: "Internal server error" }), contentType: "application/json; charset=utf-8" };
-    }
-  });
-
   // API: stats JSON export
   app.get(/^\/api\/([a-z][a-z0-9-]*)\/stats\/export\.json$/, async (_req: any, res: any, match: RegExpMatchArray) => {
     const providerId = match[1];
@@ -725,4 +657,6 @@ export function registerSettingsStatsTrash(
       return json(res, { error: "Internal server error" }, 500);
     }
   });
+
+  registerTrashRoutes(app, deps);
 }

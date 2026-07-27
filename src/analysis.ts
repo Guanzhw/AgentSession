@@ -47,7 +47,6 @@ const MAX_ARTIFACT_FILES = 200;
 const MAX_ARTIFACT_BYTES = 256 * 1024;
 const MAX_TOTAL_ARTIFACT_BYTES = 5 * 1024 * 1024;
 const PROJECT_ANALYSIS_DIR_NAME = ".agentsession";
-const LEGACY_PROJECT_ANALYSIS_DIR_NAME = ".opensessionviewer";
 const PROJECT_ANALYSIS_GITIGNORE = "*\n!.gitignore\n";
 export const SESSION_ANALYSIS_PROVIDER_ID = "opencode";
 export const OPENCODE_ANALYSIS_COMMAND = {
@@ -526,7 +525,7 @@ function snapshotArtifacts(
   }
 
   const fileExtensions = new Set(
-    (target.fileExtensions || target.extensions || DEFAULT_ANALYSIS_TARGET.fileExtensions)
+    (target.fileExtensions || DEFAULT_ANALYSIS_TARGET.fileExtensions)
       .filter((entry: any) => typeof entry === "string")
       .map((entry: any) => entry.startsWith(".") ? entry.toLowerCase() : `.${entry.toLowerCase()}`)
   );
@@ -791,29 +790,22 @@ function getProjectAnalysisOutputRoot(projectPath: any) {
   return path.join(projectPath, PROJECT_ANALYSIS_DIR_NAME, "analysis");
 }
 
-function getLegacyProjectAnalysisOutputRoot(projectPath: any) {
-  return path.join(projectPath, LEGACY_PROJECT_ANALYSIS_DIR_NAME, "analysis");
-}
-
 function ensureProjectAnalysisGitignore(outputRoot: any, projectPath: any) {
   const projectRoot = path.resolve(projectPath);
+  const directory = path.join(projectRoot, PROJECT_ANALYSIS_DIR_NAME);
+  const analysisRoot = path.join(directory, "analysis");
   const resolvedOutputRoot = path.resolve(outputRoot);
-  for (const directoryName of [PROJECT_ANALYSIS_DIR_NAME, LEGACY_PROJECT_ANALYSIS_DIR_NAME]) {
-    const directory = path.join(projectRoot, directoryName);
-    const analysisRoot = path.join(directory, "analysis");
-    if (resolvedOutputRoot !== path.resolve(analysisRoot)) {
-      continue;
-    }
-    mkdirSync(directory, { recursive: true });
-    const gitignorePath = path.join(directory, ".gitignore");
-    if (!existsSync(gitignorePath)) {
-      writeFileSync(gitignorePath, PROJECT_ANALYSIS_GITIGNORE, "utf-8");
-    }
+  if (resolvedOutputRoot !== path.resolve(analysisRoot)) {
     return;
+  }
+  mkdirSync(directory, { recursive: true });
+  const gitignorePath = path.join(directory, ".gitignore");
+  if (!existsSync(gitignorePath)) {
+    writeFileSync(gitignorePath, PROJECT_ANALYSIS_GITIGNORE, "utf-8");
   }
 }
 
-export function getAnalysisOutputRoot(directory: any, analysisConfig: any, metaDir: any) {
+export function getAnalysisOutputRoot(directory: any, analysisConfig: any) {
   const projectPath = resolveProjectDirectory(directory);
   if (!projectPath) {
     return null;
@@ -832,7 +824,6 @@ export function listSessionAnalysisRuns({
   sessionId,
   directory,
   analysisConfig,
-  metaDir,
   limit = 10
 }: {
   provider?: any;
@@ -840,34 +831,16 @@ export function listSessionAnalysisRuns({
   sessionId?: any;
   directory?: any;
   analysisConfig?: any;
-  metaDir?: any;
   limit?: number;
 }) {
   const resolvedProviderId = provider?.id || providerId;
-  const outputRoot = getAnalysisOutputRoot(directory, analysisConfig, metaDir);
+  const outputRoot = getAnalysisOutputRoot(directory, analysisConfig);
   if (!outputRoot) {
     return [];
   }
 
   const runs = [];
-  const outputRoots = [outputRoot];
-  if (!analysisConfig?.outputDir) {
-    const projectPath = resolveProjectDirectory(directory);
-    if (projectPath) {
-      const legacyProjectOutputRoot = getLegacyProjectAnalysisOutputRoot(projectPath);
-      if (path.resolve(legacyProjectOutputRoot) !== path.resolve(outputRoot)) {
-        outputRoots.push(legacyProjectOutputRoot);
-      }
-    }
-    if (metaDir) {
-      const legacyMetaOutputRoot = path.join(metaDir, "analysis");
-      if (!outputRoots.some((root) => path.resolve(root) === path.resolve(legacyMetaOutputRoot))) {
-        outputRoots.push(legacyMetaOutputRoot);
-      }
-    }
-  }
-
-  for (const currentOutputRoot of outputRoots) {
+  for (const currentOutputRoot of [outputRoot]) {
     if (!existsSync(currentOutputRoot)) {
       continue;
     }
@@ -1051,7 +1024,6 @@ export function findActiveSessionAnalysisRun({
   sessionId,
   directory,
   analysisConfig,
-  metaDir,
   targetId
 }: {
   provider?: any;
@@ -1059,7 +1031,6 @@ export function findActiveSessionAnalysisRun({
   sessionId?: any;
   directory?: any;
   analysisConfig?: any;
-  metaDir?: any;
   targetId?: any;
 }) {
   const target = String(targetId || "").trim();
@@ -1070,7 +1041,6 @@ export function findActiveSessionAnalysisRun({
     sessionId,
     directory,
     analysisConfig,
-    metaDir,
     limit: 50
   }).find((run) => run.active && run.target === target) || null;
 }
@@ -1091,7 +1061,6 @@ export function prepareSessionAnalysis({
   provider,
   sessionId,
   analysisConfig,
-  metaDir,
   configPath = "",
   targetId = "",
   runtimeExtensionIds = null
@@ -1099,7 +1068,6 @@ export function prepareSessionAnalysis({
   provider: any;
   sessionId: any;
   analysisConfig: any;
-  metaDir: any;
   configPath?: string;
   targetId?: string;
   runtimeExtensionIds?: any;
@@ -1117,7 +1085,7 @@ export function prepareSessionAnalysis({
     throw new Error("Session has no valid project directory");
   }
 
-  const outputRoot = getAnalysisOutputRoot(session.directory, analysisConfig, metaDir);
+  const outputRoot = getAnalysisOutputRoot(session.directory, analysisConfig);
   if (!outputRoot) throw new Error("Failed to determine analysis output directory");
   mkdirSync(outputRoot, { recursive: true });
   ensureProjectAnalysisGitignore(outputRoot, projectPath);
@@ -1138,8 +1106,7 @@ export function prepareSessionAnalysis({
     runtimeEnvironment,
     [...new Set([
       outputRoot,
-      getProjectAnalysisOutputRoot(projectPath),
-      getLegacyProjectAnalysisOutputRoot(projectPath)
+      getProjectAnalysisOutputRoot(projectPath)
     ].map((root) => path.resolve(root)))],
     runtimeExtensionIds
   );
@@ -1386,13 +1353,11 @@ export function prepareAnalysisImplementation({
   provider,
   sessionId,
   analysisConfig,
-  metaDir,
   runId
 }: {
   provider: any;
   sessionId: any;
   analysisConfig: any;
-  metaDir: any;
   runId: any;
 }) {
   const settings = resolveAnalysisImplementationSettings(provider, analysisConfig);
@@ -1413,7 +1378,6 @@ export function prepareAnalysisImplementation({
     sessionId,
     directory: session.directory,
     analysisConfig,
-    metaDir,
     limit: 50
   });
   const run = runs.find((item) => item.runId === runId);
@@ -1535,7 +1499,7 @@ export function prepareAnalysisImplementation({
 
 export function buildPowerShellAnalysisArgs(powershell: any, shellArgs = ["-NoExit", "-NoLogo"]) {
   const script = [
-    "$json=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:OPENSESSIONVIEWER_ANALYSIS_SPEC))",
+    "$json=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:AGENTSESSION_ANALYSIS_SPEC))",
     "$spec=$json|ConvertFrom-Json",
     "Set-Location -LiteralPath $spec.cwd",
     "$diagnosticsDir=Split-Path -LiteralPath $spec.stdoutPath -Parent",
@@ -1567,7 +1531,7 @@ export function buildPowerShellAnalysisArgs(powershell: any, shellArgs = ["-NoEx
 
 export function buildPowerShellImplementationArgs(powershell: any, shellArgs = ["-NoExit", "-NoLogo"]) {
   const script = [
-    "$json=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:OPENSESSIONVIEWER_IMPLEMENTATION_SPEC))",
+    "$json=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:AGENTSESSION_IMPLEMENTATION_SPEC))",
     "$spec=$json|ConvertFrom-Json",
     "Set-Location -LiteralPath $spec.cwd",
     "$agentExitCode=0",
@@ -1615,7 +1579,7 @@ export async function launchSessionAnalysis(run: any, fallbackShell = null) {
     cwd: run.command.cwd,
     terminal: launchHost.terminal,
     powershellArgs: buildPowerShellAnalysisArgs(launchHost.powershell, launchHost.shellArgs),
-    env: { OPENSESSIONVIEWER_ANALYSIS_SPEC: payload }
+    env: { AGENTSESSION_ANALYSIS_SPEC: payload }
   });
 
   const launched = {
@@ -1647,7 +1611,7 @@ export async function launchAnalysisImplementation(run: any, fallbackShell = nul
     cwd: run.command.cwd,
     terminal: launchHost.terminal,
     powershellArgs: buildPowerShellImplementationArgs(launchHost.powershell, launchHost.shellArgs),
-    env: { OPENSESSIONVIEWER_IMPLEMENTATION_SPEC: payload }
+    env: { AGENTSESSION_IMPLEMENTATION_SPEC: payload }
   });
 
   const launched = {

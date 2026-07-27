@@ -96,9 +96,7 @@ export function mergeAnalysisTarget(base: any, override: any) {
     : DEFAULT_ANALYSIS_TARGET.artifactFiles;
   const defaultFileExtensions = Array.isArray(left.fileExtensions)
     ? left.fileExtensions
-    : Array.isArray(left.extensions)
-      ? left.extensions
-      : DEFAULT_ANALYSIS_TARGET.fileExtensions;
+    : DEFAULT_ANALYSIS_TARGET.fileExtensions;
   return {
     ...left,
     ...right,
@@ -110,9 +108,7 @@ export function mergeAnalysisTarget(base: any, override: any) {
       : defaultFiles,
     fileExtensions: Array.isArray(right.fileExtensions)
       ? right.fileExtensions
-      : Array.isArray(right.extensions)
-        ? right.extensions
-        : defaultFileExtensions
+      : defaultFileExtensions
   };
 }
 

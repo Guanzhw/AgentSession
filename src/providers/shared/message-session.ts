@@ -9,6 +9,7 @@ import { asNumber } from "./parser.js";
 import { buildFlowTreeFromContainer } from "./flow-tree.js";
 import { treeToContainer } from "./session-container.js";
 import type { SessionMetricsView } from "./session-metrics.js";
+import { aggregateSessionTreeTokenUsage } from "./session-usage.js";
 import type {
   SessionMessageNode,
   SessionPartNode,
@@ -221,11 +222,9 @@ export function buildMessageSessionViewsFromTree(tree: SessionTree, loop: AgentL
       reasoningTokens: tree.metrics.reasoningTokens,
       cacheReadTokens: tree.metrics.cacheReadTokens,
       cacheWriteTokens: tree.metrics.cacheWriteTokens,
-      totalTokens: tree.metrics.inputTokens
-        + tree.metrics.outputTokens
-        + tree.metrics.reasoningTokens
-        + tree.metrics.cacheReadTokens
-        + tree.metrics.cacheWriteTokens,
+      // Provider totals remain authoritative when a transcript cannot break a
+      // request into all components (for example a legacy Codex token event).
+      totalTokens: aggregateSessionTreeTokenUsage(tree).total || 0,
       cost: 0,
       runtimeMs: tree.metrics.runtimeMs
     },

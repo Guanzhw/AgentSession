@@ -7,7 +7,7 @@ import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 
 const temp = mkdtempSync(path.join(os.tmpdir(), "agentsession-mcp-"));
-process.env.OPENSESSIONVIEWER_META_PATH = path.join(temp, "meta.db");
+process.env.AGENTSESSION_META_PATH = path.join(temp, "meta.db");
 
 const { initConfig, parseArgs, validateUserConfig } = await import("../dist/src/config.js");
 initConfig([]);
@@ -487,22 +487,61 @@ test("MCP configuration rejects unsafe limits", () => {
   ]);
 });
 
-test("AgentSession configuration names take precedence while legacy names remain supported", () => {
+test("AgentSession configuration rejects retired analysis extension fields", () => {
+  assert.deepEqual(validateUserConfig({
+    analysis: { targets: { skills: { extensions: [".md"] } } }
+  }), [
+    "analysis.targets.skills.extensions is not supported; use fileExtensions."
+  ]);
+});
+
+test("AgentSession configuration ignores retired OpenSessionViewer variables", () => {
   const currentConfig = path.join(temp, "current-config.json");
   const legacyConfig = path.join(temp, "legacy-config.json");
   writeFileSync(currentConfig, JSON.stringify({ mcp: { searchLimit: 7 } }));
   writeFileSync(legacyConfig, JSON.stringify({ mcp: { searchLimit: 9 } }));
   const previousCurrent = process.env.AGENTSESSION_CONFIG;
   const previousLegacy = process.env.OPENSESSIONVIEWER_CONFIG;
+  const previousMetaPath = process.env.AGENTSESSION_META_PATH;
+  const previousAppData = process.env.APPDATA;
   process.env.AGENTSESSION_CONFIG = currentConfig;
   process.env.OPENSESSIONVIEWER_CONFIG = legacyConfig;
+  delete process.env.AGENTSESSION_META_PATH;
   try {
     assert.equal(parseArgs([]).mcp.searchLimit, 7);
+    delete process.env.AGENTSESSION_CONFIG;
+    process.env.APPDATA = path.join(temp, "isolated-appdata");
+    const ignoredLegacy = parseArgs([]);
+    assert.equal(ignoredLegacy.mcp.searchLimit, 20);
+    assert.match(ignoredLegacy.configPath, /agentsession[\\/]config\.json$/);
   } finally {
     if (previousCurrent === undefined) delete process.env.AGENTSESSION_CONFIG;
     else process.env.AGENTSESSION_CONFIG = previousCurrent;
     if (previousLegacy === undefined) delete process.env.OPENSESSIONVIEWER_CONFIG;
     else process.env.OPENSESSIONVIEWER_CONFIG = previousLegacy;
+    if (previousMetaPath === undefined) delete process.env.AGENTSESSION_META_PATH;
+    else process.env.AGENTSESSION_META_PATH = previousMetaPath;
+    if (previousAppData === undefined) delete process.env.APPDATA;
+    else process.env.APPDATA = previousAppData;
+  }
+});
+
+test("AgentSession metadata DB path also scopes the default configuration", () => {
+  const metaPath = path.join(temp, "isolated-config", "viewer-meta.db");
+  const previousConfig = process.env.AGENTSESSION_CONFIG;
+  const previousMetaPath = process.env.AGENTSESSION_META_PATH;
+  process.env.AGENTSESSION_META_PATH = metaPath;
+  delete process.env.AGENTSESSION_CONFIG;
+  try {
+    const config = parseArgs([]);
+    assert.equal(config.metaPath, metaPath);
+    assert.equal(config.metaDir, path.dirname(metaPath));
+    assert.equal(config.configPath, path.join(path.dirname(metaPath), "config.json"));
+  } finally {
+    if (previousConfig === undefined) delete process.env.AGENTSESSION_CONFIG;
+    else process.env.AGENTSESSION_CONFIG = previousConfig;
+    if (previousMetaPath === undefined) delete process.env.AGENTSESSION_META_PATH;
+    else process.env.AGENTSESSION_META_PATH = previousMetaPath;
   }
 });
 

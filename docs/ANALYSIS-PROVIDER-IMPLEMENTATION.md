@@ -510,7 +510,7 @@ target-level `includeRawSnapshots` is true.
 
 Keep `src/analysis-layout.ts`, validators, tools, downloads, tests, and docs in
 sync if this layout changes. Legacy flat runs and legacy
-`.opensessionviewer/analysis` project runs must remain discoverable.
+Only `.agentsession/analysis` project runs are discovered.
 
 ### 8. Keep the Analyzer Interface File-First
 

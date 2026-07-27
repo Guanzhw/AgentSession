@@ -1,10 +1,8 @@
 # AgentSession Development Guide
 
 This file is the repository-level source of truth for coding agents and
-contributors working on AgentSession. The runtime still accepts historical
-OpenSessionViewer configuration names for compatibility. Prefer AgentSession
-names in new public surfaces and preserve the legacy names unless a change
-includes a compatibility and migration plan.
+contributors working on AgentSession. AgentSession names are the only supported
+public configuration and runtime interface.
 
 ## Project Summary
 
@@ -154,7 +152,7 @@ dist/                            generated build output; never edit directly
 packages/
   agentsession/                  publishable Viewer package assembled from dist
   agentsession-mcp/              publishable read-only stdio MCP server
-tmp/, logs/, .opensessionviewer/ runtime and QA artifacts; do not commit
+tmp/, logs/, .agentsession/ runtime and QA artifacts; do not commit
 ```
 
 ## Source And Build Conventions
@@ -231,7 +229,6 @@ because provider capabilities differ.
   implemented.
 - The default config file is `config.json` under the metadata directory;
 `AGENTSESSION_CONFIG` and `--config` select another file.
-`OPENSESSIONVIEWER_CONFIG` remains a compatibility fallback.
 - `analysis`, `resumeCommands`, and `resumeShell` can be applied to a running
   server through the settings API. Data directories, port, and other
   startup-owned settings require restart.
@@ -266,13 +263,12 @@ The analysis lifecycle is:
 7. Surface only the validator-derived state and outputs in the UI.
 
 Unconfigured runs belong under
-`<project>/.opensessionviewer/analysis` so project-scoped analyzers can access
-their evidence, helper, and outputs. Continue discovering legacy runs under the
-viewer metadata directory. Explicit absolute output directories remain valid,
+`<project>/.agentsession/analysis` so project-scoped analyzers can access
+their evidence, helper, and outputs. Explicit absolute output directories remain valid,
 but the configured analyzer environment must be able to access them.
 
-Keep current and legacy layout resolution in `src/analysis-layout.ts` when
-moving run files. Any new analyzer output must have:
+Keep the categorized layout in `src/analysis-layout.ts`. Any new analyzer
+output must have:
 
 - a documented path in the manifest/layout,
 - path-containment handling,
@@ -397,12 +393,12 @@ dashboard, search, statistics, settings, detail rendering, exports, flow, and
 terminal-launch-disabled behavior.
 
 ```powershell
-$env:OPENSESSIONVIEWER_QA_BASE_URL = 'http://127.0.0.1:3456'
-$env:OPENSESSIONVIEWER_QA_SESSION_ID = '<real-session-id>'
+$env:AGENTSESSION_QA_BASE_URL = 'http://127.0.0.1:3456'
+$env:AGENTSESSION_QA_SESSION_ID = '<real-session-id>'
 npm run qa:e2e
 ```
 
-Set `OPENSESSIONVIEWER_QA_SESSION_ID` to a real OpenCode session that includes
+Set `AGENTSESSION_QA_SESSION_ID` to a real OpenCode session that includes
 reasoning, tools, tokens, and subagent activity. It is intentionally required:
 the repository does not embed a machine-specific session ID.
 
@@ -410,7 +406,7 @@ On Windows, `npm run qa:e2e` calls `scripts/qa-agent-browser.cmd`, which selects
 Git Bash or Cygwin Bash. If Bash is elsewhere:
 
 ```powershell
-$env:OPENSESSIONVIEWER_QA_BASH_PATH = 'C:\path\to\bash.exe'
+$env:AGENTSESSION_QA_BASH_PATH = 'C:\path\to\bash.exe'
 ```
 
 The script uses `tmp/npm-cache` to avoid global npm cache permission issues and
@@ -423,7 +419,7 @@ retried once before being classified as a product regression.
 - Preserve unrelated user changes. Do not reset or rewrite files outside the
   requested scope.
 - Do not commit generated `dist/`, runtime databases, logs, screenshots, QA
-  output, or `.opensessionviewer/` analysis runs.
+  output, or `.agentsession/` analysis runs.
 - Keep `README.md`, `README.en.md`, CLI help, settings labels, and examples in
   sync when changing user-visible behavior.
 - `origin` and the publish remote may not refer to the same repository. Inspect

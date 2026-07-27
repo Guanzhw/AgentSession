@@ -376,7 +376,7 @@ function findMarkdownAgents(dir: string) {
 function wildcardToRegExp(pattern: string) {
   const normalized = pattern.replaceAll("\\", "/");
   const escaped = normalized.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-  const doubleStar = "__OPENSESSIONVIEWER_DOUBLE_STAR__";
+  const doubleStar = "__AGENTSESSION_DOUBLE_STAR__";
   return new RegExp(`^${escaped.replaceAll("**", doubleStar).replaceAll("*", "[^/]*").replaceAll(doubleStar, ".*")}$`, "i");
 }
 
@@ -549,7 +549,7 @@ export function buildOpenCodeSystemPrompts(sessionId: string, dbPath: string | u
     section("System Instruction Files", "OpenCode loads global/project AGENTS.md or CLAUDE.md plus configured instruction files before the first user message.", prompts.instructionPaths.map((file) => (
       item("instruction", path.basename(file), readText(file), file, fs.statSync(file).mtimeMs)
     ))),
-    section("Configured Remote Instructions", "Remote instruction URLs are listed but not fetched by OpenSessionViewer.", prompts.remoteInstructions.map((url) => (
+    section("Configured Remote Instructions", "Remote instruction URLs are listed but not fetched by AgentSession.", prompts.remoteInstructions.map((url) => (
       item("remote-instruction", url, "Configured remote instruction URL.", url, session?.time_created)
     ))),
     section("Prompt Config Sources", "Current OpenCode config files and agent markdown files used to resolve prompt/instruction sources.", [
