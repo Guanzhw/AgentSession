@@ -7,6 +7,7 @@ import {
   extractMeta,
   recordsToMessages,
   codexOwnedTokenUsageRecords,
+  codexUsageToTokens,
   resolveCodexInheritedContext,
   countCodexRenderedMessages
 } from "./parser.js";
@@ -81,22 +82,44 @@ const sessionFiles = createSessionFileStore({
   }
 });
 
-function resolveEntry(entry: { session: RawSession; messages: Message[] }) {
+function parentEntryFor(entry: { session: RawSession }) {
   const parent = entry.session.parentId
     ? sessionFiles.get(String(entry.session.parentId))
     : null;
-  const resolved = resolveCodexInheritedContext(entry.messages, parent?.messages || []);
-  const inheritedContext = entry.session.metadata?.inheritedContext;
+  return parent && String(parent.session.id) !== String(entry.session.id)
+    ? parent
+    : null;
+}
+
+function ownedTokenCount(records: any[], parentRecords: any[] = []) {
+  return codexOwnedTokenUsageRecords(records, parentRecords).reduce(
+    (total, record) => total + (codexUsageToTokens(record.payload?.info?.last_token_usage)?.total || 0),
+    0
+  );
+}
+
+function resolveEntry(entry: { session: RawSession; messages: Message[]; records: any[] }) {
+  const parent = parentEntryFor(entry);
+  const parentRecords = parent?.records || [];
+  const sourceMessages = parent
+    ? recordsToMessages(entry.records, entry.session.id, parentRecords)
+    : entry.messages;
+  const sourceSession = parent
+    ? extractMeta(entry.records, entry.session.id, sourceMessages, parentRecords)
+    : entry.session;
+  const resolved = resolveCodexInheritedContext(sourceMessages, parent?.messages || []);
+  const inheritedContext = sourceSession.metadata?.inheritedContext;
   const session = {
-    ...entry.session,
+    ...sourceSession,
+    tokenCount: ownedTokenCount(entry.records, parentRecords) || null,
     messageCount: countCodexRenderedMessages(resolved.messages),
     metadata: inheritedContext ? {
-      ...entry.session.metadata,
+      ...sourceSession.metadata,
       inheritedContext: {
         ...inheritedContext,
         excludedUserMessages: resolved.excludedUserMessages
       }
-    } : entry.session.metadata
+    } : sourceSession.metadata
   };
   return { session, messages: resolved.messages };
 }
@@ -145,10 +168,23 @@ const codexTokenMapping: TokenFieldMapping = {
 };
 
 const getCodexTokenStats = createIncrementalTokenStats(
-  () => sessionFiles.getFileSignatures(),
+  () => {
+    const signatures = sessionFiles.getFileSignatures();
+    const signatureByPath = new Map(signatures.map(({ filePath, signature }) => [filePath, signature]));
+    return signatures.map((file) => {
+      const entry = sessionFiles.getByFilePath(file.filePath);
+      const parent = entry ? parentEntryFor(entry) : null;
+      return {
+        ...file,
+        // A child token prefix depends on its declared parent's records too.
+        signature: `${file.signature}|parent:${parent ? signatureByPath.get(parent.filePath) || "missing" : "none"}`
+      };
+    });
+  },
   (filePath) => {
-    const records = sessionFiles.getByFilePath(filePath)?.records || [];
-    return codexOwnedTokenUsageRecords(records);
+    const entry = sessionFiles.getByFilePath(filePath);
+    const parent = entry ? parentEntryFor(entry) : null;
+    return codexOwnedTokenUsageRecords(entry?.records || [], parent?.records || []);
   },
   codexTokenMapping,
 );

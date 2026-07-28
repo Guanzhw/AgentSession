@@ -196,6 +196,54 @@ test("Codex file cache exposes shared Agent Loop trace and prompt evidence", asy
   }
 });
 
+test("Codex token stats exclude parent usage copied by a legacy fork without NEW_TASK", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "opensession-codex-parent-usage-"));
+  try {
+    const sessions = path.join(root, "sessions", "2026", "07", "20");
+    mkdirSync(sessions, { recursive: true });
+    const token = (timestamp, total) => ({
+      timestamp,
+      type: "event_msg",
+      payload: { type: "token_count", info: { last_token_usage: { input_tokens: total - 10, output_tokens: 10, total_tokens: total } } }
+    });
+    const parent = [
+      { timestamp: "2026-07-20T00:00:00.000Z", type: "session_meta", payload: { id: "parent" } },
+      token("2026-07-20T00:00:01.000Z", 10),
+      token("2026-07-20T00:00:02.000Z", 20),
+      token("2026-07-20T00:00:03.000Z", 30)
+    ];
+    const child = [
+      { timestamp: "2026-07-20T01:00:00.000Z", type: "session_meta", payload: { id: "child", parent_thread_id: "parent" } },
+      token("2026-07-20T01:00:01.000Z", 20),
+      token("2026-07-20T01:00:02.000Z", 30),
+      { timestamp: "2026-07-20T01:00:03.000Z", type: "event_msg", payload: { type: "agent_message", message: "child-owned output" } },
+      token("2026-07-20T01:00:04.000Z", 40)
+    ];
+    const parentFile = path.join(sessions, "rollout-parent.jsonl");
+    writeJsonLines(parentFile, parent);
+    writeJsonLines(path.join(sessions, "rollout-child.jsonl"), child);
+    initConfig(["--codex-dir", root]);
+    await sleep(1050);
+
+    assert.equal(codex.getSession("child")?.tokenCount, 40);
+    const day = codex.getTokenStats(30).find((item) => item.day === "2026-07-20");
+    assert.deepEqual(day && { total: day.totalTokens, events: day.messageCount }, { total: 100, events: 4 });
+
+    // Parent changes affect the child's ownership decision. Keep the parent
+    // total unchanged while breaking the copied sequence to prove that the
+    // composite parent signature invalidates the child's cached daily bucket.
+    writeJsonLines(parentFile, [parent[0], parent[1], parent[3], parent[2]]);
+    await sleep(1050);
+    const afterParentChange = codex.getTokenStats(30).find((item) => item.day === "2026-07-20");
+    assert.deepEqual(
+      afterParentChange && { total: afterParentChange.totalTokens, events: afterParentChange.messageCount },
+      { total: 150, events: 6 }
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function copilotRecords(marker) {
   return [
     {

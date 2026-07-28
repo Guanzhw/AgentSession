@@ -1173,6 +1173,81 @@ test("Codex keeps source-owned token requests when legacy events lack response i
   assert.equal(views.flow.summary.totalTokens, 120);
 });
 
+test("Codex excludes an exact parent token prefix when an older fork omits NEW_TASK", () => {
+  const usage = (total) => ({ input_tokens: total - 10, output_tokens: 10, total_tokens: total });
+  const parent = [
+    { timestamp: "2026-07-20T00:00:00.000Z", type: "session_meta", payload: { id: "parent" } },
+    { timestamp: "2026-07-20T00:00:01.000Z", type: "event_msg", payload: { type: "token_count", info: { last_token_usage: usage(10) } } },
+    { timestamp: "2026-07-20T00:00:02.000Z", type: "event_msg", payload: { type: "token_count", info: { last_token_usage: usage(20) } } },
+    { timestamp: "2026-07-20T00:00:03.000Z", type: "event_msg", payload: { type: "token_count", info: { last_token_usage: usage(30) } } }
+  ];
+  const child = [
+    { timestamp: "2026-07-20T01:00:00.000Z", type: "session_meta", payload: { id: "child", parent_thread_id: "parent" } },
+    // This copied prefix begins later in the parent, so timestamps cannot be
+    // used to identify it. The complete request usage snapshots can.
+    { timestamp: "2026-07-20T01:00:01.000Z", type: "event_msg", payload: { type: "token_count", info: { last_token_usage: usage(20) } } },
+    { timestamp: "2026-07-20T01:00:02.000Z", type: "event_msg", payload: { type: "token_count", info: { last_token_usage: usage(30) } } },
+    { timestamp: "2026-07-20T01:00:03.000Z", type: "event_msg", payload: { type: "agent_message", message: "Child-owned result" } },
+    { timestamp: "2026-07-20T01:00:04.000Z", type: "event_msg", payload: { type: "token_count", info: { last_token_usage: usage(40) } } }
+  ];
+
+  assert.deepEqual(
+    codexOwnedTokenUsageRecords(child, parent).map((record) => record.payload.info.last_token_usage.total_tokens),
+    [40]
+  );
+  assert.equal(extractCodexMeta(child, "child", undefined, parent).tokenCount, 40);
+  const childMessages = codexRecordsToMessages(child, "child", parent);
+  assert.equal(childMessages.find((message) => message.content === "Child-owned result")?.tokens?.total, 40);
+
+  const singleCoincidence = child.filter((_, index) => index !== 2);
+  assert.deepEqual(
+    codexOwnedTokenUsageRecords(singleCoincidence, parent).map((record) => record.payload.info.last_token_usage.total_tokens),
+    [20, 40]
+  );
+});
+
+test("Codex ignores a repeated adjacent token snapshot without a cumulative advance", () => {
+  const usage = (total) => ({ input_tokens: total - 10, output_tokens: 10, total_tokens: total });
+  const records = [
+    { timestamp: "2026-07-20T00:00:00.000Z", type: "session_meta", payload: { id: "duplicate-usage" } },
+    { timestamp: "2026-07-20T00:00:01.000Z", type: "event_msg", payload: { type: "agent_message", message: "Working" } },
+    {
+      timestamp: "2026-07-20T00:00:02.000Z",
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          last_token_usage: { ...usage(40), cache_write_input_tokens: 0 },
+          total_token_usage: { ...usage(40), cache_write_input_tokens: 0 }
+        }
+      }
+    },
+    {
+      timestamp: "2026-07-20T00:00:02.500Z",
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: { last_token_usage: usage(40), total_token_usage: usage(40) }
+      }
+    },
+    {
+      timestamp: "2026-07-20T00:00:03.000Z",
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: { last_token_usage: usage(50), total_token_usage: usage(90) }
+      }
+    }
+  ];
+
+  assert.deepEqual(
+    codexOwnedTokenUsageRecords(records).map((record) => record.payload.info.last_token_usage.total_tokens),
+    [40, 50]
+  );
+  assert.equal(extractCodexMeta(records, "duplicate-usage").tokenCount, 90);
+  assert.equal(codexRecordsToMessages(records, "duplicate-usage")[0]?.tokens?.total, 90);
+});
+
 test("Codex daily stats make cached input and reasoning mutually exclusive", () => {
   assert.deepEqual(codexDailyTokenComponents({
     input_tokens: 53123,

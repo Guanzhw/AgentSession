@@ -27,10 +27,17 @@ function responseText(payload: any) {
 }
 
 type CodexMessageProvenance = "session" | "inherited-parent-context-candidate";
-type CodexRecordProvenance = "session" | "inherited-parent-context";
+type CodexRecordProvenance = "session" | "inherited-parent-context" | "duplicate-token-usage";
 
 function primarySessionMeta(records: any[]) {
   return records.find((record: any) => record.type === "session_meta")?.payload || {};
+}
+
+function codexParentSessionId(primaryMeta: any) {
+  return primaryMeta.parent_thread_id
+    || primaryMeta.forked_from_id
+    || primaryMeta.source?.subagent?.thread_spawn?.parent_thread_id
+    || null;
 }
 
 export function extractCodexSessionId(records: any[], fallbackId: string) {
@@ -78,19 +85,108 @@ function subagentTaskMessage(payload: any) {
   };
 }
 
+function isCodexTokenUsageRecord(record: any) {
+  return record.type === "event_msg" && record.payload?.type === "token_count";
+}
+
+const tokenUsageFingerprintFields = [
+  "input_tokens",
+  "cached_input_tokens",
+  "cache_write_input_tokens",
+  "output_tokens",
+  "reasoning_output_tokens",
+  "total_tokens"
+];
+
+function tokenUsageFingerprint(usage: any) {
+  if (!usage || typeof usage !== "object") return null;
+  if (!tokenUsageFingerprintFields.some((field) => usage[field] !== undefined && usage[field] !== null)) {
+    return null;
+  }
+  // Codex omits zero-valued fields in some replay records. Normalize those
+  // omissions so they still compare as the same accounting snapshot.
+  return tokenUsageFingerprintFields.map((field) => asNumber(usage[field]));
+}
+
+function codexTokenUsageRecordFingerprint(record: any) {
+  if (!isCodexTokenUsageRecord(record)) return null;
+  const info = record.payload?.info || {};
+  const last = tokenUsageFingerprint(info.last_token_usage);
+  if (!last) return null;
+  return JSON.stringify({
+    last,
+    total: tokenUsageFingerprint(info.total_token_usage)
+  });
+}
+
+/**
+ * Some older Codex forks omit the NEW_TASK envelope but still begin with a
+ * byte-for-byte replay of the parent request usage. Match only a leading run
+ * of at least two complete usage snapshots against the declared parent; a
+ * single matching request is too weak to prove inherited context.
+ */
+function copiedParentTokenPrefix(records: any[], parentRecords: any[], parentId: any, hasTaskEnvelope: boolean) {
+  if (!parentId || hasTaskEnvelope || !parentRecords.length) return new Set<any>();
+
+  const childTokens = records.filter(isCodexTokenUsageRecord);
+  const parentTokens = parentRecords.filter(isCodexTokenUsageRecord);
+  const childFingerprints = childTokens.map(codexTokenUsageRecordFingerprint);
+  const parentFingerprints = parentTokens.map(codexTokenUsageRecordFingerprint);
+  if (childFingerprints.length < 2 || childFingerprints.some((value) => value === null)) {
+    return new Set<any>();
+  }
+
+  let longestMatch = 0;
+  for (let parentStart = 0; parentStart < parentFingerprints.length; parentStart += 1) {
+    let length = 0;
+    while (
+      length < childFingerprints.length
+      && parentStart + length < parentFingerprints.length
+      && childFingerprints[length] === parentFingerprints[parentStart + length]
+    ) {
+      length += 1;
+    }
+    longestMatch = Math.max(longestMatch, length);
+  }
+
+  return longestMatch >= 2
+    ? new Set(childTokens.slice(0, longestMatch))
+    : new Set<any>();
+}
+
+/** A repeated adjacent usage event with the same cumulative snapshot cannot
+ * represent another model request. Codex occasionally persists this replay
+ * while resuming a rollout, so retain the first event only. */
+function duplicateCodexTokenUsageRecords(records: any[], provenance: Map<any, CodexRecordProvenance>) {
+  const duplicates = new Set<any>();
+  for (let index = 1; index < records.length; index += 1) {
+    const previous = records[index - 1];
+    const current = records[index];
+    if (
+      !isCodexTokenUsageRecord(previous)
+      || !isCodexTokenUsageRecord(current)
+      || provenance.get(previous) !== "session"
+      || provenance.get(current) !== "session"
+    ) continue;
+    const previousFingerprint = codexTokenUsageRecordFingerprint(previous);
+    if (previousFingerprint && previousFingerprint === codexTokenUsageRecordFingerprint(current)) {
+      duplicates.add(current);
+    }
+  }
+  return duplicates;
+}
+
 /**
  * Codex subagent rollouts begin with a copied parent-thread segment. That
  * segment ends at the child-specific NEW_TASK envelope; everything before it
  * belongs to the parent even though it lives in the child JSONL file.
  */
-export function classifyCodexRecordProvenance(records: any[]) {
+export function classifyCodexRecordProvenance(records: any[], parentRecords: any[] = []) {
   const primaryMeta = primarySessionMeta(records);
-  const parentId = primaryMeta.parent_thread_id
-    || primaryMeta.forked_from_id
-    || primaryMeta.source?.subagent?.thread_spawn?.parent_thread_id
-    || null;
+  const parentId = codexParentSessionId(primaryMeta);
   const provenance = new Map<any, CodexRecordProvenance>();
   const hasTaskEnvelope = records.some((record) => isSubagentTaskEnvelope(record, primaryMeta));
+  const inheritedTokenPrefix = copiedParentTokenPrefix(records, parentRecords, parentId, hasTaskEnvelope);
   let insideInheritedParentContext = Boolean(parentId && hasTaskEnvelope);
 
   for (const record of records) {
@@ -101,30 +197,32 @@ export function classifyCodexRecordProvenance(records: any[]) {
     }
     provenance.set(record, insideInheritedParentContext ? "inherited-parent-context" : "session");
   }
+  for (const record of inheritedTokenPrefix) {
+    provenance.set(record, "inherited-parent-context");
+  }
+  for (const record of duplicateCodexTokenUsageRecords(records, provenance)) {
+    provenance.set(record, "duplicate-token-usage");
+  }
   return provenance;
 }
 
 /** Token events in a subagent transcript can begin with a copied parent
  * segment. Keep only requests that are owned by the transcript's session. */
-export function codexOwnedTokenUsageRecords(records: any[]) {
-  const provenance = classifyCodexRecordProvenance(records);
+export function codexOwnedTokenUsageRecords(records: any[], parentRecords: any[] = []) {
+  const provenance = classifyCodexRecordProvenance(records, parentRecords);
   return records.filter((record) => (
-    record.type === "event_msg"
-    && record.payload?.type === "token_count"
-    && provenance.get(record) !== "inherited-parent-context"
+    isCodexTokenUsageRecord(record)
+    && provenance.get(record) === "session"
   ));
 }
 
 /** Mark copied parent user records as candidates. The adapter confirms the
  * exact duplicate against the parent before it hides it. */
-export function classifyCodexMessageProvenance(records: any[]) {
+export function classifyCodexMessageProvenance(records: any[], parentRecords: any[] = []) {
   const primaryMeta = primarySessionMeta(records);
-  const parentId = primaryMeta.parent_thread_id
-    || primaryMeta.forked_from_id
-    || primaryMeta.source?.subagent?.thread_spawn?.parent_thread_id
-    || null;
+  const parentId = codexParentSessionId(primaryMeta);
   const hasTaskEnvelope = records.some((record) => isSubagentTaskEnvelope(record, primaryMeta));
-  const recordProvenance = classifyCodexRecordProvenance(records);
+  const recordProvenance = classifyCodexRecordProvenance(records, parentRecords);
   const provenance = new Map<any, CodexMessageProvenance>();
   let childOwnedOutputSeen = false;
   for (const record of records) {
@@ -197,7 +295,7 @@ export function parseSession(filePath: any) {
  * @param {string} fallbackId - Filename-derived session ID
  * @returns {import('../interface.js').RawSession}
  */
-export function extractMeta(records: any, fallbackId: any, normalizedMessages?: Message[]): RawSession {
+export function extractMeta(records: any, fallbackId: any, normalizedMessages?: Message[], parentRecords: any[] = []): RawSession {
   let sessionId = fallbackId;
   let timeCreated = 0;
   let timeUpdated = 0;
@@ -207,8 +305,8 @@ export function extractMeta(records: any, fallbackId: any, normalizedMessages?: 
   let parentId = null;
   let metadata = null;
   let sessionMetaSeen = false;
-  const messageProvenance = classifyCodexMessageProvenance(records);
-  const recordProvenance = classifyCodexRecordProvenance(records);
+  const messageProvenance = classifyCodexMessageProvenance(records, parentRecords);
+  const recordProvenance = classifyCodexRecordProvenance(records, parentRecords);
 
   for (const r of records) {
     const ts = r.timestamp ? new Date(r.timestamp).getTime() : 0;
@@ -249,7 +347,7 @@ export function extractMeta(records: any, fallbackId: any, normalizedMessages?: 
       }
     }
     if (r.type === "event_msg" && r.payload?.type === "token_count") {
-      if (recordProvenance.get(r) === "inherited-parent-context") continue;
+      if (recordProvenance.get(r) !== "session") continue;
       totalTokens += codexUsageToTokens(r.payload.info?.last_token_usage)?.total || 0;
     }
   }
@@ -338,7 +436,7 @@ function appendTokenUsage(target: any, tokens: any, attribution = "direct") {
  * @param {string} sessionId
  * @returns {import('../interface.js').Message[]}
  */
-export function recordsToMessages(records: any, sessionId: any): Message[] {
+export function recordsToMessages(records: any, sessionId: any, parentRecords: any[] = []): Message[] {
   const messages: any[] = [];
   let idx = 0;
   let model = null;
@@ -353,8 +451,8 @@ export function recordsToMessages(records: any, sessionId: any): Message[] {
   const subagentStart = primaryMeta.parent_thread_id || primaryMeta.forked_from_id
     ? new Date(records.find((record: any) => record.type === "session_meta")?.timestamp || 0).getTime()
     : 0;
-  const messageProvenance = classifyCodexMessageProvenance(records);
-  const recordProvenance = classifyCodexRecordProvenance(records);
+  const messageProvenance = classifyCodexMessageProvenance(records, parentRecords);
+  const recordProvenance = classifyCodexRecordProvenance(records, parentRecords);
 
   const currentResponseGroup = () => {
     if (!responseGroup) responseGroup = `${sessionId}:response:${responseIndex++}`;
@@ -364,7 +462,7 @@ export function recordsToMessages(records: any, sessionId: any): Message[] {
   for (const r of records) {
     const ts = r.timestamp ? new Date(r.timestamp).getTime() : 0;
     if (subagentStart && ts && ts < subagentStart) continue;
-    if (recordProvenance.get(r) === "inherited-parent-context") continue;
+    if (recordProvenance.get(r) !== "session") continue;
 
     if (r.type === "session_meta") {
       model = r.payload?.model || r.payload?.model_name || model;
