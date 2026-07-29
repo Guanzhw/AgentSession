@@ -3,8 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 const root = path.resolve(import.meta.dirname, "..");
 const binaryDir = path.resolve(process.argv[2] || path.join(root, "artifacts", "binaries"));
@@ -89,9 +89,15 @@ const transport = new StdioClientTransport({
   args: ["--config", configPath],
   stderr: "pipe"
 });
-const client = new Client({ name: "agentsession-sea-smoke", version: "1.0.0" });
+const client = new Client(
+  { name: "agentsession-sea-smoke", version: "1.0.0" },
+  { versionNegotiation: { mode: { pin: "2026-07-28" } } }
+);
 await client.connect(transport);
 try {
+  if (client.getProtocolEra() !== "modern") {
+    throw new Error("MCP binary did not negotiate protocol 2026-07-28");
+  }
   const tools = await client.listTools();
   const expectedTools = [
     "session_get",

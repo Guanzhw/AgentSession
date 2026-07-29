@@ -47,6 +47,10 @@ The server exposes five read-only tools:
 - `session_get_context`
 - `session_get_event`
 
+It supports both initialization-based MCP clients and stateless `2026-07-28`
+clients over stdio; the five-tool, read-only contract is identical in both
+protocol eras.
+
 Version 1.7 keeps this five-tool contract unchanged, adds Pi, and aligns the MCP
 package with the AgentSession 1.7 provider and session-history implementation.
 

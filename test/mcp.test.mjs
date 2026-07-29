@@ -22,9 +22,8 @@ const {
   installIntoTarget,
   parseInstallerCommand
 } = await import("../packages/agentsession-mcp/dist/installer.js");
-const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
-const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
+const { Client, InMemoryTransport } = await import("@modelcontextprotocol/client");
+const { StdioClientTransport } = await import("@modelcontextprotocol/client/stdio");
 
 function createFixture() {
   const sessions = new Map([
@@ -334,21 +333,33 @@ test("AgentSession-MCP lists exactly five read-only tools over the MCP protocol"
   assert.equal(invalid.isError, true);
 });
 
-test("compiled stdio executable initializes without polluting MCP stdout", async (t) => {
+test("compiled stdio executable serves legacy and 2026-07-28 MCP without polluting stdout", async (t) => {
   const configPath = path.join(temp, "mcp-config.json");
   writeFileSync(configPath, JSON.stringify({ mcp: { searchLimit: 10, timelineLimit: 10, eventMaxChars: 1000, contextWindow: 2 } }));
   const executable = path.join(process.cwd(), "packages", "agentsession-mcp", "dist", "cli.js");
-  const transport = new StdioClientTransport({
+  const createTransport = () => new StdioClientTransport({
     command: process.execPath,
     args: [executable, "--config", configPath],
     stderr: "pipe"
   });
-  const client = new Client({ name: "agentsession-mcp-stdio-test", version: "1.0.0" });
-  await client.connect(transport);
-  t.after(async () => client.close());
-  const tools = await client.listTools();
+
+  const legacyClient = new Client({ name: "agentsession-mcp-legacy-stdio-test", version: "1.0.0" });
+  await legacyClient.connect(createTransport());
+  t.after(async () => legacyClient.close());
+  assert.equal(legacyClient.getProtocolEra(), "legacy");
+  const legacyTools = await legacyClient.listTools();
+  assert.equal(legacyTools.tools.length, 5);
+
+  const modernClient = new Client(
+    { name: "agentsession-mcp-modern-stdio-test", version: "1.0.0" },
+    { versionNegotiation: { mode: { pin: "2026-07-28" } } }
+  );
+  await modernClient.connect(createTransport());
+  t.after(async () => modernClient.close());
+  assert.equal(modernClient.getProtocolEra(), "modern");
+  const tools = await modernClient.listTools();
   assert.equal(tools.tools.length, 5);
-  const search = await client.callTool({ name: "session_search", arguments: { query: "does-not-exist" } });
+  const search = await modernClient.callTool({ name: "session_search", arguments: { query: "does-not-exist" } });
   assert.equal(search.isError, undefined);
 });
 

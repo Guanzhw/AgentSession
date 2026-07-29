@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { initConfig } from "@acetamido/agentsession/config";
 import { createSessionHistoryService } from "@acetamido/agentsession/session-history";
 import { parseInstallerCommand, printInstallerHelp, runInstallerCommand } from "./installer.js";
@@ -57,5 +57,8 @@ for (const diagnostic of diagnostics) {
   }
 }
 
-const server = createSessionHistoryMcpServer(service);
-await server.connect(new StdioServerTransport());
+serveStdio(() => createSessionHistoryMcpServer(service), {
+  onerror(error) {
+    console.error(`[agentsession-mcp] ${error.message}`);
+  }
+});
