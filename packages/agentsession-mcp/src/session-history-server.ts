@@ -6,9 +6,11 @@ import {
   type SessionHistoryService
 } from "@acetamido/agentsession/session-history";
 
-const packageVersion = JSON.parse(
-  readFileSync(new URL("../package.json", import.meta.url), "utf8")
-).version as string;
+declare const __AGENTSESSION_MCP_VERSION__: string | undefined;
+
+const packageVersion = typeof __AGENTSESSION_MCP_VERSION__ === "string"
+  ? __AGENTSESSION_MCP_VERSION__
+  : JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version as string;
 
 const providerSchema = z.enum(["opencode", "claude-code", "codex", "openclaw", "hermes", "copilot", "gemini", "pi"]);
 const sessionRefSchema = z.object({

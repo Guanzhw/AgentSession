@@ -99,6 +99,9 @@ const client = new Client(
 );
 await client.connect(transport);
 try {
+  if (client.getServerVersion()?.version !== packageVersion) {
+    throw new Error("MCP binary server version does not match package version");
+  }
   if (client.getProtocolEra() !== "modern") {
     throw new Error("MCP binary did not negotiate protocol 2026-07-28");
   }

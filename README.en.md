@@ -7,12 +7,13 @@
 ![Node.js >= 22.13.0](https://img.shields.io/badge/node-%3E%3D22.13.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.8.2](https://img.shields.io/badge/version-1.8.2-orange?style=flat-square)
+![v1.8.3](https://img.shields.io/badge/version-1.8.3-orange?style=flat-square)
 
-## What's New in 1.8.2
+## What's New in 1.8.3
 
-- AgentSession MCP now reads its server version from the published package, so
-  protocol handshakes no longer return a stale hard-coded release number.
+- AgentSession MCP npm installs and standalone executables now receive their
+  exact version from the build source, so protocol handshakes no longer return
+  a stale release number.
 - Flow detail inspectors now shrink to their content and stay within the visible
   area near the selected node; long content scrolls internally instead of
   opening at the top of a tall Flow or beneath the fixed navigation bar.

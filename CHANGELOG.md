@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.3 - 2026-08-02
+
+### Fixed
+
+- Injected the release version into the standalone MCP executable while npm
+  installs continue reading their package metadata, keeping protocol version
+  reporting accurate without requiring an external file beside SEA binaries.
+
 ## 1.8.2 - 2026-08-02
 
 ### Fixed

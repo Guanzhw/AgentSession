@@ -11,11 +11,12 @@ if (nodeMajor < 25 || (nodeMajor === 25 && nodeMinor < 5)) {
 const requestedOutDir = process.argv[2] || path.join(root, "artifacts", "binaries");
 const outDir = path.resolve(requestedOutDir);
 mkdirSync(outDir, { recursive: true });
+const version = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).version;
 
 const workDir = path.join(root, "tmp", "sea-build", `${process.platform}-${process.arch}`);
 mkdirSync(workDir, { recursive: true });
 
-const bundle = async (entryPoint, outfile) => {
+const bundle = async (entryPoint, outfile, define = {}) => {
   await build({
     entryPoints: [path.join(root, entryPoint)],
     outfile,
@@ -23,6 +24,7 @@ const bundle = async (entryPoint, outfile) => {
     platform: "node",
     format: "esm",
     target: "node26",
+    define,
     sourcemap: false,
     minify: false,
     legalComments: "none"
@@ -37,7 +39,9 @@ const staticAppAsset = path.join(workDir, "app.js");
 
 await Promise.all([
   bundle("bin/binary.ts", viewerEntry),
-  bundle("packages/agentsession-mcp/src/cli.ts", mcpEntry),
+  bundle("packages/agentsession-mcp/src/cli.ts", mcpEntry, {
+    __AGENTSESSION_MCP_VERSION__: JSON.stringify(version)
+  }),
   bundle("src/analysis-tools.ts", analysisToolAsset),
   bundle("src/analysis-layout.ts", analysisLayoutAsset),
   build({
@@ -95,7 +99,6 @@ for (const target of targets) {
   }
 }
 
-const version = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).version;
 writeFileSync(path.join(outDir, "binary-metadata.json"), JSON.stringify({
   version,
   platform: process.platform,
