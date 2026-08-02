@@ -1,6 +1,6 @@
 {
   "name": "agentsession-workspace",
-  "version": "1.8.1",
+  "version": "1.8.2",
   "description": "AgentSession — a local-first multi-provider viewer and manager for AI coding sessions.",
   "type": "module",
   "private": true,

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.2 - 2026-08-02
+
+### Fixed
+
+- Read the MCP server version from its published package metadata so protocol
+  clients receive the installed release version instead of a stale hard-coded
+  value.
+
 ## 1.8.1 - 2026-08-02
 
 ### Fixed

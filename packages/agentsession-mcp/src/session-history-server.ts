@@ -1,9 +1,14 @@
 import { McpServer } from "@modelcontextprotocol/server";
+import { readFileSync } from "node:fs";
 import { z } from "zod";
 import {
   SessionHistoryError,
   type SessionHistoryService
 } from "@acetamido/agentsession/session-history";
+
+const packageVersion = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8")
+).version as string;
 
 const providerSchema = z.enum(["opencode", "claude-code", "codex", "openclaw", "hermes", "copilot", "gemini", "pi"]);
 const sessionRefSchema = z.object({
@@ -53,7 +58,7 @@ function execute(summary: (result: any) => string, operation: () => unknown) {
 export function createSessionHistoryMcpServer(service: SessionHistoryService) {
   const server = new McpServer({
     name: "AgentSession-MCP",
-    version: "1.7.2"
+    version: packageVersion
   });
   const annotations = {
     readOnlyHint: true,

@@ -302,6 +302,11 @@ test("AgentSession-MCP lists exactly five read-only tools over the MCP protocol"
     await server.close();
   });
 
+  const mcpPackage = JSON.parse(readFileSync(path.join(
+    process.cwd(), "packages", "agentsession-mcp", "package.json"
+  ), "utf8"));
+  assert.equal(client.getServerVersion()?.version, mcpPackage.version);
+
   const tools = await client.listTools();
   assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
     "session_get",
