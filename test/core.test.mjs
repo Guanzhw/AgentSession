@@ -2601,6 +2601,40 @@ test("mobile topbar keeps settings reachable when utility links collapse", () =>
   assert.match(mobileTopbarCss, /\.search-input \{\s*width: 100%;\s*min-width: 0;/);
 });
 
+test("flow inspector shrinks to content, is node-positioned, and stays inside the flow panel", () => {
+  const style = readFileSync(path.join(process.cwd(), "dist", "src", "static", "style.css"), "utf8");
+  const workbench = readFileSync(path.join(process.cwd(), "dist", "src", "static", "app.js"), "utf8");
+
+  // Desktop rule: height must follow content instead of being pinned to the
+  // panel bottom, and long content must be capped so the body scrolls.
+  const desktopInspector = style.match(/\.flow-inspector \{[^}]*\}/)?.[0] ?? "";
+  assert.match(desktopInspector, /bottom: auto/);
+  assert.doesNotMatch(desktopInspector, /bottom: 16px/);
+  assert.match(desktopInspector, /max-height: calc\(100% - 32px\)/);
+
+  // Mobile keeps the full-width inset layout with the desktop cap lifted.
+  const mobileBlockStart = style.indexOf("@media (max-width: 820px)");
+  const nextResponsiveBlock = style.indexOf("@media (max-width: 768px)", mobileBlockStart);
+  assert.notEqual(mobileBlockStart, -1);
+  assert.notEqual(nextResponsiveBlock, -1);
+  const mobileBlock = style.slice(mobileBlockStart, nextResponsiveBlock);
+  assert.match(mobileBlock, /\.flow-inspector \{[\s\S]*?max-height: none;/);
+
+  // The workbench positions the inspector relative to the clicked node,
+  // caps it to the flow viewport, and clears inline offsets on mobile.
+  assert.match(workbench, /const positionFlowInspector = /);
+  assert.match(workbench, /window\.innerWidth <= 820/);
+  assert.match(workbench, /document\.querySelector\("\.topbar"\).*getBoundingClientRect\(\)\.bottom/);
+  assert.match(workbench, /window\.innerHeight - panelRect\.top - gap/);
+  assert.match(workbench, /const visibleHeight = Math\.max\(120, visibleBottom - visibleTop\)/);
+  assert.match(workbench, /flowInspector\.style\.removeProperty\("top"\)/);
+  assert.match(workbench, /flowInspector\.style\.removeProperty\("max-height"\)/);
+  assert.match(workbench, /layoutFlowRows\(\);\s*\n\s*if \(flowInspector\.classList\.contains\("hidden"\)\) return;\s*\n\s*positionFlowInspector\(flowInspector\);/);
+  // Closes and resizes must reset or recompute the inline placement.
+  assert.match(workbench, /closeFlowInspector[\s\S]{0,600}removeProperty\("top"\)/);
+  assert.match(workbench, /resize[\s\S]{0,400}positionFlowInspector\(flowInspector\)/);
+});
+
 test("sqlite session queries exclude viewer-deleted sessions from paging, projects, and search", () => {
   const temp = mkdtempSync(path.join(os.tmpdir(), "agentsession-visible-sessions-"));
   const dbPath = path.join(temp, "sessions.db");

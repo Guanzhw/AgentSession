@@ -7,16 +7,14 @@
 ![Node.js >= 22.13.0](https://img.shields.io/badge/node-%3E%3D22.13.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.8.0](https://img.shields.io/badge/version-1.8.0-orange?style=flat-square)
+![v1.8.1](https://img.shields.io/badge/version-1.8.1-orange?style=flat-square)
 
-## 1.8.0 更新
+## 1.8.1 更新
 
-- OpenClaw 与 Hermes Agent 成为一等 Provider，支持 reasoning、工具结果、
-  Agent Loop 视图、分析、恢复、Token Explorer 与 MCP 查询。
-- Hermes 压缩续接会话会合并为一个逻辑结构化对话，同时保留 canonical segment
-  ID 供直接浏览和导出。
-- GitHub Copilot CLI 调整为历史会话 Provider：既有会话仍可读取，但不再提供恢复、
-  分析和 MCP 安装器集成。
+- Flow 详情弹窗会按内容收缩，并根据点击节点定位在当前可见区域内；长内容在弹窗内部滚动，
+  不再固定在长 Flow 的顶部或被顶部导航遮挡。
+- macOS 测试会在比较分析运行目录前 canonicalize 两侧路径，兼容 `/var` 与
+  `/private/var` 指向同一目录的系统行为。
 
 完整变更见 [CHANGELOG.md](./CHANGELOG.md)。
 

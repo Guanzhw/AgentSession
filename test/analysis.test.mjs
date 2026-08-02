@@ -1008,7 +1008,7 @@ test("analysis run listing ignores retired paths", () => {
     runs.map((run) => run.runId).sort(),
     ["current-run"]
   );
-  assert.equal(runs[0].runDir, runDir);
+  assert.equal(realpathSync(runs[0].runDir), realpathSync(runDir));
 });
 
 test("session analysis requires a provider capability and an enabled target", () => {

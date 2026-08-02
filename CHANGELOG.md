@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.8.1 - 2026-08-02
+
+### Fixed
+
+- Made Flow detail inspectors content-sized and positioned within the visible
+  Flow viewport near the selected node, with internal scrolling for long
+  content and clearance below the fixed top bar.
+- Canonicalized both sides of the analysis run-directory assertion so the
+  macOS `/var` and `/private/var` aliases compare as the same location.
+
 ## 1.8.0 - 2026-08-02
 
 ### Added

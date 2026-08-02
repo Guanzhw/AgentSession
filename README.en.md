@@ -7,16 +7,15 @@
 ![Node.js >= 22.13.0](https://img.shields.io/badge/node-%3E%3D22.13.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.8.0](https://img.shields.io/badge/version-1.8.0-orange?style=flat-square)
+![v1.8.1](https://img.shields.io/badge/version-1.8.1-orange?style=flat-square)
 
-## What's New in 1.8.0
+## What's New in 1.8.1
 
-- OpenClaw and Hermes Agent are now first-class providers with reasoning, tool
-  results, Agent Loop views, analysis, resume, Token Explorer, and MCP access.
-- Hermes compression continuations stay in one logical structured conversation
-  while canonical segment IDs remain available for direct browsing and export.
-- GitHub Copilot CLI is now a legacy history provider: existing sessions remain
-  readable, but resume, analysis, and MCP installer integration are disabled.
+- Flow detail inspectors now shrink to their content and stay within the visible
+  area near the selected node; long content scrolls internally instead of
+  opening at the top of a tall Flow or beneath the fixed navigation bar.
+- macOS tests canonicalize both analysis-run paths before comparison, accepting
+  the system's equivalent `/var` and `/private/var` directory forms.
 
 See [CHANGELOG.md](./CHANGELOG.md) for the complete release notes.
 

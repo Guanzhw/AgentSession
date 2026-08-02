@@ -1456,13 +1456,14 @@ body::before {
 .flow-inspector {
   position: absolute;
   z-index: 20;
-  top: 116px;
+  top: 116px; /* fallback anchor; session-workbench positions relative to the clicked node */
   right: 16px;
-  bottom: 16px;
+  bottom: auto; /* height follows content; capped below so long content scrolls internally */
   display: flex;
   flex-direction: column;
   width: min(640px, 48vw);
   min-width: 360px;
+  max-height: calc(100% - 32px);
   border: 1px solid color-mix(in srgb, var(--trace-agent) 65%, var(--border-color));
   border-radius: 9px;
   background: color-mix(in srgb, var(--bg-primary) 96%, var(--trace-agent));
@@ -5738,6 +5739,7 @@ pre code.hljs {
     left: 8px;
     width: auto;
     min-width: 0;
+    max-height: none;
   }
 
   .session-flow-panel.flow-inspector-open .flow-map-scroll {

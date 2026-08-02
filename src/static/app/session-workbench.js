@@ -422,6 +422,35 @@ if (sessionWorkbench) {
     });
   };
 
+  const positionFlowInspector = (flowInspector) => {
+    const flowPanel = getFlowPanel();
+    if (!flowPanel) return;
+    if (window.innerWidth <= 820) {
+      // Mobile uses the inset CSS layout; drop any desktop inline offsets.
+      flowInspector.style.removeProperty("top");
+      flowInspector.style.removeProperty("max-height");
+      return;
+    }
+    const panelRect = flowPanel.getBoundingClientRect();
+    const topbarBottom = document.querySelector(".topbar")?.getBoundingClientRect().bottom || 0;
+    const gap = 16;
+    const visibleTop = Math.max(gap, topbarBottom - panelRect.top + gap);
+    const visibleBottom = Math.min(panelRect.height - gap, window.innerHeight - panelRect.top - gap);
+    const visibleHeight = Math.max(120, visibleBottom - visibleTop);
+    // Measure true content height with the fallback cap lifted.
+    flowInspector.style.maxHeight = "none";
+    const contentHeight = flowInspector.offsetHeight;
+    const source = flowInspectorOpener;
+    const sourceRect = source instanceof HTMLElement && source.isConnected
+      ? source.getBoundingClientRect()
+      : null;
+    const desiredTop = sourceRect ? sourceRect.top - panelRect.top : visibleTop;
+    const height = Math.min(contentHeight, visibleHeight);
+    const top = Math.max(visibleTop, Math.min(desiredTop, visibleBottom - height));
+    flowInspector.style.top = `${Math.round(top)}px`;
+    flowInspector.style.maxHeight = `${Math.round(visibleBottom - top)}px`;
+  };
+
   const closeFlowInspector = ({ restoreFocus = true } = {}) => {
     const flowInspector = getFlowInspector();
     const flowInspectorBody = getFlowInspectorBody();
@@ -430,6 +459,8 @@ if (sessionWorkbench) {
     if (flowInspector && flowInspectorBody) {
       flowInspector.classList.add("hidden");
       flowInspector.setAttribute("aria-hidden", "true");
+      flowInspector.style.removeProperty("top");
+      flowInspector.style.removeProperty("max-height");
       flowInspectorBody.replaceChildren();
     }
     clearFlowFocus();
@@ -473,6 +504,7 @@ if (sessionWorkbench) {
     requestAnimationFrame(() => {
       layoutFlowRows();
       if (flowInspector.classList.contains("hidden")) return;
+      positionFlowInspector(flowInspector);
       const focusTarget = flowInspector.querySelector("[data-flow-open-conversation]")
         || flowInspector.querySelector("[data-flow-inspector-close]");
       focusTarget?.focus({ preventScroll: true });
@@ -636,7 +668,13 @@ if (sessionWorkbench) {
 
   window.addEventListener("resize", () => {
     clearTimeout(flowResizeTimer);
-    flowResizeTimer = setTimeout(layoutFlowRows, 120);
+    flowResizeTimer = setTimeout(() => {
+      layoutFlowRows();
+      const flowInspector = getFlowInspector();
+      if (flowInspector && !flowInspector.classList.contains("hidden")) {
+        positionFlowInspector(flowInspector);
+      }
+    }, 120);
   });
   bindFlowPanelControls();
 

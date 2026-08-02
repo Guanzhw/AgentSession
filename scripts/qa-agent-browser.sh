@@ -531,7 +531,7 @@ if [[ "$flow_inspector_count" != "1" ]]; then
   exit 1
 fi
 
-flow_preview_triggered="$(read_ab "trigger flow message preview" eval "(() => { const node = document.querySelector('#session-flow-panel [data-flow-preview-target]'); node?.click(); return node ? 'clicked' : 'missing'; })()")"
+flow_preview_triggered="$(read_ab "trigger flow message preview" eval "(() => { const nodes = [...document.querySelectorAll('#session-flow-panel [data-flow-preview-target]')]; const node = nodes.at(-1); node?.scrollIntoView({ block: 'center', inline: 'center' }); node?.click(); return node ? 'clicked' : 'missing'; })()")"
 if [[ "$flow_preview_triggered" != "clicked" && "$flow_preview_triggered" != '"clicked"' ]]; then
   echo "Flow should expose a message node to preview, got $flow_preview_triggered" >&2
   exit 1
@@ -541,6 +541,46 @@ sleep 0.2
 flow_preview_open="$(read_ab "verify flow message preview" eval "(() => { const inspector = document.querySelector('#session-flow-panel [data-flow-inspector]'); return inspector && !inspector.classList.contains('hidden') && inspector.querySelector('.flow-message-preview-turn') && inspector.querySelector('[data-flow-open-conversation]') ? 'open' : 'closed'; })()")"
 if [[ "$flow_preview_open" != "open" && "$flow_preview_open" != '"open"' ]]; then
   echo "Flow message nodes should open a side inspector preview, got $flow_preview_open" >&2
+  exit 1
+fi
+
+flow_inspector_geometry="$(read_ab "verify flow inspector geometry" eval "(() => {
+  if (window.innerWidth <= 820) return { desktop: false };
+  const inspector = document.querySelector('#session-flow-panel [data-flow-inspector]');
+  const panel = document.querySelector('#session-flow-panel');
+  const node = document.querySelector('#session-flow-panel .flow-focused [data-flow-preview-target]');
+  if (!inspector || !panel || inspector.classList.contains('hidden')) return { missing: true };
+  const irect = inspector.getBoundingClientRect();
+  const prect = panel.getBoundingClientRect();
+  const topbarBottom = document.querySelector('.topbar')?.getBoundingClientRect().bottom || 0;
+  const nrect = node ? node.getBoundingClientRect() : null;
+  const body = inspector.querySelector('[data-flow-inspector-body]');
+  const contentFits = !body || body.scrollHeight <= body.clientHeight + 1;
+  const topAligned = nrect ? Math.abs(irect.top - nrect.top) <= 4 : true;
+  const clamped = irect.top <= Math.max(prect.top, topbarBottom) + 17
+    || irect.bottom >= Math.min(prect.bottom, window.innerHeight) - 17;
+  return {
+    desktop: true,
+    topSet: inspector.style.top !== '',
+    maxHeightSet: inspector.style.maxHeight !== '',
+    withinPanel: irect.top >= prect.top - 1 && irect.bottom <= prect.bottom + 1,
+    withinViewport: irect.top >= topbarBottom - 1 && irect.bottom <= window.innerHeight + 1,
+    contentFits,
+    shrinksToContent: !contentFits || irect.height < prect.height - 100,
+    alignedOrClamped: topAligned || clamped,
+    bodyOverflowY: getComputedStyle(document.body).overflowY
+  };
+})()")"
+if ! printf '%s' "$flow_inspector_geometry" | grep -Eq '"desktop"[^a-z]*true'; then
+  echo "Flow inspector geometry requires a desktop viewport, got $flow_inspector_geometry" >&2
+  exit 1
+fi
+if ! printf '%s' "$flow_inspector_geometry" | grep -Eq '"topSet"[^a-z]*true' || ! printf '%s' "$flow_inspector_geometry" | grep -Eq '"maxHeightSet"[^a-z]*true' || ! printf '%s' "$flow_inspector_geometry" | grep -Eq '"withinPanel"[^a-z]*true' || ! printf '%s' "$flow_inspector_geometry" | grep -Eq '"withinViewport"[^a-z]*true' || ! printf '%s' "$flow_inspector_geometry" | grep -Eq '"shrinksToContent"[^a-z]*true' || ! printf '%s' "$flow_inspector_geometry" | grep -Eq '"alignedOrClamped"[^a-z]*true'; then
+  echo "Flow inspector should be node-positioned, capped, and inside the flow panel, got $flow_inspector_geometry" >&2
+  exit 1
+fi
+if printf '%s' "$flow_inspector_geometry" | grep -Eq '"bodyOverflowY"[^a-z]*hidden'; then
+  echo "Flow inspector should not lock document scrolling, got $flow_inspector_geometry" >&2
   exit 1
 fi
 
