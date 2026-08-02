@@ -4,8 +4,8 @@ AgentSession-MCP is a local, read-only stdio MCP server for AI coding-session
 history. It queries the providers configured for AgentSession without starting
 a web server or modifying provider-owned data.
 
-Supported provider references include OpenCode, Claude Code, Codex CLI, GitHub
-Copilot CLI, Pi, and legacy Gemini CLI histories.
+Supported provider references include OpenCode, Claude Code, Codex CLI,
+OpenClaw, Hermes Agent, Pi, and legacy Copilot/Gemini CLI histories.
 
 ## Install into coding agents
 
@@ -16,7 +16,8 @@ npx --yes --prefer-online @acetamido/agentsession-mcp@latest install
 ```
 
 It detects and configures the user-level MCP settings for Codex, Claude Code,
-GitHub Copilot CLI, and OpenCode. The generated launcher uses
+and OpenCode. Copilot remains a legacy history provider and is no longer an
+installer target. The generated launcher uses
 `npx --prefer-online @acetamido/agentsession-mcp@latest`, which checks for a
 new published package whenever the host starts. Existing `agentsession` entries
 are never overwritten by `install`, and `update` refreshes only installer-managed
@@ -26,7 +27,7 @@ entries. Migrate a manual or legacy entry deliberately with:
 npx --yes --prefer-online @acetamido/agentsession-mcp@latest update --target all --replace --yes
 ```
 
-Use `--target codex,claude-code,copilot,opencode` to select hosts, and use
+Use `--target codex,claude-code,opencode` to select hosts, and use
 `--config /path/to/config.json` to pass the AgentSession config via
 `AGENTSESSION_CONFIG`. Pi has no native upstream MCP configuration surface, so
 it needs an extension-provided bridge and is not an installer target.

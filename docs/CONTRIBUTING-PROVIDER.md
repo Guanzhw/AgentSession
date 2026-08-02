@@ -35,7 +35,9 @@ than product similarity.
 | JSONL transcript | `src/providers/claude-code/` or `src/providers/codex/` | Defensive record parsing and explicit response/child-session boundaries. |
 | Inline agent event log plus telemetry SQLite | `src/providers/copilot/` | Keep transcript events canonical; read catalog/token rows read-only and represent in-file agents as view-only embedded bundles. |
 | In-file branch-tree JSONL | `src/providers/pi/` | Reconstruct the active `id`/`parentId` branch before normalizing messages; preserve file-level `parentSession` fork identity. |
-| OpenCode-compatible SQLite | `src/providers/opencode/` and `src/providers/shared/sqlite-adapter.ts` | Share only schema-neutral SQLite behavior; keep schema enrichment provider-owned. |
+| OpenClaw branch-tree JSONL plus registry | `src/providers/openclaw/` | Cache transcripts with registry dependency paths; resolve session keys without replacing canonical session IDs. |
+| Provider-native SQLite | `src/providers/hermes/` | Keep SQL, WAL-aware snapshot caching, schema compatibility, and relationship semantics provider-owned. |
+| OpenCode SQLite | `src/providers/opencode/` | Use the OpenCode-owned adapter only for its exact schema; do not treat arbitrary SQLite providers as compatible. |
 | Nested/sidechain agent transcripts | `src/providers/shared/linked-message-session.ts` | Canonical `parentId` plus explicit spawn references. |
 
 For file-backed sources, prefer `createSessionFileStore()`,
@@ -59,7 +61,9 @@ Tree/Container/Metrics/Flow/Trace views are derived.
 - Normalize raw records at the parser/adapter boundary. Browser code must not
   know the provider's source schema.
 - Reveal System Prompts and runtime configuration only from resolvable local
-  evidence. Never claim to recover hidden provider prompts.
+  evidence. A provider-persisted prompt snapshot may be presented as stored
+  historical evidence, separately from current runtime files. Never claim to
+  recover prompt text that the provider did not store.
 - When a source has an opaque but stable project identifier instead of a
   working directory, preserve it as `metadata.projectKey`. Use the shared
   `withConfiguredProjectDirectory()` helper only with an explicit
@@ -135,10 +139,11 @@ implementation and tests support it.
 | Capability or method | Use it when |
 |---|---|
 | `localManagement` | Canonical session IDs are stable enough for viewer metadata. It never authorizes source writes. |
-| `sqliteSessionStore` | The provider uses the compatible SQLite session-store behavior. |
+| `openCodeStatsStore` | The data path uses the exact OpenCode schema accepted by native list/statistics queries. This is not a generic SQLite capability. |
 | `sessionAnalysis` | The adapter can enter the provider-neutral, proposal-only analysis lifecycle with a configured command and a real project directory from source data or an explicit viewer-owned mapping. |
 | `structuredSessionViews` | All four methods exist: `getSessionTree`, `getSessionContainer`, `getSessionMetrics`, and `getSessionFlow`. |
-| `resumeCommand` | A safe structured executable/argument command with `{sessionId}` and `{directory}` placeholders is known. |
+| `resumeCommand` | A safe structured executable/argument command with `{sessionId}` and `{projectPath}` placeholders is known. |
+| `getResumeCommandSpec()` | A provider-owned selector must be derived from the canonical ID, such as OpenClaw's registry session key. |
 | `getStatsRevision()` | A file-backed source can report changed statistics input. |
 | `getRuntimeEnvironment()` | Locally resolvable instruction/skill/agent/command/plugin/hook/rule evidence exists. |
 | `getSystemPrompts()` / `getTrace()` | All complete providers expose locally evidence-backed prompt sources and a bounded trace. File-backed adapters receive the generic Agent Loop trace; providers can override it only with richer native step evidence. |
@@ -175,7 +180,8 @@ Create `src/providers/my-tool/`. It normally contains:
 src/providers/my-tool/
 ├── adapter.ts              # Detection, paths, capabilities, public methods
 ├── parser.ts               # Raw schema to RawSession/Message normalization
-└── runtime-environment.ts  # Only when local runtime evidence is resolvable
+├── runtime-environment.ts  # Only when local runtime evidence is resolvable
+└── session-store.ts        # Optional provider-native database/cache boundary
 ```
 
 Use `node:fs`, `node:path`, and `node:os`. Catch parse errors per source file,
@@ -206,8 +212,8 @@ const myTool = {
 
 ### 3. Register the viewer
 
-- [ ] Import the adapter and call `registerProvider(myTool)` in
-  `src/providers/index.ts`.
+- [ ] Import the adapter and add it once to the immutable provider array in
+  `src/providers/index.ts`; duplicate IDs fail fast at startup.
 - [ ] Confirm `getAllProviders()` contains it while unavailable and
   `getAvailableProviders()` contains it only after `detect()` succeeds.
 - [ ] Keep provider-specific parsing and views out of shared routes and views.
@@ -217,7 +223,7 @@ const myTool = {
 AgentSession-MCP deliberately validates Provider IDs. A newly registered viewer
 Provider is not MCP-queryable until both of these are updated:
 
-- [ ] Extend `PROVIDER_IDS` in `src/session-history.ts`.
+- [ ] Confirm `src/session-history.ts` derives the ID from the viewer registry.
 - [ ] Extend the Zod `providerSchema` in
   `packages/agentsession-mcp/src/session-history-server.ts`.
 - [ ] Test that `session_search`, `session_get`, and one event/context call
@@ -304,7 +310,7 @@ the validation matrix in `AGENTS.md` for the changed surface.
 - `src/providers/shared/file-adapter-helpers.ts` — file-store, token, and
   structured-view helpers.
 - `src/providers/shared/linked-message-session.ts` — nested session linking.
-- `src/providers/shared/sqlite-adapter.ts` — schema-neutral SQLite helpers.
+- `src/providers/opencode/sqlite-adapter.ts` — OpenCode-schema adapter; never use it for unrelated SQLite schemas.
 - `src/session-history.ts` and
   `packages/agentsession-mcp/src/session-history-server.ts` — MCP ID boundary.
 - `docs/ANALYSIS-PROVIDER-IMPLEMENTATION.md` — analysis integration.

@@ -1,23 +1,22 @@
 # AgentSession
 
-> 开发者的 AI 会话档案馆：把 OpenCode、Claude Code、Codex CLI、GitHub Copilot CLI、Pi 和历史 Gemini CLI 的本地会话集中到一个可搜索、可追踪、可复盘的 Web UI。
+> 开发者的 AI 会话档案馆：把 OpenCode、Claude Code、Codex CLI、OpenClaw、Hermes Agent、Pi，以及历史 Copilot 和 Gemini CLI 会话集中到一个可搜索、可追踪、可复盘的 Web UI。
 
 [English](./README.en.md) · [中文](./README.md)
 
 ![Node.js >= 22.13.0](https://img.shields.io/badge/node-%3E%3D22.13.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.7.2](https://img.shields.io/badge/version-1.7.2-orange?style=flat-square)
+![v1.8.0](https://img.shields.io/badge/version-1.8.0-orange?style=flat-square)
 
-## 1.7.2 更新
+## 1.8.0 更新
 
-- Token Explorer 的趋势图提示框会保持在可见图表内；悬停最右侧柱状图不再产生意外的横向滚动条。
-- 会话 Flow 重新支持页面正常纵向滚动，并移除了标签栏意外出现的纵向滚动条。Flow 节点现在可在侧边检查器中预览消息或子会话，并可直接跳回原始对话。
-
-### 1.7.0
-
-- Pi 现已成为一等 Provider，支持分支树 JSONL、活动分支、fork 会话、reasoning、工具结果、Token Explorer、Flow、runtime extensions、恢复命令与 MCP 查询。
-- MCP 默认诊断现在包含未安装的 Provider；`session_get` 返回首末消息预览，长事件返回可直接复用的 continuation 参数。
+- OpenClaw 与 Hermes Agent 成为一等 Provider，支持 reasoning、工具结果、
+  Agent Loop 视图、分析、恢复、Token Explorer 与 MCP 查询。
+- Hermes 压缩续接会话会合并为一个逻辑结构化对话，同时保留 canonical segment
+  ID 供直接浏览和导出。
+- GitHub Copilot CLI 调整为历史会话 Provider：既有会话仍可读取，但不再提供恢复、
+  分析和 MCP 安装器集成。
 
 完整变更见 [CHANGELOG.md](./CHANGELOG.md)。
 
@@ -46,7 +45,9 @@ AgentSession 是一个本地优先的 AI 编程会话查看器。它不会修改
 | OpenCode | 完整共享能力 | `$XDG_DATA_HOME/opencode/opencode.db` 或 `~/.local/share/opencode/opencode.db` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析；另有 SQLite 原生高级统计 |
 | Claude Code | 完整共享能力 | `~/.claude/transcripts/` + `~/.claude/projects/` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析；保留 sidechain transcript 时支持子 agent |
 | Codex CLI | 完整共享能力 | `~/.codex/sessions/**/*.jsonl` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析、嵌套子 agent |
-| GitHub Copilot CLI | 完整共享能力 | `~/.copilot/session-state/*/events.jsonl` + `~/.copilot/session-store.db` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析、恢复命令与来源关联的内嵌子 agent 分支。事件日志是 transcript 正本；只读 SQLite store 补充目录与 Token 遥测。 |
+| OpenClaw | 完整共享能力 | `~/.openclaw/agents/*/sessions/*.jsonl` | 分支式 JSONL、reasoning、工具调用/结果、共享 Agent Loop 视图、分析与恢复。 |
+| Hermes Agent | 完整共享能力 | `$HERMES_HOME/state.db` | 只读 SQLite 会话、reasoning、工具调用/结果、共享 Agent Loop 视图、分析与恢复；压缩链不会被误判为子 agent。 |
+| GitHub Copilot CLI | 历史会话支持 | `~/.copilot/session-state/*/events.jsonl` + `~/.copilot/session-store.db` | 保留既有会话的浏览、搜索、导出、统计和共享视图；默认不再提供恢复或分析动作。 |
 | Gemini CLI | 历史会话支持 | `~/.gemini/tmp/*/chats/*.json` | 可浏览、搜索、导出、查看 Token 统计、共享视图和本地提示词/运行时证据。默认不提供继续会话或分析动作；其扁平 chat 格式没有 child-session 关系，因此 AgentSession 不会伪造嵌入式子 agent 分支。 |
 | Pi | 完整共享能力 | `~/.pi/agent/sessions/**/*.jsonl` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析、活动分支与 fork 关系。若记录了子 agent 启动工具，会在对应调用处嵌入 child；只有来源记录的 fork 关系会明确标为推断。 |
 
@@ -131,6 +132,8 @@ agentsession [options]
 --copilot-dir <path>  GitHub Copilot CLI 数据目录
 --gemini-dir <path>   Gemini CLI 数据目录
 --pi-dir <path>       Pi agent 数据目录
+--openclaw-dir <path> OpenClaw state 数据目录
+--hermes-dir <path>   Hermes Agent 数据目录
 --config <path>       AgentSession JSON 配置文件
 --disable-terminal-launch
                       禁止启动继续会话和分析命令
@@ -151,6 +154,9 @@ agentsession [options]
 | `CODEX_HOME` | Codex CLI 数据目录 |
 | `COPILOT_HOME` | GitHub Copilot CLI 数据目录 |
 | `GEMINI_HOME` | Gemini CLI 数据目录 |
+| `OPENCLAW_STATE_DIR` | OpenClaw state 数据目录（优先） |
+| `OPENCLAW_HOME` | OpenClaw home；state 默认为其下的 `.openclaw` |
+| `HERMES_HOME` | Hermes Agent 数据目录 |
 | `PI_CODING_AGENT_DIR` | Pi agent 数据目录，默认 `~/.pi/agent` |
 | `AGENTSESSION_META_PATH` | AgentSession 元数据库路径；未指定 `AGENTSESSION_CONFIG` 时，配置文件也放在同一目录 |
 | `AGENTSESSION_CONFIG` | AgentSession JSON 配置文件路径 |
@@ -167,7 +173,8 @@ agentsession [options]
 npx --yes --prefer-online @acetamido/agentsession-mcp@latest install
 ```
 
-支持 Codex、Claude Code、GitHub Copilot CLI 和 OpenCode。安装后的配置会使用
+支持 Codex、Claude Code 和 OpenCode。Copilot 保留为历史会话 Provider，不再作为
+安装器目标。安装后的配置会使用
 `npx --prefer-online @acetamido/agentsession-mcp@latest` 启动 MCP，因此每次
 Coding Agent 启动时都会强制检查 npm 缓存的新鲜度并获取最新已发布版本。
 已有同名配置不会被 `install` 覆盖；`update` 只刷新安装器已创建的配置。如需迁移
@@ -236,7 +243,9 @@ fallback 信息，以及可用时的 launcher PID。
 | OpenCode | `opencode --session {sessionId}` |
 | Claude Code | `claude --resume {sessionId}` |
 | Codex CLI | `codex resume {sessionId}` |
-| GitHub Copilot CLI | `copilot --resume {sessionId}` |
+| OpenClaw | `openclaw tui --local --session <sessionKey>`；由 canonical session ID 通过 registry 解析 |
+| Hermes Agent | `hermes chat --resume {sessionId}` |
+| GitHub Copilot CLI | 历史会话模式；默认不启动 |
 | Gemini CLI | 历史会话模式；默认不启动 |
 | Pi | `pi --session {sessionId}` |
 
@@ -624,6 +633,8 @@ src/
 │   ├── opencode/          # OpenCode SQLite 适配器与结构化视图
 │   ├── claude-code/       # Claude Code JSONL 适配器
 │   ├── codex/             # Codex CLI JSONL 适配器
+│   ├── openclaw/          # OpenClaw 分支式 JSONL 适配器
+│   ├── hermes/            # Hermes 只读 SQLite 适配器
 │   ├── copilot/           # GitHub Copilot CLI 事件日志适配器
 │   ├── gemini/            # Gemini JSON 适配器
 │   └── pi/                # Pi 分支树 JSONL 适配器

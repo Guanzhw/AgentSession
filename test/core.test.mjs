@@ -69,7 +69,7 @@ import {
   isSubagentTool,
   mergeToolMetadata
 } from "../dist/src/providers/shared/subagent-tools.js";
-import { createSqliteSessionAdapter } from "../dist/src/providers/shared/sqlite-adapter.js";
+import { createOpenCodeSqliteAdapter } from "../dist/src/providers/opencode/sqlite-adapter.js";
 import { createIncrementalTokenStats, createSessionFileStore } from "../dist/src/providers/shared/file-adapter-helpers.js";
 import { providerFeatureMatrix } from "../dist/src/providers/kinds.js";
 import { createStatsCache } from "../dist/src/stats-cache.js";
@@ -1081,7 +1081,7 @@ test("OpenCode attaches every supported launcher to its child session and trace"
     }
     db.close();
 
-    const adapter = createSqliteSessionAdapter({
+    const adapter = createOpenCodeSqliteAdapter({
       id: "opencode",
       name: "OpenCode launcher fixture",
       defaultDataPath: () => dbPath
@@ -2094,7 +2094,7 @@ test("active providers declare a configurable resume command while legacy provid
   const providers = getAllProviders();
   assert.deepEqual(
     providers.map((provider) => provider.id),
-    ["opencode", "claude-code", "codex", "copilot", "gemini", "pi"]
+    ["opencode", "claude-code", "codex", "openclaw", "hermes", "copilot", "gemini", "pi"]
   );
   for (const provider of providers.filter((provider) => provider.lifecycle !== "legacy")) {
     assert.equal(typeof provider.resumeCommand?.executable, "string", provider.id);
@@ -2104,8 +2104,12 @@ test("active providers declare a configurable resume command while legacy provid
   }
   assert.equal(providers.find((provider) => provider.id === "gemini")?.resumeCommand, undefined);
   assert.equal(providers.find((provider) => provider.id === "gemini")?.lifecycle, "legacy");
+  assert.equal(providers.find((provider) => provider.id === "copilot")?.resumeCommand, undefined);
+  assert.equal(providers.find((provider) => provider.id === "copilot")?.lifecycle, "legacy");
   assert.equal(parseArgs(["--pi-dir", "D:\\fixtures\\pi-agent"]).piDir, "D:\\fixtures\\pi-agent");
   assert.equal(parseArgs(["--copilot-dir", "D:\\fixtures\\copilot"]).copilotDir, "D:\\fixtures\\copilot");
+  assert.equal(parseArgs(["--openclaw-dir", "D:\\fixtures\\openclaw"]).openclawDir, "D:\\fixtures\\openclaw");
+  assert.equal(parseArgs(["--hermes-dir", "D:\\fixtures\\hermes"]).hermesDir, "D:\\fixtures\\hermes");
 });
 
 test("every provider exposes the complete shared Agent Loop capability surface", () => {
@@ -2118,7 +2122,7 @@ test("every provider exposes the complete shared Agent Loop capability surface",
     assert.equal(features.systemPromptEvidence, true, provider.id);
     assert.equal(features.runtimeEnvironment, true, provider.id);
     assert.equal(features.resume, provider.lifecycle !== "legacy", provider.id);
-    assert.equal(features.sqliteSessionStore, provider.id === "opencode", provider.id);
+    assert.equal(features.openCodeStatsStore, provider.id === "opencode", provider.id);
   }
 });
 
@@ -3916,12 +3920,18 @@ test("settings page exposes config location and startup-only launch status", () 
 });
 
 test("settings browser script blocks save while advanced JSON is invalid", () => {
-  const appScript = readFileSync(path.join(process.cwd(), "dist", "src", "static", "app.js"), "utf8");
+  const bundle = readFileSync(path.join(process.cwd(), "dist", "src", "static", "app.js"), "utf8");
+  const settingsModule = readFileSync(
+    path.join(process.cwd(), "src", "static", "app", "settings-form.js"),
+    "utf8"
+  );
 
-  assert.match(appScript, /let settingsJsonValid = true;/);
-  assert.match(appScript, /submitButton\.disabled = !settingsDirty \|\| !settingsJsonValid;/);
-  assert.match(appScript, /const invalidJsonMessage = \(error\) => `\$\{ft\("settings_invalid_json"\)\}: \$\{error\.message\}`;/);
-  assert.match(appScript, /if \(event\.target === editor\) \{\s*updateEditorJsonState\(\{ showMessage: true \}\);/);
+  assert.match(bundle, /initSettingsForm\(\{ ft, formatText, showToast \}\);/);
+  assert.match(bundle, /submitButton\.disabled = !settingsDirty \|\| !settingsJsonValid;/);
+  assert.match(settingsModule, /let settingsJsonValid = true;/);
+  assert.match(settingsModule, /submitButton\.disabled = !settingsDirty \|\| !settingsJsonValid;/);
+  assert.match(settingsModule, /const invalidJsonMessage = \(error\) => `\$\{ft\("settings_invalid_json"\)\}: \$\{error\.message\}`;/);
+  assert.match(settingsModule, /if \(event\.target === editor\) \{\s*updateEditorJsonState\(\{ showMessage: true \}\);/);
 });
 
 test("built-in analysis materials do not claim provider runtime paths", () => {

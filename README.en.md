@@ -1,23 +1,22 @@
 # AgentSession
 
-> A local AI session archive for developers: one searchable, traceable, reviewable web UI for OpenCode, Claude Code, Codex CLI, GitHub Copilot CLI, Pi, and legacy Gemini CLI sessions.
+> A local AI session archive for developers: one searchable, traceable, reviewable web UI for OpenCode, Claude Code, Codex CLI, OpenClaw, Hermes Agent, Pi, and legacy Copilot and Gemini sessions.
 
 [English](./README.en.md) · [中文](./README.md)
 
 ![Node.js >= 22.13.0](https://img.shields.io/badge/node-%3E%3D22.13.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.7.2](https://img.shields.io/badge/version-1.7.2-orange?style=flat-square)
+![v1.8.0](https://img.shields.io/badge/version-1.8.0-orange?style=flat-square)
 
-## What's New in 1.7.2
+## What's New in 1.8.0
 
-- Token Explorer trend tooltips stay within the visible chart, so hovering the rightmost bars no longer creates an unexpected horizontal scrollbar.
-- Session Flow restores normal page scrolling and removes the tab bar's accidental vertical scrollbar. Flow nodes now preview message or child-session details in a side inspector with a direct route back to the source conversation.
-
-### 1.7.0
-
-- Pi is now a first-class provider with branch-tree JSONL parsing, active branches, forked sessions, reasoning, tool results, Token Explorer, flow, runtime extensions, resume commands, and MCP access.
-- MCP diagnostics now include unavailable providers by default; `session_get` returns first/last message previews and long events return reusable continuation arguments.
+- OpenClaw and Hermes Agent are now first-class providers with reasoning, tool
+  results, Agent Loop views, analysis, resume, Token Explorer, and MCP access.
+- Hermes compression continuations stay in one logical structured conversation
+  while canonical segment IDs remain available for direct browsing and export.
+- GitHub Copilot CLI is now a legacy history provider: existing sessions remain
+  readable, but resume, analysis, and MCP installer integration are disabled.
 
 See [CHANGELOG.md](./CHANGELOG.md) for the complete release notes.
 
@@ -45,7 +44,9 @@ The focus is no longer just “list my chats.” The goal is to help you reconst
 | OpenCode | Full shared support | `$XDG_DATA_HOME/opencode/opencode.db` or `~/.local/share/opencode/opencode.db` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis; plus SQLite-native advanced statistics |
 | Claude Code | Full shared support | `~/.claude/transcripts/` + `~/.claude/projects/` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis; sidechain subagents when transcripts retain them |
 | Codex CLI | Full shared support | `~/.codex/sessions/**/*.jsonl` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis, nested subagents |
-| GitHub Copilot CLI | Full shared support | `~/.copilot/session-state/*/events.jsonl` + `~/.copilot/session-store.db` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis, resume, and source-linked inline subagent branches. The event log is transcript-canonical; the read-only SQLite store adds catalog paths and token telemetry. |
+| OpenClaw | Full shared support | `~/.openclaw/agents/*/sessions/*.jsonl` | Branch-aware JSONL, reasoning, tool calls/results, shared Agent Loop views, analysis, and resume. |
+| Hermes Agent | Full shared support | `$HERMES_HOME/state.db` | Read-only SQLite sessions, reasoning, tool calls/results, shared Agent Loop views, analysis, and resume; compression lineage is not misclassified as subagents. |
+| GitHub Copilot CLI | Legacy history support | `~/.copilot/session-state/*/events.jsonl` + `~/.copilot/session-store.db` | Existing histories remain browsable, searchable, exportable, and available to shared views; resume and analysis are disabled by default. |
 | Gemini CLI | Legacy history support | `~/.gemini/tmp/*/chats/*.json` | Browse, search, export, token statistics, shared views, and local prompt/runtime evidence for existing histories. It has no default resume or analysis action, and its flat chat format has no child-session relationship, so AgentSession does not invent embedded subagent branches. |
 | Pi | Full shared support | `~/.pi/agent/sessions/**/*.jsonl` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis, active branches, and fork relationships. A recorded subagent launcher embeds the child at that call; a source-only fork relationship remains explicitly inferred. |
 
@@ -135,6 +136,8 @@ agentsession [options]
 --copilot-dir <path>  GitHub Copilot CLI data directory
 --gemini-dir <path>   Gemini CLI data directory
 --pi-dir <path>       Pi agent data directory
+--openclaw-dir <path> OpenClaw state directory
+--hermes-dir <path>   Hermes Agent data directory
 --config <path>       AgentSession JSON config
 --disable-terminal-launch
                       Disable resume and analysis command launching
@@ -155,6 +158,9 @@ agentsession [options]
 | `CODEX_HOME` | Codex CLI data directory |
 | `COPILOT_HOME` | GitHub Copilot CLI data directory |
 | `GEMINI_HOME` | Gemini CLI data directory |
+| `OPENCLAW_STATE_DIR` | OpenClaw state directory (highest priority) |
+| `OPENCLAW_HOME` | OpenClaw home; state defaults to its `.openclaw` child |
+| `HERMES_HOME` | Hermes Agent data directory |
 | `PI_CODING_AGENT_DIR` | Pi agent data directory, defaults to `~/.pi/agent` |
 | `AGENTSESSION_META_PATH` | AgentSession metadata DB path; the default config is stored beside it unless `AGENTSESSION_CONFIG` is set |
 | `AGENTSESSION_CONFIG` | AgentSession JSON config path |
@@ -176,7 +182,8 @@ confirm:
 npx --yes --prefer-online @acetamido/agentsession-mcp@latest install
 ```
 
-Codex, Claude Code, GitHub Copilot CLI, and OpenCode are supported. The generated MCP
+Codex, Claude Code, and OpenCode are supported installer targets. Copilot remains
+a legacy history provider and is no longer configured by the installer. The generated MCP
 configuration launches `npx --prefer-online @acetamido/agentsession-mcp@latest`,
 so every coding-agent startup forces npm to check cached package metadata and
 uses the latest published MCP. `install` never overwrites an existing server
@@ -266,7 +273,9 @@ Active providers declare a default resume command:
 | OpenCode | `opencode --session {sessionId}` |
 | Claude Code | `claude --resume {sessionId}` |
 | Codex CLI | `codex resume {sessionId}` |
-| GitHub Copilot CLI | `copilot --resume {sessionId}` |
+| OpenClaw | `openclaw tui --local --session <sessionKey>` resolved from the canonical session ID through the registry |
+| Hermes Agent | `hermes chat --resume {sessionId}` |
+| GitHub Copilot CLI | Legacy history only; no default launch |
 | Gemini CLI | Legacy history only; no default launch |
 | Pi | `pi --session {sessionId}` |
 
@@ -702,6 +711,8 @@ src/
 │   ├── opencode/          # OpenCode-compatible SQLite adapter factory
 │   ├── claude-code/       # Claude Code JSONL adapter
 │   ├── codex/             # Codex CLI JSONL adapter
+│   ├── openclaw/          # OpenClaw branch-aware JSONL adapter
+│   ├── hermes/            # Hermes read-only SQLite adapter
 │   ├── copilot/           # GitHub Copilot CLI event-log adapter
 │   └── gemini/            # Gemini JSON adapter
 ├── db.ts                  # OpenCode-compatible DB queries

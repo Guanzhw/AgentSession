@@ -107,7 +107,11 @@ export function getResumeCommand(provider: ProviderAdapter, sessionId: any, dire
   if (configured === false || configured === null) {
     return null;
   }
-  const spec = isCommandSpec(configured) ? configured : provider.resumeCommand;
+  const spec = isCommandSpec(configured)
+    ? configured
+    : provider.getResumeCommandSpec
+      ? provider.getResumeCommandSpec(String(sessionId))
+      : provider.resumeCommand;
   const cwd = resolveProjectDirectory(isCommandSpec(configured) && configured.cwd ? configured.cwd : directory);
   if (!spec || !cwd) {
     return null;

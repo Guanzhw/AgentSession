@@ -86,13 +86,15 @@ export function buildResolvedSystemPromptEvidence({
   mode,
   session,
   messages,
-  runtimeEnvironment
+  runtimeEnvironment,
+  storedSystemPrompt = null
 }: {
   providerName: string;
   mode: string;
   session: RawSession | Row;
   messages: Message[];
   runtimeEnvironment: RuntimeEnvironmentView | null;
+  storedSystemPrompt?: { content: string; source: string; title?: string } | null;
 }) {
   const time = sessionTime(session);
   const firstUser = messages.find((message) => message.role === "user") || null;
@@ -103,6 +105,19 @@ export function buildResolvedSystemPromptEvidence({
   const runtimeSources = extensions.filter((entry) => !promptKinds.has(entry.kind));
   const row = session as Row;
   const sections: PromptSection[] = [
+    ...(storedSystemPrompt?.content ? [{
+      title: `${providerName} Stored System Prompt`,
+      note: "Prompt text persisted by the provider with this session.",
+      items: [
+        item(
+          "system-prompt",
+          storedSystemPrompt.title || "Stored system prompt",
+          storedSystemPrompt.content,
+          storedSystemPrompt.source,
+          time
+        )
+      ]
+    }] : []),
     {
       title: `${providerName} Instructions and Rules`,
       note: "Currently resolvable local instruction and rule sources that can contribute to agent context.",
@@ -133,9 +148,11 @@ export function buildResolvedSystemPromptEvidence({
   return {
     sessionId: String(row.id),
     mode,
-    hiddenPromptStored: false,
+    hiddenPromptStored: Boolean(storedSystemPrompt?.content),
     selectedAgent: null,
-    note: `${providerName} session data does not prove the hidden provider prompt. This view resolves only current local sources and clearly labels the first-user boundary.`,
+    note: storedSystemPrompt?.content
+      ? `${providerName} persisted a system prompt snapshot with this session. Current local sources are shown separately and may differ from the historical runtime.`
+      : `${providerName} session data does not prove the hidden provider prompt. This view resolves only current local sources and clearly labels the first-user boundary.`,
     firstUserMessage: firstUser ? {
       id: String(firstUser.id || "first-user"),
       time: firstUserTime,

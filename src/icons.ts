@@ -12,5 +12,7 @@ export const icons = {
 
   copilot: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 5.5a4.5 4.5 0 0 1 8.5 2v1.2A4.3 4.3 0 0 1 19 13v2.5A3.5 3.5 0 0 1 15.5 19h-7A3.5 3.5 0 0 1 5 15.5V13a4.3 4.3 0 0 1 3.5-4.3V7.5A2.5 2.5 0 0 0 7 5.5Z"/><path d="M9 13h.01M15 13h.01"/><path d="M10 16h4"/></svg>`,
 
+  openclaw: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M7 10 3 7l1 5-2 3 5 1M17 10l4-3-1 5 2 3-5 1"/><path d="M7 9c1-4 9-4 10 0v7c-2 4-8 4-10 0Z"/></svg>`,
+  hermes: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 3v18M7 6h10M8 18h8M4 8l4 3-4 3M20 8l-4 3 4 3"/></svg>`,
   pi: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14"/><path d="M8 7v10"/><path d="M16 7v8c0 1.5.7 2 2 2"/></svg>`
 };

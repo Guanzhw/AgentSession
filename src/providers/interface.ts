@@ -1,4 +1,4 @@
-export type ProviderId = "opencode" | "claude-code" | "codex" | "copilot" | "gemini" | "pi";
+export type ProviderId = "opencode" | "claude-code" | "codex" | "openclaw" | "hermes" | "copilot" | "gemini" | "pi";
 
 export type ProviderLifecycle = "active" | "legacy";
 
@@ -123,9 +123,12 @@ export interface ProviderAdapter {
   /** Legacy adapters remain readable for historic sessions but are not a current host integration. */
   lifecycle?: ProviderLifecycle;
   resumeCommand?: ResumeCommandSpec;
+  /** Resolve a provider-owned session selector when it differs from the canonical session ID. */
+  getResumeCommandSpec?(sessionId: string): ResumeCommandSpec | null;
   capabilities?: {
     localManagement?: boolean;
-    sqliteSessionStore?: boolean;
+    /** Data path uses the OpenCode SQLite schema accepted by native stats and list queries. */
+    openCodeStatsStore?: boolean;
     sessionAnalysis?: boolean;
     structuredSessionViews?: boolean;
   };

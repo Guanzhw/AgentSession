@@ -4,8 +4,8 @@ export function supportsLocalManagement(adapter: ProviderAdapter | null | undefi
   return adapter?.capabilities?.localManagement === true;
 }
 
-export function usesSqliteSessionStore(adapter: ProviderAdapter | null | undefined) {
-  return adapter?.capabilities?.sqliteSessionStore === true;
+export function usesOpenCodeStatsStore(adapter: ProviderAdapter | null | undefined) {
+  return adapter?.capabilities?.openCodeStatsStore === true;
 }
 
 export function supportsSessionAnalysis(adapter: ProviderAdapter | null | undefined) {
@@ -44,12 +44,12 @@ export function supportsRuntimeEnvironment(adapter: ProviderAdapter | null | und
 export function providerFeatureMatrix(adapter: ProviderAdapter | null | undefined) {
   return {
     localManagement: supportsLocalManagement(adapter),
-    sqliteSessionStore: usesSqliteSessionStore(adapter),
+    openCodeStatsStore: usesOpenCodeStatsStore(adapter),
     sessionAnalysis: supportsSessionAnalysis(adapter),
     agentLoopViews: supportsAgentLoopViews(adapter),
     sessionTrace: supportsSessionTrace(adapter),
     systemPromptEvidence: supportsSystemPromptEvidence(adapter),
     runtimeEnvironment: supportsRuntimeEnvironment(adapter),
-    resume: Boolean(adapter?.resumeCommand)
+    resume: Boolean(adapter?.resumeCommand || adapter?.getResumeCommandSpec)
   };
 }

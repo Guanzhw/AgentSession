@@ -21,7 +21,7 @@ import {
   supportsAgentLoopViews,
   supportsSessionTrace,
   supportsSystemPromptEvidence,
-  usesSqliteSessionStore
+  usesOpenCodeStatsStore
 } from "../providers/kinds.js";
 import { getResumeCommand } from "../resume.js";
 import { getSessionAnalysisAction, listSessionAnalysisRuns } from "../analysis.js";
@@ -53,7 +53,7 @@ export function registerSessionDetail(
     const navigationContext = parseSessionNavigationContext(new URL(req.url || "/", `http://localhost:${appConfig.port}`).searchParams.get("from"));
 
     try {
-      if (usesSqliteSessionStore(adapter)) {
+      if (usesOpenCodeStatsStore(adapter)) {
         const dbPath = adapter.getDataPath();
         const session = getSession(sessionId, dbPath);
         if (!session) {
@@ -177,7 +177,7 @@ export function registerSessionDetail(
     }
 
     try {
-      if (usesSqliteSessionStore(adapter)) {
+      if (usesOpenCodeStatsStore(adapter)) {
         const dbPath = adapter.getDataPath();
         const metaMap = getAllMeta(providerId);
         const session = getSession(sessionId, dbPath);
@@ -240,7 +240,7 @@ export function registerSessionDetail(
       let messages;
       let partsByMessage;
 
-      if (usesSqliteSessionStore(adapter)) {
+      if (usesOpenCodeStatsStore(adapter)) {
         const dbPath = adapter.getDataPath();
         const metaMap = getAllMeta(providerId);
         const rawSession = getSession(id, dbPath);

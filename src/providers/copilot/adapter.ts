@@ -108,13 +108,10 @@ const copilot = {
   id: "copilot",
   name: "GitHub Copilot CLI",
   icon: icons.copilot,
-  resumeCommand: {
-    executable: "copilot",
-    args: ["--resume", "{sessionId}"]
-  },
+  lifecycle: "legacy",
   capabilities: {
     localManagement: true,
-    sessionAnalysis: true,
+    sessionAnalysis: false,
     structuredSessionViews: true
   },
 

@@ -8,7 +8,7 @@ import { getStats } from "./db.js";
 import { getLocale, setLocale } from "./i18n.js";
 import { getIndexDb, indexProvider } from "./index-db.js";
 import { getAllProviders, getAvailableProviders } from "./providers/index.js";
-import { supportsLocalManagement, usesSqliteSessionStore } from "./providers/kinds.js";
+import { supportsLocalManagement, usesOpenCodeStatsStore } from "./providers/kinds.js";
 import {
   getRuntimeRouteContext,
   recordRuntimeEvent,
@@ -122,8 +122,7 @@ export async function startServer(config = getConfig()) {
     const router = buildRouter(appConfig, providerMap, providerInfo, availableProviders);
 
     // Startup stats
-    const statsProvider = availableProviders.find((provider) => provider.id === "opencode")
-      || availableProviders.find((provider) => usesSqliteSessionStore(provider));
+    const statsProvider = availableProviders.find((provider) => usesOpenCodeStatsStore(provider));
     const stats = statsProvider ? getStats(statsProvider.getDataPath() || undefined) : { totalSessions: 0, totalMessages: 0 };
 
     const requestHandler = async (req: any, res: any) => {

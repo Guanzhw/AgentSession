@@ -72,9 +72,10 @@ export interface ProviderAdapter {
   name: string;
   icon: string;
   resumeCommand?: ResumeCommandSpec;
+  getResumeCommandSpec?(sessionId: string): ResumeCommandSpec | null;
   capabilities?: {
     localManagement?: boolean;
-    sqliteSessionStore?: boolean;
+    openCodeStatsStore?: boolean;
     sessionAnalysis?: boolean;
     structuredSessionViews?: boolean;
   };
@@ -253,9 +254,13 @@ Keep other capabilities truthful:
 
 - `localManagement` means the viewer can mutate viewer-owned metadata for local
   management operations, not provider data.
-- `sqliteSessionStore` means the provider uses the shared SQLite read path.
+- `openCodeStatsStore` means the provider uses the OpenCode-compatible SQLite
+  schema required by the advanced stats routes. It is not a generic SQLite flag.
 - `structuredSessionViews` means detail-page tree, metrics, flow, or container
   views are available or can be built safely.
+
+Use `getResumeCommandSpec(sessionId)` when the provider must translate the
+canonical viewer session ID into a provider-owned resume key at runtime.
 
 ### 3. Implement Runtime Environment Discovery
 

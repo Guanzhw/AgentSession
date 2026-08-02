@@ -90,6 +90,20 @@ function defaultPiDir() {
   return probePaths([process.env.PI_CODING_AGENT_DIR, fallback].filter(Boolean), fallback);
 }
 
+function defaultOpenClawDir() {
+  const home = os.homedir();
+  const fallback = path.join(home, ".openclaw");
+  return probePaths([process.env.OPENCLAW_STATE_DIR, process.env.OPENCLAW_HOME && path.join(process.env.OPENCLAW_HOME, ".openclaw"), fallback].filter(Boolean), fallback);
+}
+
+function defaultHermesDir() {
+  const home = os.homedir();
+  const fallback = process.platform === "win32"
+    ? path.join(process.env.LOCALAPPDATA || path.join(home, "AppData", "Local"), "hermes")
+    : path.join(home, ".hermes");
+  return probePaths([process.env.HERMES_HOME, fallback].filter(Boolean), fallback);
+}
+
 const defaults = {
   port: 3456,
   dbPath: defaultDbPath(),
@@ -101,6 +115,8 @@ const defaults = {
   copilotDir: defaultCopilotDir(),
   geminiDir: defaultGeminiDir(),
   piDir: defaultPiDir(),
+  openclawDir: defaultOpenClawDir(),
+  hermesDir: defaultHermesDir(),
   reindex: false,
   allowTerminalLaunch: true,
   mcp: {
@@ -570,6 +586,10 @@ export function parseArgs(argv = process.argv.slice(2)) {
       config.geminiDir = argv[++i];
     } else if (argv[i] === "--pi-dir" && argv[i + 1]) {
       config.piDir = argv[++i];
+    } else if (argv[i] === "--openclaw-dir" && argv[i + 1]) {
+      config.openclawDir = argv[++i];
+    } else if (argv[i] === "--hermes-dir" && argv[i + 1]) {
+      config.hermesDir = argv[++i];
     } else if (argv[i] === "--reindex") {
       config.reindex = true;
     } else if (argv[i] === "--disable-terminal-launch") {
@@ -593,6 +613,8 @@ Options:
   --copilot-dir <path>  Path to GitHub Copilot CLI data dir (default: ~/.copilot)
   --gemini-dir <path>   Path to Gemini data dir (default: ~/.gemini)
   --pi-dir <path>       Path to Pi agent data dir (default: ~/.pi/agent)
+  --openclaw-dir <path> Path to OpenClaw state dir (default: ~/.openclaw)
+  --hermes-dir <path>   Path to Hermes Agent data dir
   --config <path>       Path to AgentSession JSON config
   --disable-terminal-launch
                         Disable resume and analysis command launching

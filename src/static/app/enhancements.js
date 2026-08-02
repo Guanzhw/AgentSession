@@ -1,4 +1,4 @@
-export function initEnhancements({ ft, formatText, showToast, escapeHtmlClient, __I18N__, __LOCALE__ }) {
+export function initEnhancements({ ft, formatText, showToast, escapeHtmlClient }) {
 // ── Tab bar navigation ──────────────────────────────────────────────
 
 (function initTabBar() {
@@ -361,7 +361,7 @@ export function initEnhancements({ ft, formatText, showToast, escapeHtmlClient, 
       saveBtn.addEventListener("click", () => {
         const views = loadViews();
         if (views.length >= maxViews) {
-          showToast(__I18N__[__LOCALE__]?.saved_views_max || "Maximum saved views reached (20).");
+          showToast(ft("saved_views_max"));
           return;
         }
         const dialog = document.createElement("dialog");

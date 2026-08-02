@@ -6,7 +6,7 @@ import { createInterface } from "node:readline/promises";
 export const AUTO_UPDATE_PACKAGE = "@acetamido/agentsession-mcp@latest";
 export const MCP_SERVER_NAME = "agentsession";
 
-export const installTargets = ["codex", "claude-code", "copilot", "opencode"] as const;
+export const installTargets = ["codex", "claude-code", "opencode"] as const;
 export type InstallTarget = (typeof installTargets)[number];
 
 export interface InstallContext {
@@ -79,7 +79,6 @@ function commandExists(command: string, context: InstallContext): boolean {
 export function detectedInstallTargets(context: InstallContext = {}): InstallTarget[] {
   return installTargets.filter((target) => {
     if (target === "claude-code") return commandExists("claude", context);
-    if (target === "copilot") return commandExists("copilot", context);
     return commandExists(target, context);
   });
 }
@@ -110,8 +109,6 @@ export function getInstallConfigPath(target: InstallTarget, context: InstallCont
       return join(env.CODEX_HOME || join(home, ".codex"), "config.toml");
     case "claude-code":
       return join(home, ".claude.json");
-    case "copilot":
-      return join(env.COPILOT_HOME || join(home, ".copilot"), "mcp-config.json");
     case "opencode": {
       const configuredPath = env.OPENCODE_CONFIG;
       if (configuredPath) return isAbsolute(configuredPath) ? configuredPath : resolve(cwd, configuredPath);
@@ -190,16 +187,6 @@ function openCodeEntryIsManaged(entry: unknown, launcher: Launcher): boolean {
     && entry.enabled === true
     && sameStringArray(entry.command, [launcher.command, ...launcher.args])
     && sameStringRecord(entry.environment, launcher.env);
-}
-
-function copilotEntryIsManaged(entry: unknown, launcher: Launcher): boolean {
-  if (!isRecord(entry)) return false;
-  return hasOnlyProperties(entry, ["type", "command", "args", "tools", "env"])
-    && entry.type === "local"
-    && entry.command === launcher.command
-    && sameStringArray(entry.args, launcher.args)
-    && sameStringArray(entry.tools, ["*"])
-    && sameStringRecord(entry.env, launcher.env);
 }
 
 function ensureObject(parent: Record<string, unknown>, property: string): Record<string, unknown> {
@@ -318,22 +305,6 @@ export function installIntoTarget(target: InstallTarget, request: InstallRequest
       Boolean(request.update),
       (current) => jsonEntryIsManaged(current, launcher)
     );
-  } else if (target === "copilot") {
-    const entry: Record<string, unknown> = {
-      type: "local",
-      command: launcher.command,
-      args: launcher.args,
-      tools: ["*"]
-    };
-    if (launcher.env) entry.env = launcher.env;
-    status = upsertJsonEntry(
-      targetConfigPath,
-      "mcpServers",
-      entry,
-      Boolean(request.replace),
-      Boolean(request.update),
-      (current) => copilotEntryIsManaged(current, launcher)
-    );
   } else {
     const entry: Record<string, unknown> = {
       type: "local",
@@ -396,7 +367,6 @@ function targetLabel(target: InstallTarget): string {
   switch (target) {
     case "codex": return "Codex";
     case "claude-code": return "Claude Code";
-    case "copilot": return "GitHub Copilot CLI";
     case "opencode": return "OpenCode";
   }
 }
@@ -451,7 +421,7 @@ export async function runInstallerCommand(
   let targets = options.targets;
   if (!targets) {
     if (!process.stdin.isTTY) {
-      throw new Error("Interactive target selection needs a terminal. Re-run with --target codex,claude-code,copilot,opencode or --target all.");
+      throw new Error("Interactive target selection needs a terminal. Re-run with --target codex,claude-code,opencode or --target all.");
     }
     targets = await chooseTargets(context, output);
   }
@@ -487,7 +457,7 @@ Usage:
   agentsession-mcp update [options]
 
 Options:
-  -t, --target <hosts>  codex, claude-code, copilot, opencode, or all
+  -t, --target <hosts>  codex, claude-code, opencode, or all
       --config <path>   AgentSession config passed to the MCP through AGENTSESSION_CONFIG
       --replace         Intentionally replace an existing custom or legacy agentsession entry
   -y, --yes             Skip the confirmation prompt

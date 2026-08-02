@@ -16,11 +16,14 @@ import { DatabaseSync } from "node:sqlite";
 
 import { initConfig } from "../dist/src/config.js";
 import { getSessionAnalysisAction } from "../dist/src/analysis.js";
+import { getResumeCommand } from "../dist/src/resume.js";
 import claudeCode from "../dist/src/providers/claude-code/adapter.js";
 import codex from "../dist/src/providers/codex/adapter.js";
 import copilot from "../dist/src/providers/copilot/adapter.js";
 import gemini from "../dist/src/providers/gemini/adapter.js";
 import pi from "../dist/src/providers/pi/adapter.js";
+import openclaw from "../dist/src/providers/openclaw/adapter.js";
+import hermes from "../dist/src/providers/hermes/adapter.js";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -541,6 +544,335 @@ test("Pi file cache preserves active-branch sessions and the last good transcrip
     await sleep(1050);
     assert.equal(pi.getSession("019f7b00-0000-7000-8000-000000000001")?.title, "Pi provider refreshed fixture");
     assert.equal(pi.searchMessages("provider is ready")[0]?.sessionId, "019f7b00-0000-7000-8000-000000000001");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("OpenClaw file cache preserves the active branch, tools, usage, and runtime evidence", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "agentsession-openclaw-cache-"));
+  try {
+    const sessionsDir = path.join(root, "agents", "main", "sessions");
+    const childSessionsDir = path.join(root, "agents", "worker", "sessions");
+    const workspace = path.join(root, "workspace");
+    mkdirSync(sessionsDir, { recursive: true });
+    mkdirSync(childSessionsDir, { recursive: true });
+    mkdirSync(workspace, { recursive: true });
+    writeFileSync(path.join(workspace, "AGENTS.md"), "# OpenClaw instructions\n");
+    const sessionId = "openclaw-fixture";
+    const filePath = path.join(sessionsDir, `${sessionId}.jsonl`);
+    const records = [
+      { type: "session", version: 2, id: sessionId, timestamp: "2026-08-02T01:00:00.000Z", cwd: workspace },
+      { type: "message", id: "u1", parentId: null, timestamp: "2026-08-02T01:00:00.000Z", message: { role: "user", content: "OpenClaw marker" } },
+      { type: "message", id: "a-abandoned", parentId: "u1", timestamp: "2026-08-02T01:00:01.000Z", message: { role: "assistant", content: [{ type: "text", text: "abandoned" }] } },
+      { type: "message", id: "a1", parentId: "u1", timestamp: "2026-08-02T01:00:02.000Z", message: { role: "assistant", model: "deepseek-v4-flash", provider: "deepseek", content: [{ type: "thinking", thinking: "inspect" }, { type: "toolCall", id: "call1", name: "read", arguments: { path: "package.json" } }], usage: { input: 15, output: 10, reasoningTokens: 3, cacheRead: 5, totalTokens: 30 } } },
+      { type: "message", id: "r1", parentId: "a1", timestamp: "2026-08-02T01:00:03.000Z", message: { role: "toolResult", toolCallId: "call1", toolName: "read", content: [{ type: "text", text: "fixture output" }], isError: false } },
+      { type: "message", id: "a2", parentId: "r1", timestamp: "2026-08-02T01:00:04.000Z", message: { role: "assistant", content: [{ type: "text", text: "OpenClaw ready" }] } }
+    ];
+    writeJsonLines(filePath, records);
+    writeFileSync(path.join(sessionsDir, "sessions.json"), JSON.stringify({ "agent:main:fixture": { sessionId, displayName: "OpenClaw cached fixture", updatedAt: Date.parse("2026-08-02T01:00:04.000Z") } }));
+    writeJsonLines(path.join(childSessionsDir, "openclaw-child.jsonl"), [
+      { type: "session", version: 2, id: "openclaw-child", timestamp: "2026-08-02T01:00:05.000Z", cwd: workspace },
+      { type: "message", id: "cu1", parentId: null, timestamp: "2026-08-02T01:00:05.000Z", message: { role: "user", content: "child task" } },
+      { type: "message", id: "ca1", parentId: "cu1", timestamp: "2026-08-02T01:00:06.000Z", message: { role: "assistant", content: [{ type: "text", text: "child result" }] } }
+    ]);
+    writeFileSync(path.join(childSessionsDir, "sessions.json"), JSON.stringify({ "agent:worker:fixture": { sessionId: "openclaw-child", spawnedBy: "agent:main:fixture" } }));
+    initConfig(["--openclaw-dir", root]);
+
+    assert.equal((await collect(openclaw.scan()))[0]?.title, "OpenClaw cached fixture");
+    assert.equal(openclaw.getMessages(sessionId).some(message => message.content === "abandoned"), false);
+    assert.equal(openclaw.getMessages(sessionId).find(message => message.id === "call1")?.toolOutput, "fixture output");
+    assert.equal(openclaw.getSession("openclaw-child")?.parentId, sessionId);
+    assert.match(JSON.stringify(openclaw.getSessionTree(sessionId)), /openclaw-child/);
+    assert.deepEqual(
+      getResumeCommand(openclaw, sessionId, workspace, {}).args.slice(-2),
+      ["--session", "agent:main:fixture"]
+    );
+    assert.ok(openclaw.getTokenStats(30).some(day => day.totalTokens === 30 && day.reasoningTokens === 3));
+    assert.ok(openclaw.getRuntimeEnvironment(sessionId)?.extensions.some(entry => entry.name === "AGENTS.md"));
+    assert.equal(openclaw.getSystemPrompts(sessionId)?.mode, "openclaw-resolved");
+
+    writeFileSync(path.join(sessionsDir, "sessions.json"), JSON.stringify({ "agent:main:fixture": { sessionId, displayName: "OpenClaw refreshed registry title", updatedAt: Date.parse("2026-08-02T01:00:05.000Z") } }));
+    await sleep(1050);
+    assert.equal(openclaw.getSession(sessionId)?.title, "OpenClaw refreshed registry title");
+
+    writeFileSync(filePath, `${readFileSync(filePath, "utf8")}{"type":"message","id":`);
+    await sleep(1050);
+    assert.equal(openclaw.getSession(sessionId)?.title, "OpenClaw refreshed registry title");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Hermes snapshot store reads SQLite once per revision and separates delegation from compression", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "agentsession-hermes-cache-"));
+  try {
+    const dbPath = path.join(root, "state.db");
+    const db = new DatabaseSync(dbPath);
+    db.exec(`
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY, source TEXT, model TEXT, model_config TEXT, system_prompt TEXT,
+        parent_session_id TEXT, started_at REAL, ended_at REAL, end_reason TEXT, title TEXT,
+        input_tokens INTEGER, output_tokens INTEGER, cache_read_tokens INTEGER,
+        cache_write_tokens INTEGER, reasoning_tokens INTEGER, cwd TEXT, billing_provider TEXT,
+        archived INTEGER DEFAULT 0
+      );
+      CREATE TABLE messages (
+        id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, tool_call_id TEXT,
+        tool_calls TEXT, tool_name TEXT, effect_disposition TEXT, timestamp REAL,
+        finish_reason TEXT, reasoning TEXT, reasoning_content TEXT, reasoning_details TEXT,
+        platform_message_id TEXT, active INTEGER DEFAULT 1
+      );
+    `);
+    const started = Date.parse("2026-08-02T02:00:00.000Z") / 1000;
+    // Real Hermes transitions: compression rotation ends the live session with
+    // end_reason='compression' and creates a continuation whose
+    // parent_session_id points back at it. The root chain compresses twice
+    // (root -> root continuation -> chained root continuation); the delegate
+    // compresses once (delegate -> delegate continuation). Timestamps are
+    // monotonic: each continuation starts after its parent ended.
+    db.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+      "hermes-root", "cli", "deepseek-v4-flash", "{}", "Stored Hermes prompt", null,
+      started, started + 5.5, "compression", "Hermes fixture", 40, 15, 10, 0, 5, root, "deepseek", 0
+    );
+    db.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+      "hermes-compression", "cli", "deepseek-v4-flash", "{}", null, "hermes-root",
+      started + 6, started + 7, "compression", null, 0, 0, 0, 0, 0, root, "deepseek", 0
+    );
+    db.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+      "hermes-delegate", "delegate", "deepseek-v4-flash", JSON.stringify({ _delegate_from: "hermes-root" }), null, "hermes-root",
+      started + 8, started + 9, "compression", null, 0, 0, 0, 0, 0, root, "deepseek", 0
+    );
+    db.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+      "hermes-delegate-compression", "delegate", "deepseek-v4-flash", JSON.stringify({ _delegate_from: "hermes-root" }), null, "hermes-delegate",
+      started + 10, started + 11, "stop", null, 0, 0, 0, 0, 0, root, "deepseek", 0
+    );
+    // Chained compression: the second continuation points at the first
+    // segment, which itself continues the root session.
+    db.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+      "hermes-compression-2", "cli", "deepseek-v4-flash", "{}", null, "hermes-compression",
+      started + 7.5, started + 8, "branched", null, 0, 0, 0, 0, 0, root, "deepseek", 0
+    );
+    // Non-compression branch: the parent row exists but ended with
+    // end_reason='branched' (Hermes marks the origin of a /branch that way), so
+    // this child is a branch, not a compression continuation.
+    db.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+      "hermes-branch-child", "cli", "deepseek-v4-flash", "{}", null, "hermes-compression-2",
+      started + 9.5, started + 10, "stop", null, 0, 0, 0, 0, 0, root, "deepseek", 0
+    );
+    // Malformed lineage: the compression parent row is missing entirely.
+    db.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+      "hermes-orphan-compression", "cli", "deepseek-v4-flash", "{}", null, "hermes-missing",
+      started + 12, started + 13, "stop", null, 0, 0, 0, 0, 0, root, "deepseek", 0
+    );
+    // Valid-looking self-cycle: the edge satisfies the classification rule
+    // (the row exists and ends with compression), so traversal guards must
+    // keep the session's own messages canonical without manufacturing a base.
+    db.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+      "hermes-self-cycle", "cli", "deepseek-v4-flash", "{}", null, "hermes-self-cycle",
+      started + 13.5, started + 14, "compression", null, 0, 0, 0, 0, 0, root, "deepseek", 0
+    );
+    const insert = db.prepare("INSERT INTO messages (session_id, role, content, tool_calls, timestamp, finish_reason, reasoning, active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)");
+    insert.run("hermes-root", "user", "Hermes marker", null, started, null, null);
+    insert.run("hermes-root", "assistant", "", JSON.stringify([{ id: "hcall", function: { name: "read_file", arguments: JSON.stringify({ path: "package.json" }) } }]), started + 1, "tool_calls", "inspect");
+    db.prepare("INSERT INTO messages (session_id, role, content, tool_call_id, tool_name, timestamp, active) VALUES (?, 'tool', ?, ?, ?, ?, 1)").run("hermes-root", "Hermes tool output", "hcall", "read_file", started + 2);
+    insert.run("hermes-root", "assistant", "Hermes ready", null, started + 3, "stop", null);
+    // Delegate_task call whose tool output deliberately omits the child
+    // session id: the source keeps no exact spawn reference, so the viewer
+    // must attach by creation order and flag the link as inferred.
+    insert.run("hermes-root", "assistant", "", JSON.stringify([{ id: "hdelegate", function: { name: "delegate_task", arguments: JSON.stringify({ task: "Summarize the workspace" }) } }]), started + 4, "tool_calls", null);
+    db.prepare("INSERT INTO messages (session_id, role, content, tool_call_id, tool_name, timestamp, active) VALUES (?, 'tool', ?, ?, ?, ?, 1)").run("hermes-root", JSON.stringify({ task: "Summarize the workspace", status: "ok" }), "hdelegate", "delegate_task", started + 5);
+    // Hermes stores whitespace-only reasoning_content for tool-call turns that
+    // carried no visible reasoning; it must not render an empty Reasoning part.
+    insert.run("hermes-root", "assistant", "Whitespace reasoning turn", null, started + 5.5, "stop", " ");
+    insert.run("hermes-delegate", "user", "Delegate request", null, started + 8, null, null);
+    insert.run("hermes-delegate", "assistant", "Delegate response text", null, started + 9, "stop", "  Deliberate: check the docs  ");
+    // Compression segments carry real conversation state: the continuation
+    // of the delegate (and of the root) must merge into its logical base.
+    insert.run("hermes-compression", "user", "Root compression question", null, started + 6.2, null, null);
+    insert.run("hermes-compression", "assistant", "Root compression reply", null, started + 6.8, "stop", "Root continuation deliberation");
+    insert.run("hermes-compression-2", "user", "Root compression round two", null, started + 7.6, null, null);
+    insert.run("hermes-compression-2", "assistant", "Root compression round two reply", null, started + 7.7, "stop", null);
+    insert.run("hermes-branch-child", "user", "Branch question", null, started + 9.6, null, null);
+    insert.run("hermes-branch-child", "assistant", "Branch reply", null, started + 9.8, "stop", null);
+    insert.run("hermes-delegate-compression", "user", "Compressed delegate question", null, started + 10, null, null);
+    insert.run("hermes-delegate-compression", "assistant", "Compressed delegate reply", null, started + 11, "stop", "  Continuation: verify  ");
+    insert.run("hermes-orphan-compression", "user", "Orphan question", null, started + 12, null, null);
+    insert.run("hermes-orphan-compression", "assistant", "Orphan reply", null, started + 13, "stop", null);
+    insert.run("hermes-self-cycle", "user", "Self cycle question", null, started + 13.6, null, null);
+    insert.run("hermes-self-cycle", "assistant", "Self cycle reply", null, started + 13.7, "stop", null);
+    db.close();
+    writeFileSync(path.join(root, "SOUL.md"), "# Hermes instructions\n");
+    initConfig(["--hermes-dir", root]);
+
+    const scanned = await collect(hermes.scan());
+    // Every public scanned session exposes only validated compression lineage:
+    // each compressionParentId is a string referencing an existing parent row
+    // whose end_reason is 'compression'. Invalid candidates were normalized
+    // to null when the store snapshot was built.
+    for (const session of scanned) {
+      const compressionParentId = session.metadata?.compressionParentId;
+      if (compressionParentId == null) continue;
+      assert.equal(typeof compressionParentId, "string");
+      const parent = scanned.find(candidate => candidate.id === compressionParentId);
+      assert.ok(parent, `compression parent ${compressionParentId} exists`);
+      assert.equal(parent.metadata?.endReason, "compression");
+    }
+    assert.equal(scanned.find(session => session.id === "hermes-compression")?.parentId, null);
+    assert.equal(scanned.find(session => session.id === "hermes-compression")?.metadata?.compressionParentId, "hermes-root");
+    assert.equal(scanned.find(session => session.id === "hermes-delegate")?.parentId, "hermes-root");
+    assert.equal(scanned.find(session => session.id === "hermes-delegate-compression")?.parentId, "hermes-root");
+    assert.equal(scanned.find(session => session.id === "hermes-delegate-compression")?.metadata?.compressionParentId, "hermes-delegate");
+    // A chained compression segment points at the previous segment, never at
+    // the delegate; the canonical parentId stays the delegate spawn parent.
+    assert.equal(scanned.find(session => session.id === "hermes-compression-2")?.parentId, null);
+    assert.equal(scanned.find(session => session.id === "hermes-compression-2")?.metadata?.compressionParentId, "hermes-compression");
+    // Malformed lineage: the compression parent row is missing, so the raw id
+    // candidate is normalized to null and the session stays standalone.
+    assert.equal(scanned.find(session => session.id === "hermes-orphan-compression")?.parentId, null);
+    assert.equal(scanned.find(session => session.id === "hermes-orphan-compression")?.metadata?.compressionParentId, null);
+    // Non-compression branch: the parent row exists but ended with
+    // end_reason='branched', so the child is not compression lineage and
+    // remains independently canonical.
+    assert.equal(scanned.find(session => session.id === "hermes-branch-child")?.parentId, null);
+    assert.equal(scanned.find(session => session.id === "hermes-branch-child")?.metadata?.compressionParentId, null);
+    // A self-referencing edge passes the classification rule (the row exists
+    // and ends with compression); traversal guards keep it canonical.
+    assert.equal(scanned.find(session => session.id === "hermes-self-cycle")?.metadata?.compressionParentId, "hermes-self-cycle");
+    assert.equal(hermes.getMessages("hermes-root").find(message => message.id === "hcall")?.toolOutput, "Hermes tool output");
+    assert.ok(hermes.getTokenStats(30).some(day => day.totalTokens === 65 && day.reasoningTokens === 5));
+    assert.equal(hermes.getSystemPrompts("hermes-root")?.hiddenPromptStored, true);
+    assert.match(JSON.stringify(hermes.getSystemPrompts("hermes-root")), /Stored Hermes prompt/);
+    assert.ok(hermes.getRuntimeEnvironment("hermes-root")?.extensions.some(entry => entry.name === "SOUL.md"));
+    // Whitespace-only reasoning is treated as absent: no thinking on the
+    // normalized message and no reasoning part in the tree, while the real
+    // "inspect" reasoning on the read_file turn stays byte-for-byte.
+    const rootMessages = hermes.getMessages("hermes-root");
+    assert.equal(rootMessages.find(message => message.content === "Whitespace reasoning turn")?.thinking, null);
+    const rootTree = hermes.getSessionTree("hermes-root");
+    const rootReasoningParts = rootTree.messages.flatMap(message => message.parts).filter(part => part.type === "reasoning");
+    // Root reasoning plus the reasoning carried by the root compression
+    // continuation, merged chronologically into the logical base session.
+    assert.equal(rootReasoningParts.length, 2);
+    assert.equal(rootReasoningParts[0].data.text, "inspect");
+    assert.ok(rootReasoningParts.some(part => part.data.text === "Root continuation deliberation"));
+    // Compression content and chained-segment content merge into the base
+    // session; nothing is dropped or detached. Merged assistant text stays in
+    // chronological order across segments: root turns, then the first
+    // continuation's reply, then the chained continuation's reply.
+    assert.ok(rootTree.messages.some(message => message.parts.some(part => part.type === "text" && part.data.text === "Root compression reply")));
+    assert.ok(rootTree.messages.some(message => message.parts.some(part => part.type === "text" && part.data.text === "Root compression round two reply")));
+    assert.deepEqual(
+      rootTree.messages
+        .filter(message => message.role === "assistant" && message.parts.some(part => part.type === "text"))
+        .map(message => message.parts.find(part => part.type === "text")?.data.text),
+      ["Hermes ready", "Whitespace reasoning turn", "Root compression reply", "Root compression round two reply"]
+    );
+    // The delegate child keeps its real reasoning and content byte-for-byte
+    // (including the surrounding whitespace Hermes stores with the text).
+    const delegateAssistant = hermes.getMessages("hermes-delegate").find(message => message.role === "assistant");
+    assert.equal(delegateAssistant?.thinking, "  Deliberate: check the docs  ");
+    assert.equal(delegateAssistant?.content, "Delegate response text");
+    // The delegate child attaches beneath the delegate_task tool. The tool
+    // output carries no exact child session id, so the attachment is inferred
+    // and flagged truthfully instead of claiming an explicit source link.
+    const delegatePart = rootTree.messages
+      .flatMap(message => message.parts)
+      .find(part => part.type === "tool" && part.tool === "delegate_task");
+    assert.ok(delegatePart, "delegate_task tool part exists");
+    // One spawn per part: the delegate child attaches beneath the delegate
+    // tool; the compression segments are lineage, not spawns, so they merge
+    // into their logical base and nothing stays detached.
+    assert.deepEqual(
+      delegatePart.childSessions.map(child => child.session.id),
+      ["hermes-delegate"]
+    );
+    assert.ok(delegatePart.inferredChildSessionIds.has("hermes-delegate"));
+    assert.deepEqual(
+      rootTree.detachedChildren.map(child => child.session.id),
+      []
+    );
+    const delegateChild = delegatePart.childSessions.find(child => child.session.id === "hermes-delegate");
+    const delegateChildAssistant = delegateChild.messages.find(message => message.role === "assistant" && message.parts.some(part => part.type === "text" && part.data.text === "Delegate response text"));
+    assert.equal(delegateChildAssistant.parts.find(part => part.type === "reasoning")?.data.text, "  Deliberate: check the docs  ");
+    assert.equal(delegateChildAssistant.parts.find(part => part.type === "text")?.data.text, "Delegate response text");
+    // The delegate compression continuation merges into the delegate tree
+    // after the original messages, preserving content and reasoning.
+    assert.ok(delegateChild.messages.some(message => message.role === "user" && message.parts.some(part => part.type === "text" && part.data.text === "Compressed delegate question")));
+    assert.deepEqual(
+      delegateChild.messages
+        .filter(message => message.role === "assistant")
+        .map(message => message.parts.find(part => part.type === "text")?.data.text),
+      ["Delegate response text", "Compressed delegate reply"]
+    );
+    const compressionDelegateTurn = delegateChild.messages.find(message => message.role === "assistant" && message.parts.some(part => part.type === "text" && part.data.text === "Compressed delegate reply"));
+    assert.equal(compressionDelegateTurn.parts.find(part => part.type === "reasoning")?.data.text, "  Continuation: verify  ");
+    // Subagent metrics cover exactly one subagent: the delegate. The
+    // compression lineage is one logical session, so it counts no branch and
+    // leaves nothing detached.
+    assert.equal(rootTree.metrics.descendantCount, 1);
+    assert.equal(rootTree.metrics.totalMessages, 13);
+    assert.equal(hermes.getSessionMetrics("hermes-root")?.totals.branches, 1);
+    const delegateFlow = hermes.getSessionFlow("hermes-root");
+    const invocation = delegateFlow.root.line.find(node => node.kind === "invocation" && !node.id.includes("detached:"));
+    assert.ok(invocation, "delegate task invocation exists");
+    assert.equal(invocation.branches.length, 1);
+    assert.equal(invocation.inferred, true);
+    assert.match(invocation.meta, /1 subagent/);
+    assert.match(invocation.meta, /1 inferred link/);
+    // No detached compression invocation: the segment merged into the
+    // delegate, so the flow renders exactly one subagent fork that carries
+    // the compressed continuation messages.
+    assert.ok(!delegateFlow.root.line.some(node => node.id.includes("detached:")), "no detached compression invocation");
+    assert.equal(delegateFlow.summary.subagents, 1);
+    const delegateBranch = invocation.branches[0];
+    assert.equal(delegateBranch.target.id, "hermes-delegate");
+    assert.ok(
+      delegateBranch.line.filter(node => node.kind === "user").some(node => node.label === "Compressed delegate question"),
+      "compression user message renders inside the delegate fork"
+    );
+    assert.match(JSON.stringify(hermes.getSessionTree("hermes-root")), /hermes-delegate/);
+    // Canonical per-segment access stays intact: raw sessions, messages, and
+    // exports remain individually queryable, and the merged lineage view did
+    // not mutate store entries.
+    assert.equal(hermes.getSession("hermes-root")?.messageCount, 7);
+    assert.equal(hermes.getSession("hermes-delegate")?.messageCount, 2);
+    assert.equal(hermes.getSession("hermes-delegate-compression")?.messageCount, 2);
+    assert.equal(hermes.getSession("hermes-compression")?.messageCount, 2);
+    assert.equal(hermes.getSession("hermes-compression-2")?.messageCount, 2);
+    assert.equal(hermes.getMessages("hermes-delegate-compression").find(message => message.content === "Compressed delegate reply")?.thinking, "  Continuation: verify  ");
+    assert.equal(hermes.getMessages("hermes-compression").find(message => message.content === "Root compression reply")?.thinking, "Root continuation deliberation");
+    const exportedSegment = hermes.exportSession("hermes-delegate-compression");
+    assert.equal(exportedSegment?.session.id, "hermes-delegate-compression");
+    assert.equal(exportedSegment?.messages.length, 2);
+    // Asking for a compression segment resolves backward to its logical base
+    // and returns the merged lineage view rooted at that base.
+    const segmentTree = hermes.getSessionTree("hermes-delegate-compression");
+    assert.equal(segmentTree.session.id, "hermes-delegate");
+    assert.ok(segmentTree.messages.some(message => message.parts.some(part => part.type === "text" && part.data.text === "Delegate response text")));
+    assert.ok(segmentTree.messages.some(message => message.parts.some(part => part.type === "text" && part.data.text === "Compressed delegate reply")));
+    const rootCompressionTree = hermes.getSessionTree("hermes-compression");
+    assert.equal(rootCompressionTree.session.id, "hermes-root");
+    // Malformed lineage (missing compression parent): the bundle is preserved
+    // rather than silently dropped, and its own lineage view keeps its
+    // messages.
+    assert.equal(hermes.getSession("hermes-orphan-compression")?.messageCount, 2);
+    const orphanTree = hermes.getSessionTree("hermes-orphan-compression");
+    assert.equal(orphanTree.session.id, "hermes-orphan-compression");
+    assert.ok(orphanTree.messages.some(message => message.parts.some(part => part.type === "text" && part.data.text === "Orphan reply")));
+    // Non-compression branch child: not merged as compression, not attached to
+    // the root lineage, and independently canonical with its own messages.
+    assert.equal(hermes.getSession("hermes-branch-child")?.messageCount, 2);
+    const branchTree = hermes.getSessionTree("hermes-branch-child");
+    assert.equal(branchTree.session.id, "hermes-branch-child");
+    assert.ok(branchTree.messages.some(message => message.parts.some(part => part.type === "text" && part.data.text === "Branch reply")));
+    assert.ok(!rootTree.messages.some(message => message.parts.some(part => part.type === "text" && part.data.text === "Branch reply")));
+    // Valid-looking self-cycle: traversal guards keep the requested session's
+    // own messages canonical instead of manufacturing a wrong base.
+    assert.equal(hermes.getSession("hermes-self-cycle")?.messageCount, 2);
+    const selfCycleTree = hermes.getSessionTree("hermes-self-cycle");
+    assert.equal(selfCycleTree.session.id, "hermes-self-cycle");
+    assert.ok(selfCycleTree.messages.some(message => message.parts.some(part => part.type === "text" && part.data.text === "Self cycle reply")));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

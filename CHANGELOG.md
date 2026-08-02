@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.8.0 - 2026-08-02
+
+### Added
+
+- First-class OpenClaw and Hermes Agent providers with full session browsing,
+  Token Explorer integration, structured Flow views, runtime-extension
+  discovery, and resume commands.
+- MCP interactive installer with provider-aware configuration and protocol
+  updates for more reliable server setup.
+
+### Changed
+
+- Unified all eight providers under a single immutable registry with consistent
+  capability declarations and renamed capability keys for clarity.
+- Reclassified Copilot CLI as a legacy, read-only provider for historical
+  sessions.
+- Normalized provider lifecycle signals so availability, detection, and
+  scanning states are truthfully reported across the dashboard and API.
+- Dynamic resume command resolution now lets each provider report its native
+  shell, token semantics, and runtime evidence without central overrides.
+- Moved OpenCode SQLite reads behind the adapter boundary, keeping
+  provider-owned access patterns strictly inside the OpenCode adapter.
+- Modularized browser JavaScript into self-contained modules (i18n,
+  settings-form, session-workbench, enhancements) alongside the main app
+  bundle.
+
+### Fixed
+
+- Hermes compression segments are now treated as one logical session in the
+  structured views: continuation messages merge into their base session and
+  are no longer rendered as detached or ghost subagents, while per-segment
+  browsing, messages, and exports stay individually available.
+
 ## 1.7.2 - 2026-07-22
 
 ### Fixed

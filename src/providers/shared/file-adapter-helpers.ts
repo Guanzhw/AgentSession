@@ -6,6 +6,8 @@ import { createSnippet, matchesSearchQuery } from "./parser.js";
 export interface SessionFileDescriptor {
   sessionId: string;
   filePath: string;
+  /** Supplementary provider-owned files whose changes invalidate this parsed entry. */
+  dependencyPaths?: string[];
 }
 
 export interface IndexedSessionFile<TSession, TRecords, TMessages> extends SessionFileDescriptor {
@@ -55,8 +57,16 @@ export function createSessionFileStore<
     for (const descriptor of options.discoverFiles()) {
       const filePath = path.resolve(descriptor.filePath);
       try {
-        const stat = statSync(filePath);
-        const signature = `${stat.size}:${stat.mtimeMs}`;
+        const signature = [filePath, ...(descriptor.dependencyPaths || [])]
+          .map(signaturePath => {
+            try {
+              const stat = statSync(path.resolve(signaturePath));
+              return `${path.resolve(signaturePath)}:${stat.size}:${stat.mtimeMs}`;
+            } catch {
+              return `${path.resolve(signaturePath)}:missing`;
+            }
+          })
+          .join("|");
         const cached = entriesByPath.get(filePath);
         if (cached?.signature === signature) {
           nextByPath.set(filePath, cached);

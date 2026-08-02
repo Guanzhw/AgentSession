@@ -13,7 +13,7 @@ const { initConfig, parseArgs, validateUserConfig } = await import("../dist/src/
 initConfig([]);
 const { closeDb } = await import("../dist/src/db.js");
 const { createSessionHistoryService, SessionHistoryError } = await import("../dist/src/session-history.js");
-const { createSqliteSessionAdapter } = await import("../dist/src/providers/shared/sqlite-adapter.js");
+const { createOpenCodeSqliteAdapter } = await import("../dist/src/providers/opencode/sqlite-adapter.js");
 const { createSessionHistoryMcpServer } = await import("../packages/agentsession-mcp/dist/session-history-server.js");
 const {
   AUTO_UPDATE_PACKAGE,
@@ -261,7 +261,7 @@ test("OpenCode SQLite search event references round-trip and session_get reports
     .run("prt_reasoning", "msg_sqlite", "ses_sqlite", JSON.stringify({ type: "reasoning", text: "PrivateReasoningNeedle" }));
   db.close();
 
-  const adapter = createSqliteSessionAdapter({
+  const adapter = createOpenCodeSqliteAdapter({
     id: "opencode",
     name: "Fixture OpenCode",
     defaultDataPath: () => dbPath
@@ -316,6 +316,8 @@ test("AgentSession-MCP lists exactly five read-only tools over the MCP protocol"
     "opencode",
     "claude-code",
     "codex",
+    "openclaw",
+    "hermes",
     "copilot",
     "gemini",
     "pi"
@@ -373,7 +375,7 @@ test("interactive installer writes user-scoped auto-updating MCP configurations"
   mkdirSync(path.dirname(codexPath), { recursive: true });
   writeFileSync(codexPath, "[mcp_servers.other]\ncommand = \"other-server\"\n");
 
-  for (const target of ["codex", "claude-code", "copilot", "opencode"]) {
+  for (const target of ["codex", "claude-code", "opencode"]) {
     const result = installIntoTarget(target, { ...context, configPath: agentConfig });
     assert.equal(result.status, "installed");
   }
@@ -386,31 +388,15 @@ test("interactive installer writes user-scoped auto-updating MCP configurations"
   assert.match(codex, /AGENTSESSION_CONFIG/);
 
   const claude = JSON.parse(readFileSync(getInstallConfigPath("claude-code", context), "utf8"));
-  const copilot = JSON.parse(readFileSync(getInstallConfigPath("copilot", context), "utf8"));
   const opencode = JSON.parse(readFileSync(getInstallConfigPath("opencode", context), "utf8"));
   for (const config of [claude]) {
     assert.equal(config.mcpServers.agentsession.command, "npx");
     assert.ok(config.mcpServers.agentsession.args.includes(AUTO_UPDATE_PACKAGE));
     assert.equal(config.mcpServers.agentsession.env.AGENTSESSION_CONFIG, agentConfig);
   }
-  assert.equal(copilot.mcpServers.agentsession.type, "local");
-  assert.deepEqual(copilot.mcpServers.agentsession.tools, ["*"]);
-  assert.equal(copilot.mcpServers.agentsession.command, "npx");
-  assert.ok(copilot.mcpServers.agentsession.args.includes(AUTO_UPDATE_PACKAGE));
-  assert.equal(copilot.mcpServers.agentsession.env.AGENTSESSION_CONFIG, agentConfig);
   assert.deepEqual(opencode.mcp.agentsession.command.slice(0, 2), ["npx", "--yes"]);
   assert.ok(opencode.mcp.agentsession.command.includes(AUTO_UPDATE_PACKAGE));
   assert.equal(opencode.mcp.agentsession.environment.AGENTSESSION_CONFIG, agentConfig);
-
-  assert.equal(installIntoTarget("copilot", { ...context, configPath: agentConfig }).status, "already-installed");
-  assert.equal(installIntoTarget("copilot", { ...context, configPath: agentConfig, update: true }).status, "updated");
-  const legacyCopilotPath = getInstallConfigPath("copilot", context);
-  const legacyCopilot = JSON.parse(readFileSync(legacyCopilotPath, "utf8"));
-  legacyCopilot.mcpServers.agentsession = { command: "legacy-mcp", args: [] };
-  writeFileSync(legacyCopilotPath, `${JSON.stringify(legacyCopilot)}\n`);
-  assert.equal(installIntoTarget("copilot", { ...context, configPath: agentConfig }).status, "needs-replace");
-  assert.equal(installIntoTarget("copilot", { ...context, configPath: agentConfig, update: true }).status, "needs-replace");
-  assert.equal(installIntoTarget("copilot", { ...context, configPath: agentConfig, replace: true }).status, "updated");
 });
 
 test("installer recognizes a commented Codex table header before replacing it", () => {
@@ -435,10 +421,11 @@ test("installer recognizes a commented Codex table header before replacing it", 
 });
 
 test("installer parses an explicit update and uses a Windows-safe launcher", () => {
-  assert.deepEqual(parseInstallerCommand(["update", "--target", "codex,copilot", "--yes"]), {
+  assert.deepEqual(parseInstallerCommand(["update", "--target", "codex,opencode", "--yes"]), {
     action: "update",
-    options: { targets: ["codex", "copilot"], yes: true }
+    options: { targets: ["codex", "opencode"], yes: true }
   });
+  assert.throws(() => parseInstallerCommand(["install", "--target", "copilot", "--yes"]), /Unsupported install target/);
   assert.deepEqual(createAutoUpdateLauncher(undefined, { platform: "win32" }), {
     command: "cmd.exe",
     args: [

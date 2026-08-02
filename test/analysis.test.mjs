@@ -69,7 +69,7 @@ import {
   isSubagentTool,
   mergeToolMetadata
 } from "../dist/src/providers/shared/subagent-tools.js";
-import { createSqliteSessionAdapter } from "../dist/src/providers/shared/sqlite-adapter.js";
+import { createOpenCodeSqliteAdapter } from "../dist/src/providers/opencode/sqlite-adapter.js";
 import { createIncrementalTokenStats, createSessionFileStore } from "../dist/src/providers/shared/file-adapter-helpers.js";
 import { providerFeatureMatrix } from "../dist/src/providers/kinds.js";
 import { createStatsCache } from "../dist/src/stats-cache.js";

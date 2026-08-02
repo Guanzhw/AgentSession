@@ -532,7 +532,7 @@ test("sqlite stats defer supporting sections to a fragment endpoint", async () =
     db.close();
 
     const adapter = {
-      id: "opencode", name: "Route fixture", icon: "", capabilities: { sqliteSessionStore: true },
+      id: "opencode", name: "Route fixture", icon: "", capabilities: { openCodeStatsStore: true },
       getDataPath() { return dbPath; },
       getTokenStats() { return []; },
     };

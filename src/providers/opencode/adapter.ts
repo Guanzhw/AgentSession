@@ -1,7 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import { icons } from "../../icons.js";
-import { createSqliteSessionAdapter } from "../shared/sqlite-adapter.js";
+import { createOpenCodeSqliteAdapter } from "./sqlite-adapter.js";
 import { buildOpenCodeFlowTree } from "./flow-tree.js";
 import { buildOpenCodeSessionContainer } from "./session-container.js";
 import { buildOpenCodeSessionMetrics } from "./session-metrics.js";
@@ -21,7 +21,7 @@ export function defaultOpenCodeDataPath() {
   return defaultDataPath();
 }
 
-const baseAdapter = createSqliteSessionAdapter({
+const baseAdapter = createOpenCodeSqliteAdapter({
   id: "opencode",
   name: "OpenCode",
   icon: icons.opencode,
@@ -33,7 +33,7 @@ const baseAdapter = createSqliteSessionAdapter({
   },
   capabilities: {
     localManagement: true,
-    sqliteSessionStore: true,
+    openCodeStatsStore: true,
     sessionAnalysis: true,
     structuredSessionViews: true
   }

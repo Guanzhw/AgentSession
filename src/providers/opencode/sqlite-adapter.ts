@@ -9,8 +9,8 @@ import {
   searchMessages as dbSearchMessages,
   getTokenStats as dbGetTokenStats,
 } from "../../db.js";
-import { parseJson } from "./parser.js";
-import { isSubagentTool, mergeToolMetadata } from "./subagent-tools.js";
+import { parseJson } from "../shared/parser.js";
+import { isSubagentTool, mergeToolMetadata } from "../shared/subagent-tools.js";
 import type { ProviderAdapter, ProviderId } from "../interface.js";
 
 function stringifyMessageContent(value: any) {
@@ -28,7 +28,7 @@ function stringifyMessageContent(value: any) {
   }
 }
 
-export function createSqliteSessionAdapter({
+export function createOpenCodeSqliteAdapter({
   id,
   name,
   icon = icons.opencode,

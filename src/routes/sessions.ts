@@ -17,7 +17,7 @@ import {
   enrichSession
 } from "../session-queries.js";
 import { json, missingProviderResponse } from "../server-helpers.js";
-import { usesSqliteSessionStore } from "../providers/kinds.js";
+import { usesOpenCodeStatsStore } from "../providers/kinds.js";
 import { getProvider } from "../providers/index.js";
 import { renderSessionsPage } from "../views/sessions.js";
 import { providerRenderContext } from "./provider-context.js";
@@ -154,7 +154,7 @@ export function registerSessions(
       const starredOnly = resolveStarredFilter(url.searchParams);
       const sessionKind = resolveSessionKindFilter(url.searchParams);
 
-      if (usesSqliteSessionStore(adapter)) {
+      if (usesOpenCodeStatsStore(adapter)) {
         const dbPath = adapter.getDataPath();
         const metaMap = getAllMeta(providerId);
         const excludedIds = getExcludedIds(providerId) as Set<string>;
@@ -269,7 +269,7 @@ export function registerSessions(
     const renderContext = providerRenderContext(providerSegment, providerInfo, adapter);
 
     try {
-      if (usesSqliteSessionStore(adapter)) {
+      if (usesOpenCodeStatsStore(adapter)) {
         const dbPath = adapter.getDataPath();
         const metaMap = getAllMeta(providerSegment);
         const excludedIds = getExcludedIds(providerSegment);
@@ -402,7 +402,7 @@ export function registerSessions(
     const renderContext = providerRenderContext(providerSegment, providerInfo, adapter);
 
     try {
-      if (usesSqliteSessionStore(adapter)) {
+      if (usesOpenCodeStatsStore(adapter)) {
         const dbPath = adapter.getDataPath();
         const metaMap = getAllMeta(providerSegment);
         const excludedIds = getExcludedIds(providerSegment);

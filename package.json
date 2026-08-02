@@ -1,6 +1,6 @@
 {
   "name": "agentsession-workspace",
-  "version": "1.7.2",
+  "version": "1.8.0",
   "description": "AgentSession — a local-first multi-provider viewer and manager for AI coding sessions.",
   "type": "module",
   "private": true,
@@ -28,6 +28,8 @@
     "opencode",
     "claude-code",
     "codex",
+    "openclaw",
+    "hermes-agent",
     "copilot",
     "gemini",
     "pi-coding-agent",

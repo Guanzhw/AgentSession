@@ -1,7 +1,7 @@
 import { getSessionsByIds } from "../db.js";
 import { getIndexedSessions } from "../index-db.js";
 import { getAllMeta, getDeletedIds } from "../meta.js";
-import { supportsLocalManagement, usesSqliteSessionStore } from "../providers/kinds.js";
+import { supportsLocalManagement, usesOpenCodeStatsStore } from "../providers/kinds.js";
 import { enrichSession, normalizeSessionRecord } from "../session-queries.js";
 import { renderTrashPage } from "../views/trash.js";
 import { providerRenderContext } from "./provider-context.js";
@@ -22,7 +22,7 @@ export function registerTrashRoutes(app: any, deps: ProviderRouteDeps) {
 
     try {
       const deletedIds = getDeletedIds(providerSegment);
-      const sessions = usesSqliteSessionStore(adapter)
+      const sessions = usesOpenCodeStatsStore(adapter)
         ? getSessionsByIds(deletedIds, adapter.getDataPath())
         : getIndexedSessions(providerSegment, Math.max(1, deletedIds.length), 0, "", "", "", "updated-desc", deletedIds).sessions;
       const metaMap = getAllMeta(providerSegment);

@@ -8,7 +8,7 @@ import {
 } from "../db.js";
 import { statSync } from "node:fs";
 import { json, missingProviderResponse, send } from "../server-helpers.js";
-import { usesSqliteSessionStore } from "../providers/kinds.js";
+import { usesOpenCodeStatsStore } from "../providers/kinds.js";
 import { renderStatsDeferredSection, renderStatsPage } from "../views/stats.js";
 import { providerRenderContext } from "./provider-context.js";
 import { registerSettingsRoutes } from "./settings.js";
@@ -401,7 +401,7 @@ export function registerSettingsStatsTrash(
   }
 
   function buildTokenExplorer(adapter: any, providerId: string, searchParams: URLSearchParams, detail: "initial" | "drill" | "full" = "full") {
-    return usesSqliteSessionStore(adapter)
+    return usesOpenCodeStatsStore(adapter)
       ? buildSqliteTokenExplorer(adapter, providerId, searchParams, detail)
       : buildFileBasedTokenExplorer(adapter, providerId, searchParams);
   }
@@ -647,7 +647,7 @@ export function registerSettingsStatsTrash(
       const cached = buildCachedTokenExplorer(adapter, providerId, searchParams, "initial");
       const filters = cached.filters;
 
-      if (usesSqliteSessionStore(adapter)) {
+      if (usesOpenCodeStatsStore(adapter)) {
         return json(res, { filters, tokenStats: cached.tokenStats, totalTokens: cached.overview.totalTokens });
       }
 

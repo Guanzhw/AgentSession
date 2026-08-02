@@ -9,7 +9,9 @@ import { getAllProviders, getAvailableProviders } from "./providers/index.js";
 import type { Message, MessageRole, ProviderAdapter, ProviderId, RawSession } from "./providers/interface.js";
 import { matchesSearchQuery } from "./providers/shared/parser.js";
 
-const PROVIDER_IDS: ProviderId[] = ["opencode", "claude-code", "codex", "copilot", "gemini", "pi"];
+function providerIds(): ProviderId[] {
+  return getAllProviders().map(provider => provider.id);
+}
 const EVENT_SEGMENTS = ["message", "thinking", "tool"] as const;
 const EVENT_STATUSES = ["error", "completed", "unknown"] as const;
 const HARD_LIMITS = {
@@ -136,7 +138,7 @@ function assertSessionRef(value: unknown): SessionRef {
   const candidate = asObject(value);
   const provider = candidate?.provider;
   const sessionId = asNonEmptyString(candidate?.sessionId);
-  if (!PROVIDER_IDS.includes(provider as ProviderId) || !sessionId) {
+  if (!providerIds().includes(provider as ProviderId) || !sessionId) {
     throw new SessionHistoryError("invalid_session_ref", "session must contain a registered provider and a non-empty canonical sessionId.");
   }
   return { provider: provider as ProviderId, sessionId };
@@ -442,7 +444,7 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
       if (!query || query.length > HARD_LIMITS.queryChars) {
         throw new SessionHistoryError("invalid_input", `query must contain between 1 and ${HARD_LIMITS.queryChars} characters.`);
       }
-      const requestedProviders = assertStringArray(input?.providers, "providers", PROVIDER_IDS) as ProviderId[] | undefined;
+      const requestedProviders = assertStringArray(input?.providers, "providers", providerIds()) as ProviderId[] | undefined;
       const updatedAfter = resolveTime(input?.updatedAfter, "updatedAfter");
       const requestedUpdatedBefore = resolveTime(input?.updatedBefore, "updatedBefore");
       const requestedDirectory = input?.directory === undefined ? undefined : asNonEmptyString(input.directory)?.trim();
