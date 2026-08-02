@@ -1196,6 +1196,107 @@ function escapeHtmlClient(str) {
   return el.innerHTML;
 }
 
+function formatCompactCountClient(value) {
+  const amount = Number(value) || 0;
+  if (Math.abs(amount) >= 1_000_000) {
+    return `${(amount / 1_000_000).toFixed(amount >= 10_000_000 ? 0 : 1)}m`;
+  }
+  if (Math.abs(amount) >= 1_000) {
+    return `${(amount / 1_000).toFixed(amount >= 10_000 ? 0 : 1)}k`;
+  }
+  return String(amount);
+}
+
+function formatDurationClient(ms) {
+  const totalSeconds = Math.round(Number(ms) / 1000);
+  if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) {
+    return "";
+  }
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+const CLIENT_STATUS_KEYS = {
+  running: "card_status_running",
+  blocked: "card_status_blocked",
+  waiting_input: "card_status_waiting_input",
+  queued: "card_status_queued"
+};
+
+function renderListStatChipsClient(s) {
+  const listStats = s && s.stats;
+  if (!listStats || typeof listStats !== "object") {
+    return "";
+  }
+  const chips = [];
+  const chip = (label, title, className = "") => {
+    const cls = ["stat-chip", className].filter(Boolean).join(" ");
+    return `<span class="${cls}" title="${escapeHtmlClient(title)}">${escapeHtmlClient(label)}</span>`;
+  };
+  if (listStats.messageCount != null) {
+    chips.push(chip(
+      ft("card_messages").replace("{count}", formatCompactCountClient(listStats.messageCount)),
+      ft("card_messages_help")
+    ));
+  }
+  if (listStats.tokenCount != null && Number(listStats.tokenCount) > 0) {
+    chips.push(chip(
+      ft("card_tokens").replace("{count}", formatCompactCountClient(listStats.tokenCount)),
+      ft("card_tokens_help")
+    ));
+  }
+  if (listStats.durationMs != null && Number(listStats.durationMs) >= 1000) {
+    const duration = formatDurationClient(listStats.durationMs);
+    const help = listStats.durationSource === "protocol"
+      ? ft("card_observed_duration_help")
+      : ft("card_recorded_duration_help");
+    chips.push(`<span class="stat-chip" title="${escapeHtmlClient(help)}" aria-label="${escapeHtmlClient(`${duration}. ${help}`)}">${escapeHtmlClient(duration)}</span>`);
+  }
+  if (listStats.protocol && Number(listStats.compactions) > 0) {
+    const count = formatCompactCountClient(listStats.compactions);
+    const label = ft("card_compactions").replace("{count}", count);
+    const title = listStats.lastCompactionAt != null
+      ? ft("card_compactions_help_last").replace("{count}", count).replace("{time}", formatTimeClient(listStats.lastCompactionAt))
+      : ft("card_compactions_help").replace("{count}", count);
+    chips.push(chip(label, title));
+  }
+  if (listStats.protocol && Number(listStats.subagentRunCount) > 0) {
+    chips.push(chip(
+      ft("card_subagents").replace("{count}", formatCompactCountClient(listStats.subagentRunCount)),
+      ft("card_subagents_help")
+    ));
+  }
+  if (listStats.protocol && Number(listStats.backgroundRunCount) > 0) {
+    chips.push(chip(
+      ft("card_background_runs").replace("{count}", formatCompactCountClient(listStats.backgroundRunCount)),
+      ft("card_background_runs_help")
+    ));
+  }
+  for (const status of listStats.activeStatuses || []) {
+    const key = CLIENT_STATUS_KEYS[status];
+    if (!key) continue;
+    const label = ft(key);
+    chips.push(chip(label, ft("card_status_help").replace("{status}", label), `stat-chip-${status}`));
+  }
+  if (listStats.protocol && Number(listStats.contextArtifactCount) > 0) {
+    chips.push(chip(
+      ft("card_artifacts").replace("{count}", formatCompactCountClient(listStats.contextArtifactCount)),
+      ft("card_artifacts_help")
+    ));
+  }
+  if (listStats.protocol && listStats.memoryCount != null && Number(listStats.memoryCount) > 0) {
+    chips.push(chip(
+      ft("card_memory").replace("{count}", formatCompactCountClient(listStats.memoryCount)),
+      ft("card_memory_help")
+    ));
+  }
+  return chips.join("");
+}
+
 function renderSessionCard(s) {
   const sessionProvider = s.provider || PROVIDER;
   const id = escapeHtmlClient(s.id);
@@ -1215,6 +1316,7 @@ function renderSessionCard(s) {
     additions > 0 ? `<span class="additions">+${additions}</span>` : "",
     deletions > 0 ? `<span class="deletions">-${deletions}</span>` : ""
   ].filter(Boolean).join("");
+  const protocolStats = renderListStatChipsClient(s);
   const analysisBadge = s.analysisTitled ? `<span class="session-kind-badge">${escapeHtmlClient(ft("session_analysis_badge"))}</span>` : "";
   let providerNames = {};
   try { providerNames = JSON.parse(scrollSentinel?.dataset.providerNames || "{}"); } catch {}
@@ -1252,7 +1354,7 @@ function renderSessionCard(s) {
         <time class="session-card-time" datetime="${new Date(timeUpdated).toISOString()}">${escapeHtmlClient(formatTimeClient(timeUpdated))}</time>
       </header>
       <p class="session-card-directory">${directory}</p>
-      ${stats ? `<footer class="session-card-stats">${stats}</footer>` : ""}
+      ${stats || protocolStats ? `<footer class="session-card-stats">${stats}${protocolStats}</footer>` : ""}
     </div>
     ${actionsHtml}
   </article>`;

@@ -180,10 +180,12 @@ export function listSessions(limit = 50, offset = 0, search = "", timeRange = ""
   const db = getDb(pathOverride);
   const { whereClause, params } = sessionFilter(search, timeRange, project, excludedIds, includedIds, sessionKind, titleOverrides);
   const { orderBy, params: sortParams } = sessionSortOrder(sort, titleOverrides);
+  const metrics = sessionListMetricColumns(db);
 
   const sessions = db.prepare(`
     SELECT id, project_id, slug, title, directory, time_created, time_updated,
-           summary_additions, summary_deletions, summary_files, time_archived
+           summary_additions, summary_deletions, summary_files, time_archived,
+           ${metrics}
     FROM session
     ${whereClause}
     ORDER BY ${orderBy}
@@ -229,7 +231,13 @@ export function getSession(id: any, pathOverride: string | undefined = undefined
 
 export function getSessionSafe(id: any, pathOverride: string | undefined = undefined) {
   const db = getDb(pathOverride);
-  const row = db.prepare(`SELECT * FROM session WHERE id = ?`).get(id);
+  const metrics = sessionListMetricColumns(db);
+  const row = db.prepare(`
+    SELECT session.*,
+           ${metrics}
+    FROM session
+    WHERE session.id = ?
+  `).get(id);
   if (!row) return null;
   return {
     id: row.id,
@@ -252,6 +260,8 @@ export function getSessionSafe(id: any, pathOverride: string | undefined = undef
     tokens_reasoning: row.tokens_reasoning ?? 0,
     tokens_cache_read: row.tokens_cache_read ?? 0,
     tokens_cache_write: row.tokens_cache_write ?? 0,
+    message_count: Number(row.message_count) || 0,
+    token_count: row.token_count == null ? null : Number(row.token_count),
   };
 }
 
@@ -452,6 +462,31 @@ function statsTokenValueSql(dataColumn = "message.data") {
   return `CASE WHEN COALESCE(json_extract(${dataColumn}, '$.tokens.total'), 0) > 0
     THEN COALESCE(json_extract(${dataColumn}, '$.tokens.total'), 0)
     ELSE (${statsTokenComponentSql(dataColumn)}) END`;
+}
+
+function sessionListMetricColumns(db: any) {
+  const hasMessageTable = Boolean(db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'message'"
+  ).get());
+  if (!hasMessageTable) {
+    return "0 AS message_count, NULL AS token_count";
+  }
+  return `(
+      SELECT COUNT(*)
+      FROM message
+      WHERE message.session_id = session.id
+    ) AS message_count,
+    (
+      SELECT SUM(
+        CASE
+          WHEN ${statsUsableTokenSql("message.data")}
+          THEN ${statsTokenValueSql("message.data")}
+          ELSE NULL
+        END
+      )
+      FROM message
+      WHERE message.session_id = session.id
+    ) AS token_count`;
 }
 
 function appendStatsProjectFilter(conds: string[], params: any[], project: string | undefined) {

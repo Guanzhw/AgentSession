@@ -178,6 +178,104 @@ export function formatDuration(startMs: any, endMs: any) {
   return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
+/** Compact duration label from a millisecond span (no start/end pair needed). */
+export function formatDurationMs(ms: any) {
+  const totalSeconds = Math.round(Number(ms) / 1000);
+  if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) {
+    return "";
+  }
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+const STATUS_LABEL_KEYS: Record<string, string> = {
+  running: "card.status_running",
+  blocked: "card.status_blocked",
+  waiting_input: "card.status_waiting_input",
+  queued: "card.status_queued"
+};
+
+function listStatChip(label: any, title: any, className = "") {
+  const classes = ["stat-chip", className].filter(Boolean).join(" ");
+  return `<span class="${classes}" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
+}
+
+/**
+ * Compact, accessible statistic chips for the bounded session list stats.
+ * Base values render when known; protocol-specific zero values are omitted.
+ * The duration chip explains whether the span is observed activity or the
+ * raw created→updated window, so idle gaps are never claimed as active time.
+ */
+function renderListStatChips(s: any) {
+  const listStats = s?.stats;
+  if (!listStats || typeof listStats !== "object") {
+    return "";
+  }
+  const chips: string[] = [];
+  if (listStats.messageCount != null) {
+    chips.push(listStatChip(
+      t("card.messages").replace("{count}", formatCompactCount(listStats.messageCount)),
+      t("card.messages_help")
+    ));
+  }
+  if (listStats.tokenCount != null && Number(listStats.tokenCount) > 0) {
+    chips.push(listStatChip(
+      t("card.tokens").replace("{count}", formatCompactCount(listStats.tokenCount)),
+      t("card.tokens_help")
+    ));
+  }
+  if (listStats.durationMs != null && Number(listStats.durationMs) >= 1000) {
+    const duration = formatDurationMs(listStats.durationMs);
+    const help = listStats.durationSource === "protocol"
+      ? t("card.observed_duration_help")
+      : t("card.recorded_duration_help");
+    chips.push(`<span class="stat-chip" title="${escapeHtml(help)}" aria-label="${escapeHtml(`${duration}. ${help}`)}">${escapeHtml(duration)}</span>`);
+  }
+  if (listStats.protocol && Number(listStats.compactions) > 0) {
+    const count = formatCompactCount(listStats.compactions);
+    const label = t("card.compactions").replace("{count}", count);
+    const title = listStats.lastCompactionAt != null
+      ? t("card.compactions_help_last").replace("{count}", count).replace("{time}", formatTime(listStats.lastCompactionAt))
+      : t("card.compactions_help").replace("{count}", count);
+    chips.push(listStatChip(label, title));
+  }
+  if (listStats.protocol && Number(listStats.subagentRunCount) > 0) {
+    chips.push(listStatChip(
+      t("card.subagents").replace("{count}", formatCompactCount(listStats.subagentRunCount)),
+      t("card.subagents_help")
+    ));
+  }
+  if (listStats.protocol && Number(listStats.backgroundRunCount) > 0) {
+    chips.push(listStatChip(
+      t("card.background_runs").replace("{count}", formatCompactCount(listStats.backgroundRunCount)),
+      t("card.background_runs_help")
+    ));
+  }
+  for (const status of listStats.activeStatuses || []) {
+    const labelKey = STATUS_LABEL_KEYS[status];
+    if (!labelKey) continue;
+    const label = t(labelKey);
+    chips.push(listStatChip(label, t("card.status_help").replace("{status}", label), `stat-chip-${status}`));
+  }
+  if (listStats.protocol && Number(listStats.contextArtifactCount) > 0) {
+    chips.push(listStatChip(
+      t("card.artifacts").replace("{count}", formatCompactCount(listStats.contextArtifactCount)),
+      t("card.artifacts_help")
+    ));
+  }
+  if (listStats.protocol && listStats.memoryCount != null && Number(listStats.memoryCount) > 0) {
+    chips.push(listStatChip(
+      t("card.memory").replace("{count}", formatCompactCount(listStats.memoryCount)),
+      t("card.memory_help")
+    ));
+  }
+  return chips.join("");
+}
+
 export function sessionCard(s: any, active = false, { showCheckbox = false, provider = "opencode", manageable = false, showProvider = false, providerName = "", returnTo = "" } = {}) {
   const sessionProvider = s.provider || provider;
   const title = s.title || s.slug || s.id;
@@ -196,7 +294,8 @@ export function sessionCard(s: any, active = false, { showCheckbox = false, prov
     additions > 0 ? `<span class="additions">+${formatCount(additions)}</span>` : "",
     deletions > 0 ? `<span class="deletions">-${formatCount(deletions)}</span>` : ""
   ].filter(Boolean).join("");
-  const statsHtml = stats ? `<footer class="session-card-stats">${stats}</footer>` : "";
+  const protocolStats = renderListStatChips(s);
+  const statsHtml = stats || protocolStats ? `<footer class="session-card-stats">${stats}${protocolStats}</footer>` : "";
   const analysisBadge = s.analysisTitled ? `<span class="session-kind-badge">${t("session.analysis_badge")}</span>` : "";
   const providerBadge = showProvider ? `<span class="session-provider-badge" title="${escapeHtml(sessionProvider)}">${escapeHtml(providerName || sessionProvider)}</span>` : "";
   const detailHref = `/${encodedProvider}/session/${encodeURIComponent(s.id)}${returnTo ? `?from=${encodeURIComponent(returnTo)}` : ""}`;

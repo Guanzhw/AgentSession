@@ -105,6 +105,7 @@ compacted-into / scheduled-run-of）、任务（Task）与代理运行（AgentRu
 - **会话内搜索**：可从详情页操作栏打开紧凑搜索，或按 `/` 聚焦；结果会同时显示匹配回合与文本命中数，逐词高亮，并在上下跳转时保持控制条可见。
 - **系统提示词证据 API**：`GET /api/:provider/session/:id/system-prompts` 只暴露当前本地可解析的指令、规则与运行时来源；不会声称恢复隐藏的 Provider prompt。
 - **会话协议 API**：`GET /api/:provider/session/:id/protocol`（只读）返回能力描述符（每域 `full/partial/none` + `recorded/derived`）与标准化协议（带稳定序列号的事件、关系、任务/代理运行、元数据优先的上下文产物）。未知 Provider、未知会话或不支持协议的 Provider 均返回 404。
+- **会话列表统计**：会话列表（`/sessions`、Provider 页面及其 JSON API）只为当前页结果附加有界、逐会话的统计摘要：消息数、已知时的 token 总量、观测时长（有协议证据时取首/尾事件活跃跨度，否则取创建→最后更新的原始跨度——绝不宣称是活跃 CPU 时间）、上下文压缩次数与最近压缩时间、子代理/后台代理运行次数、活跃任务/代理运行状态，以及上下文产物/记忆数量。统计通过 Session Protocol 表面推导，不依赖 Provider 分支；不支持协议的 Provider 自动退化为基础摘要，且绝不伪造 token 总量。
 - **Trace API**：暴露 step/span summary，聚合 tool、skill、agent、MCP、LSP 等调用。
 - **统一用量入口**：`/stats` 使用同一份每日 Token 组成契约聚合所有已选 Provider；总量趋势图直接提供 Provider 筛选，来源卡片可在同一页面应用单 Provider 筛选或进入 Provider 专属明细。单 Provider 明细继续提供 Top 会话、周期对比、模型排名、按日下钻和可选费用估算。对于含子 agent 的文件型 transcript，只统计该文件自有的请求并排除复制的父会话历史；即使来源未给出完整组成字段，也保留记录的请求总量。文件型 Provider 只展示 transcript 实际提供的维度，不伪造能力。
 - **本地管理**：所有 Provider 都支持收藏、重命名、批量操作、软删除、回收站恢复和永久排除；这些操作只修改 viewer 元数据。

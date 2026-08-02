@@ -102,6 +102,8 @@ test("viewer metadata filters and manages SQLite and indexed providers without t
     });
     assert.equal(customMatch.total, 1);
     assert.deepEqual(customMatch.sessions.map((session) => session.id), ["b"]);
+    assert.equal(customMatch.sessions[0].message_count, 0);
+    assert.equal(customMatch.sessions[0].token_count, null);
 
     const analysisOnly = getVisibleListResults({
       dbPath,

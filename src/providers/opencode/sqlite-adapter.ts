@@ -77,8 +77,8 @@ export function createOpenCodeSqliteAdapter({
         directory: s.directory || null,
         timeCreated: Number(s.time_created) || 0,
         timeUpdated: Number(s.time_updated) || 0,
-        messageCount: 0,
-        tokenCount: null
+        messageCount: Number(s.message_count) || 0,
+        tokenCount: s.token_count == null ? null : Number(s.token_count)
       };
     }
   },

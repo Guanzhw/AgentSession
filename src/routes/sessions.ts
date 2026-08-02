@@ -17,6 +17,7 @@ import {
   enrichSession
 } from "../session-queries.js";
 import { json, missingProviderResponse } from "../server-helpers.js";
+import { attachSessionListStats } from "../session-list-stats.js";
 import { usesOpenCodeStatsStore } from "../providers/kinds.js";
 import { getProvider } from "../providers/index.js";
 import { renderSessionsPage } from "../views/sessions.js";
@@ -51,9 +52,11 @@ export function registerSessions(
       .map(([id, title]) => ({ provider, id, title })));
     const queryOptions = { providers, limit, offset, timeRange: range, search: query, project, sort, sessionKind, excluded, titleOverrides };
     const results = getCrossProviderSessions(queryOptions);
+    const sessions = results.sessions.map((session: any) => normalizeSessionRecord(enrichSession(session, metaByProvider.get(session.provider))));
+    attachSessionListStats(sessions, (provider) => providerMap.get(provider));
     return {
       ...results,
-      sessions: results.sessions.map((session: any) => normalizeSessionRecord(enrichSession(session, metaByProvider.get(session.provider)))),
+      sessions,
       providers,
       range,
       query,
@@ -182,9 +185,11 @@ export function registerSessions(
           sessions = results.sessions;
           total = results.total;
         }
+        const normalized = sessions.map((session: any) => normalizeSessionRecord(session));
+        attachSessionListStats(normalized, () => adapter, providerId);
 
         return json(res, {
-          sessions: sessions.map((session: any) => toApiSessionShape(normalizeSessionRecord(session))),
+          sessions: normalized.map((session: any) => toApiSessionShape(session)),
           total,
           offset: apiOffset,
           hasMore: apiOffset + sessions.length < total
@@ -217,6 +222,7 @@ export function registerSessions(
         sessions = results.sessions.map((session: any) => normalizeSessionRecord(session));
         total = results.total;
       }
+      attachSessionListStats(sessions, () => adapter, providerId);
 
       return json(res, {
         sessions: sessions.map((session: any) => toApiSessionShape(session)),
@@ -287,6 +293,7 @@ export function registerSessions(
           sessionKind
         });
         const enrichedSessions = sessions.map((session: any) => normalizeSessionRecord(session));
+        attachSessionListStats(enrichedSessions, () => adapter, providerSegment);
         const overviewStats = getOverviewStats(dbPath);
         const deletedCount = getDeletedIds(providerSegment).length;
         const includedIds = starredOnly ? getStarredIds(metaMap) : undefined;
@@ -358,10 +365,12 @@ export function registerSessions(
         excludedIds,
         titleOverrides
       );
+      const sessions = indexed.sessions.map((session: any) => normalizeSessionRecord(session));
+      attachSessionListStats(sessions, () => adapter, providerSegment);
       return {
         status: 200,
         body: renderSessionsPage({
-          sessions: indexed.sessions.map((session: any) => normalizeSessionRecord(session)),
+          sessions,
           total: indexed.total,
           limit,
           offset,
@@ -408,6 +417,7 @@ export function registerSessions(
         const excludedIds = getExcludedIds(providerSegment);
         const results = getSearchResults(query, limit, offset, dbPath, excludedIds, "all", metaMap);
         const enrichedSessions = results.sessions.map((session: any) => normalizeSessionRecord(enrichSession(session, metaMap)));
+        attachSessionListStats(enrichedSessions, () => adapter, providerSegment);
         return {
           status: 200,
           body: renderSessionsPage({ ...results, sessions: enrichedSessions, limit, offset, query, searchMode: "content", ...renderContext }),
@@ -418,6 +428,7 @@ export function registerSessions(
       const metaMap = getAllMeta(providerSegment);
       const excludedIds = getExcludedIds(providerSegment);
       const results = getProviderSearchResults(adapter, query, limit, offset, "all", metaMap, excludedIds);
+      attachSessionListStats(results.sessions, () => adapter, providerSegment);
       return {
         status: 200,
         body: renderSessionsPage({ ...results, limit, offset, query, searchMode: "content", ...renderContext }),

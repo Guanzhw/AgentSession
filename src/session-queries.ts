@@ -2,6 +2,7 @@ import { getSession, getMessages, getParts, listSessions, searchMessages } from 
 import { getIndexedSessions } from "./index-db.js";
 import { isAnalysisTitledSession, matchesSessionKind, normalizeSessionKindFilter } from "./session-kind.js";
 import { safeJsonParse } from "./server-helpers.js";
+import { baseSessionListStats, boundedListStats } from "./session-list-stats.js";
 
 export function enrichSession(session: any, metaMap: any): any {
   if (!session) {
@@ -257,7 +258,11 @@ export function toApiSessionShape(session: any) {
     summary_additions: Number(session.summary_additions) || 0,
     summary_deletions: Number(session.summary_deletions) || 0,
     starred: Boolean(session.starred),
-    analysisTitled: Boolean(session.analysisTitled)
+    analysisTitled: Boolean(session.analysisTitled),
+    // Bounded list statistics: attached for the current page by the list
+    // routes; a base summary is derived from the row fields otherwise. The
+    // raw protocol is never exposed here.
+    stats: boundedListStats(session.stats) ?? baseSessionListStats(session)
   };
 }
 

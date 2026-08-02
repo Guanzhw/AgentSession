@@ -17,7 +17,7 @@ import { DatabaseSync } from "node:sqlite";
 import { runInNewContext } from "node:vm";
 import { EventEmitter } from "node:events";
 
-import { closeDb, getFilteredSessionCount, getModelDistribution, getModelPairs, getStatsProjects, getTokenCoverage, getTokenStats, getTopTokenSessions, listSessionProjects, listSessions, searchMessages } from "../dist/src/db.js";
+import { closeDb, getFilteredSessionCount, getModelDistribution, getModelPairs, getSession, getStatsProjects, getTokenCoverage, getTokenStats, getTopTokenSessions, listSessionProjects, listSessions, searchMessages } from "../dist/src/db.js";
 import { buildOpenCodeRuntimeEnvironment } from "../dist/src/providers/opencode/runtime-environment.js";
 import { buildOpenCodeSessionTree } from "../dist/src/providers/opencode/session-tree.js";
 import { buildClaudeCodeRuntimeEnvironment } from "../dist/src/providers/claude-code/runtime-environment.js";
@@ -2689,6 +2689,12 @@ test("sqlite session queries exclude viewer-deleted sessions from paging, projec
 
     const insertMessage = db.prepare("INSERT INTO message (id, session_id, data) VALUES (?, ?, ?)");
     const insertPart = db.prepare("INSERT INTO part (id, message_id, session_id, data) VALUES (?, ?, ?, ?)");
+    insertMessage.run("m-a-user", "a", JSON.stringify({ role: "user", time: { created: 90 } }));
+    insertMessage.run("m-a", "a", JSON.stringify({
+      role: "assistant",
+      time: { created: 100 },
+      tokens: { input: 10, output: 20, reasoning: 5, cache: { read: 3, write: 2 } }
+    }));
     for (const id of ["b", "c"]) {
       insertMessage.run(`m-${id}`, id, JSON.stringify({ role: "assistant", time: { created: 100 } }));
       insertPart.run(`p-${id}`, `m-${id}`, id, JSON.stringify({ type: "text", text: "needle in content" }));
@@ -2704,6 +2710,11 @@ test("sqlite session queries exclude viewer-deleted sessions from paging, projec
 
     assert.equal(firstPage.total, 2);
     assert.deepEqual(firstPage.sessions.map((session) => session.id), ["a"]);
+    assert.equal(firstPage.sessions[0].message_count, 2);
+    assert.equal(firstPage.sessions[0].token_count, 40);
+    const sessionA = getSession("a", dbPath);
+    assert.equal(sessionA.message_count, 2);
+    assert.equal(sessionA.token_count, 40);
     assert.deepEqual(secondPage.sessions.map((session) => session.id), ["c"]);
     assert.deepEqual(
       listSessions(10, 0, "", "", dbPath, "", excluded, "updated-asc").sessions.map((session) => session.id),

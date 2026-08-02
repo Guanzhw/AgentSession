@@ -503,9 +503,38 @@ body::before {
 
 .session-card-stats {
   display: flex;
-  gap: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.stat-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 1px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  line-height: 1.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stat-chip-running,
+.stat-chip-queued {
+  color: var(--accent-color);
+  border-color: var(--accent-color);
+}
+
+.stat-chip-blocked,
+.stat-chip-waiting_input {
+  color: var(--warning-color);
+  border-color: var(--warning-color);
 }
 
 .additions {
@@ -5653,6 +5682,17 @@ pre code.hljs {
   .search-input {
     width: 100%;
     min-width: 0;
+  }
+}
+
+@media (max-width: 820px) {
+  .session-card-stats {
+    gap: 6px 8px;
+  }
+
+  .stat-chip {
+    padding: 1px 6px;
+    font-size: 11px;
   }
 }
 
