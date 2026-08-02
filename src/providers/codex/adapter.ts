@@ -9,8 +9,10 @@ import {
   codexOwnedTokenUsageRecords,
   codexUsageToTokens,
   resolveCodexInheritedContext,
-  countCodexRenderedMessages
+  countCodexRenderedMessages,
+  classifyCodexRecordProvenance
 } from "./parser.js";
+import { buildCodexSessionProtocol } from "./protocol.js";
 import { icons } from "../../icons.js";
 import type { Message, ProviderAdapter, RawSession } from "../interface.js";
 import { buildLinkedMessageSessionViews } from "../shared/linked-message-session.js";
@@ -124,12 +126,54 @@ function resolveEntry(entry: { session: RawSession; messages: Message[]; records
   return { session, messages: resolved.messages };
 }
 
+function resolveFamily(sessionId: string) {
+  const root = sessionFiles.get(sessionId);
+  if (!root) return null;
+  const canonicalId = String(root.session.id);
+  return sessionFiles.getFamily(canonicalId).map(resolveEntry);
+}
+
 function generateCodexViews(sessionId: string) {
   const root = sessionFiles.get(sessionId);
   if (!root) return null;
   const canonicalId = String(root.session.id);
-  const bundles = sessionFiles.getFamily(canonicalId).map(resolveEntry);
-  return buildLinkedMessageSessionViews(canonicalId, bundles);
+  const family = resolveFamily(sessionId);
+  if (!family) return null;
+  const protocol = buildCodexSessionProtocolFor(canonicalId);
+  return buildLinkedMessageSessionViews(canonicalId, family, protocol ? {
+    tasks: protocol.tasks,
+    agentRuns: protocol.agentRuns,
+    relationships: protocol.relationships
+  } : undefined);
+}
+
+function buildCodexSessionProtocolFor(sessionId: string) {
+  const root = sessionFiles.get(sessionId);
+  if (!root) return null;
+  const canonicalId = String(root.session.id);
+  const family = resolveFamily(canonicalId);
+  if (!family) return null;
+  const rootEntry = family.find((item) => String(item.session.id) === canonicalId);
+  if (!rootEntry) return null;
+  const parent = parentEntryFor(root);
+  const ownedRecords = parent
+    ? root.records.filter((record) => (
+      classifyCodexRecordProvenance(root.records, parent.records).get(record) === "session"
+    ))
+    : root.records;
+  const children = family.filter((item) => (
+    item.session.parentId && String(item.session.parentId) === canonicalId
+  ));
+  return buildCodexSessionProtocol({
+    session: rootEntry.session,
+    messages: rootEntry.messages,
+    records: ownedRecords,
+    children: children.map((child) => ({
+      session: child.session,
+      messages: child.messages,
+      records: sessionFiles.get(String(child.session.id))?.records || []
+    }))
+  });
 }
 
 const getCodexViews = createStructuredViewCache(generateCodexViews);
@@ -202,6 +246,13 @@ const codex = {
     sessionAnalysis: true,
     structuredSessionViews: true
   },
+  protocolCapabilities: {
+    sessionEvents: { support: "partial", provenance: "derived", details: "derived message envelopes plus recorded compaction and NEW_TASK lifecycle events" },
+    sessionRelationships: { support: "partial", provenance: "derived", details: "recorded incoming thread spawns plus derived outgoing edges and forks" },
+    tasks: { support: "partial", provenance: "derived", details: "recorded NEW_TASK envelopes plus spawn tool-call derivations" },
+    agentRuns: { support: "partial", provenance: "derived", details: "child rollout sessions" },
+    contextArtifacts: { support: "full", provenance: "recorded", details: "compaction records, metadata-only summaries" }
+  },
 
   detect() {
     return existsSync(path.join(getCodexDir(), "sessions"));
@@ -248,6 +299,10 @@ const codex = {
   getMessages(sessionId) {
     const entry = sessionFiles.get(sessionId);
     return entry ? resolveEntry(entry).messages : [];
+  },
+
+  getSessionProtocol(sessionId) {
+    return buildCodexSessionProtocolFor(sessionId);
   },
 
   ...createStructuredViewMethods(getCodexViews),

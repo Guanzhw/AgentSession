@@ -6,7 +6,8 @@ import { buildMessageSessionViews } from "../shared/message-session.js";
 import { classifySharedTool, mergeToolMetadata } from "../shared/subagent-tools.js";
 import {
   buildLinkedMessageSessionViews,
-  type MessageSessionBundle
+  type MessageSessionBundle,
+  type SubagentEvidence
 } from "../shared/linked-message-session.js";
 import type { SessionMetricsView } from "../shared/session-metrics.js";
 import type { SessionTree } from "../shared/session-tree.js";
@@ -445,7 +446,11 @@ export function buildClaudeCodeSessionViews(session: RawSession | Row, messages:
   return enrichClaudeCodeSessionViews(buildMessageSessionViews(session, messages));
 }
 
-export function buildLinkedClaudeCodeSessionViews(sessionId: string, bundles: MessageSessionBundle[]) {
-  const base = buildLinkedMessageSessionViews(sessionId, bundles);
+export function buildLinkedClaudeCodeSessionViews(
+  sessionId: string,
+  bundles: MessageSessionBundle[],
+  evidence?: SubagentEvidence
+) {
+  const base = buildLinkedMessageSessionViews(sessionId, bundles, evidence);
   return base ? enrichClaudeCodeSessionViews(base) : null;
 }

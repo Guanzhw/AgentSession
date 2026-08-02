@@ -7,6 +7,7 @@ import {
 import { buildAgentLoop } from "./agent-loop.js";
 import { isSubagentTool, mergeToolMetadata } from "./subagent-tools.js";
 import type { SessionPartNode, SessionTree } from "./session-tree.js";
+import type { AgentRun, SessionRelationship, Task } from "./session-protocol.js";
 
 type Row = Record<string, any>;
 
@@ -68,14 +69,116 @@ function explicitlyReferencesChild(part: SessionPartNode, child: SessionTree) {
   return false;
 }
 
-function attachDirectChildren(tree: SessionTree, children: SessionTree[]) {
+/**
+ * Protocol evidence the shared subagent flow can consume: tasks, agent runs,
+ * and relationships for the root session. Only "spawned" relationships and
+ * subagent-mode tasks/runs attach children; other relationship kinds (parent,
+ * forked, continued, compacted-into, scheduled-run-of) never imply a subagent.
+ */
+export interface SubagentEvidence {
+  tasks?: Task[];
+  agentRuns?: AgentRun[];
+  relationships?: SessionRelationship[];
+}
+
+function evidenceAnchor(
+  evidence: SubagentEvidence | undefined,
+  child: SessionTree
+): string | null {
+  if (!evidence) return null;
+  const childId = String(child.session.id);
+  const runs = (evidence.agentRuns || [])
+    .filter((run) => run.childSessionId && String(run.childSessionId) === childId);
+  if (runs.length === 0) return null;
+  const run = runs[0];
+  const task = run.taskId
+    ? (evidence.tasks || []).find((candidate) => candidate.id === run.taskId)
+    : null;
+  return task?.toolCallId || task?.correlationId || run.id || null;
+}
+
+function relationshipAnchor(
+  evidence: SubagentEvidence | undefined,
+  rootSessionId: string,
+  child: SessionTree
+): string | null {
+  if (!evidence) return null;
+  const childId = String(child.session.id);
+  const relationship = (evidence.relationships || []).find((candidate) => (
+    candidate.type === "spawned"
+    && String(candidate.fromSessionId) === rootSessionId
+    && String(candidate.toSessionId) === childId
+  ));
+  return relationship?.correlationId || relationship?.provenance.sourceId || null;
+}
+
+/**
+ * Attach child sessions to the spawn tool part the protocol evidence names:
+ * a task whose toolCallId/correlationId matches the part id, or a spawned
+ * relationship whose correlationId/sourceId matches it. Falls back to the
+ * existing explicit-reference and creation-order pairing when the evidence
+ * carries no anchor.
+ */
+function attachEvidenceChildren(
+  rootSessionId: string,
+  tree: SessionTree,
+  children: SessionTree[],
+  evidence: SubagentEvidence | undefined
+): Set<string> {
+  const attached = new Set<string>();
+  if (!evidence) return attached;
+  const parts = tree.messages
+    .flatMap((message) => message.parts)
+    .filter((part) => part.type === "tool");
+  const partsByAnchor = new Map<string, SessionPartNode>();
+  for (const part of parts) {
+    partsByAnchor.set(part.id, part);
+    partsByAnchor.set(part.messageId, part);
+    // Agent Loop event ids append a kind suffix to the source message id.
+    partsByAnchor.set(part.id.replace(/:(tool|reasoning|text)$/, ""), part);
+  }
+  const subagentMarkedParts = new Set<SessionPartNode>();
+
+  for (const child of children) {
+    const childId = String(child.session.id);
+    if (attached.has(childId)) continue;
+    const anchor = evidenceAnchor(evidence, child)
+      || relationshipAnchor(evidence, rootSessionId, child);
+    if (!anchor) continue;
+    const part = partsByAnchor.get(anchor);
+    if (!part || part.childSessions.some((candidate) => String(candidate.session.id) === childId)) {
+      continue;
+    }
+    part.childSessions.push(child);
+    attached.add(childId);
+    subagentMarkedParts.add(part);
+  }
+
+  // A protocol task/run proves the part launched a subagent even when the
+  // part's tool name is not a known launcher label. Mark it so Tree, Flow,
+  // Trace, and rendering consume the normalized fact without provider-id
+  // branching.
+  for (const part of subagentMarkedParts) {
+    const state = part.data?.state && typeof part.data.state === "object" ? part.data.state : {};
+    if (isSubagentTool(part.tool, mergeToolMetadata(state.metadata, part.data?.metadata))) continue;
+    part.data.state = { ...state, metadata: { ...(state.metadata || {}), subagent: true } };
+  }
+
+  return attached;
+}
+
+function attachDirectChildren(
+  tree: SessionTree,
+  children: SessionTree[],
+  alreadyAttached: Set<string> | null = null
+) {
   const taskParts = tree.messages
     .flatMap((message) => message.parts)
     .filter((part) => part.type === "tool" && isSubagentTool(
       part.tool,
       mergeToolMetadata(part.data?.state?.metadata, part.data?.metadata)
     ));
-  const attached = new Set<string>();
+  const attached = new Set(alreadyAttached || []);
   const partsWithChildren = new Set<SessionPartNode>();
 
   for (const part of taskParts) {
@@ -113,7 +216,11 @@ function attachDirectChildren(tree: SessionTree, children: SessionTree[]) {
   tree.detachedChildren = children.filter((child) => !attached.has(String(child.session.id)));
 }
 
-export function buildLinkedMessageSessionViews(rootSessionId: string, bundles: MessageSessionBundle[]) {
+export function buildLinkedMessageSessionViews(
+  rootSessionId: string,
+  bundles: MessageSessionBundle[],
+  evidence?: SubagentEvidence
+) {
   const byId = new Map(bundles.map((bundle) => [String(bundle.session.id), bundle]));
   const childrenByParent = new Map<string, MessageSessionBundle[]>();
   for (const bundle of bundles) {
@@ -136,7 +243,8 @@ export function buildLinkedMessageSessionViews(rootSessionId: string, bundles: M
     const children = (childrenByParent.get(sessionId) || [])
       .map((child) => build(String(child.session.id), nextSeen))
       .filter(Boolean) as SessionTree[];
-    attachDirectChildren(tree, children);
+    const evidenceAttached = attachEvidenceChildren(sessionId, tree, children, evidence);
+    attachDirectChildren(tree, children, evidenceAttached);
     return tree;
   };
 

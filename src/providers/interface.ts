@@ -1,3 +1,5 @@
+import type { ProtocolCapabilities, SessionProtocol } from "./shared/session-protocol.js";
+
 export type ProviderId = "opencode" | "claude-code" | "codex" | "openclaw" | "hermes" | "copilot" | "gemini" | "pi";
 
 export type ProviderLifecycle = "active" | "legacy";
@@ -125,6 +127,20 @@ export interface ProviderAdapter {
   resumeCommand?: ResumeCommandSpec;
   /** Resolve a provider-owned session selector when it differs from the canonical session ID. */
   getResumeCommandSpec?(sessionId: string): ResumeCommandSpec | null;
+  /**
+   * Truthful per-domain capability descriptors for the standardized session
+   * protocol (events, relationships, tasks, agent runs, context artifacts).
+   * A domain may never claim support without a `getSessionProtocol`
+   * implementation; absent domains default to support "none".
+   */
+  protocolCapabilities?: ProtocolCapabilities;
+  /**
+   * Optional standardized session protocol: typed events with stable
+   * sequences, explicit relationships, tasks, agent runs, and metadata-first
+   * context artifacts. Returns null when the session is unknown. Providers
+   * without native support must not implement this accessor.
+   */
+  getSessionProtocol?(sessionId: string): SessionProtocol | null;
   capabilities?: {
     localManagement?: boolean;
     /** Data path uses the OpenCode SQLite schema accepted by native stats and list queries. */

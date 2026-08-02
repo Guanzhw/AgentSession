@@ -16,6 +16,7 @@ import {
   buildLinkedClaudeCodeSessionViews,
   buildClaudeCodeSystemPrompts
 } from "./views.js";
+import { buildClaudeSessionProtocol } from "./protocol.js";
 import {
   createSessionFileStore,
   searchNormalizedMessages,
@@ -126,10 +127,37 @@ function buildRuntimeEnvironmentForSession(sessionId: string, directory: string 
 function generateClaudeViews(sessionId: string) {
   const entry = sessionFiles.get(sessionId);
   if (!entry) return null;
+  const family = sessionFiles.getFamily(entry.session.id);
+  const protocol = buildClaudeSessionProtocolFor(entry.session.id);
   return buildLinkedClaudeCodeSessionViews(
     entry.session.id,
-    sessionFiles.getFamily(entry.session.id)
+    family,
+    protocol ? {
+      tasks: protocol.tasks,
+      agentRuns: protocol.agentRuns,
+      relationships: protocol.relationships
+    } : undefined
   );
+}
+
+function buildClaudeSessionProtocolFor(sessionId: string) {
+  const entry = sessionFiles.get(sessionId);
+  if (!entry) return null;
+  const canonicalId = String(entry.session.id);
+  const family = sessionFiles.getFamily(canonicalId);
+  const children = family.filter((candidate) => (
+    candidate.session.parentId && String(candidate.session.parentId) === canonicalId
+  ));
+  return buildClaudeSessionProtocol({
+    session: entry.session,
+    messages: entry.messages,
+    records: entry.records,
+    children: children.map((child) => ({
+      session: child.session,
+      messages: child.messages,
+      records: child.records
+    }))
+  });
 }
 
 const getClaudeViews = createStructuredViewCache(generateClaudeViews);
@@ -164,6 +192,13 @@ const claudeCode = {
     sessionAnalysis: true,
     structuredSessionViews: true
   },
+  protocolCapabilities: {
+    sessionEvents: { support: "partial", provenance: "derived", details: "derived message envelopes plus recorded compact boundary and task-notification events" },
+    sessionRelationships: { support: "full", provenance: "recorded", details: "sidechain spawned relationships" },
+    tasks: { support: "full", provenance: "recorded", details: "<task-notification> records" },
+    agentRuns: { support: "partial", provenance: "derived", details: "sidechain transcripts bound to task notifications" },
+    contextArtifacts: { support: "full", provenance: "recorded", details: "compact/PreCompact/PostCompact records, metadata-only summaries" }
+  },
 
   detect() {
     return sessionFiles.list().length > 0;
@@ -193,6 +228,10 @@ const claudeCode = {
 
   getMessages(sessionId) {
     return sessionFiles.get(sessionId)?.messages || [];
+  },
+
+  getSessionProtocol(sessionId) {
+    return buildClaudeSessionProtocolFor(sessionId);
   },
 
   getTokenStats(days = 30) {

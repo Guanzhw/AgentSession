@@ -284,6 +284,79 @@ test("system prompt endpoint returns only adapter-resolved evidence", async () =
   assert.equal(body.sections[0].items[0].title, "AGENTS.md");
 });
 
+test("session protocol route exposes descriptors and protocol with 404 semantics", async () => {
+  const provider = {
+    id: "codex",
+    name: "Protocol fixture",
+    icon: "",
+    capabilities: {},
+    protocolCapabilities: {
+      sessionEvents: { support: "partial", provenance: "derived", details: "fixture" },
+      sessionRelationships: { support: "none", provenance: "derived" },
+      tasks: { support: "full", provenance: "recorded" },
+      agentRuns: { support: "partial", provenance: "derived" },
+      contextArtifacts: { support: "none", provenance: "derived" }
+    },
+    getSessionProtocol(sessionId) {
+      if (sessionId !== "session-1") return null;
+      return {
+        sessionId,
+        events: [{
+          id: "e1", sessionId, sequence: 1, timestamp: 100, kind: "message.user",
+          provenance: { fidelity: "derived", sourceType: "fixture" }
+        }],
+        relationships: [],
+        tasks: [],
+        agentRuns: [],
+        contextArtifacts: []
+      };
+    }
+  };
+  const plain = { id: "gemini", name: "Plain", icon: "", capabilities: {}, getSession() { return null; } };
+  const routes = captureGetRoutes(registerSessionDetail, {
+    appConfig: { port: 0, metaDir: temp, analysis: {}, resumeCommands: {}, allowTerminalLaunch: false },
+    providerMap: new Map([[provider.id, provider], [plain.id, plain]]),
+    providerInfo: []
+  });
+  const route = routes.find(({ pattern }) => pattern instanceof RegExp && pattern.source.includes("/protocol$"));
+  assert.ok(route, "protocol route is registered");
+
+  // 200: capability descriptors plus the standardized protocol.
+  const okResponse = createResponseCapture();
+  await route.handler({ url: "/api/codex/session/session-1/protocol" }, okResponse, ["", "codex", "session-1"]);
+  assert.equal(okResponse.statusCode, 200);
+  const body = JSON.parse(okResponse.body);
+  assert.equal(body.sessionId, "session-1");
+  assert.equal(body.capabilities.sessionEvents.support, "partial");
+  assert.equal(body.capabilities.sessionEvents.provenance, "derived");
+  assert.equal(body.capabilities.tasks.support, "full");
+  assert.equal(body.capabilities.sessionRelationships.support, "none");
+  assert.equal(body.protocol.events[0].sequence, 1);
+
+  // Unknown session -> 404.
+  const missingResponse = createResponseCapture();
+  await route.handler({ url: "/api/codex/session/nope/protocol" }, missingResponse, ["", "codex", "nope"]);
+  assert.equal(missingResponse.statusCode, 404);
+  assert.equal(JSON.parse(missingResponse.body).error, "Not found");
+
+  // Provider without a protocol accessor -> 404, never fabricated data.
+  const unsupportedResponse = createResponseCapture();
+  await route.handler({ url: "/api/gemini/session/x/protocol" }, unsupportedResponse, ["", "gemini", "x"]);
+  assert.equal(unsupportedResponse.statusCode, 404);
+  assert.equal(JSON.parse(unsupportedResponse.body).error, "Session protocol not supported");
+
+  // Unknown provider -> 404.
+  const unknownResponse = createResponseCapture();
+  await route.handler({ url: "/api/nope/session/x/protocol" }, unknownResponse, ["", "nope", "x"]);
+  assert.equal(unknownResponse.statusCode, 404);
+
+  // Malformed encoded session id -> 404 without crashing.
+  const badResponse = createResponseCapture();
+  await route.handler({ url: "/api/codex/session/%ZZ/protocol" }, badResponse, ["", "codex", "%ZZ"]);
+  assert.equal(badResponse.statusCode, 404);
+  assert.equal(JSON.parse(badResponse.body).error, "Invalid session id");
+});
+
 test("provider page keeps unavailable paths and management capability provider-owned", async () => {
   const providers = ["gemini"].map((providerId) => getProvider(providerId));
   assert.ok(providers.every(Boolean));

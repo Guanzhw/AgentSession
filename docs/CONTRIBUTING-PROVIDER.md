@@ -38,7 +38,8 @@ than product similarity.
 | OpenClaw branch-tree JSONL plus registry | `src/providers/openclaw/` | Cache transcripts with registry dependency paths; resolve session keys without replacing canonical session IDs. |
 | Provider-native SQLite | `src/providers/hermes/` | Keep SQL, WAL-aware snapshot caching, schema compatibility, and relationship semantics provider-owned. |
 | OpenCode SQLite | `src/providers/opencode/` | Use the OpenCode-owned adapter only for its exact schema; do not treat arbitrary SQLite providers as compatible. |
-| Nested/sidechain agent transcripts | `src/providers/shared/linked-message-session.ts` | Canonical `parentId` plus explicit spawn references. |
+| Nested/sidechain agent transcripts | `src/providers/shared/linked-message-session.ts` | Canonical `parentId` plus explicit spawn references; optional `SubagentEvidence` anchors from the session protocol. |
+| Provider-neutral session protocol | `src/providers/shared/session-protocol.ts` | Event envelopes, capability descriptors, relationships, tasks/agent runs, metadata-first context artifacts, and sequence/provenance helpers. |
 
 For file-backed sources, prefer `createSessionFileStore()`,
 `createStructuredViewCache()`, `createStructuredViewMethods()`, and
@@ -147,11 +148,75 @@ implementation and tests support it.
 | `getStatsRevision()` | A file-backed source can report changed statistics input. |
 | `getRuntimeEnvironment()` | Locally resolvable instruction/skill/agent/command/plugin/hook/rule evidence exists. |
 | `getSystemPrompts()` / `getTrace()` | All complete providers expose locally evidence-backed prompt sources and a bounded trace. File-backed adapters receive the generic Agent Loop trace; providers can override it only with richer native step evidence. |
+| `protocolCapabilities` + `getSessionProtocol()` | The adapter exposes the provider-neutral session protocol: typed events with stable sequences, session relationships, tasks, agent runs, and metadata-first context artifacts. Every declared domain must be truthfully backed by the accessor; absent domains default to `support: "none"`. Domains whose values mix recorded and derived fidelities must declare `support: "partial"` and `provenance: "derived"` — never `full/recorded`. The read-only endpoint `GET /api/:provider/session/:id/protocol` returns the descriptors plus the protocol and answers 404 for unknown providers/sessions and unsupported protocols. |
+
+#### The standardized session protocol
+
+`Message` remains the universal read/compatibility view. Providers that can
+expose structured evidence additionally implement `getSessionProtocol(sessionId)`
+returning `SessionProtocol` (`src/providers/shared/session-protocol.ts`):
+
+- `events` — `SessionEventEnvelope[]` with a REQUIRED `sequence` (dense 1..n
+  in canonical SOURCE record order: record index, then local ordinal within
+  the record. Timestamps are never read — missing, equal, or out-of-order
+  timestamps cannot reorder events). Anchor recorded events with
+  `sourceSequence(recordIndex, ordinal)` and project with
+  `sequenceEventsBySource`; the anchor is kept additively in
+  `providerData.sourceSequence`. Normalized messages that cannot map to a raw
+  record are appended in normalized message order with derived provenance
+  (documented per provider). `timestamp: number | null`, `kind`, optional
+  `phase` (`started | updated | completed | failed`), `turnId`,
+  `parentEventId`, `correlationId`, `provenance`, and optional `providerData`.
+- `relationships` — `SessionRelationship[]` over
+  `parent | spawned | forked | continued | compacted-into | scheduled-run-of`.
+  Only `spawned` (and matching subagent Tasks/AgentRuns) imply a subagent;
+  lineage kinds (parent, continued, compacted-into, ...) never do.
+- `tasks` — `Task[]`: session-local units of work (status queued/running/
+  waiting_input/blocked/completed/failed/cancelled, optional
+  `dependencies: string[]` and `assignee`). Tasks carry no run state and no
+  execution mode; each execution is an AgentRun.
+- `agentRuns` — `AgentRun[]`: one execution of a task with the execution mode
+  (foreground/background/subagent/scheduled/team), `taskId`, and optional
+  `childSessionId` for detached child sessions.
+- `contextArtifacts` — metadata-first `ContextArtifact[]`: `kind`
+  (memory/instruction/skill/rule/summary), `scope` (session/agent/project/
+  user/organization), `origin` (user-authored/agent-generated/
+  provider-generated), `contentAccess` (full/summary/metadata-only/
+  unavailable), plus optional `sourcePath`, `producerRunId`,
+  `sourceSessionIds`, `hash`, and `redacted`. `summary` is always a short
+  non-sensitive note: never copy transcript or compaction text into
+  artifacts. Compaction-derived artifacts use `compactionSummaryArtifact()`:
+  kind=summary, scope=session, origin=provider-generated,
+  contentAccess=metadata-only, `sourceSessionIds` set, no plaintext. There
+  are no lifecycle/contentAvailable/contentRef artifact fields.
+- `provenance` on every value: `recorded` when the provider's own data
+  contains the fact, `derived` when the adapter reconstructed it (e.g. a
+  relationship inferred from a header field or validated lineage).
+- Lifecycle observations (`memory.generated`, `memory.consolidated`,
+  `context.loaded`, `context.reinjected`, `context.cited`) are
+  `SessionEventEnvelope` kinds (`isContextLifecycleEventKind()` helper).
+  Emit them only when provider evidence actually supports the observation;
+  never derive them from plain compaction.
+
+Standardized compaction uses `kind: "context.compaction"` with a
+`ContextCompactionEvent` payload (`trigger` manual/automatic/limit-recovery/
+unknown, `strategy` summary/opaque/hybrid/unknown, optional token counts,
+`summary`, `retainedFromEventId`, `continuationSessionId`,
+`reloadedContextRefs`). A compaction record without a readable summary is
+still a valid opaque event. Existing implementations: Codex (compacted /
+context_compacted / contextCompaction variants, NEW_TASK tasks, spawn tool
+calls), Claude Code (compact/PreCompact/PostCompact, task notifications,
+sidechains), Pi (compaction/branch_summary entries, header parentSession), and
+Hermes (validated compression lineage and delegates).
 
 For flat histories, compose `buildMessageSessionViews()` with
 `createStructuredViewMethods()`; it delegates Tree, Container, Metrics, Flow,
 and the generic Agent Loop Trace together. For child sessions, use the
-linked-session helper instead of guessing from display order. Use
+linked-session helper instead of guessing from display order. The linked
+helper accepts optional `SubagentEvidence` (tasks/agentRuns/relationships)
+and attaches children by spawn-tool anchors before falling back to explicit
+references and creation order; non-spawned relationship kinds never attach
+children as subagents. Use
 `buildResolvedSystemPromptEvidence()` with the provider-owned runtime resolver
 when the source itself does not store an explicit, recoverable prompt.
 
@@ -171,6 +236,37 @@ when the source itself does not store an explicit, recoverable prompt.
   mapping belongs at `analysis.providers.<id>.projectPaths` and must be an
   existing absolute directory; it is never a source-data write.
 - [ ] Add an icon in `src/icons.ts`.
+
+### 1b. Optional: expose the standardized session protocol
+
+Only when the source carries structured evidence (compaction records, task
+notifications, sidechains, validated lineage):
+
+- [ ] Add `protocolCapabilities` to the adapter with one
+  `CapabilityDescriptor` per populated domain; never declare a domain without
+  a `getSessionProtocol` implementation.
+- [ ] Implement `getSessionProtocol(sessionId)` in `src/providers/my-tool/protocol.ts`
+  using the factories in `src/providers/shared/session-protocol.ts`; anchor
+  every event with `sourceSequence(recordIndex, ordinal)` and project with
+  `sequenceEventsBySource` (sequence is source record order, never timestamp
+  chronology), and attach `provenance` to every value.
+- [ ] Compaction evidence becomes `context.compaction` events; opaque records
+  without a summary stay valid events with `strategy: "opaque"`. Never emit
+  memory/context lifecycle events for plain compaction.
+- [ ] Context artifacts stay metadata-only: use `compactionSummaryArtifact()`
+  for compaction-derived artifacts (kind=summary, scope=session,
+  origin=provider-generated, contentAccess=metadata-only, `sourceSessionIds`
+  set); never duplicate transcript text into them.
+- [ ] Keep execution mode on AgentRun only; Tasks carry status, dependencies,
+  and assignee. Declare descriptors truthfully: mixed-fidelity domains are
+  `partial`/`derived`.
+- [ ] Pass protocol evidence (tasks/agentRuns/relationships) into
+  `buildLinkedMessageSessionViews` (or the provider's linked-view builder)
+  so structured views consume it without provider-id branches or cache loops.
+- [ ] Test descriptor truthfulness, sequence stability, artifact privacy,
+  adapter/path integration, and the `/protocol` route in
+  `test/session-protocol.test.mjs`, `test/protocol-integration.test.mjs`, and
+  `test/routes.test.mjs`.
 
 ### 2. Create a provider-owned parser and adapter
 

@@ -239,7 +239,12 @@ export function piRecordsToMessages(records: Row[], sessionId: string): Message[
           fromId: entry.fromId || null,
           firstKeptEntryId: entry.firstKeptEntryId || null,
           tokensBefore: Number(entry.tokensBefore) || null,
-          provenance: "session"
+          // The protocol surface (context.compaction events + metadata-only
+          // artifacts) is the canonical representation of compaction; this
+          // system message remains as a read/compatibility view.
+          provenance: "session",
+          compatibility: true,
+          protocolKind: "context.compaction"
         }
       });
     }

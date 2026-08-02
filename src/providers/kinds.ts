@@ -1,4 +1,11 @@
 import type { ProviderAdapter } from "./interface.js";
+import {
+  defaultCapabilityDescriptor,
+  emptySessionProtocol,
+  type CapabilityDescriptor,
+  type ProtocolDomain,
+  type SessionProtocol
+} from "./shared/session-protocol.js";
 
 export function supportsLocalManagement(adapter: ProviderAdapter | null | undefined) {
   return adapter?.capabilities?.localManagement === true;
@@ -41,6 +48,56 @@ export function supportsRuntimeEnvironment(adapter: ProviderAdapter | null | und
   return typeof adapter?.getRuntimeEnvironment === "function";
 }
 
+export function supportsSessionProtocol(adapter: ProviderAdapter | null | undefined) {
+  return typeof adapter?.getSessionProtocol === "function";
+}
+
+/**
+ * Truthful descriptor for one standardized protocol domain. Providers may
+ * declare descriptors only for domains their `getSessionProtocol` actually
+ * populates; anything else defaults to support "none".
+ */
+export function protocolCapability(
+  adapter: ProviderAdapter | null | undefined,
+  domain: ProtocolDomain
+): CapabilityDescriptor {
+  return adapter?.protocolCapabilities?.[domain] ?? defaultCapabilityDescriptor();
+}
+
+export function supportsProtocolDomain(
+  adapter: ProviderAdapter | null | undefined,
+  domain: ProtocolDomain
+): boolean {
+  return protocolCapability(adapter, domain).support !== "none";
+}
+
+/** Fixed-shape descriptor map over every standardized protocol domain. */
+export function protocolCapabilityDescriptors(
+  adapter: ProviderAdapter | null | undefined
+): Record<ProtocolDomain, CapabilityDescriptor> {
+  return {
+    sessionEvents: protocolCapability(adapter, "sessionEvents"),
+    sessionRelationships: protocolCapability(adapter, "sessionRelationships"),
+    tasks: protocolCapability(adapter, "tasks"),
+    agentRuns: protocolCapability(adapter, "agentRuns"),
+    contextArtifacts: protocolCapability(adapter, "contextArtifacts")
+  };
+}
+
+/**
+ * Shared protocol access with stable empty arrays: returns the adapter's
+ * protocol for the session, an empty protocol when the adapter supports the
+ * protocol but the session has none, and null when the adapter does not
+ * implement the accessor at all.
+ */
+export function getSessionProtocolOrDefault(
+  adapter: ProviderAdapter | null | undefined,
+  sessionId: string
+): SessionProtocol | null {
+  if (!supportsSessionProtocol(adapter)) return null;
+  return adapter!.getSessionProtocol!(sessionId) ?? emptySessionProtocol(sessionId);
+}
+
 export function providerFeatureMatrix(adapter: ProviderAdapter | null | undefined) {
   return {
     localManagement: supportsLocalManagement(adapter),
@@ -50,6 +107,11 @@ export function providerFeatureMatrix(adapter: ProviderAdapter | null | undefine
     sessionTrace: supportsSessionTrace(adapter),
     systemPromptEvidence: supportsSystemPromptEvidence(adapter),
     runtimeEnvironment: supportsRuntimeEnvironment(adapter),
+    protocolEvents: supportsProtocolDomain(adapter, "sessionEvents"),
+    protocolRelationships: supportsProtocolDomain(adapter, "sessionRelationships"),
+    protocolTasks: supportsProtocolDomain(adapter, "tasks"),
+    protocolAgentRuns: supportsProtocolDomain(adapter, "agentRuns"),
+    protocolContextArtifacts: supportsProtocolDomain(adapter, "contextArtifacts"),
     resume: Boolean(adapter?.resumeCommand || adapter?.getResumeCommandSpec)
   };
 }

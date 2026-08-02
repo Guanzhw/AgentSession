@@ -13,12 +13,15 @@ import {
 } from "../session-queries.js";
 import {
   json,
+  safeDecodeId,
   safeJsonParse,
   missingProviderResponse,
   send
 } from "../server-helpers.js";
 import {
   supportsAgentLoopViews,
+  supportsSessionProtocol,
+  protocolCapabilityDescriptors,
   supportsSessionTrace,
   supportsSystemPromptEvidence,
   usesOpenCodeStatsStore
@@ -422,6 +425,40 @@ export function registerSessionDetail(
         return json(res, { ok: false, error: "Not found" }, 404);
       }
       return json(res, flow);
+    } catch (err: any) {
+      console.error(`Route error: ${err.message}`);
+      return json(res, { error: "Internal server error" }, 500);
+    }
+  });
+
+  // API: standardized session protocol (read-only). Exposes capability
+  // descriptors plus the typed events/relationships/tasks/agent runs/context
+  // artifacts. Unknown sessions, unknown providers, and providers without a
+  // protocol accessor all answer 404; IDs are decoded defensively.
+  app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/protocol$/, async (_req: any, res: any, match: RegExpMatchArray) => {
+    const providerId = match[1];
+    const sessionId = safeDecodeId(match[2]);
+    const adapter = providerMap.get(providerId);
+    if (!adapter) {
+      const missing = missingProviderResponse(providerId);
+      return json(res, missing.body, missing.status);
+    }
+    if (!sessionId) {
+      return json(res, { ok: false, error: "Invalid session id" }, 404);
+    }
+    if (!supportsSessionProtocol(adapter)) {
+      return json(res, { ok: false, error: "Session protocol not supported" }, 404);
+    }
+    try {
+      const protocol = adapter.getSessionProtocol?.(sessionId);
+      if (!protocol) {
+        return json(res, { ok: false, error: "Not found" }, 404);
+      }
+      return json(res, {
+        sessionId: protocol.sessionId,
+        capabilities: protocolCapabilityDescriptors(adapter),
+        protocol
+      });
     } catch (err: any) {
       console.error(`Route error: ${err.message}`);
       return json(res, { error: "Internal server error" }, 500);

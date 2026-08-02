@@ -20,7 +20,7 @@ import {
   piUsageToTokens,
   piRecordsToMessages
 } from "./parser.js";
-import { buildPiRuntimeEnvironment } from "./runtime-environment.js";
+import { buildPiSessionProtocol } from "./protocol.js";import { buildPiRuntimeEnvironment } from "./runtime-environment.js";
 
 function getPiDir() {
   return getConfig().piDir;
@@ -79,7 +79,19 @@ const sessionFiles = createSessionFileStore({
 function generatePiViews(sessionId: string) {
   const entry = sessionFiles.get(sessionId);
   if (!entry) return null;
-  return buildLinkedMessageSessionViews(entry.session.id, sessionFiles.getFamily(entry.session.id));
+  // Pi records no tasks or agent runs; only relationships are passed. The
+  // shared builder attaches children only for spawned evidence, so the
+  // derived parent lineage can never fabricate a subagent branch.
+  const protocol = buildPiSessionProtocol({
+    session: entry.session,
+    records: entry.records,
+    messages: entry.messages
+  });
+  return buildLinkedMessageSessionViews(
+    entry.session.id,
+    sessionFiles.getFamily(entry.session.id),
+    { relationships: protocol.relationships }
+  );
 }
 
 const getPiViews = createStructuredViewCache(generatePiViews);
@@ -114,6 +126,13 @@ const pi = {
     sessionAnalysis: true,
     structuredSessionViews: true
   },
+  protocolCapabilities: {
+    sessionEvents: { support: "partial", provenance: "derived", details: "derived message envelopes plus recorded compaction/branch_summary events" },
+    sessionRelationships: { support: "partial", provenance: "derived", details: "header parentSession lineage only" },
+    tasks: { support: "none", provenance: "derived", details: "Pi session files record no task abstraction" },
+    agentRuns: { support: "none", provenance: "derived", details: "Pi session files record no agent-run abstraction" },
+    contextArtifacts: { support: "full", provenance: "recorded", details: "compaction entries, metadata-only summaries" }
+  },
 
   detect() {
     return existsSync(path.join(getPiDir(), "sessions"));
@@ -133,6 +152,15 @@ const pi = {
 
   getMessages(sessionId) {
     return sessionFiles.get(sessionId)?.messages || [];
+  },
+
+  getSessionProtocol(sessionId) {
+    const entry = sessionFiles.get(sessionId);
+    return entry ? buildPiSessionProtocol({
+      session: entry.session,
+      records: entry.records,
+      messages: entry.messages
+    }) : null;
   },
 
   getRuntimeEnvironment(sessionId) {

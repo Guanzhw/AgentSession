@@ -42,13 +42,13 @@ AgentSession 是一个本地优先的 AI 编程会话查看器。它不会修改
 | Provider | 状态 | 默认数据来源 | 能力 |
 |:---|:---:|:---|:---|
 | OpenCode | 完整共享能力 | `$XDG_DATA_HOME/opencode/opencode.db` 或 `~/.local/share/opencode/opencode.db` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析；另有 SQLite 原生高级统计 |
-| Claude Code | 完整共享能力 | `~/.claude/transcripts/` + `~/.claude/projects/` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析；保留 sidechain transcript 时支持子 agent |
-| Codex CLI | 完整共享能力 | `~/.codex/sessions/**/*.jsonl` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析、嵌套子 agent |
+| Claude Code | 完整共享能力 | `~/.claude/transcripts/` + `~/.claude/projects/` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析；保留 sidechain transcript 时支持子 agent；会话协议：任务通知 → Task/AgentRun、compact 边界事件 |
+| Codex CLI | 完整共享能力 | `~/.codex/sessions/**/*.jsonl` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析、嵌套子 agent；会话协议：NEW_TASK 任务/运行、压缩变体事件 |
 | OpenClaw | 完整共享能力 | `~/.openclaw/agents/*/sessions/*.jsonl` | 分支式 JSONL、reasoning、工具调用/结果、共享 Agent Loop 视图、分析与恢复。 |
-| Hermes Agent | 完整共享能力 | `$HERMES_HOME/state.db` | 只读 SQLite 会话、reasoning、工具调用/结果、共享 Agent Loop 视图、分析与恢复；压缩链不会被误判为子 agent。 |
+| Hermes Agent | 完整共享能力 | `$HERMES_HOME/state.db` | 只读 SQLite 会话、reasoning、工具调用/结果、共享 Agent Loop 视图、分析与恢复；压缩链不会被误判为子 agent；会话协议：压缩延续关系与 opaque 事件 |
 | GitHub Copilot CLI | 历史会话支持 | `~/.copilot/session-state/*/events.jsonl` + `~/.copilot/session-store.db` | 保留既有会话的浏览、搜索、导出、统计和共享视图；默认不再提供恢复或分析动作。 |
 | Gemini CLI | 历史会话支持 | `~/.gemini/tmp/*/chats/*.json` | 可浏览、搜索、导出、查看 Token 统计、共享视图和本地提示词/运行时证据。默认不提供继续会话或分析动作；其扁平 chat 格式没有 child-session 关系，因此 AgentSession 不会伪造嵌入式子 agent 分支。 |
-| Pi | 完整共享能力 | `~/.pi/agent/sessions/**/*.jsonl` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析、活动分支与 fork 关系。若记录了子 agent 启动工具，会在对应调用处嵌入 child；只有来源记录的 fork 关系会明确标为推断。 |
+| Pi | 完整共享能力 | `~/.pi/agent/sessions/**/*.jsonl` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析、活动分支与 fork 关系。若记录了子 agent 启动工具，会在对应调用处嵌入 child；只有来源记录的 fork 关系会明确标为推断。会话协议：压缩/branch_summary 事件与元数据优先产物 |
 
 所有 Provider 都提供浏览、内容搜索、仅 viewer 的元数据管理、Markdown/JSON 导出、
 每日 Token 统计、Tree/Container/Metrics/Flow/Trace 和本地提示词/运行时证据。活跃
@@ -68,6 +68,29 @@ Flow 与通用 Trace 都由这层派生。只有当来源保存了更丰富的�
 
 想要新增 Provider？请阅读[新增 Provider 指南](./docs/CONTRIBUTING-PROVIDER.md)，其中包含适配器、MCP、测试和发布验收清单。
 
+### 共享会话协议（Session Protocol）
+
+在 Message 兼容/阅读视图之上，Codex CLI、Claude Code、Pi 与 Hermes Agent 还暴露一个
+Provider 中立的标准化会话协议（`getSessionProtocol` + `protocolCapabilities`）：带稳定序列号的事件
+（`SessionEventEnvelope`，`sequence` 是 1..n 稠密序列，按来源记录顺序编号、与时间戳无关）、显式的会话关系（parent / spawned / forked / continued /
+compacted-into / scheduled-run-of）、任务（Task）与代理运行（AgentRun）分离模型、以及元数据优先的上下文产物（ContextArtifact）。所有值都携带 provenance（`recorded` = 来源原生记录，`derived` = 适配器从其他证据重建）。
+
+- 上下文压缩成为标准 `context.compaction` 事件：Codex 的 `compacted` / `context_compacted` /
+  `contextCompaction` 变体（无摘要时按 opaque 处理）、Claude Code 的 compact 边界与
+  PreCompact/PostCompact 记录、Pi 的 `compaction` 与 `branch_summary` 条目、Hermes 的压缩延续链
+  （opaque + continuationSessionId）。压缩不会产生 memory/context 生命周期事件。
+- 子代理/父会话证据归一化为关系与 Task/AgentRun：Codex 的 NEW_TASK 信封与 spawn 工具调用、Claude 的
+  `<task-notification>` 与 sidechain transcript、Hermes 的 delegate 会话。执行模式（foreground/
+  background/subagent/scheduled/team）只属于 AgentRun；Task 只携带状态、依赖与指派信息。压缩延续不会被当作子代理；
+  Pi 的 `parentSession` 只导出为派生的 parent 关系（轮转或 fork 无法从文件元数据区分），不虚构 spawn。
+- 上下文产物是元数据优先的：`kind`（memory/instruction/skill/rule/summary）、`scope`（session/agent/
+  project/user/organization）、`origin`（user-authored/agent-generated/provider-generated）与
+  `contentAccess`（full/summary/metadata-only/unavailable）描述产物，绝不携带压缩文本本身。压缩派生的产物
+  固定为 kind=summary、scope=session、origin=provider-generated、contentAccess=metadata-only、
+  `sourceSessionIds` 已设置。`memory.generated` 等生命周期观察是事件 kind，只在来源证据支持时发出。
+- 每个域通过 `CapabilityDescriptor`（full/partial/none + recorded/derived + details）如实声明；
+  混合 recorded/derived 的域声明为 partial/derived，没有 accessor 的 Provider 一律默认 none，绝不伪造原生支持。
+
 所有 Provider 都使用独立的本地元数据库保存收藏、自定义标题、软删除和永久排除状态，不会写回原始会话数据库或 transcript 文件。
 
 ## 主要功能
@@ -81,6 +104,7 @@ Flow 与通用 Trace 都由这层派生。只有当来源保存了更丰富的�
 - **Table of Contents**：长会话自动生成可折叠导航，只索引用户消息、assistant 消息、已知启动器或由 provider 明确标记的自定义子 agent。
 - **会话内搜索**：可从详情页操作栏打开紧凑搜索，或按 `/` 聚焦；结果会同时显示匹配回合与文本命中数，逐词高亮，并在上下跳转时保持控制条可见。
 - **系统提示词证据 API**：`GET /api/:provider/session/:id/system-prompts` 只暴露当前本地可解析的指令、规则与运行时来源；不会声称恢复隐藏的 Provider prompt。
+- **会话协议 API**：`GET /api/:provider/session/:id/protocol`（只读）返回能力描述符（每域 `full/partial/none` + `recorded/derived`）与标准化协议（带稳定序列号的事件、关系、任务/代理运行、元数据优先的上下文产物）。未知 Provider、未知会话或不支持协议的 Provider 均返回 404。
 - **Trace API**：暴露 step/span summary，聚合 tool、skill、agent、MCP、LSP 等调用。
 - **统一用量入口**：`/stats` 使用同一份每日 Token 组成契约聚合所有已选 Provider；总量趋势图直接提供 Provider 筛选，来源卡片可在同一页面应用单 Provider 筛选或进入 Provider 专属明细。单 Provider 明细继续提供 Top 会话、周期对比、模型排名、按日下钻和可选费用估算。对于含子 agent 的文件型 transcript，只统计该文件自有的请求并排除复制的父会话历史；即使来源未给出完整组成字段，也保留记录的请求总量。文件型 Provider 只展示 transcript 实际提供的维度，不伪造能力。
 - **本地管理**：所有 Provider 都支持收藏、重命名、批量操作、软删除、回收站恢复和永久排除；这些操作只修改 viewer 元数据。

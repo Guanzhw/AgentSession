@@ -44,13 +44,13 @@ The focus is no longer just “list my chats.” The goal is to help you reconst
 | Provider | Status | Default Source | Capabilities |
 |:---|:---:|:---|:---|
 | OpenCode | Full shared support | `$XDG_DATA_HOME/opencode/opencode.db` or `~/.local/share/opencode/opencode.db` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis; plus SQLite-native advanced statistics |
-| Claude Code | Full shared support | `~/.claude/transcripts/` + `~/.claude/projects/` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis; sidechain subagents when transcripts retain them |
-| Codex CLI | Full shared support | `~/.codex/sessions/**/*.jsonl` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis, nested subagents |
+| Claude Code | Full shared support | `~/.claude/transcripts/` + `~/.claude/projects/` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis; sidechain subagents when transcripts retain them; session protocol: task notifications to Task/AgentRun, compact boundary events |
+| Codex CLI | Full shared support | `~/.codex/sessions/**/*.jsonl` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis, nested subagents; session protocol: NEW_TASK tasks/runs, compaction variant events |
 | OpenClaw | Full shared support | `~/.openclaw/agents/*/sessions/*.jsonl` | Branch-aware JSONL, reasoning, tool calls/results, shared Agent Loop views, analysis, and resume. |
-| Hermes Agent | Full shared support | `$HERMES_HOME/state.db` | Read-only SQLite sessions, reasoning, tool calls/results, shared Agent Loop views, analysis, and resume; compression lineage is not misclassified as subagents. |
+| Hermes Agent | Full shared support | `$HERMES_HOME/state.db` | Read-only SQLite sessions, reasoning, tool calls/results, shared Agent Loop views, analysis, and resume; compression lineage is not misclassified as subagents; session protocol: compacted-into relationships and opaque events |
 | GitHub Copilot CLI | Legacy history support | `~/.copilot/session-state/*/events.jsonl` + `~/.copilot/session-store.db` | Existing histories remain browsable, searchable, exportable, and available to shared views; resume and analysis are disabled by default. |
 | Gemini CLI | Legacy history support | `~/.gemini/tmp/*/chats/*.json` | Browse, search, export, token statistics, shared views, and local prompt/runtime evidence for existing histories. It has no default resume or analysis action, and its flat chat format has no child-session relationship, so AgentSession does not invent embedded subagent branches. |
-| Pi | Full shared support | `~/.pi/agent/sessions/**/*.jsonl` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis, active branches, and fork relationships. A recorded subagent launcher embeds the child at that call; a source-only fork relationship remains explicitly inferred. |
+| Pi | Full shared support | `~/.pi/agent/sessions/**/*.jsonl` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis, active branches, and fork relationships. A recorded subagent launcher embeds the child at that call; a source-only fork relationship remains explicitly inferred. Session protocol: compaction/branch_summary events and metadata-first artifacts |
 
 Every provider has browse, content search, viewer-only metadata management,
 Markdown/JSON export, daily token statistics, Tree/Container/Metrics/Flow/Trace,
@@ -76,6 +76,46 @@ common response-boundary or tool-result semantics.
 
 Adding a provider? Follow the [provider contribution guide](./docs/CONTRIBUTING-PROVIDER.md) for the adapter, MCP, test, and release checklist.
 
+### Shared Session Protocol
+
+On top of the Message read/compatibility view, Codex CLI, Claude Code, Pi, and
+Hermes Agent expose a provider-neutral standardized session protocol
+(`getSessionProtocol` + `protocolCapabilities`): events with stable REQUIRED
+sequences (`SessionEventEnvelope`, dense 1..n in canonical source record
+order — never timestamp chronology), explicit session relationships (parent /
+spawned / forked / continued / compacted-into / scheduled-run-of), a separated
+Task and AgentRun model, and metadata-first context artifacts
+(`ContextArtifact`). Every value carries provenance (`recorded` = native source
+evidence, `derived` = reconstructed by the adapter from other evidence).
+
+- Context compaction becomes the standard `context.compaction` event: Codex
+  `compacted` / `context_compacted` / `contextCompaction` variants (opaque when
+  no summary exists), Claude Code compact boundaries and PreCompact/PostCompact
+  records, Pi `compaction` and `branch_summary` entries, and Hermes compression
+  continuations (opaque + continuationSessionId). Plain compaction never emits
+  memory/context lifecycle events.
+- Subagent/parent-session evidence normalizes to relationships and
+  Task/AgentRun: Codex NEW_TASK envelopes and spawn tool calls, Claude
+  `<task-notification>` records and sidechain transcripts, Hermes delegate
+  sessions. Execution mode (foreground/background/subagent/scheduled/team)
+  belongs to AgentRun only; Tasks carry status, dependencies, and assignee.
+  Compression continuations are never treated as subagents; Pi's
+  `parentSession` exports only a derived parent relationship (rotation or fork
+  is indistinguishable from file metadata) without fabricating a spawn.
+- Context artifacts are metadata-first: `kind` (memory/instruction/skill/rule/
+  summary), `scope` (session/agent/project/user/organization), `origin`
+  (user-authored/agent-generated/provider-generated), and `contentAccess`
+  (full/summary/metadata-only/unavailable) describe the artifact and never
+  carry compacted transcript text. Compaction-derived artifacts are always
+  kind=summary, scope=session, origin=provider-generated,
+  contentAccess=metadata-only, with `sourceSessionIds` set. Lifecycle
+  observations such as `memory.generated` are event kinds emitted only when
+  provider evidence supports them.
+- Every domain is declared truthfully through `CapabilityDescriptor`
+  (full/partial/none + recorded/derived + details). Domains mixing recorded
+  and derived values declare partial/derived; providers without an accessor
+  default to none and never fabricate native support.
+
 All providers store stars, custom titles, soft deletes, and permanent exclusions in AgentSession’s own metadata database. Original session databases and transcript files remain read-only.
 
 ## Features
@@ -90,6 +130,7 @@ All providers store stars, custom titles, soft deletes, and permanent exclusions
 - **In-conversation search**: open the compact detail-page search from the action bar or press `/`; results report matching turns and text occurrences, highlight the exact text, and keep previous/next controls visible while navigating.
 - **Trace API**: step/span summaries classify tools, skills, agents, MCP calls, and LSP activity.
 - **System-prompt evidence API**: `GET /api/:provider/session/:id/system-prompts` exposes only current locally resolvable instructions, rules, and runtime sources; it never claims to recover a hidden provider prompt.
+- **Session protocol API**: `GET /api/:provider/session/:id/protocol` (read-only) returns capability descriptors (per domain `full/partial/none` + `recorded/derived`) and the standardized protocol (stably sequenced events, relationships, tasks/agent runs, metadata-first context artifacts). Unknown providers, unknown sessions, and providers without protocol support answer 404.
 - **Unified Usage entry**: `/stats` aggregates selected providers through one daily token-composition contract. The total trend exposes provider filters directly, while contribution cards apply a single-provider filter in place or open provider-specific details. Provider detail pages retain top sessions, period comparison, model ranking, day drill-down, and optional cost estimates. For file-backed subagent transcripts, it counts only requests owned by that transcript and excludes copied parent history; a recorded request total is retained even when its component breakdown is incomplete. File-backed providers expose only dimensions present in their transcripts.
 - **Local management**: every provider supports starring, renaming, batch actions, soft delete, restore, and permanent exclusion; these actions only mutate viewer metadata.
 - **Export**: OpenCode sessions expose one Export menu for Markdown or JSON, with JSON including the session tree.

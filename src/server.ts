@@ -8,7 +8,11 @@ import { getStats } from "./db.js";
 import { getLocale, setLocale } from "./i18n.js";
 import { getIndexDb, indexProvider } from "./index-db.js";
 import { getAllProviders, getAvailableProviders } from "./providers/index.js";
-import { supportsLocalManagement, usesOpenCodeStatsStore } from "./providers/kinds.js";
+import {
+  protocolCapabilityDescriptors,
+  supportsLocalManagement,
+  usesOpenCodeStatsStore
+} from "./providers/kinds.js";
 import {
   getRuntimeRouteContext,
   recordRuntimeEvent,
@@ -115,7 +119,10 @@ export async function startServer(config = getConfig()) {
       icon: p.icon,
       available: availableIds.has(p.id),
       manageable: supportsLocalManagement(p),
-      lifecycle: p.lifecycle || "active"
+      lifecycle: p.lifecycle || "active",
+      // Descriptor-aware protocol capabilities; absent accessors default to
+      // support "none" for every domain without breaking legacy fields.
+      protocolCapabilities: protocolCapabilityDescriptors(p)
     }));
 
     // Build router with populated deps
