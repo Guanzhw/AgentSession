@@ -466,8 +466,9 @@ export const zh = {
   "time.hours_ago": "{n}小时前",
   "time.days_ago": "{n}天前",
 
-  // Truncation
-  "truncated": "…已截断",
+  // Progressive expansion
+  "progressive.show_more": "显示更多",
+  "progressive.load_failed": "无法继续加载内容",
 
   // JS prompts/confirms
   "js.rename_prompt": "输入新标题：",

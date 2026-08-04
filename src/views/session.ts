@@ -830,10 +830,11 @@ function renderSessionMetricsPanel(sessionMetrics: any) {
   </section>`;
 }
 
-function renderReasoningPart(partData: any) {
+function renderReasoningPart(partData: any, partId = "") {
   return reasoningBlock(
     partData?.text || "",
-    formatDuration(partData?.time?.start, partData?.time?.end)
+    formatDuration(partData?.time?.start, partData?.time?.end),
+    partId
   );
 }
 
@@ -851,6 +852,7 @@ function renderPart(messageData: any, partData: any, partId: any, reasoningMarku
       return "";
     }
     return messageBubble(messageData.role, partData.text, {
+      partId,
       model: messageModelLabel(messageData),
       tokens: messageData.tokens,
       tokenRequestCount: messageData.tokenRequestCount,
@@ -970,7 +972,7 @@ function renderMessagePartsResult(message: any, depth = 0, provider = "opencode"
 
   for (const part of message.parts) {
     if (part.type === "reasoning") {
-      const reasoning = renderReasoningPart(part.data);
+      const reasoning = renderReasoningPart(part.data, part.id);
       if (reasoning) {
         pendingReasoning.push(reasoning);
       }
@@ -1064,7 +1066,7 @@ function renderRawParts(messageData: any, parts: any[] = []) {
   for (const part of parts) {
     const partData = safeParse(part.data);
     if (partData?.type === "reasoning") {
-      const reasoning = renderReasoningPart(partData);
+      const reasoning = renderReasoningPart(partData, part.id);
       if (reasoning) {
         pendingReasoning.push(reasoning);
       }

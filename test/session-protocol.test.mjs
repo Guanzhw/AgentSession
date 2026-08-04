@@ -543,6 +543,336 @@ test("Codex NEW_TASK envelopes become Tasks and child rollouts become AgentRuns"
   );
 });
 
+test("Codex sub_agent_activity and call-output evidence bind spawn calls to child rollouts", () => {
+  // Real-world record order: spawn function_call (132), sub_agent_activity
+  // (133, event_id = call id, agent_thread_id = child session), then
+  // function_call_output (134). The child must bind to the spawn call, not
+  // stay running with a null task correlation.
+  const callId = "call_g123";
+  const records = [
+    { type: "session_meta", timestamp: "2026-07-19T00:00:00Z", payload: { id: "root" } },
+    { type: "response_item", timestamp: "2026-07-19T00:01:00Z", payload: { type: "function_call", call_id: callId, name: "task", arguments: "{}" } },
+    {
+      type: "event_msg",
+      timestamp: "2026-07-19T00:01:01Z",
+      payload: {
+        type: "sub_agent_activity",
+        event_id: callId,
+        agent_thread_id: "child-1",
+        agent_path: "/root/worker",
+        kind: "started"
+      }
+    },
+    {
+      type: "response_item",
+      timestamp: "2026-07-19T00:01:02Z",
+      payload: {
+        type: "function_call_output",
+        call_id: callId,
+        output: JSON.stringify({ thread_id: "child-1", status: "completed" })
+      }
+    },
+    {
+      type: "response_item",
+      timestamp: "2026-07-19T00:02:00Z",
+      payload: {
+        type: "agent_message",
+        author: "/root/worker",
+        content: [{ type: "input_text", text: "Message Type: FINAL_ANSWER\nTask name: worker\nPayload:\ndone" }]
+      }
+    }
+  ];
+  const child = {
+    session: session("child-1", "root", { agentPath: "/root/worker", agentNickname: "worker" }, 2000),
+    messages: [message("child-msg", "assistant", 2100)],
+    records: [
+      { type: "session_meta", timestamp: "2026-07-19T00:00:30Z", payload: { id: "child-1", model: "gpt-5" } }
+    ]
+  };
+  const protocol = buildCodexSessionProtocol({
+    session: session("root"),
+    messages: [message("m1", "assistant", 1500)],
+    records,
+    children: [child]
+  });
+
+  assert.equal(protocol.tasks.length, 1);
+  const task = protocol.tasks[0];
+  assert.equal(task.id, callId);
+  assert.equal(task.status, "completed", "the child rollout proves completion");
+  assert.equal(task.mode, undefined, "execution mode belongs to AgentRun, not Task");
+  assert.equal(task.toolCallId, callId, "toolCallId is the spawn call id");
+  assert.equal(task.correlationId, callId);
+  assert.equal(task.agentPath, "/root/worker");
+  assert.equal(task.provenance.fidelity, "recorded", "sub_agent_activity is recorded evidence");
+  assert.equal(task.provenance.sourceType, "codex.sub_agent_activity");
+  assert.equal(task.provenance.sourceId, callId);
+  assert.deepEqual(task.metadata, { activityKind: "started" });
+
+  assert.equal(protocol.agentRuns.length, 1);
+  const run = protocol.agentRuns[0];
+  assert.equal(run.taskId, callId, "run binds to the spawn task instead of staying null");
+  assert.equal(run.childSessionId, "child-1");
+  assert.equal(run.status, "completed");
+  assert.equal(run.mode, "subagent", "mode is not invented when the source records none");
+  assert.equal(run.model, "gpt-5");
+
+  const spawned = protocol.relationships.filter((r) => r.type === "spawned");
+  assert.equal(spawned.length, 1);
+  assert.equal(spawned[0].fromSessionId, "root");
+  assert.equal(spawned[0].toSessionId, "child-1");
+  assert.equal(spawned[0].correlationId, callId, "relationship correlation binds to the spawn call");
+});
+
+test("Codex execution mode comes only from recorded source evidence", () => {
+  const callId = "call_g456";
+  const records = [
+    { type: "session_meta", timestamp: "2026-07-19T00:00:00Z", payload: { id: "root" } },
+    { type: "response_item", timestamp: "2026-07-19T00:01:00Z", payload: { type: "function_call", call_id: callId, name: "agent", arguments: "{}" } },
+    {
+      type: "event_msg",
+      timestamp: "2026-07-19T00:01:01Z",
+      payload: {
+        type: "sub_agent_activity",
+        event_id: callId,
+        agent_thread_id: "child-1",
+        agent_path: "/root/worker",
+        kind: "completed",
+        mode: "background"
+      }
+    },
+    { type: "response_item", timestamp: "2026-07-19T00:01:02Z", payload: { type: "function_call_output", call_id: callId, output: "done" } }
+  ];
+  const child = {
+    session: session("child-1", "root", { agentPath: "/root/worker" }, 2000),
+    messages: [],
+    records: [{ type: "session_meta", timestamp: "2026-07-19T00:00:30Z", payload: { id: "child-1" } }]
+  };
+  const protocol = buildCodexSessionProtocol({
+    session: session("root"),
+    messages: [],
+    records,
+    children: [child]
+  });
+  assert.equal(protocol.agentRuns.length, 1);
+  assert.equal(protocol.agentRuns[0].mode, "background", "recorded background mode is honored");
+  assert.equal(protocol.agentRuns[0].taskId, callId);
+});
+
+test("Codex call-output alone binds a child without claiming completion", () => {
+  const callId = "call_g789";
+  const records = [
+    { type: "session_meta", timestamp: "2026-07-19T00:00:00Z", payload: { id: "root" } },
+    { type: "response_item", timestamp: "2026-07-19T00:01:00Z", payload: { type: "function_call", call_id: callId, name: "task", arguments: "{}" } },
+    {
+      type: "response_item",
+      timestamp: "2026-07-19T00:01:02Z",
+      payload: { type: "function_call_output", call_id: callId, output: JSON.stringify({ session_id: "rollout-child-1" }) }
+    }
+  ];
+  const child = {
+    session: session("child-1", "root", { agentPath: "/root/worker" }, 2000),
+    messages: [],
+    records: [{ type: "session_meta", timestamp: "2026-07-19T00:00:30Z", payload: { id: "child-1" } }]
+  };
+  const protocol = buildCodexSessionProtocol({
+    session: session("root"),
+    messages: [],
+    records,
+    children: [child]
+  });
+  assert.equal(protocol.tasks.length, 1);
+  assert.equal(protocol.tasks[0].status, "running");
+  assert.equal(protocol.tasks[0].provenance.fidelity, "derived");
+  assert.equal(protocol.tasks[0].provenance.sourceType, "codex.response_item:function_call:spawn");
+  assert.equal(protocol.agentRuns[0].taskId, callId);
+  assert.equal(protocol.agentRuns[0].childSessionId, "child-1");
+  assert.equal(protocol.agentRuns[0].status, "running");
+  assert.equal(protocol.agentRuns[0].timeEnd, null);
+});
+
+test("Codex child-local FINAL_ANSWER completes a spawn-bound run", () => {
+  const callId = "call_child_final";
+  const records = [
+    { type: "session_meta", timestamp: "2026-07-19T00:00:00Z", payload: { id: "root" } },
+    { type: "response_item", timestamp: "2026-07-19T00:01:00Z", payload: { type: "function_call", call_id: callId, name: "task", arguments: "{}" } },
+    { type: "response_item", timestamp: "2026-07-19T00:01:02Z", payload: { type: "function_call_output", call_id: callId, output: "{\"session_id\":\"child-1\"}" } }
+  ];
+  const child = {
+    session: session("child-1", "root", { agentPath: "/root/worker" }, 2000),
+    messages: [],
+    records: [
+      { type: "session_meta", timestamp: "2026-07-19T00:00:30Z", payload: { id: "child-1" } },
+      {
+        type: "response_item",
+        timestamp: "2026-07-19T00:02:00Z",
+        payload: {
+          type: "agent_message",
+          message: "Message Type: FINAL_ANSWER\nTask name: worker\nPayload:\ndone"
+        }
+      }
+    ]
+  };
+
+  const protocol = buildCodexSessionProtocol({
+    session: session("root"),
+    messages: [],
+    records,
+    children: [child]
+  });
+
+  assert.equal(protocol.tasks[0].status, "completed");
+  assert.equal(protocol.agentRuns[0].status, "completed");
+  assert.equal(protocol.agentRuns[0].timeEnd, Date.parse("2026-07-19T00:02:00Z"));
+});
+
+test("Codex spawn calls without any completion evidence stay running", () => {
+  const callId = "call_g000";
+  const records = [
+    { type: "session_meta", timestamp: "2026-07-19T00:00:00Z", payload: { id: "root" } },
+    { type: "response_item", timestamp: "2026-07-19T00:01:00Z", payload: { type: "function_call", call_id: callId, name: "task", arguments: "{}" } }
+  ];
+  const protocol = buildCodexSessionProtocol({
+    session: session("root"),
+    messages: [],
+    records,
+    children: []
+  });
+  assert.equal(protocol.tasks.length, 1);
+  assert.equal(protocol.tasks[0].status, "running", "no evidence, no invented completion");
+  assert.equal(protocol.tasks[0].provenance.fidelity, "derived");
+  assert.equal(protocol.agentRuns.length, 0);
+});
+
+test("Codex envelopes and spawn evidence coexist without duplicate runs", () => {
+  const envelope = (id) => ({
+    type: "response_item",
+    timestamp: "2026-07-19T00:01:00Z",
+    payload: {
+      type: "agent_message",
+      id,
+      content: [{ type: "text", text: "Message Type: NEW_TASK\n\nTask name: reviewer" }]
+    }
+  });
+  const callId = "call_g999";
+  const records = [
+    { type: "session_meta", timestamp: "2026-07-19T00:00:00Z", payload: { id: "root" } },
+    envelope("task-1"),
+    { type: "response_item", timestamp: "2026-07-19T00:02:00Z", payload: { type: "function_call", call_id: callId, name: "task", arguments: "{}" } },
+    {
+      type: "event_msg",
+      timestamp: "2026-07-19T00:02:01Z",
+      payload: {
+        type: "sub_agent_activity",
+        event_id: callId,
+        agent_thread_id: "child-2",
+        agent_path: "/root/coder",
+        kind: "started"
+      }
+    },
+    { type: "response_item", timestamp: "2026-07-19T00:02:02Z", payload: { type: "function_call_output", call_id: callId, output: "done" } }
+  ];
+  const childOne = {
+    session: session("child-1", "root", { agentPath: "/root/reviewer", agentNickname: "reviewer" }, 2000),
+    messages: [],
+    records: [
+      { type: "session_meta", timestamp: "2026-07-19T00:00:30Z", payload: { id: "child-1" } },
+      { type: "response_item", timestamp: "2026-07-19T00:00:31Z", payload: { type: "agent_message", id: "task-1", content: [{ type: "text", text: "Message Type: NEW_TASK\n\nTask name: reviewer" }] } }
+    ]
+  };
+  const childTwo = {
+    session: session("child-2", "root", { agentPath: "/root/coder" }, 3000),
+    messages: [],
+    records: [{ type: "session_meta", timestamp: "2026-07-19T00:00:40Z", payload: { id: "child-2" } }]
+  };
+  const protocol = buildCodexSessionProtocol({
+    session: session("root"),
+    messages: [],
+    records,
+    children: [childOne, childTwo]
+  });
+  assert.equal(protocol.tasks.length, 2, "envelope task and spawn task both represented");
+  assert.equal(protocol.agentRuns.length, 2);
+  assert.equal(new Set(protocol.agentRuns.map((run) => run.childSessionId)).size, 2, "no duplicate runs per child");
+  assert.ok(protocol.agentRuns.every((run) => run.taskId), "every run binds to a task");
+  const byChild = new Map(protocol.agentRuns.map((run) => [run.childSessionId, run]));
+  assert.equal(byChild.get("child-1").taskId, "task-1");
+  assert.equal(byChild.get("child-2").taskId, callId);
+});
+
+test("Codex spawn-bound children render under the launch tool call in source order", () => {
+  const callId = "call_g456";
+  const parentMessages = [
+    { ...message("m0", "user", 1000), content: "Do it" },
+    { ...message("m1", "assistant", 1100), content: "Launching worker", metadata: { turnId: "r1" } },
+    {
+      ...message(callId, "tool", 1200),
+      toolName: "task",
+      toolInput: { description: "review" },
+      toolOutput: JSON.stringify({ thread_id: "child-1" }),
+      metadata: { turnId: "r1", callId }
+    },
+    { ...message("m3", "assistant", 5000), content: "Worker returned", metadata: { turnId: "r2" } }
+  ];
+  const childMessages = [
+    { ...message("c0", "user", 1300), content: "child task" },
+    { ...message("c1", "assistant", 1400), content: "child answer", metadata: { turnId: "cr1" } }
+  ];
+  const records = [
+    { type: "session_meta", timestamp: "2026-07-19T00:00:00Z", payload: { id: "root" } },
+    { type: "response_item", timestamp: "2026-07-19T00:01:00Z", payload: { type: "function_call", call_id: callId, name: "task", arguments: "{}" } },
+    {
+      type: "event_msg",
+      timestamp: "2026-07-19T00:01:01Z",
+      payload: {
+        type: "sub_agent_activity",
+        event_id: callId,
+        agent_thread_id: "child-1",
+        agent_path: "/root/worker",
+        kind: "started"
+      }
+    },
+    { type: "response_item", timestamp: "2026-07-19T00:01:02Z", payload: { type: "function_call_output", call_id: callId, output: "done" } }
+  ];
+  const child = {
+    session: session("child-1", "root", { agentPath: "/root/worker" }, 1300),
+    messages: childMessages,
+    records: [{ type: "session_meta", timestamp: "2026-07-19T00:00:30Z", payload: { id: "child-1" } }]
+  };
+  const protocol = buildCodexSessionProtocol({
+    session: session("root"),
+    messages: parentMessages,
+    records,
+    children: [child]
+  });
+
+  const views = buildLinkedMessageSessionViews("root", [
+    { session: session("root"), messages: parentMessages },
+    { session: child.session, messages: childMessages }
+  ], {
+    tasks: protocol.tasks,
+    agentRuns: protocol.agentRuns,
+    relationships: protocol.relationships
+  });
+  const tree = views.tree;
+  assert.equal(tree.detachedChildren.length, 0, "child is not detached at the end");
+  // Launch turn (assistant + spawn tool part) carries the child.
+  const launchTurn = tree.messages[1];
+  const toolPart = launchTurn.parts.find((part) => part.type === "tool");
+  assert.ok(toolPart, "spawn tool part exists on the launch turn");
+  assert.equal(toolPart.childSessions.length, 1);
+  assert.equal(toolPart.childSessions[0].session.id, "child-1");
+  // The completion turn never absorbs the child: it stays at launch position.
+  const completionTurn = tree.messages[2];
+  assert.ok(completionTurn.parts.every((part) => part.childSessions.length === 0));
+  // Child internal messages keep their own source order.
+  assert.deepEqual(
+    toolPart.childSessions[0].messages.map((m) => m.id),
+    ["c0", "c1"]
+  );
+  assert.equal(views.metrics.totals.branches, 1);
+});
+
 test("Codex compaction helper recognizes every variant including opaque payload types", () => {
   const variant = (record) => Boolean(codexCompactionRecord(record));
   assert.equal(variant({ type: "compacted", payload: {} }), true);

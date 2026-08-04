@@ -12,6 +12,7 @@ import {
   sessionRelationship,
   sessionTask,
   sourceSequence,
+  type ExecutionMode,
   type SessionProtocol
 } from "../shared/session-protocol.js";
 import { isSubagentToolName } from "../shared/subagent-tools.js";
@@ -398,73 +399,202 @@ export function buildCodexSessionProtocol(input: CodexProtocolInput): SessionPro
     }
   }
 
+  // --- Spawn tool-call evidence -------------------------------------------
   // Parent transcripts record the spawn as a tool call rather than an
-  // envelope. Derive subagent tasks from spawn function calls and bind them
-  // to child rollouts whose identity appears in the call's input/output.
-  if (envelopeByTaskId.size === 0) {
-    const spawnCalls = input.records.filter((record) => (
-      record.type === "response_item"
-      && (record.payload?.type === "function_call" || record.payload?.type === "custom_tool_call")
-      && isSubagentToolName(record.payload?.name)
-    ));
-    for (const [index, record] of spawnCalls.entries()) {
-      const callId = firstString(record.payload.call_id, record.payload.id);
-      const taskId = callId || `spawn-${index}`;
-      const ts = record.timestamp ? new Date(String(record.timestamp)).getTime() : null;
-      let referenceText = "";
-      try {
-        referenceText = JSON.stringify([record.payload.arguments ?? record.payload.input, record.payload.output]);
-      } catch {
-        referenceText = String(record.payload.arguments ?? record.payload.input ?? "");
+  // envelope. Codex binds a spawn function_call to its child thread through
+  // recorded sub_agent_activity events (event_id = call id, agent_thread_id
+  // = child session id, agent_path) and the matching function_call_output
+  // record. Tasks/AgentRuns/relationships are derived from that evidence
+  // first; the call's own input/output is the fallback for older transcripts.
+  // Execution mode is only ever taken from source evidence (a recorded mode
+  // field); background is never invented.
+  const subagentActivityByEventId = new Map<string, {
+    eventId: string;
+    agentThreadId: string | null;
+    agentPath: string | null;
+    agentLabel: string | null;
+    kind: string | null;
+    mode: ExecutionMode | null;
+    timestamp: number | null;
+    terminalTimestamp: number | null;
+  }>();
+  const executionModes = new Set<ExecutionMode>([
+    "foreground", "background", "subagent", "scheduled", "team"
+  ]);
+  const terminalActivityKinds = new Set([
+    "completed", "failed", "cancelled", "canceled", "shutdown", "stopped"
+  ]);
+  for (const record of input.records) {
+    const payload = record.payload && typeof record.payload === "object" ? record.payload : null;
+    const isActivityRecord = record.type === "sub_agent_activity"
+      || (record.type === "event_msg" && payload?.type === "sub_agent_activity");
+    if (!isActivityRecord) continue;
+    const source = payload && Object.keys(payload).length > 1 ? payload : record;
+    const eventId = firstString(source.event_id, source.id);
+    if (!eventId) continue;
+    const rawMode = firstString(source.mode, source.execution_mode);
+    const normalizedMode = rawMode ? String(rawMode).toLowerCase() : null;
+    const mode = normalizedMode && executionModes.has(normalizedMode as ExecutionMode)
+      ? normalizedMode as ExecutionMode
+      : null;
+    const ts = typeof source.occurred_at_ms === "number"
+      ? source.occurred_at_ms
+      : (record.timestamp ? new Date(String(record.timestamp)).getTime() : null);
+    const kind = firstString(source.kind, source.activity_type, source.status);
+    const previous = subagentActivityByEventId.get(eventId);
+    subagentActivityByEventId.set(eventId, {
+      eventId,
+      agentThreadId: previous?.agentThreadId || firstString(source.agent_thread_id, source.thread_id),
+      agentPath: previous?.agentPath || firstString(source.agent_path),
+      agentLabel: previous?.agentLabel || firstString(source.agent_label),
+      kind: kind || previous?.kind || null,
+      mode: previous?.mode || mode,
+      timestamp: previous?.timestamp || asNumber(ts),
+      terminalTimestamp: kind && terminalActivityKinds.has(kind.toLowerCase())
+        ? asNumber(ts)
+        : previous?.terminalTimestamp || null
+    });
+  }
+
+  const callOutputByCallId = new Map<string, string>();
+  for (const record of input.records) {
+    if (record.type !== "response_item") continue;
+    if (!["function_call_output", "custom_tool_call_output"].includes(record.payload?.type)) continue;
+    const callId = firstString(record.payload.call_id, record.payload.id);
+    if (!callId || record.payload.output == null) continue;
+    callOutputByCallId.set(
+      callId,
+      typeof record.payload.output === "string"
+        ? record.payload.output
+        : JSON.stringify(record.payload.output)
+    );
+  }
+
+  const childIdentityParts = (child: CodexProtocolChild) => {
+    const meta = child.session.metadata || {};
+    return [String(child.session.id), meta.agentPath, meta.agentNickname]
+      .filter((value): value is string => typeof value === "string" && Boolean(value));
+  };
+
+  const findChildForSpawn = (callId: string | null, record: Row): CodexProtocolChild | null => {
+    const activity = callId ? subagentActivityByEventId.get(callId) : null;
+    const callOutput = callId ? callOutputByCallId.get(callId) : null;
+    let referenceText = "";
+    try {
+      referenceText = JSON.stringify([record.payload?.arguments ?? record.payload?.input, record.payload?.output]);
+    } catch {
+      referenceText = String(record.payload?.arguments ?? record.payload?.input ?? "");
+    }
+    return input.children.find((child) => {
+      const identities = childIdentityParts(child);
+      if (activity) {
+        // The activity record names the child thread directly.
+        if (activity.agentThreadId && identities.includes(activity.agentThreadId)) return true;
+        const activityIdentity = firstString(activity.agentPath, activity.agentLabel);
+        if (activityIdentity && identities.some((identity) => (
+          identity.includes(activityIdentity) || activityIdentity.includes(identity)
+        ))) return true;
       }
-      const run = input.children.find((child) => {
-        const identity = firstString(child.session.metadata?.agentPath, child.session.metadata?.agentNickname);
-        return Boolean(identity && referenceText.includes(identity));
-      });
-      tasks.push(sessionTask({
-        id: taskId,
+      // The call-output record carries the returned child identity.
+      if (callOutput && identities.some((identity) => callOutput.includes(identity))) return true;
+      // Fallback: the call's own arguments/output text mentions the child.
+      return identities.some((identity) => referenceText.includes(identity));
+    }) ?? null;
+  };
+
+  const terminalAgentMessageTime = (child: CodexProtocolChild): number | null => {
+    const identities = childIdentityParts(child);
+    const findTerminal = (records: Row[], requireAuthorMatch: boolean): number | null => {
+      for (const record of records) {
+        if (record.type !== "response_item" || record.payload?.type !== "agent_message") continue;
+        const author = firstString(record.payload.author, record.payload.sender);
+        if (requireAuthorMatch && (!author || !identities.some((identity) => (
+          identity === author || identity.endsWith(`/${author}`) || author.endsWith(`/${identity}`)
+        )))) continue;
+        if (!/^Message Type:\s*FINAL_ANSWER\b/m.test(envelopeText(record.payload))) continue;
+        return record.timestamp ? asNumber(new Date(String(record.timestamp)).getTime()) : null;
+      }
+      return null;
+    };
+    const parentTime = findTerminal(input.records, true);
+    if (parentTime != null) return parentTime;
+    // Some Codex versions persist FINAL_ANSWER only inside the child rollout.
+    // Its transcript identity already scopes the evidence, so no author field
+    // is required for this fallback.
+    return findTerminal(child.records || [], false);
+  };
+
+  const spawnCalls = input.records.filter((record) => (
+    record.type === "response_item"
+    && (record.payload?.type === "function_call" || record.payload?.type === "custom_tool_call")
+    && isSubagentToolName(record.payload?.name)
+  ));
+  for (const [index, record] of spawnCalls.entries()) {
+    const callId = firstString(record.payload.call_id, record.payload.id);
+    const taskId = callId || `spawn-${index}`;
+    // A recorded NEW_TASK envelope is the canonical task for this call; do
+    // not double-represent it.
+    if (tasks.some((task) => task.id === taskId || task.toolCallId === taskId)) continue;
+    const ts = record.timestamp ? new Date(String(record.timestamp)).getTime() : null;
+    const activity = callId ? subagentActivityByEventId.get(callId) : null;
+    const run = findChildForSpawn(callId, record);
+    if (run && runs.some((candidate) => candidate.childSessionId === String(run.session.id))) continue;
+    const terminalMessageTime = run ? terminalAgentMessageTime(run) : null;
+    const completionTime = activity?.terminalTimestamp || terminalMessageTime;
+    // A spawn call's immediate function_call_output only proves that launch
+    // returned. Completion requires a terminal activity or FINAL_ANSWER.
+    const completed = Boolean(completionTime);
+    tasks.push(sessionTask({
+      id: taskId,
+      sessionId,
+      kind: "subagent-task",
+      status: completed ? "completed" : "running",
+      title: null,
+      toolCallId: callId,
+      correlationId: callId,
+      agentPath: run
+        ? firstString(run.session.metadata?.agentPath, run.session.metadata?.agentNickname)
+        : firstString(activity?.agentPath, activity?.agentLabel, record.payload.name),
+      timeCreated: asNumber(activity?.timestamp ?? ts),
+      timeUpdated: completionTime || (run ? asNumber(run.session.timeUpdated) : asNumber(activity?.timestamp ?? ts)),
+      timeCompleted: completionTime,
+      provenance: {
+        fidelity: activity ? "recorded" : "derived",
+        sourceType: activity
+          ? "codex.sub_agent_activity"
+          : "codex.response_item:function_call:spawn",
+        sourceId: activity?.eventId ?? callId
+      },
+      metadata: activity ? { activityKind: activity.kind } : null
+    }));
+    if (run) {
+      runs.push(agentRun({
+        id: String(run.session.id),
         sessionId,
-        kind: "subagent-task",
-        status: run ? "completed" : "running",
-        title: null,
-        toolCallId: callId,
-        correlationId: callId,
-        agentPath: run
-          ? firstString(run.session.metadata?.agentPath, run.session.metadata?.agentNickname)
-          : firstString(record.payload.name),
-        timeCreated: asNumber(ts),
-        timeUpdated: run ? asNumber(run.session.timeUpdated) : asNumber(ts),
-        timeCompleted: run ? asNumber(run.session.timeUpdated) : null,
+        taskId,
+        status: completed ? "completed" : "running",
+        mode: activity?.mode ?? "subagent",
+        agent: firstString(run.session.metadata?.agentPath, run.session.metadata?.agentNickname),
+        model: childModel(run),
+        childSessionId: String(run.session.id),
+        timeStart: asNumber(run.session.timeCreated),
+        timeEnd: completionTime,
         provenance: {
           fidelity: "derived",
-          sourceType: "codex.response_item:function_call:spawn",
-          sourceId: callId
+          sourceType: "codex.child-session",
+          sourceId: String(run.session.id)
+        },
+        metadata: {
+          agentNickname: run.session.metadata?.agentNickname || null,
+          threadSource: run.session.metadata?.threadSource || null
         }
       }));
-      if (run) {
-        runs.push(agentRun({
-          id: String(run.session.id),
-          sessionId,
-          taskId,
-          status: "completed",
-          mode: "subagent",
-          agent: firstString(run.session.metadata?.agentPath, run.session.metadata?.agentNickname),
-          model: childModel(run),
-          childSessionId: String(run.session.id),
-          timeStart: asNumber(run.session.timeCreated),
-          timeEnd: asNumber(run.session.timeUpdated),
-          provenance: {
-            fidelity: "derived",
-            sourceType: "codex.child-session",
-            sourceId: String(run.session.id)
-          }
-        }));
-      }
     }
   }
 
-  // Child sessions without a matching envelope still represent agent runs
-  // (older rollouts) or forks. Subagent threads yield a run; forks do not.
+  // Child sessions without a task bound by envelope or spawn evidence still
+  // represent agent runs (older rollouts) or forks. Subagent threads yield a
+  // run; forks do not.
   for (const child of input.children) {
     const childId = String(child.session.id);
     const childMeta = child.session.metadata || {};
@@ -474,8 +604,9 @@ export function buildCodexSessionProtocol(input: CodexProtocolInput): SessionPro
       && !(child.records || []).some(isSubagentTaskEnvelopeRecord);
     if (isFork) continue;
     if (runs.some((run) => run.childSessionId === childId)) continue;
-    if (childrenById.has(childId) && !envelopeByTaskId.size) {
-      // No recorded task envelope: derive the run from the child rollout.
+    if (childrenById.has(childId) && !runs.some((run) => run.childSessionId === childId)) {
+      // No task bound by envelope or spawn evidence: derive the run from the
+      // child rollout itself (older transcripts).
       runs.push(agentRun({
         id: childId,
         sessionId,

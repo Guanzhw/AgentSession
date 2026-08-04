@@ -19,7 +19,9 @@ export function codexUsageToTokens(usage: any) {
 }
 
 function responseText(payload: any) {
-  return (payload?.content || [])
+  const content = payload?.content ?? payload?.message;
+  if (typeof content === "string") return content;
+  return (Array.isArray(content) ? content : [])
     .flatMap((item: any) => item?.content || [item])
     .filter((item: any) => ["text", "output_text", "input_text", "summary_text"].includes(item?.type))
     .map((item: any) => item.text || "")
@@ -58,12 +60,10 @@ function agentMessageText(payload: any) {
   return responseText(payload).replace(/\s+/g, " ").trim();
 }
 
-function isSubagentTaskEnvelope(record: any, primaryMeta: any) {
+function isSubagentTaskEnvelope(record: any, _primaryMeta: any) {
   if (record.type !== "response_item" || record.payload?.type !== "agent_message") return false;
   const text = agentMessageText(record.payload);
-  if (!/^Message Type:\s*NEW_TASK\b/i.test(text)) return false;
-  const agentPath = primaryMeta.agent_path || primaryMeta.source?.subagent?.thread_spawn?.agent_path;
-  return !agentPath || text.includes(String(agentPath));
+  return /^Message Type:\s*NEW_TASK\b/i.test(text);
 }
 
 function subagentTaskMessage(payload: any) {

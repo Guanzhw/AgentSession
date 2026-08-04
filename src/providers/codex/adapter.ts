@@ -249,8 +249,8 @@ const codex = {
   protocolCapabilities: {
     sessionEvents: { support: "partial", provenance: "derived", details: "derived message envelopes plus recorded compaction and NEW_TASK lifecycle events" },
     sessionRelationships: { support: "partial", provenance: "derived", details: "recorded incoming thread spawns plus derived outgoing edges and forks" },
-    tasks: { support: "partial", provenance: "derived", details: "recorded NEW_TASK envelopes plus spawn tool-call derivations" },
-    agentRuns: { support: "partial", provenance: "derived", details: "child rollout sessions" },
+    tasks: { support: "partial", provenance: "derived", details: "recorded NEW_TASK envelopes plus spawn tool-call derivations bound via sub_agent_activity and call-output evidence" },
+    agentRuns: { support: "partial", provenance: "derived", details: "child rollout sessions bound to spawn calls through recorded activity/call-output evidence" },
     contextArtifacts: { support: "full", provenance: "recorded", details: "compaction records, metadata-only summaries" }
   },
 

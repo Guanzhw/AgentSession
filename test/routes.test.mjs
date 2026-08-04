@@ -284,6 +284,64 @@ test("system prompt endpoint returns only adapter-resolved evidence", async () =
   assert.equal(body.sections[0].items[0].title, "AGENTS.md");
 });
 
+test("progressive content endpoint returns bounded continuation chunks", async () => {
+  const output = `# Result\n\n${"line\n".repeat(1400)}`;
+  const provider = {
+    id: "codex",
+    getSessionContainer(sessionId) {
+      if (sessionId !== "session-1") return null;
+      return {
+        id: sessionId,
+        messages: [{
+          parts: [{
+            id: "tool-1",
+            data: {
+              type: "tool",
+              state: { status: "completed", input: { query: "x" }, output }
+            },
+            childSessions: []
+          }]
+        }],
+        detachedChildren: []
+      };
+    },
+    getMessages() { return []; }
+  };
+  const routes = captureGetRoutes(registerSessionDetail, {
+    appConfig: { port: 0, metaDir: temp, analysis: {}, resumeCommands: {}, allowTerminalLaunch: false },
+    providerMap: new Map([[provider.id, provider]]),
+    providerInfo: []
+  });
+  const route = routes.find(({ pattern }) => pattern instanceof RegExp && pattern.source.includes("/content$"));
+  assert.ok(route);
+
+  const firstResponse = createResponseCapture();
+  const firstUrl = "/api/codex/session/session-1/content?part=tool-1&field=output&offset=0";
+  await route.handler({ url: firstUrl }, firstResponse, ["", "codex", "session-1"]);
+  assert.equal(firstResponse.statusCode, 200);
+  const first = JSON.parse(firstResponse.body);
+  assert.equal(first.ok, true);
+  assert.match(first.html, /tool-output-body markdown/);
+  assert.match(first.html, /<h1>Result<\/h1>/);
+  assert.ok(first.nextOffset > 0 && first.nextOffset < output.length);
+  assert.ok(first.html.length < output.length, "response contains one bounded chunk");
+
+  const secondResponse = createResponseCapture();
+  const secondUrl = `/api/codex/session/session-1/content?part=tool-1&field=output&offset=${first.nextOffset}`;
+  await route.handler({ url: secondUrl }, secondResponse, ["", "codex", "session-1"]);
+  const second = JSON.parse(secondResponse.body);
+  assert.equal(second.ok, true);
+  assert.ok(second.html.length > 0);
+
+  const invalidResponse = createResponseCapture();
+  await route.handler(
+    { url: "/api/codex/session/session-1/content?part=tool-1&field=output&offset=-1" },
+    invalidResponse,
+    ["", "codex", "session-1"]
+  );
+  assert.equal(invalidResponse.statusCode, 400);
+});
+
 test("session protocol route exposes descriptors and protocol with 404 semantics", async () => {
   const provider = {
     id: "codex",

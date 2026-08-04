@@ -34,9 +34,85 @@ function stringifyData(value: any) {
   }
 }
 
-function truncate(value: any, limit = 3000) {
+const TOOL_CHUNK_LIMIT = 3000;
+const REASONING_CHUNK_LIMIT = 6000;
+const MESSAGE_CHUNK_LIMIT = 12000;
+
+type ProgressiveFormat = "markdown" | "plain" | "auto";
+
+function takeChunk(text: string, offset: number, limit: number) {
+  const start = Math.max(0, Math.min(text.length, Number(offset) || 0));
+  if (text.length - start <= limit) {
+    return { chunk: text.slice(start), nextOffset: null };
+  }
+  const target = start + limit;
+  const minimum = start + limit * 0.25;
+  let cut = text.lastIndexOf("\n\n", target);
+  if (cut < minimum) {
+    cut = text.lastIndexOf("\n", target);
+    cut = cut < minimum ? target : cut + 1;
+  } else {
+    cut += 2;
+  }
+  if (cut <= start) cut = target;
+  return { chunk: text.slice(start, cut), nextOffset: cut };
+}
+
+/**
+ * Render one bounded chunk. The server endpoint reuses this function so later
+ * chunks have identical escaping and Markdown decisions without entering the
+ * initial page HTML.
+ */
+function renderProgressiveHtml(text: string, format: ProgressiveFormat, sourceWasString: boolean, chunk: string) {
+  const markdown = format === "markdown" || (format === "auto" && sourceWasString && looksLikeMarkdown(text));
+  return markdown
+    ? `<div class="tool-output-body markdown">${renderMarkdown(chunk)}</div>`
+    : `<pre>${escapeHtml(chunk)}</pre>`;
+}
+
+export function renderProgressiveContent(
+  value: any,
+  format: ProgressiveFormat,
+  offset = 0,
+  limit = TOOL_CHUNK_LIMIT
+) {
   const text = stringifyData(value);
-  return text.length > limit ? `${text.slice(0, limit)}\n\n${t("truncated")}` : text;
+  const page = takeChunk(text, offset, limit);
+  return {
+    html: renderProgressiveHtml(text, format, typeof value === "string", page.chunk),
+    nextOffset: page.nextOffset,
+    totalLength: text.length
+  };
+}
+
+function progressiveContainer(
+  value: any,
+  format: ProgressiveFormat,
+  limit: number,
+  label: string,
+  partId: string,
+  field: "text" | "reasoning" | "input" | "output"
+) {
+  const page = renderProgressiveContent(value, format, 0, limit);
+  if (page.nextOffset == null || !partId) {
+    return page.html;
+  }
+  return `<div class="progressive">
+${page.html}
+<button type="button" class="progressive-more" data-part-id="${escapeHtml(partId)}" data-field="${field}" data-next-offset="${page.nextOffset}" data-load-error="${escapeHtml(t("progressive.load_failed"))}" aria-label="${escapeHtml(label)}">${escapeHtml(label)}</button>
+</div>`;
+}
+
+/** Structured tool output stays raw JSON/code; string output renders as
+ * Markdown when it actually contains Markdown constructs. */
+function looksLikeMarkdown(text: string): boolean {
+  return /\n\s*\n/.test(text)
+    || /^#{1,6}\s/m.test(text)
+    || /^\s{0,3}([-+*]|\d{1,9}[.)])\s/m.test(text)
+    || /^\s{0,3}>\s?/m.test(text)
+    || /^```/m.test(text)
+    || /^\s*\|.*\|\s*$/m.test(text)
+    || /\*\*|~~|!\[|\[[^\]]+\]\([^)]+\)/.test(text);
 }
 
 function toolDescription(tool: any, input: any) {
@@ -367,8 +443,18 @@ export function messageHeader(role: any, meta: any = {}) {
 export function messageBubble(role: any, content: any, meta: any = {}) {
   const safeRole = escapeHtml(role || "unknown");
   const reasoning = meta.reasoning ? `<div class="message-reasoning">${meta.reasoning}</div>` : "";
-  const body = role === "assistant"
-    ? `<div class="message-body markdown">${renderMarkdown(content || "")}</div>`
+  // Human-authored message roles (user/agent) and assistant text render
+  // through the same safe Markdown pipeline; machine roles stay plain.
+  const humanRole = ["user", "agent", "assistant"].includes(String(role || "").toLowerCase());
+  const body = humanRole
+    ? `<div class="message-body markdown">${progressiveContainer(
+      content || "",
+      "markdown",
+      MESSAGE_CHUNK_LIMIT,
+      t("progressive.show_more"),
+      meta.partId || "",
+      "text"
+    )}</div>`
     : `<pre class="message-body plain">${escapeHtml(content || "")}</pre>`;
 
   return `<section class="message message-${safeRole}">
@@ -379,7 +465,14 @@ export function messageBubble(role: any, content: any, meta: any = {}) {
 }
 
 export function reasoningBlock(content: any, duration = "", partId = "") {
-  const text = truncate(content, 6000);
+  const body = progressiveContainer(
+    content,
+    "markdown",
+    REASONING_CHUNK_LIMIT,
+    t("progressive.show_more"),
+    partId,
+    "reasoning"
+  );
   const safeDuration = duration ? `<span class="reasoning-duration">${escapeHtml(duration)}</span>` : "";
 
   return `<details class="reasoning-block" ${partId ? `id="part-${escapeHtml(partId)}" data-part-id="${escapeHtml(partId)}"` : ""}>
@@ -387,13 +480,27 @@ export function reasoningBlock(content: any, duration = "", partId = "") {
       <span class="reasoning-title">Reasoning</span>
       ${safeDuration}
     </summary>
-    <div class="reasoning-body markdown">${renderMarkdown(text || "")}</div>
+    <div class="reasoning-body markdown">${body}</div>
   </details>`;
 }
 
 export function toolCallBlock(tool: any, input: any, output: any, status: any, duration: any, partId: any) {
-  const inputText = truncate(input);
-  const outputText = truncate(output);
+  const inputMarkup = progressiveContainer(
+    input,
+    "plain",
+    TOOL_CHUNK_LIMIT,
+    t("progressive.show_more"),
+    partId,
+    "input"
+  );
+  const outputMarkup = progressiveContainer(
+    output,
+    "auto",
+    TOOL_CHUNK_LIMIT,
+    t("progressive.show_more"),
+    partId,
+    "output"
+  );
   const safeStatus = escapeHtml(status || "unknown");
   const safeDuration = duration ? `<span class="tool-duration">${escapeHtml(duration)}</span>` : "";
   const summary = escapeHtml(toolDescription(tool || "tool", input));
@@ -407,11 +514,11 @@ export function toolCallBlock(tool: any, input: any, output: any, status: any, d
     <div class="tool-panels">
       <section>
         <h4>${t("tool.input")}</h4>
-        <pre>${escapeHtml(inputText)}</pre>
+        ${inputMarkup}
       </section>
       <section>
         <h4>${t("tool.output")}</h4>
-        <pre>${escapeHtml(outputText)}</pre>
+        ${outputMarkup}
       </section>
     </div>
   </details>`;

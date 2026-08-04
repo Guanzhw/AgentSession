@@ -778,6 +778,50 @@ document.addEventListener("click", async (e) => {
   }
 });
 
+// Progressive expansion: fetch one bounded, server-rendered continuation
+// chunk at a time. The initial page never carries the hidden remainder.
+document.addEventListener("click", async (e) => {
+  const button = e.target.closest(".progressive-more");
+  if (!button) return;
+  e.preventDefault();
+  const container = button.closest(".progressive");
+  const workbench = button.closest(".session-workbench");
+  if (!container || !workbench || button.disabled) return;
+  const provider = workbench.dataset.provider;
+  const sessionId = workbench.dataset.sessionId;
+  const partId = button.dataset.partId;
+  const field = button.dataset.field;
+  const offset = button.dataset.nextOffset;
+  if (!provider || !sessionId || !partId || !field || offset == null) return;
+
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  try {
+    const query = new URLSearchParams({ part: partId, field, offset });
+    const response = await fetch(`/api/${encodeURIComponent(provider)}/session/${encodeURIComponent(sessionId)}/content?${query}`);
+    const data = await response.json();
+    if (!response.ok || !data?.ok || typeof data.html !== "string") {
+      throw new Error(data?.error || `HTTP ${response.status}`);
+    }
+    const chunk = document.createElement("div");
+    chunk.className = "progressive-chunk";
+    chunk.innerHTML = data.html;
+    container.insertBefore(chunk, button);
+    if (data.nextOffset == null) {
+      button.remove();
+    } else {
+      button.dataset.nextOffset = String(data.nextOffset);
+      button.disabled = false;
+      button.removeAttribute("aria-busy");
+    }
+  } catch (error) {
+    console.error("Unable to load progressive content:", error);
+    button.disabled = false;
+    button.removeAttribute("aria-busy");
+    showToast(button.dataset.loadError || "Unable to load more content", "error");
+  }
+});
+
 document.addEventListener("click", (e) => {
   const trigger = e.target.closest(".card-menu-trigger");
   if (trigger) {

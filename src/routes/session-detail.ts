@@ -29,6 +29,7 @@ import {
 import { getResumeCommand } from "../resume.js";
 import { getSessionAnalysisAction, listSessionAnalysisRuns } from "../analysis.js";
 import { renderSessionPage, renderCanonicalFlowPanelContent } from "../views/session.js";
+import { renderProgressiveContent } from "../views/components.js";
 import { providerRenderContext } from "./provider-context.js";
 import { parseSessionNavigationContext } from "../navigation-context.js";
 
@@ -41,6 +42,24 @@ export function registerSessionDetail(
   }
 ) {
   const { appConfig, providerMap, providerInfo } = deps;
+
+  const findPart = (container: any, partId: string): any => {
+    if (!container || typeof container !== "object") return null;
+    for (const message of container.messages || []) {
+      for (const part of message.parts || []) {
+        if (String(part.id) === partId) return part;
+        for (const child of part.childSessions || []) {
+          const match = findPart(child, partId);
+          if (match) return match;
+        }
+      }
+    }
+    for (const child of container.detachedChildren || []) {
+      const match = findPart(child, partId);
+      if (match) return match;
+    }
+    return null;
+  };
 
   // Session detail page (HTML)
   app.get("/:provider/session/:id", async (req: any, res: any, params: any) => {
@@ -220,6 +239,72 @@ export function registerSessionDetail(
         flow: adapter.getSessionFlow?.(sessionId) || null,
         messages: adapter.getMessages(sessionId)
       });
+    } catch (err: any) {
+      console.error(`Route error: ${err.message}`);
+      return json(res, { error: "Internal server error" }, 500);
+    }
+  });
+
+  // API: one bounded continuation chunk for reasoning or tool content.
+  // The initial HTML never embeds the remainder, keeping long sessions
+  // bounded while the user can still retrieve the complete source value.
+  app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/content$/, async (req: any, res: any, match: RegExpMatchArray) => {
+    const providerId = match[1];
+    const sessionId = safeDecodeId(match[2]);
+    const adapter = providerMap.get(providerId);
+    if (!adapter) {
+      const missing = missingProviderResponse(providerId);
+      return json(res, missing.body, missing.status);
+    }
+    if (!sessionId) {
+      return json(res, { ok: false, error: "Invalid session id" }, 404);
+    }
+
+    const params = new URL(req.url || "/", `http://localhost:${appConfig.port}`).searchParams;
+    const partId = params.get("part") || "";
+    const field = params.get("field");
+    const offset = Number(params.get("offset") || 0);
+    if (!partId || !["text", "reasoning", "input", "output"].includes(String(field)) || !Number.isSafeInteger(offset) || offset < 0) {
+      return json(res, { ok: false, error: "Invalid content request" }, 400);
+    }
+
+    try {
+      let part = findPart(adapter.getSessionContainer?.(sessionId), partId);
+      if (!part) {
+        const raw = buildPartsFromProviderMessages(adapter.getMessages(sessionId));
+        part = [...raw.partsByMessage.values()].flat().find((candidate: any) => String(candidate.id) === partId) || null;
+      }
+      const data = part?.data && typeof part.data === "object" ? part.data : null;
+      if (!data) {
+        return json(res, { ok: false, error: "Content not found" }, 404);
+      }
+
+      let value: any;
+      let format: "markdown" | "plain" | "auto";
+      let limit: number;
+      if (field === "text" && data.type === "text") {
+        value = data.text || "";
+        format = "markdown";
+        limit = 12000;
+      } else if (field === "reasoning" && data.type === "reasoning") {
+        value = data.text || "";
+        format = "markdown";
+        limit = 6000;
+      } else if (field === "input" && data.type === "tool") {
+        value = data.state?.input;
+        format = "plain";
+        limit = 3000;
+      } else if (field === "output" && data.type === "tool") {
+        value = data.state?.status === "error"
+          ? (data.state?.error ?? data.state?.output)
+          : data.state?.output;
+        format = "auto";
+        limit = 3000;
+      } else {
+        return json(res, { ok: false, error: "Content not found" }, 404);
+      }
+      const page = renderProgressiveContent(value, format, offset, limit);
+      return json(res, { ok: true, ...page });
     } catch (err: any) {
       console.error(`Route error: ${err.message}`);
       return json(res, { error: "Internal server error" }, 500);

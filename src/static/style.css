@@ -2115,6 +2115,75 @@ mark.session-search-highlight {
   word-break: break-word;
 }
 
+/* Shared Markdown block styles (message bodies, reasoning, tool output) */
+.markdown hr {
+  border: 0;
+  border-top: 1px solid var(--border-color);
+  margin: 24px 0;
+}
+
+.markdown table {
+  border-collapse: collapse;
+  margin: 16px 0;
+  max-width: 100%;
+  display: block;
+  overflow-x: auto;
+}
+
+.markdown th,
+.markdown td {
+  border: 1px solid var(--border-color);
+  padding: 6px 12px;
+  vertical-align: top;
+}
+
+.markdown th {
+  background: var(--bg-secondary);
+  font-weight: 600;
+  text-align: left;
+}
+
+.markdown .task-list-item {
+  list-style: none;
+}
+
+.markdown .task-list-item input[type="checkbox"] {
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+.markdown del {
+  color: var(--text-muted);
+}
+
+/* Progressive server-backed expansion of long reasoning/tool content */
+.progressive-more {
+  display: inline-block;
+  margin: 10px 0 2px;
+  padding: 5px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--accent-color);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.progressive-more:hover {
+  background: var(--bg-tertiary);
+}
+
+.progressive-more:disabled {
+  cursor: progress;
+  opacity: 0.65;
+}
+
+.progressive-more:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 1px;
+}
+
 .reasoning-block {
   background: color-mix(in srgb, var(--trace-reasoning) 5%, var(--bg-primary));
   border: 1px solid color-mix(in srgb, var(--trace-reasoning) 28%, var(--border-color));
@@ -2253,6 +2322,19 @@ code {
   font-size: 12px;
   margin: 0;
   border: none;
+}
+
+.tool-output-body.markdown {
+  margin: 0;
+  font-size: 13px;
+}
+
+.tool-output-body.markdown > :first-child {
+  margin-top: 0;
+}
+
+.tool-output-body.markdown > :last-child {
+  margin-bottom: 0;
 }
 
 .tool-status-error {

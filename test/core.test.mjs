@@ -57,6 +57,7 @@ import {
 import {
   extractMeta as extractCodexMeta,
   recordsToMessages as codexRecordsToMessages,
+  classifyCodexRecordProvenance,
   codexOwnedTokenUsageRecords,
   resolveCodexInheritedContext
 } from "../dist/src/providers/codex/parser.js";
@@ -1171,6 +1172,42 @@ test("Codex keeps source-owned token requests when legacy events lack response i
   assert.equal(views.tree.messages.find((message) => message.data.tokens?.total === 120)?.data.tokenRequestCount, 2);
   assert.equal(views.metrics.totals.totalTokens, 120);
   assert.equal(views.flow.summary.totalTokens, 120);
+});
+
+test("Codex recognizes NEW_TASK envelopes stored in payload.message", () => {
+  const inherited = {
+    timestamp: "2026-07-20T00:00:01.000Z",
+    type: "event_msg",
+    payload: { type: "user_message", message: "Inherited parent prompt" }
+  };
+  const envelope = {
+    timestamp: "2026-07-20T00:00:02.000Z",
+    type: "response_item",
+    payload: {
+      type: "agent_message",
+      message: "Message Type: NEW_TASK\nTask name: /root/worker\nPayload:\nwork"
+    }
+  };
+  const childOwned = {
+    timestamp: "2026-07-20T00:00:03.000Z",
+    type: "event_msg",
+    payload: { type: "agent_message", message: "Child result" }
+  };
+  const records = [
+    {
+      timestamp: "2026-07-20T00:00:00.000Z",
+      type: "session_meta",
+      payload: { id: "child", parent_thread_id: "parent", agent_path: "/root/worker" }
+    },
+    inherited,
+    envelope,
+    childOwned
+  ];
+
+  const provenance = classifyCodexRecordProvenance(records);
+  assert.equal(provenance.get(inherited), "inherited-parent-context");
+  assert.equal(provenance.get(envelope), "session");
+  assert.equal(provenance.get(childOwned), "session");
 });
 
 test("Codex excludes an exact parent token prefix when an older fork omits NEW_TASK", () => {

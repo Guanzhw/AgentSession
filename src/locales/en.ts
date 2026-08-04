@@ -466,8 +466,9 @@ export const en = {
   "time.hours_ago": "{n}h ago",
   "time.days_ago": "{n}d ago",
 
-  // Truncation
-  "truncated": "…truncated",
+  // Progressive expansion
+  "progressive.show_more": "Show more",
+  "progressive.load_failed": "Unable to load more content",
 
   // JS prompts/confirms
   "js.rename_prompt": "Enter new title:",
