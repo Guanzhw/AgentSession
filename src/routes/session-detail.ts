@@ -29,6 +29,7 @@ import {
 import { getResumeCommand } from "../resume.js";
 import { getSessionAnalysisAction, listSessionAnalysisRuns } from "../analysis.js";
 import { renderSessionPage, renderCanonicalFlowPanelContent } from "../views/session.js";
+import { flowTreeHasExecutionTopology } from "../providers/shared/flow-tree.js";
 import { renderProgressiveContent } from "../views/components.js";
 import { providerRenderContext } from "./provider-context.js";
 import { parseSessionNavigationContext } from "../navigation-context.js";
@@ -475,15 +476,15 @@ export function registerSessionDetail(
     }
 
     if (!supportsAgentLoopViews(adapter)) {
-      return send(res, 200, renderCanonicalFlowPanelContent(null));
+      return send(res, 200, renderCanonicalFlowPanelContent(null, providerId));
     }
 
     try {
       const flow = adapter.getSessionFlow?.(sessionId);
-      if (!flow) {
-        return send(res, 200, renderCanonicalFlowPanelContent(null));
+      if (!flow || !flowTreeHasExecutionTopology(flow)) {
+        return send(res, 200, renderCanonicalFlowPanelContent(null, providerId));
       }
-      return send(res, 200, renderCanonicalFlowPanelContent(flow));
+      return send(res, 200, renderCanonicalFlowPanelContent(flow, providerId));
     } catch (err: any) {
       console.error(`Route error: ${err.message}`);
       return json(res, { error: "Internal server error" }, 500);

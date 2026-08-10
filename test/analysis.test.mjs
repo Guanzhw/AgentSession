@@ -1267,9 +1267,26 @@ test("session detail uses progressive, accessible tabs without duplicating analy
 
   assert.match(html, /class="tab-bar" role="tablist"/);
   assert.ok(html.indexOf("tab-btn-overview") < html.indexOf("tab-btn-conversation"));
-  assert.ok(html.indexOf("tab-btn-conversation") < html.indexOf("tab-btn-flow"));
-  assert.ok(html.indexOf("tab-btn-flow") < html.indexOf("tab-btn-analysis"));
+  assert.ok(html.indexOf("tab-btn-conversation") < html.indexOf("tab-btn-analysis"));
   assert.ok(html.indexOf("tab-btn-analysis") < html.indexOf("tab-btn-raw"));
+  // Linear sessions (no child sessions) do not get an Execution tab.
+  assert.doesNotMatch(html, /id="tab-btn-flow"/);
+  const orchestratedHtml = renderSessionPage({
+    session: { id: "tabbed", title: "Tabbed session", time_created: 1000, time_updated: 2000 },
+    sessionTree: {
+      session: { id: "tabbed", title: "Tabbed session" },
+      detachedChildren: [{
+        session: { id: "fork", title: "Fork" },
+        messages: [],
+        detachedChildren: [],
+        metrics: { messageCount: 0 }
+      }],
+      metrics: { descendantCount: 1 },
+      messages: []
+    }
+  });
+  assert.match(orchestratedHtml, /id="tab-btn-flow"/);
+  assert.match(orchestratedHtml, />Execution</);
   assert.match(html, /id="tab-btn-conversation" tabindex="0"/);
   assert.match(html, /id="tab-conversation" aria-labelledby="tab-btn-conversation"/);
   assert.doesNotMatch(html, /id="tab-overview"[^>]* hidden/);

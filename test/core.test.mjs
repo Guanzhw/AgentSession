@@ -30,7 +30,7 @@ import { buildCodexRuntimeEnvironment } from "../dist/src/providers/codex/runtim
 import { codexDailyTokenComponents } from "../dist/src/providers/codex/adapter.js";
 import { buildGeminiRuntimeEnvironment } from "../dist/src/providers/gemini/runtime-environment.js";
 import { buildPiRuntimeEnvironment } from "../dist/src/providers/pi/runtime-environment.js";
-import { buildFlowTreeFromContainer } from "../dist/src/providers/shared/flow-tree.js";
+import { buildFlowTreeFromContainer, flowTreeHasExecutionTopology, sessionTreeHasExecutionTopology } from "../dist/src/providers/shared/flow-tree.js";
 import { renderCanonicalFlowPanelContent, renderSessionPage } from "../dist/src/views/session.js";
 import { renderSettingsPage } from "../dist/src/views/settings.js";
 import { renderStatsDeferredSection, renderStatsPage } from "../dist/src/views/stats.js";
@@ -4447,37 +4447,152 @@ test("detached child sessions visibly identify inferred source relationships", (
   assert.match(html, /Linked session/);
   assert.match(html, /Inferred relationship/);
   assert.match(html, /Pi fork/);
+  // Detached children are orchestration topology, so the Execution tab exists.
+  assert.match(html, /id="tab-btn-flow"/);
+  assert.match(html, />Execution</);
+  assert.doesNotMatch(html, /flow-open-btn/);
 });
 
-test("session page can defer flow markup until the panel is opened", () => {
+test("session page can defer execution markup until the panel is opened", () => {
+  const child = flowSession("child-1", [
+    flowMessage("cu1", "user", 1150),
+    flowMessage("ca1", "assistant", 1200)
+  ], {
+    depth: 1,
+    attachMode: "task",
+    metrics: { timeStart: 1150, timeEnd: 1200, runtimeMs: 50 }
+  });
+  const task = flowTool("task-1", {
+    tool: "task",
+    messageId: "a1",
+    timeStart: 1100,
+    timeEnd: 1300,
+    childSessions: [child]
+  });
   const container = flowSession("root", [
     flowMessage("u1", "user", 1000),
-    flowMessage("a1", "assistant", 1100)
-  ]);
+    flowMessage("a1", "assistant", 1080, [task])
+  ], {
+    metrics: {
+      partCount: 1,
+      toolCallCount: 1,
+      totalToolCalls: 1,
+      descendantCount: 1,
+      timeStart: 1000,
+      timeEnd: 1300,
+      runtimeMs: 300
+    }
+  });
   const flow = buildFlowTreeFromContainer(container);
   const sessionTree = {
-    session: { id: "root", title: "Lazy flow" },
+    session: { id: "root", title: "Lazy execution" },
     detachedChildren: [],
-    metrics: flowMetrics(),
-    messages: container.messages
+    metrics: flowMetrics({ descendantCount: 1 }),
+    messages: [flowMessage("u1", "user", 1000)]
   };
 
   const html = renderSessionPage({
-    session: { id: "root", title: "Lazy flow", time_created: 1000 },
+    session: { id: "root", title: "Lazy execution", time_created: 1000 },
     sessionTree,
     provider: "opencode",
     flowLazyUrl: "/api/opencode/session/root/flow-panel"
   });
-  const flowFragment = renderCanonicalFlowPanelContent(flow);
+  const flowFragment = renderCanonicalFlowPanelContent(flow, "opencode");
 
+  assert.match(html, /id="tab-btn-flow"/);
+  assert.match(html, />Execution</);
   assert.match(html, /data-flow-lazy-url="\/api\/opencode\/session\/root\/flow-panel"/);
-  assert.match(html, /Flow loads when opened/);
+  assert.match(html, /Execution loads when opened/);
   assert.doesNotMatch(html, /flow-map-root-session/);
   assert.match(flowFragment, /flow-map-root-session/);
-  assert.match(flowFragment, /flow-map-node-user/);
-  assert.match(flowFragment, /data-flow-preview-target="#msg-u1"/);
-  assert.match(flowFragment, /data-flow-inspector/);
-  assert.match(flowFragment, /data-flow-inspector-body/);
+  // Execution renders only orchestration topology: no conversation nodes, no
+  // inspector; each branch summary links straight to its source session.
+  assert.doesNotMatch(flowFragment, /flow-map-node-user/);
+  assert.doesNotMatch(flowFragment, /flow-map-node-agent/);
+  assert.doesNotMatch(flowFragment, /flow-map-overview-user/);
+  assert.doesNotMatch(flowFragment, /flow-map-overview-agent/);
+  assert.doesNotMatch(flowFragment, /data-flow-preview-target/);
+  assert.doesNotMatch(flowFragment, /data-flow-inspector/);
+  assert.match(flowFragment, /flow-map-fork-collapsed/);
+  assert.match(flowFragment, /flow-branch-summary/);
+  assert.match(flowFragment, /href="\/opencode\/session\/child-1"/);
+  assert.doesNotMatch(flowFragment, /data-flow-open-conversation/);
+  assert.match(flowFragment, /Open in conversation/);
+});
+
+test("linear sessions omit the execution tab and lazy flow markup", () => {
+  const sessionTree = {
+    session: { id: "root", title: "Linear" },
+    detachedChildren: [],
+    metrics: flowMetrics(),
+    messages: [flowMessage("u1", "user", 1000)]
+  };
+  const html = renderSessionPage({
+    session: { id: "root", title: "Linear", time_created: 1000 },
+    sessionTree,
+    provider: "opencode",
+    flowLazyUrl: "/api/opencode/session/root/flow-panel"
+  });
+
+  assert.doesNotMatch(html, /id="tab-btn-flow"/);
+  assert.doesNotMatch(html, /data-flow-lazy-url/);
+  assert.doesNotMatch(html, /session-flow-panel/);
+  assert.doesNotMatch(html, /flow-open-btn/);
+});
+
+test("execution topology predicates cover session trees and built flows", () => {
+  const linearTree = {
+    session: { id: "root", title: "Linear" },
+    detachedChildren: [],
+    metrics: flowMetrics(),
+    messages: [flowMessage("u1", "user", 1000)]
+  };
+  assert.equal(sessionTreeHasExecutionTopology(linearTree), false);
+  assert.equal(sessionTreeHasExecutionTopology(null), false);
+
+  const detachedTree = {
+    ...linearTree,
+    detachedChildren: [{ id: "fork", session: { id: "fork" } }]
+  };
+  assert.equal(sessionTreeHasExecutionTopology(detachedTree), true);
+
+  const metricsTree = {
+    ...linearTree,
+    detachedChildren: [],
+    metrics: flowMetrics({ descendantCount: 2 })
+  };
+  assert.equal(sessionTreeHasExecutionTopology(metricsTree), true);
+
+  const attachedTree = {
+    ...linearTree,
+    metrics: flowMetrics(),
+    messages: [{
+      ...flowMessage("a1", "assistant", 1080),
+      parts: [{ id: "task", childSessions: [{ id: "child" }] }]
+    }]
+  };
+  assert.equal(sessionTreeHasExecutionTopology(attachedTree), true);
+
+  const linearFlow = buildFlowTreeFromContainer(flowSession("root", [
+    flowMessage("u1", "user", 1000),
+    flowMessage("a1", "assistant", 1100)
+  ]));
+  assert.equal(flowTreeHasExecutionTopology(linearFlow), false);
+  assert.equal(flowTreeHasExecutionTopology(null), false);
+
+  const forkFlow = buildFlowTreeFromContainer(flowSession("root", [
+    flowMessage("u1", "user", 1000),
+    flowMessage("a1", "assistant", 1080, [flowTool("task-1", {
+      tool: "task",
+      childSessions: [flowSession("child", [
+        flowMessage("cu1", "user", 1150),
+        flowMessage("ca1", "assistant", 1200)
+      ], { depth: 1, attachMode: "task", metrics: { timeStart: 1150, timeEnd: 1200, runtimeMs: 50 } })]
+    })])
+  ], {
+    metrics: { partCount: 1, toolCallCount: 1, totalToolCalls: 1, descendantCount: 1, timeStart: 1000, timeEnd: 1300, runtimeMs: 300 }
+  }));
+  assert.equal(flowTreeHasExecutionTopology(forkFlow), true);
 });
 
 test("conversation flow inserts detached sessions as inferred branches", () => {

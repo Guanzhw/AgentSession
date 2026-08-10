@@ -271,7 +271,7 @@ ab "open session detail" open "$BASE/opencode/session/$SAMPLE_SESSION_ID" >/dev/
 ab "wait for reasoning" wait ".reasoning-block" >/dev/null
 detail="$(read_ab "read session detail" get text body)"
 assert_not_contains "detail" "$detail" "System Prompts"
-assert_contains "detail" "$detail" "Flow"
+assert_contains "detail" "$detail" "Execution"
 detail_session_workbench_id="$(read_ab "read detail session id" get attr ".session-workbench" data-session-id)"
 if [[ "$detail_session_workbench_id" != "$SAMPLE_SESSION_ID" && "$detail_session_workbench_id" != "\"$SAMPLE_SESSION_ID\"" ]]; then
   echo "Detail session workbench ID did not include $SAMPLE_SESSION_ID" >&2
@@ -416,7 +416,10 @@ if [[ "$top_level_tool_count" != "0" ]]; then
 fi
 
 flow_button_count="$(read_ab "count flow buttons" get count ".flow-open-btn")"
-assert_positive_count "flow buttons" "$flow_button_count"
+if [[ "$flow_button_count" != "0" ]]; then
+  echo "Per-user-message Flow buttons should be removed, got $flow_button_count" >&2
+  exit 1
+fi
 
 subagent_export_count="$(read_ab "count subagent export buttons" get count ".subagent-export-btn")"
 assert_positive_count "subagent export buttons" "$subagent_export_count"
@@ -442,203 +445,98 @@ if [[ "$subagent_branch_word_count" != "0" ]]; then
   exit 1
 fi
 
-flow_panel_hidden="$(read_ab "count hidden flow panel" get count "#session-flow-panel.hidden")"
+flow_panel_hidden="$(read_ab "count hidden execution panel" get count "#session-flow-panel.hidden")"
 if [[ "$flow_panel_hidden" != "1" ]]; then
-  echo "Flow panel should start hidden, got count $flow_panel_hidden" >&2
+  echo "Execution panel should start hidden, got count $flow_panel_hidden" >&2
   exit 1
 fi
 
-flow_open_state="$(read_ab "open lazy flow panel" eval "(() => { const btn = document.querySelector('.flow-open-btn'); if (!btn) return 'missing'; btn.click(); return btn.getAttribute('aria-expanded') || ''; })()")"
-if [[ "$flow_open_state" != "true" && "$flow_open_state" != '"true"' ]]; then
-  echo "Flow button should open the panel, got state $flow_open_state" >&2
+flow_tab_click="$(read_ab "open execution tab" eval "(() => { const tab = document.getElementById('tab-btn-flow'); if (!tab) return 'missing'; tab.click(); return 'clicked'; })()")"
+if [[ "$flow_tab_click" != "clicked" && "$flow_tab_click" != '"clicked"' ]]; then
+  echo "Execution tab should open the panel, got $flow_tab_click" >&2
   exit 1
 fi
 
-flow_tab_selected="$(read_ab "verify flow button selects Flow tab" get attr "#tab-btn-flow" aria-selected)"
+flow_tab_selected="$(read_ab "verify execution tab selection" get attr "#tab-btn-flow" aria-selected)"
 if [[ "$flow_tab_selected" != "true" && "$flow_tab_selected" != '"true"' ]]; then
-  echo "Flow button should reveal the Flow tab, got state $flow_tab_selected" >&2
+  echo "Execution tab should be selected after opening the panel, got state $flow_tab_selected" >&2
   exit 1
 fi
 
-flow_scroll_state="$(read_ab "verify flow button leaves document scrolling enabled" eval "JSON.stringify({ bodyLocked: document.body.classList.contains('flow-panel-open'), tabOverflowY: getComputedStyle(document.querySelector('.tab-bar')).overflowY })")"
+flow_scroll_state="$(read_ab "verify execution tab leaves document scrolling enabled" eval "JSON.stringify({ bodyLocked: document.body.classList.contains('flow-panel-open'), tabOverflowY: getComputedStyle(document.querySelector('.tab-bar')).overflowY })")"
 if ! printf '%s' "$flow_scroll_state" | grep -Eq 'bodyLocked[^a-z]*false' || ! printf '%s' "$flow_scroll_state" | grep -Eq 'tabOverflowY[^a-z]*hidden'; then
-  echo "Flow should not lock document scrolling or create a vertical tab-bar scrollbar, got $flow_scroll_state" >&2
+  echo "Execution should not lock document scrolling or create a vertical tab-bar scrollbar, got $flow_scroll_state" >&2
   exit 1
 fi
 
 flow_loaded="0"
 for _ in $(seq 1 40); do
-  flow_loaded="$(read_ab "wait for flow root line" get count "#session-flow-panel .flow-map-root-session > .flow-map-line")"
+  flow_loaded="$(read_ab "wait for execution root line" get count "#session-flow-panel .flow-map-root-session > .flow-map-line")"
   if [[ "$flow_loaded" != "0" ]]; then
     break
   fi
   sleep 0.25
 done
-flow_state="$(read_ab "read flow lazy state" get attr "#session-flow-panel" data-flow-state)"
+flow_state="$(read_ab "read execution lazy state" get attr "#session-flow-panel" data-flow-state)"
 if [[ "$flow_loaded" == "0" && "$flow_state" == "error" ]]; then
-  echo "Flow panel failed to lazy-load" >&2
+  echo "Execution panel failed to lazy-load" >&2
   exit 1
 fi
 
-flow_user_count="$(read_ab "count flow user nodes" get count "#session-flow-panel .flow-map-node-user")"
-assert_positive_count "flow user nodes" "$flow_user_count"
-
-flow_agent_count="$(read_ab "count flow agent nodes" get count "#session-flow-panel .flow-map-node-agent")"
-assert_positive_count "flow agent nodes" "$flow_agent_count"
-
-flow_agent_label_count="$(read_ab "count labeled flow agent nodes" get count "#session-flow-panel .flow-map-agent-label")"
-if [[ "$flow_agent_label_count" != "$flow_agent_count" ]]; then
-  echo "Every flow agent node should have a meaningful label, got agents $flow_agent_count labels $flow_agent_label_count" >&2
+flow_user_count="$(read_ab "count execution user nodes" get count "#session-flow-panel .flow-map-node-user")"
+if [[ "$flow_user_count" != "0" ]]; then
+  echo "Execution view should not render conversation user nodes, got $flow_user_count" >&2
   exit 1
 fi
 
-flow_agent_mark_count="$(read_ab "count legacy A agent marks" get count "#session-flow-panel .flow-map-agent-mark")"
-if [[ "$flow_agent_mark_count" != "0" ]]; then
-  echo "Flow still included meaningless A agent marks: $flow_agent_mark_count" >&2
+flow_agent_count="$(read_ab "count execution agent nodes" get count "#session-flow-panel .flow-map-node-agent")"
+if [[ "$flow_agent_count" != "0" ]]; then
+  echo "Execution view should not render conversation agent nodes, got $flow_agent_count" >&2
   exit 1
 fi
 
-flow_invocation_group_count="$(read_ab "count flow invocation groups" get count "#session-flow-panel .flow-map-fork-collapsed")"
-assert_positive_count "flow invocation groups" "$flow_invocation_group_count"
+flow_invocation_group_count="$(read_ab "count execution invocation groups" get count "#session-flow-panel .flow-map-fork-collapsed")"
+assert_positive_count "execution invocation groups" "$flow_invocation_group_count"
 
-flow_return_count="$(read_ab "count flow return nodes" get count "#session-flow-panel .flow-map-node-return")"
+flow_return_count="$(read_ab "count execution return nodes" get count "#session-flow-panel .flow-map-node-return")"
 if [[ "$flow_return_count" != "$flow_invocation_group_count" ]]; then
-  echo "Each compact invocation group should have one return node, got groups $flow_invocation_group_count returns $flow_return_count" >&2
+  echo "Each invocation group should have one return node, got groups $flow_invocation_group_count returns $flow_return_count" >&2
   exit 1
 fi
 
-flow_branch_summary_count="$(read_ab "count flow branch summaries" get count "#session-flow-panel .flow-branch-summary[data-flow-branch-open]")"
-assert_positive_count "flow branch summaries" "$flow_branch_summary_count"
+flow_branch_summary_count="$(read_ab "count execution branch summaries" get count "#session-flow-panel .flow-branch-summary[href]")"
+assert_positive_count "execution branch summaries" "$flow_branch_summary_count"
 
-flow_branch_template_count="$(read_ab "count flow branch templates" get count "#session-flow-panel template[data-flow-branch-template]")"
-if [[ "$flow_branch_template_count" != "$flow_branch_summary_count" ]]; then
-  echo "Each branch summary should have one detail template, got summaries $flow_branch_summary_count templates $flow_branch_template_count" >&2
+flow_branch_conversation_count="$(read_ab "count branch conversation links" get count "#session-flow-panel .flow-branch-summary[href^='/opencode/session/']")"
+if [[ "$flow_branch_conversation_count" != "$flow_branch_summary_count" ]]; then
+  echo "Each branch summary should link to its child conversation, got summaries $flow_branch_summary_count links $flow_branch_conversation_count" >&2
   exit 1
 fi
 
-flow_expanded_branch_count="$(read_ab "count expanded flow branches in backbone" get count "#session-flow-panel .flow-map-root-session > .flow-map-line .flow-map-branches")"
-if [[ "$flow_expanded_branch_count" != "0" ]]; then
-  echo "Subagent detail should not expand inside the backbone, got $flow_expanded_branch_count expanded branches" >&2
+flow_branch_template_count="$(read_ab "count execution branch templates" get count "#session-flow-panel template[data-flow-branch-template]")"
+if [[ "$flow_branch_template_count" != "0" ]]; then
+  echo "Execution should not carry branch detail templates, got $flow_branch_template_count" >&2
   exit 1
 fi
 
-flow_preview_node_count="$(read_ab "count flow message preview nodes" get count "#session-flow-panel [data-flow-preview-target]")"
-assert_positive_count "flow message preview nodes" "$flow_preview_node_count"
-
-flow_inspector_count="$(read_ab "count flow inspectors" get count "#session-flow-panel [data-flow-inspector]")"
-if [[ "$flow_inspector_count" != "1" ]]; then
-  echo "Flow should include one reusable side inspector, got $flow_inspector_count" >&2
+flow_inspector_count="$(read_ab "count execution inspectors" get count "#session-flow-panel [data-flow-inspector]")"
+if [[ "$flow_inspector_count" != "0" ]]; then
+  echo "Execution should not require a side inspector, got $flow_inspector_count" >&2
   exit 1
 fi
 
-flow_preview_triggered="$(read_ab "trigger flow message preview" eval "(() => { const nodes = [...document.querySelectorAll('#session-flow-panel [data-flow-preview-target]')]; const node = nodes.at(-1); node?.scrollIntoView({ block: 'center', inline: 'center' }); node?.click(); return node ? 'clicked' : 'missing'; })()")"
-if [[ "$flow_preview_triggered" != "clicked" && "$flow_preview_triggered" != '"clicked"' ]]; then
-  echo "Flow should expose a message node to preview, got $flow_preview_triggered" >&2
-  exit 1
-fi
-sleep 0.2
+flow_stat_count="$(read_ab "count execution summary stats" get count "#session-flow-panel .flow-map-stat")"
+assert_positive_count "execution summary stats" "$flow_stat_count"
 
-flow_preview_open="$(read_ab "verify flow message preview" eval "(() => { const inspector = document.querySelector('#session-flow-panel [data-flow-inspector]'); return inspector && !inspector.classList.contains('hidden') && inspector.querySelector('.flow-message-preview-turn') && inspector.querySelector('[data-flow-open-conversation]') ? 'open' : 'closed'; })()")"
-if [[ "$flow_preview_open" != "open" && "$flow_preview_open" != '"open"' ]]; then
-  echo "Flow message nodes should open a side inspector preview, got $flow_preview_open" >&2
-  exit 1
-fi
-
-flow_inspector_geometry="$(read_ab "verify flow inspector geometry" eval "(() => {
-  if (window.innerWidth <= 820) return { desktop: false };
-  const inspector = document.querySelector('#session-flow-panel [data-flow-inspector]');
-  const panel = document.querySelector('#session-flow-panel');
-  const node = document.querySelector('#session-flow-panel .flow-focused [data-flow-preview-target]');
-  if (!inspector || !panel || inspector.classList.contains('hidden')) return { missing: true };
-  const irect = inspector.getBoundingClientRect();
-  const prect = panel.getBoundingClientRect();
-  const topbarBottom = document.querySelector('.topbar')?.getBoundingClientRect().bottom || 0;
-  const nrect = node ? node.getBoundingClientRect() : null;
-  const body = inspector.querySelector('[data-flow-inspector-body]');
-  const contentFits = !body || body.scrollHeight <= body.clientHeight + 1;
-  const topAligned = nrect ? Math.abs(irect.top - nrect.top) <= 4 : true;
-  const clamped = irect.top <= Math.max(prect.top, topbarBottom) + 17
-    || irect.bottom >= Math.min(prect.bottom, window.innerHeight) - 17;
-  return {
-    desktop: true,
-    topSet: inspector.style.top !== '',
-    maxHeightSet: inspector.style.maxHeight !== '',
-    withinPanel: irect.top >= prect.top - 1 && irect.bottom <= prect.bottom + 1,
-    withinViewport: irect.top >= topbarBottom - 1 && irect.bottom <= window.innerHeight + 1,
-    contentFits,
-    shrinksToContent: !contentFits || irect.height < prect.height - 100,
-    alignedOrClamped: topAligned || clamped,
-    bodyOverflowY: getComputedStyle(document.body).overflowY
-  };
-})()")"
-if ! printf '%s' "$flow_inspector_geometry" | grep -Eq '"desktop"[^a-z]*true'; then
-  echo "Flow inspector geometry requires a desktop viewport, got $flow_inspector_geometry" >&2
-  exit 1
-fi
-if ! printf '%s' "$flow_inspector_geometry" | grep -Eq '"topSet"[^a-z]*true' || ! printf '%s' "$flow_inspector_geometry" | grep -Eq '"maxHeightSet"[^a-z]*true' || ! printf '%s' "$flow_inspector_geometry" | grep -Eq '"withinPanel"[^a-z]*true' || ! printf '%s' "$flow_inspector_geometry" | grep -Eq '"withinViewport"[^a-z]*true' || ! printf '%s' "$flow_inspector_geometry" | grep -Eq '"shrinksToContent"[^a-z]*true' || ! printf '%s' "$flow_inspector_geometry" | grep -Eq '"alignedOrClamped"[^a-z]*true'; then
-  echo "Flow inspector should be node-positioned, capped, and inside the flow panel, got $flow_inspector_geometry" >&2
-  exit 1
-fi
-if printf '%s' "$flow_inspector_geometry" | grep -Eq '"bodyOverflowY"[^a-z]*hidden'; then
-  echo "Flow inspector should not lock document scrolling, got $flow_inspector_geometry" >&2
-  exit 1
-fi
-
-flow_preview_focus="other"
-for _ in $(seq 1 10); do
-  flow_preview_focus="$(read_ab "verify flow preview focus" eval "document.activeElement?.matches('[data-flow-open-conversation]') ? 'action' : 'other'")"
-  if [[ "$flow_preview_focus" == "action" || "$flow_preview_focus" == '"action"' ]]; then
-    break
-  fi
-  sleep 0.1
-done
-if [[ "$flow_preview_focus" != "action" && "$flow_preview_focus" != '"action"' ]]; then
-  echo "Flow message preview should focus its explicit conversation action, got $flow_preview_focus" >&2
-  exit 1
-fi
-
-flow_preview_context="$(read_ab "verify flow remains visible with preview" eval "(() => !document.querySelector('#session-flow-panel')?.classList.contains('hidden') ? 'visible' : 'hidden')()")"
-if [[ "$flow_preview_context" != "visible" && "$flow_preview_context" != '"visible"' ]]; then
-  echo "Opening a flow message preview should keep the flow visible, got $flow_preview_context" >&2
-  exit 1
-fi
-
-flow_preview_navigation_triggered="$(read_ab "open preview source in conversation" eval "(() => { const action = document.querySelector('[data-flow-open-conversation]'); window.__qaFlowPreviewTarget = action?.dataset.flowOpenConversation || ''; action?.click(); return window.__qaFlowPreviewTarget ? 'clicked' : 'missing'; })()")"
-if [[ "$flow_preview_navigation_triggered" != "clicked" && "$flow_preview_navigation_triggered" != '"clicked"' ]]; then
-  echo "Flow message preview should expose an explicit conversation action, got $flow_preview_navigation_triggered" >&2
-  exit 1
-fi
-flow_preview_navigation="not-opened"
-for _ in $(seq 1 10); do
-  flow_preview_navigation="$(read_ab "verify preview source conversation" eval "(() => { const target = window.__qaFlowPreviewTarget; const panelHidden = document.querySelector('#session-flow-panel')?.classList.contains('hidden'); const conversationSelected = document.querySelector('#tab-btn-conversation')?.getAttribute('aria-selected') === 'true'; return target && panelHidden && conversationSelected && location.hash === '#' + target && document.getElementById(target) ? 'opened' : 'not-opened'; })()")"
-  if [[ "$flow_preview_navigation" == "opened" || "$flow_preview_navigation" == '"opened"' ]]; then
-    break
-  fi
-  sleep 0.1
-done
-if [[ "$flow_preview_navigation" != "opened" && "$flow_preview_navigation" != '"opened"' ]]; then
-  echo "Opening a preview source should switch to and anchor the conversation, got $flow_preview_navigation" >&2
-  exit 1
-fi
-
-flow_stat_count="$(read_ab "count flow summary stats" get count "#session-flow-panel .flow-map-stat")"
-assert_positive_count "flow summary stats" "$flow_stat_count"
-
-flow_overview_count="$(read_ab "count flow overview" get count "#session-flow-panel [data-flow-overview]")"
+flow_overview_count="$(read_ab "count execution overview" get count "#session-flow-panel [data-flow-overview]")"
 if [[ "$flow_overview_count" != "1" ]]; then
-  echo "Flow should include one overview navigator, got $flow_overview_count" >&2
+  echo "Execution should include one overview navigator, got $flow_overview_count" >&2
   exit 1
 fi
 
-flow_root_line_count="$(read_ab "count flow root lines" get count "#session-flow-panel .flow-map-root-session > .flow-map-line")"
+flow_root_line_count="$(read_ab "count execution root lines" get count "#session-flow-panel .flow-map-root-session > .flow-map-line")"
 if [[ "$flow_root_line_count" != "1" ]]; then
-  echo "Flow should include one root line for responsive wrapping, got $flow_root_line_count" >&2
-  exit 1
-fi
-
-toc_resize_count="$(read_ab "count toc resize handles" get count ".session-toc .toc-resize-handle")"
-if [[ "$toc_resize_count" != "1" ]]; then
-  echo "Session TOC should include one resize handle, got $toc_resize_count" >&2
+  echo "Execution should include one root line for responsive wrapping, got $flow_root_line_count" >&2
   exit 1
 fi
 
@@ -651,6 +549,26 @@ fi
 flow_step_count="$(read_ab "count legacy flow step rows" get count ".flow-step")"
 if [[ "$flow_step_count" != "0" ]]; then
   echo "Flow still included legacy step rows: $flow_step_count" >&2
+  exit 1
+fi
+
+flow_evidence_href="$(read_ab "read branch conversation link" get attr "#session-flow-panel .flow-branch-summary" href)"
+if ! [[ "$flow_evidence_href" =~ ^/opencode/session/ ]]; then
+  echo "Execution should expose a child conversation link, got $flow_evidence_href" >&2
+  exit 1
+fi
+ab "focus child conversation link" focus "#session-flow-panel .flow-branch-summary" >/dev/null
+ab "open child conversation" press Enter >/dev/null
+ab "wait for child conversation" wait --url "**/opencode/session/*" >/dev/null
+flow_evidence_navigation="$(read_ab "verify child conversation navigation" eval "JSON.stringify({ path: location.pathname, conversation: document.querySelectorAll('.message-turn').length > 0 })")"
+if ! printf '%s' "$flow_evidence_navigation" | grep -Eq 'path[^,]*\/opencode\/session\/' || ! printf '%s' "$flow_evidence_navigation" | grep -Eq 'conversation[^a-z]*true'; then
+  echo "Opening branch evidence should navigate to the child conversation page, got $flow_evidence_navigation" >&2
+  exit 1
+fi
+
+toc_resize_count="$(read_ab "count toc resize handles" get count ".session-toc .toc-resize-handle")"
+if [[ "$toc_resize_count" != "1" ]]; then
+  echo "Session TOC should include one resize handle, got $toc_resize_count" >&2
   exit 1
 fi
 

@@ -1422,6 +1422,7 @@ body::before {
   background: color-mix(in srgb, var(--trace-agent) 7%, var(--bg-primary));
   color: var(--text-secondary);
   text-align: left;
+  text-decoration: none;
   cursor: pointer;
 }
 

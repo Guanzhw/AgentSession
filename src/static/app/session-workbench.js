@@ -630,7 +630,7 @@ if (sessionWorkbench) {
     if (flowLoadPromise) return flowLoadPromise;
 
     flowPanel.dataset.flowState = "loading";
-    setFlowLazyStatus("Loading flow...");
+    setFlowLazyStatus(ft("execution_loading"));
     flowLoadPromise = (async () => {
       const response = await fetch(lazyUrl);
       if (!response.ok) {
@@ -646,7 +646,7 @@ if (sessionWorkbench) {
     })().catch(() => {
       flowLoadPromise = null;
       flowPanel.dataset.flowState = "error";
-      setFlowLazyStatus("Flow could not be loaded.");
+      setFlowLazyStatus(ft("execution_load_failed"));
       showToast(ft("toast_error"), "error");
       return false;
     });

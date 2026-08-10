@@ -426,3 +426,58 @@ export function buildFlowTree(
   }
   return buildFlowTreeFromContainer(container, buildMetrics(sessionId, dbPath));
 }
+
+export interface SessionTreeTopologyInput {
+  metrics?: { descendantCount?: number };
+  detachedChildren?: unknown[];
+  messages?: Array<{ parts?: Array<{ childSessions?: unknown[] }> }>;
+}
+
+export interface FlowTreeTopologyInput {
+  root?: { line?: Array<{ kind?: string }> } | null;
+  summary?: { subagents?: number; sessions?: number };
+}
+
+/**
+ * True when the session tree contains real orchestration topology: attached
+ * child sessions reachable from task parts, or detached child sessions. Works
+ * on the SessionTree shape before any flow lazy-load happens.
+ */
+export function sessionTreeHasExecutionTopology(tree: SessionTreeTopologyInput | null | undefined): boolean {
+  if (!tree) {
+    return false;
+  }
+  if (Number(tree.metrics?.descendantCount) > 0) {
+    return true;
+  }
+  if (Array.isArray(tree.detachedChildren) && tree.detachedChildren.length > 0) {
+    return true;
+  }
+  return Boolean(
+    Array.isArray(tree.messages)
+    && tree.messages.some((message) => (
+      Array.isArray(message?.parts)
+      && message.parts.some((part) => Array.isArray(part?.childSessions) && part.childSessions.length > 0)
+    ))
+  );
+}
+
+/**
+ * True when a built flow tree represents real orchestration topology rather
+ * than an ordinary linear conversation. Works on the eager-render SessionFlow.
+ */
+export function flowTreeHasExecutionTopology(flow: FlowTreeTopologyInput | null | undefined): boolean {
+  if (!flow?.root) {
+    return false;
+  }
+  if (Number(flow.summary?.subagents) > 0) {
+    return true;
+  }
+  if (Number(flow.summary?.sessions) > 1) {
+    return true;
+  }
+  return Boolean(
+    Array.isArray(flow.root.line)
+    && flow.root.line.some((node) => node?.kind === "invocation")
+  );
+}

@@ -98,9 +98,9 @@ compacted-into / scheduled-run-of）、任务（Task）与代理运行（AgentRu
 - **统一会话入口**：`/sessions` 在一个列表中展示所有已检测 Provider，并支持 Provider 多选、项目/时间筛选、排序和跨 Provider 无限滚动。会话始终保留 `(provider, sessionId)` 复合身份，详情页继续使用 Provider 所有的 canonical URL。
 - **会话列表与搜索**：全局入口筛选 Provider 标题、viewer 自定义标题和目录；Provider 页面继续提供消息内容搜索、收藏和本地管理。标题类型筛选可将带有 analysis/analyze 信号的显示标题与其他会话分开；它是可逆的查看器启发式，不是 Provider 元数据。
 - **详情页复盘**：按 Provider 保存的模型响应边界，把 reasoning、action/tool call 和 observation/tool result 组织在同一个 ReACT 回合中。
-- **稳定的详情标签**：Overview、Conversation、Flow、Analysis 和 Raw data 共用稳定内容轨道；Conversation 目录栏淡入淡出，不会让标题、操作区和标签栏重新排版，并尊重系统减少动态效果偏好。
+- **稳定的详情标签**：Overview、Conversation、执行、Analysis 和 Raw data 共用稳定内容轨道；Conversation 目录栏淡入淡出，不会让标题、操作区和标签栏重新排版，并尊重系统减少动态效果偏好。
 - **递归 Session Tree**：当 OpenCode、Codex、Copilot、Pi 或保存了 sidechain transcript 的 Claude Code 记录 parent/child 证据时，会被组织成嵌套结构；Copilot 的内嵌 agent 仍保持在主会话中，因为它们不是可独立恢复的会话。只有来源关系的连接会明确标为推断。
-- **Tool Flow Tree**：右侧 Flow 视图按时间和层级展示 root、message、tool、subagent 分支，覆盖 `Agent`、`task`、`subtask`、`spawn_agent` 与 `delegate_task` 启动器，以及由 provider 明确标记的自定义 agent。
+- **执行视图**：只有真正包含子代理拓扑的会话才会显示“执行”标签页；它只渲染子代理分支/返回与分支摘要，并直接链接到来源会话作为分支证据，覆盖 `Agent`、`task`、`subtask`、`spawn_agent` 与 `delegate_task` 启动器，以及由 provider 明确标记的自定义 agent。线性对话不渲染执行标签页或惰性加载标记。
 - **Table of Contents**：长会话自动生成可折叠导航，只索引用户消息、assistant 消息、已知启动器或由 provider 明确标记的自定义子 agent。
 - **会话内搜索**：可从详情页操作栏打开紧凑搜索，或按 `/` 聚焦；结果会同时显示匹配回合与文本命中数，逐词高亮，并在上下跳转时保持控制条可见。
 - **系统提示词证据 API**：`GET /api/:provider/session/:id/system-prompts` 只暴露当前本地可解析的指令、规则与运行时来源；不会声称恢复隐藏的 Provider prompt。

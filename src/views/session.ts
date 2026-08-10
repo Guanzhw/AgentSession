@@ -2,6 +2,7 @@ import { t } from "../i18n.js";
 import { escapeHtml } from "../markdown.js";
 import type { SessionPartNode, SessionTree } from "../providers/opencode/session-tree.js";
 import { isSubagentTool, mergeToolMetadata } from "../providers/shared/subagent-tools.js";
+import { flowTreeHasExecutionTopology, sessionTreeHasExecutionTopology } from "../providers/shared/flow-tree.js";
 import { formatDuration, formatTime, formatTokens, messageBubble, messageHeader, reasoningBlock, todoList, toolCallBlock } from "./components.js";
 import { layout } from "./layout.js";
 import type { SessionNavigationContext } from "../navigation-context.js";
@@ -318,17 +319,6 @@ function renderSubagentBranch(part: SessionPartNode, childMarkup: string, provid
   </details>`;
 }
 
-function renderMessageControls(message: any, provider: string) {
-  const role = String(message.role || "").toLowerCase();
-  if (role !== "user") {
-    return "";
-  }
-
-  return `<div class="message-controls">
-    <button type="button" class="flow-open-btn" data-flow-anchor="${escapeHtml(anchorId("msg", message.id))}" aria-expanded="false" aria-controls="session-flow-panel">Flow</button>
-  </div>`;
-}
-
 function messageTurnRole(role: any) {
   const normalized = String(role || "assistant").toLowerCase();
   if (normalized === "agent") return "assistant";
@@ -354,7 +344,7 @@ function renderMessageGroup(message: any, markup: any, provider: string) {
       time: data.time?.created
     })
     : "";
-  return `<article id="${messageAnchor}" class="message-group message-turn message-turn-${escapeHtml(role)}" data-role="${escapeHtml(role)}">${renderMessageControls(message, provider)}${toolOnlyHeader}${markup}</article>`;
+  return `<article id="${messageAnchor}" class="message-group message-turn message-turn-${escapeHtml(role)}" data-role="${escapeHtml(role)}">${toolOnlyHeader}${markup}</article>`;
 }
 
 function renderSubagentChildSession(tree: SessionTree, provider: string, depth = 1): string {
@@ -544,12 +534,12 @@ function renderFlowPanel(_tree: SessionTree | null, lazyUrl = "") {
     ? ` data-flow-lazy-url="${escapeHtml(lazyUrl)}" data-flow-state="idle"`
     : "";
   const body = lazyUrl
-    ? `<p class="toc-empty" data-flow-lazy-status>Flow loads when opened.</p>`
-    : `<p class="toc-empty">No flow data.</p>`;
+    ? `<p class="toc-empty" data-flow-lazy-status>${t("detail.execution_lazy_prompt")}</p>`
+    : `<p class="toc-empty">${t("detail.execution_empty")}</p>`;
   return `<section id="session-flow-panel" class="session-flow-panel hidden" tabindex="-1" aria-hidden="true"${lazyAttrs}>
     <div class="flow-panel-header">
-      <h2>Conversation Flow</h2>
-      <button type="button" class="flow-close-btn" data-flow-close aria-label="Close flow">x</button>
+      <h2>${t("detail.execution_title")}</h2>
+      <button type="button" class="flow-close-btn" data-flow-close aria-label="${t("detail.execution_close")}">x</button>
     </div>
     ${body}
   </section>`;
@@ -566,20 +556,12 @@ function flowHref(node: any) {
   return "#";
 }
 
-function flowPreviewTarget(node: any) {
+function flowConversationHref(node: any, provider: string) {
   const target = node?.target;
-  if (target?.kind !== "msg" && target?.kind !== "part") {
-    return "";
+  if (target?.kind === "session" && target?.id && provider) {
+    return `/${encodeURIComponent(provider)}/session/${encodeURIComponent(target.id)}`;
   }
   return flowHref(node);
-}
-
-function flowPreviewAttributes(node: any) {
-  const target = flowPreviewTarget(node);
-  if (!target) {
-    return "";
-  }
-  return ` data-flow-preview-target="${escapeHtml(target)}" aria-controls="flow-inspector" aria-haspopup="dialog"`;
 }
 
 function flowNodeDetails(node: any) {
@@ -609,59 +591,51 @@ function renderFlowMapNode(node: any) {
 
   if (kind === "agent") {
     const agentClasses = `${classes} ${node.emphasis === "final" ? "flow-map-node-agent-final" : ""}`.trim();
-    return `<a class="${agentClasses}" href="${escapeHtml(flowHref(node))}"${flowPreviewAttributes(node)} title="${escapeHtml(accessibleTitle)}" aria-label="${escapeHtml(accessibleTitle)}">
+    return `<a class="${agentClasses}" href="${escapeHtml(flowHref(node))}" title="${escapeHtml(accessibleTitle)}" aria-label="${escapeHtml(accessibleTitle)}">
       <span class="flow-map-agent-label">${escapeHtml(label)}</span>
       ${details ? `<span class="flow-map-agent-meta">${escapeHtml(details)}</span>` : ""}
     </a>`;
   }
 
   if (kind === "return") {
-    return `<a class="${classes}" href="${escapeHtml(flowHref(node))}"${flowPreviewAttributes(node)} title="${escapeHtml(accessibleTitle)}" aria-label="${escapeHtml(accessibleTitle)}">
+    return `<a class="${classes}" href="${escapeHtml(flowHref(node))}" title="${escapeHtml(accessibleTitle)}" aria-label="${escapeHtml(accessibleTitle)}">
       <span class="flow-map-return-mark"></span>
       <span class="flow-map-node-popover">Return</span>
     </a>`;
   }
 
   const typeLabel = kind === "user" ? "User" : "Subagent";
-  return `<a class="${classes}" href="${escapeHtml(flowHref(node))}"${flowPreviewAttributes(node)} title="${escapeHtml(accessibleTitle)}">
+  return `<a class="${classes}" href="${escapeHtml(flowHref(node))}" title="${escapeHtml(accessibleTitle)}">
     <span class="flow-map-node-kind">${escapeHtml(typeLabel)}</span>
     <span class="flow-map-node-label">${escapeHtml(label)}</span>
     ${details ? `<span class="flow-map-node-meta">${escapeHtml(details)}</span>` : ""}
   </a>`;
 }
 
-function flowBranchTemplateId(invocation: any, branch: any, index: any) {
-  return anchorId("flow-branch", `${invocation.id}-${branch.id}-${index}`);
-}
-
-function renderFlowBranchSummary(invocation: any, branch: any, index: any) {
+function renderFlowBranchSummary(invocation: any, branch: any, index: any, provider: string) {
   const metrics = branch?.metrics || {};
   const line = Array.isArray(branch?.line) ? branch.line : [];
   const messageCount = line.filter((node: any) => node.kind === "user" || node.kind === "agent").length;
-  const templateId = flowBranchTemplateId(invocation, branch, index);
+  const href = flowConversationHref(branch, provider) || flowHref(invocation) || "#";
+  const label = compactText(branch.label, 52) || "Subagent";
   const meta = [
+    branch.inferred ? t("detail.inferred_link") : "",
     messageCount ? `${formatCount(messageCount)} messages` : "",
     metrics.duration ? formatMilliseconds(metrics.duration) : "",
     metrics.tokens ? `${formatCount(metrics.tokens)} tokens` : "",
     metrics.errors ? `${formatCount(metrics.errors)} errors` : ""
   ].filter(Boolean).join(" · ");
-  return `<button type="button" class="flow-branch-summary ${metrics.errors ? "flow-branch-summary-error" : ""}" data-flow-branch-open="${escapeHtml(templateId)}">
-    <span class="flow-branch-summary-title">${escapeHtml(compactText(branch.label, 52) || "Subagent")}</span>
-    <span class="flow-branch-summary-meta">${escapeHtml(meta || "No message data")}</span>
-    <span class="flow-branch-summary-action">Inspect</span>
-  </button>
-  <template id="${escapeHtml(templateId)}" data-flow-branch-template>
-    <div class="flow-branch-detail-content">
-      <div class="flow-branch-detail-heading">
-        <strong>${escapeHtml(compactText(branch.label, 96) || "Subagent")}</strong>
-        <span>${escapeHtml(meta)}</span>
-      </div>
-      ${renderFlowMapSession(branch, 1)}
-    </div>
-  </template>`;
+  // A branch points to its own canonical conversation page. Some providers
+  // expose a child in flow data without embedding that session in the parent
+  // transcript, so a same-page fragment would otherwise be a dead link.
+  return `<a class="flow-branch-summary ${metrics.errors ? "flow-branch-summary-error" : ""}" href="${escapeHtml(href)}" title="${escapeHtml(`${label} · ${t("detail.execution_open_conversation")}`)}">
+    <span class="flow-branch-summary-title">${escapeHtml(label)}</span>
+    <span class="flow-branch-summary-meta">${escapeHtml(meta || t("detail.execution_no_child_data"))}</span>
+    <span class="flow-branch-summary-action">${t("detail.execution_open_conversation")}</span>
+  </a>`;
 }
 
-function renderFlowInvocationGroup(invocations: any, returnNodes: any) {
+function renderFlowInvocationGroup(invocations: any, returnNodes: any, provider: string) {
   const inferred = invocations.some((node: any) => node.inferred);
   const branchCount = invocations.reduce((sum: any, node: any) => sum + (Array.isArray(node.branches) ? node.branches.length : 0), 0);
   const summaries = invocations.flatMap((invocation: any) => {
@@ -669,22 +643,26 @@ function renderFlowInvocationGroup(invocations: any, returnNodes: any) {
     if (!branches.length) {
       return [`<div class="flow-branch-summary flow-branch-summary-empty">
         <span class="flow-branch-summary-title">${escapeHtml(compactText(invocation.label, 52) || "Subagent")}</span>
-        <span class="flow-branch-summary-meta">No child session data</span>
+        <span class="flow-branch-summary-meta">${t("detail.execution_no_child_data")}</span>
       </div>`];
     }
-    return branches.map((branch: any, index: any) => renderFlowBranchSummary(invocation, branch, index));
+    return branches.map((branch: any, index: any) => renderFlowBranchSummary(invocation, branch, index, provider));
   }).join("\n");
   const groupLabel = invocations.length === 1
     ? compactText(invocations[0].label, 44) || "Subagent"
     : `${formatCount(invocations.length)} parallel calls`;
   const returnNode = returnNodes.get(invocations[invocations.length - 1].id);
+  const fanoutMeta = [
+    `${formatCount(branchCount)} ${branchCount === 1 ? "branch" : "branches"}`,
+    inferred ? t("detail.inferred_link") : ""
+  ].filter(Boolean).join(" · ");
 
   return `<div class="flow-map-step flow-map-fork flow-map-fork-collapsed ${inferred ? "flow-map-fork-inferred" : ""}" data-invocation-group="${escapeHtml(invocations.map((node: any) => node.id).join(","))}" data-invocation-count="${invocations.length}">
     <div class="flow-fanout-main">
       <div class="flow-fanout-node flow-map-node-invocation">
         <span class="flow-map-node-kind">Subagent</span>
         <span class="flow-map-node-label">${escapeHtml(groupLabel)}</span>
-        <span class="flow-map-node-meta">${formatCount(branchCount)} ${branchCount === 1 ? "branch" : "branches"}</span>
+        <span class="flow-map-node-meta">${escapeHtml(fanoutMeta)}</span>
       </div>
       <span class="flow-fanout-span" aria-hidden="true"></span>
       ${returnNode ? renderFlowMapNode(returnNode) : ""}
@@ -693,7 +671,7 @@ function renderFlowInvocationGroup(invocations: any, returnNodes: any) {
   </div>`;
 }
 
-function renderFlowMapSession(session: any, depth = 0) {
+function renderFlowMapSession(session: any, depth = 0, provider = "") {
   const line = Array.isArray(session?.line) ? session.line : [];
   const returnNodes = new Map(
     line.filter((node: any) => node.kind === "return").map((node: any) => [node.invocationId, node])
@@ -702,11 +680,12 @@ function renderFlowMapSession(session: any, depth = 0) {
 
   for (let index = 0; index < line.length; index += 1) {
     const node = line[index];
-    if (node.kind === "return") {
+    if (node.kind === "return" || node.kind === "user" || node.kind === "agent") {
+      // Execution renders only orchestration topology: ordinary conversation
+      // messages are skipped, and returns are attached to their fork group.
       continue;
     }
     if (node.kind !== "invocation") {
-      rendered.push(`<div class="flow-map-step">${renderFlowMapNode(node)}</div>`);
       continue;
     }
 
@@ -717,7 +696,7 @@ function renderFlowMapSession(session: any, depth = 0) {
       cursor += 2;
     }
     index = cursor - 1;
-    rendered.push(renderFlowInvocationGroup(invocations, returnNodes));
+    rendered.push(renderFlowInvocationGroup(invocations, returnNodes, provider));
   }
 
   const sessionClasses = [
@@ -727,7 +706,7 @@ function renderFlowMapSession(session: any, depth = 0) {
   ].filter(Boolean).join(" ");
   return `<section class="${sessionClasses}" data-flow-session-id="${escapeHtml(session.id)}" data-flow-depth="${depth}">
     ${depth ? `<a class="flow-map-branch-title" href="${escapeHtml(flowHref(session))}">${escapeHtml(compactText(session.label, 72) || "Subagent")}</a>` : ""}
-    <div class="flow-map-line">${rendered.join("\n") || `<span class="flow-map-empty-branch">No user or agent messages</span>`}</div>
+    <div class="flow-map-line">${rendered.join("\n") || `<span class="flow-map-empty-branch">${t("detail.execution_no_forks")}</span>`}</div>
   </section>`;
 }
 
@@ -740,7 +719,7 @@ function renderFlowMapSummary(summary: any) {
     ["Cost", `$${Number(summary.totalCost || 0).toFixed(4)}`],
     ["Subagents", formatCount(summary.subagents)]
   ];
-  return `<div class="flow-map-stats" aria-label="Flow summary">
+  return `<div class="flow-map-stats" aria-label="${t("detail.execution_summary")}">
     ${stats.map(([label, value]) => `<span class="flow-map-stat"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></span>`).join("\n")}
   </div>`;
 }
@@ -748,55 +727,45 @@ function renderFlowMapSummary(summary: any) {
 function renderFlowMapOverview(root: any) {
   const line = Array.isArray(root?.line) ? root.line : [];
   const marks = line
-    .filter((node: any) => node.kind !== "return")
-    .map((node: any) => `<span class="flow-map-overview-mark flow-map-overview-${escapeHtml(node.kind)} ${node.emphasis === "final" ? "flow-map-overview-final" : ""}"></span>`)
+    .filter((node: any) => node.kind === "invocation")
+    .map((node: any) => `<span class="flow-map-overview-mark flow-map-overview-${escapeHtml(node.kind)}"></span>`)
     .join("");
-  return `<div class="flow-map-overview" data-flow-overview aria-label="Flow overview">
+  return `<div class="flow-map-overview" data-flow-overview aria-label="${t("detail.execution_overview")}">
     <div class="flow-map-overview-track">${marks}<span class="flow-map-overview-window" data-flow-overview-window></span></div>
   </div>`;
 }
 
-export function renderCanonicalFlowPanelContent(sessionFlow: any) {
+export function renderCanonicalFlowPanelContent(sessionFlow: any, provider = "") {
   if (!sessionFlow?.root) {
     return `<div class="flow-panel-header">
-      <h2>Conversation Flow</h2>
-      <button type="button" class="flow-close-btn" data-flow-close aria-label="Close flow">x</button>
+      <h2>${t("detail.execution_title")}</h2>
+      <button type="button" class="flow-close-btn" data-flow-close aria-label="${t("detail.execution_close")}">x</button>
     </div>
-    <p class="toc-empty">No flow data.</p>`;
+    <p class="toc-empty">${t("detail.execution_empty")}</p>`;
   }
 
   return `<div class="flow-panel-header">
       <div>
-        <h2>Conversation Flow</h2>
-        <p>Conversation order with subagent forks and returns</p>
+        <h2>${t("detail.execution_title")}</h2>
+        <p>${t("detail.execution_description")}</p>
       </div>
-      <button type="button" class="flow-close-btn" data-flow-close aria-label="Close flow">x</button>
+      <button type="button" class="flow-close-btn" data-flow-close aria-label="${t("detail.execution_close")}">x</button>
     </div>
     ${renderFlowMapSummary(sessionFlow.summary || {})}
     ${renderFlowMapOverview(sessionFlow.root)}
     <div class="flow-map-scroll">
-      <div class="flow-map">${renderFlowMapSession(sessionFlow.root)}</div>
+      <div class="flow-map">${renderFlowMapSession(sessionFlow.root, 0, provider)}</div>
     </div>
-    <aside id="flow-inspector" class="flow-inspector hidden" data-flow-inspector role="dialog" aria-modal="false" aria-hidden="true" aria-labelledby="flow-inspector-title">
-      <div class="flow-inspector-header">
-        <div>
-          <h3 id="flow-inspector-title" data-flow-inspector-title>${t("detail.flow_subagent_detail")}</h3>
-          <p data-flow-inspector-description>${t("detail.flow_subagent_detail_description")}</p>
-        </div>
-        <button type="button" class="flow-inspector-close" data-flow-inspector-close aria-label="${t("detail.flow_close_inspector")}">x</button>
-      </div>
-      <div class="flow-inspector-body" data-flow-inspector-body></div>
-    </aside>
   `;
 }
 
-function renderCanonicalFlowPanel(sessionFlow: any) {
+function renderCanonicalFlowPanel(sessionFlow: any, provider = "") {
   if (!sessionFlow?.root) {
     return "";
   }
 
   return `<section id="session-flow-panel" class="session-flow-panel hidden" tabindex="-1" aria-hidden="true">
-    ${renderCanonicalFlowPanelContent(sessionFlow)}
+    ${renderCanonicalFlowPanelContent(sessionFlow, provider)}
   </section>`;
 }
 
@@ -1288,6 +1257,14 @@ ${actions}
     ? renderSessionTree(sessionTree, 0, provider)
     : renderRawMessageGroups(messages, partsByMessage, provider);
 
+  // Execution is a demoted orchestration view: it exists only when the session
+  // has real subagent topology (attached or detached child sessions), decided
+  // from the SessionTree before lazy load or from the SessionFlow on eager
+  // render. Ordinary linear sessions get neither the tab nor lazy markup.
+  const executionTopology = sessionFlow
+    ? flowTreeHasExecutionTopology(sessionFlow)
+    : sessionTreeHasExecutionTopology(sessionTree);
+
   const sessionMetadata = session.metadata && typeof session.metadata === "object"
     ? session.metadata as Record<string, unknown>
     : {};
@@ -1323,7 +1300,7 @@ ${actions}
     <div class="tab-bar" role="tablist" aria-label="${escapeHtml(t("detail.tab_bar_label"))}" hidden>
       <button role="tab" aria-selected="false" aria-controls="tab-overview" id="tab-btn-overview" tabindex="-1">${t("detail.tab_overview")}</button>
       <button role="tab" aria-selected="true" aria-controls="tab-conversation" id="tab-btn-conversation" tabindex="0">${t("detail.tab_conversation")}</button>
-      <button role="tab" aria-selected="false" aria-controls="tab-flow" id="tab-btn-flow" tabindex="-1">${t("detail.tab_flow")}</button>
+      ${executionTopology ? `<button role="tab" aria-selected="false" aria-controls="tab-flow" id="tab-btn-flow" tabindex="-1">${t("detail.tab_flow")}</button>` : ""}
       <button role="tab" aria-selected="false" aria-controls="tab-analysis" id="tab-btn-analysis" tabindex="-1">${t("detail.tab_analysis")}</button>
       <button role="tab" aria-selected="false" aria-controls="tab-raw" id="tab-btn-raw" tabindex="-1">${t("detail.tab_raw")}</button>
     </div>
@@ -1336,9 +1313,9 @@ ${actions}
       ${renderSessionMetricsPanel(sessionMetrics)}
       ${todoList(todos)}
     </div>
-    <div role="tabpanel" id="tab-flow" aria-labelledby="tab-btn-flow" data-session-flow-tab>
-      ${sessionFlow ? renderCanonicalFlowPanel(sessionFlow) : renderFlowPanel(sessionTree, flowLazyUrl)}
-    </div>
+    ${executionTopology ? `<div role="tabpanel" id="tab-flow" aria-labelledby="tab-btn-flow" data-session-flow-tab>
+      ${sessionFlow ? renderCanonicalFlowPanel(sessionFlow, provider) : renderFlowPanel(sessionTree, flowLazyUrl)}
+    </div>` : ""}
     <div role="tabpanel" id="tab-analysis" aria-labelledby="tab-btn-analysis">
       ${analysisMaterials ? `<div class="analysis-tab-launch">${analysisMaterials}</div>` : `<p class="empty-state">${t("analysis.unavailable")}</p>`}
       ${analysisStatus}
