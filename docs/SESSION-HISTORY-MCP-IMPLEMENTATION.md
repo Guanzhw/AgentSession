@@ -57,7 +57,7 @@ adding provider-name conditionals:
 | src/providers/interface.ts | Provider detection, canonical session lookup, normalized messages, and provider-local keyword search. |
 | src/providers/index.ts | Registered and available provider enumeration. |
 | src/index-db.ts | Viewer-owned session metadata index, including parent IDs, project directory, timestamps, and counts. |
-| src/meta.ts | Read only the viewer-owned excluded-session set; do not expose stars, custom titles, or other viewer metadata as session data. |
+| src/meta.ts | Viewer-only metadata (stars, custom titles, deletions, permanent exclusions) stays out of session data; the MCP never reads the viewer-excluded set as an access filter. |
 | src/session-queries.ts | HTTP/dashboard presentation helper. It is a reference for result shape only; the MCP service must call adapters and index-db helpers directly. |
 | src/server.ts | Refactor its duplicated scan/upsert loop to call the existing indexProvider(adapter) helper in index-db.ts. |
 | src/config.ts | The MCP process uses the same config file and provider path options as the viewer. |
@@ -379,10 +379,11 @@ surface. Command-line limits are not needed in the first release.
 - Keep reasoning and full tool input/output opt-in, as described above.
 - Mark transcript output as untrusted session content in each structured
   response and in tool descriptions. No transcript field is executable.
-- Continue honoring viewer-owned excluded-session metadata. A session the user
-  permanently excluded from the viewer must not be surfaced by the MCP server.
-  Implement this through src/meta.ts getExcludedIds(provider), and use that
-  metadata only as an access filter.
+- Provider local storage is authoritative: every session still present in a
+  registered provider's local store is exposed by the MCP server regardless of
+  Viewer-only metadata. Hidden, soft-deleted, or permanently excluded Viewer
+  state does not hide a session from the MCP; it affects only Viewer lists.
+  The MCP never imports getExcludedIds() or any other Viewer exclusion state.
 
 This does not promise to detect every secret that an agent wrote into a
 transcript. The caller already runs locally with access to the configured
@@ -396,8 +397,8 @@ turn session history into a secret vault.
 1. Reuse indexProvider(adapter) from src/index-db.ts in the MCP process and
    refactor src/server.ts to use the same helper for its current session scan.
 2. Add src/session-history.ts with SessionRef/EventRef validation, normalized
-   event projection, offset/limit paging, bounded strings, provider
-   diagnostics, and excluded-session filtering.
+   event projection, offset/limit paging, bounded strings, and provider
+   diagnostics.
 3. Add narrow index-db helpers for title/directory matching and direct child
    lookup. Do not let the MCP layer execute arbitrary SQL.
 
@@ -428,14 +429,15 @@ turn session history into a secret vault.
 ### Phase 4: Tests, documentation, and release verification
 
 1. Add focused unit tests for references, event projections, cursor handling,
-   bounds, excluded sessions, and unavailable providers.
+   bounds, viewer-excluded-session visibility, and unavailable providers.
 2. Add adapter fixtures covering message-only, thinking, tool success, tool
    error, nested-session, and corrupt-source cases.
 3. Start the compiled MCP binary in a protocol integration test. Verify
    initialize, tools/list, and a call to every tool, including JSON Schema
    validation and stdout cleanliness.
 4. Use a real local provider dataset to verify cross-provider discovery,
-   canonical session lookup, bounded tool output, and excluded-session behavior.
+   canonical session lookup, bounded tool output, and
+   viewer-excluded-session visibility (provider local storage is authoritative).
 5. Update README.md, README.en.md, CLI help, package metadata, and provider
    contribution documentation when the feature is implemented.
 
@@ -448,7 +450,7 @@ turn session history into a secret vault.
 | src/config.ts | Validate and apply MCP output-limit settings. |
 | src/server.ts | Replace the duplicated startup scan/upsert loop with indexProvider(adapter). |
 | src/index-db.ts | Reuse indexProvider(adapter) and add narrowly scoped index queries needed by session history. |
-| src/meta.ts | Read excluded-session IDs as an MCP access filter only. |
+| src/meta.ts | Viewer routes keep using excluded-session IDs for Viewer lists; the session-history service must not read them. |
 | src/session-history.ts | New provider-neutral service and event projection layer. |
 | packages/agentsession-mcp/package.json | New published @acetamido/agentsession-mcp package manifest, MCP SDK dependency, and binary declaration. |
 | packages/agentsession-mcp/src/cli.ts | New stdio-only process entry point. |
@@ -475,7 +477,10 @@ The implementation is complete only when all of the following hold:
 - Tool outputs, reasoning, and long text are omitted or bounded by default.
 - On real local provider datasets, direct-adapter session_search meets the
   five-second p95 target or the implementation includes the deferred FTS index.
-- An excluded viewer session is absent from every MCP tool result.
+- A session present in a provider's local store remains reachable through
+  every MCP tool even when the Viewer hides, soft-deletes, or permanently
+  excludes it. Provider local storage is authoritative; Viewer hidden/excluded
+  state is never an access filter for the MCP.
 - No provider-owned database or transcript changes after MCP startup and tool
   calls.
 - No tool call starts a terminal, launches analysis, changes settings, edits

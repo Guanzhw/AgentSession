@@ -3,7 +3,6 @@ import {
   getIndexedSessionChildren,
   indexProvider as defaultIndexProvider
 } from "./index-db.js";
-import { getExcludedIds as defaultGetExcludedIds } from "./meta.js";
 import { normalizeCrossProviderProjectPath } from "./project-filter.js";
 import { getAllProviders, getAvailableProviders } from "./providers/index.js";
 import type { Message, MessageRole, ProviderAdapter, ProviderId, RawSession } from "./providers/interface.js";
@@ -80,7 +79,6 @@ export interface ProjectedEvent {
 export interface SessionHistoryDependencies {
   getAvailableProviders?: () => ProviderAdapter[];
   getAllProviders?: () => ProviderAdapter[];
-  getExcludedIds?: (provider: ProviderId) => Set<string>;
   indexProvider?: (adapter: ProviderAdapter) => Promise<number>;
   findIndexedSessionMetadata?: typeof findIndexedSessionMetadata;
   getIndexedSessionChildren?: typeof getIndexedSessionChildren;
@@ -370,7 +368,6 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
   const limits = resolveLimits(options.limits);
   const providers = dependencies.getAvailableProviders || getAvailableProviders;
   const allProviders = dependencies.getAllProviders || getAllProviders;
-  const excludedIds = dependencies.getExcludedIds || defaultGetExcludedIds;
   const refreshProviderIndex = dependencies.indexProvider || defaultIndexProvider;
   const findIndexed = dependencies.findIndexedSessionMetadata || findIndexedSessionMetadata;
   const indexedChildren = dependencies.getIndexedSessionChildren || getIndexedSessionChildren;
@@ -391,11 +388,10 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
     return available;
   }
 
-  function getVisibleSession(ref: SessionRef) {
+  function getProviderSession(ref: SessionRef) {
+    // Provider local storage is authoritative: Viewer hidden/excluded metadata
+    // is never an access filter for session history.
     const provider = resolveProvider(ref);
-    if (excludedIds(ref.provider).has(ref.sessionId)) {
-      throw new SessionHistoryError("session_not_found", "No visible session matches this reference.");
-    }
     let session: RawSession | Record<string, unknown> | null;
     try {
       session = provider.getSession(ref.sessionId);
@@ -403,13 +399,13 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
       throw new SessionHistoryError("provider_error", `Could not read ${ref.provider} session: ${error?.message || String(error)}`);
     }
     if (!session || asNonEmptyString((session as Record<string, unknown>).id) !== ref.sessionId) {
-      throw new SessionHistoryError("session_not_found", "No visible session matches this reference.");
+      throw new SessionHistoryError("session_not_found", "No provider-stored session matches this reference.");
     }
     return { provider, session };
   }
 
-  function getVisibleMessages(ref: SessionRef) {
-    const { provider } = getVisibleSession(ref);
+  function getProviderMessages(ref: SessionRef) {
+    const { provider } = getProviderSession(ref);
     try {
       return provider.getMessages(ref.sessionId) || [];
     } catch (error: any) {
@@ -474,11 +470,10 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
         }
         const startedAt = Date.now();
         const perProviderLimit = HARD_LIMITS.searchLimit;
-        const excluded = excludedIds(providerId);
         try {
           const add = (session: RawSession | Record<string, unknown>, field: "title" | "directory" | "message", snippet: string, messageId: string | null = null) => {
             const summary = sessionSummary(providerId, session);
-            if (!summary.session.sessionId || excluded.has(summary.session.sessionId) || !isWithinRange(summary.updatedAt, updatedAfter, updatedBefore)) return;
+            if (!summary.session.sessionId || !isWithinRange(summary.updatedAt, updatedAfter, updatedBefore)) return;
             if (directory && normalizeCrossProviderProjectPath(summary.directory) !== directory) return;
             const rank = field === "title" ? 0 : field === "directory" ? 1 : 2;
             const key = `${providerId}\u0000${summary.session.sessionId}`;
@@ -498,7 +493,7 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
             }
           };
 
-          const metadataMatches = findIndexed(providerId, query, perProviderLimit, excluded, updatedAfter, updatedBefore);
+          const metadataMatches = findIndexed(providerId, query, perProviderLimit, updatedAfter, updatedBefore);
           for (const indexed of metadataMatches) {
             const row = indexed as Record<string, unknown>;
             const title = String(row.title || "");
@@ -509,7 +504,7 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
 
           const messageMatches = provider.searchMessages(query, perProviderLimit);
           for (const match of messageMatches) {
-            if (!match?.sessionId || excluded.has(match.sessionId)) continue;
+            if (!match?.sessionId) continue;
             const session = provider.getSession(match.sessionId);
             if (session) add(session, "message", String(match.snippet || ""), asNonEmptyString(match.messageId));
           }
@@ -546,10 +541,9 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
 
     get(input: Record<string, unknown>) {
       const ref = assertSessionRef(input?.session);
-      const { session } = getVisibleSession(ref);
-      const messages = getVisibleMessages(ref);
-      const excluded = excludedIds(ref.provider);
-      const children = indexedChildren(ref.provider, ref.sessionId, 50, excluded)
+      const { session } = getProviderSession(ref);
+      const messages = getProviderMessages(ref);
+      const children = indexedChildren(ref.provider, ref.sessionId, 50)
         .map((row: any) => indexedSessionSummary(ref.provider, row));
       const messageEvents = projectEvents(ref, messages)
         .filter((event) => event.event.segment === "message" && event.preview.trim())
@@ -572,7 +566,7 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
       const statuses = assertStringArray(input?.statuses, "statuses", EVENT_STATUSES) as EventStatus[] | undefined;
       const limit = resolveLimit(input?.limit, limits.timelineLimit, limits.timelineLimit, "limit");
       const segments = requestedSegments || ["message", "tool"];
-      const messages = getVisibleMessages(ref);
+      const messages = getProviderMessages(ref);
       const filters = { session: ref, segments, roles: requestedRoles || [], toolNames: toolNames || [], statuses: statuses || [] };
       const fingerprint = cursorFingerprint(filters as unknown as Record<string, unknown>);
       const offset = input?.cursor === undefined ? 0 : decodeCursor(input.cursor, fingerprint);
@@ -595,11 +589,11 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
       const target = assertEventRef(input?.event);
       const before = resolveNonNegative(input?.before, limits.contextWindow, limits.contextWindow, "before");
       const after = resolveNonNegative(input?.after, limits.contextWindow, limits.contextWindow, "after");
-      const messages = getVisibleMessages(target);
+      const messages = getProviderMessages(target);
       const events = projectEvents(target, messages);
       const targetIndex = events.findIndex((event) => eventKey(event.event) === eventKey(target));
       if (targetIndex < 0) {
-        throw new SessionHistoryError("event_not_found", "No visible event matches this reference.");
+        throw new SessionHistoryError("event_not_found", "No session event matches this reference.");
       }
       return {
         target,
@@ -616,10 +610,10 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
       const includeToolOutput = input?.includeToolOutput === true;
       const offset = resolveNonNegative(input?.offset, 0, Number.MAX_SAFE_INTEGER, "offset");
       const maxChars = resolveLimit(input?.maxChars, limits.eventMaxChars, limits.eventMaxChars, "maxChars");
-      const messages = getVisibleMessages(target);
+      const messages = getProviderMessages(target);
       const message = messages.find((candidate) => candidate.id === target.messageId);
       if (!message || !projectEvents(target, [message]).some((event) => eventKey(event.event) === eventKey(target))) {
-        throw new SessionHistoryError("event_not_found", "No visible event matches this reference.");
+        throw new SessionHistoryError("event_not_found", "No session event matches this reference.");
       }
       const base = {
         event: target,

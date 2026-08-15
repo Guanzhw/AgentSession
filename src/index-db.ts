@@ -379,7 +379,6 @@ export function findIndexedSessionMetadata(
   provider: string,
   query: string,
   limit = 20,
-  excludedIds: Set<string> = new Set(),
   updatedAfter: number | undefined = undefined,
   updatedBefore: number | undefined = undefined
 ) {
@@ -400,9 +399,6 @@ export function findIndexedSessionMetadata(
     where.push("time_updated <= ?");
     params.push(updatedBefore);
   }
-  if (excludedIds.size > 0) {
-    where.push(idMembership("id", [...excludedIds], params, true));
-  }
   return getIndexDb().prepare(`
     SELECT id, provider, parent_id, title, directory, time_created, time_updated, message_count, token_count
     FROM session_index
@@ -413,20 +409,16 @@ export function findIndexedSessionMetadata(
 }
 
 /**
- * Return direct children only; callers retain provider and metadata filtering.
+ * Return direct children only; callers retain provider filtering.
  */
 export function getIndexedSessionChildren(
   provider: string,
   parentId: string,
-  limit = 20,
-  excludedIds: Set<string> = new Set()
+  limit = 20
 ) {
   const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 100));
   const where = ["provider = ?", "parent_id = ?"];
   const params: any[] = [provider, parentId];
-  if (excludedIds.size > 0) {
-    where.push(idMembership("id", [...excludedIds], params, true));
-  }
   return getIndexDb().prepare(`
     SELECT id, provider, parent_id, title, directory, time_created, time_updated, message_count, token_count
     FROM session_index

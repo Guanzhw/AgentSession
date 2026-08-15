@@ -12,6 +12,7 @@ process.env.AGENTSESSION_META_PATH = path.join(temp, "meta.db");
 const { initConfig, parseArgs, validateUserConfig } = await import("../dist/src/config.js");
 initConfig([]);
 const { closeDb } = await import("../dist/src/db.js");
+const { closeMetaDb, getMetaDb, getExcludedIds, permanentDelete, softDelete } = await import("../dist/src/meta.js");
 const { createSessionHistoryService, SessionHistoryError } = await import("../dist/src/session-history.js");
 const { createOpenCodeSqliteAdapter } = await import("../dist/src/providers/opencode/sqlite-adapter.js");
 const { createSessionHistoryMcpServer } = await import("../packages/agentsession-mcp/dist/session-history-server.js");
@@ -62,7 +63,9 @@ function createFixture() {
       { id: "m5", sessionId: "content-z", role: "assistant", content: "Needle appears in tied content", thinking: null, toolName: null, toolInput: null, toolOutput: null, timestamp: 40, tokens: null, metadata: null }
     ]],
     ["child", []],
-    ["hidden", []]
+    ["hidden", [
+      { id: "hidden-1", sessionId: "hidden", role: "user", content: "Needle in a viewer-excluded session", thinking: null, toolName: null, toolInput: null, toolOutput: null, timestamp: 50, tokens: null, metadata: null }
+    ]]
   ]);
   const adapter = {
     id: "codex",
@@ -90,7 +93,6 @@ function createFixture() {
     dependencies: {
       getAvailableProviders: () => [adapter],
       getAllProviders: () => [adapter],
-      getExcludedIds: () => new Set(["hidden"]),
       indexProvider: async (provider) => {
         let count = 0;
         for await (const _session of provider.scan()) count += 1;
@@ -112,19 +114,19 @@ test("session-history service keeps retrieval bounded, canonical, and read-only"
   assert.equal(typeof diagnostics[0].durationMs, "number");
 });
 
-test("session-history service searches, pages events, honors exclusions, and requires explicit sensitive-content opt-in", () => {
+test("session-history service searches, pages events, exposes every provider-stored session, and requires explicit sensitive-content opt-in", () => {
   const { service } = createFixture();
   const search = service.search({ query: "Needle" });
-  assert.deepEqual(search.matches.map((match) => match.session.sessionId), ["root", "content", "content-z"]);
+  assert.deepEqual(search.matches.map((match) => match.session.sessionId), ["hidden", "root", "content", "content-z"]);
   assert.equal(search.matches[0].matchField, "title");
-  assert.equal(search.matches.some((match) => match.session.sessionId === "hidden"), false);
+  assert.equal(search.matches.some((match) => match.session.sessionId === "hidden"), true);
 
   const firstSearchPage = service.search({ query: "Needle", limit: 2 });
-  assert.deepEqual(firstSearchPage.matches.map((match) => match.session.sessionId), ["root", "content"]);
+  assert.deepEqual(firstSearchPage.matches.map((match) => match.session.sessionId), ["hidden", "root"]);
   assert.ok(firstSearchPage.nextCursor);
   assert.equal(firstSearchPage.truncated, true);
   const secondSearchPage = service.search({ query: "Needle", limit: 2, cursor: firstSearchPage.nextCursor });
-  assert.deepEqual(secondSearchPage.matches.map((match) => match.session.sessionId), ["content-z"]);
+  assert.deepEqual(secondSearchPage.matches.map((match) => match.session.sessionId), ["content", "content-z"]);
   assert.equal(secondSearchPage.nextCursor, null);
   assert.equal(secondSearchPage.truncated, false);
   assert.deepEqual(
@@ -192,10 +194,33 @@ test("session-history service searches, pages events, honors exclusions, and req
     maxChars: 8
   });
 
-  assert.throws(
-    () => service.get({ session: { provider: "codex", sessionId: "hidden" } }),
-    (error) => error instanceof SessionHistoryError && error.code === "session_not_found"
-  );
+  const hiddenOverview = service.get({ session: { provider: "codex", sessionId: "hidden" } });
+  assert.equal(hiddenOverview.session.sessionId, "hidden");
+  assert.equal(hiddenOverview.messageCount, 1);
+  assert.deepEqual(hiddenOverview.children, []);
+});
+
+test("session-history ignores viewer hidden/permanent-excluded metadata; provider local storage is authoritative", () => {
+  const { service } = createFixture();
+  getMetaDb();
+  softDelete("codex", "hidden");
+  permanentDelete("codex", "hidden");
+  assert.ok(getExcludedIds("codex").has("hidden"), "fixture session must actually be viewer-excluded");
+
+  const search = service.search({ query: "Needle" });
+  assert.equal(search.matches.some((match) => match.session.sessionId === "hidden"), true);
+
+  const overview = service.get({ session: { provider: "codex", sessionId: "hidden" } });
+  assert.equal(overview.session.sessionId, "hidden");
+  assert.equal(overview.messageCount, 1);
+
+  const eventRef = { provider: "codex", sessionId: "hidden", messageId: "hidden-1", segment: "message" };
+  const timeline = service.timeline({ session: { provider: "codex", sessionId: "hidden" } });
+  assert.deepEqual(timeline.events.map((event) => event.event), [eventRef]);
+  assert.equal(service.getEvent({ event: eventRef }).content.text, "Needle in a viewer-excluded session");
+  const context = service.getContext({ event: eventRef, before: 1, after: 1 });
+  assert.deepEqual(context.target, eventRef);
+  assert.deepEqual(context.events.map((event) => event.event), [eventRef]);
 });
 
 test("session-history default search diagnoses unavailable registered providers", () => {
@@ -215,7 +240,6 @@ test("session-history default search diagnoses unavailable registered providers"
     dependencies: {
       getAvailableProviders: () => [],
       getAllProviders: () => [gemini],
-      getExcludedIds: () => new Set(),
       findIndexedSessionMetadata: () => [],
       getIndexedSessionChildren: () => []
     }
@@ -270,7 +294,6 @@ test("OpenCode SQLite search event references round-trip and session_get reports
     dependencies: {
       getAvailableProviders: () => [adapter],
       getAllProviders: () => [adapter],
-      getExcludedIds: () => new Set(),
       findIndexedSessionMetadata: () => [],
       getIndexedSessionChildren: () => []
     }
@@ -329,10 +352,12 @@ test("AgentSession-MCP lists exactly five read-only tools over the MCP protocol"
   ]);
   assert.ok(searchTool.inputSchema.properties.directory);
   assert.ok(searchTool.inputSchema.properties.cursor);
+  assert.match(searchTool.description, /every session still present/i);
+  assert.match(searchTool.description, /Viewer hidden, deleted, and excluded metadata is ignored/i);
 
   const response = await client.callTool({ name: "session_search", arguments: { query: "Needle" } });
   assert.equal(response.isError, undefined);
-  assert.equal(response.structuredContent.result.matches.length, 3);
+  assert.equal(response.structuredContent.result.matches.length, 4);
   const invalid = await client.callTool({ name: "session_get", arguments: {
     session: { provider: "codex", sessionId: "root" },
     unexpected: true
@@ -548,4 +573,7 @@ test("AgentSession metadata DB path also scopes the default configuration", () =
   }
 });
 
-test.after(() => rmSync(temp, { recursive: true, force: true }));
+test.after(() => {
+  closeMetaDb();
+  rmSync(temp, { recursive: true, force: true });
+});

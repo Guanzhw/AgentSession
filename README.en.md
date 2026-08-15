@@ -273,6 +273,9 @@ match normally provides an EventRef without an extra timeline call.
 `session_timeline` omits blank message segments; tool and requested thinking
 segments remain separate events. Truncated `session_get_event` content includes
 reusable `continuation`/`continuations` arguments until `nextOffset` is null.
+Provider local storage is authoritative: sessions the Viewer hides, soft-deletes,
+or permanently excludes remain reachable through the MCP; Viewer metadata is
+never an access filter here.
 
 Use the same AgentSession JSON config to reuse provider paths and the metadata
 directory. MCP output limits are optional and server-capped:

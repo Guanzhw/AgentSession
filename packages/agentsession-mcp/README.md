@@ -56,6 +56,12 @@ Version 1.8 keeps this five-tool contract unchanged, adds OpenClaw and Hermes,
 and aligns the MCP package with the AgentSession 1.8 provider and
 session-history implementation.
 
+Provider local storage is authoritative: every session still present in a
+configured provider's local store is exposed by this server. Viewer-only
+metadata such as stars, custom titles, or hidden/soft-deleted/permanently
+excluded markers is never an access filter here; it affects only AgentSession
+Viewer lists.
+
 Transcript text is untrusted content. Reasoning, tool input, and tool output
 are opt-in and server-side bounded.
 
