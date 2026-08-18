@@ -7,15 +7,27 @@
 ![Node.js >= 22.13.0](https://img.shields.io/badge/node-%3E%3D22.13.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.8.3](https://img.shields.io/badge/version-1.8.3-orange?style=flat-square)
+![v1.9.0](https://img.shields.io/badge/version-1.9.0-orange?style=flat-square)
 
-## 1.8.3 更新
+## 1.9.0 更新
 
-- AgentSession MCP 的 npm 包与独立可执行文件现在都会从构建来源获得准确版本，协议握手不再返回过期版本号。
-- Flow 详情弹窗会按内容收缩，并根据点击节点定位在当前可见区域内；长内容在弹窗内部滚动，
-  不再固定在长 Flow 的顶部或被顶部导航遮挡。
-- macOS 测试会在比较分析运行目录前 canonicalize 两侧路径，兼容 `/var` 与
-  `/private/var` 指向同一目录的系统行为。
+- 新增 DeepSeek Harness 一级只读支持：读取 `$DSH_HOME`（或 `~/.dsh`）下的 DSH v0 事件溯源日志，
+  包括多帧 Zstd 与 packed chunks、reasoning、工具、压缩、工作流/子 agent 拓扑与提示词快照，
+  并提供运行时清单、分析与完整会话协议。当前官方 headless CLI 没有稳定的默认恢复参数，
+  因此不会伪造终端恢复命令。
+- 引入 Provider 中立的会话协议（Session Protocol）：Codex CLI、Claude Code、Pi、Hermes Agent
+  与 DeepSeek Harness 统一暴露带稳定序列号的事件、显式会话关系、Task/AgentRun 分离模型与
+  元数据优先的上下文产物，所有值都携带 recorded/derived 来源标记。
+- 执行视图按真实拓扑门控：只有包含真实子代理拓扑的会话才渲染“执行”标签页，分支摘要直接链接到
+  来源会话页面，线性对话不再显示该标签页。
+- 会话列表卡片显示有界的逐会话统计摘要：消息数、已知时的 token 总量、观测时长、压缩次数与
+  最近压缩时间、子代理/后台运行次数、活跃任务状态与上下文产物数量；统计通过会话协议表面推导，
+  绝不伪造 token 总量。
+- 会话内容渲染更丰富：安全 GFM 渲染、服务端渐进式内容加载，以及基于证据的 Codex 子代理
+  生命周期关联与任务耗时。
+- AgentSession MCP 现在搜索注册 Provider 本地存储中仍然存在的每一个会话，不受 Viewer
+  隐藏/软删除/永久排除元数据的影响。
+- 刷新 OpenClaw 与 Hermes Agent 的 Provider 图标。
 
 完整变更见 [CHANGELOG.md](./CHANGELOG.md)。
 
@@ -53,7 +65,8 @@ AgentSession 是一个本地优先的 AI 编程会话查看器。它不会修改
 
 所有 Provider 都提供浏览、内容搜索、仅 viewer 的元数据管理、Markdown/JSON 导出、
 每日 Token 统计、Tree/Container/Metrics/Flow/Trace 和本地提示词/运行时证据。具有来源支持的
-恢复命令且有有效项目目录的活跃 Provider 还提供继续会话和只产出提案的分析。只有来源记录了
+恢复命令且有有效项目目录的活跃 Provider 提供继续会话；只产出提案的分析独立取决于 Provider
+的 `sessionAnalysis` 能力、已启用的分析配置与有效项目目录。只有来源记录了
 parent/child 关系时才会
 递归嵌入分支；仅能从来源关系推断的连接会明确标注为推断，而不会伪造一次调用。需要启动
 命令的能力要求来源记录了有效项目目录，或由显式、仅 viewer 的项目键映射提供目录；Provider

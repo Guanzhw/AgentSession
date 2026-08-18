@@ -351,6 +351,10 @@ test("AgentSession-MCP lists exactly five read-only tools over the MCP protocol"
     "pi",
     "deepseek-harness"
   ]);
+  assert.equal(
+    searchTool.inputSchema.properties.providers.maxItems,
+    searchTool.inputSchema.properties.providers.items.enum.length
+  );
   assert.ok(searchTool.inputSchema.properties.directory);
   assert.ok(searchTool.inputSchema.properties.cursor);
   assert.match(searchTool.description, /every session still present/i);

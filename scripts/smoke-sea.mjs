@@ -13,6 +13,7 @@ const viewer = path.join(binaryDir, `agentsession${extension}`);
 const mcp = path.join(binaryDir, `agentsession-mcp${extension}`);
 const metadata = JSON.parse(readFileSync(path.join(binaryDir, "binary-metadata.json"), "utf8"));
 const packageVersion = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).version;
+const expectedProviderIds = ["opencode", "claude-code", "codex", "openclaw", "hermes", "copilot", "gemini", "pi", "deepseek-harness"];
 if (metadata.version !== packageVersion) throw new Error("Binary metadata version does not match package version");
 
 for (const [executable, expected] of [[viewer, "AgentSession —"], [mcp, "AgentSession-MCP"]]) {
@@ -42,6 +43,7 @@ const server = spawn(viewer, [
   "--copilot-dir", path.join(temp, "missing-copilot"),
   "--gemini-dir", path.join(temp, "missing-gemini"),
   "--pi-dir", path.join(temp, "missing-pi"),
+  "--dsh-dir", path.join(temp, "missing-dsh"),
   "--openclaw-dir", path.join(temp, "missing-openclaw"),
   "--hermes-dir", path.join(temp, "missing-hermes")
 ], { stdio: ["ignore", "pipe", "pipe"] });
@@ -63,7 +65,6 @@ try {
     throw new Error(`Viewer binary did not become ready\n${serverStdout}\n${serverStderr}`);
   }
   const providers = await providersResponse.json();
-  const expectedProviderIds = ["opencode", "claude-code", "codex", "openclaw", "hermes", "copilot", "gemini", "pi"];
   if (!Array.isArray(providers)
     || JSON.stringify(providers.map((provider) => provider.id)) !== JSON.stringify(expectedProviderIds)) {
     throw new Error("Viewer binary returned an invalid provider list");
@@ -85,6 +86,7 @@ writeFileSync(configPath, JSON.stringify({
   copilotDir: path.join(temp, "missing-copilot"),
   geminiDir: path.join(temp, "missing-gemini"),
   piDir: path.join(temp, "missing-pi"),
+  dshDir: path.join(temp, "missing-dsh"),
   openclawDir: path.join(temp, "missing-openclaw"),
   hermesDir: path.join(temp, "missing-hermes")
 }));
@@ -118,7 +120,7 @@ try {
   }
   const search = await client.callTool({
     name: "session_search",
-    arguments: { query: "binary-smoke-no-match" }
+    arguments: { query: "binary-smoke-no-match", providers: expectedProviderIds }
   });
   if (search.isError || !search.structuredContent?.untrustedContent) {
     throw new Error("MCP binary search smoke failed");

@@ -1,5 +1,52 @@
 # Changelog
 
+## 1.9.0 - 2026-08-18
+
+### Added
+
+- First-class read-only DeepSeek Harness support: reads DSH v0 event-sourced
+  logs under `$DSH_HOME` (or `~/.dsh`), including multi-frame Zstd and packed
+  chunks, reasoning, tools, compaction, workflow/subagent topology, stored
+  prompt snapshots, runtime inventory, analysis, and the full session protocol.
+  The stock headless CLI has no stable default resume argument, so no terminal
+  resume command is invented.
+- A provider-neutral session protocol (`getSessionProtocol` +
+  `protocolCapabilities`) for Codex CLI, Claude Code, Pi, Hermes Agent, and
+  DeepSeek Harness: stably sequenced events, explicit session relationships
+  (parent/spawned/forked/continued/compacted-into/scheduled-run-of), a
+  separated Task/AgentRun model, metadata-first context artifacts, and
+  recorded/derived provenance, with per-domain capability descriptors. The
+  read-only protocol API `GET /api/:provider/session/:id/protocol` reports it
+  and returns 404 for unknown providers, unknown sessions, or unsupported
+  protocols.
+- Topology-gated Execution view: rendered only for sessions with real
+  child-session topology (attached or detached children), covering
+  `Agent`/`task`/`subtask`/`spawn_agent`/`delegate_task` launchers and
+  provider-marked custom agents, with branch summaries linking directly to
+  their canonical conversation pages. Linear conversations no longer render
+  the tab.
+
+### Changed
+
+- Refreshed OpenClaw and Hermes Agent provider icons with more recognizable
+  marks, locked by a focused regression test.
+
+### Fixed
+
+- Session list cards now show bounded per-session statistics: message count,
+  recorded token totals, observed duration, compaction count and last
+  compaction time, child/background agent-run counts, active task/agent-run
+  statuses, and context-artifact/memory counts, derived through the Session
+  Protocol surface without provider-id branches and never fabricating token
+  totals.
+- Conversation rendering now uses safe GFM rendering and server-backed
+  progressive content loading, with evidence-based Codex subagent lifecycle
+  correlation and task timing.
+- AgentSession MCP treats provider local storage as authoritative: every
+  session still present in a registered provider's store stays reachable
+  regardless of Viewer-only hidden, soft-deleted, or permanently excluded
+  metadata, which now affects only Viewer lists.
+
 ## 1.8.3 - 2026-08-02
 
 ### Fixed

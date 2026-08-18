@@ -1,6 +1,6 @@
 {
   "name": "agentsession-workspace",
-  "version": "1.8.3",
+  "version": "1.9.0",
   "description": "AgentSession — a local-first multi-provider viewer and manager for AI coding sessions.",
   "type": "module",
   "private": true,
@@ -33,6 +33,7 @@
     "copilot",
     "gemini",
     "pi-coding-agent",
+    "deepseek-harness",
     "session-viewer",
     "ai-coding",
     "session-manager",

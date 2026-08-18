@@ -7,18 +7,35 @@
 ![Node.js >= 22.13.0](https://img.shields.io/badge/node-%3E%3D22.13.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.8.3](https://img.shields.io/badge/version-1.8.3-orange?style=flat-square)
+![v1.9.0](https://img.shields.io/badge/version-1.9.0-orange?style=flat-square)
 
-## What's New in 1.8.3
+## What's New in 1.9.0
 
-- AgentSession MCP npm installs and standalone executables now receive their
-  exact version from the build source, so protocol handshakes no longer return
-  a stale release number.
-- Flow detail inspectors now shrink to their content and stay within the visible
-  area near the selected node; long content scrolls internally instead of
-  opening at the top of a tall Flow or beneath the fixed navigation bar.
-- macOS tests canonicalize both analysis-run paths before comparison, accepting
-  the system's equivalent `/var` and `/private/var` directory forms.
+- First-class read-only DeepSeek Harness support: reads DSH v0 event-sourced logs
+  under `$DSH_HOME` (or `~/.dsh`), including multi-frame Zstd and packed chunks,
+  reasoning, tools, compaction, workflow/subagent topology, and stored prompt
+  snapshots, with runtime inventory, analysis, and the full session protocol. The
+  stock headless CLI has no stable default resume argument, so AgentSession does
+  not invent a terminal resume command.
+- A provider-neutral Session Protocol: Codex CLI, Claude Code, Pi, Hermes Agent,
+  and DeepSeek Harness now expose a standardized protocol with stably sequenced
+  events, explicit session relationships, a separated Task/AgentRun model, and
+  metadata-first context artifacts, all carrying recorded/derived provenance.
+- Topology-gated Execution view: the Execution tab renders only for sessions with
+  real child-session topology, and branch summaries link directly to their
+  canonical source sessions; linear conversations no longer show the tab.
+- Bounded per-session statistics on session-list cards: message count, token
+  totals when recorded, observed duration, compaction count and last compaction
+  time, subagent/background run counts, active task statuses, and
+  context-artifact counts, derived through the Session Protocol surface without
+  ever fabricating token totals.
+- Richer conversation rendering: safe GFM rendering, server-backed progressive
+  content loading, and evidence-based Codex subagent lifecycle correlation with
+  task timing.
+- AgentSession MCP now searches every session still present in registered
+  providers' local stores, regardless of Viewer hidden, soft-deleted, or
+  permanently excluded metadata.
+- Refreshed OpenClaw and Hermes Agent provider icons.
 
 See [CHANGELOG.md](./CHANGELOG.md) for the complete release notes.
 
@@ -56,8 +73,10 @@ The focus is no longer just “list my chats.” The goal is to help you reconst
 Every provider has browse, content search, viewer-only metadata management,
 Markdown/JSON export, daily token statistics, Tree/Container/Metrics/Flow/Trace,
 and local prompt/runtime evidence. Active providers with a source-supported
-resume command additionally expose resume and proposal-only analysis when a valid project directory is available. Recursive
-embedded branches are shown only when a
+resume command expose resume when a valid project directory is available;
+proposal-only analysis depends independently on the provider's `sessionAnalysis`
+capability, an enabled analysis configuration, and a valid project directory.
+Recursive embedded branches are shown only when a
 source records a parent/child relationship; AgentSession labels source-only
 relationships as inferred instead of fabricating an invocation. Command-launching
 features require a valid project directory recorded by the source or supplied by
@@ -758,25 +777,46 @@ needs if older sessions must remain available.
 ## Architecture
 
 ```text
+bin/
+└── cli.ts                  # CLI entry point; initializes config before loading services
 src/
 ├── providers/
 │   ├── interface.ts       # ProviderAdapter interface
+│   ├── kinds.ts           # Provider capability checks
 │   ├── index.ts           # Provider registry
-│   ├── opencode/          # OpenCode-compatible SQLite adapter factory
+│   ├── shared/            # Schema-neutral shared provider helpers
+│   ├── opencode/          # OpenCode SQLite adapter and structured views
 │   ├── claude-code/       # Claude Code JSONL adapter
 │   ├── codex/             # Codex CLI JSONL adapter
 │   ├── openclaw/          # OpenClaw branch-aware JSONL adapter
 │   ├── hermes/            # Hermes read-only SQLite adapter
 │   ├── copilot/           # GitHub Copilot CLI event-log adapter
-│   └── gemini/            # Gemini JSON adapter
+│   ├── gemini/            # Gemini JSON adapter
+│   ├── pi/                # Pi branch-tree JSONL adapter
+│   └── deepseek-harness/  # DSH multi-frame Zstd event-log adapter
 ├── db.ts                  # OpenCode-compatible DB queries
 ├── meta.ts                # Local metadata for star, rename, delete, trash
 ├── index-db.ts            # Cross-provider session index
+├── config.ts              # CLI, environment, and JSON configuration
+├── resume.ts              # Structured resume-command resolution
+├── analysis*.ts           # Evidence snapshot, query, execution, and validation pipeline
 ├── server.ts              # HTTP API and SSR pages
 ├── views/                 # Server-rendered templates
-├── static/                # Browser JS/CSS
+├── static/                # Browser JS/CSS, copied to dist at build time
 └── locales/               # English and Chinese copy
+scripts/
+├── copy-static.mjs        # Copies static assets
+└── qa-agent-browser.*     # Live E2E QA
+test/
+└── core.test.mjs          # Provider, analysis, config, and rendering regression tests
 ```
+
+Detailed module boundaries, coding conventions, validation matrix, and local
+server operations live in [AGENTS.md](./AGENTS.md). When adding a provider,
+consult the [provider contribution guide](./docs/CONTRIBUTING-PROVIDER.md) and
+[`docs/ANALYSIS-PROVIDER-IMPLEMENTATION.md`](./docs/ANALYSIS-PROVIDER-IMPLEMENTATION.md)
+as well as `src/providers/interface.ts`; the interface source is the final
+contract.
 
 ## Current Validation
 
@@ -805,30 +845,26 @@ Validated coverage:
 
 Next work focuses on making AI workflows easier to reconstruct precisely:
 
-1. **Session Container Rewrite**
-   - Model sessions as recursive containers so root sessions, child sessions, and subsessions can be inserted and rendered consistently.
+[x] **Session Container Rewrite**
+   - Model sessions as recursive containers so root sessions, child sessions,
+     and subsessions can be inserted and rendered consistently.
 
-2. **Nested Subagent Expansion**
-   - Expand `task` / `subtask` tool calls into collapsible nested subagent sessions instead of ordinary tool rows.
+[x] **Nested Subagent Expansion**
+   - Expand `task` / `subtask` tool calls into collapsible nested subagent
+     sessions instead of ordinary tool rows.
 
-3. **Context View**
-   - Add a context view that shows what was placed into context for every step of every session.
-   - The goal is to answer: which messages, files, tool outputs, summaries, system prompts, agent prompts, or compacted history did the model actually see at that step?
+[x] **Metrics Upgrade**
+   - Add per-session token usage, runtime, step duration, tool counts, and
+     model/provider breakdowns.
 
-4. **Table Of Contents Upgrade**
-   - Improve navigation for long sessions: user prompts, assistant turns, tool calls, subagents, and important milestones.
+[ ] **Tool Flow Tree**
+   - Upgrade the current trace/tool view into a complete tree that includes all
+     sub-session branches, task calls, spans, and timing.
 
-5. **Metrics Upgrade**
-   - Add per-session token usage, runtime, step duration, tool counts, and better model/provider breakdowns.
-
-6. **Token Explorer** ✅
-   - Interactive statistics page with filtering, multi-series trend, model ranking, and drill-down sessions.
-
-7. **Tool Flow Tree**
-   - Upgrade the current trace/tool view into a complete tree that includes all sub-session branches, task calls, spans, and timing.
-
-8. **QA/Polish Pass**
-   - Fix and verify disclosure accessibility, add browser regression checks, and make `agent-browser` verification repeatable.
+[x] **Token Explorer**
+   - Upgrade the statistics panel into an interactive Token Explorer with
+     filtering, multi-series trends, model ranking, session rankings, and
+     data-coverage information.
 
 ## Development
 
