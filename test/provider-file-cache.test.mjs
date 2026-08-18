@@ -26,6 +26,14 @@ import openclaw from "../dist/src/providers/openclaw/adapter.js";
 import hermes from "../dist/src/providers/hermes/adapter.js";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const recentFixtureEpoch = (() => {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() - 1);
+  date.setUTCHours(12, 0, 0, 0);
+  return date.getTime();
+})();
+const recentFixtureTime = (seconds = 0) => new Date(recentFixtureEpoch + seconds * 1_000).toISOString();
+const recentFixtureDay = (seconds = 0) => recentFixtureTime(seconds).slice(0, 10);
 
 function normalizeMtime(filePath) {
   const stat = statSync(filePath);
@@ -52,8 +60,23 @@ function writeJsonLines(filePath, records) {
   writeFileSync(filePath, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
 }
 
+function recentPiFixture(content) {
+  const fixtureEpoch = Date.parse("2026-07-19T01:00:00.000Z");
+  const offset = recentFixtureEpoch - fixtureEpoch;
+  return `${content.trimEnd().split("\n").map((line) => {
+    const record = JSON.parse(line);
+    if (typeof record.timestamp === "string") {
+      record.timestamp = new Date(Date.parse(record.timestamp) + offset).toISOString();
+    }
+    if (typeof record.message?.timestamp === "number") {
+      record.message.timestamp += offset;
+    }
+    return JSON.stringify(record);
+  }).join("\n")}\n`;
+}
+
 function claudeRecords({ sessionId, marker, outputTokens = 7, sidechain = null }) {
-  const timestamp = "2026-07-12T01:00:00.000Z";
+  const timestamp = recentFixtureTime();
   return [
     {
       type: "system",
@@ -72,7 +95,7 @@ function claudeRecords({ sessionId, marker, outputTokens = 7, sidechain = null }
     {
       type: "assistant",
       uuid: `${sessionId}-assistant`,
-      timestamp: "2026-07-12T01:00:01.000Z",
+      timestamp: recentFixtureTime(1),
       message: {
         content: [{ type: "text", text: `${marker} reply` }],
         usage: { input_tokens: 3, output_tokens: outputTokens }
@@ -210,17 +233,17 @@ test("Codex token stats exclude parent usage copied by a legacy fork without NEW
       payload: { type: "token_count", info: { last_token_usage: { input_tokens: total - 10, output_tokens: 10, total_tokens: total } } }
     });
     const parent = [
-      { timestamp: "2026-07-20T00:00:00.000Z", type: "session_meta", payload: { id: "parent" } },
-      token("2026-07-20T00:00:01.000Z", 10),
-      token("2026-07-20T00:00:02.000Z", 20),
-      token("2026-07-20T00:00:03.000Z", 30)
+      { timestamp: recentFixtureTime(), type: "session_meta", payload: { id: "parent" } },
+      token(recentFixtureTime(1), 10),
+      token(recentFixtureTime(2), 20),
+      token(recentFixtureTime(3), 30)
     ];
     const child = [
-      { timestamp: "2026-07-20T01:00:00.000Z", type: "session_meta", payload: { id: "child", parent_thread_id: "parent" } },
-      token("2026-07-20T01:00:01.000Z", 20),
-      token("2026-07-20T01:00:02.000Z", 30),
-      { timestamp: "2026-07-20T01:00:03.000Z", type: "event_msg", payload: { type: "agent_message", message: "child-owned output" } },
-      token("2026-07-20T01:00:04.000Z", 40)
+      { timestamp: recentFixtureTime(30), type: "session_meta", payload: { id: "child", parent_thread_id: "parent" } },
+      token(recentFixtureTime(31), 20),
+      token(recentFixtureTime(32), 30),
+      { timestamp: recentFixtureTime(33), type: "event_msg", payload: { type: "agent_message", message: "child-owned output" } },
+      token(recentFixtureTime(34), 40)
     ];
     const parentFile = path.join(sessions, "rollout-parent.jsonl");
     writeJsonLines(parentFile, parent);
@@ -229,7 +252,7 @@ test("Codex token stats exclude parent usage copied by a legacy fork without NEW
     await sleep(1050);
 
     assert.equal(codex.getSession("child")?.tokenCount, 40);
-    const day = codex.getTokenStats(30).find((item) => item.day === "2026-07-20");
+    const day = codex.getTokenStats(30).find((item) => item.day === recentFixtureDay());
     assert.deepEqual(day && { total: day.totalTokens, events: day.messageCount }, { total: 100, events: 4 });
 
     // Parent changes affect the child's ownership decision. Keep the parent
@@ -237,7 +260,7 @@ test("Codex token stats exclude parent usage copied by a legacy fork without NEW
     // composite parent signature invalidates the child's cached daily bucket.
     writeJsonLines(parentFile, [parent[0], parent[1], parent[3], parent[2]]);
     await sleep(1050);
-    const afterParentChange = codex.getTokenStats(30).find((item) => item.day === "2026-07-20");
+    const afterParentChange = codex.getTokenStats(30).find((item) => item.day === recentFixtureDay());
     assert.deepEqual(
       afterParentChange && { total: afterParentChange.totalTokens, events: afterParentChange.messageCount },
       { total: 150, events: 6 }
@@ -252,31 +275,31 @@ function copilotRecords(marker) {
     {
       type: "session.start",
       id: "copilot-start",
-      timestamp: "2026-07-26T16:30:00.000Z",
+      timestamp: recentFixtureTime(),
       data: { sessionId: "copilot-canonical", copilotVersion: "1.0.75", contextTier: "default" }
     },
     {
       type: "system.message",
       id: "copilot-system",
-      timestamp: "2026-07-26T16:30:01.000Z",
+      timestamp: recentFixtureTime(1),
       data: { content: "copilot-hidden-system-marker" }
     },
     {
       type: "user.message",
       id: "copilot-user",
-      timestamp: "2026-07-26T16:30:02.000Z",
+      timestamp: recentFixtureTime(2),
       data: { content: marker, transformedContent: "copilot-transformed-marker" }
     },
     {
       type: "assistant.message",
       id: "copilot-parent-tool-turn",
-      timestamp: "2026-07-26T16:30:03.000Z",
+      timestamp: recentFixtureTime(3),
       data: { turnId: "0", content: "I will delegate this check.", model: "fixture-model", outputTokens: 20, reasoningOpaque: "copilot-opaque-reasoning-marker" }
     },
     {
       type: "tool.execution_start",
       id: "copilot-task-start",
-      timestamp: "2026-07-26T16:30:04.000Z",
+      timestamp: recentFixtureTime(4),
       data: {
         turnId: "0",
         toolCallId: "copilot-agent-call",
@@ -288,47 +311,47 @@ function copilotRecords(marker) {
       type: "subagent.started",
       id: "copilot-agent-start",
       agentId: "copilot-agent-call",
-      timestamp: "2026-07-26T16:30:05.000Z",
+      timestamp: recentFixtureTime(5),
       data: { toolCallId: "copilot-agent-call", agentName: "explore", agentDisplayName: "Explore Agent" }
     },
     {
       type: "system.message",
       id: "copilot-child-system",
       agentId: "copilot-agent-call",
-      timestamp: "2026-07-26T16:30:06.000Z",
+      timestamp: recentFixtureTime(6),
       data: { content: "copilot-child-hidden-system-marker" }
     },
     {
       type: "user.message",
       id: "copilot-child-user",
       agentId: "copilot-agent-call",
-      timestamp: "2026-07-26T16:30:07.000Z",
+      timestamp: recentFixtureTime(7),
       data: { content: "Copilot child visible marker", transformedContent: "copilot-child-transformed-marker" }
     },
     {
       type: "assistant.message",
       id: "copilot-child-assistant",
       agentId: "copilot-agent-call",
-      timestamp: "2026-07-26T16:30:08.000Z",
+      timestamp: recentFixtureTime(8),
       data: { turnId: "0", parentToolCallId: "copilot-agent-call", content: "Child result is ready.", model: "fixture-model", outputTokens: 8, encryptedContent: "copilot-encrypted-marker" }
     },
     {
       type: "subagent.completed",
       id: "copilot-agent-complete",
       agentId: "copilot-agent-call",
-      timestamp: "2026-07-26T16:30:09.000Z",
+      timestamp: recentFixtureTime(9),
       data: { toolCallId: "copilot-agent-call", agentName: "explore", agentDisplayName: "Explore Agent" }
     },
     {
       type: "tool.execution_complete",
       id: "copilot-task-complete",
-      timestamp: "2026-07-26T16:30:10.000Z",
+      timestamp: recentFixtureTime(10),
       data: { turnId: "0", toolCallId: "copilot-agent-call", success: true, result: { content: "Child result is ready.", detailedContent: "copilot-detailed-marker" } }
     },
     {
       type: "assistant.message",
       id: "copilot-parent-final",
-      timestamp: "2026-07-26T16:30:11.000Z",
+      timestamp: recentFixtureTime(11),
       data: { turnId: "1", content: "The parent answer is complete.", model: "fixture-model", outputTokens: 4 }
     }
   ];
@@ -349,12 +372,12 @@ function createCopilotStore(filePath, project) {
   `);
   db.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?)").run(
     "copilot-canonical", project, "fixture-repository", "main", "Catalog fallback title",
-    "2026-07-26T16:30:00.000Z", "2026-07-26T16:30:11.000Z"
+    recentFixtureTime(), recentFixtureTime(11)
   );
   const insert = db.prepare("INSERT INTO assistant_usage_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-  insert.run("copilot-canonical", 0, null, 100, 20, 50, 10, 5, "2026-07-26T16:30:03.000Z");
-  insert.run("copilot-canonical", 0, "copilot-agent-call", 20, 8, 0, 0, 0, "2026-07-26T16:30:08.000Z");
-  insert.run("copilot-canonical", 1, null, 30, 4, 0, 0, 0, "2026-07-26T16:30:11.000Z");
+  insert.run("copilot-canonical", 0, null, 100, 20, 50, 10, 5, recentFixtureTime(3));
+  insert.run("copilot-canonical", 0, "copilot-agent-call", 20, 8, 0, 0, 0, recentFixtureTime(8));
+  insert.run("copilot-canonical", 1, null, 30, 4, 0, 0, 0, recentFixtureTime(11));
   db.close();
 }
 
@@ -400,7 +423,7 @@ test("Copilot CLI embeds inline subagents, reads catalog telemetry, and excludes
     assert.equal(copilot.getTrace("copilot-canonical")?.summary?.totalSteps, 2);
     assert.equal(copilot.getSystemPrompts("copilot-canonical")?.mode, "copilot-resolved");
     assert.match(JSON.stringify(copilot.getRuntimeEnvironment("copilot-canonical")), /AGENTS\.md/);
-    const day = copilot.getTokenStats(30).find((item) => item.day === "2026-07-26");
+    const day = copilot.getTokenStats(30).find((item) => item.day === recentFixtureDay());
     assert.deepEqual(day && {
       input: day.inputTokens,
       output: day.outputTokens,
@@ -427,22 +450,22 @@ function geminiRecord(marker, output = 5) {
   return {
     sessionId: "gemini-canonical",
     projectHash: "gemini-fixture-project",
-    startTime: "2026-07-12T02:00:00.000Z",
-    lastUpdated: "2026-07-12T02:00:01.000Z",
+    startTime: recentFixtureTime(),
+    lastUpdated: recentFixtureTime(1),
     messages: [
-      { id: "gem-user", type: "user", text: marker, timestamp: "2026-07-12T02:00:00.000Z" },
+      { id: "gem-user", type: "user", text: marker, timestamp: recentFixtureTime() },
       {
         id: "gem-assistant",
         type: "gemini",
         text: `${marker} reply`,
-        timestamp: "2026-07-12T02:00:01.000Z",
+        timestamp: recentFixtureTime(1),
         tokenUsage: { input: 2, output, total: output + 2, thoughts: 1, cached: 1 }
       },
       {
         id: "gem-info",
         type: "info",
         text: "Gemini provider diagnostic marker",
-        timestamp: "2026-07-12T02:00:01.000Z"
+        timestamp: recentFixtureTime(1)
       }
     ]
   };
@@ -518,7 +541,7 @@ test("Pi file cache preserves active-branch sessions and the last good transcrip
     const sessions = path.join(root, "sessions", "--D-WorkSpace-pi-fixture--");
     mkdirSync(sessions, { recursive: true });
     const sessionFile = path.join(sessions, "2026-07-19T01-00-00-000Z_019f7b00-0000-7000-8000-000000000001.jsonl");
-    const fixture = readFileSync(path.join(process.cwd(), "test", "fixtures", "pi-current.jsonl"), "utf-8");
+    const fixture = recentPiFixture(readFileSync(path.join(process.cwd(), "test", "fixtures", "pi-current.jsonl"), "utf-8"));
     writeFileSync(sessionFile, fixture);
     normalizeMtime(sessionFile);
     initConfig(["--pi-dir", root]);
@@ -562,19 +585,19 @@ test("OpenClaw file cache preserves the active branch, tools, usage, and runtime
     const sessionId = "openclaw-fixture";
     const filePath = path.join(sessionsDir, `${sessionId}.jsonl`);
     const records = [
-      { type: "session", version: 2, id: sessionId, timestamp: "2026-08-02T01:00:00.000Z", cwd: workspace },
-      { type: "message", id: "u1", parentId: null, timestamp: "2026-08-02T01:00:00.000Z", message: { role: "user", content: "OpenClaw marker" } },
-      { type: "message", id: "a-abandoned", parentId: "u1", timestamp: "2026-08-02T01:00:01.000Z", message: { role: "assistant", content: [{ type: "text", text: "abandoned" }] } },
-      { type: "message", id: "a1", parentId: "u1", timestamp: "2026-08-02T01:00:02.000Z", message: { role: "assistant", model: "deepseek-v4-flash", provider: "deepseek", content: [{ type: "thinking", thinking: "inspect" }, { type: "toolCall", id: "call1", name: "read", arguments: { path: "package.json" } }], usage: { input: 15, output: 10, reasoningTokens: 3, cacheRead: 5, totalTokens: 30 } } },
-      { type: "message", id: "r1", parentId: "a1", timestamp: "2026-08-02T01:00:03.000Z", message: { role: "toolResult", toolCallId: "call1", toolName: "read", content: [{ type: "text", text: "fixture output" }], isError: false } },
-      { type: "message", id: "a2", parentId: "r1", timestamp: "2026-08-02T01:00:04.000Z", message: { role: "assistant", content: [{ type: "text", text: "OpenClaw ready" }] } }
+      { type: "session", version: 2, id: sessionId, timestamp: recentFixtureTime(), cwd: workspace },
+      { type: "message", id: "u1", parentId: null, timestamp: recentFixtureTime(), message: { role: "user", content: "OpenClaw marker" } },
+      { type: "message", id: "a-abandoned", parentId: "u1", timestamp: recentFixtureTime(1), message: { role: "assistant", content: [{ type: "text", text: "abandoned" }] } },
+      { type: "message", id: "a1", parentId: "u1", timestamp: recentFixtureTime(2), message: { role: "assistant", model: "deepseek-v4-flash", provider: "deepseek", content: [{ type: "thinking", thinking: "inspect" }, { type: "toolCall", id: "call1", name: "read", arguments: { path: "package.json" } }], usage: { input: 15, output: 10, reasoningTokens: 3, cacheRead: 5, totalTokens: 30 } } },
+      { type: "message", id: "r1", parentId: "a1", timestamp: recentFixtureTime(3), message: { role: "toolResult", toolCallId: "call1", toolName: "read", content: [{ type: "text", text: "fixture output" }], isError: false } },
+      { type: "message", id: "a2", parentId: "r1", timestamp: recentFixtureTime(4), message: { role: "assistant", content: [{ type: "text", text: "OpenClaw ready" }] } }
     ];
     writeJsonLines(filePath, records);
-    writeFileSync(path.join(sessionsDir, "sessions.json"), JSON.stringify({ "agent:main:fixture": { sessionId, displayName: "OpenClaw cached fixture", updatedAt: Date.parse("2026-08-02T01:00:04.000Z") } }));
+    writeFileSync(path.join(sessionsDir, "sessions.json"), JSON.stringify({ "agent:main:fixture": { sessionId, displayName: "OpenClaw cached fixture", updatedAt: Date.parse(recentFixtureTime(4)) } }));
     writeJsonLines(path.join(childSessionsDir, "openclaw-child.jsonl"), [
-      { type: "session", version: 2, id: "openclaw-child", timestamp: "2026-08-02T01:00:05.000Z", cwd: workspace },
-      { type: "message", id: "cu1", parentId: null, timestamp: "2026-08-02T01:00:05.000Z", message: { role: "user", content: "child task" } },
-      { type: "message", id: "ca1", parentId: "cu1", timestamp: "2026-08-02T01:00:06.000Z", message: { role: "assistant", content: [{ type: "text", text: "child result" }] } }
+      { type: "session", version: 2, id: "openclaw-child", timestamp: recentFixtureTime(5), cwd: workspace },
+      { type: "message", id: "cu1", parentId: null, timestamp: recentFixtureTime(5), message: { role: "user", content: "child task" } },
+      { type: "message", id: "ca1", parentId: "cu1", timestamp: recentFixtureTime(6), message: { role: "assistant", content: [{ type: "text", text: "child result" }] } }
     ]);
     writeFileSync(path.join(childSessionsDir, "sessions.json"), JSON.stringify({ "agent:worker:fixture": { sessionId: "openclaw-child", spawnedBy: "agent:main:fixture" } }));
     initConfig(["--openclaw-dir", root]);
@@ -592,7 +615,7 @@ test("OpenClaw file cache preserves the active branch, tools, usage, and runtime
     assert.ok(openclaw.getRuntimeEnvironment(sessionId)?.extensions.some(entry => entry.name === "AGENTS.md"));
     assert.equal(openclaw.getSystemPrompts(sessionId)?.mode, "openclaw-resolved");
 
-    writeFileSync(path.join(sessionsDir, "sessions.json"), JSON.stringify({ "agent:main:fixture": { sessionId, displayName: "OpenClaw refreshed registry title", updatedAt: Date.parse("2026-08-02T01:00:05.000Z") } }));
+    writeFileSync(path.join(sessionsDir, "sessions.json"), JSON.stringify({ "agent:main:fixture": { sessionId, displayName: "OpenClaw refreshed registry title", updatedAt: Date.parse(recentFixtureTime(5)) } }));
     await sleep(1050);
     assert.equal(openclaw.getSession(sessionId)?.title, "OpenClaw refreshed registry title");
 
@@ -624,7 +647,7 @@ test("Hermes snapshot store reads SQLite once per revision and separates delegat
         platform_message_id TEXT, active INTEGER DEFAULT 1
       );
     `);
-    const started = Date.parse("2026-08-02T02:00:00.000Z") / 1000;
+    const started = Math.floor(recentFixtureEpoch / 1000);
     // Real Hermes transitions: compression rotation ends the live session with
     // end_reason='compression' and creates a continuation whose
     // parent_session_id points back at it. The root chain compresses twice

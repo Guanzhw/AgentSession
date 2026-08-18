@@ -1,6 +1,6 @@
 # AgentSession
 
-> 开发者的 AI 会话档案馆：把 OpenCode、Claude Code、Codex CLI、OpenClaw、Hermes Agent、Pi，以及历史 Copilot 和 Gemini CLI 会话集中到一个可搜索、可追踪、可复盘的 Web UI。
+> 开发者的 AI 会话档案馆：把 OpenCode、Claude Code、Codex CLI、OpenClaw、Hermes Agent、Pi、DeepSeek Harness，以及历史 Copilot 和 Gemini CLI 会话集中到一个可搜索、可追踪、可复盘的 Web UI。
 
 [English](./README.en.md) · [中文](./README.md)
 
@@ -49,10 +49,11 @@ AgentSession 是一个本地优先的 AI 编程会话查看器。它不会修改
 | GitHub Copilot CLI | 历史会话支持 | `~/.copilot/session-state/*/events.jsonl` + `~/.copilot/session-store.db` | 保留既有会话的浏览、搜索、导出、统计和共享视图；默认不再提供恢复或分析动作。 |
 | Gemini CLI | 历史会话支持 | `~/.gemini/tmp/*/chats/*.json` | 可浏览、搜索、导出、查看 Token 统计、共享视图和本地提示词/运行时证据。默认不提供继续会话或分析动作；其扁平 chat 格式没有 child-session 关系，因此 AgentSession 不会伪造嵌入式子 agent 分支。 |
 | Pi | 完整共享能力 | `~/.pi/agent/sessions/**/*.jsonl` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析、活动分支与 fork 关系。若记录了子 agent 启动工具，会在对应调用处嵌入 child；只有来源记录的 fork 关系会明确标为推断。会话协议：压缩/branch_summary 事件与元数据优先产物 |
+| DeepSeek Harness | 完整共享浏览能力 | `$DSH_HOME/sessions/**/session.jsonl.zstd` 或 `~/.dsh/sessions/**/session.jsonl.zstd` | 读取 DSH v0 事件溯源日志（含多帧 Zstd 与 packed chunks）、reasoning、工具、压缩、工作流/子 agent、提示词快照、运行时清单、分析与完整会话协议。当前官方 headless CLI 没有稳定的默认恢复参数，因此不会伪造终端恢复命令。 |
 
 所有 Provider 都提供浏览、内容搜索、仅 viewer 的元数据管理、Markdown/JSON 导出、
-每日 Token 统计、Tree/Container/Metrics/Flow/Trace 和本地提示词/运行时证据。活跃
-Provider 在有有效项目目录时还提供继续会话和只产出提案的分析。只有来源记录了
+每日 Token 统计、Tree/Container/Metrics/Flow/Trace 和本地提示词/运行时证据。具有来源支持的
+恢复命令且有有效项目目录的活跃 Provider 还提供继续会话和只产出提案的分析。只有来源记录了
 parent/child 关系时才会
 递归嵌入分支；仅能从来源关系推断的连接会明确标注为推断，而不会伪造一次调用。需要启动
 命令的能力要求来源记录了有效项目目录，或由显式、仅 viewer 的项目键映射提供目录；Provider
@@ -70,19 +71,21 @@ Flow 与通用 Trace 都由这层派生。只有当来源保存了更丰富的�
 
 ### 共享会话协议（Session Protocol）
 
-在 Message 兼容/阅读视图之上，Codex CLI、Claude Code、Pi 与 Hermes Agent 还暴露一个
+在 Message 兼容/阅读视图之上，Codex CLI、Claude Code、Pi、Hermes Agent 与 DeepSeek Harness 还暴露一个
 Provider 中立的标准化会话协议（`getSessionProtocol` + `protocolCapabilities`）：带稳定序列号的事件
 （`SessionEventEnvelope`，`sequence` 是 1..n 稠密序列，按来源记录顺序编号、与时间戳无关）、显式的会话关系（parent / spawned / forked / continued /
 compacted-into / scheduled-run-of）、任务（Task）与代理运行（AgentRun）分离模型、以及元数据优先的上下文产物（ContextArtifact）。所有值都携带 provenance（`recorded` = 来源原生记录，`derived` = 适配器从其他证据重建）。
 
 - 上下文压缩成为标准 `context.compaction` 事件：Codex 的 `compacted` / `context_compacted` /
   `contextCompaction` 变体（无摘要时按 opaque 处理）、Claude Code 的 compact 边界与
-  PreCompact/PostCompact 记录、Pi 的 `compaction` 与 `branch_summary` 条目、Hermes 的压缩延续链
-  （opaque + continuationSessionId）。压缩不会产生 memory/context 生命周期事件。
+  PreCompact/PostCompact 记录、Pi 的 `compaction` 与 `branch_summary` 条目、Hermes 的压缩延续链、
+  DeepSeek Harness 的 `compaction/summary` 与 `compaction/prune` 记录
+  （摘要仅作为元数据保留；prune 为 opaque）。压缩不会产生 memory/context 生命周期事件。
 - 子代理/父会话证据归一化为关系与 Task/AgentRun：Codex 的 NEW_TASK 信封与 spawn 工具调用、Claude 的
   `<task-notification>` 与 sidechain transcript、Hermes 的 delegate 会话。执行模式（foreground/
   background/subagent/scheduled/team）只属于 AgentRun；Task 只携带状态、依赖与指派信息。压缩延续不会被当作子代理；
-  Pi 的 `parentSession` 只导出为派生的 parent 关系（轮转或 fork 无法从文件元数据区分），不虚构 spawn。
+  Pi 的 `parentSession` 只导出为派生的 parent 关系（轮转或 fork 无法从文件元数据区分），不虚构 spawn；
+  DeepSeek Harness 只在 header/`subagent/descriptor` 或 `tool-workflow/*` 有记录证据时导出 fork、spawn、Task 与 AgentRun。
 - 上下文产物是元数据优先的：`kind`（memory/instruction/skill/rule/summary）、`scope`（session/agent/
   project/user/organization）、`origin`（user-authored/agent-generated/provider-generated）与
   `contentAccess`（full/summary/metadata-only/unavailable）描述产物，绝不携带压缩文本本身。压缩派生的产物
@@ -99,7 +102,7 @@ compacted-into / scheduled-run-of）、任务（Task）与代理运行（AgentRu
 - **会话列表与搜索**：全局入口筛选 Provider 标题、viewer 自定义标题和目录；Provider 页面继续提供消息内容搜索、收藏和本地管理。标题类型筛选可将带有 analysis/analyze 信号的显示标题与其他会话分开；它是可逆的查看器启发式，不是 Provider 元数据。
 - **详情页复盘**：按 Provider 保存的模型响应边界，把 reasoning、action/tool call 和 observation/tool result 组织在同一个 ReACT 回合中。
 - **稳定的详情标签**：Overview、Conversation、执行、Analysis 和 Raw data 共用稳定内容轨道；Conversation 目录栏淡入淡出，不会让标题、操作区和标签栏重新排版，并尊重系统减少动态效果偏好。
-- **递归 Session Tree**：当 OpenCode、Codex、Copilot、Pi 或保存了 sidechain transcript 的 Claude Code 记录 parent/child 证据时，会被组织成嵌套结构；Copilot 的内嵌 agent 仍保持在主会话中，因为它们不是可独立恢复的会话。只有来源关系的连接会明确标为推断。
+- **递归 Session Tree**：当 OpenCode、Codex、Copilot、Pi、DeepSeek Harness 或保存了 sidechain transcript 的 Claude Code 记录 parent/child 证据时，会被组织成嵌套结构；Copilot 的内嵌 agent 仍保持在主会话中，因为它们不是可独立恢复的会话。只有来源关系的连接会明确标为推断。
 - **执行视图**：只有真正包含子代理拓扑的会话才会显示“执行”标签页；它只渲染子代理分支/返回与分支摘要，并直接链接到来源会话作为分支证据，覆盖 `Agent`、`task`、`subtask`、`spawn_agent` 与 `delegate_task` 启动器，以及由 provider 明确标记的自定义 agent。线性对话不渲染执行标签页或惰性加载标记。
 - **Table of Contents**：长会话自动生成可折叠导航，只索引用户消息、assistant 消息、已知启动器或由 provider 明确标记的自定义子 agent。
 - **会话内搜索**：可从详情页操作栏打开紧凑搜索，或按 `/` 聚焦；结果会同时显示匹配回合与文本命中数，逐词高亮，并在上下跳转时保持控制条可见。
@@ -156,6 +159,7 @@ agentsession [options]
 --copilot-dir <path>  GitHub Copilot CLI 数据目录
 --gemini-dir <path>   Gemini CLI 数据目录
 --pi-dir <path>       Pi agent 数据目录
+--dsh-dir <path>      DeepSeek Harness 数据目录（默认 `$DSH_HOME` 或 `~/.dsh`）
 --openclaw-dir <path> OpenClaw state 数据目录
 --hermes-dir <path>   Hermes Agent 数据目录
 --config <path>       AgentSession JSON 配置文件
@@ -182,6 +186,7 @@ agentsession [options]
 | `OPENCLAW_HOME` | OpenClaw home；state 默认为其下的 `.openclaw` |
 | `HERMES_HOME` | Hermes Agent 数据目录 |
 | `PI_CODING_AGENT_DIR` | Pi agent 数据目录，默认 `~/.pi/agent` |
+| `DSH_HOME` | DeepSeek Harness 数据目录，默认 `~/.dsh` |
 | `AGENTSESSION_META_PATH` | AgentSession 元数据库路径；未指定 `AGENTSESSION_CONFIG` 时，配置文件也放在同一目录 |
 | `AGENTSESSION_CONFIG` | AgentSession JSON 配置文件路径 |
 
@@ -260,7 +265,7 @@ API 会等待终端 Host 或 PowerShell wrapper 确认启动后才返回成功�
 无法启动，页面会显示错误，而不是弹出成功提示。运行时启动日志会记录所选 Host、
 fallback 信息，以及可用时的 launcher PID。
 
-活跃 Provider 都声明了默认继续命令：
+具有稳定终端恢复命令的活跃 Provider 会声明默认继续命令：
 
 | Provider | 默认命令 |
 |---|---|
@@ -272,6 +277,7 @@ fallback 信息，以及可用时的 launcher PID。
 | GitHub Copilot CLI | 历史会话模式；默认不启动 |
 | Gemini CLI | 历史会话模式；默认不启动 |
 | Pi | `pi --session {sessionId}` |
+| DeepSeek Harness | 当前 stock headless CLI 无稳定默认恢复命令；不会启动 |
 
 每个命令和 PowerShell 兼容终端 shell 都可以在 AgentSession 配置目录的
 `config.json` 中覆盖，也可以通过 `--config` 指定文件：
@@ -661,7 +667,8 @@ src/
 │   ├── hermes/            # Hermes 只读 SQLite 适配器
 │   ├── copilot/           # GitHub Copilot CLI 事件日志适配器
 │   ├── gemini/            # Gemini JSON 适配器
-│   └── pi/                # Pi 分支树 JSONL 适配器
+│   ├── pi/                # Pi 分支树 JSONL 适配器
+│   └── deepseek-harness/  # DSH 多帧 Zstd 事件日志适配器
 ├── db.ts                  # OpenCode-compatible DB 查询
 ├── meta.ts                # 收藏、重命名、删除等本地元数据
 ├── index-db.ts            # 跨 Provider 会话索引

@@ -2127,23 +2127,26 @@ test("windows executable resolution prefers runnable command shims", () => {
   );
 });
 
-test("active providers declare a configurable resume command while legacy providers stay read-only", () => {
+test("provider registration distinguishes source-supported resume commands from active read-only transcript support", () => {
   const providers = getAllProviders();
   assert.deepEqual(
     providers.map((provider) => provider.id),
-    ["opencode", "claude-code", "codex", "openclaw", "hermes", "copilot", "gemini", "pi"]
+    ["opencode", "claude-code", "codex", "openclaw", "hermes", "copilot", "gemini", "pi", "deepseek-harness"]
   );
-  for (const provider of providers.filter((provider) => provider.lifecycle !== "legacy")) {
+  for (const provider of providers.filter((provider) => provider.resumeCommand)) {
     assert.equal(typeof provider.resumeCommand?.executable, "string", provider.id);
-    assert.ok(provider.resumeCommand.executable, provider.id);
-    assert.ok(Array.isArray(provider.resumeCommand.args), provider.id);
-    assert.ok(provider.resumeCommand.args.includes("{sessionId}"), provider.id);
+    assert.ok(provider.resumeCommand?.executable, provider.id);
+    assert.ok(Array.isArray(provider.resumeCommand?.args), provider.id);
+    assert.ok(provider.resumeCommand?.args.includes("{sessionId}"), provider.id);
   }
   assert.equal(providers.find((provider) => provider.id === "gemini")?.resumeCommand, undefined);
   assert.equal(providers.find((provider) => provider.id === "gemini")?.lifecycle, "legacy");
   assert.equal(providers.find((provider) => provider.id === "copilot")?.resumeCommand, undefined);
   assert.equal(providers.find((provider) => provider.id === "copilot")?.lifecycle, "legacy");
+  assert.equal(providers.find((provider) => provider.id === "deepseek-harness")?.resumeCommand, undefined);
+  assert.notEqual(providers.find((provider) => provider.id === "deepseek-harness")?.lifecycle, "legacy");
   assert.equal(parseArgs(["--pi-dir", "D:\\fixtures\\pi-agent"]).piDir, "D:\\fixtures\\pi-agent");
+  assert.equal(parseArgs(["--dsh-dir", "D:\\fixtures\\dsh"]).dshDir, "D:\\fixtures\\dsh");
   assert.equal(parseArgs(["--copilot-dir", "D:\\fixtures\\copilot"]).copilotDir, "D:\\fixtures\\copilot");
   assert.equal(parseArgs(["--openclaw-dir", "D:\\fixtures\\openclaw"]).openclawDir, "D:\\fixtures\\openclaw");
   assert.equal(parseArgs(["--hermes-dir", "D:\\fixtures\\hermes"]).hermesDir, "D:\\fixtures\\hermes");
@@ -2158,7 +2161,7 @@ test("every provider exposes the complete shared Agent Loop capability surface",
     assert.equal(features.sessionTrace, true, provider.id);
     assert.equal(features.systemPromptEvidence, true, provider.id);
     assert.equal(features.runtimeEnvironment, true, provider.id);
-    assert.equal(features.resume, provider.lifecycle !== "legacy", provider.id);
+    assert.equal(features.resume, provider.lifecycle !== "legacy" && provider.id !== "deepseek-harness", provider.id);
     assert.equal(features.openCodeStatsStore, provider.id === "opencode", provider.id);
   }
 });

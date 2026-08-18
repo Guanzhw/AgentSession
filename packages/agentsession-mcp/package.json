@@ -28,7 +28,8 @@
     "hermes-agent",
     "copilot",
     "gemini",
-    "pi-coding-agent"
+    "pi-coding-agent",
+    "deepseek-harness"
   ],
   "author": "Guanzhw",
   "license": "MIT",

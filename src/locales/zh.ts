@@ -496,6 +496,7 @@ export const zh = {
   "provider.copilot": "GitHub Copilot CLI",
   "provider.gemini": "Gemini CLI",
   "provider.pi": "Pi",
+  "provider.deepseek-harness": "DeepSeek Harness",
   "provider.legacy": "历史支持",
   "provider.read_only": "只读模式",
   "provider.not_detected": "未安装",

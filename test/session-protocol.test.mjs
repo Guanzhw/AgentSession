@@ -34,6 +34,7 @@ import { buildCodexSessionProtocol, codexCompactionRecord } from "../dist/src/pr
 import { buildClaudeSessionProtocol, claudeCompactionRecord } from "../dist/src/providers/claude-code/protocol.js";
 import { buildPiSessionProtocol, piCompactionEntry } from "../dist/src/providers/pi/protocol.js";
 import { buildHermesSessionProtocol } from "../dist/src/providers/hermes/protocol.js";
+import { buildDshSessionProtocol } from "../dist/src/providers/deepseek-harness/protocol.js";
 import { buildLinkedMessageSessionViews } from "../dist/src/providers/shared/linked-message-session.js";
 
 const recorded = (sourceType, sourceId = null) => ({ fidelity: "recorded", sourceType, sourceId });
@@ -296,7 +297,7 @@ test("capability descriptors stay truthful across every provider", () => {
       assert.notEqual(protocolCapability(provider, "sessionEvents").support, "none", provider.id);
     }
   }
-  const implemented = ["codex", "claude-code", "pi", "hermes"];
+  const implemented = ["codex", "claude-code", "pi", "hermes", "deepseek-harness"];
   for (const provider of getAllProviders()) {
     assert.equal(
       supportsSessionProtocol(provider),
@@ -364,6 +365,17 @@ test("descriptor provenance never overclaims recorded for mixed-fidelity domains
     buildHermesSessionProtocol({
       ...hermesEntry("hermes-root"),
       family: [hermesEntry("hermes-root"), hermesEntry("hermes-continuation", null, "hermes-root")]
+    }),
+    // DSH: every retained source event is recorded rather than a
+    // message-derived reconstruction; compaction remains metadata-only.
+    buildDshSessionProtocol({
+      session: session("dsh-root"),
+      records: [
+        { type: "session", version: 0, id: "dsh-root", createdAt: 1000 },
+        { type: "compaction/prune", seq: 0, time: 1100, data: { shadowedTokenCount: 42, shadowedSeqs: [] } }
+      ],
+      messages: [],
+      children: []
     })
   ];
 
@@ -373,7 +385,8 @@ test("descriptor provenance never overclaims recorded for mixed-fidelity domains
       codex: protocols[0],
       "claude-code": protocols[1],
       pi: protocols[2],
-      hermes: protocols[3]
+      hermes: protocols[3],
+      "deepseek-harness": protocols[4]
     }[provider.id];
     for (const [domain, key] of domains) {
       const descriptor = descriptors[domain];
@@ -390,11 +403,13 @@ test("descriptor provenance never overclaims recorded for mixed-fidelity domains
         assert.equal(hasRecorded || hasDerived, values.length > 0, provider.id);
       }
     }
-    assert.equal(
-      descriptors.sessionEvents.provenance,
-      "derived",
-      "normalized event domains never claim a single recorded fidelity"
-    );
+    if (provider.id !== "deepseek-harness") {
+      assert.equal(
+        descriptors.sessionEvents.provenance,
+        "derived",
+        "normalized event domains never claim a single recorded fidelity"
+      );
+    }
   }
 });
 

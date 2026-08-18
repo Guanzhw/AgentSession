@@ -1,6 +1,6 @@
 # AgentSession
 
-> A local AI session archive for developers: one searchable, traceable, reviewable web UI for OpenCode, Claude Code, Codex CLI, OpenClaw, Hermes Agent, Pi, and legacy Copilot and Gemini sessions.
+> A local AI session archive for developers: one searchable, traceable, reviewable web UI for OpenCode, Claude Code, Codex CLI, OpenClaw, Hermes Agent, Pi, DeepSeek Harness, and legacy Copilot and Gemini sessions.
 
 [English](./README.en.md) · [中文](./README.md)
 
@@ -51,11 +51,12 @@ The focus is no longer just “list my chats.” The goal is to help you reconst
 | GitHub Copilot CLI | Legacy history support | `~/.copilot/session-state/*/events.jsonl` + `~/.copilot/session-store.db` | Existing histories remain browsable, searchable, exportable, and available to shared views; resume and analysis are disabled by default. |
 | Gemini CLI | Legacy history support | `~/.gemini/tmp/*/chats/*.json` | Browse, search, export, token statistics, shared views, and local prompt/runtime evidence for existing histories. It has no default resume or analysis action, and its flat chat format has no child-session relationship, so AgentSession does not invent embedded subagent branches. |
 | Pi | Full shared support | `~/.pi/agent/sessions/**/*.jsonl` | Shared Agent Loop views, trace, local prompt evidence, runtime inventory, analysis, active branches, and fork relationships. A recorded subagent launcher embeds the child at that call; a source-only fork relationship remains explicitly inferred. Session protocol: compaction/branch_summary events and metadata-first artifacts |
+| DeepSeek Harness | Full shared read support | `$DSH_HOME/sessions/**/session.jsonl.zstd` or `~/.dsh/sessions/**/session.jsonl.zstd` | Reads DSH v0 event-sourced logs (including multi-frame Zstd and packed chunks), reasoning, tools, compaction, workflow/subagents, stored prompt snapshots, runtime inventory, analysis, and the full session protocol. The stock headless CLI has no stable default resume argument, so AgentSession does not invent a terminal resume command. |
 
 Every provider has browse, content search, viewer-only metadata management,
 Markdown/JSON export, daily token statistics, Tree/Container/Metrics/Flow/Trace,
-and local prompt/runtime evidence. Active providers additionally expose resume
-and proposal-only analysis when a valid project directory is available. Recursive
+and local prompt/runtime evidence. Active providers with a source-supported
+resume command additionally expose resume and proposal-only analysis when a valid project directory is available. Recursive
 embedded branches are shown only when a
 source records a parent/child relationship; AgentSession labels source-only
 relationships as inferred instead of fabricating an invocation. Command-launching
@@ -78,8 +79,8 @@ Adding a provider? Follow the [provider contribution guide](./docs/CONTRIBUTING-
 
 ### Shared Session Protocol
 
-On top of the Message read/compatibility view, Codex CLI, Claude Code, Pi, and
-Hermes Agent expose a provider-neutral standardized session protocol
+On top of the Message read/compatibility view, Codex CLI, Claude Code, Pi,
+Hermes Agent, and DeepSeek Harness expose a provider-neutral standardized session protocol
 (`getSessionProtocol` + `protocolCapabilities`): events with stable REQUIRED
 sequences (`SessionEventEnvelope`, dense 1..n in canonical source record
 order — never timestamp chronology), explicit session relationships (parent /
@@ -91,8 +92,9 @@ evidence, `derived` = reconstructed by the adapter from other evidence).
 - Context compaction becomes the standard `context.compaction` event: Codex
   `compacted` / `context_compacted` / `contextCompaction` variants (opaque when
   no summary exists), Claude Code compact boundaries and PreCompact/PostCompact
-  records, Pi `compaction` and `branch_summary` entries, and Hermes compression
-  continuations (opaque + continuationSessionId). Plain compaction never emits
+  records, Pi `compaction` and `branch_summary` entries, Hermes compression
+  continuations, and DeepSeek Harness `compaction/summary` and `compaction/prune`
+  entries (the summary is retained as metadata-only; a prune is opaque). Plain compaction never emits
   memory/context lifecycle events.
 - Subagent/parent-session evidence normalizes to relationships and
   Task/AgentRun: Codex NEW_TASK envelopes and spawn tool calls, Claude
@@ -101,7 +103,9 @@ evidence, `derived` = reconstructed by the adapter from other evidence).
   belongs to AgentRun only; Tasks carry status, dependencies, and assignee.
   Compression continuations are never treated as subagents; Pi's
   `parentSession` exports only a derived parent relationship (rotation or fork
-  is indistinguishable from file metadata) without fabricating a spawn.
+  is indistinguishable from file metadata) without fabricating a spawn. DeepSeek
+  Harness exports fork/spawn, Task, and AgentRun only when its header,
+  `subagent/descriptor`, or `tool-workflow/*` records supply the evidence.
 - Context artifacts are metadata-first: `kind` (memory/instruction/skill/rule/
   summary), `scope` (session/agent/project/user/organization), `origin`
   (user-authored/agent-generated/provider-generated), and `contentAccess`
@@ -124,7 +128,7 @@ All providers store stars, custom titles, soft deletes, and permanent exclusions
 - **Session list and search**: the global entry filters provider titles, viewer custom titles, and directories; provider pages retain message-content search, starring, and local management. A reversible title-type filter can separate displayed titles containing analysis/analyze signals from other sessions; it is a viewer heuristic, not provider metadata.
 - **Session detail review**: provider-owned response boundaries keep reasoning, action/tool calls, and observation/tool results together as ReACT turns.
 - **Stable detail tabs**: Overview, Conversation, Execution, Analysis, and Raw data share one content track. The Conversation table of contents fades without reflowing the title, actions, or tab bar and honors reduced-motion preferences.
-- **Recursive session tree**: OpenCode, Codex, Copilot, Pi, and Claude Code sessions with stored parent/child evidence render child sessions as nested containers; inline Copilot agents remain embedded because they are not independently resumable sessions. Source-only relationships remain visibly inferred.
+- **Recursive session tree**: OpenCode, Codex, Copilot, Pi, DeepSeek Harness, and Claude Code sessions with stored parent/child evidence render child sessions as nested containers; inline Copilot agents remain embedded because they are not independently resumable sessions. Source-only relationships remain visibly inferred.
 - **Execution view**: only sessions with real subagent topology get the Execution tab. It renders subagent forks/returns and branch summaries that link directly to the source conversation for branch evidence, including `Agent`, `task`, `subtask`, `spawn_agent`, and `delegate_task` launchers plus provider-marked custom agents. Linear conversations get no Execution tab or lazy markup.
 - **Table of Contents**: long sessions get navigation for prompts, assistant turns, known launcher branches or provider-marked custom agents, and nested sessions.
 - **In-conversation search**: open the compact detail-page search from the action bar or press `/`; results report matching turns and text occurrences, highlight the exact text, and keep previous/next controls visible while navigating.
@@ -180,6 +184,7 @@ agentsession [options]
 --copilot-dir <path>  GitHub Copilot CLI data directory
 --gemini-dir <path>   Gemini CLI data directory
 --pi-dir <path>       Pi agent data directory
+--dsh-dir <path>      DeepSeek Harness data directory (default: $DSH_HOME or ~/.dsh)
 --openclaw-dir <path> OpenClaw state directory
 --hermes-dir <path>   Hermes Agent data directory
 --config <path>       AgentSession JSON config
@@ -206,6 +211,7 @@ agentsession [options]
 | `OPENCLAW_HOME` | OpenClaw home; state defaults to its `.openclaw` child |
 | `HERMES_HOME` | Hermes Agent data directory |
 | `PI_CODING_AGENT_DIR` | Pi agent data directory, defaults to `~/.pi/agent` |
+| `DSH_HOME` | DeepSeek Harness data directory, defaults to `~/.dsh` |
 | `AGENTSESSION_META_PATH` | AgentSession metadata DB path; the default config is stored beside it unless `AGENTSESSION_CONFIG` is set |
 | `AGENTSESSION_CONFIG` | AgentSession JSON config path |
 
@@ -313,7 +319,7 @@ before returning success. If the host cannot start, the page shows an error
 instead of a success toast. Runtime launch logs include the selected host,
 fallback information, and the launcher PID when available.
 
-Active providers declare a default resume command:
+Active providers with a stable terminal resume command declare a default command:
 
 | Provider | Default command |
 |---|---|
@@ -325,6 +331,7 @@ Active providers declare a default resume command:
 | GitHub Copilot CLI | Legacy history only; no default launch |
 | Gemini CLI | Legacy history only; no default launch |
 | Pi | `pi --session {sessionId}` |
+| DeepSeek Harness | Stock headless CLI has no stable default resume command; no launch |
 
 Every command and the PowerShell-compatible terminal shell can be overridden in
 `config.json` under the normal AgentSession config directory, or in the

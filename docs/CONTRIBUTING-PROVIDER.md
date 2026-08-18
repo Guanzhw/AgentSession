@@ -33,6 +33,7 @@ than product similarity.
 |---|---|---|
 | One JSON session per file | `src/providers/gemini/` | File store, incremental token statistics, and flat structured views. |
 | JSONL transcript | `src/providers/claude-code/` or `src/providers/codex/` | Defensive record parsing and explicit response/child-session boundaries. |
+| Event-sourced JSONL with independently compressed Zstd frames | `src/providers/deepseek-harness/` | Decode every complete frame and packed storage row before validating the header version, source sequence, and required event vocabulary. |
 | Inline agent event log plus telemetry SQLite | `src/providers/copilot/` | Keep transcript events canonical; read catalog/token rows read-only and represent in-file agents as view-only embedded bundles. |
 | In-file branch-tree JSONL | `src/providers/pi/` | Reconstruct the active `id`/`parentId` branch before normalizing messages; preserve file-level `parentSession` fork identity. |
 | OpenClaw branch-tree JSONL plus registry | `src/providers/openclaw/` | Cache transcripts with registry dependency paths; resolve session keys without replacing canonical session IDs. |

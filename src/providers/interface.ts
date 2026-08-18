@@ -1,6 +1,6 @@
 import type { ProtocolCapabilities, SessionProtocol } from "./shared/session-protocol.js";
 
-export type ProviderId = "opencode" | "claude-code" | "codex" | "openclaw" | "hermes" | "copilot" | "gemini" | "pi";
+export type ProviderId = "opencode" | "claude-code" | "codex" | "openclaw" | "hermes" | "copilot" | "gemini" | "pi" | "deepseek-harness";
 
 export type ProviderLifecycle = "active" | "legacy";
 

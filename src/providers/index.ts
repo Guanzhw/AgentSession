@@ -8,6 +8,7 @@ import hermes from "./hermes/adapter.js";
 import copilot from "./copilot/adapter.js";
 import gemini from "./gemini/adapter.js";
 import pi from "./pi/adapter.js";
+import deepseekHarness from "./deepseek-harness/adapter.js";
 
 const ALL_PROVIDERS: readonly ProviderAdapter[] = [
   opencode,
@@ -17,7 +18,8 @@ const ALL_PROVIDERS: readonly ProviderAdapter[] = [
   hermes,
   copilot,
   gemini,
-  pi
+  pi,
+  deepseekHarness
 ];
 const PROVIDERS_BY_ID = new Map(ALL_PROVIDERS.map(provider => [provider.id, provider]));
 if (PROVIDERS_BY_ID.size !== ALL_PROVIDERS.length) {

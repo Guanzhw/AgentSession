@@ -12,7 +12,7 @@ const packageVersion = typeof __AGENTSESSION_MCP_VERSION__ === "string"
   ? __AGENTSESSION_MCP_VERSION__
   : JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version as string;
 
-const providerSchema = z.enum(["opencode", "claude-code", "codex", "openclaw", "hermes", "copilot", "gemini", "pi"]);
+const providerSchema = z.enum(["opencode", "claude-code", "codex", "openclaw", "hermes", "copilot", "gemini", "pi", "deepseek-harness"]);
 const sessionRefSchema = z.object({
   provider: providerSchema,
   sessionId: z.string().trim().min(1).max(1000)

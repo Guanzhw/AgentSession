@@ -90,6 +90,13 @@ function defaultPiDir() {
   return probePaths([process.env.PI_CODING_AGENT_DIR, fallback].filter(Boolean), fallback);
 }
 
+function defaultDshDir() {
+  const home = os.homedir();
+  const fallback = path.join(home, ".dsh");
+  const configured = process.env.DSH_HOME?.trim();
+  return probePaths([configured, fallback].filter(Boolean), fallback);
+}
+
 function defaultOpenClawDir() {
   const home = os.homedir();
   const fallback = path.join(home, ".openclaw");
@@ -115,6 +122,7 @@ const defaults = {
   copilotDir: defaultCopilotDir(),
   geminiDir: defaultGeminiDir(),
   piDir: defaultPiDir(),
+  dshDir: defaultDshDir(),
   openclawDir: defaultOpenClawDir(),
   hermesDir: defaultHermesDir(),
   reindex: false,
@@ -586,6 +594,8 @@ export function parseArgs(argv = process.argv.slice(2)) {
       config.geminiDir = argv[++i];
     } else if (argv[i] === "--pi-dir" && argv[i + 1]) {
       config.piDir = argv[++i];
+    } else if (argv[i] === "--dsh-dir" && argv[i + 1]) {
+      config.dshDir = argv[++i];
     } else if (argv[i] === "--openclaw-dir" && argv[i + 1]) {
       config.openclawDir = argv[++i];
     } else if (argv[i] === "--hermes-dir" && argv[i + 1]) {
@@ -613,6 +623,7 @@ Options:
   --copilot-dir <path>  Path to GitHub Copilot CLI data dir (default: ~/.copilot)
   --gemini-dir <path>   Path to Gemini data dir (default: ~/.gemini)
   --pi-dir <path>       Path to Pi agent data dir (default: ~/.pi/agent)
+  --dsh-dir <path>      Path to DeepSeek Harness data dir (default: $DSH_HOME or ~/.dsh)
   --openclaw-dir <path> Path to OpenClaw state dir (default: ~/.openclaw)
   --hermes-dir <path>   Path to Hermes Agent data dir
   --config <path>       Path to AgentSession JSON config

@@ -86,8 +86,9 @@ type EventRef = SessionRef & {
 ~~~
 
 The registered ProviderId set includes `opencode`, `claude-code`, `codex`,
-`copilot`, `gemini`, and `pi`. Pi uses the canonical session UUID from its JSONL header;
-event IDs come from active-branch entry IDs or source tool-call IDs.
+`openclaw`, `hermes`, `copilot`, `gemini`, `pi`, and `deepseek-harness`.
+Pi and DeepSeek Harness use the canonical session ID stored in their session
+header; event IDs come from active-branch entry IDs or source tool-call IDs.
 
 An event is a projection of the existing normalized Message contract:
 
