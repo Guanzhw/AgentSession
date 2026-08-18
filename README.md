@@ -4,12 +4,15 @@
 
 [English](./README.en.md) · [中文](./README.md)
 
-![Node.js >= 22.13.0](https://img.shields.io/badge/node-%3E%3D22.13.0-brightgreen?style=flat-square&logo=node.js)
+![Node.js >= 22.15.0](https://img.shields.io/badge/node-%3E%3D22.15.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.9.0](https://img.shields.io/badge/version-1.9.0-orange?style=flat-square)
+![v1.9.1](https://img.shields.io/badge/version-1.9.1-orange?style=flat-square)
 
-## 1.9.0 更新
+## 1.9.1 更新
+
+> 要求 Node.js `>= 22.15.0`：DeepSeek Harness 解码依赖原生 Node Zstd 接口
+> （Zstd API 自 Node v22.15.0 起提供），因此最低版本从 22.13.0 上调。
 
 - 新增 DeepSeek Harness 一级只读支持：读取 `$DSH_HOME`（或 `~/.dsh`）下的 DSH v0 事件溯源日志，
   包括多帧 Zstd 与 packed chunks、reasoning、工具、压缩、工作流/子 agent 拓扑与提示词快照，
@@ -766,7 +769,7 @@ SHA-256 完整性检查。
 
 ## 开发
 
-要求 Node.js `>= 22.13.0`。项目使用 TypeScript ESM、Node 内置测试运行器和
+要求 Node.js `>= 22.15.0`。项目使用 TypeScript ESM、Node 内置测试运行器和
 原生浏览器 JavaScript/CSS，并保持零 runtime npm dependencies。
 
 ```powershell

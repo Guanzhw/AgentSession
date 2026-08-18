@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.9.1 - 2026-08-18
+
+### Fixed
+
+- Corrected the minimum supported Node.js version to 22.15.0. DeepSeek Harness
+  decoding uses Node's native Zstd APIs (`zstdDecompressSync`), which were added
+  in Node v22.15.0, so the v1.9.0 npm publish test run failed on Node 22.13.0.
+  The v1.9.0 binary release is unaffected because the standalone executables
+  embed Node 26.5. This patch only raises the declared minimum; no runtime
+  behavior changed.
+
 ## 1.9.0 - 2026-08-18
 
 ### Added

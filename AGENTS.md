@@ -13,12 +13,13 @@ such as stars, custom titles, and deletion state in a separate local database.
 
 The package is intentionally small:
 
-- Node.js 22.13 or newer.
+- Node.js 22.15 or newer.
 - TypeScript compiled as ESM with `NodeNext`.
 - No runtime npm dependencies.
 - Server-rendered HTML with plain browser JavaScript and CSS.
 - Node's built-in test runner.
-- Provider adapters for OpenCode, Claude Code, Codex CLI, Gemini CLI, and Pi.
+- Provider adapters for OpenCode, Claude Code, Codex CLI, OpenClaw, Hermes
+  Agent, GitHub Copilot CLI, Gemini CLI, Pi, and DeepSeek Harness.
 
 ## Non-Negotiable Invariants
 
@@ -135,8 +136,12 @@ src/
     opencode/                    OpenCode adapter and structured views
     claude-code/                 Claude transcript adapter/parser
     codex/                       Codex JSONL adapter/parser
+    openclaw/                    OpenClaw branch-aware JSONL adapter/parser
+    hermes/                      Hermes read-only SQLite adapter/parser
+    copilot/                     GitHub Copilot CLI event-log adapter/parser
     gemini/                      Gemini JSON adapter/parser
     pi/                          Pi branch-aware JSONL adapter/parser
+    deepseek-harness/            DSH multi-frame Zstd adapter/parser/protocol
   views/                         server-rendered page and component templates
   static/                        browser JavaScript and CSS copied during build
   locales/                       English and Chinese UI strings

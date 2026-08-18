@@ -4,12 +4,16 @@
 
 [English](./README.en.md) · [中文](./README.md)
 
-![Node.js >= 22.13.0](https://img.shields.io/badge/node-%3E%3D22.13.0-brightgreen?style=flat-square&logo=node.js)
+![Node.js >= 22.15.0](https://img.shields.io/badge/node-%3E%3D22.15.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.9.0](https://img.shields.io/badge/version-1.9.0-orange?style=flat-square)
+![v1.9.1](https://img.shields.io/badge/version-1.9.1-orange?style=flat-square)
 
-## What's New in 1.9.0
+## What's New in 1.9.1
+
+> Requires Node.js >= 22.15.0: DeepSeek Harness decoding uses the native Node
+> Zstd APIs (available since Node v22.15.0), so the minimum version is raised
+> from 22.13.0.
 
 - First-class read-only DeepSeek Harness support: reads DSH v0 event-sourced logs
   under `$DSH_HOME` (or `~/.dsh`), including multi-frame Zstd and packed chunks,
@@ -867,6 +871,9 @@ Next work focuses on making AI workflows easier to reconstruct precisely:
      data-coverage information.
 
 ## Development
+
+Requires Node.js `>= 22.15.0`. The project uses TypeScript ESM, Node's built-in
+test runner, and native browser JavaScript/CSS with zero runtime npm dependencies.
 
 ```bash
 npm run typecheck
