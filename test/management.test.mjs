@@ -31,6 +31,16 @@ const { getIndexedListResults, getVisibleListResults } = await import("../dist/s
 const { getAllProviders } = await import("../dist/src/providers/index.js");
 const { EMPTY_PROJECT_FILTER } = await import("../dist/src/project-filter.js");
 const { renderSessionsPage } = await import("../dist/src/views/sessions.js");
+const { registerMutations } = await import("../dist/src/routes/mutations.js");
+
+function mutationResponse() {
+  return {
+    statusCode: 0,
+    body: "",
+    writeHead(status) { this.statusCode = status; return this; },
+    end(chunk = "") { this.body += String(chunk); return this; }
+  };
+}
 
 function createProviderDb(dbPath) {
   const db = new DatabaseSync(dbPath);
@@ -62,7 +72,7 @@ function createProviderDb(dbPath) {
   const now = Date.now();
   insert.run("a", "p1", "a", "Zulu work", "/p1", now - 5000, now - 1000);
   insert.run("b", "p1", "b", "Alpha work", "/p1", now - 4000, now - 2000);
-  insert.run("c", "p2", "c", "Analysis original", "/p2", now - 3000, now - 3000);
+  insert.run("c", "p2", "c", "Custom original", "/p2", now - 3000, now - 3000);
   insert.run("d", "p2", "d", "Middle work", "/p2", now - 2000, now - 4000);
   insert.run("e", "p2", "e", "Beta work", "/p2", now - 1000, now - 5000);
   db.close();
@@ -73,7 +83,7 @@ test("viewer metadata filters and manages SQLite and indexed providers without t
   createProviderDb(dbPath);
 
   try {
-    renameSession("codex", "b", "Renamed analysis");
+    renameSession("codex", "b", "Renamed project");
     renameSession("codex", "c", "Custom work");
     assert.equal(batchAction("codex", ["b", "c"], "star"), 2);
     assert.equal(batchAction("codex", ["c"], "unstar"), 1);
@@ -98,22 +108,11 @@ test("viewer metadata filters and manages SQLite and indexed providers without t
       range: "week",
       project: "p1",
       starredOnly: true,
-      sessionKind: "analysis"
     });
     assert.equal(customMatch.total, 1);
     assert.deepEqual(customMatch.sessions.map((session) => session.id), ["b"]);
     assert.equal(customMatch.sessions[0].message_count, 0);
     assert.equal(customMatch.sessions[0].token_count, null);
-
-    const analysisOnly = getVisibleListResults({
-      dbPath,
-      metaMap,
-      excludedIds,
-      limit: 10,
-      offset: 0,
-      sessionKind: "analysis"
-    });
-    assert.deepEqual(analysisOnly.sessions.map((session) => session.id), ["b"]);
 
     const titlePage = getVisibleListResults({
       dbPath,
@@ -127,7 +126,7 @@ test("viewer metadata filters and manages SQLite and indexed providers without t
     assert.deepEqual(titlePage.sessions.map((session) => session.id), ["c", "b"]);
 
     assert.deepEqual(
-      listSessionProjects("renamed", "week", dbPath, excludedIds, undefined, "analysis", new Map([["b", "Renamed analysis"], ["c", "Custom work"]]))
+      listSessionProjects("renamed", "week", dbPath, excludedIds, undefined, undefined, new Map([["b", "Renamed project"], ["c", "Custom work"]]))
         .map((project) => ({ id: project.id, count: project.count })),
       [{ id: "p1", count: 1 }]
     );
@@ -154,7 +153,7 @@ test("viewer metadata filters and manages SQLite and indexed providers without t
     const indexedRows = [
       { id: "a", provider: "codex", parentId: null, title: "Zulu work", directory: "/p1", timeCreated: 1, timeUpdated: 500, messageCount: 1, tokenCount: 10 },
       { id: "b", provider: "codex", parentId: null, title: "Alpha work", directory: "/p1", timeCreated: 2, timeUpdated: 400, messageCount: 2, tokenCount: 20 },
-      { id: "c", provider: "codex", parentId: null, title: "Analysis original", directory: "/p2", timeCreated: 3, timeUpdated: 300, messageCount: 3, tokenCount: 30 },
+      { id: "c", provider: "codex", parentId: null, title: "Custom original", directory: "/p2", timeCreated: 3, timeUpdated: 300, messageCount: 3, tokenCount: 30 },
       { id: "d", provider: "codex", parentId: null, title: "Middle work", directory: "/p2", timeCreated: 4, timeUpdated: 200, messageCount: 4, tokenCount: 40 },
       { id: "e", provider: "codex", parentId: null, title: "Beta work", directory: "/p2", timeCreated: 5, timeUpdated: 100, messageCount: 5, tokenCount: 50 },
       { id: "child-b", provider: "codex", parentId: "b", title: "Child work", directory: "/p1", timeCreated: 6, timeUpdated: 450, messageCount: 1, tokenCount: 5 }
@@ -170,7 +169,6 @@ test("viewer metadata filters and manages SQLite and indexed providers without t
       query: "renamed",
       project: "/p1",
       includedIds: ["b"],
-      sessionKind: "analysis"
     });
     assert.equal(indexedCustomMatch.total, 1);
     assert.deepEqual(indexedCustomMatch.sessions.map((session) => session.id), ["b"]);
@@ -191,7 +189,7 @@ test("viewer metadata filters and manages SQLite and indexed providers without t
     );
 
     assert.deepEqual(
-      getIndexedSessionProjects("codex", "", "renamed", undefined, "analysis", excludedIds, new Map([["b", "Renamed analysis"], ["c", "Custom work"]]))
+      getIndexedSessionProjects("codex", "", "renamed", undefined, undefined, excludedIds, new Map([["b", "Renamed project"], ["c", "Custom work"]]))
         .map((project) => ({ id: project.id, count: project.count })),
       [{ id: "/p1", count: 1 }]
     );
@@ -241,5 +239,28 @@ test("viewer metadata filters and manages SQLite and indexed providers without t
     closeIndexDb();
     closeMetaDb();
     rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("all metadata and reindex mutations require same-origin loopback JSON", async () => {
+  const posts = [];
+  registerMutations({ post(pattern, handler) { posts.push({ pattern, handler }); }, get() {} }, {
+    appConfig: { metaDir: temp, allowTerminalLaunch: false },
+    providerMap: new Map(),
+    availableProviders: []
+  });
+  const untrusted = { headers: { host: "127.0.0.1:3456", "content-type": "application/x-www-form-urlencoded", origin: "https://attacker.example" }, socket: { remoteAddress: "127.0.0.1" } };
+  const cases = [
+    [posts.find((entry) => entry.pattern instanceof RegExp && entry.pattern.source.includes("permanent-delete") && entry.pattern.source.includes("[a-z]")), ["", "opencode", "session-1", "star"]],
+    [posts.find((entry) => entry.pattern instanceof RegExp && entry.pattern.source.includes("permanent-delete") && !entry.pattern.source.includes("[a-z]")), ["", "session-1", "star"]],
+    [posts.find((entry) => entry.pattern === "/api/batch"), undefined],
+    [posts.find((entry) => entry.pattern instanceof RegExp && entry.pattern.source.endsWith("batch$")), ["", "opencode"]],
+    [posts.find((entry) => entry.pattern === "/api/reindex"), undefined]
+  ];
+  for (const [entry, match] of cases) {
+    assert.ok(entry);
+    const response = mutationResponse();
+    await entry.handler(untrusted, response, match);
+    assert.equal(response.statusCode, 403);
   }
 });

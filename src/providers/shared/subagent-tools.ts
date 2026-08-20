@@ -43,7 +43,7 @@ export function isSubagentToolName(tool: unknown) {
 
 /**
  * Provider-neutral subagent classification. Parsers own the source-specific
- * decision and may set `metadata.subagent`; shared Tree, Flow, Trace, and
+ * decision and may set `metadata.subagent`; shared Tree, Trace, and
  * rendering code consume that normalized fact rather than guessing from a
  * provider's configurable tool name.
  */

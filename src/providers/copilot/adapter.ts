@@ -18,6 +18,7 @@ import {
   parseCopilotSession
 } from "./parser.js";
 import { buildCopilotRuntimeEnvironment } from "./runtime-environment.js";
+import { buildCopilotSessionProtocol, copilotProtocolCapabilities } from "./protocol.js";
 import { copilotDailyTokenStats, readCopilotSessionStore } from "./session-store.js";
 
 function getCopilotDir() {
@@ -111,9 +112,9 @@ const copilot = {
   lifecycle: "legacy",
   capabilities: {
     localManagement: true,
-    sessionAnalysis: false,
     structuredSessionViews: true
   },
+  protocolCapabilities: copilotProtocolCapabilities,
 
   detect() {
     return existsSync(getSessionStateDir());
@@ -172,6 +173,16 @@ const copilot = {
 
   getStatsRevision() {
     return `${sessionFiles.getStatsRevision()}:${readCopilotSessionStore(getCopilotDir()).signature}`;
+  },
+
+  getSessionProtocol(sessionId: string) {
+    const entry = sessionFiles.get(sessionId);
+    if (!entry) return null;
+    return buildCopilotSessionProtocol(
+      resolvedSession(entry.session),
+      entry.records,
+      `${sessionFiles.getStatsRevision()}:${readCopilotSessionStore(getCopilotDir()).signature}`
+    );
   },
 
   searchMessages(query, limit = 20) {

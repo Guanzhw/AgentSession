@@ -13,6 +13,7 @@ import {
   classifyCodexRecordProvenance
 } from "./parser.js";
 import { buildCodexSessionProtocol } from "./protocol.js";
+import { finalizeSessionProtocol, protocolRevision } from "../shared/session-protocol.js";
 import { icons } from "../../icons.js";
 import type { Message, ProviderAdapter, RawSession } from "../interface.js";
 import { buildLinkedMessageSessionViews } from "../shared/linked-message-session.js";
@@ -147,6 +148,15 @@ function generateCodexViews(sessionId: string) {
   } : undefined);
 }
 
+const codexProtocolCapabilities = {
+  sessionEvents: { support: "partial" as const, provenance: "derived" as const, details: "derived message envelopes plus recorded compaction and NEW_TASK lifecycle events" },
+  sessionRelationships: { support: "partial" as const, provenance: "derived" as const, details: "recorded incoming thread spawns plus derived outgoing edges and forks" },
+  tasks: { support: "partial" as const, provenance: "derived" as const, details: "recorded NEW_TASK envelopes plus spawn tool-call derivations bound via sub_agent_activity and call-output evidence" },
+  agentRuns: { support: "partial" as const, provenance: "derived" as const, details: "child rollout sessions bound to spawn calls through recorded activity/call-output evidence" },
+  contextArtifacts: { support: "full" as const, provenance: "recorded" as const, details: "compaction records, metadata-only summaries" },
+  branches: { support: "none" as const, provenance: "derived" as const, details: "Codex fork lineage remains a session relationship" }
+};
+
 function buildCodexSessionProtocolFor(sessionId: string) {
   const root = sessionFiles.get(sessionId);
   if (!root) return null;
@@ -164,7 +174,7 @@ function buildCodexSessionProtocolFor(sessionId: string) {
   const children = family.filter((item) => (
     item.session.parentId && String(item.session.parentId) === canonicalId
   ));
-  return buildCodexSessionProtocol({
+  const protocol = buildCodexSessionProtocol({
     session: rootEntry.session,
     messages: rootEntry.messages,
     records: ownedRecords,
@@ -173,6 +183,12 @@ function buildCodexSessionProtocolFor(sessionId: string) {
       messages: child.messages,
       records: sessionFiles.get(String(child.session.id))?.records || []
     }))
+  });
+  return finalizeSessionProtocol(protocol, {
+    provider: "codex",
+    session: rootEntry.session,
+    capabilities: codexProtocolCapabilities,
+    revision: protocolRevision(sessionFiles.getStatsRevision())
   });
 }
 
@@ -243,15 +259,10 @@ const codex = {
   },
   capabilities: {
     localManagement: true,
-    sessionAnalysis: true,
     structuredSessionViews: true
   },
   protocolCapabilities: {
-    sessionEvents: { support: "partial", provenance: "derived", details: "derived message envelopes plus recorded compaction and NEW_TASK lifecycle events" },
-    sessionRelationships: { support: "partial", provenance: "derived", details: "recorded incoming thread spawns plus derived outgoing edges and forks" },
-    tasks: { support: "partial", provenance: "derived", details: "recorded NEW_TASK envelopes plus spawn tool-call derivations bound via sub_agent_activity and call-output evidence" },
-    agentRuns: { support: "partial", provenance: "derived", details: "child rollout sessions bound to spawn calls through recorded activity/call-output evidence" },
-    contextArtifacts: { support: "full", provenance: "recorded", details: "compaction records, metadata-only summaries" }
+    ...codexProtocolCapabilities
   },
 
   detect() {

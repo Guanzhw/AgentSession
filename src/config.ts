@@ -164,7 +164,7 @@ export function readUserConfigDocument(configPath: any) {
     return {
       exists: true,
       raw,
-      config: parsed,
+      config: normalizeUserConfig(parsed),
       error: ""
     };
   } catch (error: any) {
@@ -213,6 +213,39 @@ function validateProjectPathMap(value: any, field: string, errors: any[]) {
       return;
     }
   }
+}
+
+function normalizeProjectPaths(config: any) {
+  const projectPaths: Record<string, Record<string, string>> = {};
+  const copy = (value: any, overwrite = true) => {
+    if (!isObject(value)) return;
+    for (const [provider, mapping] of Object.entries(value)) {
+      if (!isObject(mapping)) continue;
+      const target = projectPaths[provider] || (projectPaths[provider] = {});
+      for (const [key, directory] of Object.entries(mapping as any)) {
+        if (typeof key === "string" && key.trim() && typeof directory === "string" && directory.trim()) {
+          if (overwrite || target[key] === undefined) target[key] = directory;
+        }
+      }
+    }
+  };
+  copy(config?.projectPaths);
+  // Legacy compatibility is read-only. Only opaque project mappings survive;
+  // the old analyzer configuration is never exposed or persisted.
+  const providers = config?.analysis?.providers;
+  if (isObject(providers)) {
+    for (const [provider, settings] of Object.entries(providers)) {
+      copy({ [provider]: (settings as any)?.projectPaths }, false);
+    }
+  }
+  return projectPaths;
+}
+
+function normalizeUserConfig(config: any) {
+  const normalized = isObject(config) ? { ...config } : {};
+  normalized.projectPaths = normalizeProjectPaths(config);
+  delete normalized.analysis;
+  return normalized;
 }
 
 function validateShell(value: any, field: any, errors: any) {
@@ -280,51 +313,6 @@ function validateMcpConfig(value: any, field: string, errors: any[]) {
   }
 }
 
-function validateAnalysisTargets(value: any, field: any, errors: any) {
-  if (!isObject(value)) {
-    errors.push(`${field} must be an object.`);
-    return;
-  }
-  for (const [targetId, target] of Object.entries(value)) {
-    if (target === false) {
-      continue;
-    }
-    if (!isObject(target)) {
-      errors.push(`${field}.${targetId} must be an object or false.`);
-      continue;
-    }
-    const targetSettings: any = target;
-    if (targetSettings.extensions !== undefined) {
-      errors.push(`${field}.${targetId}.extensions is not supported; use fileExtensions.`);
-    }
-    for (const listField of ["artifactRoots", "artifactFiles", "fileExtensions"]) {
-      if (targetSettings[listField] !== undefined) {
-        validateStringArray(targetSettings[listField], `${field}.${targetId}.${listField}`, errors);
-      }
-    }
-    for (const textField of ["label", "prompt", "promptFile"]) {
-      if (
-        targetSettings[textField] !== undefined
-        && typeof targetSettings[textField] !== "string"
-      ) {
-        errors.push(`${field}.${targetId}.${textField} must be a string.`);
-      }
-    }
-    if (
-      targetSettings.includeRawSnapshots !== undefined
-      && typeof targetSettings.includeRawSnapshots !== "boolean"
-    ) {
-      errors.push(`${field}.${targetId}.includeRawSnapshots must be a boolean.`);
-    }
-    if (targetSettings.command !== undefined) {
-      validateCommand(targetSettings.command, `${field}.${targetId}.command`, errors);
-    }
-    if (targetSettings.shell !== undefined) {
-      validateShell(targetSettings.shell, `${field}.${targetId}.shell`, errors);
-    }
-  }
-}
-
 export function validateUserConfig(config: any) {
   const errors: any[] = [];
   if (!isObject(config)) {
@@ -351,119 +339,12 @@ export function validateUserConfig(config: any) {
     validateMcpConfig(config.mcp, "mcp", errors);
   }
 
-  if (config.analysis !== undefined) {
-    if (!isObject(config.analysis)) {
-      errors.push("analysis must be an object.");
+  if (config.projectPaths !== undefined) {
+    if (!isObject(config.projectPaths)) {
+      errors.push("projectPaths must be an object mapping providers to project maps.");
     } else {
-      if (config.analysis.enabled !== undefined && typeof config.analysis.enabled !== "boolean") {
-        errors.push("analysis.enabled must be a boolean.");
-      }
-      if (config.analysis.defaultTarget !== undefined && typeof config.analysis.defaultTarget !== "string") {
-        errors.push("analysis.defaultTarget must be a string.");
-      }
-      if (config.analysis.defaultTargets !== undefined) {
-        validateStringArray(config.analysis.defaultTargets, "analysis.defaultTargets", errors);
-        if (Array.isArray(config.analysis.defaultTargets) && config.analysis.defaultTargets.length === 0) {
-          errors.push("analysis.defaultTargets must contain at least one target.");
-        }
-      }
-      if (config.analysis.outputDir !== undefined && typeof config.analysis.outputDir !== "string") {
-        errors.push("analysis.outputDir must be a string.");
-      }
-      if (config.analysis.includeRawSnapshots !== undefined && typeof config.analysis.includeRawSnapshots !== "boolean") {
-        errors.push("analysis.includeRawSnapshots must be a boolean.");
-      }
-      if (config.analysis.shell !== undefined) {
-        validateShell(config.analysis.shell, "analysis.shell", errors);
-      }
-      if (config.analysis.implementation !== undefined) {
-        if (!isObject(config.analysis.implementation)) {
-          errors.push("analysis.implementation must be an object.");
-        } else {
-          if (config.analysis.implementation.command !== undefined) {
-            validateCommand(config.analysis.implementation.command, "analysis.implementation.command", errors);
-          }
-          if (config.analysis.implementation.shell !== undefined) {
-            validateShell(config.analysis.implementation.shell, "analysis.implementation.shell", errors);
-          }
-        }
-      }
-      if (config.analysis.targets !== undefined) {
-        validateAnalysisTargets(config.analysis.targets, "analysis.targets", errors);
-      }
-      if (config.analysis.providers !== undefined) {
-        if (!isObject(config.analysis.providers)) {
-          errors.push("analysis.providers must be an object.");
-        } else {
-          for (const [providerId, providerConfig] of Object.entries(config.analysis.providers)) {
-            if (!isObject(providerConfig)) {
-              errors.push(`analysis.providers.${providerId} must be an object.`);
-              continue;
-            }
-            const providerSettings: any = providerConfig;
-            if (
-              providerSettings.defaultTarget !== undefined
-              && typeof providerSettings.defaultTarget !== "string"
-            ) {
-              errors.push(`analysis.providers.${providerId}.defaultTarget must be a string.`);
-            }
-            if (providerSettings.defaultTargets !== undefined) {
-              validateStringArray(
-                providerSettings.defaultTargets,
-                `analysis.providers.${providerId}.defaultTargets`,
-                errors
-              );
-              if (
-                Array.isArray(providerSettings.defaultTargets)
-                && providerSettings.defaultTargets.length === 0
-              ) {
-                errors.push(
-                  `analysis.providers.${providerId}.defaultTargets must contain at least one target.`
-                );
-              }
-            }
-            if (providerSettings.command !== undefined) {
-              validateCommand(providerSettings.command, `analysis.providers.${providerId}.command`, errors);
-            }
-            if (providerSettings.projectPaths !== undefined) {
-              validateProjectPathMap(
-                providerSettings.projectPaths,
-                `analysis.providers.${providerId}.projectPaths`,
-                errors
-              );
-            }
-            if (providerSettings.shell !== undefined) {
-              validateShell(providerSettings.shell, `analysis.providers.${providerId}.shell`, errors);
-            }
-            if (providerSettings.implementation !== undefined) {
-              if (!isObject(providerSettings.implementation)) {
-                errors.push(`analysis.providers.${providerId}.implementation must be an object.`);
-              } else {
-                if (providerSettings.implementation.command !== undefined) {
-                  validateCommand(
-                    providerSettings.implementation.command,
-                    `analysis.providers.${providerId}.implementation.command`,
-                    errors
-                  );
-                }
-                if (providerSettings.implementation.shell !== undefined) {
-                  validateShell(
-                    providerSettings.implementation.shell,
-                    `analysis.providers.${providerId}.implementation.shell`,
-                    errors
-                  );
-                }
-              }
-            }
-            if (providerSettings.targets !== undefined) {
-              validateAnalysisTargets(
-                providerSettings.targets,
-                `analysis.providers.${providerId}.targets`,
-                errors
-              );
-            }
-          }
-        }
+      for (const [providerId, mapping] of Object.entries(config.projectPaths)) {
+        validateProjectPathMap(mapping, `projectPaths.${providerId}`, errors);
       }
     }
   }
@@ -522,6 +403,7 @@ export function validateUserConfig(config: any) {
 }
 
 export function writeUserConfig(configPath: any, config: any) {
+  const normalized = normalizeUserConfig(config);
   const errors = validateUserConfig(config);
   if (errors.length) {
     const error: any = new Error("Invalid AgentSession configuration.");
@@ -529,13 +411,13 @@ export function writeUserConfig(configPath: any, config: any) {
     throw error;
   }
   mkdirSync(path.dirname(configPath), { recursive: true });
-  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf-8");
+  writeFileSync(configPath, `${JSON.stringify(normalized, null, 2)}\n`, "utf-8");
 }
 
 export function applyRuntimeUserConfig(config: any, fileConfig: any) {
   config.resumeCommands = isObject(fileConfig.resumeCommands) ? fileConfig.resumeCommands : {};
   config.resumeShell = isObject(fileConfig.resumeShell) ? fileConfig.resumeShell : null;
-  config.analysis = isObject(fileConfig.analysis) ? fileConfig.analysis : { enabled: false };
+  config.projectPaths = normalizeProjectPaths(fileConfig);
   config.tokenPricing = isObject(fileConfig.tokenPricing) ? fileConfig.tokenPricing : {};
   config.mcp = normalizeMcpConfig(fileConfig.mcp);
   return config;
@@ -573,9 +455,7 @@ export function parseArgs(argv = process.argv.slice(2)) {
     resumeShell: fileConfig.resumeShell && typeof fileConfig.resumeShell === "object"
       ? fileConfig.resumeShell
       : null,
-    analysis: fileConfig.analysis && typeof fileConfig.analysis === "object"
-      ? fileConfig.analysis
-      : { enabled: false },
+    projectPaths: normalizeProjectPaths(fileConfig),
     mcp: normalizeMcpConfig(fileConfig.mcp)
   };
 
@@ -611,7 +491,7 @@ export function parseArgs(argv = process.argv.slice(2)) {
     } else if (argv[i] === "--open") {
       config.open = true;
     } else if (argv[i] === "--help" || argv[i] === "-h") {
-      console.log(`AgentSession — Multi-Provider Session Viewer & Manager
+      console.log(`AgentSession — Multi-Provider Agent Runtime Inspector
 
 Usage: agentsession [options]
 
@@ -628,7 +508,7 @@ Options:
   --hermes-dir <path>   Path to Hermes Agent data dir
   --config <path>       Path to AgentSession JSON config
   --disable-terminal-launch
-                        Disable resume and analysis command launching
+                        Disable resume command launching
   --reindex             Force full reindex of all providers on start
   --lang <en|zh>        UI language (default: auto-detect from LANG)
   --open                Open browser on start

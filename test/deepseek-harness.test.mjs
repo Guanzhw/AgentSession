@@ -12,9 +12,11 @@ import test from "node:test";
 
 import { initConfig } from "../dist/src/config.js";
 import { getAllProviders } from "../dist/src/providers/index.js";
-import dsh from "../dist/src/providers/deepseek-harness/adapter.js";
+import dsh, { getDshStorageDiagnostic } from "../dist/src/providers/deepseek-harness/adapter.js";
+import { DSH_COMPATIBILITY_SNAPSHOT } from "../dist/src/providers/deepseek-harness/compatibility.js";
 import {
   DshSessionParseError,
+  DSH_KNOWN_EVENT_TYPES,
   decodeDshStorageRecord,
   dshAssistantUsageRecords,
   dshOwnedEvents,
@@ -56,7 +58,7 @@ function writeJsonl(filePath, records) {
 
 function parentRecords(parentId, childId) {
   return [
-    header(parentId),
+    header(parentId, { agentPreset: "standard" }),
     ...events([
       { type: "permission/preset", data: { preset: "read-only" } },
       { type: "sandbox/mode", data: { mode: "read-only" } },
@@ -149,6 +151,32 @@ function parentRecords(parentId, childId) {
       { type: "compaction/end", data: { compactionId: "compact-1", turn: 1 } },
       { type: "tool-workflow/agent-start", data: { runId: "workflow-1", seq: 0, label: "Inspect child", childId } },
       { type: "tool-workflow/agent-end", data: { runId: "workflow-1", seq: 0, outcome: { kind: "completed" } } },
+      { type: "agent/inbox/spliced", data: { operation: "claim", messageIds: ["dsh-user"] } },
+      {
+        type: "team/member",
+        data: {
+          version: 1,
+          teamId: parentId,
+          member: { id: childId, name: "inspector", description: "Inspect child", provider: "subagent", context: "fresh", phase: "active" }
+        }
+      },
+      {
+        type: "team/task",
+        data: {
+          version: 1,
+          teamId: parentId,
+          task: { id: "task-1", revision: 1, subject: "Inspect", description: "Inspect the repository", status: "in_progress", ownerId: childId, blockedBy: [], writeScopes: ["src"] }
+        }
+      },
+      {
+        type: "team/message/queued",
+        data: {
+          version: 1,
+          teamId: parentId,
+          message: { id: "team-message-1", senderId: parentId, senderName: "lead", targetId: childId, delivery: "quiet", content: [{ type: "text", text: "Inspect this" }] }
+        }
+      },
+      { type: "team/message/delivered", data: { version: 1, teamId: parentId, messageId: "team-message-1", targetId: childId } },
       { type: "step/end", data: { turn: 1, step: 1 } },
       { type: "turn/end", data: { turn: 1, reason: { kind: "completed" } } }
     ])
@@ -189,10 +217,12 @@ test("DeepSeek Harness provider reads current raw sessions, system evidence, wor
     assert.equal(dsh.getSession("parent-alias")?.id, parentId);
     assert.equal(dsh.getSession(parentId)?.title, "DSH parent title");
     assert.equal(dsh.getSession(childId)?.parentId, parentId);
+    assert.equal(dsh.getSession(parentId)?.metadata?.agentPreset, "standard");
 
     const messages = dsh.getMessages(parentId);
     assert.equal(messages.some((message) => message.content.includes("DSH hidden plugin marker")), false);
     assert.equal(messages.some((message) => message.content.includes("DSH hidden compacted context")), false);
+    assert.equal(messages.some((message) => message.content.includes("Inspect this")), false);
     const assistant = messages.find((message) => message.id === "dsh-assistant");
     assert.equal(assistant?.thinking, "DSH reasoning marker");
     assert.deepEqual(assistant?.tokens, { input: 10, output: 5, reasoning: 3, total: 20, cache: { read: 2, write: 0 } });
@@ -210,9 +240,11 @@ test("DeepSeek Harness provider reads current raw sessions, system evidence, wor
     assert.equal(protocol?.tasks[0]?.status, "completed");
     assert.equal(protocol?.agentRuns[0]?.childSessionId, childId);
     assert.ok(protocol?.relationships.some((relationship) => relationship.type === "spawned" && relationship.toSessionId === childId));
+    // Team/inbox records are accepted as DSH control facts but remain
+    // log-only in this slice; they must not be projected as ordinary
+    // normalized messages or require a protocol-v2 mapping.
     assert.deepEqual(protocol?.events.map((event) => event.sequence), Array.from({ length: protocol?.events.length || 0 }, (_, index) => index + 1));
     assert.ok(dsh.getSessionTree(parentId));
-    assert.ok(dsh.getSessionFlow(parentId));
     assert.ok(dsh.getTrace(parentId));
 
     const promptEvidence = dsh.getSystemPrompts(parentId);
@@ -225,6 +257,36 @@ test("DeepSeek Harness provider reads current raw sessions, system evidence, wor
     assert.equal(dsh.resumeCommand, undefined);
     assert.equal(dsh.capabilities.localManagement, true);
     assert.ok(getAllProviders().some((provider) => provider.id === "deepseek-harness"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("DeepSeek Harness compatibility snapshot and SQLite diagnostic are explicit", () => {
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.commit, "141eb6fef83422698aef7a981029e843e8161534");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.tag, "dsh-v0.1.0-rc.8");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.npm.stable, "0.1.0-rc.7");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.npm.next, "0.1.0-rc.8");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.sessionFormatVersion, 0);
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.sqliteSchemaVersion, 17);
+  assert.ok(DSH_COMPATIBILITY_SNAPSHOT.requiredEventTypes.includes("agent/inbox/spliced"));
+  assert.ok(DSH_COMPATIBILITY_SNAPSHOT.requiredEventTypes.includes("team/message/delivered"));
+  assert.deepEqual(
+    [...DSH_KNOWN_EVENT_TYPES].sort(),
+    [...DSH_COMPATIBILITY_SNAPSHOT.requiredEventTypes].sort()
+  );
+
+  const root = mkdtempSync(path.join(os.tmpdir(), "opensession-dsh-sqlite-"));
+  try {
+    writeFileSync(path.join(root, "sessions.sqlite"), Buffer.from("SQLite format 3\u0000fixture"));
+    const diagnostic = getDshStorageDiagnostic(root);
+    assert.deepEqual(diagnostic && {
+      backend: diagnostic.backend,
+      status: diagnostic.status,
+      detectedSchema: diagnostic.detectedSchema,
+      expectedSchema: diagnostic.expectedSchema
+    }, { backend: "sqlite", status: "unsupported", detectedSchema: null, expectedSchema: 17 });
+    assert.match(diagnostic?.message || "", /schema 17/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -275,6 +337,7 @@ test("DeepSeek Harness parser expands multi-frame Zstd chunks, rejects unsafe vo
     assert.throws(() => decodeDshStorageRecord({ type: "text-chunks", seq0: 0, time0: 1, data: { turn: 1, step: 1, index: 0, texts: ["bad"], dt: [1] } }), DshSessionParseError);
     assert.throws(() => decodeDshStorageRecord({ type: "tool-call-chunks", seq0: 0, time0: 1, data: { turn: 1, step: 1, index: 0, id: "call", name: 1, args: ["{}"], dt: [] } }), DshSessionParseError);
     assert.throws(() => decodeDshStorageRecord({ type: "text-chunks", seq0: Number.MAX_SAFE_INTEGER, time0: 1, data: { turn: 1, step: 1, index: 0, texts: ["a", "b", "c"], dt: [1, 1] } }), DshSessionParseError);
+    assert.throws(() => decodeDshStorageRecord({ type: "text-chunks", seq0: 0, time0: 1, data: { turn: 1, step: 1, index: 0, texts: ["a", "b", "c"], dt: [1, 1], future: true } }), DshSessionParseError);
     const badPath = path.join(root, "unknown.jsonl");
     writeJsonl(badPath, [header("session-dsh-unknown"), { type: "future/required", seq: 0, time: Date.now(), data: {} }]);
     assert.throws(() => parseDshSession(badPath), /Unsupported required/);
@@ -287,6 +350,28 @@ test("DeepSeek Harness parser expands multi-frame Zstd chunks, rejects unsafe vo
     const rawTornPath = path.join(root, "torn.jsonl");
     writeFileSync(rawTornPath, `${JSON.stringify(header("session-dsh-raw-torn"))}\n${JSON.stringify({ type: "turn/start", seq: 0, time: Date.now(), data: { turn: 1 } })}\n{\"type\":\"turn/end\"`);
     assert.deepEqual(parseDshSession(rawTornPath).map((record) => record.type), ["session", "turn/start"]);
+
+    const missingDepthPath = path.join(root, "missing-depth.jsonl");
+    const missingDepth = header("session-dsh-missing-depth");
+    delete missingDepth.delegationDepth;
+    writeJsonl(missingDepthPath, [missingDepth]);
+    assert.equal(parseDshSession(missingDepthPath)[0].delegationDepth, undefined, "rc.8 root-session snapshots may omit delegationDepth");
+
+    const badDepthPath = path.join(root, "bad-depth.jsonl");
+    writeJsonl(badDepthPath, [header("session-dsh-bad-depth", { delegationDepth: -1 })]);
+    assert.throws(() => parseDshSession(badDepthPath), /session\.delegationDepth/);
+
+    const badPresetPath = path.join(root, "bad-agent-preset.jsonl");
+    writeJsonl(badPresetPath, [header("session-dsh-bad-agent-preset", { agentPreset: 42 })]);
+    assert.throws(() => parseDshSession(badPresetPath), /session\.agentPreset/);
+
+    const badSeedPath = path.join(root, "bad-seed.jsonl");
+    writeJsonl(badSeedPath, [header("session-dsh-bad-seed", { seedLength: 2 }), { type: "turn/start", seq: 0, time: Date.now(), data: { turn: 1 } }]);
+    assert.throws(() => parseDshSession(badSeedPath), /seedLength/);
+
+    const badBoundaryPath = path.join(root, "bad-boundary.jsonl");
+    writeJsonl(badBoundaryPath, [header("session-dsh-bad-boundary", { seedLength: 1 }), { type: "session/end-seed", seq: 0, time: Date.now(), data: {} }]);
+    assert.throws(() => parseDshSession(badBoundaryPath), /end-seed boundary/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

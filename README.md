@@ -1,160 +1,92 @@
 # AgentSession
 
-> 开发者的 AI 会话档案馆：把 OpenCode、Claude Code、Codex CLI、OpenClaw、Hermes Agent、Pi、DeepSeek Harness，以及历史 Copilot 和 Gemini CLI 会话集中到一个可搜索、可追踪、可复盘的 Web UI。
+AgentSession 是本地优先、只读的 harness runtime inspector。它从 OpenCode、Claude Code、Codex CLI、OpenClaw、Hermes Agent、GitHub Copilot CLI、Gemini CLI、Pi 和 DeepSeek Harness 的本地记录中重建：harness 如何运行、如何派生 session、如何调度工作，以及上下文如何被加载、压缩、继承和重新注入。
+
+对话仍然是兼容的阅读投影，但不是唯一的结构模型。所有 Provider 原始数据库、transcript 和事件日志都保持只读；收藏、自定义标题和排除状态写入独立的 AgentSession 元数据。
 
 [English](./README.en.md) · [中文](./README.md)
 
 ![Node.js >= 22.15.0](https://img.shields.io/badge/node-%3E%3D22.15.0-brightgreen?style=flat-square&logo=node.js)
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
-![v1.9.1](https://img.shields.io/badge/version-1.9.1-orange?style=flat-square)
 
-## 1.9.1 更新
+## Runtime Workbench
 
-> 要求 Node.js `>= 22.15.0`：DeepSeek Harness 解码依赖原生 Node Zstd 接口
-> （Zstd API 自 Node v22.15.0 起提供），因此最低版本从 22.13.0 上调。
+session 详情页固定为 `Overview | Conversation | Runtime | Raw`。Runtime 对每个可读 session 都显示，并按协议能力降级；不会把“不支持”“不可用”“缺失”“无效”渲染成观测到的零值。
 
-- 新增 DeepSeek Harness 一级只读支持：读取 `$DSH_HOME`（或 `~/.dsh`）下的 DSH v0 事件溯源日志，
-  包括多帧 Zstd 与 packed chunks、reasoning、工具、压缩、工作流/子 agent 拓扑与提示词快照，
-  并提供运行时清单、分析与完整会话协议。当前官方 headless CLI 没有稳定的默认恢复参数，
-  因此不会伪造终端恢复命令。
-- 引入 Provider 中立的会话协议（Session Protocol）：Codex CLI、Claude Code、Pi、Hermes Agent
-  与 DeepSeek Harness 统一暴露带稳定序列号的事件、显式会话关系、Task/AgentRun 分离模型与
-  元数据优先的上下文产物，所有值都携带 recorded/derived 来源标记。
-- 执行视图按真实拓扑门控：只有包含真实子代理拓扑的会话才渲染“执行”标签页，分支摘要直接链接到
-  来源会话页面，线性对话不再显示该标签页。
-- 会话列表卡片显示有界的逐会话统计摘要：消息数、已知时的 token 总量、观测时长、压缩次数与
-  最近压缩时间、子代理/后台运行次数、活跃任务状态与上下文产物数量；统计通过会话协议表面推导，
-  绝不伪造 token 总量。
-- 会话内容渲染更丰富：安全 GFM 渲染、服务端渐进式内容加载，以及基于证据的 Codex 子代理
-  生命周期关联与任务耗时。
-- AgentSession MCP 现在搜索注册 Provider 本地存储中仍然存在的每一个会话，不受 Viewer
-  隐藏/软删除/永久排除元数据的影响。
-- 刷新 OpenClaw 与 Hermes Agent 的 Provider 图标。
+Runtime 提供五个服务端派生 lens：
 
-完整变更见 [CHANGELOG.md](./CHANGELOG.md)。
+- **Summary**：session 状态、harness、能力覆盖、事件/任务/run/context 数量和校验异常。
+- **Events**：按来源顺序分页的标准化事件，可按 category、kind、phase 和 correlation 过滤。
+- **Work**：分离显示 Task（请求的工作）和 AgentRun（一次尝试、模式、模型、子 session、结果或取消原因）。
+- **Sessions**：parent、spawned、forked、continued、compacted-into、scheduled-run-of 和 handed-off 关系，带 canonical session 链接。
+- **Context**：元数据优先的 memory、instruction、skill、rule、summary 产物，以及有来源证据的加载、注入、引用、压缩和 reinjection 生命周期事件。
 
-## 来源说明
+### Session Protocol v2
 
-AgentSession 基于 [OpenSession](https://github.com/HeavyBunny19C/OpenSession) 开发。这个项目保留了本地、多 Provider AI 会话浏览器的核心方向，同时迁移到 TypeScript，并继续推进更丰富的嵌套会话、调用链和系统提示可视化。
+每个注册 Provider 都为每个可读 session 提供 `getSessionProtocol()`。协议边界使用 canonical composite `SessionRef`：`{ provider, sessionId }`；Provider 自己的 session ID 始终保留。
 
-## 它现在是什么
+v2 snapshot 包含：
 
-AgentSession 是一个本地优先的 AI 编程会话查看器。它不会修改原始工具数据库，而是读取你机器上的会话记录，生成统一的仪表盘、搜索、详情页、统计页、导出和调用链视图。
+- `version: 2`、session descriptor（state、origin、created/updated、cwd、harness、terminal outcome、fork seed boundary、inherited event count）；
+- dense source-order `events`，带 `category`、`normalizedKind`、turn/step/correlation anchors 和 `provenance`；
+- typed session relationships、`tasks`、`agentRuns`、metadata-first `contextArtifacts` 和可选的 in-file `branches`；
+- `validation`、`completeness` 和 provider `revision`。
 
-当前重点已经不只是“列出会话”，而是帮助你复盘一次 AI 工作流到底发生了什么：
+事件的常见 category 是 `session`、`message`、`model`、`reasoning`、`tool`、`task`、`run`、`context`、`control`、`team` 和 `unknown`。`recorded` 表示来源直接记录，`derived` 表示适配器根据来源证据重建；两者不会混写。校验器检查序列稠密性、实体唯一性、引用完整性、Task/AgentRun 分离、lineage 冲突和 capability 声明。
 
-- 哪个用户问题开启了这次会话
-- Assistant 每一步做了什么
-- 调用了哪些工具、MCP、Skill、LSP 或子 agent
-- task/subtask 分支如何插入主会话
-- 用户第一条消息之前加载了哪些 agent prompt、AGENTS.md、CLAUDE.md 或 configured instructions
-- token、cost、runtime、模型分布如何变化
-- 哪些会话值得收藏、重命名、删除或导出
+只要来源没有保存事实，适配器就不会发明 child session、隐藏 prompt、context 正文或 lifecycle。in-file message branch 是 branch topology，不会伪造成跨 session 关系。
 
-## 支持的 Provider
+## Read-only HTTP API
 
-| Provider | 状态 | 默认数据来源 | 能力 |
-|:---|:---:|:---|:---|
-| OpenCode | 完整共享能力 | `$XDG_DATA_HOME/opencode/opencode.db` 或 `~/.local/share/opencode/opencode.db` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析；另有 SQLite 原生高级统计 |
-| Claude Code | 完整共享能力 | `~/.claude/transcripts/` + `~/.claude/projects/` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析；保留 sidechain transcript 时支持子 agent；会话协议：任务通知 → Task/AgentRun、compact 边界事件 |
-| Codex CLI | 完整共享能力 | `~/.codex/sessions/**/*.jsonl` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析、嵌套子 agent；会话协议：NEW_TASK 任务/运行、压缩变体事件 |
-| OpenClaw | 完整共享能力 | `~/.openclaw/agents/*/sessions/*.jsonl` | 分支式 JSONL、reasoning、工具调用/结果、共享 Agent Loop 视图、分析与恢复。 |
-| Hermes Agent | 完整共享能力 | `$HERMES_HOME/state.db` | 只读 SQLite 会话、reasoning、工具调用/结果、共享 Agent Loop 视图、分析与恢复；压缩链不会被误判为子 agent；会话协议：压缩延续关系与 opaque 事件 |
-| GitHub Copilot CLI | 历史会话支持 | `~/.copilot/session-state/*/events.jsonl` + `~/.copilot/session-store.db` | 保留既有会话的浏览、搜索、导出、统计和共享视图；默认不再提供恢复或分析动作。 |
-| Gemini CLI | 历史会话支持 | `~/.gemini/tmp/*/chats/*.json` | 可浏览、搜索、导出、查看 Token 统计、共享视图和本地提示词/运行时证据。默认不提供继续会话或分析动作；其扁平 chat 格式没有 child-session 关系，因此 AgentSession 不会伪造嵌入式子 agent 分支。 |
-| Pi | 完整共享能力 | `~/.pi/agent/sessions/**/*.jsonl` | 共享 Agent Loop 视图、Trace、本地提示词证据、运行时清单、分析、活动分支与 fork 关系。若记录了子 agent 启动工具，会在对应调用处嵌入 child；只有来源记录的 fork 关系会明确标为推断。会话协议：压缩/branch_summary 事件与元数据优先产物 |
-| DeepSeek Harness | 完整共享浏览能力 | `$DSH_HOME/sessions/**/session.jsonl.zstd` 或 `~/.dsh/sessions/**/session.jsonl.zstd` | 读取 DSH v0 事件溯源日志（含多帧 Zstd 与 packed chunks）、reasoning、工具、压缩、工作流/子 agent、提示词快照、运行时清单、分析与完整会话协议。当前官方 headless CLI 没有稳定的默认恢复参数，因此不会伪造终端恢复命令。 |
+以下 API 都是 `GET`，返回 bounded、服务端归一化的 JSON：
 
-所有 Provider 都提供浏览、内容搜索、仅 viewer 的元数据管理、Markdown/JSON 导出、
-每日 Token 统计、Tree/Container/Metrics/Flow/Trace 和本地提示词/运行时证据。具有来源支持的
-恢复命令且有有效项目目录的活跃 Provider 提供继续会话；只产出提案的分析独立取决于 Provider
-的 `sessionAnalysis` 能力、已启用的分析配置与有效项目目录。只有来源记录了
-parent/child 关系时才会
-递归嵌入分支；仅能从来源关系推断的连接会明确标注为推断，而不会伪造一次调用。需要启动
-命令的能力要求来源记录了有效项目目录，或由显式、仅 viewer 的项目键映射提供目录；Provider
-原始数据始终保持只读。
-高级统计仍遵从来源本身：AgentSession 不会伪造 transcript 未记录的项目、模型或费用维度。
+```text
+GET /api/:provider/session/:id/protocol
+GET /api/:provider/session/:id/runtime/summary
+GET /api/:provider/session/:id/runtime/events?cursor=&limit=&category=&kind=&phase=&correlationId=
+GET /api/:provider/session/:id/runtime/graph?depth=&maxNodes=
+```
 
-### 共享 Agent Loop
+完整 `/protocol` 返回 v2 snapshot、capability descriptors、validation 和可用的 storage diagnostic。`events` 使用 cursor/limit；`graph` 使用 depth/maxNodes，并报告 truncation、缺失 session、不可用 Provider 和校验诊断。未知 session 返回 404；已知但不完整或无效的 session 保留诊断，不会被伪装成完整结果。
 
-所有 Provider 先把原始记录归一化为共同的 Coding Agent Loop：用户输入 → Agent 回合
-→ reasoning/文本/工具调用 → 工具结果 → 可选的子 agent 分支。Tree、Container、Metrics、
-Flow 与通用 Trace 都由这层派生。只有当来源保存了更丰富的原生 step 模型时，Provider
-才可以覆盖通用 Trace；它不能削弱共同的响应边界或工具结果语义。
+## Provider coverage
 
-想要新增 Provider？请阅读[新增 Provider 指南](./docs/CONTRIBUTING-PROVIDER.md)，其中包含适配器、MCP、测试和发布验收清单。
+九个已注册 Provider 都覆盖 Session Protocol v2。能力表区分来源记录和适配器派生的事实；`partial` 不等于来源原生保存。
 
-### 共享会话协议（Session Protocol）
+| Provider | 生命周期 | 本地来源 | Protocol fidelity 与覆盖 |
+|:---|:---|:---|:---|
+| OpenCode | active | `$XDG_DATA_HOME/opencode/opencode.db` 或 `~/.local/share/opencode/opencode.db` | `partial/derived` messages/parts 事件；原生 child/session 记录支持关系、Task、AgentRun。 |
+| Claude Code | active | `~/.claude/transcripts/`、`~/.claude/projects/` | `partial/derived` transcript、compact 边界和 sidechain/task-notification 证据。 |
+| Codex CLI | active | `~/.codex/sessions/**/*.jsonl` | `full/recorded` response/item、工具和 compaction；`partial/derived` NEW_TASK 关系、Task、AgentRun。 |
+| OpenClaw | active | `~/.openclaw/agents/*/sessions/*.jsonl` | `partial/derived` branch、reasoning、工具和 registry lineage；无来源证据不创建 child。 |
+| Hermes Agent | active | `$HERMES_HOME/state.db` | `full/recorded` SQLite 事件；`partial/derived` 压缩延续/delegation lineage，压缩不是 spawned。 |
+| GitHub Copilot CLI | legacy | `~/.copilot/session-state/*/events.jsonl` 与 `session-store.db` | `partial/derived` event-log message/tool 和 inline-agent Task/AgentRun；无可独立恢复 child。 |
+| Gemini CLI | legacy | `~/.gemini/tmp/*/chats/*.json` | `partial/derived` message/model/tool；未记录的关系、Task、run、context 为 `none`/unsupported。 |
+| Pi | active | `~/.pi/agent/sessions/**/*.jsonl` | `full/recorded` branch/compaction 和 `partial/derived` parent lineage；不虚构 spawn。 |
+| DeepSeek Harness | active preview | `$DSH_HOME/sessions/**/session.jsonl[.zstd]` 或 `~/.dsh/sessions/**` | `full/recorded` v0 event/context；`partial/derived` workflow、team 和跨 session 关系。 |
 
-在 Message 兼容/阅读视图之上，Codex CLI、Claude Code、Pi、Hermes Agent 与 DeepSeek Harness 还暴露一个
-Provider 中立的标准化会话协议（`getSessionProtocol` + `protocolCapabilities`）：带稳定序列号的事件
-（`SessionEventEnvelope`，`sequence` 是 1..n 稠密序列，按来源记录顺序编号、与时间戳无关）、显式的会话关系（parent / spawned / forked / continued /
-compacted-into / scheduled-run-of）、任务（Task）与代理运行（AgentRun）分离模型、以及元数据优先的上下文产物（ContextArtifact）。所有值都携带 provenance（`recorded` = 来源原生记录，`derived` = 适配器从其他证据重建）。
+当前 Provider 也提供消息搜索、token 统计、导出和只修改 AgentSession 元数据的本地管理。Runtime Environment 与 system-prompt evidence 仍是独立的只读能力：只展示可解析的本地来源，不声称恢复隐藏 prompt。
+未检测到的安装会显示为 unavailable 并保留 Provider diagnostic，不会被报告为空的成功来源。
 
-- 上下文压缩成为标准 `context.compaction` 事件：Codex 的 `compacted` / `context_compacted` /
-  `contextCompaction` 变体（无摘要时按 opaque 处理）、Claude Code 的 compact 边界与
-  PreCompact/PostCompact 记录、Pi 的 `compaction` 与 `branch_summary` 条目、Hermes 的压缩延续链、
-  DeepSeek Harness 的 `compaction/summary` 与 `compaction/prune` 记录
-  （摘要仅作为元数据保留；prune 为 opaque）。压缩不会产生 memory/context 生命周期事件。
-- 子代理/父会话证据归一化为关系与 Task/AgentRun：Codex 的 NEW_TASK 信封与 spawn 工具调用、Claude 的
-  `<task-notification>` 与 sidechain transcript、Hermes 的 delegate 会话。执行模式（foreground/
-  background/subagent/scheduled/team）只属于 AgentRun；Task 只携带状态、依赖与指派信息。压缩延续不会被当作子代理；
-  Pi 的 `parentSession` 只导出为派生的 parent 关系（轮转或 fork 无法从文件元数据区分），不虚构 spawn；
-  DeepSeek Harness 只在 header/`subagent/descriptor` 或 `tool-workflow/*` 有记录证据时导出 fork、spawn、Task 与 AgentRun。
-- 上下文产物是元数据优先的：`kind`（memory/instruction/skill/rule/summary）、`scope`（session/agent/
-  project/user/organization）、`origin`（user-authored/agent-generated/provider-generated）与
-  `contentAccess`（full/summary/metadata-only/unavailable）描述产物，绝不携带压缩文本本身。压缩派生的产物
-  固定为 kind=summary、scope=session、origin=provider-generated、contentAccess=metadata-only、
-  `sourceSessionIds` 已设置。`memory.generated` 等生命周期观察是事件 kind，只在来源证据支持时发出。
-- 每个域通过 `CapabilityDescriptor`（full/partial/none + recorded/derived + details）如实声明；
-  混合 recorded/derived 的域声明为 partial/derived，没有 accessor 的 Provider 一律默认 none，绝不伪造原生支持。
+## DeepSeek Harness compatibility
 
-所有 Provider 都使用独立的本地元数据库保存收藏、自定义标题、软删除和永久排除状态，不会写回原始会话数据库或 transcript 文件。
+DSH 适配器以官方 `deepseek-ai/deepseek-harness` 快照为兼容边界：commit `141eb6fef83422698aef7a981029e843e8161534`、tag `dsh-v0.1.0-rc.8`、npm stable `@deepseek-ai/dsh@0.1.0-rc.7`、npm `next` `0.1.0-rc.8`，session format version `0`。
 
-## 主要功能
+JSONL 是当前主支持后端，支持 raw `.jsonl`、multi-frame `.jsonl.zstd` 和 packed `text-chunks`、`reasoning-chunks`、`tool-call-chunks`。适配器保留 zero-based source sequence、rc.8 核心 `turn/start`、`turn/end`、`step/start`、`step/end`、`user/message`、`assistant/chunk`、`assistant/message`、`tool/call`、`tool/result`、`request/header` 与 `request/context`、surface/source-event citations、`session/end-seed`、fork `parentSession`/`seedLength`、compaction、cancellation/interruption、workflow/subagent，以及 rc.8 的 `agent/inbox/spliced` 和 Agent Teams `team/member`、`team/task`、`team/message/queued`、`team/message/delivered`。后四类是 control/team/task/delivery facts，不会变成普通 conversation message。
 
-- **统一会话入口**：`/sessions` 在一个列表中展示所有已检测 Provider，并支持 Provider 多选、项目/时间筛选、排序和跨 Provider 无限滚动。会话始终保留 `(provider, sessionId)` 复合身份，详情页继续使用 Provider 所有的 canonical URL。
-- **会话列表与搜索**：全局入口筛选 Provider 标题、viewer 自定义标题和目录；Provider 页面继续提供消息内容搜索、收藏和本地管理。标题类型筛选可将带有 analysis/analyze 信号的显示标题与其他会话分开；它是可逆的查看器启发式，不是 Provider 元数据。
-- **详情页复盘**：按 Provider 保存的模型响应边界，把 reasoning、action/tool call 和 observation/tool result 组织在同一个 ReACT 回合中。
-- **稳定的详情标签**：Overview、Conversation、执行、Analysis 和 Raw data 共用稳定内容轨道；Conversation 目录栏淡入淡出，不会让标题、操作区和标签栏重新排版，并尊重系统减少动态效果偏好。
-- **递归 Session Tree**：当 OpenCode、Codex、Copilot、Pi、DeepSeek Harness 或保存了 sidechain transcript 的 Claude Code 记录 parent/child 证据时，会被组织成嵌套结构；Copilot 的内嵌 agent 仍保持在主会话中，因为它们不是可独立恢复的会话。只有来源关系的连接会明确标为推断。
-- **执行视图**：只有真正包含子代理拓扑的会话才会显示“执行”标签页；它只渲染子代理分支/返回与分支摘要，并直接链接到来源会话作为分支证据，覆盖 `Agent`、`task`、`subtask`、`spawn_agent` 与 `delegate_task` 启动器，以及由 provider 明确标记的自定义 agent。线性对话不渲染执行标签页或惰性加载标记。
-- **Table of Contents**：长会话自动生成可折叠导航，只索引用户消息、assistant 消息、已知启动器或由 provider 明确标记的自定义子 agent。
-- **会话内搜索**：可从详情页操作栏打开紧凑搜索，或按 `/` 聚焦；结果会同时显示匹配回合与文本命中数，逐词高亮，并在上下跳转时保持控制条可见。
-- **系统提示词证据 API**：`GET /api/:provider/session/:id/system-prompts` 只暴露当前本地可解析的指令、规则与运行时来源；不会声称恢复隐藏的 Provider prompt。
-- **会话协议 API**：`GET /api/:provider/session/:id/protocol`（只读）返回能力描述符（每域 `full/partial/none` + `recorded/derived`）与标准化协议（带稳定序列号的事件、关系、任务/代理运行、元数据优先的上下文产物）。未知 Provider、未知会话或不支持协议的 Provider 均返回 404。
-- **会话列表统计**：会话列表（`/sessions`、Provider 页面及其 JSON API）只为当前页结果附加有界、逐会话的统计摘要：消息数、已知时的 token 总量、观测时长（有协议证据时取首/尾事件活跃跨度，否则取创建→最后更新的原始跨度——绝不宣称是活跃 CPU 时间）、上下文压缩次数与最近压缩时间、子代理/后台代理运行次数、活跃任务/代理运行状态，以及上下文产物/记忆数量。统计通过 Session Protocol 表面推导，不依赖 Provider 分支；不支持协议的 Provider 自动退化为基础摘要，且绝不伪造 token 总量。
-- **Trace API**：暴露 step/span summary，聚合 tool、skill、agent、MCP、LSP 等调用。
-- **统一用量入口**：`/stats` 使用同一份每日 Token 组成契约聚合所有已选 Provider；总量趋势图直接提供 Provider 筛选，来源卡片可在同一页面应用单 Provider 筛选或进入 Provider 专属明细。单 Provider 明细继续提供 Top 会话、周期对比、模型排名、按日下钻和可选费用估算。对于含子 agent 的文件型 transcript，只统计该文件自有的请求并排除复制的父会话历史；即使来源未给出完整组成字段，也保留记录的请求总量。文件型 Provider 只展示 transcript 实际提供的维度，不伪造能力。
-- **本地管理**：所有 Provider 都支持收藏、重命名、批量操作、软删除、回收站恢复和永久排除；这些操作只修改 viewer 元数据。
-- **导出**：OpenCode 在详情页提供一个 Export 菜单，可选择 Markdown
-  或 JSON 导出，JSON 包含 session tree。
-- **中英双语**：通过 `--lang zh` 或 `--lang en` 指定界面语言。
+检测到 DSH SQLite persistence 时，schema 17 会明确显示为 **unsupported backend/schema diagnostic**；它不会静默消失，也不会被当作空 Provider。当前官方 headless CLI 没有稳定的默认 resume 参数，因此 AgentSession 不伪造 DSH resume 命令。
 
-## 安装
+## Installation
 
-本项目当前支持以下安装方式：
-
-### 方式一：下载单文件 binary（无需安装 Node.js）
-
-从 [GitHub Releases](https://github.com/Guanzhw/AgentSession/releases) 下载对应平台压缩包，并用同一 Release 中的 `SHA256SUMS` 验证文件。每个压缩包包含：
-
-- `agentsession` / `agentsession.exe`：Web Viewer；
-- `agentsession-mcp` / `agentsession-mcp.exe`：只读 stdio MCP Server。
-
-当前发布 Windows x64、Linux x64、Linux arm64 与 macOS arm64。binary 内嵌 Node.js runtime、Web 静态资源和 analysis helper，不依赖系统 Node.js 或源码目录。目前未提供商业代码签名，Windows SmartScreen 或 macOS Gatekeeper 可能要求用户确认本地下载的可执行文件。
-
-### 方式二：安装 npm 包
+需要 Node.js `>= 22.15.0`。也可以使用 GitHub Releases 中的 standalone binary。
 
 ```bash
 npm install --global @acetamido/agentsession
 agentsession
 ```
 
-打开 http://localhost:3456 来访问主页
-
-### 方式三：从源码运行
+源码运行：
 
 ```bash
 git clone https://github.com/Guanzhw/AgentSession.git
@@ -163,637 +95,78 @@ npm install
 npm start
 ```
 
-## 命令行参数
+服务只监听 loopback，默认地址为 `http://127.0.0.1:3456`。
+
+## CLI
 
 ```text
 agentsession [options]
 
---port <number>       服务端口，默认 3456
---opencode-db <path>  OpenCode 数据库路径
+--port <number>       服务端口（默认 3456）
+--opencode-db <path>  OpenCode 数据库
 --claude-dir <path>   Claude Code 数据目录
 --codex-dir <path>    Codex CLI 数据目录
 --copilot-dir <path>  GitHub Copilot CLI 数据目录
 --gemini-dir <path>   Gemini CLI 数据目录
 --pi-dir <path>       Pi agent 数据目录
---dsh-dir <path>      DeepSeek Harness 数据目录（默认 `$DSH_HOME` 或 `~/.dsh`）
---openclaw-dir <path> OpenClaw state 数据目录
+--dsh-dir <path>      DeepSeek Harness 数据目录（默认 $DSH_HOME 或 ~/.dsh）
+--openclaw-dir <path> OpenClaw state 目录
 --hermes-dir <path>   Hermes Agent 数据目录
---config <path>       AgentSession JSON 配置文件
---disable-terminal-launch
-                      禁止启动继续会话和分析命令
---reindex             启动时重建跨 Provider 索引
+--config <path>       AgentSession JSON 配置
+--disable-terminal-launch  禁止 resume command 启动
+--reindex             启动时重建索引
 --lang <en|zh>        界面语言
 --open                启动后打开浏览器
 -h, --help            显示帮助
 ```
 
-## 环境变量
+终端启动只用于用户明确请求的 provider resume command。命令由结构化 executable/args/cwd 组成，并受 loopback、same-origin 和 `--disable-terminal-launch` 约束；AgentSession 不提供写入 Provider 数据的终端控制面。
 
-| 变量 | 作用 |
-|:---|:---|
-| `PORT` | 默认服务端口 |
-| `AGENTSESSION_DB_PATH` | OpenCode DB 路径，低于 `--opencode-db` 优先级 |
-| `XDG_DATA_HOME` | OpenCode 的 XDG 数据根目录 |
-| `CLAUDE_CONFIG_DIR` | Claude Code 数据目录 |
-| `CODEX_HOME` | Codex CLI 数据目录 |
-| `COPILOT_HOME` | GitHub Copilot CLI 数据目录 |
-| `GEMINI_HOME` | Gemini CLI 数据目录 |
-| `OPENCLAW_STATE_DIR` | OpenClaw state 数据目录（优先） |
-| `OPENCLAW_HOME` | OpenClaw home；state 默认为其下的 `.openclaw` |
-| `HERMES_HOME` | Hermes Agent 数据目录 |
-| `PI_CODING_AGENT_DIR` | Pi agent 数据目录，默认 `~/.pi/agent` |
-| `DSH_HOME` | DeepSeek Harness 数据目录，默认 `~/.dsh` |
-| `AGENTSESSION_META_PATH` | AgentSession 元数据库路径；未指定 `AGENTSESSION_CONFIG` 时，配置文件也放在同一目录 |
-| `AGENTSESSION_CONFIG` | AgentSession JSON 配置文件路径 |
+## Configuration
 
-## AgentSession-MCP：供 Coding Agent 查询会话历史
+用户配置文件默认为元数据目录下的 `config.json`，也可以用 `AGENTSESSION_CONFIG` 或 `--config` 指定。项目目录映射现在是顶层 `projectPaths`，不是 Provider 私有的旧嵌套设置：
 
-`@acetamido/agentsession-mcp` 是一个独立的 stdio MCP 包，供 Codex、Claude Code、GitHub Copilot CLI、OpenCode 等 MCP Host 查询本机已注册 Provider 的会话历史。它不启动 Web 服务、不绑定端口，也不会修改任何 Provider 数据。
+```json
+{
+  "projectPaths": {
+    "gemini": {
+      "opaque-project-key": "C:\\work\\project"
+    }
+  },
+  "resumeCommands": {
+    "claude-code": {
+      "executable": "claude",
+      "args": ["--resume", "{sessionId}"]
+    }
+  },
+  "resumeShell": {
+    "executable": "powershell.exe",
+    "args": ["-NoLogo", "-NoProfile"]
+  }
+}
+```
 
-### 交互式一键安装与自动更新
+`projectPaths.<provider>` 的 key 必须是来源提供的稳定 opaque project key，value 必须是已存在的绝对目录；AgentSession 不猜测或写回该映射。`resumeCommands` 只覆盖 resume 命令，`resumeShell` 只定义受信任的本地宿主。`allowTerminalLaunch` 是启动时开关，不写入保存配置。
 
-无需全局安装；运行下面的命令后，安装器会列出本机检测到的 Coding Agent、询问目标并仅写入你确认的用户级 MCP 配置：
+常用环境变量：`PORT`、`AGENTSESSION_DB_PATH`、`XDG_DATA_HOME`、`CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`COPILOT_HOME`、`GEMINI_HOME`、`OPENCLAW_STATE_DIR`、`OPENCLAW_HOME`、`HERMES_HOME`、`PI_CODING_AGENT_DIR`、`DSH_HOME`、`AGENTSESSION_META_PATH`、`AGENTSESSION_CONFIG`。
+
+## AgentSession-MCP
+
+`@acetamido/agentsession-mcp` 是独立的 read-only stdio MCP server。它查询 Provider 本地仍存在的 session，不写入 Provider 数据，也不受 Viewer 隐藏或排除元数据影响。工具边界是 `session_search`、`session_get`、`session_timeline`、`session_get_context` 和 `session_get_event`；返回内容带有长度上限和不可信来源边界。
 
 ```bash
 npx --yes --prefer-online @acetamido/agentsession-mcp@latest install
 ```
 
-支持 Codex、Claude Code 和 OpenCode。Copilot 保留为历史会话 Provider，不再作为
-安装器目标。安装后的配置会使用
-`npx --prefer-online @acetamido/agentsession-mcp@latest` 启动 MCP，因此每次
-Coding Agent 启动时都会强制检查 npm 缓存的新鲜度并获取最新已发布版本。
-已有同名配置不会被 `install` 覆盖；`update` 只刷新安装器已创建的配置。如需迁移
-手工或旧版同名配置，必须显式添加 `--replace`：
+## Development and verification
 
 ```bash
-# 非交互式安装到指定 Host；--config 会作为 AGENTSESSION_CONFIG 传给 MCP
-npx --yes --prefer-online @acetamido/agentsession-mcp@latest install \
-  --target codex,claude-code --config /path/to/config.json --yes
-
-# 刷新安装器已管理的自动更新配置
-npx --yes --prefer-online @acetamido/agentsession-mcp@latest update \
-  --target all --yes
-
-# 有意迁移手工或旧版同名配置时才覆盖
-npx --yes --prefer-online @acetamido/agentsession-mcp@latest update \
-  --target all --replace --yes
-```
-
-Pi 当前上游 CLI 没有原生 MCP 配置入口，因此安装器不会声称已安装到 Pi；如需在 Pi 中使用，需要由 Pi Extension 显式提供 MCP bridge。
-
-### 手动安装
-
-```bash
-npm install --global @acetamido/agentsession-mcp
-agentsession-mcp --config /path/to/config.json
-```
-
-它只提供五个只读工具：`session_search`、`session_get`、`session_timeline`、`session_get_context` 与 `session_get_event`。默认搜索标题、消息正文和已记录的目录；以空白分隔的多个关键词必须全部命中，但不要求相邻。`session_search` 可用 `directory` 限定规范化后的项目路径，并用返回的 `nextCursor` 继续读取同一时间快照；默认搜索的 `diagnostics` 会列出所有已注册 Provider，包括未安装的 Provider。`session_get` 同时返回首条和末条可见消息预览，标题命中后通常无需先调用 timeline 才能取得 EventRef。`session_timeline` 会省略没有可见文本的 message 段；工具和显式请求的 reasoning 仍是独立事件。普通搜索不会返回 reasoning；reasoning、tool input 与 tool output 均需要显式请求，并始终受服务端长度限制。截断的 `session_get_event` 内容会返回可直接用于下一次调用的 `continuation`/`continuations` 参数，直到 `nextOffset` 为 `null`。Provider 本地存储是权威来源：只要会话仍存在于 Provider 的本地存储中，即使 Viewer 将其隐藏、软删除或永久排除，MCP 依然可以检索到它；Viewer 元数据不会作为 MCP 的访问过滤条件。
-
-使用相同的 AgentSession 配置文件即可复用 Provider 路径与元数据目录。可选的 MCP 输出上限如下；所有数值都有服务端硬上限：
-
-```json
-{
-  "mcp": {
-    "searchLimit": 20,
-    "timelineLimit": 50,
-    "eventMaxChars": 4000,
-    "contextWindow": 5
-  }
-}
-```
-
-手动注册时，使用 `agentsession-mcp` 命令和可选的 `--config` 参数即可。例如 Codex CLI：
-
-```bash
-codex mcp add agentsession -- agentsession-mcp --config /path/to/config.json
-```
-
-## 继续会话命令
-
-会话详情页始终显示可复制的 session ID。当 Provider 有已知的继续命令，且
-来源记录或映射提供的项目目录有效时，页面可以在终端中打开该命令。命令启动默认
-启用。启动前，页面会在可复制的折叠面板中展示解析后的命令和工作目录；使用 `--disable-terminal-launch` 启动服务可隐藏并禁用继续会话和分析
-操作。
-启动时优先使用 Windows Terminal（`wt.exe`）；如果不可用，则直接打开已配置的
-PowerShell Host。
-API 会等待终端 Host 或 PowerShell wrapper 确认启动后才返回成功；如果 Host
-无法启动，页面会显示错误，而不是弹出成功提示。运行时启动日志会记录所选 Host、
-fallback 信息，以及可用时的 launcher PID。
-
-具有稳定终端恢复命令的活跃 Provider 会声明默认继续命令：
-
-| Provider | 默认命令 |
-|---|---|
-| OpenCode | `opencode --session {sessionId}` |
-| Claude Code | `claude --resume {sessionId}` |
-| Codex CLI | `codex resume {sessionId}` |
-| OpenClaw | `openclaw tui --local --session <sessionKey>`；由 canonical session ID 通过 registry 解析 |
-| Hermes Agent | `hermes chat --resume {sessionId}` |
-| GitHub Copilot CLI | 历史会话模式；默认不启动 |
-| Gemini CLI | 历史会话模式；默认不启动 |
-| Pi | `pi --session {sessionId}` |
-| DeepSeek Harness | 当前 stock headless CLI 无稳定默认恢复命令；不会启动 |
-
-每个命令和 PowerShell 兼容终端 shell 都可以在 AgentSession 配置目录的
-`config.json` 中覆盖，也可以通过 `--config` 指定文件：
-
-```json
-{
-  "resumeCommands": {
-    "opencode": {
-      "executable": "opencode",
-      "args": ["--session", "{sessionId}"]
-    },
-    "gemini": false
-  },
-  "resumeShell": {
-    "executable": "powershell.exe",
-    "args": ["-NoExit", "-NoLogo", "-NoProfile"]
-  }
-}
-```
-
-支持 `{sessionId}` 和 `{projectPath}` 占位符。命令以 executable/args 数组
-启动，不执行原始 shell 字符串。对于历史记录中没有项目目录的 Provider，
-可以显式配置绝对路径 `cwd`。将 Provider 配置设为 `false` 可禁用其继续
-会话操作。
-
-`resumeShell.executable` 可以是 `pwsh.exe`、`powershell.exe`，或
-PowerShell 兼容程序的绝对路径。`args` 会插入到自动生成的
-`-EncodedCommand` 参数之前。未配置时，AgentSession 会依次查找
-`pwsh.exe` 和 `powershell.exe`，并使用 `["-NoExit", "-NoLogo"]`。
-
-## Web 设置
-
-打开 `/:provider/settings`，例如
-`http://127.0.0.1:3456/opencode/settings`，即可通过开关和表单管理分析功能、
-目标路径、Provider 命令、继续会话命令和 PowerShell Host。页面会显示配置
-文件的准确路径，并在保存前完成校验。底层 JSON 仍保留在折叠的高级设置中。
-
-`analysis`、`resumeCommands` 和 `resumeShell` 的修改会立即应用到当前服务器。
-端口、数据目录和 Provider 路径等配置会持久化，但需要重启后生效。
-`allowTerminalLaunch` 有意保留为非 Web 配置权限。命令启动默认启用；使用
-`--disable-terminal-launch` 启动 AgentSession 可对当前进程关闭该能力。
-
-Token Explorer 不内置供应商价格表。若要显示费用估算，请在高级 JSON 配置中
-按 `provider/model` 键填写每百万 Token 的价格；估算只在统计页筛选到单个模型时显示：
-
-```json
-{
-  "tokenPricing": {
-    "openai/gpt-5": {
-      "currency": "USD",
-      "inputPerMillion": 1.25,
-      "outputPerMillion": 10,
-      "cacheReadPerMillion": 0.125,
-      "sourceLabel": "Vendor pricing page",
-      "sourceUrl": "https://example.com/pricing",
-      "asOf": "2026-07-13"
-    }
-  }
-}
-```
-
-### 项目键映射
-
-有些 transcript 只保留稳定但不透明的项目键，而不记录工作目录；Gemini CLI 就是其中一例。
-AgentSession 不会根据该键猜测目录。请从会话的 **原始数据** 页复制项目键，在
-**设置 → 项目目录映射** 中每行填写一个 `项目键=绝对路径`，或保存等价的仅 viewer 配置：
-
-```json
-{
-  "analysis": {
-    "providers": {
-      "gemini": {
-        "projectPaths": {
-          "从原始数据复制的不透明项目键": "D:\\WorkSpace\\my-project"
-        }
-      }
-    }
-  }
-}
-```
-
-AgentSession 会在使用时只采用实际存在的绝对目录，并在本机规范化该路径、在会话详情中
-标记为“由配置映射提供”；绝不会把目录写回 Provider transcript。匹配的 Gemini 历史会话随后可
-使用运行时解析。
-
-`currency` 必须是三个字母的货币代码；价格必须为非负有限数；`sourceUrl`
-只能使用绝对 HTTP/HTTPS URL。未配置的 reasoning/cache 维度会明确标为未计价，
-不会被静默当作零成本。请使用实际模型键和可信价格来源，并自行维护 `asOf` 日期。
-
-## 运行时日志
-
-AgentSession 会在 metadata 目录下写入 append-only JSONL 运行时事件：
-
-```text
-<metadata-dir>/logs/runtime-YYYY-MM-DD.jsonl
-```
-
-日志记录服务器启动、Provider 索引、HTTP 路由模式与状态码、元数据修改、设置保存、
-终端启动，以及分析任务 prepare/launch 事件。为了本地诊断，启动事件可能包含工作
-目录路径。日志有意不记录请求体、会话全文、prompt、工具输出、完整命令参数、
-cookie、token 或 secret。单个分析任务的 stdout/stderr 与证据快照仍保存在该 run
-自己的 `diagnostics/` 目录中。
-
-## 会话分析与评估提案
-
-AgentSession 可以从所有活跃 Provider 的详情页以非交互方式启动已配置的 Analyzer。默认
-Runner 是 OpenCode 的非交互命令，但可以全局或按活跃 Provider 覆盖，因此 Copilot CLI 和 Pi
-会话也能使用同一条有边界、只产出提案的分析生命周期。Gemini CLI 保持历史会话 Provider，
-默认不显示分析动作。分析任务会把会话保存为带索引的 JSONL 证据、保存选定工件快照、创建评估种子，
-并要求 Analyzer 输出：
-
-- `report.md`：主要的、面向人的分析结果
-- `evaluation-proposals.json`：包含回放、留出和回归用例的验证计划
-- `artifact-proposals.json`：建议的目标修改，也可能是空提案列表。单个提案
-  可以用 `kind: "skill-evolution"` 表示这是有证据支持的未来 Agent 技能、
-  指令或 harness 指南更新。
-
-这三个文件是最终分析产物。`session-index.json`、`evidence-index.json`、
-`evidence.jsonl`、`artifacts.json` 和 `manifest.json` 等文件属于支持证据和
-诊断数据。已完成运行会在会话的 **分析活动** 面板中显示直接打开和下载链接。
-
-运行中、失败或校验无效的任务还会在同一面板中提供可用的 Analyzer stdout/stderr 日志，
-以及可复制的 PowerShell Analyzer 命令。
-
-分析输入会明确分成三类：
-
-- **会话证据**：标准化后的对话、工具结果、系统提示词记录和其他会话数据。
-- **分析材料**：由所选目标配置、与 Provider 无关的原始输入，例如文档、
-  测试、提示词素材、脚本或显式外部引用文件。
-- **运行时扩展**：由 Provider 解析的指令和行为，包括 `AGENTS.md`、
-  `CLAUDE.md`、`GEMINI.md`，以及技能、Agent、命令、插件、Hook、工具和规则。
-
-启动前，AgentSession 会解析当前本地 Provider 运行时扩展，并自动采集
-默认选中的项目级和用户级指令、Skills、Agents、Commands、Plugins、Hooks、
-Tools、Rules 或扩展包中可采集的部分。扩展类型、搜索路径和优先级仍由各
-Provider 负责。大多数 transcript 不包含不可变的历史扩展清单，因此这里表示
-“当前本地解析结果”，不会声称精确还原会话开始时加载的环境。每个捕获的工件
-都会记录其对应的运行时扩展 ID。
-
-会话详情页会把启动动作放在同一行：**在终端中继续** 和 **分析所选项** 并列
-显示。下方的分析选择器使用类似 inventory 的二维网格：行表示来源范围，例如
-分析目标、项目级运行时和用户级运行时；列表示材料类型，例如 Skills、Prompts、
-Agents、Rules 和其他输入。启动前，摘要会显示已选目标数量和运行时扩展数量。
-
-新运行会按用途组织这些文件：
-
-```text
-<run>/
-├── manifest.json
-├── outputs/
-│   ├── report.md
-│   ├── evaluation-proposals.json
-│   ├── artifact-proposals.json
-│   └── implementation-result.json # 实现 run 请求写入
-├── inputs/
-│   ├── session.json
-│   ├── evaluation-seed.json
-│   ├── analysis-request.md
-│   └── accepted-proposals.json    # 用户批准后写入
-├── evidence/
-│   ├── session-index.json
-│   ├── evidence-index.json
-│   ├── evidence.jsonl
-│   ├── artifacts.json
-│   └── artifact-snapshots/
-└── diagnostics/
-    ├── analyzer.stdout.log
-    ├── analyzer.stderr.log
-    ├── messages.json            # 仅 raw snapshot 受 includeRawSnapshots 控制
-    ├── tree.json
-    ├── container.json
-    ├── metrics.json
-    ├── flow.json
-    └── trace.json
-```
-
-旧版平铺运行目录仍可读取。
-
-生成的评估用例初始状态为 `status: "proposed"`。AgentSession 不会直接
-修改 Skill，也不会把提案标记为已验证。只有在基线版本与候选版本通过重放、
-留出和回归测试后，才应提升候选工件。
-
-Analyzer 退出后，AgentSession 会自动检查输出结构，要求同时包含重放、
-留出和回归用例，依据工件清单验证提案根目录与路径，解析每个 `ev:...` 与
-`artifact:...` 引用，并要求显式描述基线/候选预期以及 token/runtime 标准，
-最后将 `manifest.json` 状态更新为 `completed`、`invalid` 或 `failed`。
-
-会话页面包含一个 **分析活动** 面板。分析运行期间页面会自动轮询，结束后
-显示权威的 manifest 状态、进程退出码、提案数量、校验错误和本地运行目录。
-启动 Toast 只表示命令已经发起；是否真正成功应以分析活动面板为准。
-
-Analyzer 首先读取紧凑的会话层级与证据索引，而不是单个大型会话 JSON。
-生成的分析请求提供以下只读命令。CLI 输出使用紧凑 Markdown，同时保留精确的
-证据 ID 与工件 ID，供后续查询和校验使用：
-
-- `session_main_info`
-- `session_query_system_prompts`
-- `session_query_context`
-- `session_query_errors`
-- `session_query_tools`，使用 `status: "completed"` 获取正样本
-- `session_find_anomalies`
-- `session_get_evidence`
-- `extension_list`
-- `extension_get`
-- `artifact_list`
-- `artifact_get`
-
-`extension_*` 用于查询已捕获的 Provider 运行时上下文；`artifact_*` 用于查询
-由已配置分析材料和自动采集的运行时扩展共同生成的有界快照。
-`runtimeExtensionIds` 字段会标识来自运行时上下文的快照。
-
-用户中断信号来自明确的工具错误原因。“高错误率”仍是透明的启发式判断：
-结果会返回阈值、最小工具调用样本数、原始计数、错误率和完整排序。Analyzer
-在提出修改前还必须对比成功与失败的执行结果。
-
-会话分析与继续命令共用启动时的命令启动设置。该能力默认启用，也可以使用
-`--disable-terminal-launch` 关闭；分析仍需要显式启用。OpenCode 自带默认
-Analyzer 命令，也可以覆盖：
-
-```json
-{
-  "analysis": {
-    "enabled": true,
-    "defaultTarget": "skills",
-    "outputDir": ".agentsession/analysis",
-    "includeRawSnapshots": false,
-    "shell": {
-      "executable": "powershell.exe",
-      "args": ["-NoExit", "-NoLogo", "-NoProfile"]
-    },
-    "implementation": {
-      "command": {
-        "executable": "opencode",
-        "args": [
-          "run",
-          "读取附加的实现请求并实现已接受的提案。",
-          "--model", "deepseek/deepseek-v4-flash",
-          "--dir", "{projectPath}",
-          "--file", "{implementationPromptPath}"
-        ]
-      }
-    },
-    "targets": {
-      "skills": {
-        "label": "分析 Skills",
-        "fileExtensions": [".md", ".json", ".yaml", ".yml", ".js", ".ts", ".py"],
-        "promptFile": "prompts/analyze-skills.md"
-      },
-      "docs": {
-        "artifactRoots": ["docs"],
-        "artifactFiles": ["README.md"],
-        "fileExtensions": [".md", ".mdx", ".txt"]
-      }
-    },
-    "providers": {
-      "opencode": {
-        "targets": {
-          "skills": {
-            "prompt": "优先分析影响所选会话的可复用技能。"
-          }
-        },
-        "command": {
-          "executable": "opencode",
-          "args": [
-            "run",
-            "读取附加的分析请求并写入要求的提案文件。",
-            "--model", "deepseek/deepseek-v4-flash",
-            "--dir", "{projectPath}",
-            "--file", "{promptPath}"
-          ]
-        }
-      }
-    }
-  }
-}
-```
-
-命令支持 `{sessionId}`、`{projectPath}`、`{target}`、`{runId}`、
-`{runDir}`、`{sessionPath}`、`{sessionIndexPath}`、
-`{evidenceIndexPath}`、`{evidencePath}`、`{accessManifestPath}`、
-`{analysisToolPath}`、`{promptPath}`、`{reportPath}`、
-`{evaluationSeedPath}`、`{evaluationPath}`、`{proposalsPath}` 和
-`{artifactsPath}` 占位符。
-实现命令还支持 `{implementationPromptPath}`、`{acceptedProposalsPath}` 和
-`{implementationResultPath}`。
-也可以使用 `{prompt}` 将完整提示词作为一个参数传入，但大体积会话更适合
-使用 `{promptPath}` 或 `"stdin": "prompt"`。只有启用
-`includeRawSnapshots` 进行调试或兼容旧 Analyzer 时，才应使用
-`{messagesPath}`。
-
-OpenCode 示例使用非交互的 `run` 命令，并把生成的请求作为文件附加。应配置
-OpenCode 权限，使其只能写入分析输出目录。`--dangerously-skip-permissions`
-可简化受信任本地项目的无人值守测试，但只应在项目和提示词均可信时添加。
-
-当 run 以 `manifest.validation.ok === true` 完成且至少包含一个已校验的提案
-后，会话页可以启动实现 run。点击 **实现已接受的提案** 是第一版用户
-批准门：它会写入包含已接受提案 ID 和完整提案记录的
-`inputs/accepted-proposals.json`，再写入 `inputs/implementation-request.md`，
-把配置的实现命令指向该请求，并要求 Agent 只实现已接受的提案。若该 run 带有
-`inputs/analysis-access.json`，请求也会指向它，让实现阶段沿用相同的有界
-文件优先证据接口。Agent 应写入 `outputs/implementation-result.json`、完成
-验证并留下供人工 review 的结果；它不会自动合并。
-
-相对路径形式的 `artifactRoots` 和 `outputDir` 从会话记录的项目目录解析。
-显式配置时也允许使用绝对工件目录。`artifactFiles` 可以包含 `README.md`
-等项目相对文件或绝对外部引用文档。`.opencode/skills`、`.claude/skills`、
-`~/.claude/skills`、`AGENTS.md` 和 `CLAUDE.md` 等 Provider 运行时路径不应
-在这里重复配置；Provider Adapter 会将它们解析为运行时扩展。分析文件使用
-有大小限制的快照，因此即使原始材料后续发生变化，分析证据仍可审查。
-`fileExtensions` 仅用于筛选这些分析材料目录中的文件名后缀。
-
-未配置 `analysis.outputDir` 时，run 默认写入会话项目下的
-`.agentsession/analysis`。AgentSession 会写入
-`.agentsession/.gitignore`，即使目标项目尚未忽略该目录，生成的 run 也不会
-进入版本控制。
-每个 run 都会在自己的 `tools/` 目录中携带只读 evidence 查询工具及其本地依赖，
-因此 Analyzer 不需要读取 AgentSession 的安装目录。显式绝对 `outputDir`
-仍受支持，但如果 Analyzer 采用仅允许访问项目目录的 sandbox，该目录也必须对
-Analyzer 可见。
-
-可以在设置页面直接编辑目标专用的 Analyzer 指令，也可以通过
-`analysis.targets.<target>.prompt` 配置。`promptFile` 只是对已有文本文件的
-可选引用；相对路径从 `config.json` 所在目录解析，AgentSession 不会
-自动创建该文件。可以在设置页面点击 **预览实际提示词**，检查与运行时使用
-相同的组合提示词模板；会话专用路径会显示为占位符。
-
-无需在 `analysis.targets` 中额外配置即可使用以下内置分析目标：
-
-- `skills`：所选 OpenCode 运行时 Skills
-- `prompts`：提示词文件与模板
-- `agents`：所选 OpenCode 运行时 Agent 定义与角色
-- `docs`：文档目录
-- `rules`：所选 OpenCode 运行时指令与规则
-- `tests`：测试、规格与 Fixtures
-- `workflows`：CI 与仓库自动化
-- `scripts`：项目脚本与命令行工具
-
-设置页面会将这些目标显示为预设。`analysis.targets` 中的配置可以覆盖内置
-目标，也可以定义其他自定义目标。
-
-`analysis.defaultTarget` 控制会话页面启动分析时使用的单个目标。旧配置中的
-`defaultTargets` 数组仍会被接受，但只使用第一个有效目标。
-
-设置页面会编辑 `analysis.providers.<provider>.targets.<target>` 覆盖。每个目标
-会明确显示默认使用的 Provider 无关分析材料根目录、显式文件和后缀筛选；会话
-页面会把这些目标和 Provider 解析出的运行时扩展一起放进 inventory 选择器中，
-但生成分析包时这两类输入仍保持分离。Provider 运行时上下文会在启动时自动解析。
-点击 **恢复默认值** 时，会尽可能删除 Provider 专用差异，使该值重新继承
-`analysis.targets` 或内置目标。
-
-默认情况下，分析任务写入 `evidence/session-index.json`、
-`evidence/evidence-index.json` 和不可变的 `evidence/evidence.jsonl`，
-`diagnostics/` 目录始终包含 Analyzer stdout/stderr 日志。只有旧 Analyzer
-确实依赖大型诊断快照时，才应把 `analysis.includeRawSnapshots` 或目标级
-`includeRawSnapshots` 设为 `true`。
-
-可以在 `analysis.providers.<provider>.targets.<target>` 下覆盖 Provider 的目标
-配置，包括提示词、工件目录和文件后缀筛选。其他自定义目标也可复用相同结构。
-面向编码 Agent 的其他 Provider 分析能力实现指南见
-[`docs/ANALYSIS-PROVIDER-IMPLEMENTATION.md`](./docs/ANALYSIS-PROVIDER-IMPLEMENTATION.md)。
-
-## Claude Code 历史记录
-
-Claude Code Provider 同时读取旧版 `~/.claude/transcripts` 和当前
-`~/.claude/projects/<project>/*.jsonl` 布局。AgentSession 不会修改这些文件。
-
-Claude Code 会按照 `cleanupPeriodDays` 清理历史 JSONL，默认保留 30 天。
-JSONL 被清理后，`~/.claude.json` 中可能仍保留项目元数据；此时页面会明确提示
-“只有元数据”，但无法恢复已删除的对话。如果需要长期归档，请设置合适的正数
-保留天数。
-
-## 架构概览
-
-```text
-bin/
-└── cli.ts                  # CLI 入口，先初始化配置再加载服务
-src/
-├── providers/
-│   ├── interface.ts       # ProviderAdapter 接口
-│   ├── kinds.ts           # Provider capability 判断
-│   ├── index.ts           # Provider 注册表
-│   ├── shared/            # 与具体 schema 无关的共享 Provider 工具
-│   ├── opencode/          # OpenCode SQLite 适配器与结构化视图
-│   ├── claude-code/       # Claude Code JSONL 适配器
-│   ├── codex/             # Codex CLI JSONL 适配器
-│   ├── openclaw/          # OpenClaw 分支式 JSONL 适配器
-│   ├── hermes/            # Hermes 只读 SQLite 适配器
-│   ├── copilot/           # GitHub Copilot CLI 事件日志适配器
-│   ├── gemini/            # Gemini JSON 适配器
-│   ├── pi/                # Pi 分支树 JSONL 适配器
-│   └── deepseek-harness/  # DSH 多帧 Zstd 事件日志适配器
-├── db.ts                  # OpenCode-compatible DB 查询
-├── meta.ts                # 收藏、重命名、删除等本地元数据
-├── index-db.ts            # 跨 Provider 会话索引
-├── config.ts              # CLI、环境变量与 JSON 配置
-├── resume.ts              # 结构化继续会话命令
-├── analysis*.ts           # 证据快照、查询、执行与验证流水线
-├── server.ts              # HTTP API 与 SSR 页面
-├── views/                 # 服务端渲染模板
-├── static/                # 原生前端 JS/CSS，构建时复制到 dist
-└── locales/               # 中英文文案
-scripts/
-├── copy-static.mjs        # 复制静态资源
-└── qa-agent-browser.*     # Live E2E QA
-test/
-└── core.test.mjs          # Provider、分析、配置和渲染回归测试
-```
-
-详细的模块边界、代码约定、验证矩阵和本地服务操作见
-[AGENTS.md](./AGENTS.md)。新增 Provider 时同时参考
-[Provider 贡献指南](./docs/CONTRIBUTING-PROVIDER.md) 和
-[`docs/ANALYSIS-PROVIDER-IMPLEMENTATION.md`](./docs/ANALYSIS-PROVIDER-IMPLEMENTATION.md)，以及
-`src/providers/interface.ts`；接口源码是最终契约。
-
-## 验证
-
-基础验证：
-
-```powershell
 npm run typecheck
 npm test
-```
-
-涉及页面、静态资源、Provider 展示或 API 行为时，先构建并重启本地服务：
-
-```powershell
 npm run build
-node dist/bin/cli.js
 ```
 
-然后使用一个真实、包含 reasoning/tool/subagent 数据的 OpenCode Session
-运行浏览器 E2E：
-
-```powershell
-$env:AGENTSESSION_QA_BASE_URL = 'http://127.0.0.1:3456'
-$env:AGENTSESSION_QA_SESSION_ID = '<real-session-id>'
-npm run qa:e2e
-```
-
-`AGENTSESSION_QA_SESSION_ID` 是必填项；仓库不会内置任何机器相关的真实会话 ID。
-
-E2E 覆盖：
-
-- dashboard、session list、search、stats、session detail
-- settings、recursive session tree、TOC、Flow、reasoning 与 token 渲染
-- JSON/Markdown 导出
-- 默认关闭的终端启动入口
-- browser/page errors 收集
-
-会话分析不能只看外部 analyzer 的退出码。最终成功条件是对应 run 的
-`manifest.json` 同时满足 `state: "completed"` 和
-`validation.ok: true`，并通过 evidence 引用、输出 schema、路径边界与
-SHA-256 完整性检查。
-
-## Roadmap
-
-下一阶段会围绕“更准确地复盘 AI 工作流”继续推进：
-
-[x] **Session Container Rewrite**
-   - 将 session 建模为可递归容器，主会话、child session、subsession 都能以统一结构插入和渲染。
-
-[x] **Nested Subagent Expansion**
-   - 将 `task` / `subtask` 工具调用展开为可折叠的 nested subagent session，而不是普通工具行。
-
-[x] **Metrics Upgrade**
-   - 增加 per-session token usage、runtime、step duration、tool counts、model/provider breakdown。
-
-[ ] **Tool Flow Tree**
-   - 将当前 trace/tool 视图升级为完整树，包含所有 sub-session branch、task calls、spans 和 timing。
-
-[x] **Token Explorer**
-   - 将统计面板升级为交互式 Token Explorer，支持过滤、多系列趋势、模型排名、会话排行和数据覆盖信息。
-
-## 开发
-
-要求 Node.js `>= 22.15.0`。项目使用 TypeScript ESM、Node 内置测试运行器和
-原生浏览器 JavaScript/CSS，并保持零 runtime npm dependencies。
-
-```powershell
-npm install
-npm run typecheck
-npm test
-npm start
-```
-
-常用命令：
-
-| 命令 | 说明 |
-|:---|:---|
-| `npm run typecheck` | 仅执行 TypeScript 检查，不生成文件 |
-| `npm run build` | 编译 `bin/`、`src/`，并复制 `src/static/` 到 `dist/` |
-| `npm test` | 先构建，再运行 `test/*.test.mjs` |
-| `npm start` | 构建并启动 `127.0.0.1:3456` |
-| `npm run dev` | 构建、启动并打开浏览器 |
-| `npm run qa:e2e` | 对已运行的本地服务执行 `agent-browser` E2E |
-
-开发时只修改源码目录，不要直接编辑 `dist/`。Provider 原始数据库和 transcript
-保持只读；收藏、重命名、软删除与永久排除状态写入独立的 viewer 元数据库。
-配置、Provider capability、渲染语义、分析输出和测试要求详见
-[AGENTS.md](./AGENTS.md)。
+真实数据验证应检查 `/api/providers`、一个代表性 session 的 `/protocol` 和四个 Runtime API，并在桌面与 390px viewport 运行 `npm run qa:e2e`。请使用 [provider contribution guide](./docs/CONTRIBUTING-PROVIDER.md) 添加 Provider；协议规格位于 [`docs/specs/runtime-protocol-workbench/`](./docs/specs/runtime-protocol-workbench/)。
 
 ## License
 

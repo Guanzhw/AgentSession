@@ -97,7 +97,7 @@ function protocolAdapter(id = "codex-fake", calls = []) {
     },
     getSessionProtocol(sessionId) {
       calls.push(sessionId);
-      if (sessionId !== "p-1") return null;
+      if (sessionId === "nope") return null;
       return {
         sessionId,
         events: [
@@ -105,7 +105,7 @@ function protocolAdapter(id = "codex-fake", calls = []) {
           protocolEvent("e2", "message.assistant", 2000),
           protocolEvent("e3", "context.compaction", 1500, { compaction: { trigger: "automatic", strategy: "summary" } }),
           protocolEvent("e4", "context.compaction", 3000, { compaction: { trigger: "manual", strategy: "summary" } })
-        ],
+        ].map((event) => ({ ...event, sessionId })),
         relationships: [],
         tasks: [
           { id: "t1", sessionId, kind: "subagent-task", status: "running", title: null, timeCreated: 1000, timeUpdated: 3000, timeCompleted: null, provenance: { fidelity: "recorded", sourceType: "fixture" } },
@@ -214,12 +214,12 @@ test("unsupported adapters and unknown sessions degrade to base stats", () => {
   const nullAdapter = deriveSessionListStats(null, { id: "x1", provider: "x" });
   assert.equal(nullAdapter.protocol, false);
 
-  // Supported adapter, unknown session: empty protocol surface, still cached.
+  // Supported adapter, unknown session: protocol-derived values remain unknown.
   const calls = [];
   const unknown = deriveSessionListStats(protocolAdapter("codex-fake", calls), { id: "nope", provider: "codex-fake" });
-  assert.equal(unknown.protocol, true);
+  assert.equal(unknown.protocol, false);
   assert.equal(unknown.compactions, 0);
-  assert.equal(unknown.memoryCount, 0, "recorded zero from the empty protocol surface");
+  assert.equal(unknown.memoryCount, null, "missing protocol does not fabricate a recorded zero");
 });
 
 test("protocol construction failure falls back without caching", () => {
@@ -245,15 +245,22 @@ test("protocol results are cached by provider+id+revision and bounded", () => {
   deriveSessionListStats(adapter, { id: "p-1", provider: "codex-fake", time_updated: 9000, message_count: 8, token_count: 100 });
   assert.equal(calls.length, 1, "same revision reuses the cached protocol summary");
 
+  let providerRevision = 1;
+  adapter.getStatsRevision = () => providerRevision;
+  deriveSessionListStats(adapter, { id: "p-1", provider: "codex-fake", time_updated: 9000, message_count: 8, token_count: 100 });
+  providerRevision = 2;
+  deriveSessionListStats(adapter, { id: "p-1", provider: "codex-fake", time_updated: 9000, message_count: 8, token_count: 100 });
+  assert.equal(calls.length, 3, "provider stats revision invalidates otherwise unchanged list stats");
+
   deriveSessionListStats(adapter, { id: "p-1", provider: "codex-fake", time_updated: 9100, message_count: 8, token_count: 100 });
-  assert.equal(calls.length, 2, "revision change (timeUpdated) invalidates the entry");
+  assert.equal(calls.length, 4, "revision change (timeUpdated) invalidates the entry");
 
   deriveSessionListStats(adapter, { id: "p-1", provider: "codex-fake", time_updated: 9100, message_count: 9, token_count: 100 });
-  assert.equal(calls.length, 3, "revision change (messageCount) invalidates the entry");
+  assert.equal(calls.length, 5, "revision change (messageCount) invalidates the entry");
 
   const plain = plainAdapter("gemini");
   deriveSessionListStats(plain, { id: "g1", provider: "gemini", time_updated: 1 });
-  assert.equal(sessionListStatsCacheSize(), 3, "one entry per distinct revision; unsupported providers never enter the cache");
+  assert.equal(sessionListStatsCacheSize(), 5, "one entry per distinct revision; unsupported providers never enter the cache");
 
   clearSessionListStatsCache();
   const otherCalls = [];

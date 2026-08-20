@@ -1,6 +1,6 @@
 import { getSession, getMessages, getParts, listSessions, searchMessages } from "./db.js";
 import { getIndexedSessions } from "./index-db.js";
-import { isAnalysisTitledSession, matchesSessionKind, normalizeSessionKindFilter } from "./session-kind.js";
+import { normalizeSessionKindFilter } from "./session-kind.js";
 import { safeJsonParse } from "./server-helpers.js";
 import { baseSessionListStats, boundedListStats } from "./session-list-stats.js";
 
@@ -111,7 +111,7 @@ export function getSearchResults(query: string, limit: number, offset: number, d
 
   for (const session of titleMatches) {
     const enriched = enrichSession(session, metaMap);
-    if (!sessionMap.has(enriched.id) && matchesSessionKind(enriched, kind)) {
+    if (!sessionMap.has(enriched.id)) {
       orderedIds.push(enriched.id);
       sessionMap.set(enriched.id, enriched);
     }
@@ -121,7 +121,7 @@ export function getSearchResults(query: string, limit: number, offset: number, d
     if (!sessionMap.has(match.sessionId)) {
       const session = getSession(match.sessionId, dbPath);
       const enriched = enrichSession(session, metaMap);
-      if (enriched && matchesSessionKind(enriched, kind)) {
+      if (enriched) {
         orderedIds.push(enriched.id);
         sessionMap.set(enriched.id, enriched);
       }
@@ -166,7 +166,6 @@ export function normalizeSessionRecord(session: any): any {
     summary_additions: Number(session.summary_additions) || 0,
     summary_deletions: Number(session.summary_deletions) || 0,
     starred: Boolean(session.starred),
-    analysisTitled: isAnalysisTitledSession(session)
   };
 }
 
@@ -219,7 +218,7 @@ export function buildPartsFromProviderMessages(providerMessages: any[] = []) {
 
 export function getProviderSearchResults(adapter: any, query: string, limit: number, offset: number, sessionKind = "all", metaMap: any = undefined, excludedIds: Set<string> = new Set()) {
   const term = (query || "").trim();
-  const kind = normalizeSessionKindFilter(sessionKind);
+  normalizeSessionKindFilter(sessionKind);
   if (!term) {
     return { sessions: [], total: 0, note: "Enter a search query to find sessions." };
   }
@@ -233,7 +232,7 @@ export function getProviderSearchResults(adapter: any, query: string, limit: num
       continue;
     }
     const session = enrichSession(adapter.getSession(match.sessionId), metaMap);
-    if (!session || !matchesSessionKind(session, kind)) {
+    if (!session) {
       continue;
     }
     orderedIds.push(match.sessionId);
@@ -258,7 +257,6 @@ export function toApiSessionShape(session: any) {
     summary_additions: Number(session.summary_additions) || 0,
     summary_deletions: Number(session.summary_deletions) || 0,
     starred: Boolean(session.starred),
-    analysisTitled: Boolean(session.analysisTitled),
     // Bounded list statistics: attached for the current page by the list
     // routes; a base summary is derived from the row fields otherwise. The
     // raw protocol is never exposed here.

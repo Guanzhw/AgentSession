@@ -103,47 +103,24 @@ export function getRuntimeRouteContext(method: any, pathname: any) {
       actionIndex: 2
     },
     {
-      pattern: /^\/api\/([a-z][a-z0-9-]*)\/analysis\/prompt-preview$/,
-      route: "/api/:provider/analysis/prompt-preview",
-      providerIndex: 1,
-      actionLiteral: "prompt-preview"
-    },
-    {
-      pattern: /^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/analyses\/([^/]+)\/diagnostics\/([^/]+)$/,
-      route: "/api/:provider/session/:sessionId/analyses/:runId/diagnostics/:diagnostic",
+      pattern: /^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/runtime\/(summary|events|graph)$/,
+      route: "/api/:provider/session/:sessionId/runtime/:action",
       providerIndex: 1,
       sessionIndex: 2,
-      runIndex: 3,
-      actionIndex: 4
+      actionIndex: 3
     },
     {
-      pattern: /^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/analyses\/([^/]+)\/outputs\/([^/]+)$/,
-      route: "/api/:provider/session/:sessionId/analyses/:runId/outputs/:output",
-      providerIndex: 1,
-      sessionIndex: 2,
-      runIndex: 3,
-      actionIndex: 4
-    },
-    {
-      pattern: /^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/analyses\/([^/]+)\/implement$/,
-      route: "/api/:provider/session/:sessionId/analyses/:runId/implement",
-      providerIndex: 1,
-      sessionIndex: 2,
-      runIndex: 3,
-      actionLiteral: "implement"
-    },
-    {
-      pattern: /^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/analyses$/,
-      route: "/api/:provider/session/:sessionId/analyses",
-      providerIndex: 1,
-      sessionIndex: 2
-    },
-    {
-      pattern: /^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/(analyze|resume|export|flow-panel|metrics|flow|trace)$/,
+      pattern: /^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/(resume|export|metrics|trace|protocol|content|system-prompts)$/,
       route: "/api/:provider/session/:sessionId/:action",
       providerIndex: 1,
       sessionIndex: 2,
       actionIndex: 3
+    },
+    {
+      pattern: /^\/api\/([a-z][a-z0-9-]*)\/stats\/deferred$/,
+      route: "/api/:provider/stats/deferred",
+      providerIndex: 1,
+      actionLiteral: "deferred"
     },
     {
       pattern: /^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)$/,
@@ -186,13 +163,14 @@ export function getRuntimeRouteContext(method: any, pathname: any) {
   for (const entry of patterns) {
     const match = pathname.match(entry.pattern);
     if (match) {
+      const routeEntry: any = entry;
       return {
         method,
         route: entry.route,
         provider: entry.providerIndex ? match[entry.providerIndex] : undefined,
         sessionId: safeRuntimeId(entry.sessionIndex ? match[entry.sessionIndex] : undefined),
-        runId: safeRuntimeId(entry.runIndex ? match[entry.runIndex] : undefined),
-        action: entry.actionLiteral || (entry.actionIndex ? match[entry.actionIndex] : undefined)
+        runId: safeRuntimeId(routeEntry.runIndex ? match[routeEntry.runIndex] : undefined),
+        action: routeEntry.actionLiteral || (routeEntry.actionIndex ? match[routeEntry.actionIndex] : undefined)
       };
     }
   }

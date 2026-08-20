@@ -15,8 +15,7 @@ import {
   json,
   safeDecodeId,
   safeJsonParse,
-  missingProviderResponse,
-  send
+  missingProviderResponse
 } from "../server-helpers.js";
 import {
   supportsAgentLoopViews,
@@ -27,12 +26,19 @@ import {
   usesOpenCodeStatsStore
 } from "../providers/kinds.js";
 import { getResumeCommand } from "../resume.js";
-import { getSessionAnalysisAction, listSessionAnalysisRuns } from "../analysis.js";
-import { renderSessionPage, renderCanonicalFlowPanelContent } from "../views/session.js";
-import { flowTreeHasExecutionTopology } from "../providers/shared/flow-tree.js";
+import { renderSessionPage } from "../views/session.js";
+import type { SessionProtocol } from "../providers/shared/session-protocol.js";
+import { renderRuntimeWorkbench } from "../views/runtime-workbench.js";
 import { renderProgressiveContent } from "../views/components.js";
 import { providerRenderContext } from "./provider-context.js";
 import { parseSessionNavigationContext } from "../navigation-context.js";
+import {
+  buildRuntimeGraph,
+  getRuntimeProtocol,
+  ProtocolRuntimeError,
+  queryRuntimeEvents,
+  summarizeRuntimeProtocol
+} from "../protocol-runtime.js";
 
 export function registerSessionDetail(
   app: any,
@@ -43,6 +49,52 @@ export function registerSessionDetail(
   }
 ) {
   const { appConfig, providerMap, providerInfo } = deps;
+
+  const runtimeRenderData = (adapter: any, sessionId: string) => {
+    try {
+      const protocol = getRuntimeProtocol(adapter, sessionId);
+      return {
+        protocol: protocol as SessionProtocol,
+        summary: summarizeRuntimeProtocol(protocol, adapter.protocolCapabilities),
+        graph: buildRuntimeGraph(adapter, protocol, { depth: 0, maxNodes: 100 }),
+        eventNextCursor: queryRuntimeEvents(protocol, { limit: 50 }).nextCursor,
+        storageDiagnostic: adapter.getStorageDiagnostic?.() || null
+      };
+    } catch (error) {
+      return {
+        protocol: null,
+        summary: {
+          version: 2,
+          completeness: "partial",
+          counts: { events: 0, relationships: 0, tasks: 0, agentRuns: 0, contextArtifacts: 0, branches: 0 },
+          capabilities: {}
+        },
+        storageDiagnostic: adapter.getStorageDiagnostic?.() || null,
+        runtimeError: {
+          code: error instanceof ProtocolRuntimeError ? error.code : "runtime_unavailable",
+          message: error instanceof ProtocolRuntimeError
+            ? "Runtime protocol is unavailable for this session."
+            : "Runtime protocol could not be loaded."
+        }
+      };
+    }
+  };
+
+  const runtimeError = (res: any, error: unknown) => {
+    if (error instanceof ProtocolRuntimeError) {
+      const status = error.code === "invalid_input" ? 400 : 404;
+      return json(res, { ok: false, error: error.message, code: error.code }, status);
+    }
+    console.error(`Runtime protocol route error: ${error instanceof Error ? error.message : String(error)}`);
+    return json(res, { ok: false, error: "Internal server error" }, 500);
+  };
+
+  const listParam = (params: URLSearchParams, name: string) => (
+    params.getAll(name)
+      .flatMap((value) => value.split(","))
+      .map((value) => value.trim())
+      .filter(Boolean)
+  );
 
   const findPart = (container: any, partId: string): any => {
     if (!container || typeof container !== "object") return null;
@@ -104,14 +156,7 @@ export function registerSessionDetail(
         }).sessions;
         const enrichedRecentSessions = recentSessions.map((item: any) => normalizeSessionRecord(item));
         const resumeCommand = getResumeCommand(adapter, sessionId, enrichedSession.directory, appConfig.resumeCommands);
-        const analysisAction = getSessionAnalysisAction(adapter, sessionId, enrichedSession.directory, appConfig.analysis);
-        const analysisRuns = listSessionAnalysisRuns({
-          provider: adapter,
-          providerId: providerSegment,
-          sessionId,
-          directory: enrichedSession.directory,
-          analysisConfig: appConfig.analysis
-        });
+        const runtime = runtimeRenderData(adapter, sessionId);
         return {
           status: 200,
           body: renderSessionPage({
@@ -124,10 +169,8 @@ export function registerSessionDetail(
             recentSessions: enrichedRecentSessions,
             meta,
             resumeCommand,
-            analysisAction,
-            analysisRuns,
+            runtimeWorkbench: renderRuntimeWorkbench(runtime, providerSegment, sessionId),
             terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),
-            flowLazyUrl: adapter.getSessionFlow ? `/api/${providerSegment}/session/${encodeURIComponent(sessionId)}/flow-panel` : "",
             navigationContext,
             ...renderContext
           }),
@@ -154,14 +197,7 @@ export function registerSessionDetail(
       }).sessions.map((item: any) => normalizeSessionRecord(item));
       const normalizedSession = normalizeSessionRecord(enrichSession(session, metaMap));
       const resumeCommand = getResumeCommand(adapter, sessionId, normalizedSession.directory, appConfig.resumeCommands);
-      const analysisAction = getSessionAnalysisAction(adapter, sessionId, normalizedSession.directory, appConfig.analysis);
-      const analysisRuns = listSessionAnalysisRuns({
-        provider: adapter,
-        providerId: providerSegment,
-        sessionId,
-        directory: normalizedSession.directory,
-        analysisConfig: appConfig.analysis
-      });
+      const runtime = runtimeRenderData(adapter, sessionId);
       return {
         status: 200,
         body: renderSessionPage({
@@ -174,10 +210,8 @@ export function registerSessionDetail(
           recentSessions,
           meta,
           resumeCommand,
-          analysisAction,
-          analysisRuns,
+          runtimeWorkbench: renderRuntimeWorkbench(runtime, providerSegment, sessionId),
           terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),
-          flowLazyUrl: adapter.getSessionFlow ? `/api/${providerSegment}/session/${encodeURIComponent(sessionId)}/flow-panel` : "",
           navigationContext,
           ...renderContext
         }),
@@ -213,13 +247,11 @@ export function registerSessionDetail(
         const sessionTree = adapter.getSessionTree?.(sessionId) || null;
         const sessionContainer = adapter.getSessionContainer?.(sessionId) || null;
         const sessionMetrics = adapter.getSessionMetrics?.(sessionId) || null;
-        const sessionFlow = adapter.getSessionFlow?.(sessionId) || null;
         return json(res, {
           session: enrichedSession,
           tree: sessionTree,
           container: sessionContainer,
           metrics: sessionMetrics,
-          flow: sessionFlow,
           messages: messages.map((message: any) => ({
             ...message,
             parts: (partsByMessage.get(message.id) || []).map((part: any) => part.data)
@@ -237,7 +269,6 @@ export function registerSessionDetail(
         tree: adapter.getSessionTree?.(sessionId) || null,
         container: adapter.getSessionContainer?.(sessionId) || null,
         metrics: adapter.getSessionMetrics?.(sessionId) || null,
-        flow: adapter.getSessionFlow?.(sessionId) || null,
         messages: adapter.getMessages(sessionId)
       });
     } catch (err: any) {
@@ -355,13 +386,11 @@ export function registerSessionDetail(
         const sessionTree = adapter.getSessionTree?.(id) || null;
         const sessionContainer = adapter.getSessionContainer?.(id) || null;
         const sessionMetrics = adapter.getSessionMetrics?.(id) || null;
-        const sessionFlow = adapter.getSessionFlow?.(id) || null;
         const body = JSON.stringify({
           session,
           tree: sessionTree,
           container: sessionContainer,
           metrics: sessionMetrics,
-          flow: sessionFlow,
           messages: messages.map((message: any) => ({
             ...message,
             parts: (partsByMessage.get(message.id) || []).map((part: any) => part.data)
@@ -465,58 +494,6 @@ export function registerSessionDetail(
     }
   });
 
-  // API: flow panel (HTML)
-  app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/flow-panel$/, async (_req: any, res: any, match: RegExpMatchArray) => {
-    const providerId = match[1];
-    const sessionId = decodeURIComponent(match[2]);
-    const adapter = providerMap.get(providerId);
-    if (!adapter) {
-      const missing = missingProviderResponse(providerId);
-      return json(res, missing.body, missing.status);
-    }
-
-    if (!supportsAgentLoopViews(adapter)) {
-      return send(res, 200, renderCanonicalFlowPanelContent(null, providerId));
-    }
-
-    try {
-      const flow = adapter.getSessionFlow?.(sessionId);
-      if (!flow || !flowTreeHasExecutionTopology(flow)) {
-        return send(res, 200, renderCanonicalFlowPanelContent(null, providerId));
-      }
-      return send(res, 200, renderCanonicalFlowPanelContent(flow, providerId));
-    } catch (err: any) {
-      console.error(`Route error: ${err.message}`);
-      return json(res, { error: "Internal server error" }, 500);
-    }
-  });
-
-  // API: flow JSON
-  app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/flow$/, async (_req: any, res: any, match: RegExpMatchArray) => {
-    const providerId = match[1];
-    const sessionId = decodeURIComponent(match[2]);
-    const adapter = providerMap.get(providerId);
-    if (!adapter) {
-      const missing = missingProviderResponse(providerId);
-      return json(res, missing.body, missing.status);
-    }
-
-    if (!supportsAgentLoopViews(adapter)) {
-      return json(res, { sessionId, root: null, summary: null });
-    }
-
-    try {
-      const flow = adapter.getSessionFlow?.(sessionId);
-      if (!flow) {
-        return json(res, { ok: false, error: "Not found" }, 404);
-      }
-      return json(res, flow);
-    } catch (err: any) {
-      console.error(`Route error: ${err.message}`);
-      return json(res, { error: "Internal server error" }, 500);
-    }
-  });
-
   // API: standardized session protocol (read-only). Exposes capability
   // descriptors plus the typed events/relationships/tasks/agent runs/context
   // artifacts. Unknown sessions, unknown providers, and providers without a
@@ -536,18 +513,86 @@ export function registerSessionDetail(
       return json(res, { ok: false, error: "Session protocol not supported" }, 404);
     }
     try {
-      const protocol = adapter.getSessionProtocol?.(sessionId);
-      if (!protocol) {
-        return json(res, { ok: false, error: "Not found" }, 404);
-      }
+      const protocol = getRuntimeProtocol(adapter, sessionId);
       return json(res, {
         sessionId: protocol.sessionId,
         capabilities: protocolCapabilityDescriptors(adapter),
-        protocol
+        protocol,
+        validation: protocol.validation || null,
+        storageDiagnostic: adapter.getStorageDiagnostic?.() || null
       });
-    } catch (err: any) {
-      console.error(`Route error: ${err.message}`);
-      return json(res, { error: "Internal server error" }, 500);
+    } catch (error) {
+      return runtimeError(res, error);
+    }
+  });
+
+  // Bounded, provider-neutral Runtime Workbench projections. The browser
+  // receives normalized facts and never interprets providerData.
+  app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/runtime\/summary$/, async (_req: any, res: any, match: RegExpMatchArray) => {
+    const providerId = match[1];
+    const sessionId = safeDecodeId(match[2]);
+    const adapter = providerMap.get(providerId);
+    if (!adapter) {
+      const missing = missingProviderResponse(providerId);
+      return json(res, missing.body, missing.status);
+    }
+    if (!sessionId) return json(res, { ok: false, error: "Invalid session id" }, 404);
+    try {
+      const protocol = getRuntimeProtocol(adapter, sessionId);
+      return json(res, {
+        summary: summarizeRuntimeProtocol(protocol, adapter.protocolCapabilities),
+        storageDiagnostic: adapter.getStorageDiagnostic?.() || null
+      });
+    } catch (error) {
+      return runtimeError(res, error);
+    }
+  });
+
+  app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/runtime\/events$/, async (req: any, res: any, match: RegExpMatchArray) => {
+    const providerId = match[1];
+    const sessionId = safeDecodeId(match[2]);
+    const adapter = providerMap.get(providerId);
+    if (!adapter) {
+      const missing = missingProviderResponse(providerId);
+      return json(res, missing.body, missing.status);
+    }
+    if (!sessionId) return json(res, { ok: false, error: "Invalid session id" }, 404);
+    try {
+      const params = new URL(req.url || "/", `http://localhost:${appConfig.port}`).searchParams;
+      const protocol = getRuntimeProtocol(adapter, sessionId);
+      return json(res, queryRuntimeEvents(protocol, {
+        cursor: params.get("cursor"),
+        limit: params.get("limit"),
+        categories: listParam(params, "category"),
+        kinds: listParam(params, "kind"),
+        phases: listParam(params, "phase"),
+        taskId: params.get("taskId"),
+        runId: params.get("runId"),
+        correlationId: params.get("correlationId")
+      }));
+    } catch (error) {
+      return runtimeError(res, error);
+    }
+  });
+
+  app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/runtime\/graph$/, async (req: any, res: any, match: RegExpMatchArray) => {
+    const providerId = match[1];
+    const sessionId = safeDecodeId(match[2]);
+    const adapter = providerMap.get(providerId);
+    if (!adapter) {
+      const missing = missingProviderResponse(providerId);
+      return json(res, missing.body, missing.status);
+    }
+    if (!sessionId) return json(res, { ok: false, error: "Invalid session id" }, 404);
+    try {
+      const params = new URL(req.url || "/", `http://localhost:${appConfig.port}`).searchParams;
+      const protocol = getRuntimeProtocol(adapter, sessionId);
+      return json(res, buildRuntimeGraph(adapter, protocol, {
+        depth: params.get("depth"),
+        maxNodes: params.get("maxNodes")
+      }));
+    } catch (error) {
+      return runtimeError(res, error);
     }
   });
 
@@ -563,10 +608,7 @@ export function registerSessionDetail(
 
     try {
       if (supportsSessionTrace(adapter)) {
-        return json(res, {
-          ...adapter.getTrace(sessionId),
-          flow: adapter.getSessionFlow?.(sessionId) || null
-        });
+        return json(res, adapter.getTrace(sessionId));
       }
 
       return json(res, {

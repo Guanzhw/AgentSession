@@ -297,11 +297,10 @@ test("capability descriptors stay truthful across every provider", () => {
       assert.notEqual(protocolCapability(provider, "sessionEvents").support, "none", provider.id);
     }
   }
-  const implemented = ["codex", "claude-code", "pi", "hermes", "deepseek-harness"];
   for (const provider of getAllProviders()) {
     assert.equal(
       supportsSessionProtocol(provider),
-      implemented.includes(provider.id),
+      true,
       provider.id
     );
   }
@@ -316,9 +315,12 @@ test("shared protocol access returns stable empty arrays when supported but empt
   assert.ok(unknown, "accessor exists so a protocol is returned");
   assert.deepEqual(unknown.events, []);
   assert.deepEqual(unknown.tasks, []);
-  // Unsupported adapters return null rather than fabricated data.
+  // Every registered provider now exposes the protocol surface, so an unknown
+  // session receives the same stable empty compatibility shape.
   const opencode = getAllProviders().find((candidate) => candidate.id === "opencode");
-  assert.equal(getSessionProtocolOrDefault(opencode, "x"), null);
+  const openCodeUnknown = getSessionProtocolOrDefault(opencode, "x");
+  assert.ok(openCodeUnknown);
+  assert.deepEqual(openCodeUnknown.events, []);
 });
 
 test("descriptor provenance never overclaims recorded for mixed-fidelity domains", () => {
@@ -388,6 +390,10 @@ test("descriptor provenance never overclaims recorded for mixed-fidelity domains
       hermes: protocols[3],
       "deepseek-harness": protocols[4]
     }[provider.id];
+    // The four newly-covered providers have provider-native protocol fixtures
+    // in runtime-protocol-missing-providers.test.mjs. This block retains the
+    // mixed-fidelity assertions for the original five builders.
+    if (!byId) continue;
     for (const [domain, key] of domains) {
       const descriptor = descriptors[domain];
       if (descriptor.support === "none") continue;
@@ -1418,7 +1424,7 @@ test("Task and AgentRun stay separated: tasks carry no run state, runs own execu
   assert.equal(task.status, "completed", "task status survives independent runs");
 });
 
-test("shared subagent flow consumes Task and AgentRun evidence without provider branching", () => {
+test("shared subagent attachment consumes Task and AgentRun evidence without provider branching", () => {
   const parentBundle = {
     session: session("parent", null, null, 1000),
     messages: [{
@@ -1485,7 +1491,6 @@ test("shared subagent flow consumes Task and AgentRun evidence without provider 
   // The custom launcher part is now classified as a subagent from protocol
   // evidence, without any provider-id branch.
   assert.equal(part.data.state.metadata.subagent, true);
-  assert.equal(views.flow.summary.subagents, 1);
 });
 
 test("non-spawned relationships never attach children and never fabricate tasks", () => {

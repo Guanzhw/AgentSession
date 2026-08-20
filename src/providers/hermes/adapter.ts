@@ -18,6 +18,7 @@ import {
   type HermesSessionEntry
 } from "./session-store.js";
 import { buildHermesSessionProtocol } from "./protocol.js";
+import { finalizeSessionProtocol, protocolRevision } from "../shared/session-protocol.js";
 
 function getHermesDir() {
   return getConfig().hermesDir;
@@ -73,16 +74,8 @@ function buildHermesLinkedViews(sessionId: string) {
   // Protocol evidence (tasks/agentRuns/relationships) reaches the shared
   // view builder without recursion: it reads the same store snapshot the
   // view builder already resolved.
-  const protocol = buildHermesSessionProtocol({
-    session: entry.session,
-    messages: entry.messages,
-    rawSession: entry.rawSession,
-    family: family.map((candidate) => ({
-      session: candidate.session,
-      messages: candidate.messages,
-      rawSession: candidate.rawSession
-    }))
-  });
+  const protocol = buildHermesSessionProtocolFor(sessionId);
+  if (!protocol) return null;
   const byId = new Map(family.map(candidate => [candidate.session.id, candidate]));
   const bundles = new Map<string, HermesViewBundle>();
   const orderByMessage = new Map<Message, { segment: number; index: number }>();
@@ -180,6 +173,36 @@ function buildHermesLinkedViews(sessionId: string) {
   });
 }
 
+const hermesProtocolCapabilities = {
+  sessionEvents: { support: "full" as const, provenance: "derived" as const, details: "derived message envelopes plus compression context.compaction events" },
+  sessionRelationships: { support: "full" as const, provenance: "derived" as const, details: "validated compacted-into and delegate spawned lineage" },
+  tasks: { support: "partial" as const, provenance: "derived" as const, details: "delegate sessions only" },
+  agentRuns: { support: "partial" as const, provenance: "derived" as const, details: "delegate sessions only" },
+  contextArtifacts: { support: "partial" as const, provenance: "derived" as const, details: "compression continuations, metadata-only summaries" },
+  branches: { support: "none" as const, provenance: "derived" as const, details: "Hermes compression/delegation are session lineage relationships" }
+};
+
+function buildHermesSessionProtocolFor(sessionId: string) {
+  const entry = sessions.get(sessionId);
+  if (!entry) return null;
+  const protocol = buildHermesSessionProtocol({
+    session: entry.session,
+    messages: entry.messages,
+    rawSession: entry.rawSession,
+    family: sessions.getFamily(sessionId).map((candidate) => ({
+      session: candidate.session,
+      messages: candidate.messages,
+      rawSession: candidate.rawSession
+    }))
+  });
+  return finalizeSessionProtocol(protocol, {
+    provider: "hermes",
+    session: entry.session,
+    capabilities: hermesProtocolCapabilities,
+    revision: protocolRevision(sessions.getRevision())
+  });
+}
+
 function runtimeFor(sessionId: string) {
   const entry = sessions.get(sessionId);
   return entry?.session.directory
@@ -201,15 +224,10 @@ const hermes = {
   },
   capabilities: {
     localManagement: true,
-    sessionAnalysis: true,
     structuredSessionViews: true
   },
   protocolCapabilities: {
-    sessionEvents: { support: "full", provenance: "derived", details: "derived message envelopes plus compression context.compaction events" },
-    sessionRelationships: { support: "full", provenance: "derived", details: "validated compacted-into and delegate spawned lineage" },
-    tasks: { support: "partial", provenance: "derived", details: "delegate sessions only" },
-    agentRuns: { support: "partial", provenance: "derived", details: "delegate sessions only" },
-    contextArtifacts: { support: "partial", provenance: "derived", details: "compression continuations, metadata-only summaries" }
+    ...hermesProtocolCapabilities
   },
   detect() { return existsSync(getHermesDbPath()); },
   getUnavailableReason() {
@@ -222,18 +240,7 @@ const hermes = {
   getSession(sessionId) { return sessions.get(sessionId)?.session || null; },
   getMessages(sessionId) { return sessions.get(sessionId)?.messages || []; },
   getSessionProtocol(sessionId) {
-    const entry = sessions.get(sessionId);
-    if (!entry) return null;
-    return buildHermesSessionProtocol({
-      session: entry.session,
-      messages: entry.messages,
-      rawSession: entry.rawSession,
-      family: sessions.getFamily(sessionId).map((candidate) => ({
-        session: candidate.session,
-        messages: candidate.messages,
-        rawSession: candidate.rawSession
-      }))
-    });
+    return buildHermesSessionProtocolFor(sessionId);
   },
   getRuntimeEnvironment: runtimeFor,
   getSystemPrompts(sessionId) {

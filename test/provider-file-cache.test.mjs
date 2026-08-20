@@ -15,7 +15,6 @@ import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 
 import { initConfig } from "../dist/src/config.js";
-import { getSessionAnalysisAction } from "../dist/src/analysis.js";
 import { getResumeCommand } from "../dist/src/resume.js";
 import claudeCode from "../dist/src/providers/claude-code/adapter.js";
 import codex from "../dist/src/providers/codex/adapter.js";
@@ -419,7 +418,6 @@ test("Copilot CLI embeds inline subagents, reads catalog telemetry, and excludes
     assert.equal(tree.detachedChildren.length, 0);
     assert.match(JSON.stringify(tree), /Copilot child visible marker/);
     assert.doesNotMatch(JSON.stringify(tree), /copilot-(hidden-system|transformed|opaque|encrypted|detailed)-marker/);
-    assert.equal(copilot.getSessionFlow("copilot-canonical")?.summary?.subagents, 1);
     assert.equal(copilot.getTrace("copilot-canonical")?.summary?.totalSteps, 2);
     assert.equal(copilot.getSystemPrompts("copilot-canonical")?.mode, "copilot-resolved");
     assert.match(JSON.stringify(copilot.getRuntimeEnvironment("copilot-canonical")), /AGENTS\.md/);
@@ -475,18 +473,14 @@ test("Gemini file cache skips corrupt files, reuses parsed data, and refreshes c
   const root = mkdtempSync(path.join(os.tmpdir(), "opensession-gemini-cache-"));
   try {
     const chats = path.join(root, "tmp", "project", "chats");
-    const project = path.join(root, "analysis-project");
+    const project = path.join(root, "fixture-project");
     const configPath = path.join(root, "agentsession.json");
     mkdirSync(chats, { recursive: true });
     mkdirSync(project, { recursive: true });
     writeFileSync(configPath, JSON.stringify({
-      analysis: {
-        providers: {
-          gemini: {
-            projectPaths: {
-              "gemini-fixture-project": project
-            }
-          }
+      projectPaths: {
+        gemini: {
+          "gemini-fixture-project": project
         }
       }
     }));
@@ -515,15 +509,8 @@ test("Gemini file cache skips corrupt files, reuses parsed data, and refreshes c
     assert.equal(gemini.getTrace("gemini-canonical")?.summary?.totalSteps, 1);
     assert.equal(gemini.getSystemPrompts("gemini-canonical")?.mode, "gemini-resolved");
     assert.equal(gemini.getRuntimeEnvironment("gemini-canonical")?.sessionId, "gemini-canonical");
-    const action = getSessionAnalysisAction(
-      gemini,
-      "gemini-canonical",
-      gemini.getSession("gemini-canonical")?.directory,
-      { enabled: true, providers: { gemini: { command: { executable: process.execPath, args: ["--version"] } } } }
-    );
     assert.equal(gemini.lifecycle, "legacy");
     assert.equal(gemini.resumeCommand, undefined);
-    assert.equal(action, null);
 
     writeFileSync(sessionFile, JSON.stringify(geminiRecord("gemini refreshed marker with a different size", 17)));
     await sleep(1050);
@@ -836,24 +823,6 @@ test("Hermes snapshot store reads SQLite once per revision and separates delegat
     assert.equal(rootTree.metrics.descendantCount, 1);
     assert.equal(rootTree.metrics.totalMessages, 13);
     assert.equal(hermes.getSessionMetrics("hermes-root")?.totals.branches, 1);
-    const delegateFlow = hermes.getSessionFlow("hermes-root");
-    const invocation = delegateFlow.root.line.find(node => node.kind === "invocation" && !node.id.includes("detached:"));
-    assert.ok(invocation, "delegate task invocation exists");
-    assert.equal(invocation.branches.length, 1);
-    assert.equal(invocation.inferred, true);
-    assert.match(invocation.meta, /1 subagent/);
-    assert.match(invocation.meta, /1 inferred link/);
-    // No detached compression invocation: the segment merged into the
-    // delegate, so the flow renders exactly one subagent fork that carries
-    // the compressed continuation messages.
-    assert.ok(!delegateFlow.root.line.some(node => node.id.includes("detached:")), "no detached compression invocation");
-    assert.equal(delegateFlow.summary.subagents, 1);
-    const delegateBranch = invocation.branches[0];
-    assert.equal(delegateBranch.target.id, "hermes-delegate");
-    assert.ok(
-      delegateBranch.line.filter(node => node.kind === "user").some(node => node.label === "Compressed delegate question"),
-      "compression user message renders inside the delegate fork"
-    );
     assert.match(JSON.stringify(hermes.getSessionTree("hermes-root")), /hermes-delegate/);
     // Canonical per-segment access stays intact: raw sessions, messages, and
     // exports remain individually queryable, and the merged lineage view did

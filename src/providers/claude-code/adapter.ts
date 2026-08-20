@@ -17,6 +17,7 @@ import {
   buildClaudeCodeSystemPrompts
 } from "./views.js";
 import { buildClaudeSessionProtocol } from "./protocol.js";
+import { finalizeSessionProtocol, protocolRevision } from "../shared/session-protocol.js";
 import {
   createSessionFileStore,
   searchNormalizedMessages,
@@ -140,6 +141,17 @@ function generateClaudeViews(sessionId: string) {
   );
 }
 
+const claudeProtocolCapabilities = {
+  sessionEvents: { support: "partial" as const, provenance: "derived" as const, details: "derived message envelopes plus recorded compact boundary and task-notification events" },
+  // Parent-side child pairing is reconstructed from sidechain/task evidence;
+  // the child-side isSidechain edge is recorded, so the domain is mixed.
+  sessionRelationships: { support: "partial" as const, provenance: "derived" as const, details: "recorded sidechain lineage plus derived parent-side child pairing" },
+  tasks: { support: "full" as const, provenance: "recorded" as const, details: "<task-notification> records" },
+  agentRuns: { support: "partial" as const, provenance: "derived" as const, details: "sidechain transcripts bound to task notifications" },
+  contextArtifacts: { support: "full" as const, provenance: "recorded" as const, details: "compact/PreCompact/PostCompact records, metadata-only summaries" },
+  branches: { support: "none" as const, provenance: "derived" as const, details: "Claude sidechains are session relationships, not in-file branches" }
+};
+
 function buildClaudeSessionProtocolFor(sessionId: string) {
   const entry = sessionFiles.get(sessionId);
   if (!entry) return null;
@@ -148,7 +160,7 @@ function buildClaudeSessionProtocolFor(sessionId: string) {
   const children = family.filter((candidate) => (
     candidate.session.parentId && String(candidate.session.parentId) === canonicalId
   ));
-  return buildClaudeSessionProtocol({
+  const protocol = buildClaudeSessionProtocol({
     session: entry.session,
     messages: entry.messages,
     records: entry.records,
@@ -157,6 +169,12 @@ function buildClaudeSessionProtocolFor(sessionId: string) {
       messages: child.messages,
       records: child.records
     }))
+  });
+  return finalizeSessionProtocol(protocol, {
+    provider: "claude-code",
+    session: entry.session,
+    capabilities: claudeProtocolCapabilities,
+    revision: protocolRevision(sessionFiles.getStatsRevision())
   });
 }
 
@@ -189,15 +207,10 @@ const claudeCode = {
   },
   capabilities: {
     localManagement: true,
-    sessionAnalysis: true,
     structuredSessionViews: true
   },
   protocolCapabilities: {
-    sessionEvents: { support: "partial", provenance: "derived", details: "derived message envelopes plus recorded compact boundary and task-notification events" },
-    sessionRelationships: { support: "full", provenance: "recorded", details: "sidechain spawned relationships" },
-    tasks: { support: "full", provenance: "recorded", details: "<task-notification> records" },
-    agentRuns: { support: "partial", provenance: "derived", details: "sidechain transcripts bound to task notifications" },
-    contextArtifacts: { support: "full", provenance: "recorded", details: "compact/PreCompact/PostCompact records, metadata-only summaries" }
+    ...claudeProtocolCapabilities
   },
 
   detect() {

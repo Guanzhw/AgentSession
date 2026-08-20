@@ -46,7 +46,7 @@ The package is intentionally small:
 ### Session identity must remain canonical
 
 - Use the provider's canonical session ID throughout URLs, metadata keys,
-  exports, resume commands, analysis runs, and child-session relationships.
+  exports, resume commands, protocol projections, and session relationships.
 - Parsers may normalize raw records, but must not invent a second ID that
   breaks lookup in `getSession()`.
 - Metadata keys always include both provider and session ID.
@@ -59,8 +59,9 @@ The package is intentionally small:
   and must not cross assistant-message boundaries.
 - The table of contents contains user messages, assistant/agent messages, and
   task/subtask entries only.
-- Flow distinguishes user and agent nodes and represents subagent work as
-  explicit fork/return behavior.
+- Runtime Workbench renders protocol events, work, relationships, and context
+  from normalized provider evidence; it must not infer provider semantics in
+  browser code.
 - Keep HTML structure, `data-*` hooks in `src/views/`, selectors in
   `src/static/app.js`, styles in `src/static/style.css`, and E2E assertions in
   sync.
@@ -75,40 +76,27 @@ The package is intentionally small:
 - Preserve source paths and resolution metadata so the UI can distinguish
   resolved content from unavailable content.
 
-### Analysis output is proposal-only
+### Session Protocol is the runtime inspection boundary
 
-- Session analysis snapshots inputs and produces reviewable proposals. It must
-  never directly modify source skills, tests, prompts, or other analyzed
-  artifacts.
-- Keep analysis inputs distinct: session records are evidence, target artifacts
-  are provider-neutral raw materials such as docs/tests/scripts, and runtime
-  extensions are provider-owned instructions and behavior such as `AGENTS.md`,
-  `CLAUDE.md`, skills, agents, commands, plugins, hooks, and rules.
-- Do not put provider runtime directories or instruction files in built-in
-  `artifactRoots` or `artifactFiles`. Discover them through the owning
-  provider's runtime environment.
-- Treat `evidence/session-index.json`, `evidence/evidence-index.json`, and
-  `evidence/evidence.jsonl` as the bounded evidence interface for an analysis
-  run. Prefer the query commands in `src/analysis-tools.ts` over broad raw-file
-  reads.
-- External analyzer exit code zero is not success by itself. The gate is the
-  validator result written to `manifest.json`.
-- A successful run requires `manifest.state === "completed"`,
-  `manifest.validation.ok === true`, valid evidence references, valid proposal
-  schemas, and passing integrity checks.
-- Keep captured input hashes, artifact root restrictions, path containment, and
-  proposal-only status checks intact.
+- Every readable provider exposes a finalized, validated Session Protocol v2
+  snapshot or an explicit unavailable/invalid diagnostic.
+- Preserve recorded versus derived provenance. Missing evidence stays missing;
+  do not fabricate tasks, runs, branches, context lifecycle, or child sessions.
+- Keep summary, event, and graph projections bounded. Cursor filters are part
+  of cursor identity, and graph node limits must also bound construction work.
+- Provider-specific event vocabulary belongs in the provider protocol builder.
+  Shared runtime projections must not branch on provider id.
 
 ### Terminal launch is explicitly trusted local behavior
 
-- Resume and analysis launch endpoints are enabled by default for this
+- Resume launch endpoints are enabled by default for this
   loopback-only local server. `--disable-terminal-launch` disables them for the
   current process.
 - Keep launch requests restricted to same-origin JSON requests from loopback.
 - Build commands as structured executable/argument/cwd objects. Do not
   concatenate user or session data into an unquoted shell command.
 - Provider default resume commands belong on adapters. User overrides belong in
-  `resumeCommands`, `resumeShell`, and provider analysis configuration.
+  `resumeCommands` and `resumeShell`.
 
 ## Repository Map
 
@@ -122,12 +110,7 @@ src/
   meta.ts                        viewer-owned stars/titles/deletion metadata
   index-db.ts                    cross-provider startup/search index
   resume.ts                      structured resume command resolution and launch
-  analysis.ts                    analysis preparation, snapshots, prompts, launch
-  analysis-layout.ts             current and legacy run-file layout resolution
-  analysis-evidence.ts           normalized evidence generation
-  analysis-tools.ts              bounded read-only analysis query CLI
-  analysis-validator.ts          output schema, evidence, path, and hash validation
-  analysis-targets.ts            built-in analysis target definitions
+  protocol-runtime.ts            validated protocol cache and bounded projections
   providers/
     interface.ts                 ProviderAdapter and normalized data contracts
     kinds.ts                     capability helpers
@@ -150,7 +133,7 @@ scripts/
   qa-agent-browser.cmd           Windows Bash selection wrapper
   qa-agent-browser.sh            live browser/API E2E suite
 test/
-  core.test.mjs                  parser, provider, analysis, config, and render tests
+  core.test.mjs                  parser, provider, config, and render tests
 docs/
   CONTRIBUTING-PROVIDER.md       detailed provider contribution walkthrough
 dist/                            generated build output; never edit directly
@@ -234,7 +217,7 @@ because provider capabilities differ.
   implemented.
 - The default config file is `config.json` under the metadata directory;
 `AGENTSESSION_CONFIG` and `--config` select another file.
-- `analysis`, `resumeCommands`, and `resumeShell` can be applied to a running
+- `projectPaths`, `resumeCommands`, and `resumeShell` can be applied to a running
   server through the settings API. Data directories, port, and other
   startup-owned settings require restart.
 - `allowTerminalLaunch` is startup-only and intentionally ignored from saved
@@ -255,31 +238,13 @@ because provider capabilities differ.
 - For detail-page changes, test long sessions, tool-only assistant turns,
   reasoning placement, nested subagents, and narrow viewport behavior.
 
-### Analysis subsystem
+### Runtime protocol subsystem
 
-The analysis lifecycle is:
-
-1. Resolve provider and target configuration.
-2. Snapshot bounded artifacts and normalized session evidence.
-3. Copy the read-only query helper into the run-local `tools/` directory.
-4. Write the prompt, manifest, integrity metadata, and run inputs.
-5. Launch the configured analyzer through the structured PowerShell wrapper.
-6. Run `analysis-validator.js` after the analyzer exits.
-7. Surface only the validator-derived state and outputs in the UI.
-
-Unconfigured runs belong under
-`<project>/.agentsession/analysis` so project-scoped analyzers can access
-their evidence, helper, and outputs. Explicit absolute output directories remain valid,
-but the configured analyzer environment must be able to access them.
-
-Keep the categorized layout in `src/analysis-layout.ts`. Any new analyzer
-output must have:
-
-- a documented path in the manifest/layout,
-- path-containment handling,
-- schema and integrity validation,
-- run-list/API presentation,
-- tests for valid, invalid, missing, and legacy cases.
+Provider adapters own protocol construction and revision evidence.
+`src/protocol-runtime.ts` owns the bounded cache plus summary, event-page, and
+graph projections. The Runtime Workbench consumes only those normalized facts.
+Update provider fixtures, route tests, list-stat tests, and browser assertions
+together when changing this contract.
 
 ## Local Development
 
@@ -305,7 +270,7 @@ filter:
 
 ```powershell
 npm run build
-node --test --test-name-pattern="session analysis" test/core.test.mjs
+node --test --test-name-pattern="runtime protocol" test/protocol-runtime.test.mjs
 ```
 
 Use real provider data for final verification when the change depends on
@@ -324,12 +289,8 @@ Choose validation based on the affected surface:
 | Server/API/meta/index | `npm test`, restart, and direct API checks |
 | Views/static/locales | `npm test`, restart, and `npm run qa:e2e` |
 | Resume/terminal launch | Tests plus a real descendant-process launch check |
-| Analysis pipeline | `npm test`, a real analysis run, and manifest validation inspection |
+| Session Protocol/runtime | `npm test`, real provider/API checks, and browser QA |
 | Cross-provider/refactor | Full build/test/E2E and unavailable-provider coverage |
-
-For analysis runs, report the final `manifest.state`, validation errors, output
-counts, and integrity result. Do not report a successful external process exit
-as a successful analysis when validation failed.
 
 ## Restart AgentSession
 
@@ -379,7 +340,7 @@ Git Bash alternative:
 node dist/bin/cli.js > app.log 2>&1 &
 ```
 
-For the normal resume or analysis launch path, start without an extra launch
+For the normal resume launch path, start without an extra launch
 flag. Add `--disable-terminal-launch` when testing the opt-out path.
 
 ### 4. Verify
@@ -394,7 +355,7 @@ Inspect `app.log` and `app-error.log` if startup or indexing fails.
 ## Repeatable E2E QA
 
 The QA suite assumes a compatible server is already running. It checks the
-dashboard, search, statistics, settings, detail rendering, exports, flow, and
+dashboard, search, statistics, settings, detail rendering, exports, Runtime, and
 terminal-launch-disabled behavior.
 
 ```powershell
@@ -423,8 +384,8 @@ retried once before being classified as a product regression.
 - Check `git status --short` before editing and before reporting completion.
 - Preserve unrelated user changes. Do not reset or rewrite files outside the
   requested scope.
-- Do not commit generated `dist/`, runtime databases, logs, screenshots, QA
-  output, or `.agentsession/` analysis runs.
+- Do not commit generated `dist/`, runtime databases, logs, screenshots, or QA
+  output.
 - Keep `README.md`, `README.en.md`, CLI help, settings labels, and examples in
   sync when changing user-visible behavior.
 - `origin` and the publish remote may not refer to the same repository. Inspect
@@ -441,7 +402,7 @@ Before declaring a development task complete:
 2. Add or update focused regression tests.
 3. Run the validation level required by the matrix.
 4. Restart and exercise the live app when behavior is user-visible.
-5. Check browser/API output, server logs, and analysis manifests as applicable.
+5. Check browser/API output, server logs, and protocol validation diagnostics.
 6. Review `git diff --check` and `git diff`.
 7. Update relevant README, config, provider, and architecture documentation.
 8. Report commands run, exact results, and any verification that could not be

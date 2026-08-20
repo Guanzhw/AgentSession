@@ -1,11 +1,9 @@
 import { DatabaseSync } from "node:sqlite";
 import { getConfig } from "./config.js";
 import { createSnippet, escapeSqlLikePattern, mapDataRow, parseJson, splitSearchTerms } from "./providers/shared/parser.js";
-import { analysisTitleSqlCondition, analysisTitleSqlParams, normalizeSessionKindFilter } from "./session-kind.js";
+import { normalizeSessionKindFilter } from "./session-kind.js";
 import { isEmptyProjectFilter } from "./project-filter.js";
 import {
-  getKindMatchingOverrideIds,
-  getOverrideTitleIds,
   getSearchMatchingOverrideIds,
   normalizeSessionTitleOverrides,
   serializeSessionTitleOverrides,
@@ -152,26 +150,7 @@ function sessionFilter(
     }
   }
 
-  const kind = normalizeSessionKindFilter(sessionKind);
-  if (kind !== "all") {
-    const titleCondition = analysisTitleSqlCondition("LOWER(COALESCE(NULLIF(session.title, ''), NULLIF(session.slug, ''), session.id))");
-    const sourceKindCondition = kind === "analysis" ? `(${titleCondition})` : `NOT (${titleCondition})`;
-    const overrideIds = getOverrideTitleIds(titleOverrides);
-    const matchingOverrideIds = getKindMatchingOverrideIds(titleOverrides, kind);
-    if (overrideIds.length > 0) {
-      const sourceIdsCondition = idMembership("session.id", overrideIds, params, true);
-      params.push(...analysisTitleSqlParams());
-      if (matchingOverrideIds.length > 0) {
-        const overrideIdsCondition = idMembership("session.id", matchingOverrideIds, params);
-        where.push(`((${sourceIdsCondition} AND ${sourceKindCondition}) OR ${overrideIdsCondition})`);
-      } else {
-        where.push(`(${sourceIdsCondition} AND ${sourceKindCondition})`);
-      }
-    } else {
-      where.push(sourceKindCondition);
-      params.push(...analysisTitleSqlParams());
-    }
-  }
+  normalizeSessionKindFilter(sessionKind);
 
   return { whereClause: `WHERE ${where.join(" AND ")}`, params };
 }

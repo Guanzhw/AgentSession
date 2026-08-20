@@ -1,13 +1,15 @@
 import os from "node:os";
 import path from "node:path";
+import { statSync } from "node:fs";
 import { icons } from "../../icons.js";
 import { createOpenCodeSqliteAdapter } from "./sqlite-adapter.js";
-import { buildOpenCodeFlowTree } from "./flow-tree.js";
 import { buildOpenCodeSessionContainer } from "./session-container.js";
 import { buildOpenCodeSessionMetrics } from "./session-metrics.js";
 import { buildOpenCodeSessionTree } from "./session-tree.js";
 import { buildOpenCodeSystemPrompts } from "./system-prompts.js";
 import { buildOpenCodeRuntimeEnvironment } from "./runtime-environment.js";
+import { buildOpenCodeSessionProtocol, openCodeProtocolCapabilities } from "./protocol.js";
+import { createStructuredViewCache } from "../shared/file-adapter-helpers.js";
 
 function defaultDataPath() {
   if (process.platform === "win32") {
@@ -34,10 +36,14 @@ const baseAdapter = createOpenCodeSqliteAdapter({
   capabilities: {
     localManagement: true,
     openCodeStatsStore: true,
-    sessionAnalysis: true,
     structuredSessionViews: true
-  }
+  },
+  protocolCapabilities: openCodeProtocolCapabilities
 });
+
+const getOpenCodeTree = createStructuredViewCache((sessionId: string) => (
+  buildOpenCodeSessionTree(sessionId, baseAdapter.getDataPath() || undefined)
+));
 
 const opencode = {
   ...baseAdapter,
@@ -48,7 +54,7 @@ const opencode = {
       : null;
   },
   getSessionTree(sessionId: string) {
-    return buildOpenCodeSessionTree(sessionId, baseAdapter.getDataPath() || undefined);
+    return getOpenCodeTree(sessionId);
   },
   getSessionContainer(sessionId: string) {
     return buildOpenCodeSessionContainer(sessionId, baseAdapter.getDataPath() || undefined);
@@ -56,8 +62,20 @@ const opencode = {
   getSessionMetrics(sessionId: string) {
     return buildOpenCodeSessionMetrics(sessionId, baseAdapter.getDataPath() || undefined);
   },
-  getSessionFlow(sessionId: string) {
-    return buildOpenCodeFlowTree(sessionId, baseAdapter.getDataPath() || undefined);
+  getSessionProtocol(sessionId: string) {
+    const tree = getOpenCodeTree(sessionId);
+    if (!tree) return null;
+    return buildOpenCodeSessionProtocol(tree, this.getStatsRevision());
+  },
+  getStatsRevision() {
+    const dbPath = baseAdapter.getDataPath();
+    if (!dbPath) return "missing";
+    try {
+      const stat = statSync(dbPath);
+      return `${dbPath}:${stat.size}:${stat.mtimeMs}`;
+    } catch {
+      return `${dbPath}:missing`;
+    }
   },
   getSystemPrompts(sessionId: string) {
     return buildOpenCodeSystemPrompts(sessionId, baseAdapter.getDataPath() || undefined);

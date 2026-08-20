@@ -25,8 +25,9 @@ export function renderSessionsPage({
   manageable = false,
   providers = [],
   selectedProviders = [],
-  global = false
-}: { sessions?: any[]; total?: number; limit?: number; offset?: number; query?: string; note?: string; range?: string; project?: string; sort?: string; starredOnly?: boolean; sessionKind?: string; projectOptions?: { id: string; label: string; count?: number; worktree?: string }[]; searchMode?: string; totalMessages?: number; deletedCount?: number; provider?: string | null; providerAvailable?: boolean; manageable?: boolean; providers?: any[]; selectedProviders?: string[]; global?: boolean } = {}) {
+  global = false,
+  storageDiagnostic = null
+}: { sessions?: any[]; total?: number; limit?: number; offset?: number; query?: string; note?: string; range?: string; project?: string; sort?: string; starredOnly?: boolean; sessionKind?: string; projectOptions?: { id: string; label: string; count?: number; worktree?: string }[]; searchMode?: string; totalMessages?: number; deletedCount?: number; provider?: string | null; providerAvailable?: boolean; manageable?: boolean; providers?: any[]; selectedProviders?: string[]; global?: boolean; storageDiagnostic?: any } = {}) {
   const isAvailable = providerAvailable !== false;
   const isManageableProvider = isAvailable && manageable;
   const hasVisibleSessions = sessions.length > 0;
@@ -55,6 +56,9 @@ export function renderSessionsPage({
       : `<p class="empty-state">${t("sessions.empty")}</p>`;
 
   const searchNote = note ? `<p class="search-note">${escapeHtml(note)}</p>` : "";
+  const storageNotice = storageDiagnostic
+    ? `<p class="search-note settings-status-warn" data-storage-diagnostic="${escapeHtml(String(storageDiagnostic.code || "storage"))}">${escapeHtml(String(storageDiagnostic.message || storageDiagnostic.code || storageDiagnostic))}</p>`
+    : "";
 
   const shortProjectLabel = (value: any, id: any = "") => {
     if (String(id) === "global") return t("filter.global_project");
@@ -79,13 +83,6 @@ export function renderSessionsPage({
     { key: "title-desc", label: t("sort.title_desc") }
   ].map((item) => (
     `<option value="${escapeHtml(item.key)}" ${item.key === sort ? "selected" : ""}>${escapeHtml(item.label)}</option>`
-  )).join("");
-  const sessionKindOptions = [
-    { key: "all", label: t("filter.title_all") },
-    { key: "work", label: t("filter.title_work") },
-    { key: "analysis", label: t("filter.title_analysis") }
-  ].map((item) => (
-    `<option value="${escapeHtml(item.key)}" ${item.key === sessionKind ? "selected" : ""}>${escapeHtml(item.label)}</option>`
   )).join("");
   const projectSelectOptions = [
     `<option value="">${t("filter.all_projects")}</option>`,
@@ -116,10 +113,6 @@ export function renderSessionsPage({
     <label class="filter-field">
       <span>${t("filter.sort")}</span>
       <select name="sort" data-session-filter-auto>${sortOptions}</select>
-    </label>
-    <label class="filter-field">
-      <span>${t("filter.title_type")}</span>
-      <select name="kind" data-session-filter-auto>${sessionKindOptions}</select>
     </label>
     <div class="filter-actions">
       ${isManageableProvider ? `<div class="filter-field filter-check">
@@ -157,7 +150,7 @@ export function renderSessionsPage({
         </div>
         ${searchMode !== "content" && isManageableProvider && hasVisibleSessions ? `<button class="btn btn-manage" id="toggle-batch">${t("sessions.manage")}</button>` : ""}
       </div>
-      ${searchNote}
+      ${searchNote}${storageNotice}
       ${searchMode !== "content" ? filterBar : ""}
     </section>
     ${isManageableProvider && hasVisibleSessions ? `

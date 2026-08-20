@@ -8,6 +8,7 @@ import { buildGeminiRuntimeEnvironment } from "./runtime-environment.js";
 import { buildMessageSessionViews } from "../shared/message-session.js";
 import { buildResolvedSystemPromptEvidence } from "../shared/system-prompt-evidence.js";
 import { withConfiguredProjectDirectory } from "../shared/project-directory.js";
+import { buildGeminiSessionProtocol, geminiProtocolCapabilities } from "./protocol.js";
 import {
   createSessionFileStore,
   createStructuredViewCache,
@@ -111,9 +112,9 @@ const gemini = {
   lifecycle: "legacy",
   capabilities: {
     localManagement: true,
-    sessionAnalysis: false,
     structuredSessionViews: true
   },
+  protocolCapabilities: geminiProtocolCapabilities,
 
   detect() {
     return existsSync(path.join(getGeminiDir(), "tmp"));
@@ -168,6 +169,16 @@ const gemini = {
 
   getStatsRevision() {
     return sessionFiles.getStatsRevision();
+  },
+
+  getSessionProtocol(sessionId: string) {
+    const entry = sessionFiles.get(sessionId);
+    if (!entry) return null;
+    return buildGeminiSessionProtocol(
+      configuredGeminiSession(entry.session),
+      entry.records,
+      sessionFiles.getStatsRevision()
+    );
   },
 
   searchMessages(query, limit = 20) {

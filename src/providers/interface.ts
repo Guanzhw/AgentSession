@@ -15,10 +15,6 @@ export interface ResumeShellSpec {
   args?: string[];
 }
 
-export interface AnalysisCommandSpec extends ResumeCommandSpec {
-  stdin?: "prompt";
-}
-
 export interface TokenUsage {
   input?: number;
   output?: number;
@@ -145,7 +141,6 @@ export interface ProviderAdapter {
     localManagement?: boolean;
     /** Data path uses the OpenCode SQLite schema accepted by native stats and list queries. */
     openCodeStatsStore?: boolean;
-    sessionAnalysis?: boolean;
     structuredSessionViews?: boolean;
   };
   detect(): boolean;
@@ -164,6 +159,7 @@ export interface ProviderAdapter {
   getSessionTree?(sessionId: string): unknown;
   getSessionContainer?(sessionId: string): unknown;
   getSessionMetrics?(sessionId: string): unknown;
-  getSessionFlow?(sessionId: string): unknown;
   getUnavailableReason?(): string | null;
+  /** Optional provider-owned diagnostic for detected but unsupported storage backends. */
+  getStorageDiagnostic?(): unknown;
 }

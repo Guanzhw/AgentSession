@@ -10,7 +10,7 @@ Canonical detail URLs remain `/:provider/session/:sessionId` because a session I
 is only unique inside its owning provider and provider adapters retain ownership
 of transcript parsing, resume behavior, structured views, and source paths.
 
-## Sessions data flow
+## Sessions pipeline
 
 All adapters populate the viewer-owned `session_index` table at startup. The
 global query reads this index by the composite `(provider, id)` identity and
@@ -24,7 +24,7 @@ as well as during the server-rendered initial response. Provider-specific pages
 and APIs remain available for compatibility and for provider-owned operations
 such as starring, renaming, deletion, content search, and resume.
 
-## Usage data flow
+## Usage pipeline
 
 Every adapter exposes normalized daily token components through the shared
 statistics contract: input, output, reasoning, cache read, cache write, total,
@@ -43,8 +43,8 @@ after bounded collection.
 When a provider stores copied parent history inside a subagent transcript, the
 adapter excludes those copied requests before aggregation. A provider-reported
 request total remains authoritative even when a legacy record does not expose a
-complete input/output/cache breakdown, so a session, Flow summary, and daily
-usage total use the same source-backed amount.
+complete input/output/cache breakdown, so a session summary and daily usage
+total use the same source-backed amount.
 
 The global page exposes only capabilities whose meaning is provider-neutral.
 Project/model filters, coverage, session rankings, cost estimates, and day

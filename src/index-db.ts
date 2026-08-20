@@ -1,12 +1,10 @@
 // src/index-db.js
 import { DatabaseSync } from "node:sqlite";
 import { getConfig } from "./config.js";
-import { analysisTitleSqlCondition, analysisTitleSqlParams, normalizeSessionKindFilter } from "./session-kind.js";
+import { normalizeSessionKindFilter } from "./session-kind.js";
 import { isEmptyProjectFilter, normalizeCrossProviderProjectPath } from "./project-filter.js";
 import { escapeSqlLikePattern, splitSearchTerms } from "./providers/shared/parser.js";
 import {
-  getKindMatchingOverrideIds,
-  getOverrideTitleIds,
   getSearchMatchingOverrideIds,
   normalizeSessionTitleOverrides,
   serializeSessionTitleOverrides,
@@ -169,26 +167,7 @@ function indexedFilter(
     }
   }
 
-  const kind = normalizeSessionKindFilter(sessionKind);
-  if (kind !== "all") {
-    const titleCondition = analysisTitleSqlCondition("LOWER(COALESCE(NULLIF(title, ''), id))");
-    const sourceKindCondition = kind === "analysis" ? `(${titleCondition})` : `NOT (${titleCondition})`;
-    const overrideIds = getOverrideTitleIds(titleOverrides);
-    const matchingOverrideIds = getKindMatchingOverrideIds(titleOverrides, kind);
-    if (overrideIds.length > 0) {
-      const sourceIdsCondition = idMembership("id", overrideIds, params, true);
-      params.push(...analysisTitleSqlParams());
-      if (matchingOverrideIds.length > 0) {
-        const overrideIdsCondition = idMembership("id", matchingOverrideIds, params);
-        where.push(`((${sourceIdsCondition} AND ${sourceKindCondition}) OR ${overrideIdsCondition})`);
-      } else {
-        where.push(`(${sourceIdsCondition} AND ${sourceKindCondition})`);
-      }
-    } else {
-      where.push(sourceKindCondition);
-      params.push(...analysisTitleSqlParams());
-    }
-  }
+  normalizeSessionKindFilter(sessionKind);
 
   return { db, whereClause: `WHERE ${where.join(" AND ")}`, params };
 }
@@ -297,13 +276,7 @@ function crossProviderFilter(query: CrossProviderSessionQuery, includeProject = 
     where.push("NOT EXISTS (SELECT 1 FROM json_each(?) AS hidden WHERE json_extract(hidden.value, '$.provider') = session_index.provider AND json_extract(hidden.value, '$.id') = session_index.id)");
     params.push(JSON.stringify(excluded));
   }
-  const kind = normalizeSessionKindFilter(query.sessionKind);
-  if (kind !== "all") {
-    const effectiveTitle = crossProviderTitleExpression(params, query.titleOverrides);
-    const titleCondition = analysisTitleSqlCondition(`LOWER(${effectiveTitle})`);
-    where.push(kind === "analysis" ? titleCondition : `NOT (${titleCondition})`);
-    params.push(...analysisTitleSqlParams());
-  }
+  normalizeSessionKindFilter(query.sessionKind);
   return { db, whereClause: `WHERE ${where.join(" AND ")}`, params };
 }
 

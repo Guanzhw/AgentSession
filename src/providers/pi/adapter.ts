@@ -20,7 +20,9 @@ import {
   piUsageToTokens,
   piRecordsToMessages
 } from "./parser.js";
-import { buildPiSessionProtocol } from "./protocol.js";import { buildPiRuntimeEnvironment } from "./runtime-environment.js";
+import { buildPiSessionProtocol } from "./protocol.js";
+import { finalizeSessionProtocol, protocolRevision, type SessionBranch } from "../shared/session-protocol.js";
+import { buildPiRuntimeEnvironment } from "./runtime-environment.js";
 
 function getPiDir() {
   return getConfig().piDir;
@@ -76,17 +78,59 @@ const sessionFiles = createSessionFileStore({
   }
 });
 
+const piProtocolCapabilities = {
+  sessionEvents: { support: "partial" as const, provenance: "derived" as const, details: "derived message envelopes plus recorded compaction/branch_summary events" },
+  sessionRelationships: { support: "partial" as const, provenance: "derived" as const, details: "header parentSession lineage only" },
+  tasks: { support: "none" as const, provenance: "derived" as const, details: "Pi session files record no task abstraction" },
+  agentRuns: { support: "none" as const, provenance: "derived" as const, details: "Pi session files record no agent-run abstraction" },
+  contextArtifacts: { support: "full" as const, provenance: "recorded" as const, details: "compaction entries, metadata-only summaries" },
+  branches: { support: "partial" as const, provenance: "derived" as const, details: "active in-file branch and optional parentSession lineage" }
+};
+
+function piBranchTopology(session: any, records: Array<Record<string, any>>): SessionBranch[] {
+  const head = [...records].reverse().find((record) => typeof record.id === "string" && record.id)?.id || null;
+  const parentId = typeof session.parentId === "string" && session.parentId ? session.parentId : null;
+  return [{
+    id: `branch:${String(session.id)}`,
+    parentBranchId: parentId ? `branch:${parentId}` : null,
+    forkEventId: null,
+    headEventId: head,
+    selected: true,
+    provenance: {
+      fidelity: "derived",
+      sourceType: parentId ? "pi.session.parentSession" : "pi.session.active-file",
+      sourceId: parentId || String(session.id)
+    }
+  }];
+}
+
+function buildPiSessionProtocolFor(sessionId: string) {
+  const entry = sessionFiles.get(sessionId);
+  if (!entry) return null;
+  const protocol = buildPiSessionProtocol({
+    session: entry.session,
+    records: entry.records,
+    messages: entry.messages
+  });
+  return finalizeSessionProtocol({
+    ...protocol,
+    branches: piBranchTopology(entry.session, entry.records)
+  }, {
+    provider: "pi",
+    session: entry.session,
+    capabilities: piProtocolCapabilities,
+    revision: protocolRevision(sessionFiles.getStatsRevision())
+  });
+}
+
 function generatePiViews(sessionId: string) {
   const entry = sessionFiles.get(sessionId);
   if (!entry) return null;
   // Pi records no tasks or agent runs; only relationships are passed. The
   // shared builder attaches children only for spawned evidence, so the
   // derived parent lineage can never fabricate a subagent branch.
-  const protocol = buildPiSessionProtocol({
-    session: entry.session,
-    records: entry.records,
-    messages: entry.messages
-  });
+  const protocol = buildPiSessionProtocolFor(sessionId);
+  if (!protocol) return null;
   return buildLinkedMessageSessionViews(
     entry.session.id,
     sessionFiles.getFamily(entry.session.id),
@@ -123,15 +167,10 @@ const pi = {
   },
   capabilities: {
     localManagement: true,
-    sessionAnalysis: true,
     structuredSessionViews: true
   },
   protocolCapabilities: {
-    sessionEvents: { support: "partial", provenance: "derived", details: "derived message envelopes plus recorded compaction/branch_summary events" },
-    sessionRelationships: { support: "partial", provenance: "derived", details: "header parentSession lineage only" },
-    tasks: { support: "none", provenance: "derived", details: "Pi session files record no task abstraction" },
-    agentRuns: { support: "none", provenance: "derived", details: "Pi session files record no agent-run abstraction" },
-    contextArtifacts: { support: "full", provenance: "recorded", details: "compaction entries, metadata-only summaries" }
+    ...piProtocolCapabilities
   },
 
   detect() {
@@ -155,12 +194,7 @@ const pi = {
   },
 
   getSessionProtocol(sessionId) {
-    const entry = sessionFiles.get(sessionId);
-    return entry ? buildPiSessionProtocol({
-      session: entry.session,
-      records: entry.records,
-      messages: entry.messages
-    }) : null;
+    return buildPiSessionProtocolFor(sessionId);
   },
 
   getRuntimeEnvironment(sessionId) {

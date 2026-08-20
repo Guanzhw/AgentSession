@@ -104,6 +104,7 @@ export function registerMutations(
 
   // Session mutations (star/rename/delete/restore/permanent-delete)
   app.post(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/(star|rename|delete|restore|permanent-delete)$/, async (req: any, res: any, match: RegExpMatchArray) => {
+    if (!isTrustedLocalJsonRequest(req)) return json(res, { ok: false, error: "Mutation requests must be same-origin JSON from loopback" }, 403);
     const providerId = match[1];
     const adapter = providerMap.get(providerId);
     if (!supportsLocalManagement(adapter)) {
@@ -195,6 +196,7 @@ export function registerMutations(
 
   // Legacy mutation route (without provider prefix)
   app.post(/^\/api\/session\/([^/]+)\/(star|rename|delete|restore|permanent-delete)$/, async (req: any, res: any, match: RegExpMatchArray) => {
+    if (!isTrustedLocalJsonRequest(req)) return json(res, { ok: false, error: "Mutation requests must be same-origin JSON from loopback" }, 403);
     const providerId = "opencode";
     const adapter = providerMap.get(providerId);
     if (!supportsLocalManagement(adapter)) {
@@ -286,6 +288,7 @@ export function registerMutations(
 
   // Batch actions
   app.post("/api/batch", async (req: any, res: any, _match: any) => {
+    if (!isTrustedLocalJsonRequest(req)) return json(res, { ok: false, error: "Batch requests must be same-origin JSON from loopback" }, 403);
     const providerId = "opencode";
     const adapter = providerMap.get(providerId);
     if (!supportsLocalManagement(adapter)) {
@@ -324,6 +327,7 @@ export function registerMutations(
 
   // Prefixed batch
   app.post(/^\/api\/([a-z][a-z0-9-]*)\/batch$/, async (req: any, res: any, match: RegExpMatchArray) => {
+    if (!isTrustedLocalJsonRequest(req)) return json(res, { ok: false, error: "Batch requests must be same-origin JSON from loopback" }, 403);
     const providerId = match[1];
     const adapter = providerMap.get(providerId);
     if (!supportsLocalManagement(adapter)) {
@@ -361,7 +365,8 @@ export function registerMutations(
   });
 
   // Reindex
-  app.post("/api/reindex", async (_req: any, res: any, _match: any) => {
+  app.post("/api/reindex", async (req: any, res: any, _match: any) => {
+    if (!isTrustedLocalJsonRequest(req)) return json(res, { ok: false, error: "Reindex requests must be same-origin JSON from loopback" }, 403);
     try {
       getIndexDb();
       const results: any[] = [];
@@ -464,7 +469,7 @@ export function registerMutations(
 }
 
 function getRestartRequiredKeys(previousConfig: any, nextConfig: any): string[] {
-  const runtimeKeys = new Set(["analysis", "resumeCommands", "resumeShell", "allowTerminalLaunch"]);
+  const runtimeKeys = new Set(["projectPaths", "resumeCommands", "resumeShell", "tokenPricing", "mcp", "allowTerminalLaunch"]);
   const keys = new Set([
     ...Object.keys(previousConfig || {}),
     ...Object.keys(nextConfig || {})

@@ -35,7 +35,8 @@ export function createOpenCodeSqliteAdapter({
   defaultDataPath,
   useConfiguredDbPath = false,
   resumeCommand,
-  capabilities = {}
+  capabilities = {},
+  protocolCapabilities
 }: {
   id: ProviderId;
   name: string;
@@ -44,6 +45,7 @@ export function createOpenCodeSqliteAdapter({
   useConfiguredDbPath?: boolean;
   resumeCommand?: ProviderAdapter["resumeCommand"];
   capabilities?: ProviderAdapter["capabilities"];
+  protocolCapabilities?: ProviderAdapter["protocolCapabilities"];
 }): ProviderAdapter {
   function getAdapterDataPath() {
     return useConfiguredDbPath ? (getConfig().dbPath || defaultDataPath()) : defaultDataPath();
@@ -55,6 +57,7 @@ export function createOpenCodeSqliteAdapter({
     icon,
     resumeCommand,
     capabilities,
+    protocolCapabilities,
 
   detect() {
     const dbPath = getAdapterDataPath();

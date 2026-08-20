@@ -155,7 +155,7 @@ export function createSessionFileStore<
 /**
  * Create a 1-second cache for a single-session view builder.
  * Prevents redundant rebuilds when a detail page requests multiple
- * view facets (tree, container, metrics, flow) for the same session
+ * view facets (tree, container, metrics) for the same session
  * within a single render cycle.
  */
 export function createStructuredViewCache<T>(
@@ -183,12 +183,11 @@ export function createStructuredViewCache<T>(
  */
 export function createStructuredViewMethods(
   getViews: (sessionId: string) => Record<string, any> | null
-): Pick<ProviderAdapter, "getSessionTree" | "getSessionContainer" | "getSessionMetrics" | "getSessionFlow" | "getTrace"> {
+): Pick<ProviderAdapter, "getSessionTree" | "getSessionContainer" | "getSessionMetrics" | "getTrace"> {
   return {
     getSessionTree(sessionId: string) { return getViews(sessionId)?.tree || null; },
     getSessionContainer(sessionId: string) { return getViews(sessionId)?.container || null; },
     getSessionMetrics(sessionId: string) { return getViews(sessionId)?.metrics || null; },
-    getSessionFlow(sessionId: string) { return getViews(sessionId)?.flow || null; },
     getTrace(sessionId: string) { return getViews(sessionId)?.trace || null; },
   };
 }

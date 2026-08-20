@@ -1,7 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 import type { Message, RawSession, RuntimeEnvironmentView, RuntimeExtensionReference, TokenUsage } from "../interface.js";
 import { asNumber } from "../shared/parser.js";
-import { buildFlowTreeFromContainer } from "../shared/flow-tree.js";
 import { buildMessageSessionViews } from "../shared/message-session.js";
 import { classifySharedTool, mergeToolMetadata } from "../shared/subagent-tools.js";
 import {
@@ -437,7 +436,6 @@ function enrichClaudeCodeSessionViews(base: any) {
   return {
     ...base,
     metrics,
-    flow: buildFlowTreeFromContainer(base.container, metrics),
     trace
   };
 }

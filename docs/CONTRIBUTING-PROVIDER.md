@@ -1,413 +1,211 @@
-# Contributing a New Provider
+# Contributing a Provider
 
-This is the implementation guide for adding a local AI coding-agent session
-provider to AgentSession. A provider reads and normalizes its own session data;
-it must never modify the provider-owned database or transcript files.
+This guide explains how to add a local AI harness provider to AgentSession.
+The adapter owns source parsing and provider-specific semantics; the viewer,
+Runtime Workbench, and read-only MCP consume normalized contracts. Provider
+databases, transcripts, and event logs must never be written, migrated,
+deleted, or repaired.
 
-`src/providers/interface.ts` is authoritative. Treat this document as the
-end-to-end checklist that makes the TypeScript contract usable in the viewer,
-the read-only MCP server, and a release.
+`src/providers/interface.ts` is authoritative. Keep provider behavior under
+`src/providers/<provider-id>/` and do not add central provider-ID branches in
+routes, projections, or browser code.
 
-## A complete Provider
+## Contract boundary
 
-A complete Provider is more than a parser. It must:
+Every adapter implements `ProviderAdapter`:
 
-1. detect its local data without writing to it;
-2. preserve canonical session IDs and parent relationships;
-3. expose normalized sessions, messages, token statistics, and search;
-4. register with the viewer and, when supported, AgentSession-MCP;
-5. declare only capabilities it actually implements; and
-6. include fixture, unavailable-data, and real-data verification.
+- stable lowercase `id`, display `name`, and `icon`;
+- `detect()`, `getDataPath()`, `scan()`, and `getSession()`;
+- normalized `getMessages()`, trusted `getTokenStats()`, and bounded `searchMessages()`;
+- optional `exportSession()`, runtime-environment evidence, system-prompt evidence, structured conversation projections, and a provider-owned resume command;
+- `protocolCapabilities` and `getSessionProtocol(sessionId)` for every readable session;
+- `getStorageDiagnostic()` when a detected backend is known but unsupported.
 
-Keep defaults, schema extraction, transcript quirks, resume behavior,
-structured views, and runtime-environment discovery under
-`src/providers/<provider-id>/`. Do not add central
-`if (provider.id === "my-tool")` branches.
+IDs are canonical everywhere: scan results, lookup, URLs, metadata keys,
+exports, resume commands, protocol references, and MCP requests. Use Unix
+milliseconds. A malformed individual source file must not stop other sessions
+from loading; preserve a bounded diagnostic and use `null` or an empty
+collection where the contract permits unavailable optional data.
 
-## Pick the correct reference implementation
+Raw source fields are normalized at the adapter boundary. Browser code must
+not interpret provider schemas. Preserve nullable message fields (`thinking`,
+tool name/input/result, tokens, metadata) explicitly, and keep reasoning,
+assistant text, tool calls, and tool results inside their source response
+boundary.
 
-Read the actual adapter before copying it. Choose by source data shape rather
-than product similarity.
+## Choose a reference adapter
 
-| Source data | Start with | Key pattern |
-|---|---|---|
-| One JSON session per file | `src/providers/gemini/` | File store, incremental token statistics, and flat structured views. |
-| JSONL transcript | `src/providers/claude-code/` or `src/providers/codex/` | Defensive record parsing and explicit response/child-session boundaries. |
-| Event-sourced JSONL with independently compressed Zstd frames | `src/providers/deepseek-harness/` | Decode every complete frame and packed storage row before validating the header version, source sequence, and required event vocabulary. |
-| Inline agent event log plus telemetry SQLite | `src/providers/copilot/` | Keep transcript events canonical; read catalog/token rows read-only and represent in-file agents as view-only embedded bundles. |
-| In-file branch-tree JSONL | `src/providers/pi/` | Reconstruct the active `id`/`parentId` branch before normalizing messages; preserve file-level `parentSession` fork identity. |
-| OpenClaw branch-tree JSONL plus registry | `src/providers/openclaw/` | Cache transcripts with registry dependency paths; resolve session keys without replacing canonical session IDs. |
-| Provider-native SQLite | `src/providers/hermes/` | Keep SQL, WAL-aware snapshot caching, schema compatibility, and relationship semantics provider-owned. |
-| OpenCode SQLite | `src/providers/opencode/` | Use the OpenCode-owned adapter only for its exact schema; do not treat arbitrary SQLite providers as compatible. |
-| Nested/sidechain agent transcripts | `src/providers/shared/linked-message-session.ts` | Canonical `parentId` plus explicit spawn references; optional `SubagentEvidence` anchors from the session protocol. |
-| Provider-neutral session protocol | `src/providers/shared/session-protocol.ts` | Event envelopes, capability descriptors, relationships, tasks/agent runs, metadata-first context artifacts, and sequence/provenance helpers. |
+| Source shape | Reference | Boundary to preserve |
+|:---|:---|:---|
+| One JSON file per session | `src/providers/gemini/` | Flat messages and truthful unsupported domains. |
+| JSONL transcript | `src/providers/claude-code/` or `src/providers/codex/` | Record order, response boundaries, and child evidence. |
+| Branch-tree JSONL | `src/providers/pi/` or `src/providers/openclaw/` | In-file branches and canonical parent/session IDs. |
+| Event-sourced JSONL with Zstd frames | `src/providers/deepseek-harness/` | Frame decoding, packed-row keys, source sequence, and required event vocabulary. |
+| Inline event log plus catalog database | `src/providers/copilot/` | Event log is canonical; inline agents remain non-detached facts. |
+| Provider-native SQLite | `src/providers/hermes/` | Provider schema, WAL snapshots, and lineage remain local to the adapter. |
+| OpenCode SQLite | `src/providers/opencode/` | Only the OpenCode schema is supported; arbitrary SQLite is not interchangeable. |
 
-For file-backed sources, prefer `createSessionFileStore()`,
-`createStructuredViewCache()`, `createStructuredViewMethods()`, and
-`createIncrementalTokenStats()` from
-`src/providers/shared/file-adapter-helpers.ts`. They avoid reparsing unchanged
-files and keep detail views consistent. `src/providers/shared/agent-loop.ts`
-is the shared semantic layer: normalized `Message[]` becomes user/agent turns,
-reasoning, tool calls, results, and optional subagent branches before the
-Tree/Container/Metrics/Flow/Trace views are derived.
+Shared helpers in `src/providers/shared/` are schema-neutral: file caching,
+message/session projections, runtime evidence, canonical project mapping, and
+Session Protocol validation/finalization. Do not move provider field
+assumptions into those helpers.
 
-## Non-negotiable data rules
+## Session Protocol v2
 
-- Provider data is read-only. Stars, custom titles, trash, and exclusions are
-  AgentSession metadata, never source-data writes.
-- A session ID remains canonical in scan results, lookup, URLs, metadata,
-  exports, resume commands, analysis runs, parent links, and MCP requests.
-- Use Unix milliseconds. A corrupt individual file must not block other
-  sessions; retain a useful diagnostic and return `null`/empty arrays at
-  optional boundaries.
-- Normalize raw records at the parser/adapter boundary. Browser code must not
-  know the provider's source schema.
-- Reveal System Prompts and runtime configuration only from resolvable local
-  evidence. A provider-persisted prompt snapshot may be presented as stored
-  historical evidence, separately from current runtime files. Never claim to
-  recover prompt text that the provider did not store.
-- When a source has an opaque but stable project identifier instead of a
-  working directory, preserve it as `metadata.projectKey`. Use the shared
-  `withConfiguredProjectDirectory()` helper only with an explicit
-  viewer-owned mapping; never reverse, hash-match, or otherwise guess a path.
+Every registered provider must expose a protocol for every readable session.
+Message remains the universal conversation projection; protocol v2 is the
+structured harness contract.
 
-## The ProviderAdapter contract
-
-Every adapter must provide `id`, `name`, `icon`, `detect()`,
-`getDataPath()`, `scan()`, `getSession()`, `getMessages()`,
-`getTokenStats()`, and `searchMessages()`.
-
-| Member | Required behavior |
-|---|---|
-| `id` | Stable lowercase ID. Add it to `ProviderId` first. |
-| `detect()` | True only when locally configured source data is usable. |
-| `scan()` / `getSession()` | Canonical `RawSession` records; use `parentId: null` when there is no parent. |
-| `getMessages()` | Full normalized `Message[]`, including every required nullable field. |
-| `getTokenStats(days)` | Daily trusted aggregates, or `[]` when unavailable. Do not double count fragmented responses. |
-| `searchMessages()` | Bounded snippets associated with canonical session and message IDs. |
-
-### Normalize all nullable fields
-
-`RawSession.parentId` is required even for a flat history. `Message` fields such
-as `thinking`, `toolName`, `toolInput`, `toolOutput`, `tokens`, and `metadata`
-are also required by the TypeScript type; use `null`, not omission.
+Use canonical references at every graph and query boundary:
 
 ```ts
-import type { Message, RawSession } from "../interface.js";
+type SessionRef = { provider: ProviderId; sessionId: string };
+```
 
-export function normalizeSession(raw: any): RawSession {
-  return {
-    id: String(raw.sessionId),
-    provider: "my-tool", // Valid after ProviderId is extended.
-    parentId: raw.parentSessionId ? String(raw.parentSessionId) : null,
-    title: typeof raw.title === "string" ? raw.title : null,
-    directory: typeof raw.cwd === "string" ? raw.cwd : null,
-    timeCreated: Number(raw.createdAt) || 0,
-    timeUpdated: Number(raw.updatedAt) || 0,
-    messageCount: Array.isArray(raw.messages) ? raw.messages.length : 0,
-    tokenCount: Number.isFinite(raw.totalTokens) ? Number(raw.totalTokens) : null,
-    metadata: null
-  };
-}
+The finalized protocol contains `version: 2`, a session descriptor, events,
+relationships, tasks, agent runs, context artifacts, optional branches,
+validation, completeness, and a provider revision.
 
-export function normalizeMessage(raw: any, sessionId: string): Message {
-  return {
-    id: String(raw.id),
-    sessionId,
-    role: raw.role === "user" ? "user" : "assistant",
-    content: typeof raw.text === "string" ? raw.text : "",
-    thinking: typeof raw.thinking === "string" ? raw.thinking : null,
-    toolName: typeof raw.toolName === "string" ? raw.toolName : null,
-    toolInput: raw.toolInput ?? null,
-    toolOutput: raw.toolOutput ?? null,
-    timestamp: Number(raw.timestamp) || 0,
-    tokens: raw.tokens
-      ? { input: Number(raw.tokens.input) || 0, output: Number(raw.tokens.output) || 0 }
-      : null,
-    metadata: raw.turnId ? { turnId: String(raw.turnId) } : null
-  };
+### Events
+
+Events retain source order and exact source anchors. `sequence` is dense and
+one-based in AgentSession's normalized projection; timestamps never reorder
+events. Emit a normalized category (`session`, `message`, `model`,
+`reasoning`, `tool`, `task`, `run`, `context`, `control`, `team`, or
+`unknown`) and a stable normalized kind while preserving provider-native kind
+and bounded safe attributes in provenance/provider metadata.
+
+Every value carries `provenance.fidelity`: `recorded` when the source stores
+the fact, `derived` when the adapter reconstructs it. Unknown required source
+semantics must leave the session incomplete with a diagnostic; unknown
+ignorable events may remain `unknown` events. Never silently drop required
+events.
+
+### Relationships, Tasks, and AgentRuns
+
+Relationships preserve type, direction, canonical source/target refs,
+timestamp, provenance, and event/task/run anchors. Supported types are
+`parent`, `spawned`, `forked`, `continued`, `compacted-into`,
+`scheduled-run-of`, and `handed-off`. `spawned` is the only relationship that
+implies detached subagent work; lineage and collaboration edges do not.
+
+`Task` is requested work: status, title, owner/assignee, dependencies,
+schedule, deadline, revision, and outcome. `AgentRun` is one attempt: mode,
+agent/model, task, trigger, parent run, child session, timing, outcome, and
+failure/cancellation reason. Keep run mode on `AgentRun`, never on `Task`.
+
+### Context and branches
+
+Context artifacts are metadata-first. Preserve kind, scope, origin,
+`contentAccess`, source path, producer/consumer/citation links, source session
+IDs, version/lineage, hash, redaction, and a short non-sensitive summary.
+Never copy transcript or compaction text into an artifact. Emit context
+lifecycle events (`context.loaded`, `context.reinjected`, `context.cited`,
+`memory.generated`, `memory.consolidated`) only when the source supports that
+observation; plain compaction alone is not a lifecycle event.
+
+In-file branches use event/message IDs and remain branch topology. They never
+create a second canonical session or a fabricated cross-session edge.
+
+Implement with the factories and validator in
+`src/providers/shared/session-protocol.ts`, then finalize through the shared
+runtime path so validation, caching, revisions, and projections stay uniform.
+
+## Configuration and launch boundaries
+
+When a source has only an opaque project key, keep it as
+`metadata.projectKey`. A user may provide an existing absolute directory in
+the top-level configuration:
+
+```json
+{
+  "projectPaths": {
+    "my-tool": {
+      "opaque-project-key": "C:\\work\\project"
+    }
+  }
 }
 ```
 
-When one response is fragmented into reasoning, text, tool call, and tool
-result records, give those fragments the same `metadata.turnId` (or
-`responseGroupId`). A group must never cross assistant-response boundaries.
+This is viewer-owned lookup data; it never mutates provider storage and never
+guesses a path. Add a provider CLI data-path flag only when the provider root
+is configurable. A resume command is optional and must be a structured
+provider-owned executable/argument specification. Do not advertise resume when
+the source lacks a stable selector or project directory. DSH currently has no
+default resume command.
 
-### Capabilities and optional methods
+Terminal launch is resume-only. Do not add write-capable management or launch
+tools to AgentSession-MCP.
 
-Capabilities are declarations, not feature requests. Declare one only when the
-implementation and tests support it.
+## Provider registration and MCP
 
-| Capability or method | Use it when |
-|---|---|
-| `localManagement` | Canonical session IDs are stable enough for viewer metadata. It never authorizes source writes. |
-| `openCodeStatsStore` | The data path uses the exact OpenCode schema accepted by native list/statistics queries. This is not a generic SQLite capability. |
-| `sessionAnalysis` | The adapter can enter the provider-neutral, proposal-only analysis lifecycle with a configured command and a real project directory from source data or an explicit viewer-owned mapping. |
-| `structuredSessionViews` | All four methods exist: `getSessionTree`, `getSessionContainer`, `getSessionMetrics`, and `getSessionFlow`. |
-| `resumeCommand` | A safe structured executable/argument command with `{sessionId}` and `{projectPath}` placeholders is known. |
-| `getResumeCommandSpec()` | A provider-owned selector must be derived from the canonical ID, such as OpenClaw's registry session key. |
-| `getStatsRevision()` | A file-backed source can report changed statistics input. |
-| `getRuntimeEnvironment()` | Locally resolvable instruction/skill/agent/command/plugin/hook/rule evidence exists. |
-| `getSystemPrompts()` / `getTrace()` | All complete providers expose locally evidence-backed prompt sources and a bounded trace. File-backed adapters receive the generic Agent Loop trace; providers can override it only with richer native step evidence. |
-| `protocolCapabilities` + `getSessionProtocol()` | The adapter exposes the provider-neutral session protocol: typed events with stable sequences, session relationships, tasks, agent runs, and metadata-first context artifacts. Every declared domain must be truthfully backed by the accessor; absent domains default to `support: "none"`. Domains whose values mix recorded and derived fidelities must declare `support: "partial"` and `provenance: "derived"` — never `full/recorded`. The read-only endpoint `GET /api/:provider/session/:id/protocol` returns the descriptors plus the protocol and answers 404 for unknown providers/sessions and unsupported protocols. |
+1. Add the lowercase ID to `ProviderId` and register the adapter once in
+   `src/providers/index.ts`.
+2. Ensure unavailable providers remain in `getAllProviders()` while only
+   detected providers enter `getAvailableProviders()`.
+3. Keep provider-specific parsing and projections out of routes and views.
+4. Confirm the MCP provider allow-list and tests accept the ID where the MCP
+   package uses a static schema.
+5. Keep all MCP tools read-only, bounded, and explicit that provider content
+   is untrusted input.
 
-#### The standardized session protocol
+## DeepSeek Harness requirements
 
-`Message` remains the universal read/compatibility view. Providers that can
-expose structured evidence additionally implement `getSessionProtocol(sessionId)`
-returning `SessionProtocol` (`src/providers/shared/session-protocol.ts`):
+For DSH, keep compatibility metadata synchronized with the checked-in snapshot:
 
-- `events` — `SessionEventEnvelope[]` with a REQUIRED `sequence` (dense 1..n
-  in canonical SOURCE record order: record index, then local ordinal within
-  the record. Timestamps are never read — missing, equal, or out-of-order
-  timestamps cannot reorder events). Anchor recorded events with
-  `sourceSequence(recordIndex, ordinal)` and project with
-  `sequenceEventsBySource`; the anchor is kept additively in
-  `providerData.sourceSequence`. Normalized messages that cannot map to a raw
-  record are appended in normalized message order with derived provenance
-  (documented per provider). `timestamp: number | null`, `kind`, optional
-  `phase` (`started | updated | completed | failed`), `turnId`,
-  `parentEventId`, `correlationId`, `provenance`, and optional `providerData`.
-- `relationships` — `SessionRelationship[]` over
-  `parent | spawned | forked | continued | compacted-into | scheduled-run-of`.
-  Only `spawned` (and matching subagent Tasks/AgentRuns) imply a subagent;
-  lineage kinds (parent, continued, compacted-into, ...) never do.
-- `tasks` — `Task[]`: session-local units of work (status queued/running/
-  waiting_input/blocked/completed/failed/cancelled, optional
-  `dependencies: string[]` and `assignee`). Tasks carry no run state and no
-  execution mode; each execution is an AgentRun.
-- `agentRuns` — `AgentRun[]`: one execution of a task with the execution mode
-  (foreground/background/subagent/scheduled/team), `taskId`, and optional
-  `childSessionId` for detached child sessions.
-- `contextArtifacts` — metadata-first `ContextArtifact[]`: `kind`
-  (memory/instruction/skill/rule/summary), `scope` (session/agent/project/
-  user/organization), `origin` (user-authored/agent-generated/
-  provider-generated), `contentAccess` (full/summary/metadata-only/
-  unavailable), plus optional `sourcePath`, `producerRunId`,
-  `sourceSessionIds`, `hash`, and `redacted`. `summary` is always a short
-  non-sensitive note: never copy transcript or compaction text into
-  artifacts. Compaction-derived artifacts use `compactionSummaryArtifact()`:
-  kind=summary, scope=session, origin=provider-generated,
-  contentAccess=metadata-only, `sourceSessionIds` set, no plaintext. There
-  are no lifecycle/contentAvailable/contentRef artifact fields.
-- `provenance` on every value: `recorded` when the provider's own data
-  contains the fact, `derived` when the adapter reconstructed it (e.g. a
-  relationship inferred from a header field or validated lineage).
-- Lifecycle observations (`memory.generated`, `memory.consolidated`,
-  `context.loaded`, `context.reinjected`, `context.cited`) are
-  `SessionEventEnvelope` kinds (`isContextLifecycleEventKind()` helper).
-  Emit them only when provider evidence actually supports the observation;
-  never derive them from plain compaction.
+- repository `deepseek-ai/deepseek-harness`;
+- commit `141eb6fef83422698aef7a981029e843e8161534`;
+- tag `dsh-v0.1.0-rc.8`;
+- npm stable `0.1.0-rc.7`, `next` `0.1.0-rc.8`;
+- session format `0`, SQLite schema `17`.
 
-Standardized compaction uses `kind: "context.compaction"` with a
-`ContextCompactionEvent` payload (`trigger` manual/automatic/limit-recovery/
-unknown, `strategy` summary/opaque/hybrid/unknown, optional token counts,
-`summary`, `retainedFromEventId`, `continuationSessionId`,
-`reloadedContextRefs`). A compaction record without a readable summary is
-still a valid opaque event. Existing implementations: Codex (compacted /
-context_compacted / contextCompaction variants, NEW_TASK tasks, spawn tool
-calls), Claude Code (compact/PreCompact/PostCompact, task notifications,
-sidechains), Pi (compaction/branch_summary entries, header parentSession), and
-Hermes (validated compression lineage and delegates).
+JSONL is the primary backend. Test raw and multi-frame `.jsonl.zstd`, packed
+`text-chunks`/`reasoning-chunks`/`tool-call-chunks`, zero-based upstream
+sequence, header identity, `request/header` and `request/context`,
+`session/end-seed`, fork seed length, source-event citations, surface
+replacement, compaction, cancellation/interruption, workflow/subagent facts,
+`agent/inbox/spliced`, and Agent Teams member/task/mailbox events. Team and
+inbox records are control-plane facts, not ordinary messages. Preserve dangling
+references as unresolved diagnostics; never invent a readable child session.
 
-For flat histories, compose `buildMessageSessionViews()` with
-`createStructuredViewMethods()`; it delegates Tree, Container, Metrics, Flow,
-and the generic Agent Loop Trace together. For child sessions, use the
-linked-session helper instead of guessing from display order. The linked
-helper accepts optional `SubagentEvidence` (tasks/agentRuns/relationships)
-and attaches children by spawn-tool anchors before falling back to explicit
-references and creation order; non-spawned relationship kinds never attach
-children as subagents. Use
-`buildResolvedSystemPromptEvidence()` with the provider-owned runtime resolver
-when the source itself does not store an explicit, recoverable prompt.
+If SQLite persistence or another known backend is detected but unsupported,
+return an explicit storage diagnostic naming the detected and expected schema.
+Never silently treat durable data as an empty provider.
 
-## End-to-end change checklist
+## Tests and acceptance
 
-### 1. Define the ID and path boundary
+Use provider-owned fixtures for current, legacy, malformed, unavailable,
+derived, unsupported, dangling, and cyclic records. Check:
 
-- [ ] Add the stable lowercase ID to `ProviderId` in
-  `src/providers/interface.ts`.
-- [ ] Add a default data-path resolver and configuration field in
-  `src/config.ts` if users need to configure the provider root.
-- [ ] When the path is configurable, add its CLI flag, help text, environment
-  variable, config validation, and both README entries.
-- [ ] If the source omits a working directory but retains an opaque stable
-  project key, normalize it as `metadata.projectKey` and wire
-  `withConfiguredProjectDirectory()` through `scan()` and `getSession()`. The
-  mapping belongs at `analysis.providers.<id>.projectPaths` and must be an
-  existing absolute directory; it is never a source-data write.
-- [ ] Add an icon in `src/icons.ts`.
-
-### 1b. Optional: expose the standardized session protocol
-
-Only when the source carries structured evidence (compaction records, task
-notifications, sidechains, validated lineage):
-
-- [ ] Add `protocolCapabilities` to the adapter with one
-  `CapabilityDescriptor` per populated domain; never declare a domain without
-  a `getSessionProtocol` implementation.
-- [ ] Implement `getSessionProtocol(sessionId)` in `src/providers/my-tool/protocol.ts`
-  using the factories in `src/providers/shared/session-protocol.ts`; anchor
-  every event with `sourceSequence(recordIndex, ordinal)` and project with
-  `sequenceEventsBySource` (sequence is source record order, never timestamp
-  chronology), and attach `provenance` to every value.
-- [ ] Compaction evidence becomes `context.compaction` events; opaque records
-  without a summary stay valid events with `strategy: "opaque"`. Never emit
-  memory/context lifecycle events for plain compaction.
-- [ ] Context artifacts stay metadata-only: use `compactionSummaryArtifact()`
-  for compaction-derived artifacts (kind=summary, scope=session,
-  origin=provider-generated, contentAccess=metadata-only, `sourceSessionIds`
-  set); never duplicate transcript text into them.
-- [ ] Keep execution mode on AgentRun only; Tasks carry status, dependencies,
-  and assignee. Declare descriptors truthfully: mixed-fidelity domains are
-  `partial`/`derived`.
-- [ ] Pass protocol evidence (tasks/agentRuns/relationships) into
-  `buildLinkedMessageSessionViews` (or the provider's linked-view builder)
-  so structured views consume it without provider-id branches or cache loops.
-- [ ] Test descriptor truthfulness, sequence stability, artifact privacy,
-  adapter/path integration, and the `/protocol` route in
-  `test/session-protocol.test.mjs`, `test/protocol-integration.test.mjs`, and
-  `test/routes.test.mjs`.
-
-### 2. Create a provider-owned parser and adapter
-
-Create `src/providers/my-tool/`. It normally contains:
-
-```text
-src/providers/my-tool/
-├── adapter.ts              # Detection, paths, capabilities, public methods
-├── parser.ts               # Raw schema to RawSession/Message normalization
-├── runtime-environment.ts  # Only when local runtime evidence is resolvable
-└── session-store.ts        # Optional provider-native database/cache boundary
-```
-
-Use `node:fs`, `node:path`, and `node:os`. Catch parse errors per source file,
-not around the whole provider scan. Use `satisfies ProviderAdapter` on the
-adapter object so the contract is checked during typecheck.
-
-The adapter shape should follow this pattern; its store, views, token mapping,
-and search stay provider-owned:
-
-```ts
-const myTool = {
-  id: "my-tool",
-  name: "My Tool CLI",
-  icon: icons.myTool,
-  resumeCommand: { executable: "my-tool", args: ["resume", "{sessionId}"] },
-  capabilities: { localManagement: true, structuredSessionViews: true },
-  detect: () => existsSync(path.join(getMyToolDir(), "sessions")),
-  getDataPath: () => getMyToolDir(),
-  async *scan() { for (const entry of sessionFiles.list()) yield entry.session; },
-  getSession: (id: string) => sessionFiles.get(id)?.session || null,
-  getMessages: (id: string) => sessionFiles.get(id)?.messages || [],
-  ...createStructuredViewMethods(getViews),
-  getTokenStats: (days = 30) => getMyToolTokenStats(days),
-  getStatsRevision: () => sessionFiles.getStatsRevision(),
-  searchMessages: (query: string, limit = 20) => searchMyToolMessages(query, limit)
-} satisfies ProviderAdapter;
-```
-
-### 3. Register the viewer
-
-- [ ] Import the adapter and add it once to the immutable provider array in
-  `src/providers/index.ts`; duplicate IDs fail fast at startup.
-- [ ] Confirm `getAllProviders()` contains it while unavailable and
-  `getAvailableProviders()` contains it only after `detect()` succeeds.
-- [ ] Keep provider-specific parsing and views out of shared routes and views.
-
-### 4. Register MCP ID validation
-
-AgentSession-MCP deliberately validates Provider IDs. A newly registered viewer
-Provider is not MCP-queryable until both of these are updated:
-
-- [ ] Confirm `src/session-history.ts` derives the ID from the viewer registry.
-- [ ] Extend the Zod `providerSchema` in
-  `packages/agentsession-mcp/src/session-history-server.ts`.
-- [ ] Test that `session_search`, `session_get`, and one event/context call
-  accept the new ID while results remain read-only and transcript content stays
-  marked untrusted.
-
-Do not add analysis launch, terminal launch, or mutation tools to this MCP
-server.
-
-### 5. Add optional runtime and analysis support only when justified
-
-Implement `getRuntimeEnvironment()` only when the adapter can resolve current
-local evidence and source paths. It must not imply that hidden historical
-instructions were recovered.
-
-Set `sessionAnalysis` only after provider-owned launch configuration, bounded
-runtime capture, and the validator lifecycle in
-`docs/ANALYSIS-PROVIDER-IMPLEMENTATION.md` are in place. A provider is useful
-without analysis support. If the source does not record a directory, do not
-advertise per-session resume, runtime inventory, or analysis until a configured
-project-key mapping has resolved an existing local directory.
-
-### 6. Update public documentation
-
-- [ ] Add the provider, source path, and truthful capabilities to the support
-  table in `README.md` and `README.en.md`.
-- [ ] Update CLI/config/environment and resume-command examples when relevant.
-- [ ] Update this guide when the contract, capability model, or MCP registration
-  boundary changes.
-
-## Test and acceptance matrix
-
-Use small provider-owned fixtures. Do not rely only on one contributor's local
-data directory.
-
-| Surface | Required evidence |
-|---|---|
-| Parser | Current and legacy shapes; canonical ID; `parentId`; timestamps; every nullable Message field; tools/reasoning/models/tokens when present. |
-| Corruption and cache | One malformed file is skipped; unchanged files are reused; changed files reparse; deleted files disappear. |
-| Adapter | Absent-data `detect()`; scan/get/messages/search agreement; token fragments are not double counted; opaque project keys remain opaque until an explicit mapping resolves an existing directory. |
-| Nested agents | Explicit child IDs link correctly; copied parent context does not become child content; multiple children do not cross-contaminate. For every provider launcher name (`Agent`, `Task`, `task`, `subtask`, `spawn_agent`, `delegate_task`, or a documented equivalent), verify both the embedded conversation branch and the Flow fork/return pair. When a provider permits configured or arbitrary agent tool names, its parser must set normalized `metadata.subagent: true`; shared code must not guess from the name. Claude Code `task-notification` records must bind by their `task-id` and `tool-use-id`, rather than render as user text. |
-| Capabilities | Every declared capability has a matching view, resume, runtime, or analysis test. |
-| Viewer routes | Unavailable state, detail, search, metadata management, and structured views work without central provider-ID branches. |
-| MCP | Both static validators accept the ID; the five read-only tools remain bounded and untrusted-content safe. |
-| Real data | Scan a real source, inspect a detail API/page, and report source path plus observed session/message counts. |
+- canonical IDs and source-order sequence stability;
+- parser corruption isolation and cache invalidation;
+- nullable message normalization and token non-duplication;
+- truthful capability descriptors and protocol validation diagnostics;
+- relationship anchors, Task/AgentRun separation, branch topology, context privacy, and canonical links;
+- unavailable and unsupported-backend behavior;
+- `/api/providers`, `/protocol`, Runtime summary/events/graph, and the detail page;
+- MCP search/get/timeline/context/event bounds and untrusted-content handling;
+- a real local source, not fixtures alone, when provider schemas or paths are involved.
 
 Run at least:
 
 ```powershell
 npm run typecheck
 npm test
-
-# For user-visible behavior, with a compatible local server running:
-npm run qa:e2e
+npm run build
 ```
 
-For release-quality work, restart AgentSession, call `GET /api/providers`, and
-exercise both unavailable and installed states against a real source. Follow
-the validation matrix in `AGENTS.md` for the changed surface.
+For user-visible changes, restart the loopback server, inspect `/api/providers`
+and representative protocol/runtime responses, then run `npm run qa:e2e` at
+desktop and 390px widths. Review `git diff --check`, confirm provider data was
+not changed, and update both READMEs when public capabilities change.
 
-## Pull request checklist
-
-- [ ] Provider data remains read-only.
-- [ ] IDs stay canonical across viewer, metadata, resume, analysis, and MCP.
-- [ ] Provider-specific code stays under `src/providers/<id>/`; shared helpers
-  remain schema-neutral.
-- [ ] Required adapter methods and nullable normalized fields are present.
-- [ ] Capabilities exactly match implemented behavior.
-- [ ] Config, CLI help, icons, registration, and both MCP allow lists were reviewed.
-- [ ] Fixtures cover current, malformed, unavailable, and nested data as applicable.
-- [ ] Real local data plus browser/API output were verified.
-- [ ] English and Chinese README tables/examples are current.
-- [ ] `git diff --check`, typecheck, and relevant tests pass.
-
-## Related references
+## Related source
 
 - `src/providers/interface.ts` — authoritative adapter contract.
-- `src/providers/gemini/` — compact JSON file-provider example.
-- `src/providers/copilot/` — event-log transcript, read-only catalog telemetry, and inline subagent example.
-- `src/providers/claude-code/` and `src/providers/codex/` — JSONL and nested
-  transcript examples.
-- `src/providers/pi/` — in-file branch-tree JSONL, compaction, tool-result,
-  usage, session-name, and forked-session example.
-- `src/providers/shared/file-adapter-helpers.ts` — file-store, token, and
-  structured-view helpers.
-- `src/providers/shared/linked-message-session.ts` — nested session linking.
-- `src/providers/opencode/sqlite-adapter.ts` — OpenCode-schema adapter; never use it for unrelated SQLite schemas.
-- `src/session-history.ts` and
-  `packages/agentsession-mcp/src/session-history-server.ts` — MCP ID boundary.
-- `docs/ANALYSIS-PROVIDER-IMPLEMENTATION.md` — analysis integration.
+- `src/providers/shared/session-protocol.ts` — v2 types, factories, validator, and finalizer.
+- `src/protocol-runtime.ts` — cache and bounded Runtime projections.
+- `src/providers/deepseek-harness/compatibility.ts` — DSH compatibility snapshot.
+- `src/providers/gemini/`, `src/providers/copilot/`, `src/providers/pi/` — compact provider-specific protocol examples.
+- `packages/agentsession-mcp/src/session-history-server.ts` — read-only MCP boundary.
+- [`docs/specs/runtime-protocol-workbench/`](./specs/runtime-protocol-workbench/) — requirements and design source.

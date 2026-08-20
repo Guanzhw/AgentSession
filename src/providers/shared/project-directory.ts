@@ -26,7 +26,7 @@ function existingDirectory(value: unknown) {
 /**
  * Some transcript formats deliberately store only an opaque project key, not
  * a recoverable working directory. A user may map that key to a local project
- * in `analysis.providers.<provider>.projectPaths`; this remains viewer-owned
+ * in `projectPaths.<provider>`; this remains viewer-owned
  * configuration and is never written back to provider data.
  */
 export function withConfiguredProjectDirectory(
@@ -37,7 +37,7 @@ export function withConfiguredProjectDirectory(
   if (typeof session.directory === "string" && session.directory.trim()) return session;
   const key = projectKey(session);
   if (!key) return session;
-  const configured = config?.analysis?.providers?.[providerId]?.projectPaths?.[key];
+  const configured = config?.projectPaths?.[providerId]?.[key];
   const directory = existingDirectory(configured);
   if (!directory) return session;
   return {

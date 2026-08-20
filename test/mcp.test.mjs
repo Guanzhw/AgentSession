@@ -520,14 +520,6 @@ test("MCP configuration rejects unsafe limits", () => {
   ]);
 });
 
-test("AgentSession configuration rejects retired analysis extension fields", () => {
-  assert.deepEqual(validateUserConfig({
-    analysis: { targets: { skills: { extensions: [".md"] } } }
-  }), [
-    "analysis.targets.skills.extensions is not supported; use fileExtensions."
-  ]);
-});
-
 test("AgentSession configuration ignores retired OpenSessionViewer variables", () => {
   const currentConfig = path.join(temp, "current-config.json");
   const legacyConfig = path.join(temp, "legacy-config.json");

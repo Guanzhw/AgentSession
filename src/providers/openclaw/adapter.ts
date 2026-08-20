@@ -22,6 +22,7 @@ import {
   parseOpenClawSession
 } from "./parser.js";
 import { buildOpenClawRuntimeEnvironment } from "./runtime-environment.js";
+import { buildOpenClawSessionProtocol, openClawProtocolCapabilities } from "./protocol.js";
 
 interface OpenClawDescriptor extends SessionFileDescriptor {
   agentId: string;
@@ -152,7 +153,8 @@ const openclaw = {
       ? { executable: "openclaw", args: ["tui", "--local", "--session", sessionKey] }
       : null;
   },
-  capabilities: { localManagement: true, sessionAnalysis: true, structuredSessionViews: true },
+  capabilities: { localManagement: true, structuredSessionViews: true },
+  protocolCapabilities: openClawProtocolCapabilities,
   detect() { return existsSync(path.join(getOpenClawDir(), "agents")); },
   getUnavailableReason() {
     const agentsDir = path.join(getOpenClawDir(), "agents");
@@ -179,6 +181,17 @@ const openclaw = {
   ...createStructuredViewMethods(getViews),
   getTokenStats(days = 30) { return getTokenStats(days); },
   getStatsRevision() { return sessionFiles.getStatsRevision(); },
+  getSessionProtocol(sessionId: string) {
+    const entry = sessionFiles.get(sessionId);
+    if (!entry) return null;
+    const family = sessionFiles.getFamily(sessionId);
+    return buildOpenClawSessionProtocol(
+      entry.session,
+      entry.records,
+      family.filter((child) => String(child.session.id) !== String(entry.session.id)),
+      sessionFiles.getStatsRevision()
+    );
+  },
   searchMessages(query, limit = 20) { return searchNormalizedMessages(sessionFiles.list(), query, limit); },
   exportSession(sessionId) {
     const entry = sessionFiles.get(sessionId);

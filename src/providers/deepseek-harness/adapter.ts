@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readdirSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, openSync, readSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { getConfig } from "../../config.js";
 import { icons } from "../../icons.js";
@@ -27,6 +27,48 @@ import { buildDshRuntimeEnvironment } from "./runtime-environment.js";
 
 function getDshDir() {
   return getConfig().dshDir;
+}
+
+export interface DshStorageDiagnostic {
+  backend: "sqlite";
+  status: "unsupported";
+  path: string;
+  detectedSchema: null;
+  expectedSchema: 17;
+  message: string;
+}
+
+/**
+ * Detect the conventional DSH SQLite locations without opening or mutating
+ * the database.  DSH's SQLite path is deployment-configured, so an arbitrary
+ * external path cannot be discovered from AgentSession's read-only config.
+ */
+export function getDshStorageDiagnostic(root = getDshDir()): DshStorageDiagnostic | null {
+  const candidates = ["sessions.sqlite", "sessions.sqlite3", "sessions.db", "dsh.sqlite", "dsh.sqlite3", "dsh.db"];
+  for (const name of candidates) {
+    const filePath = path.join(root, name);
+    if (!existsSync(filePath)) continue;
+    let handle: number | null = null;
+    try {
+      handle = openSync(filePath, "r");
+      const header = Buffer.alloc(16);
+      if (readSync(handle, header, 0, header.length, 0) !== header.length
+        || header.toString("utf8") !== "SQLite format 3\u0000") continue;
+    } catch {
+      continue;
+    } finally {
+      if (handle !== null) closeSync(handle);
+    }
+    return {
+      backend: "sqlite",
+      status: "unsupported",
+      path: filePath,
+      detectedSchema: null,
+      expectedSchema: 17,
+      message: `DeepSeek Harness SQLite persistence was detected at ${filePath}, but AgentSession does not inspect or migrate that database. The reader currently supports JSONL; the compatibility snapshot documents upstream SQLite schema 17.`
+    };
+  }
+  return null;
 }
 
 function discoverSessionFiles() {
@@ -157,7 +199,6 @@ const deepseekHarness = {
     // This only enables AgentSession-owned stars, titles, and exclusions; it
     // never mutates DSH's append-only source records.
     localManagement: true,
-    sessionAnalysis: true,
     structuredSessionViews: true
   },
   protocolCapabilities: {
@@ -169,11 +210,19 @@ const deepseekHarness = {
   },
 
   detect() {
-    return existsSync(path.join(getDshDir(), "sessions"));
+    // A current SQLite store is still a detected DSH installation even though
+    // this adapter cannot read schema 17 yet. Keeping the provider visible is
+    // what makes the unsupported-backend diagnostic inspectable instead of
+    // silently treating durable sessions as absent.
+    return existsSync(path.join(getDshDir(), "sessions")) || getDshStorageDiagnostic() !== null;
   },
 
   getDataPath() {
     return path.join(getDshDir(), "sessions");
+  },
+
+  getStorageDiagnostic() {
+    return getDshStorageDiagnostic();
   },
 
   async *scan() {

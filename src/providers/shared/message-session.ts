@@ -6,7 +6,6 @@ import {
   type AgentLoopEvent
 } from "./agent-loop.js";
 import { asNumber } from "./parser.js";
-import { buildFlowTreeFromContainer } from "./flow-tree.js";
 import { treeToContainer } from "./session-container.js";
 import type { SessionMetricsView } from "./session-metrics.js";
 import { aggregateSessionTreeTokenUsage } from "./session-usage.js";
@@ -252,7 +251,6 @@ export function buildMessageSessionViewsFromTree(tree: SessionTree, loop: AgentL
     tree,
     container,
     metrics,
-    flow: buildFlowTreeFromContainer(container, metrics),
     trace
   };
 }

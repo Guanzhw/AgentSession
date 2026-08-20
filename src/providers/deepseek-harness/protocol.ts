@@ -4,6 +4,7 @@ import {
   dshHeader,
   dshOwnedEvents,
   dshSessionStatus,
+  dshUsageToTokens,
   type DshRecord
 } from "./parser.js";
 import {
@@ -11,6 +12,7 @@ import {
   compactionEnvelope,
   compactionSummaryArtifact,
   contextCompactionEvent,
+  finalizeSessionProtocol,
   sequenceEventsBySource,
   sessionEvent,
   sessionRelationship,
@@ -22,6 +24,7 @@ import {
   type Task,
   type TaskStatus
 } from "../shared/session-protocol.js";
+import { DSH_COMPATIBILITY_SNAPSHOT } from "./compatibility.js";
 
 export interface DshProtocolChild {
   session: RawSession;
@@ -53,12 +56,25 @@ function eventData(event: DshRecord): DshRecord {
     : {};
 }
 
+function isRecord(value: unknown): value is DshRecord {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function toolResultHasError(event: DshRecord): boolean {
+  const message = eventData(event).message;
+  if (!isRecord(message) || !Array.isArray(message.content)) return false;
+  return message.content.some((item) => isRecord(item) && item.type === "tool-result" && item.isError === true);
+}
+
 function descriptorOf(records: DshRecord[]): DshRecord | null {
   return [...dshOwnedEvents(records)].reverse().find((event) => event.type === "subagent/descriptor") || null;
 }
 
 function eventKind(event: DshRecord): string {
   switch (event.type) {
+    case "session/end-seed": return "session.end-seed";
+    case "request/header": return "request.header";
+    case "request/context": return "request.context";
     case "user/message": return "message.user";
     case "assistant/message": return "message.assistant";
     case "tool/call": return "tool.call";
@@ -68,6 +84,13 @@ function eventKind(event: DshRecord): string {
     case "step/start": return "step.started";
     case "step/end": return "step.completed";
     case "assistant/chunk": return "assistant.chunk";
+    case "compaction/start": return "context.compaction.started";
+    case "compaction/end": return "context.compaction.completed";
+    case "agent/inbox/spliced": return "control.inbox.spliced";
+    case "team/member": return "team.member";
+    case "team/task": return "team.task";
+    case "team/message/queued": return "team.message.queued";
+    case "team/message/delivered": return "team.message.delivered";
     case "approval/asked": return "approval.requested";
     case "approval/decided": return "approval.decided";
     case "subagent/descriptor": return "subagent.descriptor";
@@ -115,7 +138,7 @@ function eventCorrelation(event: DshRecord): string | null {
 
 function commonProviderData(event: DshRecord) {
   const data = eventData(event);
-  return {
+  const providerData: Record<string, unknown> = {
     sourceSequence: sourceSequence(Number(event.seq) || 0),
     eventType: String(event.type),
     turn: asNumber(data.turn),
@@ -123,6 +146,70 @@ function commonProviderData(event: DshRecord) {
     surfaceOp: event.surfaceOp || null,
     ignorable: event.ignorable === true
   };
+  if (event.type === "session/end-seed") {
+    providerData.seedBoundary = true;
+    providerData.seedLength = asNumber(data.seedLength);
+  } else if (event.type === "request/header") {
+    const requestHeader = data.header && typeof data.header === "object" && !Array.isArray(data.header)
+      ? data.header as DshRecord
+      : {};
+    const config = requestHeader.config && typeof requestHeader.config === "object" && !Array.isArray(requestHeader.config)
+      ? requestHeader.config as DshRecord
+      : {};
+    providerData.reason = firstString(data.reason);
+    providerData.hasSystemPrompt = typeof requestHeader.system === "string" && requestHeader.system.length > 0;
+    providerData.provider = firstString(config.provider);
+    providerData.model = firstString(config.model);
+  } else if (event.type === "request/context") {
+    providerData.provider = firstString(data.provider);
+    providerData.model = firstString(data.model);
+    providerData.contextWindow = asNumber(data.contextWindow);
+  } else if (event.type === "assistant/message") {
+    providerData.usage = dshUsageToTokens(data.usage);
+  } else if (event.type === "turn/end") {
+    const reason = data.reason && typeof data.reason === "object" && !Array.isArray(data.reason) ? data.reason as DshRecord : {};
+    providerData.reasonKind = firstString(reason.kind);
+  } else if (event.type === "tool/call") {
+    providerData.callId = firstString(data.callId);
+    providerData.name = firstString(data.name);
+  } else if (event.type === "tool/result") {
+    providerData.callId = eventCorrelation(event);
+    providerData.isError = toolResultHasError(event);
+  } else if (event.type === "agent/inbox/spliced") {
+    providerData.operation = firstString(data.operation);
+    providerData.messageIds = Array.isArray(data.messageIds) ? data.messageIds.filter((value): value is string => typeof value === "string") : [];
+  } else if (event.type === "team/member") {
+    const member = data.member && typeof data.member === "object" && !Array.isArray(data.member) ? data.member as DshRecord : {};
+    providerData.version = asNumber(data.version);
+    providerData.teamId = firstString(data.teamId);
+    providerData.memberId = firstString(member.id);
+    providerData.memberName = firstString(member.name);
+    providerData.memberProvider = firstString(member.provider);
+    providerData.memberContext = firstString(member.context);
+    providerData.memberPhase = firstString(member.phase);
+  } else if (event.type === "team/task") {
+    const task = data.task && typeof data.task === "object" && !Array.isArray(data.task) ? data.task as DshRecord : {};
+    providerData.version = asNumber(data.version);
+    providerData.teamId = firstString(data.teamId);
+    providerData.taskId = firstString(task.id);
+    providerData.revision = asNumber(task.revision);
+    providerData.ownerId = firstString(task.ownerId);
+    providerData.blockedBy = Array.isArray(task.blockedBy) ? task.blockedBy.filter((value): value is string => typeof value === "string") : [];
+  } else if (event.type === "team/message/queued") {
+    const message = data.message && typeof data.message === "object" && !Array.isArray(data.message) ? data.message as DshRecord : {};
+    providerData.version = asNumber(data.version);
+    providerData.teamId = firstString(data.teamId);
+    providerData.messageId = firstString(message.id);
+    providerData.senderId = firstString(message.senderId);
+    providerData.targetId = firstString(message.targetId);
+    providerData.delivery = firstString(message.delivery);
+  } else if (event.type === "team/message/delivered") {
+    providerData.version = asNumber(data.version);
+    providerData.teamId = firstString(data.teamId);
+    providerData.messageId = firstString(data.messageId);
+    providerData.targetId = firstString(data.targetId);
+  }
+  return providerData;
 }
 
 export function dshCompactionRecord(event: DshRecord) {
@@ -163,7 +250,11 @@ export function dshCompactionRecord(event: DshRecord) {
   return null;
 }
 
-function recordedEvent(sessionId: string, event: DshRecord): SessionEventEnvelope {
+function recordedEvent(
+  sessionId: string,
+  event: DshRecord,
+  sessionMetadata: { delegationDepth: number | null; agentPreset: string | null }
+): SessionEventEnvelope {
   const compaction = dshCompactionRecord(event);
   const fields = {
     id: `event:dsh:${event.seq}`,
@@ -177,7 +268,11 @@ function recordedEvent(sessionId: string, event: DshRecord): SessionEventEnvelop
       sourceType: `dsh.session-event:${String(event.type)}`,
       sourceId: String(event.seq)
     },
-    providerData: commonProviderData(event)
+    providerData: {
+      ...commonProviderData(event),
+      delegationDepth: sessionMetadata.delegationDepth,
+      agentPreset: sessionMetadata.agentPreset
+    }
   };
   if (compaction) {
     return compactionEnvelope(fields, contextCompactionEvent({
@@ -263,6 +358,95 @@ function childModel(child: DshProtocolChild, descriptor: DshRecord | null) {
   return firstString(descriptor?.data?.agentModel, child.session.metadata?.model);
 }
 
+function teamTaskStatus(value: unknown): TaskStatus {
+  switch (String(value || "").toLowerCase()) {
+    case "pending": return "queued";
+    case "in_progress":
+    case "in-progress":
+    case "running": return "running";
+    case "completed":
+    case "complete": return "completed";
+    case "deleted": return "cancelled";
+    default: return "queued";
+  }
+}
+
+interface DshTeamTask {
+  event: DshRecord;
+  id: string;
+  teamId: string | null;
+  revision: number | null;
+  subject: string | null;
+  description: string | null;
+  status: TaskStatus;
+  rawStatus: string | null;
+  ownerId: string | null;
+  blockedBy: string[];
+  writeScopes: string[];
+}
+
+function teamTasks(records: DshRecord[]): DshTeamTask[] {
+  const latest = new Map<string, DshTeamTask>();
+  for (const event of dshOwnedEvents(records)) {
+    if (event.type !== "team/task") continue;
+    const data = eventData(event);
+    const task = isRecord(data.task) ? data.task : {};
+    const id = firstString(task.id);
+    if (!id) continue;
+    const candidate: DshTeamTask = {
+      event,
+      id,
+      teamId: firstString(data.teamId),
+      revision: asNumber(task.revision),
+      subject: firstString(task.subject),
+      description: firstString(task.description),
+      status: teamTaskStatus(task.status),
+      rawStatus: firstString(task.status),
+      ownerId: firstString(task.ownerId),
+      blockedBy: Array.isArray(task.blockedBy) ? task.blockedBy.filter((value): value is string => typeof value === "string" && Boolean(value)) : [],
+      writeScopes: Array.isArray(task.writeScopes) ? task.writeScopes.filter((value): value is string => typeof value === "string" && Boolean(value)) : []
+    };
+    const previous = latest.get(id);
+    if (!previous || (candidate.revision ?? -1) >= (previous.revision ?? -1)) latest.set(id, candidate);
+  }
+  return [...latest.values()];
+}
+
+interface DshTeamMember {
+  event: DshRecord;
+  id: string;
+  teamId: string | null;
+  name: string | null;
+  description: string | null;
+  provider: string | null;
+  context: string | null;
+  phase: string | null;
+  error: string | null;
+}
+
+function teamMembers(records: DshRecord[]): DshTeamMember[] {
+  const latest = new Map<string, DshTeamMember>();
+  for (const event of dshOwnedEvents(records)) {
+    if (event.type !== "team/member") continue;
+    const data = eventData(event);
+    const member = isRecord(data.member) ? data.member : {};
+    const id = firstString(member.id);
+    if (!id) continue;
+    latest.set(id, {
+      event,
+      id,
+      teamId: firstString(data.teamId),
+      name: firstString(member.name),
+      description: firstString(member.description),
+      provider: firstString(member.provider),
+      context: firstString(member.context),
+      phase: firstString(member.phase),
+      error: firstString(member.error)
+    });
+  }
+  return [...latest.values()];
+}
+
 function addTaskAndRun({
   tasks,
   runs,
@@ -301,6 +485,7 @@ function addTaskAndRun({
   metadata?: Record<string, unknown> | null;
 }) {
   const childId = child ? String(child.session.id) : (childSessionId || sourceId);
+  const childSessionAvailable = Boolean(child);
   if (!tasks.some((task) => task.id === taskId)) {
     tasks.push(sessionTask({
       id: taskId,
@@ -315,7 +500,7 @@ function addTaskAndRun({
       timeUpdated: timeCompleted || timeCreated,
       timeCompleted,
       provenance: { fidelity, sourceType, sourceId },
-      metadata: metadata || null
+      metadata: { ...(metadata || {}), childSessionAvailable, ...(child ? {} : { danglingChildSessionId: childId }) }
     }));
   }
   if (!runs.some((run) => run.childSessionId === childId)) {
@@ -331,7 +516,7 @@ function addTaskAndRun({
       timeStart: timeCreated,
       timeEnd: timeCompleted,
       provenance: { fidelity, sourceType, sourceId },
-      metadata: metadata || null
+      metadata: { ...(metadata || {}), childSessionAvailable, ...(child ? {} : { danglingChildSessionId: childId }) }
     }));
   }
   if (!relationships.some((relationship) => relationship.type === "spawned" && relationship.toSessionId === childId)) {
@@ -341,7 +526,11 @@ function addTaskAndRun({
       toSessionId: childId,
       correlationId,
       timestamp: timeCreated,
-      details: mode === "team" ? "DeepSeek Harness workflow member" : "DeepSeek Harness subagent child",
+      details: child
+        ? (mode === "team" ? "DeepSeek Harness workflow member" : "DeepSeek Harness subagent child")
+        : `${mode === "team" ? "DeepSeek Harness workflow member" : "DeepSeek Harness subagent child"}; child session is not present in this snapshot`,
+      taskId,
+      runId: `run:${childId}`,
       provenance: { fidelity, sourceType, sourceId }
     }));
   }
@@ -355,7 +544,10 @@ function addTaskAndRun({
 export function buildDshSessionProtocol(input: DshProtocolInput): SessionProtocol {
   const sessionId = String(input.session.id);
   const owned = dshOwnedEvents(input.records);
-  const events = owned.map((event) => recordedEvent(sessionId, event));
+  const events = owned.map((event) => recordedEvent(sessionId, event, {
+    delegationDepth: asNumber((dshHeader(input.records) || {}).delegationDepth),
+    agentPreset: firstString((dshHeader(input.records) || {}).agentPreset)
+  }));
   const relationships: ReturnType<typeof sessionRelationship>[] = [];
   const tasks: Task[] = [];
   const runs: AgentRun[] = [];
@@ -405,6 +597,70 @@ export function buildDshSessionProtocol(input: DshProtocolInput): SessionProtoco
   }
 
   const childrenById = new Map(input.children.map((child) => [String(child.session.id), child]));
+  const nativeTasks = teamTasks(input.records);
+  const taskIdsByOwner = new Map<string, string>();
+  for (const native of nativeTasks) {
+    const taskId = `team:${native.id}`;
+    if (native.ownerId) taskIdsByOwner.set(native.ownerId, taskId);
+  }
+  for (const member of teamMembers(input.records)) {
+    const child = childrenById.get(member.id) || null;
+    const taskId = taskIdsByOwner.get(member.id) || null;
+    const childStatus = child ? dshSessionStatus(child.records) : null;
+    const phaseStatus: TaskStatus = member.phase === "failed"
+      ? "failed"
+      : member.phase === "active"
+        ? "running"
+        : "queued";
+    const status = childStatus && childStatus !== "running" ? childStatus : phaseStatus;
+    const runId = `team-member:${member.id}`;
+    runs.push(agentRun({
+      id: runId,
+      sessionId,
+      taskId,
+      status,
+      mode: "team",
+      agent: member.name || member.id,
+      model: child ? childModel(child, descriptorOf(child.records)) : member.provider,
+      childSessionId: child ? member.id : null,
+      timeStart: asNumber(member.event.time),
+      timeEnd: status === "running" || status === "queued" ? null : asNumber(child?.session.timeUpdated || member.event.time),
+      provenance: {
+        fidelity: "recorded",
+        sourceType: "dsh.session-event:team/member",
+        sourceId: String(member.event.seq)
+      },
+      metadata: {
+        teamId: member.teamId,
+        memberId: member.id,
+        description: member.description,
+        provider: member.provider,
+        context: member.context,
+        phase: member.phase,
+        error: member.error,
+        childSessionAvailable: Boolean(child),
+        ...(child ? {} : { danglingChildSessionId: member.id })
+      }
+    }));
+    if (child && !relationships.some((relationship) => relationship.type === "spawned" && relationship.toSessionId === member.id)) {
+      relationships.push(sessionRelationship({
+        type: "spawned",
+        fromSessionId: sessionId,
+        toSessionId: member.id,
+        timestamp: asNumber(member.event.time),
+        correlationId: member.id,
+        taskId,
+        runId,
+        details: "DeepSeek Harness team member session",
+        provenance: {
+          fidelity: "recorded",
+          sourceType: "dsh.session-event:team/member",
+          sourceId: String(member.event.seq)
+        }
+      }));
+    }
+  }
+
   for (const member of workflowMembers(input.records)) {
     const child = childrenById.get(member.childId) || null;
     const fallbackStatus = child ? dshSessionStatus(child.records) : "running";
@@ -432,6 +688,42 @@ export function buildDshSessionProtocol(input: DshProtocolInput): SessionProtoco
       fidelity: "recorded",
       metadata: { runId: member.runId, workflowSequence: member.sequence, outcome: member.outcome || null }
     });
+  }
+
+  // Keep the existing workflow/subagent task ordering stable; native Team
+  // tasks are appended after recorded workflow tasks in this snapshot.
+  for (const native of nativeTasks) {
+    const taskId = `team:${native.id}`;
+    const terminal = ["completed", "failed", "cancelled"].includes(native.status);
+    tasks.push(sessionTask({
+      id: taskId,
+      sessionId,
+      kind: "team-task",
+      status: native.status,
+      title: native.subject,
+      assignee: native.ownerId,
+      owner: native.ownerId,
+      correlationId: native.id,
+      dependencies: native.blockedBy.map((dependency) => `team:${dependency}`),
+      revision: native.revision,
+      timeCreated: asNumber(native.event.time),
+      timeUpdated: asNumber(native.event.time),
+      timeCompleted: terminal ? asNumber(native.event.time) : null,
+      outcome: terminal ? native.rawStatus : null,
+      provenance: {
+        fidelity: "recorded",
+        sourceType: "dsh.session-event:team/task",
+        sourceId: String(native.event.seq)
+      },
+      metadata: {
+        teamId: native.teamId,
+        description: native.description,
+        rawStatus: native.rawStatus,
+        ownerId: native.ownerId,
+        blockedBy: native.blockedBy,
+        writeScopes: native.writeScopes
+      }
+    }));
   }
 
   for (const child of input.children) {
@@ -467,7 +759,15 @@ export function buildDshSessionProtocol(input: DshProtocolInput): SessionProtoco
     });
   }
 
-  return {
+  const turnEnd = [...owned].reverse().find((event) => event.type === "turn/end");
+  const headerMetadata = {
+    ...(input.session.metadata || {}),
+    seedLength: asNumber(header.seedLength),
+    inheritedEventCount: asNumber(header.seedLength),
+    delegationDepth: asNumber(header.delegationDepth),
+    agentPreset: firstString(header.agentPreset)
+  };
+  const sourceProtocol: SessionProtocol = {
     sessionId,
     events: sequenceEventsBySource(events),
     relationships,
@@ -475,4 +775,18 @@ export function buildDshSessionProtocol(input: DshProtocolInput): SessionProtoco
     agentRuns: runs,
     contextArtifacts: artifacts
   };
+  return finalizeSessionProtocol(sourceProtocol, {
+    provider: "deepseek-harness",
+    session: { ...input.session, metadata: headerMetadata },
+    descriptor: {
+      state: dshSessionStatus(input.records),
+      origin: firstString(header.origin),
+      forkSeedBoundary: asNumber(header.seedLength),
+      inheritedEventCount: asNumber(header.seedLength),
+      harness: firstString(header.agentPreset),
+      terminalOutcome: firstString(turnEnd ? eventData(turnEnd).reason?.kind : null)
+    },
+    revision: DSH_COMPATIBILITY_SNAPSHOT.tag,
+    freeze: true
+  });
 }

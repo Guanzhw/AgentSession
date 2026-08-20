@@ -2,11 +2,9 @@ import { t } from "../i18n.js";
 import { escapeHtml } from "../markdown.js";
 import type { SessionPartNode, SessionTree } from "../providers/opencode/session-tree.js";
 import { isSubagentTool, mergeToolMetadata } from "../providers/shared/subagent-tools.js";
-import { flowTreeHasExecutionTopology, sessionTreeHasExecutionTopology } from "../providers/shared/flow-tree.js";
 import { formatDuration, formatTime, formatTokens, messageBubble, messageHeader, reasoningBlock, todoList, toolCallBlock } from "./components.js";
 import { layout } from "./layout.js";
 import type { SessionNavigationContext } from "../navigation-context.js";
-import { renderAnalysisLaunchButton, renderAnalysisLaunchControl } from "./session-analysis.js";
 
 function safeParse(value: any) {
   if (typeof value !== "string") {
@@ -147,11 +145,6 @@ function isTaskTool(partData: any) {
     partData?.tool,
     mergeToolMetadata(partData?.state?.metadata, partData?.metadata)
   );
-}
-
-function formatPercent(value: any) {
-  const amount = Number(value) || 0;
-  return `${Math.round(amount * 100)}%`;
 }
 
 function isNavigableMessageRole(role: any) {
@@ -529,246 +522,6 @@ function renderToc(tree: SessionTree | null) {
   </aside>`;
 }
 
-function renderFlowPanel(_tree: SessionTree | null, lazyUrl = "") {
-  const lazyAttrs = lazyUrl
-    ? ` data-flow-lazy-url="${escapeHtml(lazyUrl)}" data-flow-state="idle"`
-    : "";
-  const body = lazyUrl
-    ? `<p class="toc-empty" data-flow-lazy-status>${t("detail.execution_lazy_prompt")}</p>`
-    : `<p class="toc-empty">${t("detail.execution_empty")}</p>`;
-  return `<section id="session-flow-panel" class="session-flow-panel hidden" tabindex="-1" aria-hidden="true"${lazyAttrs}>
-    <div class="flow-panel-header">
-      <h2>${t("detail.execution_title")}</h2>
-      <button type="button" class="flow-close-btn" data-flow-close aria-label="${t("detail.execution_close")}">x</button>
-    </div>
-    ${body}
-  </section>`;
-}
-
-function flowHref(node: any) {
-  const target = node?.target;
-  if (!target?.kind || !target?.id) {
-    return "#";
-  }
-  if (target.kind === "session") return `#${anchorId("session", target.id)}`;
-  if (target.kind === "msg") return `#${anchorId("msg", target.id)}`;
-  if (target.kind === "part") return `#${anchorId("part", target.id)}`;
-  return "#";
-}
-
-function flowConversationHref(node: any, provider: string) {
-  const target = node?.target;
-  if (target?.kind === "session" && target?.id && provider) {
-    return `/${encodeURIComponent(provider)}/session/${encodeURIComponent(target.id)}`;
-  }
-  return flowHref(node);
-}
-
-function flowNodeDetails(node: any) {
-  const metrics = node?.metrics || {};
-  const operationalMeta = [
-    metrics.duration ? formatMilliseconds(metrics.duration) : "",
-    metrics.errors ? `${formatCount(metrics.errors)} errors` : "",
-    metrics.tokens ? `${formatCount(metrics.tokens)} tokens` : "",
-    node.inferred ? "inferred attachment" : ""
-  ].filter(Boolean).join(" · ");
-  const isMessage = node.kind === "user" || node.kind === "agent";
-  const status = node.status === "tool calls" || node.status === "stop" ? "" : node.status;
-  return [isMessage ? "" : node.meta, operationalMeta, status].filter(Boolean).join(" · ");
-}
-
-function renderFlowMapNode(node: any) {
-  const kind = node.kind || "agent";
-  const label = compactText(node.label, kind === "user" ? 64 : 48) || kind;
-  const details = flowNodeDetails(node);
-  const classes = [
-    "flow-map-node",
-    `flow-map-node-${kind}`,
-    node.inferred ? "flow-map-node-inferred" : "",
-    node?.metrics?.errors ? "flow-map-node-error" : ""
-  ].filter(Boolean).join(" ");
-  const accessibleTitle = [label, details].filter(Boolean).join(" — ");
-
-  if (kind === "agent") {
-    const agentClasses = `${classes} ${node.emphasis === "final" ? "flow-map-node-agent-final" : ""}`.trim();
-    return `<a class="${agentClasses}" href="${escapeHtml(flowHref(node))}" title="${escapeHtml(accessibleTitle)}" aria-label="${escapeHtml(accessibleTitle)}">
-      <span class="flow-map-agent-label">${escapeHtml(label)}</span>
-      ${details ? `<span class="flow-map-agent-meta">${escapeHtml(details)}</span>` : ""}
-    </a>`;
-  }
-
-  if (kind === "return") {
-    return `<a class="${classes}" href="${escapeHtml(flowHref(node))}" title="${escapeHtml(accessibleTitle)}" aria-label="${escapeHtml(accessibleTitle)}">
-      <span class="flow-map-return-mark"></span>
-      <span class="flow-map-node-popover">Return</span>
-    </a>`;
-  }
-
-  const typeLabel = kind === "user" ? "User" : "Subagent";
-  return `<a class="${classes}" href="${escapeHtml(flowHref(node))}" title="${escapeHtml(accessibleTitle)}">
-    <span class="flow-map-node-kind">${escapeHtml(typeLabel)}</span>
-    <span class="flow-map-node-label">${escapeHtml(label)}</span>
-    ${details ? `<span class="flow-map-node-meta">${escapeHtml(details)}</span>` : ""}
-  </a>`;
-}
-
-function renderFlowBranchSummary(invocation: any, branch: any, index: any, provider: string) {
-  const metrics = branch?.metrics || {};
-  const line = Array.isArray(branch?.line) ? branch.line : [];
-  const messageCount = line.filter((node: any) => node.kind === "user" || node.kind === "agent").length;
-  const href = flowConversationHref(branch, provider) || flowHref(invocation) || "#";
-  const label = compactText(branch.label, 52) || "Subagent";
-  const meta = [
-    branch.inferred ? t("detail.inferred_link") : "",
-    messageCount ? `${formatCount(messageCount)} messages` : "",
-    metrics.duration ? formatMilliseconds(metrics.duration) : "",
-    metrics.tokens ? `${formatCount(metrics.tokens)} tokens` : "",
-    metrics.errors ? `${formatCount(metrics.errors)} errors` : ""
-  ].filter(Boolean).join(" · ");
-  // A branch points to its own canonical conversation page. Some providers
-  // expose a child in flow data without embedding that session in the parent
-  // transcript, so a same-page fragment would otherwise be a dead link.
-  return `<a class="flow-branch-summary ${metrics.errors ? "flow-branch-summary-error" : ""}" href="${escapeHtml(href)}" title="${escapeHtml(`${label} · ${t("detail.execution_open_conversation")}`)}">
-    <span class="flow-branch-summary-title">${escapeHtml(label)}</span>
-    <span class="flow-branch-summary-meta">${escapeHtml(meta || t("detail.execution_no_child_data"))}</span>
-    <span class="flow-branch-summary-action">${t("detail.execution_open_conversation")}</span>
-  </a>`;
-}
-
-function renderFlowInvocationGroup(invocations: any, returnNodes: any, provider: string) {
-  const inferred = invocations.some((node: any) => node.inferred);
-  const branchCount = invocations.reduce((sum: any, node: any) => sum + (Array.isArray(node.branches) ? node.branches.length : 0), 0);
-  const summaries = invocations.flatMap((invocation: any) => {
-    const branches = Array.isArray(invocation.branches) ? invocation.branches : [];
-    if (!branches.length) {
-      return [`<div class="flow-branch-summary flow-branch-summary-empty">
-        <span class="flow-branch-summary-title">${escapeHtml(compactText(invocation.label, 52) || "Subagent")}</span>
-        <span class="flow-branch-summary-meta">${t("detail.execution_no_child_data")}</span>
-      </div>`];
-    }
-    return branches.map((branch: any, index: any) => renderFlowBranchSummary(invocation, branch, index, provider));
-  }).join("\n");
-  const groupLabel = invocations.length === 1
-    ? compactText(invocations[0].label, 44) || "Subagent"
-    : `${formatCount(invocations.length)} parallel calls`;
-  const returnNode = returnNodes.get(invocations[invocations.length - 1].id);
-  const fanoutMeta = [
-    `${formatCount(branchCount)} ${branchCount === 1 ? "branch" : "branches"}`,
-    inferred ? t("detail.inferred_link") : ""
-  ].filter(Boolean).join(" · ");
-
-  return `<div class="flow-map-step flow-map-fork flow-map-fork-collapsed ${inferred ? "flow-map-fork-inferred" : ""}" data-invocation-group="${escapeHtml(invocations.map((node: any) => node.id).join(","))}" data-invocation-count="${invocations.length}">
-    <div class="flow-fanout-main">
-      <div class="flow-fanout-node flow-map-node-invocation">
-        <span class="flow-map-node-kind">Subagent</span>
-        <span class="flow-map-node-label">${escapeHtml(groupLabel)}</span>
-        <span class="flow-map-node-meta">${escapeHtml(fanoutMeta)}</span>
-      </div>
-      <span class="flow-fanout-span" aria-hidden="true"></span>
-      ${returnNode ? renderFlowMapNode(returnNode) : ""}
-    </div>
-    <div class="flow-branch-summaries">${summaries}</div>
-  </div>`;
-}
-
-function renderFlowMapSession(session: any, depth = 0, provider = "") {
-  const line = Array.isArray(session?.line) ? session.line : [];
-  const returnNodes = new Map(
-    line.filter((node: any) => node.kind === "return").map((node: any) => [node.invocationId, node])
-  );
-  const rendered = [];
-
-  for (let index = 0; index < line.length; index += 1) {
-    const node = line[index];
-    if (node.kind === "return" || node.kind === "user" || node.kind === "agent") {
-      // Execution renders only orchestration topology: ordinary conversation
-      // messages are skipped, and returns are attached to their fork group.
-      continue;
-    }
-    if (node.kind !== "invocation") {
-      continue;
-    }
-
-    const invocations = [node];
-    let cursor = index + 2;
-    while (line[cursor]?.kind === "invocation") {
-      invocations.push(line[cursor]);
-      cursor += 2;
-    }
-    index = cursor - 1;
-    rendered.push(renderFlowInvocationGroup(invocations, returnNodes, provider));
-  }
-
-  const sessionClasses = [
-    "flow-map-session",
-    depth ? "flow-map-branch-session" : "flow-map-root-session",
-    session.inferred ? "flow-map-session-inferred" : ""
-  ].filter(Boolean).join(" ");
-  return `<section class="${sessionClasses}" data-flow-session-id="${escapeHtml(session.id)}" data-flow-depth="${depth}">
-    ${depth ? `<a class="flow-map-branch-title" href="${escapeHtml(flowHref(session))}">${escapeHtml(compactText(session.label, 72) || "Subagent")}</a>` : ""}
-    <div class="flow-map-line">${rendered.join("\n") || `<span class="flow-map-empty-branch">${t("detail.execution_no_forks")}</span>`}</div>
-  </section>`;
-}
-
-function renderFlowMapSummary(summary: any) {
-  const stats = [
-    ["Duration", formatMilliseconds(summary.totalDuration)],
-    ["Tools", formatCount(summary.toolCalls)],
-    ["Errors", summary.errors ? `${formatCount(summary.errors)} · ${formatPercent(summary.errorRate)}` : "0"],
-    ["Tokens", formatCount(summary.totalTokens)],
-    ["Cost", `$${Number(summary.totalCost || 0).toFixed(4)}`],
-    ["Subagents", formatCount(summary.subagents)]
-  ];
-  return `<div class="flow-map-stats" aria-label="${t("detail.execution_summary")}">
-    ${stats.map(([label, value]) => `<span class="flow-map-stat"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></span>`).join("\n")}
-  </div>`;
-}
-
-function renderFlowMapOverview(root: any) {
-  const line = Array.isArray(root?.line) ? root.line : [];
-  const marks = line
-    .filter((node: any) => node.kind === "invocation")
-    .map((node: any) => `<span class="flow-map-overview-mark flow-map-overview-${escapeHtml(node.kind)}"></span>`)
-    .join("");
-  return `<div class="flow-map-overview" data-flow-overview aria-label="${t("detail.execution_overview")}">
-    <div class="flow-map-overview-track">${marks}<span class="flow-map-overview-window" data-flow-overview-window></span></div>
-  </div>`;
-}
-
-export function renderCanonicalFlowPanelContent(sessionFlow: any, provider = "") {
-  if (!sessionFlow?.root) {
-    return `<div class="flow-panel-header">
-      <h2>${t("detail.execution_title")}</h2>
-      <button type="button" class="flow-close-btn" data-flow-close aria-label="${t("detail.execution_close")}">x</button>
-    </div>
-    <p class="toc-empty">${t("detail.execution_empty")}</p>`;
-  }
-
-  return `<div class="flow-panel-header">
-      <div>
-        <h2>${t("detail.execution_title")}</h2>
-        <p>${t("detail.execution_description")}</p>
-      </div>
-      <button type="button" class="flow-close-btn" data-flow-close aria-label="${t("detail.execution_close")}">x</button>
-    </div>
-    ${renderFlowMapSummary(sessionFlow.summary || {})}
-    ${renderFlowMapOverview(sessionFlow.root)}
-    <div class="flow-map-scroll">
-      <div class="flow-map">${renderFlowMapSession(sessionFlow.root, 0, provider)}</div>
-    </div>
-  `;
-}
-
-function renderCanonicalFlowPanel(sessionFlow: any, provider = "") {
-  if (!sessionFlow?.root) {
-    return "";
-  }
-
-  return `<section id="session-flow-panel" class="session-flow-panel hidden" tabindex="-1" aria-hidden="true">
-    ${renderCanonicalFlowPanelContent(sessionFlow, provider)}
-  </section>`;
-}
-
 function renderSessionMetricsPanel(sessionMetrics: any) {
   if (!sessionMetrics?.totals) {
     return "";
@@ -1124,7 +877,6 @@ export function renderSessionPage({
   session,
   sessionTree = null,
   sessionMetrics = null,
-  sessionFlow = null,
   messages = [],
   partsByMessage = new Map(),
   todos = [],
@@ -1134,12 +886,10 @@ export function renderSessionPage({
   providers = [],
   manageable = false,
   resumeCommand = null,
-  analysisAction = null,
-  analysisRuns = [],
   terminalLaunchAllowed = false,
-  flowLazyUrl = "",
+  runtimeWorkbench = "",
   navigationContext = null
-}: { session: any; sessionTree?: any; sessionMetrics?: any; sessionFlow?: any; messages?: any[]; partsByMessage?: Map<any, any>; todos?: any[]; recentSessions?: any[]; meta?: any; provider?: string; providers?: any[]; manageable?: boolean; resumeCommand?: any; analysisAction?: any; analysisRuns?: any[]; terminalLaunchAllowed?: boolean; flowLazyUrl?: string; navigationContext?: SessionNavigationContext | null }) {
+}: { session: any; sessionTree?: any; sessionMetrics?: any; messages?: any[]; partsByMessage?: Map<any, any>; todos?: any[]; recentSessions?: any[]; meta?: any; provider?: string; providers?: any[]; manageable?: boolean; resumeCommand?: any; terminalLaunchAllowed?: boolean; runtimeWorkbench?: string; navigationContext?: SessionNavigationContext | null }) {
   const title = session.title || session.slug || session.id;
   const starred = meta?.starred ? 1 : 0;
   const encodedProvider = encodeURIComponent(provider);
@@ -1161,9 +911,6 @@ export function renderSessionPage({
   const resumeActions = resumeCommand && terminalLaunchAllowed ? `
         <button class="action-btn" data-action="resume-session" data-id="${escapeHtml(session.id)}" ${resumeCommand.available ? "" : "disabled"}>${t("action.open_terminal")}</button>
   ` : "";
-  const analysisButton = analysisAction && terminalLaunchAllowed
-    ? renderAnalysisLaunchButton(analysisAction, session)
-    : "";
   const moreActionsDropdown = manageable ? `
         <details class="more-actions">
           <summary class="action-btn">${t("action.more_actions")}</summary>
@@ -1196,16 +943,11 @@ export function renderSessionPage({
         </details>
   ` : "";
 
-  const analysisMaterials = renderAnalysisLaunchControl(analysisAction, terminalLaunchAllowed);
-  const actionShellClass = analysisMaterials
-    ? "session-actions-shell analysis-launch-control"
-    : "session-actions-shell";
   const actions = `
-      <div class="${actionShellClass}"${analysisMaterials ? ' data-analysis-selection-id="analysis-materials-panel"' : ""}>
+      <div class="session-actions-shell">
         <div class="session-actions">
           ${visibleStarAction}
           ${resumeActions}
-          ${analysisButton}
           ${renderTranscriptSearch()}
           ${moreActionsDropdown}
         </div>
@@ -1229,41 +971,9 @@ ${actions}
     </header>
   `;
 
-  // Analysis collapse
-  const showAnalysisStatus = Boolean(analysisAction) || analysisRuns.length > 0;
-  const activeRunStates = new Set(["prepared", "launched", "running", "waiting", "analysis_waiting_no_output", "failed", "invalid", "needs_attention"]);
-  const hasActiveRun = analysisRuns.some((run: any) => run?.active === true || activeRunStates.has(run?.state));
-  const analysisActivityBadge = hasActiveRun
-    ? `<span class="analysis-activity-badge">${t(analysisRuns.some((r: any) => r?.active === true || ["prepared", "launched", "running"].includes(r?.state)) ? "analysis.activity_badge_active" : analysisRuns.some((r: any) => ["failed", "invalid"].includes(r?.state)) ? "analysis.activity_badge_failed" : analysisRuns.some((r: any) => ["waiting", "analysis_waiting_no_output"].includes(r?.state)) ? "analysis.activity_badge_waiting" : "analysis.activity_badge_attention")}</span>`
-    : "";
-  const analysisStatus = showAnalysisStatus ? `
-    <details class="analysis-activity-details" id="analysis-activity-details" ${hasActiveRun ? "open" : ""}>
-      <summary>${t("analysis.activity_summary").replace("{count}", String(analysisRuns.length))}${analysisActivityBadge}</summary>
-      <section class="analysis-status-panel" id="analysis-status-panel" data-provider="${escapeHtml(provider)}" data-session-id="${escapeHtml(session.id)}" data-terminal-launch="${terminalLaunchAllowed ? "true" : "false"}">
-        <div class="analysis-status-header">
-          <div>
-            <h2>${t("analysis.status_title")}</h2>
-            <p>${t("analysis.status_description")}</p>
-          </div>
-          <button type="button" class="btn" id="analysis-status-refresh">${t("analysis.refresh")}</button>
-        </div>
-        <div id="analysis-runs" class="analysis-runs" aria-live="polite"></div>
-        <script type="application/json" id="analysis-runs-initial">${JSON.stringify(analysisRuns).replace(/</g, "\\u003c")}</script>
-      </section>
-    </details>
-  ` : "";
-
   const messageMarkup = sessionTree
     ? renderSessionTree(sessionTree, 0, provider)
     : renderRawMessageGroups(messages, partsByMessage, provider);
-
-  // Execution is a demoted orchestration view: it exists only when the session
-  // has real subagent topology (attached or detached child sessions), decided
-  // from the SessionTree before lazy load or from the SessionFlow on eager
-  // render. Ordinary linear sessions get neither the tab nor lazy markup.
-  const executionTopology = sessionFlow
-    ? flowTreeHasExecutionTopology(sessionFlow)
-    : sessionTreeHasExecutionTopology(sessionTree);
 
   const sessionMetadata = session.metadata && typeof session.metadata === "object"
     ? session.metadata as Record<string, unknown>
@@ -1300,8 +1010,7 @@ ${actions}
     <div class="tab-bar" role="tablist" aria-label="${escapeHtml(t("detail.tab_bar_label"))}" hidden>
       <button role="tab" aria-selected="false" aria-controls="tab-overview" id="tab-btn-overview" tabindex="-1">${t("detail.tab_overview")}</button>
       <button role="tab" aria-selected="true" aria-controls="tab-conversation" id="tab-btn-conversation" tabindex="0">${t("detail.tab_conversation")}</button>
-      ${executionTopology ? `<button role="tab" aria-selected="false" aria-controls="tab-flow" id="tab-btn-flow" tabindex="-1">${t("detail.tab_flow")}</button>` : ""}
-      <button role="tab" aria-selected="false" aria-controls="tab-analysis" id="tab-btn-analysis" tabindex="-1">${t("detail.tab_analysis")}</button>
+      <button role="tab" aria-selected="false" aria-controls="tab-runtime" id="tab-btn-runtime" tabindex="-1">${t("detail.tab_runtime")}</button>
       <button role="tab" aria-selected="false" aria-controls="tab-raw" id="tab-btn-raw" tabindex="-1">${t("detail.tab_raw")}</button>
     </div>
     <div role="tabpanel" id="tab-conversation" aria-labelledby="tab-btn-conversation">
@@ -1309,16 +1018,12 @@ ${actions}
         ${messageMarkup || `<p class="empty-state">${t("detail.no_messages")}</p>`}
       </section>
     </div>
+    <div role="tabpanel" id="tab-runtime" aria-labelledby="tab-btn-runtime">
+      ${runtimeWorkbench || `<p class="empty-state">${t("runtime.unavailable")}</p>`}
+    </div>
     <div role="tabpanel" id="tab-overview" aria-labelledby="tab-btn-overview">
       ${renderSessionMetricsPanel(sessionMetrics)}
       ${todoList(todos)}
-    </div>
-    ${executionTopology ? `<div role="tabpanel" id="tab-flow" aria-labelledby="tab-btn-flow" data-session-flow-tab>
-      ${sessionFlow ? renderCanonicalFlowPanel(sessionFlow, provider) : renderFlowPanel(sessionTree, flowLazyUrl)}
-    </div>` : ""}
-    <div role="tabpanel" id="tab-analysis" aria-labelledby="tab-btn-analysis">
-      ${analysisMaterials ? `<div class="analysis-tab-launch">${analysisMaterials}</div>` : `<p class="empty-state">${t("analysis.unavailable")}</p>`}
-      ${analysisStatus}
     </div>
     <div role="tabpanel" id="tab-raw" aria-labelledby="tab-btn-raw">
       ${rawDataContent}

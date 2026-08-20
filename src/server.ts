@@ -38,7 +38,6 @@ export {
 } from "./session-queries.js";
 
 import { registerMutations } from "./routes/mutations.js";
-import { registerAnalysisRoutes } from "./routes/analysis-routes.js";
 import { registerSessions } from "./routes/sessions.js";
 import { registerSessionDetail } from "./routes/session-detail.js";
 import { registerSettingsStatsTrash } from "./routes/settings-stats-trash.js";
@@ -53,7 +52,6 @@ function buildRouter(
 ): Router {
   const router = new Router();
   registerMutations(router, { appConfig, providerMap, availableProviders });
-  registerAnalysisRoutes(router, { appConfig, providerMap });
   // Register static global explorer entries before the single-segment
   // provider route (`/:provider`) so `/stats` cannot be mistaken for a provider.
   registerSettingsStatsTrash(router, { appConfig, providerMap, providerInfo });
@@ -120,6 +118,7 @@ export async function startServer(config = getConfig()) {
       available: availableIds.has(p.id),
       manageable: supportsLocalManagement(p),
       lifecycle: p.lifecycle || "active",
+      storageDiagnostic: p.getStorageDiagnostic?.() || null,
       // Descriptor-aware protocol capabilities; absent accessors default to
       // support "none" for every domain without breaking legacy fields.
       protocolCapabilities: protocolCapabilityDescriptors(p)

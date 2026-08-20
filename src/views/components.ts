@@ -372,7 +372,6 @@ export function sessionCard(s: any, active = false, { showCheckbox = false, prov
   ].filter(Boolean).join("");
   const protocolStats = renderListStatChips(s);
   const statsHtml = stats || protocolStats ? `<footer class="session-card-stats">${stats}${protocolStats}</footer>` : "";
-  const analysisBadge = s.analysisTitled ? `<span class="session-kind-badge">${t("session.analysis_badge")}</span>` : "";
   const providerBadge = showProvider ? `<span class="session-provider-badge" title="${escapeHtml(sessionProvider)}">${escapeHtml(providerName || sessionProvider)}</span>` : "";
   const detailHref = `/${encodedProvider}/session/${encodeURIComponent(s.id)}${returnTo ? `?from=${encodeURIComponent(returnTo)}` : ""}`;
 
@@ -404,7 +403,6 @@ export function sessionCard(s: any, active = false, { showCheckbox = false, prov
           <a href="${detailHref}" class="session-card-title-link">
             <h2 class="session-card-title">${escapeHtml(title)}</h2>
           </a>
-          ${analysisBadge}
           ${providerBadge}
         </div>
         <time class="session-card-time" datetime="${new Date(Number(s.time_updated) || Date.now()).toISOString()}">${escapeHtml(formatTime(s.time_updated))}</time>

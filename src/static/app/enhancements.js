@@ -8,7 +8,9 @@ export function initEnhancements({ ft, formatText, showToast, escapeHtmlClient }
   // Enable tabs: show tab bar, hide inactive panels
   tabBar.removeAttribute("hidden");
   const tabButtons = tabBar.querySelectorAll("[role='tab']");
-  const tabPanels = document.querySelectorAll("[role='tabpanel']");
+  // Only manage the session workbench's top-level panels. Runtime lenses are
+  // nested tabpanels with their own controller and must retain their state.
+  const tabPanels = tabBar.parentElement?.querySelectorAll(":scope > [role='tabpanel']") || [];
 
   const initiallySelected = tabBar.querySelector("[role='tab'][aria-selected='true']") || tabButtons[0];
 
@@ -37,17 +39,6 @@ export function initEnhancements({ ft, formatText, showToast, escapeHtmlClient }
     tabPanels.forEach(function (panel) {
       if (panel.id === targetPanelId) {
         panel.removeAttribute("hidden");
-        // Auto-open analysis details if switching to analysis tab
-        if (panel.id === "tab-analysis") {
-          var details = panel.querySelector(".analysis-activity-details");
-          if (details && !details.open) {
-            var hasActive = details.querySelector(".analysis-activity-badge");
-            if (hasActive) details.open = true;
-          }
-        }
-        if (panel.id === "tab-flow") {
-          document.dispatchEvent(new CustomEvent("session-flow-tab-open"));
-        }
       } else {
         panel.setAttribute("hidden", "");
       }
@@ -91,32 +82,6 @@ export function initEnhancements({ ft, formatText, showToast, escapeHtmlClient }
   });
 
   document.querySelector(".session-workbench")?.classList.add("session-conversation-tab-active");
-  document.addEventListener("click", function (e) {
-    if (!e.target.closest("#tab-flow [data-flow-close]")) return;
-    const conversationTab = document.getElementById("tab-btn-conversation");
-    if (conversationTab) switchTab(conversationTab);
-  }, true);
-})();
-
-// ── Analysis activity collapse ─────────────────────────────────────────
-
-(function initAnalysisActivity() {
-  var details = document.getElementById("analysis-activity-details");
-  if (!details) return;
-
-  // Server may have already added "open" for active runs; JS handles refresh
-  // Listen for analysis status panel refreshes to auto-open if needed
-  var panel = document.getElementById("analysis-status-panel");
-  if (!panel) return;
-
-  var observer = new MutationObserver(function () {
-    // If any analysis run is active/waiting/failed/needs_attention, open the details
-    var badge = details.querySelector(".analysis-activity-badge");
-    if (badge && !details.open) {
-      details.open = true;
-    }
-  });
-  observer.observe(panel, { childList: true, subtree: true, characterData: true });
 })();
 
 // ── Token Explorer interactivity ───────────────────────────────────────

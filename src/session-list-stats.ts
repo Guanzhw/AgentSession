@@ -1,6 +1,7 @@
 import type { ProviderAdapter } from "./providers/interface.js";
 import { supportsSessionProtocol } from "./providers/kinds.js";
-import { emptySessionProtocol, type SessionProtocol, type TaskStatus } from "./providers/shared/session-protocol.js";
+import { type SessionProtocol, type TaskStatus } from "./providers/shared/session-protocol.js";
+import { clearProtocolRuntimeCache, getRuntimeProtocol, ProtocolRuntimeError } from "./protocol-runtime.js";
 
 /**
  * Provider-neutral session-list statistics.
@@ -10,10 +11,10 @@ import { emptySessionProtocol, type SessionProtocol, type TaskStatus } from "./p
  * index row already carries, normalizing snake_case and camelCase fields and
  * keeping 0 distinct from unavailable (null). `deriveSessionListStats` then
  * merges bounded protocol evidence (compactions, tasks/agent runs, statuses,
- * context artifacts) through the standardized `getSessionProtocol` surface —
+ * context artifacts) through the shared validated Runtime Protocol cache —
  * never through provider-id branches.
  *
- * The protocol result for the CURRENT page rows is cached in a bounded LRU
+ * The derived list summary for the CURRENT page rows is cached in a bounded LRU
  * keyed by provider + canonical session id + revision
  * (timeUpdated/messageCount/tokenCount) because protocol construction is
  * file/material I/O for the file-backed providers. No provider data is ever
@@ -188,7 +189,8 @@ export function deriveSessionListStats(
   }
 
   const timeUpdated = finiteNumber(session?.time_updated ?? session?.timeUpdated) ?? 0;
-  const revision = `${timeUpdated}|${base.messageCount}|${base.tokenCount}`;
+  const providerRevision = adapter.getStatsRevision?.() ?? "none";
+  const revision = `${providerRevision}|${timeUpdated}|${base.messageCount}|${base.tokenCount}`;
   const key = `${adapter.id}\u0000${session.id}\u0000${revision}`;
 
   const cached = listStatsCache.get(key);
@@ -201,21 +203,22 @@ export function deriveSessionListStats(
 
   let protocol: SessionProtocol | null;
   try {
-    protocol = adapter.getSessionProtocol!(session.id);
+    protocol = getRuntimeProtocol(adapter, session.id, session);
   } catch (err: any) {
+    if (err instanceof ProtocolRuntimeError && err.code === "session_not_found") {
+      return base;
+    } else {
     // Never cache a failed lookup: a transient protocol error must not stick.
-    console.error(`Session list stats: protocol failed for ${adapter.id}/${session.id}: ${err?.message || String(err)}`);
-    return base;
+      console.error(`Session list stats: protocol failed for ${adapter.id}/${session.id}: ${err?.message || String(err)}`);
+      return base;
+    }
   }
 
-  // The adapter exposes the protocol surface for this session; a null result
-  // is the empty protocol (matching getSessionProtocolOrDefault) and records
-  // zeros rather than "unknown". Only a thrown error leaves protocol false.
+  if (!protocol) return base;
   base.protocol = true;
-  const effective = protocol ?? emptySessionProtocol(session.id);
   {
-    const summary = protocolSummary(effective);
-    const duration = protocolDuration(effective);
+    const summary = protocolSummary(protocol);
+    const duration = protocolDuration(protocol);
     base.compactions = summary.compactions;
     base.lastCompactionAt = summary.lastCompactionAt;
     base.taskCount = summary.taskCount;
@@ -296,6 +299,7 @@ export function boundedListStats(value: unknown): SessionListStats | null {
 /** Test hook: reset the bounded protocol-result cache. */
 export function clearSessionListStatsCache(): void {
   listStatsCache.clear();
+  clearProtocolRuntimeCache();
 }
 
 /** Test hook: current cache size (bounded by CACHE_LIMIT). */

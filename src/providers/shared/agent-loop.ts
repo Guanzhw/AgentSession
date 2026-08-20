@@ -210,7 +210,7 @@ function mergeTurnData(target: Row, message: Message) {
  * A tool result is folded into its call, response fragments with a shared
  * response id form one turn, and a tool-only continuation remains attached to
  * the preceding agent turn. Those are the shared semantics behind the
- * conversation, Trace, Tree, Metrics, and Flow views.
+ * conversation, Trace, Tree, Metrics, and Runtime views.
  */
 export function buildAgentLoop(messages: Message[]): AgentLoop {
   const turns: AgentLoopTurn[] = [];

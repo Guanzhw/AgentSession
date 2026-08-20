@@ -18,6 +18,7 @@ const { getProvider } = await import("../dist/src/providers/index.js");
 const { providerRenderContext } = await import("../dist/src/routes/provider-context.js");
 const { registerSessionDetail } = await import("../dist/src/routes/session-detail.js");
 const { registerSessions } = await import("../dist/src/routes/sessions.js");
+const { renderSessionsPage } = await import("../dist/src/views/sessions.js");
 const { registerSettingsStatsTrash } = await import("../dist/src/routes/settings-stats-trash.js");
 const { closeIndexDb, getIndexDb } = await import("../dist/src/index-db.js");
 const { closeDb } = await import("../dist/src/db.js");
@@ -134,7 +135,6 @@ test("session exports stay complete and keep the HTTP server alive", async (t) =
     appConfig: {
       port: 0,
       metaDir: temp,
-      analysis: {},
       resumeCommands: {},
       allowTerminalLaunch: false
     },
@@ -198,7 +198,6 @@ test("session exports stay complete and keep the HTTP server alive", async (t) =
     appConfig: {
       port: 0,
       metaDir: temp,
-      analysis: {},
       resumeCommands: {},
       allowTerminalLaunch: false
     },
@@ -266,7 +265,7 @@ test("system prompt endpoint returns only adapter-resolved evidence", async () =
     }
   };
   const routes = captureGetRoutes(registerSessionDetail, {
-    appConfig: { port: 0, metaDir: temp, analysis: {}, resumeCommands: {}, allowTerminalLaunch: false },
+    appConfig: { port: 0, metaDir: temp, projectPaths: {}, resumeCommands: {}, allowTerminalLaunch: false },
     providerMap: new Map([[provider.id, provider]]),
     providerInfo: []
   });
@@ -308,7 +307,7 @@ test("progressive content endpoint returns bounded continuation chunks", async (
     getMessages() { return []; }
   };
   const routes = captureGetRoutes(registerSessionDetail, {
-    appConfig: { port: 0, metaDir: temp, analysis: {}, resumeCommands: {}, allowTerminalLaunch: false },
+    appConfig: { port: 0, metaDir: temp, projectPaths: {}, resumeCommands: {}, allowTerminalLaunch: false },
     providerMap: new Map([[provider.id, provider]]),
     providerInfo: []
   });
@@ -355,6 +354,11 @@ test("session protocol route exposes descriptors and protocol with 404 semantics
       agentRuns: { support: "partial", provenance: "derived" },
       contextArtifacts: { support: "none", provenance: "derived" }
     },
+    getSession(sessionId) {
+      return sessionId === "session-1"
+        ? { id: sessionId, provider: "codex", parentId: null, title: "Protocol fixture", directory: temp, timeCreated: 100, timeUpdated: 200, messageCount: 1, tokenCount: null }
+        : null;
+    },
     getSessionProtocol(sessionId) {
       if (sessionId !== "session-1") return null;
       return {
@@ -372,7 +376,7 @@ test("session protocol route exposes descriptors and protocol with 404 semantics
   };
   const plain = { id: "gemini", name: "Plain", icon: "", capabilities: {}, getSession() { return null; } };
   const routes = captureGetRoutes(registerSessionDetail, {
-    appConfig: { port: 0, metaDir: temp, analysis: {}, resumeCommands: {}, allowTerminalLaunch: false },
+    appConfig: { port: 0, metaDir: temp, projectPaths: {}, resumeCommands: {}, allowTerminalLaunch: false },
     providerMap: new Map([[provider.id, provider], [plain.id, plain]]),
     providerInfo: []
   });
@@ -390,12 +394,15 @@ test("session protocol route exposes descriptors and protocol with 404 semantics
   assert.equal(body.capabilities.tasks.support, "full");
   assert.equal(body.capabilities.sessionRelationships.support, "none");
   assert.equal(body.protocol.events[0].sequence, 1);
+  assert.equal(body.protocol.version, 2);
+  assert.equal(body.protocol.session.ref.provider, "codex");
+  assert.equal(body.validation.ok, true);
 
   // Unknown session -> 404.
   const missingResponse = createResponseCapture();
   await route.handler({ url: "/api/codex/session/nope/protocol" }, missingResponse, ["", "codex", "nope"]);
   assert.equal(missingResponse.statusCode, 404);
-  assert.equal(JSON.parse(missingResponse.body).error, "Not found");
+  assert.equal(JSON.parse(missingResponse.body).code, "session_not_found");
 
   // Provider without a protocol accessor -> 404, never fabricated data.
   const unsupportedResponse = createResponseCapture();
@@ -413,6 +420,78 @@ test("session protocol route exposes descriptors and protocol with 404 semantics
   await route.handler({ url: "/api/codex/session/%ZZ/protocol" }, badResponse, ["", "codex", "%ZZ"]);
   assert.equal(badResponse.statusCode, 404);
   assert.equal(JSON.parse(badResponse.body).error, "Invalid session id");
+});
+
+test("runtime protocol routes return bounded summary, event pages, and graph projections", async () => {
+  const provider = {
+    id: "codex",
+    name: "Runtime fixture",
+    icon: "",
+    capabilities: {},
+    protocolCapabilities: {
+      sessionEvents: { support: "partial", provenance: "derived" },
+      sessionRelationships: { support: "none", provenance: "derived" },
+      tasks: { support: "partial", provenance: "derived" },
+      agentRuns: { support: "partial", provenance: "derived" },
+      contextArtifacts: { support: "none", provenance: "derived" }
+    },
+    getSession(sessionId) {
+      return sessionId === "session-1"
+        ? { id: sessionId, provider: "codex", parentId: null, title: "Runtime fixture", directory: temp, timeCreated: 100, timeUpdated: 200, messageCount: 2, tokenCount: null }
+        : null;
+    },
+    getSessionProtocol(sessionId) {
+      return sessionId === "session-1" ? {
+        sessionId,
+        events: [
+          { id: "e1", sessionId, sequence: 1, timestamp: 100, kind: "message.user", provenance: { fidelity: "derived", sourceType: "fixture" } },
+          { id: "e2", sessionId, sequence: 2, timestamp: 200, kind: "tool.call", phase: "started", provenance: { fidelity: "derived", sourceType: "fixture" }, providerData: { secret: "not-public" } }
+        ],
+        relationships: [],
+        tasks: [{ id: "task-1", sessionId, kind: "task", status: "completed", title: "Inspect", triggerEventId: "e2", dependencies: [], timeCreated: 100, timeUpdated: 200, timeCompleted: 200, provenance: { fidelity: "derived", sourceType: "fixture" } }],
+        agentRuns: [{ id: "run-1", sessionId, taskId: "task-1", status: "completed", mode: "subagent", agent: "worker", model: null, childSessionId: null, triggerEventId: "e2", timeStart: 100, timeEnd: 200, provenance: { fidelity: "derived", sourceType: "fixture" } }],
+        contextArtifacts: []
+      } : null;
+    }
+  };
+  const routes = captureGetRoutes(registerSessionDetail, {
+    appConfig: { port: 0, metaDir: temp, projectPaths: {}, resumeCommands: {}, allowTerminalLaunch: false },
+    providerMap: new Map([[provider.id, provider]]),
+    providerInfo: []
+  });
+  const routeFor = (suffix) => routes.find(({ pattern }) => pattern instanceof RegExp && pattern.source.includes(suffix));
+
+  const summaryResponse = createResponseCapture();
+  await routeFor("runtime\\/summary$").handler({ url: "/api/codex/session/session-1/runtime/summary" }, summaryResponse, ["", "codex", "session-1"]);
+  assert.equal(summaryResponse.statusCode, 200);
+  assert.equal(JSON.parse(summaryResponse.body).summary.counts.events, 2);
+
+  const eventsResponse = createResponseCapture();
+  await routeFor("runtime\\/events$").handler({ url: "/api/codex/session/session-1/runtime/events?limit=1&category=tool" }, eventsResponse, ["", "codex", "session-1"]);
+  assert.equal(eventsResponse.statusCode, 200);
+  const events = JSON.parse(eventsResponse.body);
+  assert.equal(events.events.length, 1);
+  assert.equal(events.events[0].category, "tool");
+  assert.equal("providerData" in events.events[0], false);
+
+  const workEventsResponse = createResponseCapture();
+  await routeFor("runtime\\/events$").handler({ url: "/api/codex/session/session-1/runtime/events?taskId=task-1&runId=run-1" }, workEventsResponse, ["", "codex", "session-1"]);
+  const workEvents = JSON.parse(workEventsResponse.body);
+  assert.equal(workEvents.events.length, 1);
+  assert.equal(workEvents.events[0].taskId, "task-1");
+  assert.equal(workEvents.events[0].runId, "run-1");
+
+  const graphResponse = createResponseCapture();
+  await routeFor("runtime\\/graph$").handler({ url: "/api/codex/session/session-1/runtime/graph?depth=1&maxNodes=20" }, graphResponse, ["", "codex", "session-1"]);
+  assert.equal(graphResponse.statusCode, 200);
+  const graph = JSON.parse(graphResponse.body);
+  assert.equal(graph.focus.sessionId, "session-1");
+  assert.equal(graph.nodes[0].focus, true);
+
+  const invalidResponse = createResponseCapture();
+  await routeFor("runtime\\/events$").handler({ url: "/api/codex/session/session-1/runtime/events?limit=999" }, invalidResponse, ["", "codex", "session-1"]);
+  assert.equal(invalidResponse.statusCode, 400);
+  assert.equal(JSON.parse(invalidResponse.body).code, "invalid_input");
 });
 
 test("provider page keeps unavailable paths and management capability provider-owned", async () => {
@@ -447,12 +526,20 @@ test("provider page keeps unavailable paths and management capability provider-o
 
   assert.deepEqual(
     providerRenderContext("codex", providerInfo, { capabilities: {} }),
-    { provider: "codex", providers: providerInfo, manageable: false }
+    { provider: "codex", providers: providerInfo, manageable: false, storageDiagnostic: null }
   );
   assert.equal(
     providerRenderContext("codex", providerInfo, { capabilities: { localManagement: true } }).manageable,
     true
   );
+
+  const diagnosticPage = renderSessionsPage({
+    provider: "deepseek-harness",
+    sessions: [],
+    storageDiagnostic: { code: "DSH_SQLITE_UNSUPPORTED", message: "SQLite schema 17 was detected but is not readable yet." }
+  });
+  assert.match(diagnosticPage, /data-storage-diagnostic="DSH_SQLITE_UNSUPPORTED"/);
+  assert.match(diagnosticPage, /SQLite schema 17 was detected but is not readable yet\./);
 });
 
 test("centralized sessions page queries multiple providers and keeps canonical provider identity", async () => {

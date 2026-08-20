@@ -33,8 +33,6 @@ const bundle = async (entryPoint, outfile, define = {}) => {
 
 const viewerEntry = path.join(workDir, "agentsession.mjs");
 const mcpEntry = path.join(workDir, "agentsession-mcp.mjs");
-const analysisToolAsset = path.join(workDir, "analysis-tools.js");
-const analysisLayoutAsset = path.join(workDir, "analysis-layout.js");
 const staticAppAsset = path.join(workDir, "app.js");
 
 await Promise.all([
@@ -42,8 +40,6 @@ await Promise.all([
   bundle("packages/agentsession-mcp/src/cli.ts", mcpEntry, {
     __AGENTSESSION_MCP_VERSION__: JSON.stringify(version)
   }),
-  bundle("src/analysis-tools.ts", analysisToolAsset),
-  bundle("src/analysis-layout.ts", analysisLayoutAsset),
   build({
     entryPoints: [path.join(root, "src", "static", "app.js")],
     outfile: staticAppAsset,
@@ -66,8 +62,6 @@ const targets = [
     assets: {
       "static/app.js": staticAppAsset,
       "static/style.css": path.join(root, "src", "static", "style.css"),
-      "analysis-tools.js": analysisToolAsset,
-      "analysis-layout.js": analysisLayoutAsset
     }
   },
   {

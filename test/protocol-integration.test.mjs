@@ -106,8 +106,6 @@ test("Pi adapter protocol reaches the real store and view path without fabricati
   assert.ok(tree, "structured tree builds from the fixture");
   assert.equal(tree.metrics.toolCallCount, 1);
   assert.equal(tree.metrics.descendantCount, 0, "parent lineage never fabricates subagent branches");
-  const flow = pi.getSessionFlow(sessionId);
-  assert.equal(flow.summary.subagents, 0);
 
   // Compatibility system messages remain marked as derived.
   const messages = pi.getMessages(sessionId);
@@ -151,8 +149,6 @@ test("Claude adapter protocol evidence reaches buildLinkedMessageSessionViews th
   assert.equal(tree.detachedChildren.length, 0);
   assert.equal(tree.metrics.descendantCount, 1);
   assert.equal(tree.metrics.totalMessages, 5, "parent messages plus the attached child");
-  const flow = claudeCode.getSessionFlow(parentId);
-  assert.equal(flow.summary.subagents, 1);
 
   // The child's own protocol names the recorded sidechain relationship.
   const childProtocol = claudeCode.getSessionProtocol(childId);
@@ -202,7 +198,6 @@ test("Hermes adapter protocol evidence reaches the merged lineage view path", ()
     .find((part) => part.type === "tool" && part.tool === "delegate_task");
   assert.ok(delegatePart, "delegate spawn part exists");
   assert.equal(delegatePart.childSessions[0].session.id, "hermes-delegate");
-  assert.equal(hermes.getSessionFlow("hermes-root").summary.subagents, 1);
   // The compression continuation is not a subagent branch.
   const childTree = hermes.getSessionTree("hermes-compression");
   assert.equal(childTree.session.id, "hermes-root", "compression resolves back to the logical base");

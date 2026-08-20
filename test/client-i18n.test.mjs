@@ -78,10 +78,6 @@ test("client i18n — every ft() key exists in both locale tables", async (t) =>
       usedKeys.add(key);
     }
   }
-  for (const state of ["prepared", "launched", "completed", "invalid", "failed", "unknown"]) {
-    usedKeys.add(`analysis_status_${state}`);
-  }
-
   await t.test("every used ft() key exists in locale tables", () => {
     const missing = [...usedKeys].filter((k) => !allKeys.has(k));
     if (missing.length > 0) {

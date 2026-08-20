@@ -30,8 +30,7 @@ import { buildCodexRuntimeEnvironment } from "../dist/src/providers/codex/runtim
 import { codexDailyTokenComponents } from "../dist/src/providers/codex/adapter.js";
 import { buildGeminiRuntimeEnvironment } from "../dist/src/providers/gemini/runtime-environment.js";
 import { buildPiRuntimeEnvironment } from "../dist/src/providers/pi/runtime-environment.js";
-import { buildFlowTreeFromContainer, flowTreeHasExecutionTopology, sessionTreeHasExecutionTopology } from "../dist/src/providers/shared/flow-tree.js";
-import { renderCanonicalFlowPanelContent, renderSessionPage } from "../dist/src/views/session.js";
+import { renderSessionPage } from "../dist/src/views/session.js";
 import { renderSettingsPage } from "../dist/src/views/settings.js";
 import { renderStatsDeferredSection, renderStatsPage } from "../dist/src/views/stats.js";
 import { sessionCard } from "../dist/src/views/components.js";
@@ -45,7 +44,6 @@ import {
   resolveSessionSort,
   resolveStarredFilter
 } from "../dist/src/server.js";
-import { isAnalysisTitledSession, matchesSessionKind } from "../dist/src/session-kind.js";
 import { t } from "../dist/src/i18n.js";
 import {
   claudeUsageToTokens,
@@ -101,29 +99,6 @@ import {
   spawnPowerShellLaunch
 } from "../dist/src/resume.js";
 import {
-  buildAnalysisPromptPreview,
-  buildPowerShellAnalysisArgs,
-  buildPowerShellImplementationArgs,
-  findActiveSessionAnalysisRun,
-  getAnalysisTargetIds,
-  getDefaultAnalysisTargetIds,
-  getAnalysisOutputRoot,
-  getSessionAnalysisAction,
-  listSessionAnalysisRuns,
-  OPENCODE_ANALYSIS_COMMAND,
-  prepareAnalysisImplementation,
-  prepareSessionAnalysis,
-  resolveAnalysisSettings
-} from "../dist/src/analysis.js";
-import {
-  formatAnalysisToolOutput,
-  runAnalysisTool
-} from "../dist/src/analysis-tools.js";
-import { validateAnalysisOutputs } from "../dist/src/analysis-validator.js";
-import { buildAnalysisAccessManifest } from "../dist/src/analysis-access.js";
-import { BUILTIN_ANALYSIS_TARGETS } from "../dist/src/analysis-targets.js";
-import { resolveAnalysisRunPath } from "../dist/src/analysis-layout.js";
-import {
   applyRuntimeUserConfig,
   parseArgs,
   readUserConfigDocument,
@@ -142,29 +117,6 @@ import {
 
 const fixture = (name) => path.join(process.cwd(), "test", "fixtures", name);
 const regexEscape = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-test("binary analysis access invokes the embedded helper mode", () => {
-  const runDir = path.join(os.tmpdir(), "analysis-run");
-  const files = {
-    analysisToolPath: path.join(runDir, "tools", "analysis-tools.js"),
-    sessionIndexPath: path.join(runDir, "evidence", "session-index.json"),
-    evidenceIndexPath: path.join(runDir, "evidence", "evidence-index.json"),
-    evidencePath: path.join(runDir, "evidence", "evidence.jsonl"),
-    artifactsPath: path.join(runDir, "artifacts.json")
-  };
-  const manifest = buildAnalysisAccessManifest({
-    providerId: "codex",
-    providerName: "Codex CLI",
-    rootSessionId: "session-1",
-    runDir,
-    files,
-    nodeExecutable: "agentsession.exe",
-    executableArgs: ["--internal-analysis-tool"]
-  });
-  assert.deepEqual(manifest.accessTool.executableArgs, ["--internal-analysis-tool"]);
-  assert.match(manifest.accessTool.invocation, /agentsession\.exe" "--internal-analysis-tool"/);
-  assert.doesNotMatch(manifest.accessTool.invocation, /analysis-tools\.js" "C:/);
-});
 
 test("Claude current transcripts preserve tools, thinking, titles, and cache tokens", () => {
   const records = parseTranscript(fixture("claude-current.jsonl"));
@@ -287,7 +239,7 @@ test("Claude task notifications bind Agent calls without becoming user messages"
   assert.doesNotMatch(JSON.stringify(views?.tree), /task-notification/);
   assert.equal(views?.tree.messages[1].parts[0].childSessions[0].session.id, "claude-agent-1");
   assert.equal(views?.tree.detachedChildren.length, 0);
-  assert.equal(views?.flow.root.line.some((node) => node.inferred), false);
+  assert.equal(views?.tree.detachedChildren.length, 0);
 });
 
 test("Claude token usage keeps optional fields numeric and deduplicates response fragments", () => {
@@ -319,7 +271,7 @@ test("Claude token usage keeps optional fields numeric and deduplicates response
   assert.equal(extractSessionMeta(records, "fragmented-response").tokenCount, 21);
 });
 
-test("normalized message providers build structured tree, metrics, flow, and model-aware cache data", () => {
+test("normalized message providers build structured tree, metrics, and model-aware cache data", () => {
   const records = parseTranscript(fixture("claude-current.jsonl"));
   const session = extractSessionMeta(records, "session-current");
   const messages = recordsToMessages(records, "session-current");
@@ -333,7 +285,7 @@ test("normalized message providers build structured tree, metrics, flow, and mod
   );
   assert.equal(views.metrics.totals.inputTokens, 14);
   assert.equal(views.metrics.totals.cacheReadTokens, 20);
-  assert.equal(views.flow.root.line.filter((node) => node.kind === "user").length, 1);
+  assert.equal(views.tree.messages.filter((node) => node.role === "user").length, 1);
   assert.equal(
     views.tree.messages.find((message) => message.data.tokens)?.data.model.modelID,
     "claude-sonnet"
@@ -680,7 +632,7 @@ test("Codex token_count records attach request usage to the preceding assistant 
   assert.equal(messages[0].metadata.model, "gpt-5");
   assert.equal(session.id, "codex-test");
   assert.equal(views.metrics.totals.cacheReadTokens, 9000);
-  assert.equal(views.flow.summary.totalTokens, 10120);
+  assert.equal(views.metrics.totals.totalTokens, 10120);
 });
 
 test("Codex assigns interrupted request usage to the initiating user message", () => {
@@ -718,7 +670,7 @@ test("Codex assigns interrupted request usage to the initiating user message", (
   assert.equal(messages[0].tokens.total, 42);
   assert.equal(messages[0].metadata.tokenAttribution, "request-start");
   assert.equal(views.metrics.totals.totalTokens, 42);
-  assert.equal(views.flow.summary.totalTokens, 42);
+  assert.equal(views.metrics.totals.totalTokens, 42);
 });
 
 test("shared session metrics preserve a provider-reported total with partial components", () => {
@@ -1171,7 +1123,7 @@ test("Codex keeps source-owned token requests when legacy events lack response i
   const views = buildMessageSessionViews(extractCodexMeta(records, "child"), messages);
   assert.equal(views.tree.messages.find((message) => message.data.tokens?.total === 120)?.data.tokenRequestCount, 2);
   assert.equal(views.metrics.totals.totalTokens, 120);
-  assert.equal(views.flow.summary.totalTokens, 120);
+  assert.equal(views.metrics.totals.totalTokens, 120);
 });
 
 test("Codex recognizes NEW_TASK envelopes stored in payload.message", () => {
@@ -1576,7 +1528,7 @@ test("linked message sessions attach every shared subagent launcher", () => {
   }
 });
 
-test("shared views preserve provider-marked custom subagent tools across Tree, Flow, Trace, and rendering", () => {
+test("shared views preserve provider-marked custom subagent tools across Tree, Trace, and rendering", () => {
   const session = (id, parentId, title, timeCreated) => ({
     id,
     provider: "fixture",
@@ -1646,17 +1598,13 @@ test("shared views preserve provider-marked custom subagent tools across Tree, F
     views.trace.steps[0].spans.filter((span) => span.category === "agent").map((span) => span.name),
     ["security-auditor", "performance-auditor"]
   );
-  const invocations = views.flow.root.line.filter((node) => node.kind === "invocation");
-  const returns = views.flow.root.line.filter((node) => node.kind === "return");
-  assert.deepEqual(invocations.map((node) => node.branches[0].id), ["session:child-security", "session:child-performance"]);
-  assert.deepEqual(invocations.map((node) => node.returnId), returns.map((node) => node.id));
   const html = renderSessionPage({ session: views.tree.session, sessionTree: views.tree, provider: "fixture" });
   assert.match(html, /subagent-branch/);
   assert.match(html, /Security audit complete\./);
   assert.match(html, /Performance audit complete\./);
 });
 
-test("chronological child fallback remains visibly inferred across detail and Flow", () => {
+test("chronological child fallback remains visibly inferred in detail", () => {
   const session = (id, parentId, timeCreated) => ({
     id,
     provider: "fixture",
@@ -1682,12 +1630,9 @@ test("chronological child fallback remains visibly inferred across detail and Fl
     { session: session("child-fallback", "root-fallback", 1150), messages: [childAnswer] }
   ]);
   const part = views.tree.messages[0].parts[0];
-  const invocation = views.flow.root.line.find((node) => node.kind === "invocation");
   const html = renderSessionPage({ session: views.tree.session, sessionTree: views.tree, provider: "fixture" });
 
   assert.equal(part.inferredChildSessionIds?.has("child-fallback"), true);
-  assert.equal(invocation?.inferred, true);
-  assert.match(invocation?.meta || "", /1 inferred link/);
   assert.match(html, /data-subagent-relationship="inferred"/);
   assert.match(html, /Linked session/);
   assert.match(html, /Inferred relationship/);
@@ -2156,7 +2101,6 @@ test("every provider exposes the complete shared Agent Loop capability surface",
   for (const provider of getAllProviders()) {
     const features = providerFeatureMatrix(provider);
     assert.equal(features.localManagement, true, provider.id);
-    assert.equal(features.sessionAnalysis, provider.lifecycle !== "legacy", provider.id);
     assert.equal(features.agentLoopViews, true, provider.id);
     assert.equal(features.sessionTrace, true, provider.id);
     assert.equal(features.systemPromptEvidence, true, provider.id);
@@ -2175,18 +2119,6 @@ test("terminal launch is enabled by default and supports an explicit startup opt
       executable: "powershell.exe",
       args: ["-NoExit", "-NoLogo", "-NoProfile"]
     },
-    analysis: {
-      enabled: true,
-      defaultTarget: "skills",
-      providers: {
-        codex: {
-          command: {
-            executable: "codex",
-            args: ["exec", "{promptPath}"]
-          }
-        }
-      }
-    }
   }));
 
   const enabled = parseArgs(["--config", configPath]);
@@ -2195,8 +2127,6 @@ test("terminal launch is enabled by default and supports an explicit startup opt
     executable: "powershell.exe",
     args: ["-NoExit", "-NoLogo", "-NoProfile"]
   });
-  assert.equal(enabled.analysis.enabled, true);
-  assert.equal(enabled.analysis.providers.codex.command.executable, "codex");
   assert.equal(
     parseArgs(["--config", configPath, "--disable-terminal-launch"]).allowTerminalLaunch,
     false
@@ -2209,20 +2139,20 @@ test("runtime events write JSONL under meta logs with redaction", () => {
   const longValue = "x".repeat(700);
 
   const record = recordRuntimeEvent(temp, {
-    event: "analysis.launch",
+    event: "terminal.resume.launch",
     level: "info",
     provider: "opencode",
     sessionId: "ses_test",
     runId: "run_test",
     prompt: "do not persist",
     details: {
-      route: "/api/:provider/session/:sessionId/analyze",
+      route: "/api/:provider/session/:sessionId/resume",
       authorization: "Bearer secret"
     },
     note: longValue
   }, { now });
 
-  assert.equal(record.event, "analysis.launch");
+  assert.equal(record.event, "terminal.resume.launch");
   assert.equal(record.provider, "opencode");
   assert.equal(record.prompt, "[redacted]");
   assert.equal(record.details.authorization, "[redacted]");
@@ -2281,14 +2211,14 @@ test("runtime route context logs patterns instead of raw session paths", () => {
     }
   );
   assert.deepEqual(
-    getRuntimeRouteContext("POST", "/api/opencode/session/ses_123/analyze"),
+    getRuntimeRouteContext("POST", "/api/opencode/session/ses_123/resume"),
     {
       method: "POST",
       route: "/api/:provider/session/:sessionId/:action",
       provider: "opencode",
       sessionId: "ses_123",
       runId: undefined,
-      action: "analyze"
+      action: "resume"
     }
   );
   assert.deepEqual(
@@ -2303,27 +2233,18 @@ test("runtime route context logs patterns instead of raw session paths", () => {
     }
   );
   assert.deepEqual(
-    getRuntimeRouteContext("GET", "/api/opencode/session/ses_123/analyses/run_456/outputs/report"),
+    getRuntimeRouteContext("GET", "/api/codex/session/ses_123/runtime/events"),
     {
       method: "GET",
-      route: "/api/:provider/session/:sessionId/analyses/:runId/outputs/:output",
-      provider: "opencode",
+      route: "/api/:provider/session/:sessionId/runtime/:action",
+      provider: "codex",
       sessionId: "ses_123",
-      runId: "run_456",
-      action: "report"
+      runId: undefined,
+      action: "events"
     }
   );
-  assert.deepEqual(
-    getRuntimeRouteContext("GET", "/api/opencode/session/ses_123/analyses/run_456/diagnostics/stderr"),
-    {
-      method: "GET",
-      route: "/api/:provider/session/:sessionId/analyses/:runId/diagnostics/:diagnostic",
-      provider: "opencode",
-      sessionId: "ses_123",
-      runId: "run_456",
-      action: "stderr"
-    }
-  );
+  assert.equal(getRuntimeRouteContext("GET", "/api/codex/session/ses_123/protocol").action, "protocol");
+  assert.equal(getRuntimeRouteContext("GET", "/api/codex/stats/deferred").action, "deferred");
   assert.equal(getRuntimeRouteContext("GET", "/static/app.js"), null);
   assert.deepEqual(
     getRuntimeRouteContext("GET", "/unexpected/ses_secret"),
@@ -2393,7 +2314,7 @@ test("Pi sessions preserve the active branch, tools, reasoning, usage, names, an
   assert.equal(views.tree.session.id, meta.id);
   assert.equal(views.tree.metrics.toolCallCount, 1);
   assert.equal(views.tree.metrics.inputTokens, 13);
-  assert.equal(views.flow.summary.toolCalls, 1);
+  assert.equal(views.metrics.totals.toolCalls, 1);
 });
 
 test("Pi keeps reported reasoning exclusive from output", () => {
@@ -2453,7 +2374,7 @@ test("sessions search page preserves query and exposes content pagination", () =
     total: 40,
     limit: 30,
     offset: 0,
-    query: "analysis",
+    query: "project",
     searchMode: "content",
     provider: "opencode",
     providerAvailable: true,
@@ -2461,13 +2382,13 @@ test("sessions search page preserves query and exposes content pagination", () =
     providers: []
   });
 
-  assert.match(html, /<input type="search" name="q" value="analysis"/);
+  assert.match(html, /<input type="search" name="q" value="project"/);
   assert.match(html, /id="scroll-sentinel"/);
   assert.match(html, /data-offset="30"/);
   assert.match(html, /data-total="40"/);
-  assert.match(html, /data-query="analysis"/);
+  assert.match(html, /data-query="project"/);
   assert.match(html, /data-mode="content"/);
-  assert.match(html, /from=%2Fopencode%2Fsearch%3Fq%3Danalysis/);
+  assert.match(html, /from=%2Fopencode%2Fsearch%3Fq%3Dproject/);
   assert.match(html, />Load more sessions<\/button>/);
 });
 
@@ -2494,53 +2415,6 @@ test("session batch actions are disabled until a session is selected", () => {
   assert.match(html, /<button class="btn batch-action" data-action="star" disabled>/);
   assert.match(html, /<button class="btn batch-action" data-action="unstar" disabled>/);
   assert.match(html, /<button class="btn batch-action btn-danger" data-action="delete" disabled>/);
-});
-
-test("session list exposes sort, title type, and starred filters through pagination", () => {
-  const html = renderSessionsPage({
-    sessions: Array.from({ length: 30 }, (_, index) => ({
-      id: `ses_filter_${index}`,
-      title: `Session ${index}`,
-      directory: "D:\\WorkSpace\\OpenSession",
-      time_updated: 1_700_000_000_000 + index,
-      summary_files: 0,
-      summary_additions: 0,
-      summary_deletions: 0,
-      starred: index === 0
-    })),
-    total: 40,
-    limit: 30,
-    offset: 0,
-    sort: "title-asc",
-    starredOnly: true,
-    sessionKind: "analysis",
-    projectOptions: [{ id: "global", label: "/", worktree: "/", count: 4 }],
-    provider: "opencode",
-    providerAvailable: true,
-    manageable: true,
-    providers: []
-  });
-
-  assert.match(html, /<select name="sort" data-session-filter-auto>/);
-  assert.match(html, /<option value="title-asc" selected>Title A-Z<\/option>/);
-  assert.match(html, /<select name="kind" data-session-filter-auto>/);
-  assert.match(html, /<option value="analysis" selected>Analysis titles<\/option>/);
-  assert.match(html, /<input type="checkbox" name="starred" value="1" data-session-filter-auto checked>/);
-  assert.match(html, /<option value="global"\s+title="\/">Global sessions \(4\)<\/option>/);
-  assert.match(html, /data-sort="title-asc"/);
-  assert.match(html, /data-kind="analysis"/);
-  assert.match(html, /data-starred="1"/);
-  assert.match(html, /href="\/opencode">Clear<\/a>/);
-  const filterMarkup = html.slice(html.indexOf('<form class="session-filter"'));
-  assert.ok(filterMarkup.indexOf('<select name="kind"') < filterMarkup.indexOf('<input type="search" name="q"'));
-  assert.ok(filterMarkup.indexOf('<input type="search" name="q"') < filterMarkup.indexOf('>Apply</button>'));
-
-  const style = readFileSync(path.join(process.cwd(), "dist", "src", "static", "style.css"), "utf8");
-  assert.match(
-    style,
-    /\.session-filter \{\s*display: grid;\s*grid-template-columns: minmax\(0, 1\.15fr\) minmax\(0, 0\.75fr\) minmax\(0, 0\.95fr\) minmax\(0, 0\.85fr\) minmax\(220px, 1\.5fr\) max-content;/
-  );
-  assert.match(style, /\.filter-actions \{\s*grid-column: 5 \/ -1;/);
 });
 
 test("global search uses the centralized sessions entry while list filters stay scoped", () => {
@@ -2597,18 +2471,7 @@ test("session list query options accept known sort and starred values only", () 
   assert.equal(resolveStarredFilter(new URLSearchParams("starred=true")), true);
   assert.equal(resolveStarredFilter(new URLSearchParams("starred=false")), false);
   assert.equal(resolveSessionKindFilter(new URLSearchParams()), "all");
-  assert.equal(resolveSessionKindFilter(new URLSearchParams("kind=analysis")), "analysis");
-  assert.equal(resolveSessionKindFilter(new URLSearchParams("sessionKind=work")), "work");
   assert.equal(resolveSessionKindFilter(new URLSearchParams("kind=unknown")), "all");
-});
-
-test("analysis title classification remains an explicit title heuristic", () => {
-  assert.equal(isAnalysisTitledSession({ title: "OpenCode session analysis proposals" }), true);
-  assert.equal(isAnalysisTitledSession({ title: "Analyze current session" }), true);
-  assert.equal(isAnalysisTitledSession({ title: "Implement authentication" }), false);
-  assert.equal(matchesSessionKind({ title: "Analyze current session" }, "analysis"), true);
-  assert.equal(matchesSessionKind({ title: "Analyze current session" }, "work"), false);
-  assert.equal(matchesSessionKind({ title: "Implement authentication" }, "work"), true);
 });
 
 test("mobile topbar keeps settings reachable when utility links collapse", () => {
@@ -2641,39 +2504,6 @@ test("mobile topbar keeps settings reachable when utility links collapse", () =>
   assert.match(mobileTopbarCss, /\.search-input \{\s*width: 100%;\s*min-width: 0;/);
 });
 
-test("flow inspector shrinks to content, is node-positioned, and stays inside the flow panel", () => {
-  const style = readFileSync(path.join(process.cwd(), "dist", "src", "static", "style.css"), "utf8");
-  const workbench = readFileSync(path.join(process.cwd(), "dist", "src", "static", "app.js"), "utf8");
-
-  // Desktop rule: height must follow content instead of being pinned to the
-  // panel bottom, and long content must be capped so the body scrolls.
-  const desktopInspector = style.match(/\.flow-inspector \{[^}]*\}/)?.[0] ?? "";
-  assert.match(desktopInspector, /bottom: auto/);
-  assert.doesNotMatch(desktopInspector, /bottom: 16px/);
-  assert.match(desktopInspector, /max-height: calc\(100% - 32px\)/);
-
-  // Mobile keeps the full-width inset layout with the desktop cap lifted.
-  const mobileBlockStart = style.indexOf("@media (max-width: 820px)");
-  const nextResponsiveBlock = style.indexOf("@media (max-width: 768px)", mobileBlockStart);
-  assert.notEqual(mobileBlockStart, -1);
-  assert.notEqual(nextResponsiveBlock, -1);
-  const mobileBlock = style.slice(mobileBlockStart, nextResponsiveBlock);
-  assert.match(mobileBlock, /\.flow-inspector \{[\s\S]*?max-height: none;/);
-
-  // The workbench positions the inspector relative to the clicked node,
-  // caps it to the flow viewport, and clears inline offsets on mobile.
-  assert.match(workbench, /const positionFlowInspector = /);
-  assert.match(workbench, /window\.innerWidth <= 820/);
-  assert.match(workbench, /document\.querySelector\("\.topbar"\).*getBoundingClientRect\(\)\.bottom/);
-  assert.match(workbench, /window\.innerHeight - panelRect\.top - gap/);
-  assert.match(workbench, /const visibleHeight = Math\.max\(120, visibleBottom - visibleTop\)/);
-  assert.match(workbench, /flowInspector\.style\.removeProperty\("top"\)/);
-  assert.match(workbench, /flowInspector\.style\.removeProperty\("max-height"\)/);
-  assert.match(workbench, /layoutFlowRows\(\);\s*\n\s*if \(flowInspector\.classList\.contains\("hidden"\)\) return;\s*\n\s*positionFlowInspector\(flowInspector\);/);
-  // Closes and resizes must reset or recompute the inline placement.
-  assert.match(workbench, /closeFlowInspector[\s\S]{0,600}removeProperty\("top"\)/);
-  assert.match(workbench, /resize[\s\S]{0,400}positionFlowInspector\(flowInspector\)/);
-});
 
 test("sqlite session queries exclude viewer-deleted sessions from paging, projects, and search", () => {
   const temp = mkdtempSync(path.join(os.tmpdir(), "agentsession-visible-sessions-"));
@@ -2723,7 +2553,7 @@ test("sqlite session queries exclude viewer-deleted sessions from paging, projec
         summary_additions, summary_deletions, summary_files, time_archived
       ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 0, 0, 0, NULL)
     `);
-    insertSession.run("a", "p1", "a", "needle analysis", "/p1", 100, 300);
+    insertSession.run("a", "p1", "a", "needle project", "/p1", 100, 300);
     insertSession.run("b", "p1", "b", "deleted content", "/p1", 100, 200);
     insertSession.run("c", "p2", "c", "active content", "/p2", 100, 100);
 
@@ -2768,14 +2598,6 @@ test("sqlite session queries exclude viewer-deleted sessions from paging, projec
     assert.equal(starredOnly.total, 1);
     assert.deepEqual(starredOnly.sessions.map((session) => session.id), ["c"]);
     assert.deepEqual(
-      listSessions(10, 0, "", "", dbPath, "", excluded, "updated-desc", undefined, "analysis").sessions.map((session) => session.id),
-      ["a"]
-    );
-    assert.deepEqual(
-      listSessions(10, 0, "", "", dbPath, "", excluded, "updated-desc", undefined, "work").sessions.map((session) => session.id),
-      ["c"]
-    );
-    assert.deepEqual(
       listSessionProjects("", "", dbPath, excluded).map((project) => ({
         id: project.id,
         label: project.label,
@@ -2797,10 +2619,6 @@ test("sqlite session queries exclude viewer-deleted sessions from paging, projec
       ]
     );
     assert.deepEqual(
-      listSessionProjects("", "", dbPath, excluded, undefined, "analysis").map((project) => project.id),
-      ["p1"]
-    );
-    assert.deepEqual(
       searchMessages("needle", 1, dbPath, excluded).map((match) => match.sessionId),
       ["c"]
     );
@@ -2808,14 +2626,6 @@ test("sqlite session queries exclude viewer-deleted sessions from paging, projec
     const search = getSearchResults("needle", 10, 0, dbPath, excluded);
     assert.equal(search.total, 2);
     assert.deepEqual(search.sessions.map((session) => session.id), ["a", "c"]);
-    assert.deepEqual(
-      getSearchResults("needle", 10, 0, dbPath, excluded, "analysis").sessions.map((session) => session.id),
-      ["a"]
-    );
-    assert.deepEqual(
-      getSearchResults("needle", 10, 0, dbPath, excluded, "work").sessions.map((session) => session.id),
-      ["c"]
-    );
   } finally {
     closeDb(dbPath);
     rmSync(temp, { recursive: true, force: true });
@@ -2890,50 +2700,11 @@ test("session management uses in-page dialogs", () => {
   assert.match(appJs, /tagName === "TEXTAREA"/);
   assert.match(appJs, /!isEditableShortcutTarget\(e\.target\)/);
   assert.match(appJs, /document\.getElementById\("search-input"\)\?\.focus\(\)/);
-  assert.match(appJs, /analysis_launch_confirm_title/);
-  assert.match(appJs, /const confirmed = await openConfirmDialog\(formatText\(ft\("analysis_launch_confirm"\)/);
-  assert.ok(
-    appJs.indexOf('openConfirmDialog(formatText(ft("analysis_launch_confirm")')
-      < appJs.indexOf('fetch(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/analyze`')
-  );
   const style = readFileSync(path.join(process.cwd(), "dist", "src", "static", "style.css"), "utf-8");
   assert.match(style, /\.btn:disabled \{/);
   assert.match(style, /cursor: not-allowed;/);
   assert.match(style, /grid-template-columns: auto minmax\(0, 1fr\) minmax\(0, auto\)/);
   assert.match(style, /@media \(max-width: 1300px\)[\s\S]*?\.logo-text \{\s*display: none;/);
-});
-
-test("analysis launch accessible name follows selected target labels and runtime count", () => {
-  const bundle = readFileSync(path.join(process.cwd(), "dist", "src", "static", "app.js"), "utf-8");
-  const appSource = readFileSync(path.join(process.cwd(), "src", "static", "app.js"), "utf-8");
-  assert.match(bundle, /function analysisLaunchAccessibleLabel/);
-  const helperSource = appSource
-    .match(/function analysisLaunchAccessibleLabel\([\s\S]*?\r?\n\}\r?\n\r?\nfunction updateAnalysisLaunchControl/)?.[0]
-    ?.replace(/\r?\n\r?\nfunction updateAnalysisLaunchControl$/, "");
-  assert.ok(helperSource);
-  const analysisLaunchAccessibleLabel = runInNewContext(
-    `${helperSource}\nanalysisLaunchAccessibleLabel;`,
-    {
-      ft: (key) => ({
-        analysis_launch_action: "Launch analysis for {targets}; runtime extensions: {runtime}",
-        analysis_launch_running_title: "Running analyses: {targets}.",
-        analysis_launch_select_target: "Select a target"
-      })[key],
-      formatText: (template, values) => Object.entries(values).reduce(
-        (text, [key, value]) => text.replaceAll(`{${key}}`, String(value)),
-        template
-      )
-    }
-  );
-
-  assert.equal(
-    analysisLaunchAccessibleLabel([{ label: "Skills" }], 2, [], "Targets 1 · Runtime 2"),
-    "Launch analysis for Skills; runtime extensions: 2"
-  );
-  assert.equal(
-    analysisLaunchAccessibleLabel([{ label: "Skills" }, { label: "Tests" }], 0, [], "Targets 2 · Runtime 0"),
-    "Launch analysis for Skills, Tests; runtime extensions: 0"
-  );
 });
 
 test("model distribution legend distinguishes equal model names by provider", () => {
@@ -3672,338 +3443,6 @@ test("provider runtime environments classify instruction files as runtime extens
   )));
 });
 
-test("settings configuration validates, persists, and applies runtime fields", () => {
-  const temp = mkdtempSync(path.join(os.tmpdir(), "agentsession-settings-"));
-  const configPath = path.join(temp, "nested", "config.json");
-  const fileConfig = {
-    port: 4567,
-    resumeCommands: {
-      opencode: {
-        executable: "opencode",
-        args: ["--session", "{sessionId}"]
-      }
-    },
-    resumeShell: {
-      executable: "powershell.exe",
-      args: ["-NoExit", "-NoLogo"]
-    },
-    analysis: {
-      enabled: true,
-      defaultTargets: ["skills", "tests"],
-      defaultTarget: "skills",
-      targets: {
-        skills: {
-          artifactRoots: ["skills"],
-          fileExtensions: [".md"],
-          prompt: "Focus on deterministic validation."
-        }
-      },
-      providers: {
-        opencode: {
-          targets: {
-            skills: {
-              artifactRoots: ["provider-materials"],
-              artifactFiles: ["REFERENCE.md"],
-              fileExtensions: [".md"]
-            }
-          },
-          command: {
-            executable: "opencode",
-            args: ["run", "--file", "{promptPath}"]
-          },
-          projectPaths: {
-            "opaque-project-key": process.cwd()
-          }
-        }
-      }
-    }
-  };
-
-  assert.deepEqual(validateUserConfig(fileConfig), []);
-  writeUserConfig(configPath, fileConfig);
-  const document = readUserConfigDocument(configPath);
-  assert.equal(document.exists, true);
-  assert.equal(document.error, "");
-  assert.deepEqual(document.config, fileConfig);
-  assert.equal(
-    document.config.analysis.targets.skills.prompt,
-    "Focus on deterministic validation."
-  );
-
-  const runtimeConfig = {
-    allowTerminalLaunch: true,
-    resumeCommands: {},
-    resumeShell: null,
-    analysis: { enabled: false }
-  };
-  applyRuntimeUserConfig(runtimeConfig, fileConfig);
-  assert.equal(runtimeConfig.allowTerminalLaunch, true);
-  assert.deepEqual(runtimeConfig.analysis, fileConfig.analysis);
-  assert.deepEqual(runtimeConfig.resumeCommands, fileConfig.resumeCommands);
-  assert.deepEqual(runtimeConfig.resumeShell, fileConfig.resumeShell);
-
-  assert.deepEqual(
-    validateUserConfig({
-      analysis: {
-        enabled: "yes",
-        defaultTargets: [],
-        targets: {
-          skills: {
-            prompt: 42
-          }
-        },
-        providers: {
-          opencode: {
-            defaultTargets: [],
-            command: { executable: "", args: "run" },
-            projectPaths: [],
-            targets: {
-              skills: {
-                artifactRoots: "skills"
-              }
-            }
-          }
-        }
-      }
-    }),
-    [
-      "analysis.enabled must be a boolean.",
-      "analysis.defaultTargets must contain at least one target.",
-      "analysis.targets.skills.prompt must be a string.",
-      "analysis.providers.opencode.defaultTargets must contain at least one target.",
-      "analysis.providers.opencode.command.executable must be a non-empty string.",
-      "analysis.providers.opencode.command.args must be an array of strings.",
-      "analysis.providers.opencode.projectPaths must be an object of string values.",
-      "analysis.providers.opencode.targets.skills.artifactRoots must be an array of strings."
-    ]
-  );
-  assert.deepEqual(
-    validateUserConfig({
-      analysis: {
-        providers: {
-          gemini: {
-            projectPaths: { "opaque-project-key": "relative-project" }
-          }
-        }
-      }
-    }),
-    ["analysis.providers.gemini.projectPaths.opaque-project-key must be an absolute path."]
-  );
-  assert.deepEqual(
-    validateUserConfig({
-      analysis: {
-        implementation: {
-          command: { executable: "", args: "run" }
-        },
-        providers: {
-          opencode: {
-            implementation: {
-              command: { executable: "", args: "run" }
-            }
-          }
-        }
-      }
-    }),
-    [
-      "analysis.implementation.command.executable must be a non-empty string.",
-      "analysis.implementation.command.args must be an array of strings.",
-      "analysis.providers.opencode.implementation.command.executable must be a non-empty string.",
-      "analysis.providers.opencode.implementation.command.args must be an array of strings."
-    ]
-  );
-});
-
-test("analysis configuration preserves explicit paths without migration", () => {
-  const temp = mkdtempSync(path.join(os.tmpdir(), "agentsession-config-"));
-  const configPath = path.join(temp, "config.json");
-  writeFileSync(configPath, JSON.stringify({
-    analysis: {
-      outputDir: ".agentsession/analysis",
-      targets: {
-        skills: {
-          artifactRoots: ["skills", ".agents/skills", ".codex/skills"]
-        },
-        prompts: {
-          artifactRoots: ["custom-prompts"]
-        }
-      },
-      providers: {
-        opencode: {
-          targets: {
-            skills: {
-              artifactRoots: [".opencode/skills", ".agents/skills", ".codex/skills"],
-              artifactFiles: ["AGENTS.md"]
-            }
-          }
-        },
-        codex: {
-          targets: {
-            skills: {
-              artifactFiles: ["AGENTS.md"]
-            }
-          }
-        }
-      }
-    }
-  }));
-
-  const document = readUserConfigDocument(configPath);
-  assert.equal(document.config.analysis.outputDir, ".agentsession/analysis");
-  assert.deepEqual(document.config.analysis.targets.skills.artifactRoots, ["skills", ".agents/skills", ".codex/skills"]);
-  assert.deepEqual(document.config.analysis.targets.prompts.artifactRoots, ["custom-prompts"]);
-  assert.deepEqual(
-    document.config.analysis.providers.opencode.targets.skills.artifactRoots,
-    [".opencode/skills", ".agents/skills", ".codex/skills"]
-  );
-  assert.deepEqual(
-    document.config.analysis.providers.opencode.targets.skills.artifactFiles,
-    ["AGENTS.md"]
-  );
-  assert.deepEqual(
-    document.config.analysis.providers.codex.targets.skills.artifactFiles,
-    ["AGENTS.md"]
-  );
-  assert.match(document.raw, /\.agents\/skills/);
-
-  const savedPath = path.join(temp, "saved.json");
-  writeUserConfig(savedPath, JSON.parse(document.raw));
-  const saved = JSON.parse(readFileSync(savedPath, "utf-8"));
-  assert.equal(saved.analysis.outputDir, ".agentsession/analysis");
-  assert.deepEqual(saved.analysis.targets.skills.artifactRoots, ["skills", ".agents/skills", ".codex/skills"]);
-  assert.deepEqual(saved.analysis.providers.opencode.targets.skills.artifactRoots, [".opencode/skills", ".agents/skills", ".codex/skills"]);
-  assert.deepEqual(saved.analysis.providers.opencode.targets.skills.artifactFiles, ["AGENTS.md"]);
-});
-
-test("settings page exposes config location and startup-only launch status", () => {
-  const html = renderSettingsPage({
-    configPath: "C:\\Users\\tester\\config.json",
-    configDocument: {
-      exists: false,
-      raw: "{}\n",
-      config: {},
-      error: ""
-    },
-    terminalLaunchAllowed: true,
-    provider: "opencode",
-    providerName: "OpenCode",
-    analysisDefaultCommand: OPENCODE_ANALYSIS_COMMAND,
-    resumeDefault: {
-      executable: "opencode",
-      args: ["--session", "{sessionId}"]
-    },
-    providers: [{
-      id: "opencode",
-      name: "OpenCode",
-      icon: "OC",
-      available: true
-    }]
-  });
-
-  assert.match(html, /data-page="settings"/);
-  assert.match(html, /class="logo"[^>]+title="AgentSession"[^>]+aria-label="AgentSession"/);
-  assert.match(html, /class="provider-context" title="OpenCode"/);
-  assert.match(html, /id="theme-toggle"[^>]+aria-label="Toggle theme"/);
-  assert.match(html, /id="settings-form"/);
-  assert.match(html, /class="settings-section-nav"/);
-  assert.match(html, /href="#settings-target"/);
-  assert.match(html, /href="#settings-advanced" data-open-settings-advanced/);
-  assert.match(html, /id="settings-analysis"/);
-  assert.match(html, /id="settings-target"/);
-  assert.match(html, /id="settings-analyzer"/);
-  assert.match(html, /id="settings-resume"/);
-  assert.match(html, /id="settings-advanced"/);
-  assert.match(html, /id="settings-json"[^>]+aria-describedby="settings-json-feedback"/);
-  assert.match(html, /id="settings-json-feedback"[^>]+class="settings-json-feedback"/);
-  assert.match(html, /id="settings-analysis-enabled"/);
-  assert.match(html, /id="settings-default-target"/);
-  assert.match(html, /id="settings-target-id"/);
-  assert.match(html, /id="settings-target-context-label"/);
-  assert.match(html, /Target display name/);
-  assert.match(html, /<option value="skills" selected>/);
-  assert.match(html, /Analyze skills \(built-in\)/);
-  assert.match(html, /id="settings-target-prompt"/);
-  assert.match(html, /data-reset-setting="target-prompt"/);
-  assert.match(html, /AgentSession does not create it/);
-  assert.match(html, /id="settings-artifact-summary-roots"/);
-  assert.match(html, /Analysis materials used by default/);
-  assert.match(html, /data-reset-setting="artifact-roots"/);
-  assert.match(html, /data-reset-setting="resume-executable"/);
-  assert.match(html, /id="settings-prompt-preview-button"/);
-  assert.match(html, /Preview current prompt/);
-  for (const [targetId, target] of Object.entries(BUILTIN_ANALYSIS_TARGETS)) {
-    assert.match(html, new RegExp(`<option value="${targetId}"`));
-    assert.match(html, new RegExp(`${target.label} \\(built-in\\)`));
-  }
-  assert.match(html, /id="settings-analyzer-model"/);
-  assert.match(html, /id="settings-resume-enabled"/);
-  assert.match(html, /id="settings-shell-mode"/);
-  assert.match(html, /C:\\Users\\tester\\config\.json/);
-  assert.match(html, /Enabled for this server process/);
-  assert.match(html, /--disable-terminal-launch/);
-  assert.match(html, /id="settings-initial-data"/);
-  assert.match(html, /id="settings-dirty-state"[^>]+data-dirty="false"/);
-  assert.match(html, /class="btn settings-save" disabled/);
-  assert.match(html, /deepseek\/deepseek-v4-flash/);
-  const settingsInitialData = JSON.parse(
-    html.match(/<script type="application\/json" id="settings-initial-data">([\s\S]*?)<\/script>/)[1]
-  );
-  assert.deepEqual(
-    Object.keys(settingsInitialData.targetDefaults),
-    Object.keys(BUILTIN_ANALYSIS_TARGETS)
-  );
-  const presetArgs = settingsInitialData.analysisDefaultCommand.args;
-  assert.equal(presetArgs[0], "run");
-  assert.ok(
-    presetArgs.indexOf("Read the attached analysis request and write the requested proposal files.")
-      < presetArgs.indexOf("--file")
-  );
-
-  const customTargetHtml = renderSettingsPage({
-    configPath: "C:\\Users\\tester\\config.json",
-    configDocument: {
-      exists: true,
-      raw: "{}\n",
-      config: {
-        analysis: {
-          enabled: true,
-          defaultTargets: ["memories", "skills"],
-          defaultTarget: "memories",
-          targets: {
-            memories: {
-              label: "Analyze memories",
-              artifactRoots: ["memories"],
-              fileExtensions: [".md"],
-              prompt: "Look for stale operational knowledge."
-            }
-          },
-          providers: {
-            opencode: {
-              defaultTargets: ["memories", "skills"],
-              targets: {
-                memories: {
-                  artifactRoots: ["provider-memories"],
-                  artifactFiles: ["MEMORY.md"]
-                }
-              }
-            }
-          }
-        }
-      },
-      error: ""
-    },
-    provider: "opencode",
-    providerName: "OpenCode"
-  });
-  assert.match(customTargetHtml, /<option value="skills"\s*>/);
-  assert.match(customTargetHtml, /<option value="memories" selected>/);
-  assert.doesNotMatch(customTargetHtml, /name="settings-default-target"/);
-  assert.match(customTargetHtml, /Analyze memories \(memories\)/);
-  assert.match(customTargetHtml, /Look for stale operational knowledge\./);
-  assert.match(customTargetHtml, /provider-memories/);
-  assert.match(customTargetHtml, /MEMORY\.md/);
-
-});
-
 test("settings browser script blocks save while advanced JSON is invalid", () => {
   const bundle = readFileSync(path.join(process.cwd(), "dist", "src", "static", "app.js"), "utf8");
   const settingsModule = readFileSync(
@@ -4012,23 +3451,11 @@ test("settings browser script blocks save while advanced JSON is invalid", () =>
   );
 
   assert.match(bundle, /initSettingsForm\(\{ ft, formatText, showToast \}\);/);
-  assert.match(bundle, /submitButton\.disabled = !settingsDirty \|\| !settingsJsonValid;/);
-  assert.match(settingsModule, /let settingsJsonValid = true;/);
-  assert.match(settingsModule, /submitButton\.disabled = !settingsDirty \|\| !settingsJsonValid;/);
-  assert.match(settingsModule, /const invalidJsonMessage = \(error\) => `\$\{ft\("settings_invalid_json"\)\}: \$\{error\.message\}`;/);
-  assert.match(settingsModule, /if \(event\.target === editor\) \{\s*updateEditorJsonState\(\{ showMessage: true \}\);/);
-});
-
-test("built-in analysis materials do not claim provider runtime paths", () => {
-  const providerRuntimePath = /(^|[\\/])\.(agents|codex|claude|opencode|gemini)([\\/]|$)/;
-  const instructionFile = /^(AGENTS(?:\.override)?|CLAUDE(?:\.local)?|GEMINI)\.md$/i;
-  for (const target of Object.values(BUILTIN_ANALYSIS_TARGETS)) {
-    assert.equal(target.artifactRoots.some((root) => providerRuntimePath.test(root)), false);
-    assert.equal(Boolean(target.artifactFiles?.some((file) => instructionFile.test(file))), false);
-  }
-  assert.deepEqual(BUILTIN_ANALYSIS_TARGETS.skills.artifactRoots, []);
-  assert.deepEqual(BUILTIN_ANALYSIS_TARGETS.agents.artifactRoots, []);
-  assert.deepEqual(BUILTIN_ANALYSIS_TARGETS.rules.artifactRoots, []);
+  assert.match(settingsModule, /let jsonValid = true;/);
+  assert.match(settingsModule, /submit\.disabled = !dirty \|\| !jsonValid;/);
+  assert.match(settingsModule, /JSON\.parse\(editor\.value\)/);
+  assert.match(settingsModule, /if \(event\.target === editor\)/);
+  assert.match(settingsModule, /jsonFeedback\.textContent = ft\("settings_invalid_json"\)/);
 });
 
 test("terminal launch encodes the complete PowerShell resume script", () => {
@@ -4276,359 +3703,6 @@ function flowTool(id, options = {}) {
   };
 }
 
-test("conversation flow includes all messages and hides ordinary tool nodes", () => {
-  const ordinaryTool = flowTool("read-1", { tool: "read", messageId: "a1" });
-  const container = flowSession("root", [
-    flowMessage("u1", "user", 1000),
-    flowMessage("a1", "assistant", 1100, [ordinaryTool], { text: false })
-  ], {
-    metrics: {
-      partCount: 1,
-      toolCallCount: 1,
-      totalToolCalls: 1,
-      inputTokens: 10,
-      outputTokens: 4
-    }
-  });
-
-  const flow = buildFlowTreeFromContainer(container);
-  assert.deepEqual(flow.root.line.map((node) => node.kind), ["user"]);
-  assert.equal(flow.summary.messages, 1);
-  assert.equal(flow.summary.toolCalls, 1);
-  assert.equal(flow.root.line.some((node) => node.id.includes("read-1")), false);
-});
-
-test("conversation flow renders recursive subagents as fork-and-join pairs", () => {
-  const grandchild = flowSession("grandchild", [
-    flowMessage("gu1", "user", 1250),
-    flowMessage("ga1", "assistant", 1300)
-  ], {
-    depth: 2,
-    attachMode: "task",
-    metrics: { timeStart: 1250, timeEnd: 1350, runtimeMs: 100 }
-  });
-  const nestedTask = flowTool("nested-task", {
-    tool: "task",
-    messageId: "ca1",
-    sessionId: "child-1",
-    timeStart: 1200,
-    timeEnd: 1400,
-    childSessions: [grandchild]
-  });
-  const childOne = flowSession("child-1", [
-    flowMessage("cu1", "user", 1150),
-    flowMessage("ca1", "assistant", 1200, [nestedTask])
-  ], {
-    depth: 1,
-    attachMode: "task",
-    metrics: {
-      partCount: 1,
-      toolCallCount: 1,
-      totalToolCalls: 1,
-      descendantCount: 1,
-      timeStart: 1150,
-      timeEnd: 1450,
-      runtimeMs: 300
-    }
-  });
-  const childTwo = flowSession("child-2", [
-    flowMessage("c2u1", "user", 1160),
-    flowMessage("c2a1", "assistant", 1250)
-  ], {
-    depth: 1,
-    attachMode: "task",
-    metrics: { timeStart: 1160, timeEnd: 1300, runtimeMs: 140 }
-  });
-  const task = flowTool("task-1", {
-    tool: "task",
-    messageId: "a1",
-    timeStart: 1100,
-    timeEnd: 1500,
-    childSessions: [childOne, childTwo]
-  });
-  const container = flowSession("root", [
-    flowMessage("u1", "user", 1000),
-    flowMessage("a1", "assistant", 1080, [task]),
-    flowMessage("a2", "assistant", 1600)
-  ], {
-    metrics: {
-      partCount: 1,
-      toolCallCount: 1,
-      totalToolCalls: 2,
-      descendantCount: 3,
-      timeStart: 1000,
-      timeEnd: 1700,
-      runtimeMs: 700
-    }
-  });
-
-  const flow = buildFlowTreeFromContainer(container);
-  assert.deepEqual(flow.root.line.map((node) => node.kind), [
-    "user", "agent", "invocation", "return", "agent"
-  ]);
-  const invocation = flow.root.line[2];
-  const returned = flow.root.line[3];
-  assert.equal(invocation.branches.length, 2);
-  assert.equal(invocation.returnId, returned.id);
-  assert.equal(returned.invocationId, invocation.id);
-  assert.deepEqual(invocation.branches[0].line.map((node) => node.kind), [
-    "user", "agent", "invocation", "return"
-  ]);
-  assert.equal(invocation.branches[0].line[2].branches[0].id, "session:grandchild");
-  assert.equal(flow.summary.subagents, 3);
-  assert.equal(flow.root.line[4].emphasis, "final");
-});
-
-test("conversation flow recognizes every shared subagent launcher", () => {
-  for (const tool of ["agent", "task", "subtask", "spawn_agent", "delegate_task"]) {
-    const child = flowSession(`${tool}-child`, [
-      flowMessage(`${tool}-user`, "user", 1100),
-      flowMessage(`${tool}-assistant`, "assistant", 1200)
-    ], {
-      depth: 1,
-      attachMode: "task",
-      metrics: { timeStart: 1100, timeEnd: 1200, runtimeMs: 100 }
-    });
-    const launcher = flowTool(`${tool}-launcher`, {
-      tool,
-      messageId: `${tool}-root-agent`,
-      childSessions: [child],
-      timeStart: 1050,
-      timeEnd: 1250
-    });
-    const parent = flowSession(`${tool}-root`, [
-      flowMessage(`${tool}-root-user`, "user", 1000),
-      flowMessage(`${tool}-root-agent`, "assistant", 1040, [launcher])
-    ], {
-      metrics: {
-        partCount: 1,
-        toolCallCount: 1,
-        totalToolCalls: 1,
-        descendantCount: 1,
-        timeStart: 1000,
-        timeEnd: 1300,
-        runtimeMs: 300
-      }
-    });
-
-    const flow = buildFlowTreeFromContainer(parent);
-    const invocation = flow.root.line.find((node) => node.kind === "invocation");
-    const returned = flow.root.line.find((node) => node.kind === "return");
-
-    assert.ok(invocation, `${tool} should render a subagent fork`);
-    assert.ok(returned, `${tool} should render a matching return`);
-    assert.equal(invocation.branches[0].id, `session:${tool}-child`);
-    assert.equal(invocation.returnId, returned.id);
-    assert.equal(flow.summary.subagents, 1);
-  }
-});
-
-test("detached child sessions visibly identify inferred source relationships", () => {
-  const child = {
-    session: { id: "fork", title: "Pi fork", time_created: 1100, time_updated: 1200 },
-    detachedChildren: [],
-    metrics: flowMetrics({ messageCount: 2, totalMessages: 2, timeStart: 1100, timeEnd: 1200 }),
-    messages: [
-      flowMessage("fork-user", "user", 1100),
-      flowMessage("fork-agent", "assistant", 1200)
-    ]
-  };
-  const sessionTree = {
-    session: { id: "root", title: "Root", time_created: 1000, time_updated: 1300 },
-    detachedChildren: [child],
-    metrics: flowMetrics({ messageCount: 1, totalMessages: 3, descendantCount: 1, timeStart: 1000, timeEnd: 1300 }),
-    messages: [flowMessage("root-user", "user", 1000)]
-  };
-
-  const html = renderSessionPage({
-    session: sessionTree.session,
-    sessionTree,
-    provider: "pi"
-  });
-
-  assert.match(html, /data-session-relationship="inferred"/);
-  assert.match(html, /Linked session/);
-  assert.match(html, /Inferred relationship/);
-  assert.match(html, /Pi fork/);
-  // Detached children are orchestration topology, so the Execution tab exists.
-  assert.match(html, /id="tab-btn-flow"/);
-  assert.match(html, />Execution</);
-  assert.doesNotMatch(html, /flow-open-btn/);
-});
-
-test("session page can defer execution markup until the panel is opened", () => {
-  const child = flowSession("child-1", [
-    flowMessage("cu1", "user", 1150),
-    flowMessage("ca1", "assistant", 1200)
-  ], {
-    depth: 1,
-    attachMode: "task",
-    metrics: { timeStart: 1150, timeEnd: 1200, runtimeMs: 50 }
-  });
-  const task = flowTool("task-1", {
-    tool: "task",
-    messageId: "a1",
-    timeStart: 1100,
-    timeEnd: 1300,
-    childSessions: [child]
-  });
-  const container = flowSession("root", [
-    flowMessage("u1", "user", 1000),
-    flowMessage("a1", "assistant", 1080, [task])
-  ], {
-    metrics: {
-      partCount: 1,
-      toolCallCount: 1,
-      totalToolCalls: 1,
-      descendantCount: 1,
-      timeStart: 1000,
-      timeEnd: 1300,
-      runtimeMs: 300
-    }
-  });
-  const flow = buildFlowTreeFromContainer(container);
-  const sessionTree = {
-    session: { id: "root", title: "Lazy execution" },
-    detachedChildren: [],
-    metrics: flowMetrics({ descendantCount: 1 }),
-    messages: [flowMessage("u1", "user", 1000)]
-  };
-
-  const html = renderSessionPage({
-    session: { id: "root", title: "Lazy execution", time_created: 1000 },
-    sessionTree,
-    provider: "opencode",
-    flowLazyUrl: "/api/opencode/session/root/flow-panel"
-  });
-  const flowFragment = renderCanonicalFlowPanelContent(flow, "opencode");
-
-  assert.match(html, /id="tab-btn-flow"/);
-  assert.match(html, />Execution</);
-  assert.match(html, /data-flow-lazy-url="\/api\/opencode\/session\/root\/flow-panel"/);
-  assert.match(html, /Execution loads when opened/);
-  assert.doesNotMatch(html, /flow-map-root-session/);
-  assert.match(flowFragment, /flow-map-root-session/);
-  // Execution renders only orchestration topology: no conversation nodes, no
-  // inspector; each branch summary links straight to its source session.
-  assert.doesNotMatch(flowFragment, /flow-map-node-user/);
-  assert.doesNotMatch(flowFragment, /flow-map-node-agent/);
-  assert.doesNotMatch(flowFragment, /flow-map-overview-user/);
-  assert.doesNotMatch(flowFragment, /flow-map-overview-agent/);
-  assert.doesNotMatch(flowFragment, /data-flow-preview-target/);
-  assert.doesNotMatch(flowFragment, /data-flow-inspector/);
-  assert.match(flowFragment, /flow-map-fork-collapsed/);
-  assert.match(flowFragment, /flow-branch-summary/);
-  assert.match(flowFragment, /href="\/opencode\/session\/child-1"/);
-  assert.doesNotMatch(flowFragment, /data-flow-open-conversation/);
-  assert.match(flowFragment, /Open in conversation/);
-});
-
-test("linear sessions omit the execution tab and lazy flow markup", () => {
-  const sessionTree = {
-    session: { id: "root", title: "Linear" },
-    detachedChildren: [],
-    metrics: flowMetrics(),
-    messages: [flowMessage("u1", "user", 1000)]
-  };
-  const html = renderSessionPage({
-    session: { id: "root", title: "Linear", time_created: 1000 },
-    sessionTree,
-    provider: "opencode",
-    flowLazyUrl: "/api/opencode/session/root/flow-panel"
-  });
-
-  assert.doesNotMatch(html, /id="tab-btn-flow"/);
-  assert.doesNotMatch(html, /data-flow-lazy-url/);
-  assert.doesNotMatch(html, /session-flow-panel/);
-  assert.doesNotMatch(html, /flow-open-btn/);
-});
-
-test("execution topology predicates cover session trees and built flows", () => {
-  const linearTree = {
-    session: { id: "root", title: "Linear" },
-    detachedChildren: [],
-    metrics: flowMetrics(),
-    messages: [flowMessage("u1", "user", 1000)]
-  };
-  assert.equal(sessionTreeHasExecutionTopology(linearTree), false);
-  assert.equal(sessionTreeHasExecutionTopology(null), false);
-
-  const detachedTree = {
-    ...linearTree,
-    detachedChildren: [{ id: "fork", session: { id: "fork" } }]
-  };
-  assert.equal(sessionTreeHasExecutionTopology(detachedTree), true);
-
-  const metricsTree = {
-    ...linearTree,
-    detachedChildren: [],
-    metrics: flowMetrics({ descendantCount: 2 })
-  };
-  assert.equal(sessionTreeHasExecutionTopology(metricsTree), true);
-
-  const attachedTree = {
-    ...linearTree,
-    metrics: flowMetrics(),
-    messages: [{
-      ...flowMessage("a1", "assistant", 1080),
-      parts: [{ id: "task", childSessions: [{ id: "child" }] }]
-    }]
-  };
-  assert.equal(sessionTreeHasExecutionTopology(attachedTree), true);
-
-  const linearFlow = buildFlowTreeFromContainer(flowSession("root", [
-    flowMessage("u1", "user", 1000),
-    flowMessage("a1", "assistant", 1100)
-  ]));
-  assert.equal(flowTreeHasExecutionTopology(linearFlow), false);
-  assert.equal(flowTreeHasExecutionTopology(null), false);
-
-  const forkFlow = buildFlowTreeFromContainer(flowSession("root", [
-    flowMessage("u1", "user", 1000),
-    flowMessage("a1", "assistant", 1080, [flowTool("task-1", {
-      tool: "task",
-      childSessions: [flowSession("child", [
-        flowMessage("cu1", "user", 1150),
-        flowMessage("ca1", "assistant", 1200)
-      ], { depth: 1, attachMode: "task", metrics: { timeStart: 1150, timeEnd: 1200, runtimeMs: 50 } })]
-    })])
-  ], {
-    metrics: { partCount: 1, toolCallCount: 1, totalToolCalls: 1, descendantCount: 1, timeStart: 1000, timeEnd: 1300, runtimeMs: 300 }
-  }));
-  assert.equal(flowTreeHasExecutionTopology(forkFlow), true);
-});
-
-test("conversation flow inserts detached sessions as inferred branches", () => {
-  const detached = flowSession("detached", [
-    flowMessage("du1", "user", 1400),
-    flowMessage("da1", "assistant", 1450)
-  ], {
-    depth: 1,
-    attachMode: "detached",
-    metrics: { timeStart: 1400, timeEnd: 1500, runtimeMs: 100 }
-  });
-  const container = flowSession("root", [
-    flowMessage("u1", "user", 1000),
-    flowMessage("a1", "assistant", 1300),
-    flowMessage("u2", "user", 1600)
-  ], {
-    detachedChildren: [detached],
-    metrics: {
-      descendantCount: 1,
-      timeStart: 1000,
-      timeEnd: 1700,
-      runtimeMs: 700
-    }
-  });
-
-  const flow = buildFlowTreeFromContainer(container);
-  assert.deepEqual(flow.root.line.map((node) => node.kind), [
-    "user", "agent", "invocation", "return", "user"
-  ]);
-  assert.equal(flow.root.line[2].inferred, true);
-  assert.equal(flow.root.line[3].inferred, true);
-  assert.equal(flow.root.line[2].branches[0].inferred, true);
-});
 
 test("session rendering merges reasoning tokens into output and nests tools in assistant turns", () => {
   const sessionTree = {

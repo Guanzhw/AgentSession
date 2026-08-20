@@ -232,7 +232,7 @@ if [[ "$file_stats_capability_state" != "true" ]]; then
 fi
 
 ab "open settings" open "$BASE/opencode/settings" >/dev/null
-ab "wait for settings" wait --text "Session analysis" >/dev/null
+ab "wait for settings" wait --text "Project directory mappings" >/dev/null
 settings="$(read_ab "read settings" get text body)"
 assert_contains "settings" "$settings" "CONFIGURATION FILE"
 if [[ "$TERMINAL_LAUNCH" == "disabled" ]]; then
@@ -240,15 +240,14 @@ if [[ "$TERMINAL_LAUNCH" == "disabled" ]]; then
 else
   assert_contains "settings" "$settings" "Enabled for this server process"
 fi
-assert_contains "settings" "$settings" "Provider analyzer"
 settings_editor_count="$(read_ab "count settings editor" get count "#settings-json")"
 if [[ "$settings_editor_count" != "1" ]]; then
   echo "Settings page should render one JSON editor, got $settings_editor_count" >&2
   exit 1
 fi
 settings_switch_count="$(read_ab "count settings switches" get count ".settings-switch input[type='checkbox']")"
-if ! [[ "$settings_switch_count" =~ ^[0-9]+$ ]] || (( settings_switch_count < 4 )); then
-  echo "Settings page should render at least four switches, got $settings_switch_count" >&2
+if ! [[ "$settings_switch_count" =~ ^[0-9]+$ ]] || (( settings_switch_count < 1 )); then
+  echo "Settings page should render at least one switch, got $settings_switch_count" >&2
   exit 1
 fi
 ab "open advanced settings JSON" click "[data-open-settings-advanced]" >/dev/null
@@ -271,7 +270,7 @@ ab "open session detail" open "$BASE/opencode/session/$SAMPLE_SESSION_ID" >/dev/
 ab "wait for reasoning" wait ".reasoning-block" >/dev/null
 detail="$(read_ab "read session detail" get text body)"
 assert_not_contains "detail" "$detail" "System Prompts"
-assert_contains "detail" "$detail" "Execution"
+assert_contains "detail" "$detail" "Runtime"
 detail_session_workbench_id="$(read_ab "read detail session id" get attr ".session-workbench" data-session-id)"
 if [[ "$detail_session_workbench_id" != "$SAMPLE_SESSION_ID" && "$detail_session_workbench_id" != "\"$SAMPLE_SESSION_ID\"" ]]; then
   echo "Detail session workbench ID did not include $SAMPLE_SESSION_ID" >&2
@@ -322,16 +321,14 @@ ab "close transcript search after shortcut" press Escape >/dev/null
 resume_preview_count="$(read_ab "count resume command previews" get count ".resume-command-preview")"
 resume_copy_count="$(read_ab "count resume command copy buttons" get count ".resume-command-preview [data-action='copy-resume-command']")"
 resume_launch_count="$(read_ab "count terminal launch buttons" get count ".session-actions [data-action='resume-session']")"
-analysis_launch_count="$(read_ab "count analysis launch buttons" get count ".session-actions [data-action='analyze-session']")"
-analysis_launch_enabled_count="$(read_ab "count enabled analysis launch buttons" get count ".session-actions [data-action='analyze-session']:not(:disabled)")"
 if [[ "$TERMINAL_LAUNCH" == "disabled" ]]; then
-  if [[ "$resume_launch_count" != "0" || "$resume_preview_count" != "0" || "$resume_copy_count" != "0" || "$analysis_launch_count" != "0" || "$analysis_launch_enabled_count" != "0" ]]; then
-    echo "Terminal controls and analysis launch buttons should be hidden with --disable-terminal-launch" >&2
+  if [[ "$resume_launch_count" != "0" || "$resume_preview_count" != "0" || "$resume_copy_count" != "0" ]]; then
+    echo "Terminal controls should be hidden with --disable-terminal-launch" >&2
     exit 1
   fi
 else
-  if [[ "$resume_launch_count" != "1" || "$resume_preview_count" != "1" || "$resume_copy_count" != "1" || "$analysis_launch_count" != "1" || "$analysis_launch_enabled_count" != "1" ]]; then
-    echo "Terminal launch, preview, copy, and analysis buttons should be visible by default" >&2
+  if [[ "$resume_launch_count" != "1" || "$resume_preview_count" != "1" || "$resume_copy_count" != "1" ]]; then
+    echo "Terminal launch, preview, and copy buttons should be visible by default" >&2
     exit 1
   fi
 fi
@@ -415,9 +412,9 @@ if [[ "$top_level_tool_count" != "0" ]]; then
   exit 1
 fi
 
-flow_button_count="$(read_ab "count flow buttons" get count ".flow-open-btn")"
-if [[ "$flow_button_count" != "0" ]]; then
-  echo "Per-user-message Flow buttons should be removed, got $flow_button_count" >&2
+legacy_topology_button_count="$(read_ab "count removed topology buttons" get count ".flow-open-btn")"
+if [[ "$legacy_topology_button_count" != "0" ]]; then
+  echo "Per-message topology buttons should remain removed, got $legacy_topology_button_count" >&2
   exit 1
 fi
 
@@ -445,126 +442,58 @@ if [[ "$subagent_branch_word_count" != "0" ]]; then
   exit 1
 fi
 
-flow_panel_hidden="$(read_ab "count hidden execution panel" get count "#session-flow-panel.hidden")"
-if [[ "$flow_panel_hidden" != "1" ]]; then
-  echo "Execution panel should start hidden, got count $flow_panel_hidden" >&2
+runtime_tab_click="$(read_ab "open runtime tab" eval "(() => { const tab = document.getElementById('tab-btn-runtime'); if (!tab) return 'missing'; tab.click(); return 'clicked'; })()")"
+if [[ "$runtime_tab_click" != "clicked" && "$runtime_tab_click" != '"clicked"' ]]; then
+  echo "Runtime tab should open the workbench, got $runtime_tab_click" >&2
   exit 1
 fi
 
-flow_tab_click="$(read_ab "open execution tab" eval "(() => { const tab = document.getElementById('tab-btn-flow'); if (!tab) return 'missing'; tab.click(); return 'clicked'; })()")"
-if [[ "$flow_tab_click" != "clicked" && "$flow_tab_click" != '"clicked"' ]]; then
-  echo "Execution tab should open the panel, got $flow_tab_click" >&2
+runtime_tab_selected="$(read_ab "verify runtime tab selection" get attr "#tab-btn-runtime" aria-selected)"
+if [[ "$runtime_tab_selected" != "true" && "$runtime_tab_selected" != '"true"' ]]; then
+  echo "Runtime tab should be selected after opening the workbench, got state $runtime_tab_selected" >&2
   exit 1
 fi
 
-flow_tab_selected="$(read_ab "verify execution tab selection" get attr "#tab-btn-flow" aria-selected)"
-if [[ "$flow_tab_selected" != "true" && "$flow_tab_selected" != '"true"' ]]; then
-  echo "Execution tab should be selected after opening the panel, got state $flow_tab_selected" >&2
+runtime_root_count="$(read_ab "count runtime workbenches" get count "#tab-runtime .runtime-workbench[data-runtime-available='true']")"
+if [[ "$runtime_root_count" != "1" ]]; then
+  echo "Runtime tab should contain one available workbench, got $runtime_root_count" >&2
   exit 1
 fi
 
-flow_scroll_state="$(read_ab "verify execution tab leaves document scrolling enabled" eval "JSON.stringify({ bodyLocked: document.body.classList.contains('flow-panel-open'), tabOverflowY: getComputedStyle(document.querySelector('.tab-bar')).overflowY })")"
-if ! printf '%s' "$flow_scroll_state" | grep -Eq 'bodyLocked[^a-z]*false' || ! printf '%s' "$flow_scroll_state" | grep -Eq 'tabOverflowY[^a-z]*hidden'; then
-  echo "Execution should not lock document scrolling or create a vertical tab-bar scrollbar, got $flow_scroll_state" >&2
+runtime_lens_count="$(read_ab "count runtime lenses" get count "#tab-runtime [data-runtime-lens]")"
+if [[ "$runtime_lens_count" != "5" ]]; then
+  echo "Runtime workbench should expose five protocol lenses, got $runtime_lens_count" >&2
   exit 1
 fi
 
-flow_loaded="0"
-for _ in $(seq 1 40); do
-  flow_loaded="$(read_ab "wait for execution root line" get count "#session-flow-panel .flow-map-root-session > .flow-map-line")"
-  if [[ "$flow_loaded" != "0" ]]; then
-    break
-  fi
-  sleep 0.25
-done
-flow_state="$(read_ab "read execution lazy state" get attr "#session-flow-panel" data-flow-state)"
-if [[ "$flow_loaded" == "0" && "$flow_state" == "error" ]]; then
-  echo "Execution panel failed to lazy-load" >&2
+runtime_stat_count="$(read_ab "count runtime summary stats" get count "#tab-runtime .runtime-stat-card")"
+assert_positive_count "runtime summary stats" "$runtime_stat_count"
+runtime_summary_visible="$(read_ab "verify runtime summary visibility" eval "(() => { const panel = document.querySelector('#tab-runtime [data-runtime-panel=summary]'); return Boolean(panel && !panel.hidden && panel.getBoundingClientRect().height > 0); })()")"
+if [[ "$runtime_summary_visible" != "true" ]]; then
+  echo "Runtime summary lens should be visibly rendered, got $runtime_summary_visible" >&2
   exit 1
 fi
 
-flow_user_count="$(read_ab "count execution user nodes" get count "#session-flow-panel .flow-map-node-user")"
-if [[ "$flow_user_count" != "0" ]]; then
-  echo "Execution view should not render conversation user nodes, got $flow_user_count" >&2
+ab "open runtime events lens" click "#tab-runtime [data-runtime-lens='events']" >/dev/null
+runtime_event_count="$(read_ab "count runtime events" get count "#tab-runtime [data-runtime-event]")"
+assert_positive_count "runtime events" "$runtime_event_count"
+
+runtime_evidence_count="$(read_ab "count runtime evidence controls" get count "#tab-runtime [data-runtime-evidence-kind='event']")"
+assert_positive_count "runtime event evidence controls" "$runtime_evidence_count"
+ab "open runtime event evidence" click "#tab-runtime [data-runtime-evidence-kind='event']" >/dev/null
+runtime_drawer_open="$(read_ab "verify runtime evidence drawer" eval "Boolean(document.querySelector('[data-runtime-drawer]')?.open)")"
+if [[ "$runtime_drawer_open" != "true" ]]; then
+  echo "Runtime evidence control should open the provenance drawer, got $runtime_drawer_open" >&2
   exit 1
 fi
+ab "close runtime evidence drawer" press Escape >/dev/null
 
-flow_agent_count="$(read_ab "count execution agent nodes" get count "#session-flow-panel .flow-map-node-agent")"
-if [[ "$flow_agent_count" != "0" ]]; then
-  echo "Execution view should not render conversation agent nodes, got $flow_agent_count" >&2
-  exit 1
-fi
-
-flow_invocation_group_count="$(read_ab "count execution invocation groups" get count "#session-flow-panel .flow-map-fork-collapsed")"
-assert_positive_count "execution invocation groups" "$flow_invocation_group_count"
-
-flow_return_count="$(read_ab "count execution return nodes" get count "#session-flow-panel .flow-map-node-return")"
-if [[ "$flow_return_count" != "$flow_invocation_group_count" ]]; then
-  echo "Each invocation group should have one return node, got groups $flow_invocation_group_count returns $flow_return_count" >&2
-  exit 1
-fi
-
-flow_branch_summary_count="$(read_ab "count execution branch summaries" get count "#session-flow-panel .flow-branch-summary[href]")"
-assert_positive_count "execution branch summaries" "$flow_branch_summary_count"
-
-flow_branch_conversation_count="$(read_ab "count branch conversation links" get count "#session-flow-panel .flow-branch-summary[href^='/opencode/session/']")"
-if [[ "$flow_branch_conversation_count" != "$flow_branch_summary_count" ]]; then
-  echo "Each branch summary should link to its child conversation, got summaries $flow_branch_summary_count links $flow_branch_conversation_count" >&2
-  exit 1
-fi
-
-flow_branch_template_count="$(read_ab "count execution branch templates" get count "#session-flow-panel template[data-flow-branch-template]")"
-if [[ "$flow_branch_template_count" != "0" ]]; then
-  echo "Execution should not carry branch detail templates, got $flow_branch_template_count" >&2
-  exit 1
-fi
-
-flow_inspector_count="$(read_ab "count execution inspectors" get count "#session-flow-panel [data-flow-inspector]")"
-if [[ "$flow_inspector_count" != "0" ]]; then
-  echo "Execution should not require a side inspector, got $flow_inspector_count" >&2
-  exit 1
-fi
-
-flow_stat_count="$(read_ab "count execution summary stats" get count "#session-flow-panel .flow-map-stat")"
-assert_positive_count "execution summary stats" "$flow_stat_count"
-
-flow_overview_count="$(read_ab "count execution overview" get count "#session-flow-panel [data-flow-overview]")"
-if [[ "$flow_overview_count" != "1" ]]; then
-  echo "Execution should include one overview navigator, got $flow_overview_count" >&2
-  exit 1
-fi
-
-flow_root_line_count="$(read_ab "count execution root lines" get count "#session-flow-panel .flow-map-root-session > .flow-map-line")"
-if [[ "$flow_root_line_count" != "1" ]]; then
-  echo "Execution should include one root line for responsive wrapping, got $flow_root_line_count" >&2
-  exit 1
-fi
-
-flow_timing_count="$(read_ab "count legacy flow timing rows" get count "#session-flow-panel .flow-timing-row")"
-if [[ "$flow_timing_count" != "0" ]]; then
-  echo "Flow still included legacy timing rows: $flow_timing_count" >&2
-  exit 1
-fi
-
-flow_step_count="$(read_ab "count legacy flow step rows" get count ".flow-step")"
-if [[ "$flow_step_count" != "0" ]]; then
-  echo "Flow still included legacy step rows: $flow_step_count" >&2
-  exit 1
-fi
-
-flow_evidence_href="$(read_ab "read branch conversation link" get attr "#session-flow-panel .flow-branch-summary" href)"
-if ! [[ "$flow_evidence_href" =~ ^/opencode/session/ ]]; then
-  echo "Execution should expose a child conversation link, got $flow_evidence_href" >&2
-  exit 1
-fi
-ab "focus child conversation link" focus "#session-flow-panel .flow-branch-summary" >/dev/null
-ab "open child conversation" press Enter >/dev/null
-ab "wait for child conversation" wait --url "**/opencode/session/*" >/dev/null
-flow_evidence_navigation="$(read_ab "verify child conversation navigation" eval "JSON.stringify({ path: location.pathname, conversation: document.querySelectorAll('.message-turn').length > 0 })")"
-if ! printf '%s' "$flow_evidence_navigation" | grep -Eq 'path[^,]*\/opencode\/session\/' || ! printf '%s' "$flow_evidence_navigation" | grep -Eq 'conversation[^a-z]*true'; then
-  echo "Opening branch evidence should navigate to the child conversation page, got $flow_evidence_navigation" >&2
-  exit 1
-fi
+ab "reveal runtime lens tabs" scrollintoview "#tab-runtime .runtime-lens-tabs" >/dev/null
+ab "open runtime sessions lens" click "#tab-runtime [data-runtime-lens='sessions']" >/dev/null
+runtime_relationship_count="$(read_ab "count runtime relationship rows" get count "#tab-runtime .runtime-session-edge")"
+assert_positive_count "runtime relationship rows" "$runtime_relationship_count"
+runtime_session_link_count="$(read_ab "count canonical runtime session links" get count "#tab-runtime .runtime-session-edge a[href^='/opencode/session/']")"
+assert_positive_count "canonical runtime session links" "$runtime_session_link_count"
 
 toc_resize_count="$(read_ab "count toc resize handles" get count ".session-toc .toc-resize-handle")"
 if [[ "$toc_resize_count" != "1" ]]; then

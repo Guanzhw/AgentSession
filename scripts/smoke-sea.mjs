@@ -23,14 +23,6 @@ for (const [executable, expected] of [[viewer, "AgentSession —"], [mcp, "Agent
   }
 }
 
-const internalTool = spawnSync(viewer, ["--internal-analysis-tool"], { encoding: "utf8" });
-if (internalTool.status !== 2 || !internalTool.stderr.includes("analysis-tools.js")) {
-  throw new Error("Binary internal analysis-tool dispatch failed");
-}
-const internalValidator = spawnSync(viewer, ["--internal-analysis-validator"], { encoding: "utf8" });
-if (internalValidator.status !== 2 || !internalValidator.stderr.includes("analysis-validator.js")) {
-  throw new Error("Binary internal validator dispatch failed");
-}
 
 const temp = mkdtempSync(path.join(os.tmpdir(), "agentsession-sea-smoke-"));
 const port = 35000 + (process.pid % 20000);
@@ -135,6 +127,5 @@ console.log(JSON.stringify({
   arch: process.arch,
   viewer: true,
   embeddedAssets: true,
-  internalAnalysisCommands: true,
   mcpTools: 5
 }));

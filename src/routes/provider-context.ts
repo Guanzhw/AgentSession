@@ -9,6 +9,7 @@ export function providerRenderContext(
   return {
     provider,
     providers,
-    manageable: supportsLocalManagement(adapter)
+    manageable: supportsLocalManagement(adapter),
+    storageDiagnostic: adapter?.getStorageDiagnostic?.() || null
   };
 }

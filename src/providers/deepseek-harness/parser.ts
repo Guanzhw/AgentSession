@@ -42,6 +42,10 @@ export const DSH_KNOWN_EVENT_TYPES = new Set([
   "step/end",
   "step/start",
   "subagent/descriptor",
+  "team/member",
+  "team/message/delivered",
+  "team/message/queued",
+  "team/task",
   "todo/write",
   "tool-workflow/agent-end",
   "tool-workflow/agent-start",
@@ -93,6 +97,10 @@ function nonEmptyString(value: unknown, label: string): string {
     throw new DshSessionParseError(`Invalid ${label} in DeepSeek Harness session storage`);
   }
   return value;
+}
+
+function hasExactKeys(value: object, keys: readonly string[]): boolean {
+  return Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 }
 
 interface ZstdFrame {
@@ -198,6 +206,9 @@ function parseJsonl(content: string, filePath: string, allowTornFinalLine: boole
 }
 
 function expandPackedChunkRow(value: DshRecord, tag: string): DshRecord[] {
+  if (!hasExactKeys(value, ["type", "seq0", "time0", "data"])) {
+    throw new DshSessionParseError(`Malformed DeepSeek Harness ${tag} storage row: unexpected envelope fields`);
+  }
   const seq0 = nonNegativeSafeInteger(value.seq0, `${tag}.seq0`);
   const time0 = safeInteger(value.time0, `${tag}.time0`);
   const data = isRecord(value.data) ? value.data : null;
@@ -216,10 +227,18 @@ function expandPackedChunkRow(value: DshRecord, tag: string): DshRecord[] {
     throw new DshSessionParseError(`Malformed DeepSeek Harness ${tag} storage row member sequence`);
   }
   if (tag === "tool-call-chunks") {
+    const hasName = Object.hasOwn(data, "name");
+    if (!hasExactKeys(data, hasName
+      ? ["turn", "step", "index", "dt", "id", "name", "args"]
+      : ["turn", "step", "index", "dt", "id", "args"])) {
+      throw new DshSessionParseError(`Malformed DeepSeek Harness ${tag} storage row: unexpected data fields`);
+    }
     nonEmptyString(data.id, `${tag}.data.id`);
-    if (Object.hasOwn(data, "name") && typeof data.name !== "string") {
+    if (hasName && typeof data.name !== "string") {
       throw new DshSessionParseError(`Malformed DeepSeek Harness ${tag} storage row name`);
     }
+  } else if (!hasExactKeys(data, ["turn", "step", "index", "dt", "texts"])) {
+    throw new DshSessionParseError(`Malformed DeepSeek Harness ${tag} storage row: unexpected data fields`);
   }
 
   const events: DshRecord[] = [];
@@ -269,6 +288,9 @@ function validateDshHeader(header: DshRecord, filePath: string) {
   }
   nonEmptyString(header.id, "session.id");
   nonNegativeSafeInteger(header.createdAt, "session.createdAt");
+  if (header.delegationDepth !== undefined) {
+    nonNegativeSafeInteger(header.delegationDepth, "session.delegationDepth");
+  }
   if (header.cwd !== undefined && typeof header.cwd !== "string") {
     throw new DshSessionParseError("Invalid session.cwd in DeepSeek Harness session storage");
   }
@@ -276,6 +298,9 @@ function validateDshHeader(header: DshRecord, filePath: string) {
     throw new DshSessionParseError("Invalid session.parentSession in DeepSeek Harness session storage");
   }
   if (header.seedLength !== undefined) nonNegativeSafeInteger(header.seedLength, "session.seedLength");
+  if (header.agentPreset !== undefined && typeof header.agentPreset !== "string") {
+    throw new DshSessionParseError("Invalid session.agentPreset in DeepSeek Harness session storage");
+  }
 }
 
 function validateDshEvents(records: DshRecord[], filePath: string) {
@@ -307,7 +332,16 @@ export function parseDshSession(filePath: string): DshRecord[] {
   const records = storageRows.flatMap(decodeDshStorageRecord);
   if (!records.length) throw new DshSessionParseError(`Empty DeepSeek Harness session: ${filePath}`);
   validateDshHeader(records[0], filePath);
+  const seedLength = dshHeader(records)?.seedLength;
+  if (seedLength !== undefined && seedLength > records.length - 1) {
+    throw new DshSessionParseError(`Invalid session.seedLength ${String(seedLength)} in ${filePath}; exceeds stored event count`);
+  }
   validateDshEvents(records.slice(1), filePath);
+  for (const event of records.slice(1).filter((candidate) => candidate.type === "session/end-seed")) {
+    if (seedLength !== undefined && event.seq < seedLength) {
+      throw new DshSessionParseError(`Invalid session/end-seed boundary at sequence ${String(event.seq)} in ${filePath}`);
+    }
+  }
   return records;
 }
 

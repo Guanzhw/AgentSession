@@ -1,7 +1,5 @@
-import { OPENCODE_ANALYSIS_COMMAND } from "../analysis.js";
 import { readUserConfigDocument } from "../config.js";
 import { getProvider } from "../providers/index.js";
-import { supportsSessionAnalysis } from "../providers/kinds.js";
 import { renderSettingsPage } from "../views/settings.js";
 import { providerRenderContext } from "./provider-context.js";
 import type { ProviderRouteDeps } from "./route-deps.js";
@@ -27,7 +25,6 @@ export function registerSettingsRoutes(app: any, deps: ProviderRouteDeps) {
         terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),
         providerName: currentProvider.name,
         resumeDefault: currentProvider.resumeCommand || null,
-        analysisDefaultCommand: supportsSessionAnalysis(currentProvider) ? OPENCODE_ANALYSIS_COMMAND : null,
         providerAvailable: Boolean(adapter),
         ...providerRenderContext(providerSegment, providerInfo, adapter)
       }),
