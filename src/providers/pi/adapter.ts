@@ -166,8 +166,7 @@ const pi = {
     args: ["--session", "{sessionId}"]
   },
   capabilities: {
-    localManagement: true,
-    structuredSessionViews: true
+    localManagement: true
   },
   protocolCapabilities: {
     ...piProtocolCapabilities

@@ -27,7 +27,7 @@ const {
   permanentDelete,
   renameSession
 } = await import("../dist/src/meta.js");
-const { getIndexedListResults, getVisibleListResults } = await import("../dist/src/session-queries.js");
+const { createSessionCatalog } = await import("../dist/src/session-queries.js");
 const { getAllProviders } = await import("../dist/src/providers/index.js");
 const { EMPTY_PROJECT_FILTER } = await import("../dist/src/project-filter.js");
 const { renderSessionsPage } = await import("../dist/src/views/sessions.js");
@@ -60,6 +60,8 @@ function createProviderDb(dbPath) {
       summary_files INTEGER,
       time_archived INTEGER
     );
+    CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT);
+    CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, data TEXT);
   `);
   db.prepare("INSERT INTO project (id, name, worktree) VALUES (?, ?, ?)").run("p1", "Project One", "/p1");
   db.prepare("INSERT INTO project (id, name, worktree) VALUES (?, ?, ?)").run("p2", "Project Two", "/p2");
@@ -75,6 +77,8 @@ function createProviderDb(dbPath) {
   insert.run("c", "p2", "c", "Custom original", "/p2", now - 3000, now - 3000);
   insert.run("d", "p2", "d", "Middle work", "/p2", now - 2000, now - 4000);
   insert.run("e", "p2", "e", "Beta work", "/p2", now - 1000, now - 5000);
+  db.prepare("INSERT INTO message (id, session_id, data) VALUES (?, ?, ?)").run("message-a", "a", JSON.stringify({ role: "user", time: { created: now - 4900 } }));
+  db.prepare("INSERT INTO part (id, message_id, session_id, data) VALUES (?, ?, ?, ?)").run("part-a", "message-a", "a", JSON.stringify({ type: "text", text: "catalog needle" }));
   db.close();
 }
 
@@ -98,10 +102,12 @@ test("viewer metadata filters and manages SQLite and indexed providers without t
     assert.equal(excludedIds.has("d"), true);
     assert.equal(excludedIds.has("excluded-missing-source"), true);
 
-    const customMatch = getVisibleListResults({
-      dbPath,
-      metaMap,
-      excludedIds,
+    const sqliteCatalog = createSessionCatalog({
+      capabilities: { openCodeStatsStore: true },
+      getDataPath() { return dbPath; }
+    }, "codex", { metaMap, excludedIds });
+
+    const customMatch = sqliteCatalog.list({
       limit: 1,
       offset: 0,
       query: "renamed",
@@ -114,10 +120,7 @@ test("viewer metadata filters and manages SQLite and indexed providers without t
     assert.equal(customMatch.sessions[0].message_count, 0);
     assert.equal(customMatch.sessions[0].token_count, null);
 
-    const titlePage = getVisibleListResults({
-      dbPath,
-      metaMap,
-      excludedIds,
+    const titlePage = sqliteCatalog.list({
       limit: 2,
       offset: 1,
       sort: "title-asc"
@@ -139,10 +142,7 @@ test("viewer metadata filters and manages SQLite and indexed providers without t
       ) VALUES (?, NULL, NULL, ?, ?, '', ?, ?, 0, 0, 0, NULL)
     `).run("no-project", "no-project", "No project", Date.now(), Date.now());
     providerDb.close();
-    const sqliteUnknownProject = getVisibleListResults({
-      dbPath,
-      metaMap,
-      excludedIds,
+    const sqliteUnknownProject = sqliteCatalog.list({
       limit: 10,
       offset: 0,
       project: EMPTY_PROJECT_FILTER
@@ -160,23 +160,23 @@ test("viewer metadata filters and manages SQLite and indexed providers without t
     ];
     upsertIndex("codex", indexedRows);
 
-    const indexedCustomMatch = getIndexedListResults({
-      providerId: "codex",
-      metaMap,
-      excludedIds,
+    const indexedCatalog = createSessionCatalog({
+      capabilities: {},
+      getSession(id) { return indexedRows.find((session) => session.id === id) || null; },
+      searchMessages() { return [{ sessionId: "b" }]; }
+    }, "codex", { metaMap, excludedIds });
+
+    const indexedCustomMatch = indexedCatalog.list({
       limit: 1,
       offset: 0,
       query: "renamed",
       project: "/p1",
-      includedIds: ["b"],
+      starredOnly: true,
     });
     assert.equal(indexedCustomMatch.total, 1);
     assert.deepEqual(indexedCustomMatch.sessions.map((session) => session.id), ["b"]);
 
-    const indexedTitlePage = getIndexedListResults({
-      providerId: "codex",
-      metaMap,
-      excludedIds,
+    const indexedTitlePage = indexedCatalog.list({
       limit: 2,
       offset: 1,
       sort: "title-asc"
@@ -205,10 +205,7 @@ test("viewer metadata filters and manages SQLite and indexed providers without t
       messageCount: 1,
       tokenCount: 1
     }]);
-    const indexedUnknownProject = getIndexedListResults({
-      providerId: "codex",
-      metaMap,
-      excludedIds,
+    const indexedUnknownProject = indexedCatalog.list({
       limit: 10,
       offset: 0,
       project: EMPTY_PROJECT_FILTER
@@ -229,6 +226,22 @@ test("viewer metadata filters and manages SQLite and indexed providers without t
 
     const trash = getIndexedSessions("codex", 10, 0, "", "", "", "updated-desc", getDeletedIds("codex"));
     assert.deepEqual(trash.sessions.map((session) => session.id), ["d"]);
+
+    const sqliteCatalogPage = sqliteCatalog.list({ limit: 1, offset: 0, query: "renamed", project: "p1", starredOnly: true });
+    assert.deepEqual(sqliteCatalogPage.sessions.map((session) => session.id), ["b"]);
+    assert.equal(sqliteCatalogPage.sessions[0].title, "Renamed project");
+    assert.deepEqual(sqliteCatalog.projects({ query: "renamed" }).map((project) => project.id), ["p1"]);
+    assert.deepEqual(sqliteCatalog.byIds(["d"]).map((session) => session.id), ["d"]);
+    assert.deepEqual(sqliteCatalog.contentSearch({ query: "needle", limit: 10, offset: 0 }).sessions.map((session) => session.id), ["a"]);
+    assert.deepEqual(sqliteCatalog.overview({ starredOnly: true }), { totalSessions: 6, totalMessages: 1 });
+
+    const indexedCatalogPage = indexedCatalog.list({ limit: 1, offset: 0, query: "renamed", project: "/p1", starredOnly: true });
+    assert.deepEqual(indexedCatalogPage.sessions.map((session) => session.id), ["b"]);
+    assert.equal(indexedCatalogPage.sessions[0].title, "Renamed project");
+    assert.deepEqual(indexedCatalog.projects({ query: "renamed" }).map((project) => project.id), ["/p1"]);
+    assert.deepEqual(indexedCatalog.byIds(["d"]).map((session) => session.id), ["d"]);
+    assert.deepEqual(indexedCatalog.contentSearch({ query: "needle", limit: 10, offset: 0 }).sessions.map((session) => session.id), ["b"]);
+    assert.deepEqual(indexedCatalog.overview({ starredOnly: true }), { totalSessions: 1, totalMessages: 2 });
 
     const providers = new Map(getAllProviders().map((provider) => [provider.id, provider]));
     for (const id of ["claude-code", "codex", "copilot", "gemini", "pi", "deepseek-harness"]) {

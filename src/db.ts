@@ -244,10 +244,6 @@ export function getSessionSafe(id: any, pathOverride: string | undefined = undef
   };
 }
 
-export function getChildSessions(parentId: any, pathOverride = undefined) {
-  return getChildSessionsSafe(parentId, pathOverride);
-}
-
 export function getChildSessionsSafe(parentId: any, pathOverride: string | undefined = undefined) {
   const db = getDb(pathOverride);
   const rows = db.prepare(`
@@ -590,42 +586,6 @@ export function getModelDistribution(pathOverride = undefined, opts: { days?: nu
     WHERE ${where}
     GROUP BY 1, 2
     ORDER BY total_tokens DESC
-  `).all(...params);
-}
-
-export function getDailySessionCounts(days = 30, pathOverride = undefined, opts: { fromDate?: string; toDate?: string; project?: string; scope?: "root" | "all" } = {}) {
-  const d = getDb(pathOverride);
-  const conds: string[] = ["time_archived IS NULL"];
-  const params: any[] = [];
-
-  if (opts.fromDate && opts.toDate) {
-    const fromMs = new Date(opts.fromDate + "T00:00:00Z").getTime();
-    const toMs = new Date(opts.toDate + "T23:59:59.999Z").getTime();
-    conds.push("time_created >= ?");
-    conds.push("time_created <= ?");
-    params.push(fromMs, toMs);
-  } else {
-    const cutoff = Date.now() - days * 86400000;
-    conds.push("time_created >= ?");
-    params.push(cutoff);
-  }
-
-  if (opts.scope === "root") {
-    conds.push("parent_id IS NULL");
-  }
-  if (opts.project) {
-    conds.push("COALESCE(project_id, '') = ?");
-    params.push(opts.project);
-  }
-
-  const where = conds.join(" AND ");
-
-  return d.prepare(`
-    SELECT date(time_created / 1000, 'unixepoch') as day,
-           COUNT(*) as count
-    FROM session
-     WHERE ${where}
-     GROUP BY day ORDER BY day ASC
   `).all(...params);
 }
 

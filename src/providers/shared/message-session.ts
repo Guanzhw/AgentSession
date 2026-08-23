@@ -1,13 +1,12 @@
 import type { Message, RawSession, TokenUsage } from "../interface.js";
 import {
   buildAgentLoop,
-  buildAgentLoopTrace,
   type AgentLoop,
   type AgentLoopEvent
 } from "./agent-loop.js";
 import { asNumber } from "./parser.js";
 import { treeToContainer } from "./session-container.js";
-import type { SessionMetricsView } from "./session-metrics.js";
+import { buildSessionMetricSteps, type SessionMetricsView } from "./session-metrics.js";
 import { aggregateSessionTreeTokenUsage } from "./session-usage.js";
 import type {
   SessionMessageNode,
@@ -208,14 +207,14 @@ export function buildMessageSessionViewsFromTree(tree: SessionTree, loop: AgentL
   refreshMessageSessionTreeMetrics(tree);
   const container = treeToContainer(tree);
   const toolCounts = collectToolCounts(tree);
-  const trace = buildAgentLoopTrace(String(tree.session.id), loop);
+  const steps = buildSessionMetricSteps(loop);
   const metrics: SessionMetricsView = {
     sessionId: String(tree.session.id),
     totals: {
       messages: tree.metrics.totalMessages,
       toolCalls: tree.metrics.totalToolCalls,
       branches: tree.metrics.descendantCount,
-      steps: trace.steps.length,
+      steps: steps.length,
       inputTokens: tree.metrics.inputTokens,
       outputTokens: tree.metrics.outputTokens,
       reasoningTokens: tree.metrics.reasoningTokens,
@@ -230,28 +229,13 @@ export function buildMessageSessionViewsFromTree(tree: SessionTree, loop: AgentL
     tools: [...toolCounts.entries()]
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .map(([name, count]) => ({ name, count })),
-    steps: trace.steps.map((step, index) => ({
-      index: index + 1,
-      messageId: step.messageId,
-      snapshotId: null,
-      reason: step.reason,
-      duration: step.duration,
-      totalTokens: step.tokens.total || 0,
-      inputTokens: step.tokens.input || 0,
-      outputTokens: step.tokens.output || 0,
-      reasoningTokens: step.tokens.reasoning || 0,
-      cacheReadTokens: step.tokens.cache?.read || 0,
-      cacheWriteTokens: step.tokens.cache?.write || 0,
-      cost: step.cost,
-      contextItems: step.spans.length
-    }))
+    steps
   };
 
   return {
     tree,
     container,
-    metrics,
-    trace
+    metrics
   };
 }
 

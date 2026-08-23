@@ -153,7 +153,7 @@ const openclaw = {
       ? { executable: "openclaw", args: ["tui", "--local", "--session", sessionKey] }
       : null;
   },
-  capabilities: { localManagement: true, structuredSessionViews: true },
+  capabilities: { localManagement: true },
   protocolCapabilities: openClawProtocolCapabilities,
   detect() { return existsSync(path.join(getOpenClawDir(), "agents")); },
   getUnavailableReason() {

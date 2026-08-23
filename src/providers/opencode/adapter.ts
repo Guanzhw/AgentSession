@@ -35,8 +35,7 @@ const baseAdapter = createOpenCodeSqliteAdapter({
   },
   capabilities: {
     localManagement: true,
-    openCodeStatsStore: true,
-    structuredSessionViews: true
+    openCodeStatsStore: true
   },
   protocolCapabilities: openCodeProtocolCapabilities
 });

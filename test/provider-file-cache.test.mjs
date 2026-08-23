@@ -136,7 +136,7 @@ test("Claude file cache preserves canonical subagent families and refreshes chan
     assert.ok(claudeCode.getTokenStats(30).some((day) => day.outputTokens >= 14));
     assert.match(JSON.stringify(claudeCode.getSessionTree("root-canonical")), /child-canonical/);
     assert.ok(claudeCode.getSystemPrompts("root-canonical"));
-    assert.equal(claudeCode.getTrace("root-canonical")?.summary?.totalSteps, 1);
+    assert.equal(claudeCode.getSessionMetrics("root-canonical")?.totals.steps, 1);
 
     const partialSystemRecord = claudeRecords({
       sessionId: "root-canonical",
@@ -199,7 +199,7 @@ function codexRecords(marker) {
   ];
 }
 
-test("Codex file cache exposes shared Agent Loop trace and prompt evidence", async () => {
+test("Codex file cache exposes shared Agent Loop metrics and prompt evidence", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "opensession-codex-cache-"));
   try {
     const sessions = path.join(root, "sessions", "2026", "07", "12");
@@ -212,7 +212,7 @@ test("Codex file cache exposes shared Agent Loop trace and prompt evidence", asy
     const scanned = await collect(codex.scan());
     assert.deepEqual(scanned.map((session) => session.id), ["codex-canonical"]);
     assert.equal(codex.searchMessages("codex cached marker")[0]?.sessionId, "codex-canonical");
-    assert.equal(codex.getTrace("codex-canonical")?.summary?.totalSteps, 1);
+    assert.equal(codex.getSessionMetrics("codex-canonical")?.totals.steps, 1);
     const prompts = codex.getSystemPrompts("codex-canonical");
     assert.equal(prompts?.mode, "codex-resolved");
     assert.match(JSON.stringify(prompts), /codex cached marker/);
@@ -418,7 +418,7 @@ test("Copilot CLI embeds inline subagents, reads catalog telemetry, and excludes
     assert.equal(tree.detachedChildren.length, 0);
     assert.match(JSON.stringify(tree), /Copilot child visible marker/);
     assert.doesNotMatch(JSON.stringify(tree), /copilot-(hidden-system|transformed|opaque|encrypted|detailed)-marker/);
-    assert.equal(copilot.getTrace("copilot-canonical")?.summary?.totalSteps, 2);
+    assert.equal(copilot.getSessionMetrics("copilot-canonical")?.totals.steps, 2);
     assert.equal(copilot.getSystemPrompts("copilot-canonical")?.mode, "copilot-resolved");
     assert.match(JSON.stringify(copilot.getRuntimeEnvironment("copilot-canonical")), /AGENTS\.md/);
     const day = copilot.getTokenStats(30).find((item) => item.day === recentFixtureDay());
@@ -506,7 +506,7 @@ test("Gemini file cache skips corrupt files, reuses parsed data, and refreshes c
     assert.deepEqual(gemini.searchMessages("Gemini provider diagnostic marker"), []);
     assert.ok(gemini.getTokenStats(30).some((day) => day.outputTokens === 5));
     assert.match(JSON.stringify(gemini.getSessionTree("gemini-canonical")), /gemini cached marker/);
-    assert.equal(gemini.getTrace("gemini-canonical")?.summary?.totalSteps, 1);
+    assert.equal(gemini.getSessionMetrics("gemini-canonical")?.totals.steps, 1);
     assert.equal(gemini.getSystemPrompts("gemini-canonical")?.mode, "gemini-resolved");
     assert.equal(gemini.getRuntimeEnvironment("gemini-canonical")?.sessionId, "gemini-canonical");
     assert.equal(gemini.lifecycle, "legacy");
@@ -540,7 +540,7 @@ test("Pi file cache preserves active-branch sessions and the last good transcrip
     assert.equal(pi.getMessages("019f7b00-0000-7000-8000-000000000001").some((message) => message.content.includes("abandoned")), false);
     assert.ok(pi.getTokenStats(30).some((day) => day.outputTokens === 9 && day.cacheReadTokens === 6));
     assert.match(JSON.stringify(pi.getSessionTree("019f7b00-0000-7000-8000-000000000001")), /call_read_1/);
-    assert.ok(pi.getTrace("019f7b00-0000-7000-8000-000000000001")?.summary?.totalSteps);
+    assert.ok(pi.getSessionMetrics("019f7b00-0000-7000-8000-000000000001")?.totals.steps);
     assert.equal(pi.getSystemPrompts("019f7b00-0000-7000-8000-000000000001")?.mode, "pi-resolved");
 
     writeFileSync(sessionFile, `${fixture}{"type":"message","id":`);

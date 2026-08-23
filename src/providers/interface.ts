@@ -141,7 +141,6 @@ export interface ProviderAdapter {
     localManagement?: boolean;
     /** Data path uses the OpenCode SQLite schema accepted by native stats and list queries. */
     openCodeStatsStore?: boolean;
-    structuredSessionViews?: boolean;
   };
   detect(): boolean;
   getDataPath(): string | null;
@@ -155,7 +154,6 @@ export interface ProviderAdapter {
   exportSession?(sessionId: string): unknown;
   getRuntimeEnvironment?(sessionId: string): RuntimeEnvironmentView | null;
   getSystemPrompts?(sessionId: string): unknown;
-  getTrace?(sessionId: string): unknown;
   getSessionTree?(sessionId: string): unknown;
   getSessionContainer?(sessionId: string): unknown;
   getSessionMetrics?(sessionId: string): unknown;

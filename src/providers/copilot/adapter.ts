@@ -111,8 +111,7 @@ const copilot = {
   icon: icons.copilot,
   lifecycle: "legacy",
   capabilities: {
-    localManagement: true,
-    structuredSessionViews: true
+    localManagement: true
   },
   protocolCapabilities: copilotProtocolCapabilities,
 

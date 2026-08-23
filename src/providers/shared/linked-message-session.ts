@@ -156,7 +156,7 @@ function attachEvidenceChildren(
 
   // A protocol task/run proves the part launched a subagent even when the
   // part's tool name is not a known launcher label. Mark it so Tree, Runtime,
-  // Trace, and rendering consume the normalized fact without provider-id
+  // and rendering consume the normalized fact without provider-id
   // branching.
   for (const part of subagentMarkedParts) {
     const state = part.data?.state && typeof part.data.state === "object" ? part.data.state : {};

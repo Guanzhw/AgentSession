@@ -8,7 +8,7 @@ import {
   type MessageSessionBundle,
   type SubagentEvidence
 } from "../shared/linked-message-session.js";
-import type { SessionMetricsView } from "../shared/session-metrics.js";
+import { MAX_SESSION_METRIC_STEPS, type SessionMetricsView } from "../shared/session-metrics.js";
 import type { SessionTree } from "../shared/session-tree.js";
 
 type Row = Record<string, any>;
@@ -27,35 +27,6 @@ export interface SystemPromptSection {
   items: SystemPromptItem[];
 }
 
-interface ClaudeCodeTraceSpan {
-  id: string;
-  name: string;
-  category: string;
-  mcpServer?: string;
-  timeStart: number;
-  timeEnd: number;
-  duration: number;
-  status: string | null;
-  input: string | null;
-  output: string | null;
-  title: string | null;
-}
-
-export interface ClaudeCodeTraceStep {
-  messageId: string;
-  agent: string | null;
-  model: string | null;
-  cost: number;
-  tokens: TokenUsage;
-  reason: string | null;
-  timeStart: number;
-  timeEnd: number;
-  duration: number;
-  spans: ClaudeCodeTraceSpan[];
-}
-
-const MAX_TRACE_STEPS = 200;
-
 function asTime(value: unknown, fallback = 0) {
   if (typeof value === "string" && value) {
     const parsed = new Date(value).getTime();
@@ -72,11 +43,6 @@ function compact(value: unknown, limit = 420) {
   const text = typeof value === "string" ? value : JSON.stringify(value);
   const clean = text.replace(/\s+/g, " ").trim();
   return clean.length > limit ? `${clean.slice(0, limit - 3)}...` : clean;
-}
-
-function stringify(value: unknown, limit = 500) {
-  if (value == null) return null;
-  return compact(value, limit);
 }
 
 function contentBlocks(content: unknown): Row[] {
@@ -247,15 +213,6 @@ function addTokens(target: TokenUsage, source: TokenUsage | null | undefined) {
   );
 }
 
-function modelLabel(data: Row) {
-  const model = data.model;
-  if (typeof model === "string") return model;
-  if (model && typeof model === "object") {
-    return model.modelID || model.providerID || null;
-  }
-  return data.modelID || null;
-}
-
 function spanTime(part: Row, fallback = 0) {
   const timeStart = asNumber(part.timeStart) || asNumber(part.data?.state?.time?.start) || fallback;
   const timeEnd = asNumber(part.timeEnd) || asNumber(part.data?.state?.time?.end) || timeStart;
@@ -266,97 +223,50 @@ function spanTime(part: Row, fallback = 0) {
   };
 }
 
-function traceSpan(part: Row, fallbackTime = 0): ClaudeCodeTraceSpan {
+type ClaudeMetricAccumulator = {
+  messageId: string;
+  cost: number;
+  tokens: TokenUsage;
+  timeStart: number;
+  timeEnd: number;
+  partDurations: number[];
+  contextItems: number;
+  hasToolReason: boolean;
+  hasTextReason: boolean;
+  hasReasoningReason: boolean;
+};
+
+function addClaudeMetricPart(step: ClaudeMetricAccumulator, part: Row, fallbackTime: number) {
   const data = part.data || {};
   const partType = String(part.type || data.type || "unknown");
   const time = spanTime(part, fallbackTime);
-  if (partType === "reasoning") {
-    return {
-      id: String(part.id),
-      name: "reasoning",
-      category: "reasoning",
-      ...time,
-      status: null,
-      input: null,
-      output: stringify(data.text),
-      title: "reasoning"
-    };
-  }
-  if (partType === "text") {
-    return {
-      id: String(part.id),
-      name: "text",
-      category: "text",
-      ...time,
-      status: null,
-      input: null,
-      output: stringify(data.text),
-      title: "assistant text"
-    };
-  }
-
-  const tool = String(part.tool || data.tool || partType);
-  const classification = classifySharedTool(tool, mergeToolMetadata(data.state?.metadata, data.metadata));
-  const state = data.state || {};
-  return {
-    id: String(part.id),
-    name: tool,
-    category: classification.category,
-    ...(classification.mcpServer ? { mcpServer: classification.mcpServer } : {}),
-    ...time,
-    status: state.status || null,
-    input: stringify(state.input),
-    output: stringify(state.output ?? state.error),
-    title: state.title || state.input?.description || state.input?.command || state.input?.file_path || state.input?.filePath || null
-  };
-}
-
-function startStep(message: SessionTree["messages"][number]): ClaudeCodeTraceStep {
-  const data = message.data || {};
-  const tokens = emptyTokens();
-  addTokens(tokens, data.tokens || null);
-  return {
-    messageId: message.id,
-    agent: typeof data.agent === "string" ? data.agent : null,
-    model: modelLabel(data),
-    cost: asNumber(data.cost),
-    tokens,
-    reason: null,
-    timeStart: asNumber(message.timeCreated),
-    timeEnd: asNumber(message.timeCreated),
-    duration: 0,
-    spans: []
-  };
-}
-
-function finalizeStep(step: ClaudeCodeTraceStep) {
-  const spanTimes = step.spans.flatMap((span) => [span.timeStart, span.timeEnd]).filter(Boolean);
+  const spanTimes = [time.timeStart, time.timeEnd].filter(Boolean);
   if (spanTimes.length) {
     step.timeStart = Math.min(step.timeStart || spanTimes[0], ...spanTimes);
     step.timeEnd = Math.max(step.timeEnd || spanTimes[0], ...spanTimes);
   }
-  step.duration = step.timeStart && step.timeEnd
-    ? Math.max(0, step.timeEnd - step.timeStart)
-    : step.spans.reduce((sum, span) => sum + asNumber(span.duration), 0);
-  if (!step.reason) {
-    if (step.spans.some((span) => ["tool", "mcp", "agent"].includes(span.category))) {
-      step.reason = "tool-calls";
-    } else if (step.spans.some((span) => span.category === "text")) {
-      step.reason = "message";
-    } else if (step.spans.some((span) => span.category === "reasoning")) {
-      step.reason = "reasoning";
+  step.partDurations.push(asNumber(time.duration));
+  step.contextItems += 1;
+  if (partType === "reasoning") {
+    step.hasReasoningReason = true;
+  } else if (partType === "text") {
+    step.hasTextReason = true;
+  } else {
+    const tool = String(part.tool || data.tool || partType);
+    const classification = classifySharedTool(tool, mergeToolMetadata(data.state?.metadata, data.metadata));
+    if (["tool", "mcp", "agent"].includes(classification.category)) {
+      step.hasToolReason = true;
     }
   }
-  return step;
 }
 
-function buildClaudeCodeTraceFromTree(sessionId: string, tree: SessionTree) {
-  let current: ClaudeCodeTraceStep | null = null;
-  const steps: ClaudeCodeTraceStep[] = [];
+function buildClaudeCodeSessionMetricSteps(tree: SessionTree): SessionMetricsView["steps"] {
+  let current: ClaudeMetricAccumulator | null = null;
+  const steps: ClaudeMetricAccumulator[] = [];
 
   const flush = () => {
     if (!current) return;
-    steps.push(finalizeStep(current));
+    steps.push(current);
     current = null;
   };
 
@@ -367,49 +277,44 @@ function buildClaudeCodeTraceFromTree(sessionId: string, tree: SessionTree) {
       continue;
     }
     if (!current) {
-      current = startStep(message);
-    } else {
-      addTokens(current.tokens, message.data?.tokens || null);
-      if (!current.model) current.model = modelLabel(message.data || {});
+      current = {
+        messageId: message.id,
+        cost: asNumber(message.data?.cost),
+        tokens: emptyTokens(),
+        timeStart: asNumber(message.timeCreated),
+        timeEnd: asNumber(message.timeCreated),
+        partDurations: [],
+        contextItems: 0,
+        hasToolReason: false,
+        hasTextReason: false,
+        hasReasoningReason: false
+      };
     }
-
+    addTokens(current.tokens, message.data?.tokens || null);
     for (const part of message.parts || []) {
-      current.spans.push(traceSpan(part as Row, asNumber(message.timeCreated)));
+      addClaudeMetricPart(current, part as Row, asNumber(message.timeCreated));
     }
   }
   flush();
 
-  const truncated = steps.length > MAX_TRACE_STEPS;
-  const visibleSteps = steps.slice(0, MAX_TRACE_STEPS);
-  const summary = visibleSteps.reduce(
-    (acc, step) => {
-      acc.totalSteps += 1;
-      acc.totalSpans += step.spans.length;
-      acc.totalDuration += asNumber(step.duration);
-      acc.totalCost += asNumber(step.cost);
-      acc.totalTokens += asNumber(step.tokens.total);
-      return acc;
-    },
-    { totalSteps: 0, totalSpans: 0, totalDuration: 0, totalCost: 0, totalTokens: 0 }
-  );
-
-  return {
-    sessionId,
-    steps: visibleSteps,
-    summary,
-    truncated
-  };
-}
-
-function stepsToMetrics(steps: ClaudeCodeTraceStep[]): SessionMetricsView["steps"] {
-  return steps.map((step, index) => {
+  return steps.slice(0, MAX_SESSION_METRIC_STEPS).map((step, index) => {
+    const duration = step.timeStart && step.timeEnd
+      ? Math.max(0, step.timeEnd - step.timeStart)
+      : step.partDurations.reduce((sum, value) => sum + value, 0);
+    const reason = step.hasToolReason
+      ? "tool-calls"
+      : step.hasTextReason
+        ? "message"
+        : step.hasReasoningReason
+          ? "reasoning"
+          : null;
     const cache = step.tokens.cache || {};
     return {
       index: index + 1,
       messageId: step.messageId,
       snapshotId: null,
-      reason: step.reason,
-      duration: asNumber(step.duration),
+      reason,
+      duration,
       totalTokens: asNumber(step.tokens.total),
       inputTokens: asNumber(step.tokens.input),
       outputTokens: asNumber(step.tokens.output),
@@ -417,26 +322,25 @@ function stepsToMetrics(steps: ClaudeCodeTraceStep[]): SessionMetricsView["steps
       cacheReadTokens: asNumber(cache.read),
       cacheWriteTokens: asNumber(cache.write),
       cost: asNumber(step.cost),
-      contextItems: step.spans.length
+      contextItems: step.contextItems
     };
   });
 }
 
 function enrichClaudeCodeSessionViews(base: any) {
-  const trace = buildClaudeCodeTraceFromTree(String(base.tree.session.id), base.tree);
+  const steps = buildClaudeCodeSessionMetricSteps(base.tree);
   const metrics: SessionMetricsView = {
     ...base.metrics,
     totals: {
       ...base.metrics.totals,
-      steps: trace.steps.length,
-      cost: trace.summary.totalCost
+      steps: steps.length,
+      cost: steps.reduce((sum, step) => sum + asNumber(step.cost), 0)
     },
-    steps: stepsToMetrics(trace.steps)
+    steps
   };
   return {
     ...base,
-    metrics,
-    trace
+    metrics
   };
 }
 

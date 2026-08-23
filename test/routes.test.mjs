@@ -17,6 +17,7 @@ const { Router } = await import("../dist/src/router.js");
 const { getProvider } = await import("../dist/src/providers/index.js");
 const { providerRenderContext } = await import("../dist/src/routes/provider-context.js");
 const { registerSessionDetail } = await import("../dist/src/routes/session-detail.js");
+const { getSessionDocument } = await import("../dist/src/session-queries.js");
 const { registerSessions } = await import("../dist/src/routes/sessions.js");
 const { renderSessionsPage } = await import("../dist/src/views/sessions.js");
 const { registerSettingsStatsTrash } = await import("../dist/src/routes/settings-stats-trash.js");
@@ -141,6 +142,17 @@ test("session exports stay complete and keep the HTTP server alive", async (t) =
     providerMap: new Map([[provider.id, provider]]),
     providerInfo: []
   });
+
+  renameSession("codex", "session-1", "Viewer export title");
+  const document = getSessionDocument(provider, "codex", "session-1");
+  assert.equal(document.session.title, "Viewer export title");
+  assert.equal(document.apiSession.title, "Export fixture");
+  assert.equal(document.exportSession.title, "Export fixture");
+  assert.equal(document.messages[0].data.role, "assistant");
+  assert.equal(document.partsByMessage.get("message-1")[0].data.text, "Export body");
+  assert.equal(document.apiMessages[0].content, "Export body");
+  assert.equal(document.exportMessages[0].parts[0].text, "Export body");
+
   const route = routes.find(({ pattern }) => pattern instanceof RegExp && pattern.source.includes("export"));
   assert.ok(route);
 
@@ -239,6 +251,55 @@ test("session exports stay complete and keep the HTTP server alive", async (t) =
   assert.equal(followUp.status, 404);
   assert.equal(await followUp.text(), "not found");
   assert.deepEqual(requestErrors, []);
+});
+
+test("SQLite session documents preserve parsed parts, todos, and viewer metadata", () => {
+  const documentTemp = mkdtempSync(path.join(os.tmpdir(), "agentsession-document-"));
+  const dbPath = path.join(documentTemp, "sessions.db");
+  try {
+    const db = new DatabaseSync(dbPath);
+    db.exec(`
+      CREATE TABLE session (
+        id TEXT PRIMARY KEY, project_id TEXT, parent_id TEXT, slug TEXT, title TEXT,
+        directory TEXT, time_created INTEGER, time_updated INTEGER,
+        summary_additions INTEGER, summary_deletions INTEGER, summary_files INTEGER,
+        time_archived INTEGER
+      );
+      CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT);
+      CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, data TEXT);
+      CREATE TABLE todo (
+        session_id TEXT, content TEXT, status TEXT, priority TEXT,
+        position INTEGER, time_created INTEGER
+      );
+    `);
+    db.prepare("INSERT INTO session VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, 0, 0, 0, NULL)")
+      .run("sqlite-document", "sqlite-document", "SQLite source title", documentTemp, 1000, 2000);
+    db.prepare("INSERT INTO message VALUES (?, ?, ?)")
+      .run("sqlite-message", "sqlite-document", JSON.stringify({ role: "assistant", time: { created: 1500 } }));
+    db.prepare("INSERT INTO part VALUES (?, ?, ?, ?)")
+      .run("sqlite-part", "sqlite-message", "sqlite-document", JSON.stringify({ type: "text", text: "SQLite body" }));
+    db.prepare("INSERT INTO todo VALUES (?, ?, ?, ?, ?, ?)")
+      .run("sqlite-document", "Verify SQLite fidelity", "pending", "high", 0, 1600);
+    db.close();
+
+    renameSession("opencode", "sqlite-document", "Viewer SQLite title");
+    const document = getSessionDocument({
+      capabilities: { openCodeStatsStore: true },
+      getDataPath() { return dbPath; }
+    }, "opencode", "sqlite-document");
+
+    assert.equal(document.session.title, "Viewer SQLite title");
+    assert.equal(document.apiSession.title, "Viewer SQLite title");
+    assert.equal(document.exportSession.title, "Viewer SQLite title");
+    assert.equal(document.messages[0].data.role, "assistant");
+    assert.equal(document.partsByMessage.get("sqlite-message")[0].data.text, "SQLite body");
+    assert.equal(document.apiMessages[0].parts[0].text, "SQLite body");
+    assert.equal(document.exportMessages[0].parts[0].text, "SQLite body");
+    assert.equal(document.todos[0].content, "Verify SQLite fidelity");
+  } finally {
+    closeDb(dbPath);
+    rmSync(documentTemp, { recursive: true, force: true });
+  }
 });
 
 test("system prompt endpoint returns only adapter-resolved evidence", async () => {
@@ -380,6 +441,11 @@ test("session protocol route exposes descriptors and protocol with 404 semantics
     providerMap: new Map([[provider.id, provider], [plain.id, plain]]),
     providerInfo: []
   });
+  assert.equal(
+    routes.some(({ pattern }) => pattern instanceof RegExp && (/\/trace\$/.test(pattern.source) || /\/metrics\$/.test(pattern.source))),
+    false,
+    "retired trace and metrics endpoints stay unregistered"
+  );
   const route = routes.find(({ pattern }) => pattern instanceof RegExp && pattern.source.includes("/protocol$"));
   assert.ok(route, "protocol route is registered");
 

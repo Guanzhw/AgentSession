@@ -1,12 +1,6 @@
-import { getOverviewStats, listSessionProjects } from "../db.js";
 import { getAllMeta, getDeletedIds, getExcludedIds } from "../meta.js";
-import { getCrossProviderOverview, getCrossProviderSessionProjects, getCrossProviderSessions, getIndexedOverview, getIndexedSessionProjects } from "../index-db.js";
+import { getCrossProviderOverview, getCrossProviderSessionProjects, getCrossProviderSessions } from "../index-db.js";
 import {
-  getVisibleListResults,
-  getIndexedListResults,
-  getSearchResults,
-  getProviderSearchResults,
-  getStarredIds,
   getTitleOverrides,
   resolveSessionSearchMode,
   resolveSessionSort,
@@ -14,11 +8,11 @@ import {
   resolveSessionKindFilter,
   toApiSessionShape,
   normalizeSessionRecord,
-  enrichSession
+  enrichSession,
+  createSessionCatalog
 } from "../session-queries.js";
 import { json, missingProviderResponse } from "../server-helpers.js";
 import { attachSessionListStats } from "../session-list-stats.js";
-import { usesOpenCodeStatsStore } from "../providers/kinds.js";
 import { getProvider } from "../providers/index.js";
 import { renderSessionsPage } from "../views/sessions.js";
 import { providerRenderContext } from "./provider-context.js";
@@ -156,72 +150,12 @@ export function registerSessions(
       const sort = resolveSessionSort(url.searchParams);
       const starredOnly = resolveStarredFilter(url.searchParams);
       const sessionKind = resolveSessionKindFilter(url.searchParams);
-
-      if (usesOpenCodeStatsStore(adapter)) {
-        const dbPath = adapter.getDataPath();
-        const metaMap = getAllMeta(providerId);
-        const excludedIds = getExcludedIds(providerId) as Set<string>;
-
-        let sessions;
-        let total;
-        if (query && searchMode === "content") {
-          const results = getSearchResults(query, apiLimit, apiOffset, dbPath, excludedIds, sessionKind, metaMap);
-          sessions = results.sessions.map((session: any) => enrichSession(session, metaMap));
-          total = results.total;
-        } else {
-          const results = getVisibleListResults({
-            dbPath,
-            metaMap,
-            excludedIds,
-            limit: apiLimit,
-            offset: apiOffset,
-            query,
-            range,
-            project,
-            sort,
-            starredOnly,
-            sessionKind
-          });
-          sessions = results.sessions;
-          total = results.total;
-        }
-        const normalized = sessions.map((session: any) => normalizeSessionRecord(session));
-        attachSessionListStats(normalized, () => adapter, providerId);
-
-        return json(res, {
-          sessions: normalized.map((session: any) => toApiSessionShape(session)),
-          total,
-          offset: apiOffset,
-          hasMore: apiOffset + sessions.length < total
-        });
-      }
-
-      const metaMap = getAllMeta(providerId);
-      const includedIds = starredOnly ? getStarredIds(metaMap) : undefined;
-      const excludedIds = getExcludedIds(providerId) as Set<string>;
-      let sessions;
-      let total;
-      if (query && searchMode === "content") {
-        const results = getProviderSearchResults(adapter, query, apiLimit, apiOffset, sessionKind, metaMap, excludedIds);
-        sessions = results.sessions;
-        total = results.total;
-      } else {
-        const results = getIndexedListResults({
-          providerId,
-          metaMap,
-          limit: apiLimit,
-          offset: apiOffset,
-          range,
-          query,
-          project,
-          sort,
-          includedIds,
-          excludedIds,
-          sessionKind
-        });
-        sessions = results.sessions.map((session: any) => normalizeSessionRecord(session));
-        total = results.total;
-      }
+      const catalog = createSessionCatalog(adapter, providerId);
+      const results = query && searchMode === "content"
+        ? catalog.contentSearch({ query, limit: apiLimit, offset: apiOffset, sessionKind })
+        : catalog.list({ limit: apiLimit, offset: apiOffset, query, range, project, sort, starredOnly, sessionKind });
+      const sessions = results.sessions;
+      const total = results.total;
       attachSessionListStats(sessions, () => adapter, providerId);
 
       return json(res, {
@@ -275,98 +209,12 @@ export function registerSessions(
     const renderContext = providerRenderContext(providerSegment, providerInfo, adapter);
 
     try {
-      if (usesOpenCodeStatsStore(adapter)) {
-        const dbPath = adapter.getDataPath();
-        const metaMap = getAllMeta(providerSegment);
-        const excludedIds = getExcludedIds(providerSegment);
-        const { sessions, total } = getVisibleListResults({
-          dbPath,
-          metaMap,
-          excludedIds,
-          limit,
-          offset,
-          query,
-          range,
-          project,
-          sort,
-          starredOnly,
-          sessionKind
-        });
-        const enrichedSessions = sessions.map((session: any) => normalizeSessionRecord(session));
-        attachSessionListStats(enrichedSessions, () => adapter, providerSegment);
-        const overviewStats = getOverviewStats(dbPath);
-        const deletedCount = getDeletedIds(providerSegment).length;
-        const includedIds = starredOnly ? getStarredIds(metaMap) : undefined;
-        const projectOptions = listSessionProjects(
-          query,
-          range,
-          dbPath,
-          excludedIds,
-          includedIds,
-          sessionKind,
-          getTitleOverrides(metaMap)
-        );
-        return {
-          status: 200,
-          body: renderSessionsPage({
-            sessions: enrichedSessions,
-            total,
-            limit,
-            offset,
-            query,
-            range,
-            project,
-            sort,
-            starredOnly,
-            sessionKind,
-            projectOptions,
-            searchMode: "list",
-            totalMessages: overviewStats.totalMessages,
-            deletedCount,
-            ...renderContext
-          }),
-          contentType: "text/html; charset=utf-8"
-        };
-      }
-
-      const metaMap = getAllMeta(providerSegment);
-      const includedIds = starredOnly ? getStarredIds(metaMap) : undefined;
-      const excludedIds = getExcludedIds(providerSegment);
-      const indexed = getIndexedListResults({
-        providerId: providerSegment,
-        metaMap,
-        limit,
-        offset,
-        range,
-        query,
-        project,
-        sort,
-        includedIds,
-        excludedIds,
-        sessionKind
-      });
-      const titleOverrides = getTitleOverrides(metaMap);
-      const overviewStats = getIndexedOverview(
-        providerSegment,
-        range,
-        query,
-        project,
-        sessionKind,
-        excludedIds,
-        includedIds,
-        titleOverrides
-      );
-      const projectOptions = getIndexedSessionProjects(
-        providerSegment,
-        range,
-        query,
-        includedIds,
-        sessionKind,
-        excludedIds,
-        titleOverrides
-      );
-      const sessions = indexed.sessions.map((session: any) => normalizeSessionRecord(session));
+      const catalog = createSessionCatalog(adapter, providerSegment);
+      const indexed = catalog.list({ limit, offset, range, query, project, sort, starredOnly, sessionKind });
+      const sessions = indexed.sessions;
       attachSessionListStats(sessions, () => adapter, providerSegment);
+      const overviewStats = catalog.overview({ range, query, project, sessionKind, starredOnly });
+      const projectOptions = catalog.projects({ range, query, sessionKind, starredOnly });
       return {
         status: 200,
         body: renderSessionsPage({
@@ -411,23 +259,8 @@ export function registerSessions(
     const renderContext = providerRenderContext(providerSegment, providerInfo, adapter);
 
     try {
-      if (usesOpenCodeStatsStore(adapter)) {
-        const dbPath = adapter.getDataPath();
-        const metaMap = getAllMeta(providerSegment);
-        const excludedIds = getExcludedIds(providerSegment);
-        const results = getSearchResults(query, limit, offset, dbPath, excludedIds, "all", metaMap);
-        const enrichedSessions = results.sessions.map((session: any) => normalizeSessionRecord(enrichSession(session, metaMap)));
-        attachSessionListStats(enrichedSessions, () => adapter, providerSegment);
-        return {
-          status: 200,
-          body: renderSessionsPage({ ...results, sessions: enrichedSessions, limit, offset, query, searchMode: "content", ...renderContext }),
-          contentType: "text/html; charset=utf-8"
-        };
-      }
-
-      const metaMap = getAllMeta(providerSegment);
-      const excludedIds = getExcludedIds(providerSegment);
-      const results = getProviderSearchResults(adapter, query, limit, offset, "all", metaMap, excludedIds);
+      const catalog = createSessionCatalog(adapter, providerSegment);
+      const results = catalog.contentSearch({ query, limit, offset, sessionKind: "all" });
       attachSessionListStats(results.sessions, () => adapter, providerSegment);
       return {
         status: 200,

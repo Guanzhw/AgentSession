@@ -62,7 +62,8 @@ import {
 import { buildMessageSessionViews } from "../dist/src/providers/shared/message-session.js";
 import { buildSessionMetrics } from "../dist/src/providers/shared/session-metrics.js";
 import { buildLinkedMessageSessionViews } from "../dist/src/providers/shared/linked-message-session.js";
-import { buildAgentLoop, buildAgentLoopTrace } from "../dist/src/providers/shared/agent-loop.js";
+import { buildAgentLoop } from "../dist/src/providers/shared/agent-loop.js";
+import { buildSessionMetricSteps } from "../dist/src/providers/shared/session-metrics.js";
 import {
   classifySharedTool,
   isSubagentTool,
@@ -71,10 +72,8 @@ import {
 import { createOpenCodeSqliteAdapter } from "../dist/src/providers/opencode/sqlite-adapter.js";
 import { createIncrementalTokenStats, createSessionFileStore } from "../dist/src/providers/shared/file-adapter-helpers.js";
 import {
-  supportsAgentLoopViews,
   supportsLocalManagement,
   supportsRuntimeEnvironment,
-  supportsSessionTrace,
   supportsSystemPromptEvidence,
   usesOpenCodeStatsStore
 } from "../dist/src/providers/kinds.js";
@@ -297,11 +296,11 @@ test("normalized message providers build structured tree, metrics, and model-awa
     views.tree.messages.find((message) => message.data.tokens)?.data.model.modelID,
     "claude-sonnet"
   );
-  assert.equal(views.trace.summary.totalSteps, 2);
+  assert.equal(views.metrics.totals.steps, 2);
   assert.equal(views.metrics.steps[0]?.reason, "tool-calls");
 });
 
-test("Agent Loop folds common coding-agent turns into provider-neutral trace steps", () => {
+test("Agent Loop folds common coding-agent turns into provider-neutral metric steps", () => {
   const messages = [
     {
       id: "user-1", sessionId: "loop-session", role: "user", content: "Inspect the repository.",
@@ -326,7 +325,7 @@ test("Agent Loop folds common coding-agent turns into provider-neutral trace ste
     }
   ];
   const loop = buildAgentLoop(messages);
-  const trace = buildAgentLoopTrace("loop-session", loop);
+  const steps = buildSessionMetricSteps(loop);
 
   assert.deepEqual(loop.turns.map((turn) => [turn.role, turn.events.map((event) => event.kind)]), [
     ["user", ["text"]],
@@ -334,10 +333,49 @@ test("Agent Loop folds common coding-agent turns into provider-neutral trace ste
     ["assistant", ["text"]]
   ]);
   assert.equal(loop.turns[1].events[1].output, "AgentSession");
-  assert.equal(trace.summary.totalSteps, 2);
-  assert.equal(trace.steps[0].reason, "tool-calls");
-  assert.equal(trace.steps[0].spans[1].output, "AgentSession");
-  assert.equal(trace.steps[1].tokens.total, 6);
+  assert.equal(steps.length, 2);
+  assert.equal(steps[0].reason, "tool-calls");
+  assert.equal(steps[0].contextItems, 2);
+  assert.equal(steps[1].totalTokens, 6);
+});
+
+test("shared metric steps preserve characterization fields and cap at 200 assistant turns", () => {
+  const messages = [
+    {
+      id: "metrics-user", sessionId: "metrics-session", role: "user", content: "Run it.", thinking: null,
+      toolName: null, toolInput: null, toolOutput: null, timestamp: 1000, tokens: null, metadata: null
+    },
+    {
+      id: "metrics-assistant", sessionId: "metrics-session", role: "assistant", content: "done", thinking: "thinking",
+      toolName: "read", toolInput: { path: "README.md" }, toolOutput: "ok", timestamp: 2000,
+      tokens: { input: 3, output: 4, reasoning: 5, total: 12, cache: { read: 6, write: 7 } },
+      metadata: { cost: 0.25 }
+    },
+    ...Array.from({ length: 200 }, (_, index) => ({
+      id: `metrics-${index + 1}`, sessionId: "metrics-session", role: "assistant", content: `step ${index + 1}`,
+      thinking: null, toolName: null, toolInput: null, toolOutput: null, timestamp: 3000 + index,
+      tokens: { input: 1, output: 2, total: 3, cache: { read: 4, write: 5 } }, metadata: null
+    }))
+  ];
+  const steps = buildSessionMetricSteps(buildAgentLoop(messages));
+
+  assert.deepEqual(steps[0], {
+    index: 1,
+    messageId: "metrics-assistant",
+    snapshotId: null,
+    reason: "tool-calls",
+    duration: 0,
+    totalTokens: 12,
+    inputTokens: 3,
+    outputTokens: 4,
+    reasoningTokens: 5,
+    cacheReadTokens: 6,
+    cacheWriteTokens: 7,
+    cost: 0.25,
+    contextItems: 2
+  });
+  assert.equal(steps.length, 200);
+  assert.equal(steps[199].messageId, "metrics-199");
 });
 
 test("Agent Loop classifies every supported subagent launcher as an agent", () => {
@@ -347,10 +385,10 @@ test("Agent Loop classifies every supported subagent launcher as an agent", () =
       toolName, toolInput: { description: `Run ${toolName}` }, toolOutput: "done", timestamp: 1000, tokens: null,
       metadata: { callId: `${toolName}-call` }
     }]);
-    const trace = buildAgentLoopTrace("launcher-loop", loop);
-
-    assert.equal(trace.steps[0].spans[0].name, toolName);
-    assert.equal(trace.steps[0].spans[0].category, "agent");
+    assert.deepEqual(classifySharedTool(toolName, loop.turns[0].events[0].metadata), {
+      category: "agent",
+      mcpServer: null
+    });
   }
 });
 
@@ -411,32 +449,19 @@ test("Agent Loop clears implicit tool continuation at a system boundary", () => 
   ]);
 });
 
-test("Claude Code views reconstruct trace and metrics steps from transcript tools", () => {
+test("Claude Code views reconstruct metrics steps from transcript tools", () => {
   const records = parseTranscript(fixture("claude-current.jsonl"));
   const session = extractSessionMeta(records, "session-current");
   const messages = recordsToMessages(records, "session-current");
   const views = buildClaudeCodeSessionViews(session, messages);
-  const trace = views.trace;
-
-  assert.equal(trace.summary.totalSteps, 1);
-  assert.equal(trace.summary.totalSpans, 3);
-  assert.equal(trace.summary.totalTokens, 44);
   assert.equal(views.metrics.totals.steps, 1);
   assert.equal(views.metrics.steps[0].reason, "tool-calls");
   assert.equal(views.metrics.steps[0].inputTokens, 14);
   assert.equal(views.metrics.steps[0].cacheReadTokens, 20);
-  assert.deepEqual(
-    trace.steps[0].spans.map((span) => [span.name, span.category, span.status]),
-    [
-      ["reasoning", "reasoning", null],
-      ["Read", "tool", "completed"],
-      ["text", "text", null]
-    ]
-  );
-  assert.equal(trace.steps[0].spans.find((span) => span.name === "Read")?.output, "OpenSessionViewer");
+  assert.equal(views.metrics.steps[0].contextItems, 3);
 });
 
-test("Claude Code trace splits independent turns and classifies MCP tools", () => {
+test("Claude Code metrics split independent turns and classify MCP tools for reason", () => {
   const records = [
     {
       type: "user",
@@ -491,18 +516,68 @@ test("Claude Code trace splits independent turns and classifies MCP tools", () =
   ];
   const session = extractSessionMeta(records, "claude-multiturn");
   const views = buildClaudeCodeSessionViews(session, recordsToMessages(records, "claude-multiturn"));
-  const mcpSpan = views.trace.steps[1].spans.find((span) => span.name === "mcp__github__search_issues");
-
-  assert.equal(views.trace.summary.totalSteps, 2);
   assert.equal(views.metrics.steps.length, 2);
   assert.equal(views.metrics.steps[0].reason, "message");
   assert.equal(views.metrics.steps[1].reason, "tool-calls");
-  assert.equal(mcpSpan?.category, "mcp");
-  assert.equal(mcpSpan?.mcpServer, "github");
-  assert.equal(mcpSpan?.output, "issue #123");
 });
 
-test("Claude Code trace classifies every supported subagent launcher as an agent", () => {
+test("Claude Code metrics preserve first cost, accumulated tokens, duration, and reason quirk", () => {
+  const message = ({ id, role, timestamp, content = "", thinking = null, toolName = null, metadata = null, tokens = null }) => ({
+    id,
+    sessionId: "claude-metric-characterization",
+    role,
+    content,
+    thinking,
+    toolName,
+    toolInput: toolName ? { description: toolName } : null,
+    toolOutput: toolName ? "done" : null,
+    timestamp,
+    tokens,
+    metadata
+  });
+  const views = buildClaudeCodeSessionViews(
+    {
+      id: "claude-metric-characterization",
+      provider: "claude-code",
+      title: "Metrics",
+      directory: "D:\\WorkSpace",
+      timeCreated: 1000,
+      timeUpdated: 4000
+    },
+    [
+      message({
+        id: "assistant-first", role: "assistant", timestamp: 1000, content: "first", metadata: { cost: 0.5 },
+        tokens: { input: 2, output: 3, total: 5, cache: { read: 7, write: 11 } }
+      }),
+      message({
+        id: "assistant-second", role: "assistant", timestamp: 2000, thinking: "reasoning", metadata: { cost: 9 },
+        tokens: { input: 13, output: 17, total: 30, cache: { read: 19, write: 23 } }
+      }),
+      message({ id: "user-boundary", role: "user", timestamp: 3000, content: "next" }),
+      message({ id: "skill-only", role: "assistant", timestamp: 4000, toolName: "skill" })
+    ]
+  );
+
+  assert.deepEqual(views.metrics.steps[0], {
+    index: 1,
+    messageId: "assistant-first",
+    snapshotId: null,
+    reason: "message",
+    duration: 1000,
+    totalTokens: 35,
+    inputTokens: 15,
+    outputTokens: 20,
+    reasoningTokens: 0,
+    cacheReadTokens: 26,
+    cacheWriteTokens: 34,
+    cost: 0.5,
+    contextItems: 2
+  });
+  assert.equal(views.metrics.steps[1].reason, null);
+  assert.equal(views.metrics.totals.cost, 0.5);
+});
+
+test("Claude Code reason preserves supported subagent launcher classification", () => {
   for (const toolName of ["Agent", "task", "subtask", "spawn_agent", "delegate_task"]) {
     const records = [
       {
@@ -524,10 +599,37 @@ test("Claude Code trace classifies every supported subagent launcher as an agent
     ];
     const session = extractSessionMeta(records, `claude-${toolName}`);
     const views = buildClaudeCodeSessionViews(session, recordsToMessages(records, `claude-${toolName}`));
-    const span = views.trace.steps[0].spans.find((candidate) => candidate.name === toolName);
-
-    assert.equal(span?.category, "agent", toolName);
+    assert.equal(views.metrics.steps[0].reason, "tool-calls", toolName);
   }
+});
+
+test("Claude Code metric steps group non-user messages and cap at 200 visible steps", () => {
+  const records = Array.from({ length: 201 }, (_, index) => [
+    {
+      type: "user",
+      uuid: `claude-metric-user-${index}`,
+      timestamp: new Date(1700000000000 + index * 2000).toISOString(),
+      message: { content: [{ type: "text", text: `Prompt ${index}` }] }
+    },
+    {
+      type: "assistant",
+      uuid: `claude-metric-assistant-${index}`,
+      timestamp: new Date(1700000001000 + index * 2000).toISOString(),
+      message: {
+        model: "claude-sonnet",
+        usage: { input_tokens: 1, output_tokens: 2, cache_read_input_tokens: 3, cache_creation_input_tokens: 4 },
+        content: [{ type: "text", text: `Answer ${index}` }]
+      }
+    }
+  ]).flat();
+  const session = extractSessionMeta(records, "claude-metric-cap");
+  const views = buildClaudeCodeSessionViews(session, recordsToMessages(records, "claude-metric-cap"));
+
+  assert.equal(views.metrics.steps.length, 200);
+  assert.equal(views.metrics.steps[0].messageId, "claude-metric-assistant-0:0");
+  assert.equal(views.metrics.steps[199].messageId, "claude-metric-assistant-199:199");
+  assert.equal(views.metrics.steps[0].reason, "message");
+  assert.equal(views.metrics.steps[0].contextItems, 1);
 });
 
 test("Claude Code system prompt evidence resolves local runtime sources without hidden prompt claims", () => {
@@ -1001,7 +1103,7 @@ test("file session store reuses parsed transcripts, refreshes changed files, and
   }
 });
 
-test("OpenCode attaches every supported launcher to its child session and trace", () => {
+test("OpenCode attaches every supported launcher to its child session tree", () => {
   const temp = mkdtempSync(path.join(os.tmpdir(), "agentsession-subagent-launchers-"));
   const dbPath = path.join(temp, "sessions.db");
   try {
@@ -1049,10 +1151,9 @@ test("OpenCode attaches every supported launcher to its child session and trace"
     for (const toolName of ["task", "subtask", "spawn_agent", "delegate_task"]) {
       const rootId = `root-${toolName}`;
       const tree = buildOpenCodeSessionTree(rootId, dbPath);
-      const trace = adapter.getTrace(rootId);
 
       assert.equal(tree?.messages[0].parts[0].childSessions[0].session.id, `ses${["task", "subtask", "spawn_agent", "delegate_task"].indexOf(toolName)}child`);
-      assert.equal(trace?.steps[0].spans[0].category, "agent", toolName);
+      assert.equal(tree?.metrics.toolCallCount, 1, toolName);
     }
   } finally {
     closeDb(dbPath);
@@ -1535,7 +1636,7 @@ test("linked message sessions attach every shared subagent launcher", () => {
   }
 });
 
-test("shared views preserve provider-marked custom subagent tools across Tree, Trace, and rendering", () => {
+test("shared views preserve provider-marked custom subagent tools across Tree, metrics, and rendering", () => {
   const session = (id, parentId, title, timeCreated) => ({
     id,
     provider: "fixture",
@@ -1601,10 +1702,7 @@ test("shared views preserve provider-marked custom subagent tools across Tree, T
   ]);
   assert.equal(views.tree.detachedChildren.length, 0);
   assert.equal(views.metrics.totals.branches, 2);
-  assert.deepEqual(
-    views.trace.steps[0].spans.filter((span) => span.category === "agent").map((span) => span.name),
-    ["security-auditor", "performance-auditor"]
-  );
+  assert.equal(views.metrics.steps[0].reason, "tool-calls");
   const html = renderSessionPage({ session: views.tree.session, sessionTree: views.tree, provider: "fixture" });
   assert.match(html, /subagent-branch/);
   assert.match(html, /Security audit complete\./);
@@ -2104,11 +2202,12 @@ test("provider registration distinguishes source-supported resume commands from 
   assert.equal(parseArgs(["--hermes-dir", "D:\\fixtures\\hermes"]).hermesDir, "D:\\fixtures\\hermes");
 });
 
-test("every provider exposes the complete shared Agent Loop capability surface", () => {
+test("every provider exposes the complete shared session capability surface", () => {
   for (const provider of getAllProviders()) {
     assert.equal(supportsLocalManagement(provider), true, provider.id);
-    assert.equal(supportsAgentLoopViews(provider), true, provider.id);
-    assert.equal(supportsSessionTrace(provider), true, provider.id);
+    assert.equal(typeof provider.getSessionTree, "function", provider.id);
+    assert.equal(typeof provider.getSessionContainer, "function", provider.id);
+    assert.equal(typeof provider.getSessionMetrics, "function", provider.id);
     assert.equal(supportsSystemPromptEvidence(provider), true, provider.id);
     assert.equal(supportsRuntimeEnvironment(provider), true, provider.id);
     assert.equal(Boolean(provider.resumeCommand || provider.getResumeCommandSpec), provider.lifecycle !== "legacy" && provider.id !== "deepseek-harness", provider.id);
@@ -2226,17 +2325,6 @@ test("runtime route context logs patterns instead of raw session paths", () => {
       sessionId: "ses_123",
       runId: undefined,
       action: "resume"
-    }
-  );
-  assert.deepEqual(
-    getRuntimeRouteContext("GET", "/api/opencode/session/ses_123/metrics"),
-    {
-      method: "GET",
-      route: "/api/:provider/session/:sessionId/:action",
-      provider: "opencode",
-      sessionId: "ses_123",
-      runId: undefined,
-      action: "metrics"
     }
   );
   assert.deepEqual(

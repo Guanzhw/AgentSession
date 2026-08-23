@@ -111,8 +111,7 @@ const gemini = {
   icon: icons.gemini,
   lifecycle: "legacy",
   capabilities: {
-    localManagement: true,
-    structuredSessionViews: true
+    localManagement: true
   },
   protocolCapabilities: geminiProtocolCapabilities,
 

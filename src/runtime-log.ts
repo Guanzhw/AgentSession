@@ -110,7 +110,7 @@ export function getRuntimeRouteContext(method: any, pathname: any) {
       actionIndex: 3
     },
     {
-      pattern: /^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/(resume|export|metrics|trace|protocol|content|system-prompts)$/,
+      pattern: /^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/(resume|export|protocol|content|system-prompts)$/,
       route: "/api/:provider/session/:sessionId/:action",
       providerIndex: 1,
       sessionIndex: 2,

@@ -223,8 +223,7 @@ const hermes = {
       : null;
   },
   capabilities: {
-    localManagement: true,
-    structuredSessionViews: true
+    localManagement: true
   },
   protocolCapabilities: {
     ...hermesProtocolCapabilities

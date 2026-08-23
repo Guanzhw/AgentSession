@@ -1,7 +1,6 @@
 import type { Message, TokenUsage } from "../interface.js";
 import { asNumber } from "./parser.js";
-import { classifySharedTool } from "./subagent-tools.js";
-import { cloneTokenUsage, sumTokenUsage, tokenUsageTotal } from "./token-usage.js";
+import { cloneTokenUsage, sumTokenUsage } from "./token-usage.js";
 
 type Row = Record<string, any>;
 
@@ -40,47 +39,6 @@ export interface AgentLoop {
   turns: AgentLoopTurn[];
 }
 
-export interface AgentLoopTraceSpan {
-  id: string;
-  name: string;
-  category: "reasoning" | "text" | "tool" | "mcp" | "agent" | "skill" | "lsp";
-  mcpServer?: string;
-  timeStart: number;
-  timeEnd: number;
-  duration: number;
-  status: string | null;
-  input: string | null;
-  output: string | null;
-  title: string | null;
-}
-
-export interface AgentLoopTraceStep {
-  messageId: string;
-  agent: string | null;
-  model: string | null;
-  cost: number;
-  tokens: TokenUsage;
-  reason: string | null;
-  timeStart: number;
-  timeEnd: number;
-  duration: number;
-  spans: AgentLoopTraceSpan[];
-}
-
-export interface AgentLoopTrace {
-  sessionId: string;
-  steps: AgentLoopTraceStep[];
-  summary: {
-    totalSteps: number;
-    totalSpans: number;
-    totalDuration: number;
-    totalCost: number;
-    totalTokens: number;
-  };
-  truncated: boolean;
-}
-
-const MAX_TRACE_STEPS = 200;
 function asRow(value: unknown): Row {
   return value && typeof value === "object" ? value as Row : {};
 }
@@ -210,7 +168,7 @@ function mergeTurnData(target: Row, message: Message) {
  * A tool result is folded into its call, response fragments with a shared
  * response id form one turn, and a tool-only continuation remains attached to
  * the preceding agent turn. Those are the shared semantics behind the
- * conversation, Trace, Tree, Metrics, and Runtime views.
+ * conversation, Tree, Metrics, and Runtime views.
  */
 export function buildAgentLoop(messages: Message[]): AgentLoop {
   const turns: AgentLoopTurn[] = [];
@@ -281,140 +239,4 @@ export function buildAgentLoop(messages: Message[]): AgentLoop {
   });
 
   return { turns };
-}
-
-function compact(value: unknown, limit = 500) {
-  if (value == null || value === "") return null;
-  let text = "";
-  try {
-    text = typeof value === "string" ? value : JSON.stringify(value);
-  } catch {
-    text = String(value);
-  }
-  const normalized = text.replace(/\s+/g, " ").trim();
-  return normalized.length > limit ? `${normalized.slice(0, limit - 1)}…` : normalized;
-}
-
-function modelLabel(data: Row) {
-  const model = data.model;
-  if (typeof model === "string") return model;
-  if (model && typeof model === "object") {
-    return typeof model.modelID === "string"
-      ? model.modelID
-      : typeof model.providerID === "string"
-        ? model.providerID
-        : null;
-  }
-  return typeof data.modelID === "string" ? data.modelID : null;
-}
-
-function traceSpan(event: AgentLoopEvent, fallbackTime: number): AgentLoopTraceSpan {
-  const timeStart = asNumber(event.timeStart) || fallbackTime;
-  const timeEnd = asNumber(event.timeEnd) || timeStart;
-  const time = {
-    timeStart,
-    timeEnd,
-    duration: timeStart && timeEnd ? Math.max(0, timeEnd - timeStart) : 0
-  };
-  if (event.kind === "reasoning") {
-    return {
-      id: event.id,
-      name: "reasoning",
-      category: "reasoning",
-      ...time,
-      status: null,
-      input: null,
-      output: compact(event.text),
-      title: "reasoning"
-    };
-  }
-  if (event.kind === "text") {
-    return {
-      id: event.id,
-      name: "text",
-      category: "text",
-      ...time,
-      status: null,
-      input: null,
-      output: compact(event.text),
-      title: "assistant text"
-    };
-  }
-
-  const tool = event.tool || "tool";
-  const classification = classifySharedTool(tool, event.metadata);
-  const metadata = event.metadata || {};
-  return {
-    id: event.id,
-    name: tool,
-    category: classification.category,
-    ...(classification.mcpServer ? { mcpServer: classification.mcpServer } : {}),
-    ...time,
-    status: event.status,
-    input: compact(event.input),
-    output: compact(event.output),
-    title: compact(
-      metadata.title
-        || asRow(event.input).description
-        || asRow(event.input).command
-        || asRow(event.input).file_path
-        || asRow(event.input).filePath,
-      180
-    )
-  };
-}
-
-function traceReason(spans: AgentLoopTraceSpan[]) {
-  if (spans.some((span) => ["tool", "mcp", "agent", "skill", "lsp"].includes(span.category))) {
-    return "tool-calls";
-  }
-  if (spans.some((span) => span.category === "text")) return "message";
-  if (spans.some((span) => span.category === "reasoning")) return "reasoning";
-  return null;
-}
-
-/** Build a bounded Trace view directly from the common Agent Loop. */
-export function buildAgentLoopTrace(sessionId: string, loop: AgentLoop): AgentLoopTrace {
-  const allSteps = loop.turns
-    .filter((turn) => turn.role === "assistant" || turn.role === "agent")
-    .map((turn) => {
-      const spans = turn.events.map((event) => traceSpan(event, turn.timeCreated));
-      const times = [turn.timeCreated, ...spans.flatMap((span) => [span.timeStart, span.timeEnd])]
-        .filter((time) => Number.isFinite(time) && time > 0);
-      const timeStart = times.length ? Math.min(...times) : 0;
-      const timeEnd = times.length ? Math.max(...times) : timeStart;
-      const tokens = turn.data.tokens && typeof turn.data.tokens === "object"
-        ? cloneTokenUsage(turn.data.tokens as TokenUsage)
-        : { input: 0, output: 0, reasoning: 0, total: 0, cache: { read: 0, write: 0 } };
-      return {
-        messageId: turn.id,
-        agent: typeof turn.data.agent === "string" ? turn.data.agent : null,
-        model: modelLabel(turn.data),
-        cost: asNumber(turn.data.cost),
-        tokens,
-        reason: traceReason(spans),
-        timeStart,
-        timeEnd,
-        duration: timeStart && timeEnd ? Math.max(0, timeEnd - timeStart) : 0,
-        spans
-      } satisfies AgentLoopTraceStep;
-    });
-  const truncated = allSteps.length > MAX_TRACE_STEPS;
-  const steps = allSteps.slice(0, MAX_TRACE_STEPS);
-  const summary = steps.reduce((totals, step) => {
-    totals.totalSteps += 1;
-    totals.totalSpans += step.spans.length;
-    totals.totalDuration += asNumber(step.duration);
-    totals.totalCost += asNumber(step.cost);
-    totals.totalTokens += tokenUsageTotal(step.tokens);
-    return totals;
-  }, {
-    totalSteps: 0,
-    totalSpans: 0,
-    totalDuration: 0,
-    totalCost: 0,
-    totalTokens: 0
-  });
-
-  return { sessionId, steps, summary, truncated };
 }

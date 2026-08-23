@@ -1,8 +1,6 @@
-import { getSessionsByIds } from "../db.js";
-import { getIndexedSessions } from "../index-db.js";
-import { getAllMeta, getDeletedIds } from "../meta.js";
-import { supportsLocalManagement, usesOpenCodeStatsStore } from "../providers/kinds.js";
-import { enrichSession, normalizeSessionRecord } from "../session-queries.js";
+import { getDeletedIds } from "../meta.js";
+import { supportsLocalManagement } from "../providers/kinds.js";
+import { createSessionCatalog } from "../session-queries.js";
 import { renderTrashPage } from "../views/trash.js";
 import { providerRenderContext } from "./provider-context.js";
 import type { ProviderRouteDeps } from "./route-deps.js";
@@ -22,14 +20,10 @@ export function registerTrashRoutes(app: any, deps: ProviderRouteDeps) {
 
     try {
       const deletedIds = getDeletedIds(providerSegment);
-      const sessions = usesOpenCodeStatsStore(adapter)
-        ? getSessionsByIds(deletedIds, adapter.getDataPath())
-        : getIndexedSessions(providerSegment, Math.max(1, deletedIds.length), 0, "", "", "", "updated-desc", deletedIds).sessions;
-      const metaMap = getAllMeta(providerSegment);
-      const enriched = sessions.map((session: any) => normalizeSessionRecord(enrichSession(session, metaMap)));
+      const sessions = createSessionCatalog(adapter, providerSegment).byIds(deletedIds);
       return {
         status: 200,
-        body: renderTrashPage({ sessions: enriched, ...renderContext }),
+        body: renderTrashPage({ sessions, ...renderContext }),
         contentType: "text/html; charset=utf-8"
       };
     } catch (err: any) {

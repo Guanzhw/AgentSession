@@ -258,8 +258,7 @@ const codex = {
     args: ["resume", "{sessionId}"]
   },
   capabilities: {
-    localManagement: true,
-    structuredSessionViews: true
+    localManagement: true
   },
   protocolCapabilities: {
     ...codexProtocolCapabilities

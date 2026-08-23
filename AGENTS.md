@@ -171,7 +171,9 @@ tmp/, logs/, .agentsession/ runtime and QA artifacts; do not commit
 `src/providers/interface.ts` is the authoritative contract. A provider must
 implement detection, data path reporting, scanning, session lookup, normalized
 messages, token stats, search, and export. Optional structured views and system
-prompt/trace data are adapter methods.
+prompt evidence are adapter methods. Tree, Container, and Metrics remain the
+conversation-oriented view projections; runtime inspection uses Session
+Protocol v2 rather than a separate Trace accessor.
 
 When adding or changing a provider:
 

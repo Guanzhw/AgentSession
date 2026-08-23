@@ -13,26 +13,6 @@ export function usesOpenCodeStatsStore(adapter: ProviderAdapter | null | undefin
   return adapter?.capabilities?.openCodeStatsStore === true;
 }
 
-export function supportsStructuredSessionViews(adapter: ProviderAdapter | null | undefined) {
-  return adapter?.capabilities?.structuredSessionViews === true;
-}
-
-/**
- * Tree/Container/Metrics are the temporary shared conversation projections.
- * Check both the declaration and concrete methods so a provider cannot
- * advertise a half-implemented view bundle.
- */
-export function supportsAgentLoopViews(adapter: ProviderAdapter | null | undefined) {
-  return supportsStructuredSessionViews(adapter)
-    && typeof adapter?.getSessionTree === "function"
-    && typeof adapter?.getSessionContainer === "function"
-    && typeof adapter?.getSessionMetrics === "function";
-}
-
-export function supportsSessionTrace(adapter: ProviderAdapter | null | undefined) {
-  return supportsAgentLoopViews(adapter) && typeof adapter?.getTrace === "function";
-}
-
 export function supportsSystemPromptEvidence(adapter: ProviderAdapter | null | undefined) {
   return typeof adapter?.getSystemPrompts === "function";
 }

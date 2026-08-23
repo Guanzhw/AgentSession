@@ -1,29 +1,17 @@
-import { getMessages, getSession, getTodos } from "../db.js";
-import { getAllMeta, getDeletedIds, getExcludedIds, getMeta } from "../meta.js";
 import {
-  getVisibleListResults,
-  getIndexedListResults,
-  normalizeSessionRecord,
-  enrichSession,
-  loadPartsByMessage,
   buildPartsFromProviderMessages,
-  toApiSessionShape,
-  completeTokenStats,
-  getStarredIds
+  createSessionCatalog,
+  getSessionDocument
 } from "../session-queries.js";
 import {
   json,
   safeDecodeId,
-  safeJsonParse,
   missingProviderResponse
 } from "../server-helpers.js";
 import {
-  supportsAgentLoopViews,
   supportsSessionProtocol,
   protocolCapabilityDescriptors,
-  supportsSessionTrace,
   supportsSystemPromptEvidence,
-  usesOpenCodeStatsStore
 } from "../providers/kinds.js";
 import { getResumeCommand } from "../resume.js";
 import { renderSessionPage } from "../views/session.js";
@@ -128,87 +116,26 @@ export function registerSessionDetail(
     const navigationContext = parseSessionNavigationContext(new URL(req.url || "/", `http://localhost:${appConfig.port}`).searchParams.get("from"));
 
     try {
-      if (usesOpenCodeStatsStore(adapter)) {
-        const dbPath = adapter.getDataPath();
-        const session = getSession(sessionId, dbPath);
-        if (!session) {
-          return { status: 404, body: "<h1>Session not found</h1>", contentType: "text/html; charset=utf-8" };
-        }
-
-        const meta = getMeta(providerSegment, sessionId);
-        const metaMap = getAllMeta(providerSegment);
-        const excludedIds = getExcludedIds(providerSegment);
-        const enrichedSession = normalizeSessionRecord(enrichSession(session, metaMap));
-        const messages = getMessages(sessionId, dbPath).map((message: any) => ({
-          ...message,
-          data: safeJsonParse(message.data)
-        }));
-        const partsByMessage = loadPartsByMessage(messages, dbPath);
-        const sessionTree = adapter.getSessionTree?.(sessionId) || null;
-        const sessionMetrics = adapter.getSessionMetrics?.(sessionId) || null;
-        const todos = getTodos(sessionId, dbPath);
-        const recentSessions = getVisibleListResults({
-          dbPath,
-          metaMap,
-          excludedIds,
-          limit: 30,
-          offset: 0
-        }).sessions;
-        const enrichedRecentSessions = recentSessions.map((item: any) => normalizeSessionRecord(item));
-        const resumeCommand = getResumeCommand(adapter, sessionId, enrichedSession.directory, appConfig.resumeCommands);
-        const runtime = runtimeRenderData(adapter, sessionId, enrichedSession);
-        return {
-          status: 200,
-          body: renderSessionPage({
-            session: enrichedSession,
-            sessionTree,
-            sessionMetrics,
-            messages,
-            partsByMessage,
-            todos,
-            recentSessions: enrichedRecentSessions,
-            meta,
-            resumeCommand,
-            runtimeWorkbench: renderRuntimeWorkbench(runtime, providerSegment, sessionId),
-            terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),
-            navigationContext,
-            ...renderContext
-          }),
-          contentType: "text/html; charset=utf-8"
-        };
-      }
-
-      const session = adapter.getSession(sessionId);
-      if (!session) {
+      const document = getSessionDocument(adapter, providerSegment, sessionId);
+      if (!document) {
         return { status: 404, body: "<h1>Session not found</h1>", contentType: "text/html; charset=utf-8" };
       }
 
-      const providerMessages = adapter.getMessages(sessionId);
-      const { messages, partsByMessage } = buildPartsFromProviderMessages(providerMessages);
-      const meta = getMeta(providerSegment, sessionId);
-      const metaMap = getAllMeta(providerSegment);
-      const excludedIds = getExcludedIds(providerSegment);
-      const recentSessions = getIndexedListResults({
-        providerId: providerSegment,
-        metaMap,
-        excludedIds,
-        limit: 30,
-        offset: 0
-      }).sessions.map((item: any) => normalizeSessionRecord(item));
-      const normalizedSession = normalizeSessionRecord(enrichSession(session, metaMap));
-      const resumeCommand = getResumeCommand(adapter, sessionId, normalizedSession.directory, appConfig.resumeCommands);
-      const runtime = runtimeRenderData(adapter, sessionId, normalizedSession);
+      const recentSessions = createSessionCatalog(adapter, providerSegment)
+        .list({ limit: 30, offset: 0 }).sessions;
+      const resumeCommand = getResumeCommand(adapter, sessionId, document.session.directory, appConfig.resumeCommands);
+      const runtime = runtimeRenderData(adapter, sessionId, document.session);
       return {
         status: 200,
         body: renderSessionPage({
-          session: normalizedSession,
+          session: document.session,
           sessionTree: adapter.getSessionTree?.(sessionId) || null,
           sessionMetrics: adapter.getSessionMetrics?.(sessionId) || null,
-          messages,
-          partsByMessage,
-          todos: [],
+          messages: document.messages,
+          partsByMessage: document.partsByMessage,
+          todos: document.todos,
           recentSessions,
-          meta,
+          meta: document.meta,
           resumeCommand,
           runtimeWorkbench: renderRuntimeWorkbench(runtime, providerSegment, sessionId),
           terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),
@@ -234,42 +161,17 @@ export function registerSessionDetail(
     }
 
     try {
-      if (usesOpenCodeStatsStore(adapter)) {
-        const dbPath = adapter.getDataPath();
-        const metaMap = getAllMeta(providerId);
-        const session = getSession(sessionId, dbPath);
-        if (!session) {
-          return json(res, { ok: false, error: "Not found" }, 404);
-        }
-        const enrichedSession = normalizeSessionRecord(enrichSession(session, metaMap));
-        const messages = getMessages(sessionId, dbPath).map((message: any) => ({ ...message, data: safeJsonParse(message.data) }));
-        const partsByMessage = loadPartsByMessage(messages, dbPath);
-        const sessionTree = adapter.getSessionTree?.(sessionId) || null;
-        const sessionContainer = adapter.getSessionContainer?.(sessionId) || null;
-        const sessionMetrics = adapter.getSessionMetrics?.(sessionId) || null;
-        return json(res, {
-          session: enrichedSession,
-          tree: sessionTree,
-          container: sessionContainer,
-          metrics: sessionMetrics,
-          messages: messages.map((message: any) => ({
-            ...message,
-            parts: (partsByMessage.get(message.id) || []).map((part: any) => part.data)
-          }))
-        });
-      }
-
-      const session = adapter.getSession(sessionId);
-      if (!session) {
+      const document = getSessionDocument(adapter, providerId, sessionId);
+      if (!document) {
         return json(res, { ok: false, error: "Not found" }, 404);
       }
 
       return json(res, {
-        session: normalizeSessionRecord(session),
+        session: document.apiSession,
         tree: adapter.getSessionTree?.(sessionId) || null,
         container: adapter.getSessionContainer?.(sessionId) || null,
         metrics: adapter.getSessionMetrics?.(sessionId) || null,
-        messages: adapter.getMessages(sessionId)
+        messages: document.apiMessages
       });
     } catch (err: any) {
       console.error(`Route error: ${err.message}`);
@@ -356,30 +258,13 @@ export function registerSessionDetail(
     try {
       const url = new URL(req.url || "/", `http://localhost:${appConfig.port}`);
       const format = url.searchParams.get("format") || "md";
-      let session;
-      let messages;
-      let partsByMessage;
-
-      if (usesOpenCodeStatsStore(adapter)) {
-        const dbPath = adapter.getDataPath();
-        const metaMap = getAllMeta(providerId);
-        const rawSession = getSession(id, dbPath);
-        if (!rawSession) {
-          return json(res, { ok: false, error: "Not found" }, 404);
-        }
-        session = normalizeSessionRecord(enrichSession(rawSession, metaMap));
-        messages = getMessages(id, dbPath).map((message: any) => ({ ...message, data: safeJsonParse(message.data) }));
-        partsByMessage = loadPartsByMessage(messages, dbPath);
-      } else {
-        const rawSession = adapter.getSession(id);
-        if (!rawSession) {
-          return json(res, { ok: false, error: "Not found" }, 404);
-        }
-        session = normalizeSessionRecord(rawSession);
-        const mapped = buildPartsFromProviderMessages(adapter.getMessages(id));
-        messages = mapped.messages;
-        partsByMessage = mapped.partsByMessage;
+      const document = getSessionDocument(adapter, providerId, id);
+      if (!document) {
+        return json(res, { ok: false, error: "Not found" }, 404);
       }
+      const session = document.exportSession;
+      const messages = document.messages;
+      const { partsByMessage } = document;
 
       if (format === "json") {
         const filename = `session-${id.slice(0, 8)}.json`;
@@ -391,10 +276,7 @@ export function registerSessionDetail(
           tree: sessionTree,
           container: sessionContainer,
           metrics: sessionMetrics,
-          messages: messages.map((message: any) => ({
-            ...message,
-            parts: (partsByMessage.get(message.id) || []).map((part: any) => part.data)
-          }))
+          messages: document.exportMessages
         }, null, 2);
         res.writeHead(200, {
           "Content-Type": "application/json; charset=utf-8",
@@ -464,32 +346,6 @@ export function registerSessionDetail(
         }
         return;
       }
-      return json(res, { error: "Internal server error" }, 500);
-    }
-  });
-
-  // API: session metrics
-  app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/metrics$/, async (_req: any, res: any, match: RegExpMatchArray) => {
-    const providerId = match[1];
-    const sessionId = decodeURIComponent(match[2]);
-    const adapter = providerMap.get(providerId);
-    if (!adapter) {
-      const missing = missingProviderResponse(providerId);
-      return json(res, missing.body, missing.status);
-    }
-
-    if (!supportsAgentLoopViews(adapter)) {
-      return json(res, { sessionId, totals: null, tools: [], steps: [] });
-    }
-
-    try {
-      const metrics = adapter.getSessionMetrics?.(sessionId);
-      if (!metrics) {
-        return json(res, { ok: false, error: "Not found" }, 404);
-      }
-      return json(res, metrics);
-    } catch (err: any) {
-      console.error(`Route error: ${err.message}`);
       return json(res, { error: "Internal server error" }, 500);
     }
   });
@@ -593,31 +449,6 @@ export function registerSessionDetail(
       }));
     } catch (error) {
       return runtimeError(res, error);
-    }
-  });
-
-  // API: trace
-  app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/trace$/, async (_req: any, res: any, match: RegExpMatchArray) => {
-    const providerId = match[1];
-    const sessionId = decodeURIComponent(match[2]);
-    const adapter = providerMap.get(providerId);
-    if (!adapter) {
-      const missing = missingProviderResponse(providerId);
-      return json(res, missing.body, missing.status);
-    }
-
-    try {
-      if (supportsSessionTrace(adapter)) {
-        return json(res, adapter.getTrace(sessionId));
-      }
-
-      return json(res, {
-        steps: [],
-        summary: { totalSteps: 0, totalSpans: 0, totalDuration: 0, totalCost: 0, totalTokens: 0 }
-      });
-    } catch (err: any) {
-      console.error(`Route error: ${err.message}`);
-      return json(res, { error: "Internal server error" }, 500);
     }
   });
 

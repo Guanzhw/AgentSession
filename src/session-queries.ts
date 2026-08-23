@@ -1,6 +1,8 @@
-import { getSession, getMessages, getParts, listSessions, searchMessages } from "./db.js";
-import { getIndexedSessions } from "./index-db.js";
+import { getOverviewStats, getSession, getMessages, getParts, getSessionsByIds, getTodos, listSessionProjects, listSessions, searchMessages } from "./db.js";
+import { getIndexedOverview, getIndexedSessionProjects, getIndexedSessions } from "./index-db.js";
+import { getAllMeta, getExcludedIds, getMeta } from "./meta.js";
 import { normalizeSessionKindFilter } from "./session-kind.js";
+import { usesOpenCodeStatsStore } from "./providers/kinds.js";
 import { safeJsonParse } from "./server-helpers.js";
 import { baseSessionListStats, boundedListStats } from "./session-list-stats.js";
 
@@ -29,7 +31,7 @@ export function resolveStarredFilter(params: URLSearchParams): boolean {
   return value === "1" || value === "true";
 }
 
-export function getStarredIds(metaMap: Map<string, any>): string[] {
+function getStarredIds(metaMap: Map<string, any>): string[] {
   return [...metaMap.entries()]
     .filter(([, meta]) => Boolean(meta?.starred))
     .map(([id]) => id);
@@ -49,51 +51,6 @@ export function resolveSessionSearchMode(params: URLSearchParams): string {
 
 export function resolveSessionKindFilter(params: URLSearchParams): string {
   return normalizeSessionKindFilter(params.get("kind") || params.get("sessionKind"));
-}
-
-export function getVisibleListResults({
-  dbPath,
-  metaMap,
-  excludedIds,
-  limit,
-  offset,
-  query = "",
-  range = "",
-  project = "",
-  sort = "updated-desc",
-  starredOnly = false,
-  sessionKind = "all"
-}: any) {
-  const includedIds = starredOnly ? getStarredIds(metaMap) : undefined;
-  const kind = normalizeSessionKindFilter(sessionKind);
-  const titleOverrides = getTitleOverrides(metaMap);
-  const results = listSessions(limit, offset, query, range, dbPath, project, excludedIds, sort, includedIds, kind, titleOverrides);
-  return {
-    sessions: results.sessions.map((session: any) => enrichSession(session, metaMap)),
-    total: results.total
-  };
-}
-
-export function getIndexedListResults({
-  providerId,
-  metaMap,
-  limit,
-  offset,
-  range = "",
-  query = "",
-  project = "",
-  sort = "updated-desc",
-  includedIds = undefined,
-  excludedIds = undefined,
-  sessionKind = "all"
-}: any) {
-  const kind = normalizeSessionKindFilter(sessionKind);
-  const titleOverrides = getTitleOverrides(metaMap);
-  const results = getIndexedSessions(providerId, limit, offset, range, query, project, sort, includedIds, kind, excludedIds, titleOverrides);
-  return {
-    sessions: results.sessions.map((session: any) => enrichSession(session, metaMap)),
-    total: results.total
-  };
 }
 
 export function getSearchResults(query: string, limit: number, offset: number, dbPath: any = undefined, excludedIds: Set<string> = new Set(), sessionKind = "all", metaMap: any = undefined) {
@@ -216,7 +173,70 @@ export function buildPartsFromProviderMessages(providerMessages: any[] = []) {
   return { messages, partsByMessage };
 }
 
-export function getProviderSearchResults(adapter: any, query: string, limit: number, offset: number, sessionKind = "all", metaMap: any = undefined, excludedIds: Set<string> = new Set()) {
+/**
+ * Read the source-owned pieces needed by the session detail surfaces once.
+ * OpenCode keeps its raw message/part/todo records in SQLite; file providers
+ * expose normalized messages through their adapter and need the small view
+ * mapping used by HTML and export. The separate API fields preserve the
+ * existing file-provider API shape and its intentional lack of viewer-meta
+ * enrichment.
+ */
+export function getSessionDocument(adapter: any, providerId: string, sessionId: string): any | null {
+  const sqlite = usesOpenCodeStatsStore(adapter);
+  const dbPath = sqlite ? adapter.getDataPath() : undefined;
+  const rawSession = sqlite ? getSession(sessionId, dbPath) : adapter.getSession(sessionId);
+  if (!rawSession) return null;
+
+  const metaMap = getAllMeta(providerId);
+  const normalizedRawSession = normalizeSessionRecord(rawSession);
+  const session = normalizeSessionRecord(enrichSession(rawSession, metaMap));
+  const meta = getMeta(providerId, rawSession.id || sessionId);
+
+  if (sqlite) {
+    const messages = getMessages(sessionId, dbPath).map((message: any) => ({
+      ...message,
+      data: safeJsonParse(message.data)
+    }));
+    const partsByMessage = loadPartsByMessage(messages, dbPath);
+    const apiMessages = messages.map((message: any) => ({
+      ...message,
+      parts: (partsByMessage.get(message.id) || []).map((part: any) => part.data)
+    }));
+    return {
+      session,
+      apiSession: session,
+      exportSession: session,
+      messages,
+      apiMessages,
+      exportMessages: apiMessages,
+      partsByMessage,
+      todos: getTodos(sessionId, dbPath),
+      meta
+    };
+  }
+
+  const providerMessages = adapter.getMessages(sessionId);
+  const mapped = buildPartsFromProviderMessages(providerMessages);
+  const exportMessages = mapped.messages.map((message: any) => ({
+    ...message,
+    parts: (mapped.partsByMessage.get(message.id) || []).map((part: any) => part.data)
+  }));
+  return {
+    session,
+    // File-provider JSON has historically returned adapter messages and the
+    // source-normalized session, while HTML/export consume the mapped view.
+    apiSession: normalizedRawSession,
+    exportSession: normalizedRawSession,
+    messages: mapped.messages,
+    apiMessages: providerMessages,
+    exportMessages,
+    partsByMessage: mapped.partsByMessage,
+    todos: [],
+    meta
+  };
+}
+
+function getProviderSearchResults(adapter: any, query: string, limit: number, offset: number, sessionKind = "all", metaMap: any = undefined, excludedIds: Set<string> = new Set()) {
   const term = (query || "").trim();
   normalizeSessionKindFilter(sessionKind);
   if (!term) {
@@ -246,6 +266,76 @@ export function getProviderSearchResults(adapter: any, query: string, limit: num
   };
 }
 
+/**
+ * Provider-neutral session catalog for list/search/overview surfaces.
+ *
+ * The catalog selects the source once. Callers should not need to know whether
+ * the provider is backed by OpenCode's SQLite schema or the viewer index.
+ */
+export function createSessionCatalog(adapter: any, providerId: string, metadata: {
+  metaMap?: Map<string, any>;
+  excludedIds?: Set<string>;
+} = {}) {
+  const sqlite = usesOpenCodeStatsStore(adapter);
+  const dbPath = sqlite ? adapter.getDataPath() : undefined;
+  const metaMap = metadata.metaMap || getAllMeta(providerId);
+  const excludedIds = metadata.excludedIds || getExcludedIds(providerId);
+  const titleOverrides = getTitleOverrides(metaMap);
+
+  function normalizeRows(rows: any[] = []) {
+    return rows.map((session) => normalizeSessionRecord(enrichSession(session, metaMap)));
+  }
+
+  return {
+    list({
+      limit,
+      offset,
+      range = "",
+      query = "",
+      project = "",
+      sort = "updated-desc",
+      starredOnly = false,
+      sessionKind = "all"
+    }: any) {
+      const includedIds = starredOnly ? getStarredIds(metaMap) : undefined;
+      const kind = normalizeSessionKindFilter(sessionKind);
+      const results = sqlite
+        ? listSessions(limit, offset, query, range, dbPath, project, excludedIds, sort, includedIds, kind, titleOverrides)
+        : getIndexedSessions(providerId, limit, offset, range, query, project, sort, includedIds as any, kind, excludedIds as any, titleOverrides);
+      return { sessions: normalizeRows(results.sessions), total: results.total };
+    },
+
+    contentSearch({ query, limit, offset, sessionKind = "all" }: any) {
+      const results = sqlite
+        ? getSearchResults(query, limit, offset, dbPath, excludedIds, sessionKind, metaMap)
+        : getProviderSearchResults(adapter, query, limit, offset, sessionKind, metaMap, excludedIds);
+      return { ...results, sessions: normalizeRows(results.sessions) };
+    },
+
+    overview({ range = "", query = "", project = "", sessionKind = "all", starredOnly = false }: any = {}) {
+      const includedIds = starredOnly ? getStarredIds(metaMap) : undefined;
+      return sqlite
+        ? getOverviewStats(dbPath)
+        : getIndexedOverview(providerId, range, query, project, sessionKind, excludedIds, includedIds, titleOverrides);
+    },
+
+    projects({ range = "", query = "", sessionKind = "all", starredOnly = false }: any = {}) {
+      const includedIds = starredOnly ? getStarredIds(metaMap) : undefined;
+      return sqlite
+        ? listSessionProjects(query, range, dbPath, excludedIds, includedIds, sessionKind, titleOverrides)
+        : getIndexedSessionProjects(providerId, range, query, includedIds, sessionKind, excludedIds, titleOverrides);
+    },
+
+    byIds(ids: string[] = []) {
+      if (!ids.length) return [];
+      const sessions = sqlite
+        ? getSessionsByIds(ids, dbPath)
+        : getIndexedSessions(providerId, ids.length, 0, "", "", "", "updated-desc", ids as any).sessions;
+      return normalizeRows(sessions);
+    }
+  };
+}
+
 export function toApiSessionShape(session: any) {
   return {
     id: session.id,
@@ -262,28 +352,4 @@ export function toApiSessionShape(session: any) {
     // raw protocol is never exposed here.
     stats: boundedListStats(session.stats) ?? baseSessionListStats(session)
   };
-}
-
-export function completeTokenStats(rows: any[], days = 30): any[] {
-  const byDay = new Map(rows.map((row) => [row.day, row]));
-  const completed: any[] = [];
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-
-  for (let offset = days - 1; offset >= 0; offset -= 1) {
-    const date = new Date(today.getTime() - offset * 86400000);
-    const day = date.toISOString().slice(0, 10);
-    completed.push(byDay.get(day) || {
-      day,
-      input_tokens: 0,
-      output_tokens: 0,
-      reasoning_tokens: 0,
-      cache_read_tokens: 0,
-      cache_write_tokens: 0,
-      total_tokens: 0,
-      message_count: 0
-    });
-  }
-
-  return completed;
 }

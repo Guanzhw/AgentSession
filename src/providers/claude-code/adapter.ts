@@ -206,8 +206,7 @@ const claudeCode = {
     args: ["--resume", "{sessionId}"]
   },
   capabilities: {
-    localManagement: true,
-    structuredSessionViews: true
+    localManagement: true
   },
   protocolCapabilities: {
     ...claudeProtocolCapabilities
@@ -266,10 +265,6 @@ const claudeCode = {
     if (!bundle) return null;
     const runtimeEnvironment = buildRuntimeEnvironmentForSession(bundle.session.id, bundle.session.directory);
     return buildClaudeCodeSystemPrompts(bundle.session, bundle.records, runtimeEnvironment);
-  },
-
-  getTrace(sessionId) {
-    return getClaudeViews(sessionId)?.trace || null;
   },
 
   getUnavailableReason() {

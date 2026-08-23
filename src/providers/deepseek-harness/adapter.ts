@@ -198,8 +198,7 @@ const deepseekHarness = {
   capabilities: {
     // This only enables AgentSession-owned stars, titles, and exclusions; it
     // never mutates DSH's append-only source records.
-    localManagement: true,
-    structuredSessionViews: true
+    localManagement: true
   },
   protocolCapabilities: {
     sessionEvents: { support: "full", provenance: "recorded", details: "DSH v0 append-only events, including expanded packed chunk storage rows" },

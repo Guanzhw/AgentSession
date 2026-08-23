@@ -178,17 +178,14 @@ export function createStructuredViewCache<T>(
  * view getter. Callers use {@link createStructuredViewCache} to wrap
  * their provider-specific builder, then pass the cached getter here.
  *
- * Providers can override a generated trace when their source stores a richer,
- * provider-native step model (for example OpenCode and Claude Code).
  */
 export function createStructuredViewMethods(
   getViews: (sessionId: string) => Record<string, any> | null
-): Pick<ProviderAdapter, "getSessionTree" | "getSessionContainer" | "getSessionMetrics" | "getTrace"> {
+): Pick<ProviderAdapter, "getSessionTree" | "getSessionContainer" | "getSessionMetrics"> {
   return {
     getSessionTree(sessionId: string) { return getViews(sessionId)?.tree || null; },
     getSessionContainer(sessionId: string) { return getViews(sessionId)?.container || null; },
-    getSessionMetrics(sessionId: string) { return getViews(sessionId)?.metrics || null; },
-    getTrace(sessionId: string) { return getViews(sessionId)?.trace || null; },
+    getSessionMetrics(sessionId: string) { return getViews(sessionId)?.metrics || null; }
   };
 }
 
@@ -246,48 +243,6 @@ export interface TokenFieldMapping {
  * @param fieldMapping   Provider-specific field accessors.
  * @param days           Number of days to include (default 30).
  */
-export function buildTokenStats(
-  discoverFiles: () => Array<{ filePath: string }>,
-  parseFile: (filePath: string) => any,
-  fieldMapping: TokenFieldMapping,
-  days = 30
-): DailyTokenStat[] {
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-  const cutoff = today.getTime() - (Math.max(1, days) - 1) * 86400000;
-  const dailyMap = new Map<string, DailyTokenStat>();
-
-  for (const { filePath } of discoverFiles()) {
-    try {
-      const data = parseFile(filePath);
-      if (!data) continue;
-      const records = Array.isArray(data) ? data : (data.records || data.messages || []);
-      for (const r of records) {
-        if (!fieldMapping.filterRecord(r)) continue;
-        const ts = fieldMapping.getTimestamp(r);
-        if (ts < cutoff) continue;
-        const day = new Date(ts).toISOString().slice(0, 10);
-        const existing = dailyMap.get(day) || {
-          day, inputTokens: 0, outputTokens: 0, totalTokens: 0, messageCount: 0,
-          reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0
-        };
-        existing.inputTokens += fieldMapping.inputTokens(r);
-        existing.outputTokens += fieldMapping.outputTokens(r);
-        existing.totalTokens += fieldMapping.totalTokens(r);
-        existing.reasoningTokens = (existing.reasoningTokens ?? 0) + fieldMapping.reasoningTokens(r);
-        existing.cacheReadTokens = (existing.cacheReadTokens ?? 0) + fieldMapping.cacheReadTokens(r);
-        existing.cacheWriteTokens = (existing.cacheWriteTokens ?? 0) + fieldMapping.cacheWriteTokens(r);
-        existing.messageCount += 1;
-        dailyMap.set(day, existing);
-      }
-    } catch (err) {
-      console.warn("Skipping unparseable session file for token stats:", filePath, err);
-    }
-  }
-
-  return [...dailyMap.values()].sort((a, b) => a.day.localeCompare(b.day));
-}
-
 /**
  * Keep per-transcript daily aggregates while transcript signatures are stable.
  * A changed transcript is the only one reparsed into aggregate buckets; range

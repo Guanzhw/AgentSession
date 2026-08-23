@@ -245,7 +245,7 @@ test("DeepSeek Harness provider reads current raw sessions, system evidence, wor
     // normalized messages or require a protocol-v2 mapping.
     assert.deepEqual(protocol?.events.map((event) => event.sequence), Array.from({ length: protocol?.events.length || 0 }, (_, index) => index + 1));
     assert.ok(dsh.getSessionTree(parentId));
-    assert.ok(dsh.getTrace(parentId));
+    assert.ok(dsh.getSessionMetrics(parentId)?.totals.steps);
 
     const promptEvidence = dsh.getSystemPrompts(parentId);
     assert.match(JSON.stringify(promptEvidence), /DSH_STORED_SYSTEM_MARKER/);

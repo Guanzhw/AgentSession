@@ -1,4 +1,6 @@
 import { asNumber } from "./parser.js";
+import type { AgentLoop } from "./agent-loop.js";
+import { classifySharedTool } from "./subagent-tools.js";
 import type { SessionContainer } from "./session-container.js";
 import type { SessionContextView } from "./context.js";
 import { aggregateSessionContainerTokenUsage } from "./session-usage.js";
@@ -35,6 +37,55 @@ export interface SessionMetricsView {
     cost: number;
     contextItems: number;
   }>;
+}
+
+export const MAX_SESSION_METRIC_STEPS = 200;
+
+/** Build the bounded metric steps shared by normalized message providers. */
+export function buildSessionMetricSteps(loop: AgentLoop): SessionMetricsView["steps"] {
+  return loop.turns
+    .filter((turn) => turn.role === "assistant" || turn.role === "agent")
+    .slice(0, MAX_SESSION_METRIC_STEPS)
+    .map((turn, index) => {
+      const times = [
+        turn.timeCreated,
+        ...turn.events.flatMap((event) => {
+          const timeStart = asNumber(event.timeStart) || turn.timeCreated;
+          const timeEnd = asNumber(event.timeEnd) || timeStart;
+          return [timeStart, timeEnd];
+        })
+      ].filter((time) => Number.isFinite(time) && time > 0);
+      const timeStart = times.length ? Math.min(...times) : 0;
+      const timeEnd = times.length ? Math.max(...times) : timeStart;
+      const tokens = turn.data.tokens && typeof turn.data.tokens === "object"
+        ? turn.data.tokens
+        : {};
+      const cache = tokens.cache || {};
+      const reason = turn.events.some((event) => event.kind === "tool" && ["tool", "mcp", "agent", "skill", "lsp"].includes(
+        classifySharedTool(event.tool || "tool", event.metadata).category
+      ))
+        ? "tool-calls"
+        : turn.events.some((event) => event.kind === "text")
+          ? "message"
+          : turn.events.some((event) => event.kind === "reasoning")
+            ? "reasoning"
+            : null;
+      return {
+        index: index + 1,
+        messageId: turn.id,
+        snapshotId: null,
+        reason,
+        duration: timeStart && timeEnd ? Math.max(0, timeEnd - timeStart) : 0,
+        totalTokens: asNumber(tokens.total),
+        inputTokens: asNumber(tokens.input),
+        outputTokens: asNumber(tokens.output),
+        reasoningTokens: asNumber(tokens.reasoning),
+        cacheReadTokens: asNumber(cache.read),
+        cacheWriteTokens: asNumber(cache.write),
+        cost: asNumber(turn.data.cost),
+        contextItems: turn.events.length
+      };
+    });
 }
 
 function collectTools(container: SessionContainer | null, counts = new Map<string, number>()) {

@@ -1,8 +1,12 @@
 # Agent/Skill/MCP/Tool/LSP Visualization Design
 
 **Date**: 2026-03-21
-**Status**: Draft — pending review
+**Status**: Historical — superseded by Session Protocol v2 and Runtime Workbench
 **Scope**: Session detail page trace visualization for OpenCode provider
+
+This proposal is retained as design history. Its standalone `/trace` API and
+trace panel are not current product surfaces; use the bounded `/protocol` and
+`/runtime/*` APIs instead.
 
 ---
 

@@ -334,17 +334,6 @@ export function getCrossProviderOverview(query: CrossProviderSessionQuery) {
 }
 
 /**
- * Read a single indexed session without exposing the database to callers.
- */
-export function getIndexedSession(provider: string, sessionId: string) {
-  return getIndexDb().prepare(`
-    SELECT id, provider, parent_id, title, directory, time_created, time_updated, message_count, token_count
-    FROM session_index
-    WHERE provider = ? AND id = ?
-  `).get(provider, sessionId) || null;
-}
-
-/**
  * Search only the viewer-owned session metadata index. This is intentionally
  * narrower than the transcript search contract and accepts no SQL fragments.
  */
@@ -414,17 +403,6 @@ export async function indexProvider(adapter: any) {
     upsertIndex(adapter.id, batch);
   }
   return batch.length;
-}
-
-/**
- * Get the latest time_updated for a provider in the index.
- * @param {string} provider
- * @returns {number}
- */
-export function getLastIndexedTime(provider: any) {
-  const db = getIndexDb();
-  const row = db.prepare("SELECT MAX(last_indexed) as t FROM session_index WHERE provider = ?").get(provider);
-  return row?.t || 0;
 }
 
 /**
