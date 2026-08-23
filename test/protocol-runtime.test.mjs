@@ -68,6 +68,24 @@ test("runtime protocol finalizes and caches provider snapshots by revision", () 
   assert.throws(() => getRuntimeProtocol(adapter, "missing"), (error) => error instanceof ProtocolRuntimeError && error.code === "session_not_found");
 });
 
+test("runtime protocol reuses immutable finalized provider snapshots and finalizes mutable v2 sources", () => {
+  clearProtocolRuntimeCache();
+  const { adapter } = adapterFixture();
+  const finalized = getRuntimeProtocol(adapter, "root");
+
+  clearProtocolRuntimeCache();
+  adapter.getSessionProtocol = () => finalized;
+  assert.equal(getRuntimeProtocol(adapter, "root"), finalized, "already-finalized snapshots retain source identity");
+
+  clearProtocolRuntimeCache();
+  const mutableV2 = { ...finalized };
+  adapter.getSessionProtocol = () => mutableV2;
+  const fallback = getRuntimeProtocol(adapter, "root");
+  assert.notEqual(fallback, mutableV2, "mutable v2 sources still use the finalizer");
+  assert.equal(fallback.validation.ok, true);
+  assert.equal(Object.isFrozen(fallback), true);
+});
+
 test("runtime event queries are bounded, filterable, cursor-bound, and omit provider data", () => {
   clearProtocolRuntimeCache();
   const { adapter } = adapterFixture();

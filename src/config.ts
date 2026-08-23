@@ -455,7 +455,7 @@ export function parseArgs(argv = process.argv.slice(2)) {
     resumeShell: fileConfig.resumeShell && typeof fileConfig.resumeShell === "object"
       ? fileConfig.resumeShell
       : null,
-    projectPaths: normalizeProjectPaths(fileConfig),
+    projectPaths: fileConfig.projectPaths || {},
     mcp: normalizeMcpConfig(fileConfig.mcp)
   };
 

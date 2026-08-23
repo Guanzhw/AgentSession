@@ -136,12 +136,6 @@ export function getRuntimeRouteContext(method: any, pathname: any) {
       actionIndex: 3
     },
     {
-      pattern: /^\/api\/session\/([^/]+)\/(star|rename|delete|restore|permanent-delete)$/,
-      route: "/api/session/:sessionId/:action",
-      sessionIndex: 1,
-      actionIndex: 2
-    },
-    {
       pattern: /^\/([a-z][a-z0-9-]*)\/session\/([^/]+)$/,
       route: "/:provider/session/:sessionId",
       providerIndex: 1,

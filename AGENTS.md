@@ -202,7 +202,7 @@ because provider capabilities differ.
 - Provider URLs use `/:provider/...`; APIs use `/api/:provider/...`.
 - Validate and safely decode session IDs before lookup.
 - Management routes must check `supportsLocalManagement()`.
-- Structured metrics/flow/session-tree routes must use adapter capabilities or
+- Structured metrics and session-tree views must use adapter capabilities or
   optional methods.
 - Mutating local settings or launching commands must preserve loopback and
   same-origin checks.
@@ -247,6 +247,12 @@ Update provider fixtures, route tests, list-stat tests, and browser assertions
 together when changing this contract.
 
 ## Local Development
+
+### Pi helper routing
+
+- When Pi is explicitly requested but high-level Pi tools are not in the
+  explicit tool list, search the deferred catalog for `mcp__pi_wsl__*` before
+  falling back to raw WSL commands.
 
 Install dependencies:
 

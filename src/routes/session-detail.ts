@@ -50,9 +50,9 @@ export function registerSessionDetail(
 ) {
   const { appConfig, providerMap, providerInfo } = deps;
 
-  const runtimeRenderData = (adapter: any, sessionId: string) => {
+  const runtimeRenderData = (adapter: any, sessionId: string, session: Record<string, unknown>) => {
     try {
-      const protocol = getRuntimeProtocol(adapter, sessionId);
+      const protocol = getRuntimeProtocol(adapter, sessionId, session);
       return {
         protocol: protocol as SessionProtocol,
         summary: summarizeRuntimeProtocol(protocol, adapter.protocolCapabilities),
@@ -156,7 +156,7 @@ export function registerSessionDetail(
         }).sessions;
         const enrichedRecentSessions = recentSessions.map((item: any) => normalizeSessionRecord(item));
         const resumeCommand = getResumeCommand(adapter, sessionId, enrichedSession.directory, appConfig.resumeCommands);
-        const runtime = runtimeRenderData(adapter, sessionId);
+        const runtime = runtimeRenderData(adapter, sessionId, enrichedSession);
         return {
           status: 200,
           body: renderSessionPage({
@@ -197,7 +197,7 @@ export function registerSessionDetail(
       }).sessions.map((item: any) => normalizeSessionRecord(item));
       const normalizedSession = normalizeSessionRecord(enrichSession(session, metaMap));
       const resumeCommand = getResumeCommand(adapter, sessionId, normalizedSession.directory, appConfig.resumeCommands);
-      const runtime = runtimeRenderData(adapter, sessionId);
+      const runtime = runtimeRenderData(adapter, sessionId, normalizedSession);
       return {
         status: 200,
         body: renderSessionPage({

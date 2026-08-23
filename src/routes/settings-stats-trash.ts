@@ -646,11 +646,6 @@ export function registerSettingsStatsTrash(
       const searchParams = new URL(_req.url || "/", "http://localhost").searchParams;
       const cached = buildCachedTokenExplorer(adapter, providerId, searchParams, "initial");
       const filters = cached.filters;
-
-      if (usesOpenCodeStatsStore(adapter)) {
-        return json(res, { filters, tokenStats: cached.tokenStats, totalTokens: cached.overview.totalTokens });
-      }
-
       return json(res, { filters, tokenStats: cached.tokenStats, totalTokens: cached.overview.totalTokens });
     } catch (err: any) {
       console.error(`Route error: ${err.message}`);

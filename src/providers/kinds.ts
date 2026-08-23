@@ -1,10 +1,8 @@
 import type { ProviderAdapter } from "./interface.js";
 import {
   defaultCapabilityDescriptor,
-  emptySessionProtocol,
   type CapabilityDescriptor,
-  type ProtocolDomain,
-  type SessionProtocol
+  type ProtocolDomain
 } from "./shared/session-protocol.js";
 
 export function supportsLocalManagement(adapter: ProviderAdapter | null | undefined) {
@@ -59,13 +57,6 @@ export function protocolCapability(
   return adapter?.protocolCapabilities?.[domain] ?? defaultCapabilityDescriptor();
 }
 
-export function supportsProtocolDomain(
-  adapter: ProviderAdapter | null | undefined,
-  domain: ProtocolDomain
-): boolean {
-  return protocolCapability(adapter, domain).support !== "none";
-}
-
 /** Fixed-shape descriptor map over every standardized protocol domain. */
 export function protocolCapabilityDescriptors(
   adapter: ProviderAdapter | null | undefined
@@ -77,37 +68,5 @@ export function protocolCapabilityDescriptors(
     agentRuns: protocolCapability(adapter, "agentRuns"),
     contextArtifacts: protocolCapability(adapter, "contextArtifacts"),
     branches: protocolCapability(adapter, "branches")
-  };
-}
-
-/**
- * Shared protocol access with stable empty arrays: returns the adapter's
- * protocol for the session, an empty protocol when the adapter supports the
- * protocol but the session has none, and null when the adapter does not
- * implement the accessor at all.
- */
-export function getSessionProtocolOrDefault(
-  adapter: ProviderAdapter | null | undefined,
-  sessionId: string
-): SessionProtocol | null {
-  if (!supportsSessionProtocol(adapter)) return null;
-  return adapter!.getSessionProtocol!(sessionId) ?? emptySessionProtocol(sessionId);
-}
-
-export function providerFeatureMatrix(adapter: ProviderAdapter | null | undefined) {
-  return {
-    localManagement: supportsLocalManagement(adapter),
-    openCodeStatsStore: usesOpenCodeStatsStore(adapter),
-    agentLoopViews: supportsAgentLoopViews(adapter),
-    sessionTrace: supportsSessionTrace(adapter),
-    systemPromptEvidence: supportsSystemPromptEvidence(adapter),
-    runtimeEnvironment: supportsRuntimeEnvironment(adapter),
-    protocolEvents: supportsProtocolDomain(adapter, "sessionEvents"),
-    protocolRelationships: supportsProtocolDomain(adapter, "sessionRelationships"),
-    protocolTasks: supportsProtocolDomain(adapter, "tasks"),
-    protocolAgentRuns: supportsProtocolDomain(adapter, "agentRuns"),
-    protocolContextArtifacts: supportsProtocolDomain(adapter, "contextArtifacts"),
-    protocolBranches: supportsProtocolDomain(adapter, "branches"),
-    resume: Boolean(adapter?.resumeCommand || adapter?.getResumeCommandSpec)
   };
 }

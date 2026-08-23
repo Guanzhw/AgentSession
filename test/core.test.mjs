@@ -43,7 +43,7 @@ import {
   resolveSessionSearchMode,
   resolveSessionSort,
   resolveStarredFilter
-} from "../dist/src/server.js";
+} from "../dist/src/session-queries.js";
 import { t } from "../dist/src/i18n.js";
 import {
   claudeUsageToTokens,
@@ -70,7 +70,14 @@ import {
 } from "../dist/src/providers/shared/subagent-tools.js";
 import { createOpenCodeSqliteAdapter } from "../dist/src/providers/opencode/sqlite-adapter.js";
 import { createIncrementalTokenStats, createSessionFileStore } from "../dist/src/providers/shared/file-adapter-helpers.js";
-import { providerFeatureMatrix } from "../dist/src/providers/kinds.js";
+import {
+  supportsAgentLoopViews,
+  supportsLocalManagement,
+  supportsRuntimeEnvironment,
+  supportsSessionTrace,
+  supportsSystemPromptEvidence,
+  usesOpenCodeStatsStore
+} from "../dist/src/providers/kinds.js";
 import { createStatsCache } from "../dist/src/stats-cache.js";
 import {
   getIndexedModelDistribution,
@@ -2099,14 +2106,13 @@ test("provider registration distinguishes source-supported resume commands from 
 
 test("every provider exposes the complete shared Agent Loop capability surface", () => {
   for (const provider of getAllProviders()) {
-    const features = providerFeatureMatrix(provider);
-    assert.equal(features.localManagement, true, provider.id);
-    assert.equal(features.agentLoopViews, true, provider.id);
-    assert.equal(features.sessionTrace, true, provider.id);
-    assert.equal(features.systemPromptEvidence, true, provider.id);
-    assert.equal(features.runtimeEnvironment, true, provider.id);
-    assert.equal(features.resume, provider.lifecycle !== "legacy" && provider.id !== "deepseek-harness", provider.id);
-    assert.equal(features.openCodeStatsStore, provider.id === "opencode", provider.id);
+    assert.equal(supportsLocalManagement(provider), true, provider.id);
+    assert.equal(supportsAgentLoopViews(provider), true, provider.id);
+    assert.equal(supportsSessionTrace(provider), true, provider.id);
+    assert.equal(supportsSystemPromptEvidence(provider), true, provider.id);
+    assert.equal(supportsRuntimeEnvironment(provider), true, provider.id);
+    assert.equal(Boolean(provider.resumeCommand || provider.getResumeCommandSpec), provider.lifecycle !== "legacy" && provider.id !== "deepseek-harness", provider.id);
+    assert.equal(usesOpenCodeStatsStore(provider), provider.id === "opencode", provider.id);
   }
 });
 
@@ -2123,6 +2129,7 @@ test("terminal launch is enabled by default and supports an explicit startup opt
 
   const enabled = parseArgs(["--config", configPath]);
   assert.equal(enabled.allowTerminalLaunch, true);
+  assert.deepEqual(enabled.projectPaths, {});
   assert.deepEqual(enabled.resumeShell, {
     executable: "powershell.exe",
     args: ["-NoExit", "-NoLogo", "-NoProfile"]

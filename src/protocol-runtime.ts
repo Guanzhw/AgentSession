@@ -1,7 +1,6 @@
 import type { ProviderAdapter } from "./providers/interface.js";
 import {
   finalizeSessionProtocol,
-  validateSessionProtocol,
   type EventCategory,
   type ProtocolCapabilities,
   type ProtocolDiagnostic,
@@ -43,7 +42,7 @@ function clampInteger(value: unknown, fallback: number, minimum: number, maximum
   return parsed;
 }
 
-function sessionRevision(adapter: ProviderAdapter, session: Record<string, unknown>): string {
+export function sessionRevision(adapter: ProviderAdapter, session: Record<string, unknown>): string {
   let providerRevision = "";
   try {
     const value = adapter.getStatsRevision?.();
@@ -106,13 +105,14 @@ export function getRuntimeProtocol(
     throw new ProtocolRuntimeError("session_not_found", "No provider-stored protocol matches this session.");
   }
   let protocol: SessionProtocol;
-  if (source.version === 2 && source.session) {
-    const validation = validateSessionProtocol(source, adapter.protocolCapabilities);
-    protocol = Object.freeze({
-      ...source,
-      validation: Object.freeze(validation),
-      completeness: validation.completeness
-    });
+  if (
+    source.version === 2
+    && source.session
+    && source.validation
+    && source.completeness
+    && Object.isFrozen(source)
+  ) {
+    protocol = source;
   } else {
     protocol = finalizeSessionProtocol(source, {
       provider: adapter.id,
@@ -207,7 +207,7 @@ function decodeCursor(cursor: string | null | undefined, fingerprint: string): n
   }
 }
 
-function publicEvent(event: SessionEventEnvelope) {
+export function publicEvent(event: SessionEventEnvelope) {
   return {
     id: event.id,
     sessionId: event.sessionId,

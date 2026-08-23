@@ -194,98 +194,6 @@ export function registerMutations(
     }
   });
 
-  // Legacy mutation route (without provider prefix)
-  app.post(/^\/api\/session\/([^/]+)\/(star|rename|delete|restore|permanent-delete)$/, async (req: any, res: any, match: RegExpMatchArray) => {
-    if (!isTrustedLocalJsonRequest(req)) return json(res, { ok: false, error: "Mutation requests must be same-origin JSON from loopback" }, 403);
-    const providerId = "opencode";
-    const adapter = providerMap.get(providerId);
-    if (!supportsLocalManagement(adapter)) {
-      return json(res, { ok: false, error: "Not supported for this provider" }, 501);
-    }
-
-    const rawId = match[1];
-    const id = safeDecodeId(rawId);
-    if (!id) return json(res, { ok: false, error: "Invalid session ID" }, 400);
-    const action = match[2];
-    const existingMeta = getMeta(providerId, id);
-    const canManageMissingSource = (action === "restore" || action === "permanent-delete")
-      && Boolean(existingMeta?.deleted);
-    if (adapter && !adapter.getSession(id) && !canManageMissingSource) {
-      return json(res, { ok: false, error: "Session not found" }, 404);
-    }
-    try {
-      if (action === "star") {
-        const starred = toggleStar(providerId, id);
-        recordRuntimeEvent(appConfig.metaDir, {
-          event: "session.meta.update",
-          provider: providerId,
-          sessionId: id,
-          action,
-          starred,
-          ok: true
-        });
-        return json(res, { ok: true, starred });
-      }
-      if (action === "rename") {
-        const body = await readBody(req);
-        renameSession(providerId, id, body.title || "");
-        recordRuntimeEvent(appConfig.metaDir, {
-          event: "session.meta.update",
-          provider: providerId,
-          sessionId: id,
-          action,
-          ok: true
-        });
-        return json(res, { ok: true });
-      }
-      if (action === "delete") {
-        softDelete(providerId, id);
-        recordRuntimeEvent(appConfig.metaDir, {
-          event: "session.meta.update",
-          provider: providerId,
-          sessionId: id,
-          action,
-          ok: true
-        });
-        return json(res, { ok: true });
-      }
-      if (action === "restore") {
-        restoreSession(providerId, id);
-        recordRuntimeEvent(appConfig.metaDir, {
-          event: "session.meta.update",
-          provider: providerId,
-          sessionId: id,
-          action,
-          ok: true
-        });
-        return json(res, { ok: true });
-      }
-      if (action === "permanent-delete") {
-        permanentDelete(providerId, id);
-        recordRuntimeEvent(appConfig.metaDir, {
-          event: "session.meta.update",
-          provider: providerId,
-          sessionId: id,
-          action,
-          ok: true
-        });
-        return json(res, { ok: true });
-      }
-    } catch (error: any) {
-      console.error("Mutation error:", error?.message || error);
-      recordRuntimeEvent(appConfig.metaDir, {
-        event: "session.meta.update",
-        level: "error",
-        provider: providerId,
-        sessionId: id,
-        action,
-        ok: false,
-        error: runtimeErrorMessage(error)
-      });
-      return json(res, { ok: false, error: "Internal server error" }, 500);
-    }
-  });
-
   // Batch actions
   app.post("/api/batch", async (req: any, res: any, _match: any) => {
     if (!isTrustedLocalJsonRequest(req)) return json(res, { ok: false, error: "Batch requests must be same-origin JSON from loopback" }, 403);
@@ -424,10 +332,6 @@ export function registerMutations(
     }
 
     try {
-      const session = adapter.getSession(sessionId);
-      if (!session) {
-        return json(res, { ok: false, error: "Session not found" }, 404);
-      }
       const command = getResumeCommand(
         adapter,
         sessionId,

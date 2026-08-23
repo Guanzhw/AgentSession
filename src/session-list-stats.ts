@@ -1,7 +1,7 @@
 import type { ProviderAdapter } from "./providers/interface.js";
 import { supportsSessionProtocol } from "./providers/kinds.js";
 import { type SessionProtocol, type TaskStatus } from "./providers/shared/session-protocol.js";
-import { clearProtocolRuntimeCache, getRuntimeProtocol, ProtocolRuntimeError } from "./protocol-runtime.js";
+import { clearProtocolRuntimeCache, getRuntimeProtocol, ProtocolRuntimeError, sessionRevision } from "./protocol-runtime.js";
 
 /**
  * Provider-neutral session-list statistics.
@@ -188,9 +188,7 @@ export function deriveSessionListStats(
     return base;
   }
 
-  const timeUpdated = finiteNumber(session?.time_updated ?? session?.timeUpdated) ?? 0;
-  const providerRevision = adapter.getStatsRevision?.() ?? "none";
-  const revision = `${providerRevision}|${timeUpdated}|${base.messageCount}|${base.tokenCount}`;
+  const revision = sessionRevision(adapter, session);
   const key = `${adapter.id}\u0000${session.id}\u0000${revision}`;
 
   const cached = listStatsCache.get(key);

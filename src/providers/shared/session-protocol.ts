@@ -398,18 +398,6 @@ function numberOrNull(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-/** Stable empty protocol surface. Unsupported adapters and empty sessions share this contract. */
-export function emptySessionProtocol(sessionId: string): SessionProtocol {
-  return {
-    sessionId,
-    events: [],
-    relationships: [],
-    tasks: [],
-    agentRuns: [],
-    contextArtifacts: []
-  };
-}
-
 export function defaultCapabilityDescriptor(): CapabilityDescriptor {
   return { support: "none", provenance: "derived" };
 }

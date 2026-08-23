@@ -26,17 +26,6 @@ import {
 } from "./server-helpers.js";
 import { Router } from "./router.js";
 
-// Re-export session query functions for test compatibility
-export {
-  resolveSessionSort,
-  resolveStarredFilter,
-  resolveSessionSearchMode,
-  resolveSessionKindFilter,
-  getVisibleListResults,
-  getIndexedListResults,
-  getSearchResults
-} from "./session-queries.js";
-
 import { registerMutations } from "./routes/mutations.js";
 import { registerSessions } from "./routes/sessions.js";
 import { registerSessionDetail } from "./routes/session-detail.js";

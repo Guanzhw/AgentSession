@@ -5,9 +5,7 @@ import { getAllProviders } from "../dist/src/providers/index.js";
 import {
   protocolCapability,
   protocolCapabilityDescriptors,
-  supportsProtocolDomain,
-  supportsSessionProtocol,
-  getSessionProtocolOrDefault
+  supportsSessionProtocol
 } from "../dist/src/providers/kinds.js";
 import {
   agentRun,
@@ -18,7 +16,6 @@ import {
   contextArtifact,
   contextCompactionEvent,
   defaultCapabilityDescriptor,
-  emptySessionProtocol,
   isContextLifecycleEventKind,
   messageSessionEvents,
   normalizeCompactionStrategy,
@@ -70,21 +67,6 @@ const message = (id, role = "assistant", timestamp = 1000) => ({
 // ---------------------------------------------------------------------------
 // Type/runtime helpers
 // ---------------------------------------------------------------------------
-
-test("empty protocol surfaces return stable empty arrays", () => {
-  const protocol = emptySessionProtocol("s1");
-  assert.deepEqual(protocol, {
-    sessionId: "s1",
-    events: [],
-    relationships: [],
-    tasks: [],
-    agentRuns: [],
-    contextArtifacts: []
-  });
-  const again = emptySessionProtocol("s1");
-  assert.notEqual(protocol.events, again.events, "fresh arrays per call");
-  assert.deepEqual(protocol.events, []);
-});
 
 test("sequences follow canonical source order and never reorder by timestamps", () => {
   // Out-of-order, equal, and null timestamps must not influence the sequence:
@@ -304,23 +286,15 @@ test("capability descriptors stay truthful across every provider", () => {
       provider.id
     );
   }
-  assert.equal(supportsProtocolDomain(null, "tasks"), false);
   assert.equal(protocolCapability(null, "tasks").support, "none");
   assert.deepEqual(defaultCapabilityDescriptor(), { support: "none", provenance: "derived" });
 });
 
-test("shared protocol access returns stable empty arrays when supported but empty", () => {
+test("provider protocol access remains adapter-owned for unknown sessions", () => {
   const provider = getAllProviders().find((candidate) => candidate.id === "pi");
-  const unknown = getSessionProtocolOrDefault(provider, "no-such-session");
-  assert.ok(unknown, "accessor exists so a protocol is returned");
-  assert.deepEqual(unknown.events, []);
-  assert.deepEqual(unknown.tasks, []);
-  // Every registered provider now exposes the protocol surface, so an unknown
-  // session receives the same stable empty compatibility shape.
+  assert.equal(provider.getSessionProtocol("no-such-session"), null);
   const opencode = getAllProviders().find((candidate) => candidate.id === "opencode");
-  const openCodeUnknown = getSessionProtocolOrDefault(opencode, "x");
-  assert.ok(openCodeUnknown);
-  assert.deepEqual(openCodeUnknown.events, []);
+  assert.equal(opencode.getSessionProtocol("x"), null);
 });
 
 test("descriptor provenance never overclaims recorded for mixed-fidelity domains", () => {

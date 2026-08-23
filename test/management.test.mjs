@@ -27,7 +27,7 @@ const {
   permanentDelete,
   renameSession
 } = await import("../dist/src/meta.js");
-const { getIndexedListResults, getVisibleListResults } = await import("../dist/src/server.js");
+const { getIndexedListResults, getVisibleListResults } = await import("../dist/src/session-queries.js");
 const { getAllProviders } = await import("../dist/src/providers/index.js");
 const { EMPTY_PROJECT_FILTER } = await import("../dist/src/project-filter.js");
 const { renderSessionsPage } = await import("../dist/src/views/sessions.js");
@@ -252,7 +252,6 @@ test("all metadata and reindex mutations require same-origin loopback JSON", asy
   const untrusted = { headers: { host: "127.0.0.1:3456", "content-type": "application/x-www-form-urlencoded", origin: "https://attacker.example" }, socket: { remoteAddress: "127.0.0.1" } };
   const cases = [
     [posts.find((entry) => entry.pattern instanceof RegExp && entry.pattern.source.includes("permanent-delete") && entry.pattern.source.includes("[a-z]")), ["", "opencode", "session-1", "star"]],
-    [posts.find((entry) => entry.pattern instanceof RegExp && entry.pattern.source.includes("permanent-delete") && !entry.pattern.source.includes("[a-z]")), ["", "session-1", "star"]],
     [posts.find((entry) => entry.pattern === "/api/batch"), undefined],
     [posts.find((entry) => entry.pattern instanceof RegExp && entry.pattern.source.endsWith("batch$")), ["", "opencode"]],
     [posts.find((entry) => entry.pattern === "/api/reindex"), undefined]
@@ -263,4 +262,5 @@ test("all metadata and reindex mutations require same-origin loopback JSON", asy
     await entry.handler(untrusted, response, match);
     assert.equal(response.statusCode, 403);
   }
+  assert.equal(posts.some((entry) => entry.pattern instanceof RegExp && entry.pattern.source.includes("/api\\/session\\/")), false, "legacy unprefixed mutation route is removed");
 });

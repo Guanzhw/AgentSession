@@ -1,6 +1,7 @@
 import { t } from "../i18n.js";
 import { escapeHtml } from "../markdown.js";
-import type { SessionProtocol, SessionEventEnvelope } from "../providers/shared/session-protocol.js";
+import type { SessionProtocol } from "../providers/shared/session-protocol.js";
+import { publicEvent } from "../protocol-runtime.js";
 
 type RuntimeData = {
   protocol: SessionProtocol | null;
@@ -43,26 +44,6 @@ function evidenceButton(kind: string, id: string, label = "") {
   return `<button type="button" class="runtime-evidence-trigger" data-runtime-evidence-kind="${escapeHtml(kind)}" data-runtime-evidence-id="${escapeHtml(id)}" aria-label="${escapeHtml(label || t("runtime.evidence_open"))}">${escapeHtml(label || t("runtime.evidence"))}</button>`;
 }
 
-function safeEvent(event: SessionEventEnvelope) {
-  return {
-    id: event.id,
-    sessionId: event.sessionId,
-    sequence: event.sequence,
-    timestamp: event.timestamp,
-    kind: event.kind,
-    normalizedKind: event.normalizedKind || event.kind,
-    category: event.category || "unknown",
-    phase: event.phase || null,
-    turnId: event.turnId || null,
-    taskId: event.taskId || null,
-    runId: event.runId || null,
-    parentEventId: event.parentEventId || null,
-    correlationId: event.correlationId || null,
-    compaction: event.compaction || null,
-    provenance: event.provenance
-  };
-}
-
 function renderCapability(name: string, descriptor: any) {
   const support = descriptor?.support || "none";
   const fidelity = descriptor?.provenance || "derived";
@@ -102,7 +83,7 @@ function renderEvent(event: any) {
 
 function renderEvents(data: RuntimeData) {
   const protocol = data.protocol;
-  const events = (protocol?.events || []).slice(0, 50).map(safeEvent);
+  const events = (protocol?.events || []).slice(0, 50).map(publicEvent);
   return `<section class="runtime-lens runtime-events-lens" aria-labelledby="runtime-events-title" data-runtime-events-panel>
     <div class="runtime-section-heading"><div><h2 id="runtime-events-title">${t("runtime.events_title")}</h2><p>${t("runtime.events_description")}</p></div><span class="runtime-bounded-label">${t("runtime.bounded_label")}</span></div>
     <form class="runtime-event-filters" data-runtime-event-filters><label>${t("runtime.filter_category")}<select data-runtime-event-category><option value="">${t("runtime.all_categories")}</option>${["session", "message", "model", "reasoning", "tool", "task", "run", "context", "control", "team", "unknown"].map((category) => `<option value="${category}">${category}</option>`).join("")}</select></label><label class="runtime-filter-search">${t("runtime.filter_text")}<input type="search" data-runtime-event-search placeholder="${escapeHtml(t("runtime.filter_text_placeholder"))}"></label><button type="submit" class="btn">${t("runtime.apply_filter")}</button></form>
@@ -172,12 +153,12 @@ function renderSessions(protocol: SessionProtocol | null, graph: any = null) {
 function renderContext(protocol: SessionProtocol | null) {
   const artifacts = (protocol?.contextArtifacts || []).slice(0, 100);
   const events = (protocol?.events || []).filter((event) => event.category === "context" || String(event.normalizedKind || event.kind).startsWith("context.") || String(event.normalizedKind || event.kind).startsWith("memory.")).slice(0, 50);
-  return `<section class="runtime-lens runtime-context-lens" aria-labelledby="runtime-context-title"><div class="runtime-section-heading"><div><h2 id="runtime-context-title">${t("runtime.context_title")}</h2><p>${t("runtime.context_description")}</p></div><span class="runtime-bounded-label">${escapeHtml(`${count(artifacts.length)} ${t("runtime.artifacts")}`)}</span></div><div class="runtime-context-grid">${artifacts.length ? artifacts.map((artifact: any) => `<article class="runtime-artifact runtime-card"><div class="runtime-card-heading"><strong>${escapeHtml(artifact.title || artifact.kind || artifact.id)}</strong><span>${escapeHtml(artifact.contentAccess || t("runtime.unknown"))}</span></div><p>${escapeHtml([artifact.kind, artifact.scope, artifact.origin].filter(Boolean).join(" · "))}</p>${artifact.summary ? `<p>${escapeHtml(artifact.summary)}</p>` : ""}<div class="runtime-card-meta">${artifact.redacted ? `<span>${escapeHtml(t("runtime.redacted"))}</span>` : ""}${artifact.sourcePath ? `<code>${escapeHtml(artifact.sourcePath)}</code>` : ""}${evidenceButton("artifact", artifact.id)}</div></article>`).join("") : `<p class="runtime-empty">${t("runtime.no_artifacts")}</p>`}</div><h3>${t("runtime.context_events_title")}</h3><div class="runtime-context-events">${events.length ? events.slice(0, 50).map((event) => renderEvent(safeEvent(event))).join("") : `<p class="runtime-empty">${t("runtime.no_context_events")}</p>`}</div></section>`;
+  return `<section class="runtime-lens runtime-context-lens" aria-labelledby="runtime-context-title"><div class="runtime-section-heading"><div><h2 id="runtime-context-title">${t("runtime.context_title")}</h2><p>${t("runtime.context_description")}</p></div><span class="runtime-bounded-label">${escapeHtml(`${count(artifacts.length)} ${t("runtime.artifacts")}`)}</span></div><div class="runtime-context-grid">${artifacts.length ? artifacts.map((artifact: any) => `<article class="runtime-artifact runtime-card"><div class="runtime-card-heading"><strong>${escapeHtml(artifact.title || artifact.kind || artifact.id)}</strong><span>${escapeHtml(artifact.contentAccess || t("runtime.unknown"))}</span></div><p>${escapeHtml([artifact.kind, artifact.scope, artifact.origin].filter(Boolean).join(" · "))}</p>${artifact.summary ? `<p>${escapeHtml(artifact.summary)}</p>` : ""}<div class="runtime-card-meta">${artifact.redacted ? `<span>${escapeHtml(t("runtime.redacted"))}</span>` : ""}${artifact.sourcePath ? `<code>${escapeHtml(artifact.sourcePath)}</code>` : ""}${evidenceButton("artifact", artifact.id)}</div></article>`).join("") : `<p class="runtime-empty">${t("runtime.no_artifacts")}</p>`}</div><h3>${t("runtime.context_events_title")}</h3><div class="runtime-context-events">${events.length ? events.slice(0, 50).map(renderEvent).join("") : `<p class="runtime-empty">${t("runtime.no_context_events")}</p>`}</div></section>`;
 }
 
 function renderEvidenceData(protocol: SessionProtocol | null) {
   return {
-    events: (protocol?.events || []).slice(0, 50).map(safeEvent),
+    events: (protocol?.events || []).slice(0, 50).map(publicEvent),
     tasks: (protocol?.tasks || []).slice(0, 100),
     runs: (protocol?.agentRuns || []).slice(0, 100),
     artifacts: (protocol?.contextArtifacts || []).slice(0, 100),
