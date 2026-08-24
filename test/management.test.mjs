@@ -129,7 +129,7 @@ test("viewer metadata filters and manages SQLite and indexed providers without t
     assert.deepEqual(titlePage.sessions.map((session) => session.id), ["c", "b"]);
 
     assert.deepEqual(
-      listSessionProjects("renamed", "week", dbPath, excludedIds, undefined, undefined, new Map([["b", "Renamed project"], ["c", "Custom work"]]))
+      listSessionProjects("renamed", "week", dbPath, excludedIds, undefined, new Map([["b", "Renamed project"], ["c", "Custom work"]]))
         .map((project) => ({ id: project.id, count: project.count })),
       [{ id: "p1", count: 1 }]
     );
@@ -189,7 +189,7 @@ test("viewer metadata filters and manages SQLite and indexed providers without t
     );
 
     assert.deepEqual(
-      getIndexedSessionProjects("codex", "", "renamed", undefined, undefined, excludedIds, new Map([["b", "Renamed project"], ["c", "Custom work"]]))
+      getIndexedSessionProjects("codex", "", "renamed", undefined, excludedIds, new Map([["b", "Renamed project"], ["c", "Custom work"]]))
         .map((project) => ({ id: project.id, count: project.count })),
       [{ id: "/p1", count: 1 }]
     );

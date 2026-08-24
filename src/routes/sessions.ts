@@ -5,7 +5,6 @@ import {
   resolveSessionSearchMode,
   resolveSessionSort,
   resolveStarredFilter,
-  resolveSessionKindFilter,
   toApiSessionShape,
   normalizeSessionRecord,
   enrichSession,
@@ -14,7 +13,9 @@ import {
 import { json, missingProviderResponse } from "../server-helpers.js";
 import { attachSessionListStats } from "../session-list-stats.js";
 import { getProvider } from "../providers/index.js";
+import { supportsLocalManagement } from "../providers/kinds.js";
 import { renderSessionsPage } from "../views/sessions.js";
+import { sessionCard } from "../views/components.js";
 import { providerRenderContext } from "./provider-context.js";
 
 export function registerSessions(
@@ -39,12 +40,11 @@ export function registerSessions(
     const query = searchParams.get("q") || "";
     const project = searchParams.get("project") || "";
     const sort = resolveSessionSort(searchParams);
-    const sessionKind = resolveSessionKindFilter(searchParams);
     const excluded = providers.flatMap((provider) => [...getExcludedIds(provider)].map((id) => ({ provider, id })));
     const metaByProvider = new Map(providers.map((provider) => [provider, getAllMeta(provider)]));
     const titleOverrides = providers.flatMap((provider) => [...getTitleOverrides(metaByProvider.get(provider) || new Map())]
       .map(([id, title]) => ({ provider, id, title })));
-    const queryOptions = { providers, limit, offset, timeRange: range, search: query, project, sort, sessionKind, excluded, titleOverrides };
+    const queryOptions = { providers, limit, offset, timeRange: range, search: query, project, sort, excluded, titleOverrides };
     const results = getCrossProviderSessions(queryOptions);
     const sessions = results.sessions.map((session: any) => normalizeSessionRecord(enrichSession(session, metaByProvider.get(session.provider))));
     attachSessionListStats(sessions, (provider) => providerMap.get(provider));
@@ -56,7 +56,6 @@ export function registerSessions(
       query,
       project,
       sort,
-      sessionKind,
       excluded,
       titleOverrides,
     };
@@ -68,8 +67,18 @@ export function registerSessions(
       const limit = Math.min(Math.max(1, Number(searchParams.get("limit")) || 30), 100);
       const offset = Math.max(0, Number(searchParams.get("offset")) || 0);
       const result = buildCrossProviderList(searchParams, limit, offset);
+      const returnTo = searchParams.get("returnTo") || "";
+      const providerNames = new Map(providerInfo.map((item: any) => [item.id, item.name || item.id]));
       return json(res, {
-        sessions: result.sessions.map(toApiSessionShape),
+        sessions: result.sessions.map((session: any) => toApiSessionShape(session, {
+          html: sessionCard(session, false, {
+            provider: "",
+            manageable: false,
+            showProvider: true,
+            providerName: providerNames.get(session.provider) || session.provider || "",
+            returnTo
+          })
+        })),
         total: result.total,
         offset,
         hasMore: offset + result.sessions.length < result.total,
@@ -90,7 +99,6 @@ export function registerSessions(
         timeRange: result.range,
         search: result.query,
         project: result.project,
-        sessionKind: result.sessionKind,
         excluded: result.excluded,
         titleOverrides: result.titleOverrides,
       });
@@ -98,7 +106,6 @@ export function registerSessions(
         providers: result.providers,
         timeRange: result.range,
         search: result.query,
-        sessionKind: result.sessionKind,
         excluded: result.excluded,
         titleOverrides: result.titleOverrides,
       });
@@ -113,7 +120,6 @@ export function registerSessions(
           range: result.range,
           project: result.project,
           sort: result.sort,
-          sessionKind: result.sessionKind,
           projectOptions,
           totalMessages: overview.totalMessages,
           provider: null,
@@ -149,17 +155,26 @@ export function registerSessions(
       const searchMode = resolveSessionSearchMode(url.searchParams);
       const sort = resolveSessionSort(url.searchParams);
       const starredOnly = resolveStarredFilter(url.searchParams);
-      const sessionKind = resolveSessionKindFilter(url.searchParams);
       const catalog = createSessionCatalog(adapter, providerId);
       const results = query && searchMode === "content"
-        ? catalog.contentSearch({ query, limit: apiLimit, offset: apiOffset, sessionKind })
-        : catalog.list({ limit: apiLimit, offset: apiOffset, query, range, project, sort, starredOnly, sessionKind });
+        ? catalog.contentSearch({ query, limit: apiLimit, offset: apiOffset })
+        : catalog.list({ limit: apiLimit, offset: apiOffset, query, range, project, sort, starredOnly });
       const sessions = results.sessions;
       const total = results.total;
       attachSessionListStats(sessions, () => adapter, providerId);
+      const returnTo = url.searchParams.get("returnTo") || "";
+      const manageable = supportsLocalManagement(adapter);
 
       return json(res, {
-        sessions: sessions.map((session: any) => toApiSessionShape(session)),
+        sessions: sessions.map((session: any) => toApiSessionShape(session, {
+          html: sessionCard(session, false, {
+            provider: providerId,
+            manageable,
+            showCheckbox: manageable,
+            showProvider: false,
+            returnTo
+          })
+        })),
         total,
         offset: apiOffset,
         hasMore: apiOffset + sessions.length < total
@@ -204,17 +219,16 @@ export function registerSessions(
     const project = url.searchParams.get("project") || "";
     const sort = resolveSessionSort(url.searchParams);
     const starredOnly = resolveStarredFilter(url.searchParams);
-    const sessionKind = resolveSessionKindFilter(url.searchParams);
 
     const renderContext = providerRenderContext(providerSegment, providerInfo, adapter);
 
     try {
       const catalog = createSessionCatalog(adapter, providerSegment);
-      const indexed = catalog.list({ limit, offset, range, query, project, sort, starredOnly, sessionKind });
+      const indexed = catalog.list({ limit, offset, range, query, project, sort, starredOnly });
       const sessions = indexed.sessions;
       attachSessionListStats(sessions, () => adapter, providerSegment);
-      const overviewStats = catalog.overview({ range, query, project, sessionKind, starredOnly });
-      const projectOptions = catalog.projects({ range, query, sessionKind, starredOnly });
+      const overviewStats = catalog.overview({ range, query, project, starredOnly });
+      const projectOptions = catalog.projects({ range, query, starredOnly });
       return {
         status: 200,
         body: renderSessionsPage({
@@ -227,7 +241,6 @@ export function registerSessions(
           project,
           sort,
           starredOnly,
-          sessionKind,
           projectOptions,
           searchMode: "list",
           totalMessages: overviewStats.totalMessages,
@@ -260,7 +273,7 @@ export function registerSessions(
 
     try {
       const catalog = createSessionCatalog(adapter, providerSegment);
-      const results = catalog.contentSearch({ query, limit, offset, sessionKind: "all" });
+      const results = catalog.contentSearch({ query, limit, offset });
       attachSessionListStats(results.sessions, () => adapter, providerSegment);
       return {
         status: 200,

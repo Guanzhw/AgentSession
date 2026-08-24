@@ -15,7 +15,6 @@ export function renderSessionsPage({
   project = "",
   sort = "updated-desc",
   starredOnly = false,
-  sessionKind = "all",
   projectOptions = [],
   searchMode = "list",
   totalMessages = 0,
@@ -27,17 +26,16 @@ export function renderSessionsPage({
   selectedProviders = [],
   global = false,
   storageDiagnostic = null
-}: { sessions?: any[]; total?: number; limit?: number; offset?: number; query?: string; note?: string; range?: string; project?: string; sort?: string; starredOnly?: boolean; sessionKind?: string; projectOptions?: { id: string; label: string; count?: number; worktree?: string }[]; searchMode?: string; totalMessages?: number; deletedCount?: number; provider?: string | null; providerAvailable?: boolean; manageable?: boolean; providers?: any[]; selectedProviders?: string[]; global?: boolean; storageDiagnostic?: any } = {}) {
+}: { sessions?: any[]; total?: number; limit?: number; offset?: number; query?: string; note?: string; range?: string; project?: string; sort?: string; starredOnly?: boolean; projectOptions?: { id: string; label: string; count?: number; worktree?: string }[]; searchMode?: string; totalMessages?: number; deletedCount?: number; provider?: string | null; providerAvailable?: boolean; manageable?: boolean; providers?: any[]; selectedProviders?: string[]; global?: boolean; storageDiagnostic?: any } = {}) {
   const isAvailable = providerAvailable !== false;
   const isManageableProvider = isAvailable && manageable;
   const hasVisibleSessions = sessions.length > 0;
-  const hasActiveFilters = Boolean(query || range || project || starredOnly || sort !== "updated-desc" || sessionKind !== "all");
+  const hasActiveFilters = Boolean(query || range || project || starredOnly || sort !== "updated-desc");
   const listParams = new URLSearchParams();
   if (query) listParams.set("q", query);
   if (range) listParams.set("range", range);
   if (project) listParams.set("project", project);
   if (sort !== "updated-desc") listParams.set("sort", sort);
-  if (sessionKind !== "all") listParams.set("kind", sessionKind);
   if (starredOnly) listParams.set("starred", "1");
   if (global) selectedProviders.forEach((id) => listParams.append("provider", id));
   const listBasePath = global
@@ -167,7 +165,7 @@ export function renderSessionsPage({
     <section class="session-list" id="session-list">
       ${cards}
     </section>
-    ${total > offset + sessions.length ? `<button id="scroll-sentinel" class="scroll-load-more" type="button" data-offset="${offset + sessions.length}" data-total="${total}" data-range="${escapeHtml(range)}" data-project="${escapeHtml(project)}" data-query="${escapeHtml(query)}" data-mode="${escapeHtml(searchMode)}" data-sort="${escapeHtml(sort)}" data-kind="${escapeHtml(sessionKind)}" data-starred="${starredOnly ? "1" : ""}" data-provider="${escapeHtml(provider || "")}" data-providers="${escapeHtml(selectedProviders.join(","))}" data-provider-names="${escapeHtml(JSON.stringify(Object.fromEntries(providerNames)))}" data-return-to="${escapeHtml(listPath)}" data-global="${global ? "true" : "false"}">${t("sessions.load_more")}</button>` : ""}
+    ${total > offset + sessions.length ? `<button id="scroll-sentinel" class="scroll-load-more" type="button" data-offset="${offset + sessions.length}" data-total="${total}" data-range="${escapeHtml(range)}" data-project="${escapeHtml(project)}" data-query="${escapeHtml(query)}" data-mode="${escapeHtml(searchMode)}" data-sort="${escapeHtml(sort)}" data-starred="${starredOnly ? "1" : ""}" data-provider="${escapeHtml(provider || "")}" data-providers="${escapeHtml(selectedProviders.join(","))}" data-provider-names="${escapeHtml(JSON.stringify(Object.fromEntries(providerNames)))}" data-return-to="${escapeHtml(listPath)}" data-global="${global ? "true" : "false"}">${t("sessions.load_more")}</button>` : ""}
   `;
 
   const isContentSearch = searchMode === "content" && query;

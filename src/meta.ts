@@ -68,20 +68,8 @@ export function getMetaDb() {
   return metaDb;
 }
 
-/**
- * Backward-compat: if called with 1 arg, treat it as sessionId with provider="opencode".
- * If called with 2 args, first is provider, second is sessionId.
- */
-function resolveArgs(providerOrId: any, sessionId: string | undefined = undefined) {
-  if (sessionId === undefined) {
-    return ["opencode", providerOrId];
-  }
-  return [providerOrId, sessionId];
-}
-
 /** 确保 session_id 在 session_meta 中有记录（upsert 辅助） */
-function ensureMeta(providerOrId: any, sessionId: string | undefined = undefined) {
-  const [provider, sid] = resolveArgs(providerOrId, sessionId);
+function ensureMeta(provider: string, sid: string) {
   const db = getMetaDb();
   const existing = db.prepare("SELECT 1 FROM session_meta WHERE provider = ? AND session_id = ?").get(provider, sid);
   if (!existing) {
@@ -89,31 +77,28 @@ function ensureMeta(providerOrId: any, sessionId: string | undefined = undefined
   }
 }
 
-export function getMeta(providerOrId: any, sessionId: string | undefined = undefined) {
-  const [provider, sid] = resolveArgs(providerOrId, sessionId);
+export function getMeta(provider: string, sid: string) {
   const db = getMetaDb();
   return db.prepare("SELECT * FROM session_meta WHERE provider = ? AND session_id = ?").get(provider, sid) || null;
 }
 
-export function getAllMeta(provider: string | undefined = undefined) {
+export function getAllMeta(provider: string) {
   const db = getMetaDb();
-  const rows = provider
-    ? db.prepare("SELECT * FROM session_meta WHERE provider = ?").all(provider)
-    : db.prepare("SELECT * FROM session_meta").all();
+  const rows = db.prepare("SELECT * FROM session_meta WHERE provider = ?").all(provider);
   const map = new Map();
   for (const row of rows) map.set(row.session_id, row);
   return map;
 }
 
 /** 返回所有 deleted=1 且 permanent=0 的 session_id 列表 */
-export function getDeletedIds(provider = "opencode") {
+export function getDeletedIds(provider: string) {
   const db = getMetaDb();
   return db.prepare("SELECT session_id FROM session_meta WHERE provider = ? AND deleted = 1 AND permanent = 0").all(provider)
     .map((r: any) => r.session_id);
 }
 
 /** 返回所有 deleted=1 或 permanent=1 的 session_id 集合（用于列表排除） */
-export function getExcludedIds(provider = "opencode"): Set<string> {
+export function getExcludedIds(provider: string): Set<string> {
   const db = getMetaDb();
   return new Set(
     db.prepare("SELECT session_id FROM session_meta WHERE provider = ? AND (deleted = 1 OR permanent = 1)").all(provider)
@@ -121,8 +106,7 @@ export function getExcludedIds(provider = "opencode"): Set<string> {
   );
 }
 
-export function toggleStar(providerOrId: any, sessionId: string | undefined = undefined) {
-  const [provider, sid] = resolveArgs(providerOrId, sessionId);
+export function toggleStar(provider: string, sid: string) {
   const db = getMetaDb();
   ensureMeta(provider, sid);
   const row = db.prepare("SELECT starred FROM session_meta WHERE provider = ? AND session_id = ?").get(provider, sid);
@@ -132,61 +116,34 @@ export function toggleStar(providerOrId: any, sessionId: string | undefined = un
   return newStarred === 1;
 }
 
-export function renameSession(providerOrId: any, sessionIdOrTitle: any, newTitle: string | undefined = undefined) {
-  let provider, sid, title;
-  if (newTitle === undefined) {
-    // Legacy: renameSession(sessionId, title)
-    provider = "opencode";
-    sid = providerOrId;
-    title = sessionIdOrTitle;
-  } else {
-    // New: renameSession(provider, sessionId, title)
-    provider = providerOrId;
-    sid = sessionIdOrTitle;
-    title = newTitle;
-  }
+export function renameSession(provider: string, sid: string, title: string) {
   const db = getMetaDb();
   ensureMeta(provider, sid);
   db.prepare("UPDATE session_meta SET custom_title = ?, time_renamed = ? WHERE provider = ? AND session_id = ?")
     .run(title || null, Date.now(), provider, sid);
 }
 
-export function softDelete(providerOrId: any, sessionId: string | undefined = undefined) {
-  const [provider, sid] = resolveArgs(providerOrId, sessionId);
+export function softDelete(provider: string, sid: string) {
   const db = getMetaDb();
   ensureMeta(provider, sid);
   db.prepare("UPDATE session_meta SET deleted = 1, time_deleted = ? WHERE provider = ? AND session_id = ?")
     .run(Date.now(), provider, sid);
 }
 
-export function restoreSession(providerOrId: any, sessionId: string | undefined = undefined) {
-  const [provider, sid] = resolveArgs(providerOrId, sessionId);
+export function restoreSession(provider: string, sid: string) {
   const db = getMetaDb();
   db.prepare("UPDATE session_meta SET deleted = 0, time_deleted = NULL WHERE provider = ? AND session_id = ?")
     .run(provider, sid);
 }
 
-export function permanentDelete(providerOrId: any, sessionId: string | undefined = undefined) {
-  const [provider, sid] = resolveArgs(providerOrId, sessionId);
+export function permanentDelete(provider: string, sid: string) {
   const db = getMetaDb();
   ensureMeta(provider, sid);
   db.prepare("UPDATE session_meta SET deleted = 1, permanent = 1 WHERE provider = ? AND session_id = ?")
     .run(provider, sid);
 }
 
-export function batchAction(providerOrIds: any, idsOrAction: any, actionArg: string | undefined = undefined) {
-  let provider, ids, action;
-  if (actionArg === undefined) {
-    // Legacy: batchAction(ids, action)
-    provider = "opencode";
-    ids = providerOrIds;
-    action = idsOrAction;
-  } else {
-    // New: batchAction(provider, ids, action)
-    provider = providerOrIds;
-    ids = idsOrAction;
-    action = actionArg;
-  }
+export function batchAction(provider: string, ids: string[], action: string) {
   for (const id of ids) {
     if (action === "delete") softDelete(provider, id);
     else if (action === "restore") restoreSession(provider, id);

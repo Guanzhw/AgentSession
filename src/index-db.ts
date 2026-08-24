@@ -1,7 +1,6 @@
 // src/index-db.js
 import { DatabaseSync } from "node:sqlite";
 import { getConfig } from "./config.js";
-import { normalizeSessionKindFilter } from "./session-kind.js";
 import { isEmptyProjectFilter, normalizeCrossProviderProjectPath } from "./project-filter.js";
 import { escapeSqlLikePattern, splitSearchTerms } from "./providers/shared/parser.js";
 import {
@@ -106,7 +105,6 @@ function indexedFilter(
   search = "",
   project = "",
   includedIds: string[] | undefined = undefined,
-  sessionKind = "all",
   excludedIds: Set<string> | undefined = undefined,
   titleOverrides: SessionTitleOverrides = undefined
 ) {
@@ -167,13 +165,11 @@ function indexedFilter(
     }
   }
 
-  normalizeSessionKindFilter(sessionKind);
-
   return { db, whereClause: `WHERE ${where.join(" AND ")}`, params };
 }
 
-export function getIndexedSessions(provider: any, limit = 50, offset = 0, timeRange = "", search = "", project = "", sort = "updated-desc", includedIds = undefined, sessionKind = "all", excludedIds = undefined, titleOverrides: SessionTitleOverrides = undefined) {
-  const { db, whereClause, params } = indexedFilter(timeRange, search, project, includedIds, sessionKind, excludedIds, titleOverrides);
+export function getIndexedSessions(provider: any, limit = 50, offset = 0, timeRange = "", search = "", project = "", sort = "updated-desc", includedIds = undefined, excludedIds = undefined, titleOverrides: SessionTitleOverrides = undefined) {
+  const { db, whereClause, params } = indexedFilter(timeRange, search, project, includedIds, excludedIds, titleOverrides);
   const { orderBy, params: sortParams } = indexedSortOrder(sort, titleOverrides);
   const total = db.prepare(`SELECT COUNT(*) as c FROM session_index ${whereClause}`).get(provider, ...params).c;
   const sessions = db.prepare(`
@@ -184,8 +180,8 @@ export function getIndexedSessions(provider: any, limit = 50, offset = 0, timeRa
   return { sessions, total };
 }
 
-export function getIndexedSessionProjects(provider: any, timeRange = "", search = "", includedIds: string[] | undefined = undefined, sessionKind = "all", excludedIds: Set<string> | undefined = undefined, titleOverrides: SessionTitleOverrides = undefined) {
-  const { db, whereClause, params } = indexedFilter(timeRange, search, "", includedIds, sessionKind, excludedIds, titleOverrides);
+export function getIndexedSessionProjects(provider: any, timeRange = "", search = "", includedIds: string[] | undefined = undefined, excludedIds: Set<string> | undefined = undefined, titleOverrides: SessionTitleOverrides = undefined) {
+  const { db, whereClause, params } = indexedFilter(timeRange, search, "", includedIds, excludedIds, titleOverrides);
   return db.prepare(`
     SELECT COALESCE(directory, '') AS id,
            COALESCE(NULLIF(directory, ''), 'Unknown project') AS label,
@@ -202,8 +198,8 @@ export function getIndexedSessionProjects(provider: any, timeRange = "", search 
   }));
 }
 
-export function getIndexedOverview(provider: any, timeRange = "", search = "", project = "", sessionKind = "all", excludedIds: Set<string> | undefined = undefined, includedIds: string[] | undefined = undefined, titleOverrides: SessionTitleOverrides = undefined) {
-  const { db, whereClause, params } = indexedFilter(timeRange, search, project, includedIds, sessionKind, excludedIds, titleOverrides);
+export function getIndexedOverview(provider: any, timeRange = "", search = "", project = "", excludedIds: Set<string> | undefined = undefined, includedIds: string[] | undefined = undefined, titleOverrides: SessionTitleOverrides = undefined) {
+  const { db, whereClause, params } = indexedFilter(timeRange, search, project, includedIds, excludedIds, titleOverrides);
   const row = db.prepare(`
     SELECT COUNT(*) AS totalSessions,
            COALESCE(SUM(COALESCE(message_count, 0)), 0) AS totalMessages
@@ -225,7 +221,6 @@ export interface CrossProviderSessionQuery {
   search?: string;
   project?: string;
   sort?: string;
-  sessionKind?: string;
   excluded?: Array<{ provider: string; id: string }>;
   titleOverrides?: Array<{ provider: string; id: string; title: string }>;
 }
@@ -276,7 +271,6 @@ function crossProviderFilter(query: CrossProviderSessionQuery, includeProject = 
     where.push("NOT EXISTS (SELECT 1 FROM json_each(?) AS hidden WHERE json_extract(hidden.value, '$.provider') = session_index.provider AND json_extract(hidden.value, '$.id') = session_index.id)");
     params.push(JSON.stringify(excluded));
   }
-  normalizeSessionKindFilter(query.sessionKind);
   return { db, whereClause: `WHERE ${where.join(" AND ")}`, params };
 }
 

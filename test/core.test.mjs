@@ -17,7 +17,7 @@ import { DatabaseSync } from "node:sqlite";
 import { runInNewContext } from "node:vm";
 import { EventEmitter } from "node:events";
 
-import { closeDb, getFilteredSessionCount, getModelDistribution, getModelPairs, getSession, getStatsProjects, getTokenCoverage, getTokenStats, getTopTokenSessions, listSessionProjects, listSessions, searchMessages } from "../dist/src/db.js";
+import { closeDb, getModelPairs, getSession, getStatsProjects, getTokenCoverage, getTokenStats, getTopTokenSessions, listSessionProjects, listSessions, searchMessages } from "../dist/src/db.js";
 import { buildOpenCodeRuntimeEnvironment } from "../dist/src/providers/opencode/runtime-environment.js";
 import { buildOpenCodeSessionTree } from "../dist/src/providers/opencode/session-tree.js";
 import { buildClaudeCodeRuntimeEnvironment } from "../dist/src/providers/claude-code/runtime-environment.js";
@@ -39,7 +39,6 @@ import { EMPTY_PROJECT_FILTER, normalizeCrossProviderProjectPath } from "../dist
 import { parseSessionNavigationContext } from "../dist/src/navigation-context.js";
 import {
   getSearchResults,
-  resolveSessionKindFilter,
   resolveSessionSearchMode,
   resolveSessionSort,
   resolveStarredFilter
@@ -932,7 +931,6 @@ test("Token Explorer database queries share the usable assistant-token dataset",
 
     assert.equal(getTokenStats(30, dbPath)[0].total_tokens, 28);
     assert.equal(getTokenStats(30, dbPath, { project: EMPTY_PROJECT_FILTER })[0].total_tokens, 5);
-    assert.equal(getFilteredSessionCount(dbPath, { days: 30 }), 2);
     assert.deepEqual(getModelPairs(dbPath, { days: 30 }).map((row) => row.key).sort(), ["provider-a/model-a", "provider-b/model-b"]);
     assert.equal(getStatsProjects(dbPath, { days: 30 }).find((row) => row.projectId === "p1").label, "Readable Project");
 
@@ -2089,73 +2087,6 @@ test("Claude sidechain transcripts preserve canonical agent and parent session I
   assert.deepEqual(session.metadata.aliases, ["claude-agent-1", "agent-claude-agent-1"]);
 });
 
-test("OpenCode model distribution groups by JSON model and provider values", () => {
-  const temp = mkdtempSync(path.join(os.tmpdir(), "agentsession-model-distribution-"));
-  const dbPath = path.join(temp, "sessions.db");
-  try {
-    const db = new DatabaseSync(dbPath);
-    db.exec(`
-      CREATE TABLE session (
-        id TEXT PRIMARY KEY,
-        model TEXT,
-        time_archived INTEGER
-      );
-      CREATE TABLE message (
-        id TEXT PRIMARY KEY,
-        session_id TEXT,
-        data TEXT
-      );
-    `);
-    const insertSession = db.prepare("INSERT INTO session (id, model, time_archived) VALUES (?, ?, ?)");
-    insertSession.run("active-a", "legacy-model-a", null);
-    insertSession.run("active-b", "legacy-model-b", null);
-    insertSession.run("active-c", "legacy-model-c", null);
-    insertSession.run("archived", "legacy-model-d", 1);
-    const insertMessage = db.prepare(`
-      INSERT INTO message (id, session_id, data)
-      VALUES (?, ?, ?)
-    `);
-    const assistantData = (providerID, total) => JSON.stringify({
-      role: "assistant",
-      modelID: "shared-model",
-      providerID,
-      tokens: { total }
-    });
-    insertMessage.run("m1", "active-a", assistantData("provider-a", 10));
-    insertMessage.run("m2", "active-b", assistantData("provider-a", 20));
-    insertMessage.run("m3", "active-c", assistantData("provider-b", 5));
-    insertMessage.run("m4", "archived", assistantData("provider-a", 100));
-
-    const legacyRows = db.prepare(`
-      SELECT json_extract(message.data, '$.modelID') as model,
-             json_extract(message.data, '$.providerID') as provider,
-             COUNT(*) as count,
-             SUM(json_extract(message.data, '$.tokens.total')) as total_tokens
-      FROM message
-      JOIN session ON session.id = message.session_id
-      WHERE json_extract(message.data, '$.role') = 'assistant'
-        AND json_extract(message.data, '$.modelID') IS NOT NULL
-        AND session.time_archived IS NULL
-      GROUP BY model, provider
-      ORDER BY count DESC
-    `).all();
-    const legacyProviderARows = legacyRows.filter((row) => row.provider === "provider-a");
-    assert.equal(legacyRows.length, 3);
-    assert.equal(legacyProviderARows.length, 2);
-    assert.ok(legacyProviderARows.every((row) => row.model === "shared-model" && row.count === 1));
-    assert.deepEqual(legacyProviderARows.map((row) => row.total_tokens).sort((a, b) => a - b), [10, 20]);
-    db.close();
-
-    assert.deepEqual(getModelDistribution(dbPath).map((row) => ({ ...row })), [
-      { model: "shared-model", provider: "provider-a", count: 2, total_tokens: 30 },
-      { model: "shared-model", provider: "provider-b", count: 1, total_tokens: 5 }
-    ]);
-  } finally {
-    closeDb(dbPath);
-    rmSync(temp, { recursive: true, force: true });
-  }
-});
-
 test("windows executable resolution prefers runnable command shims", () => {
   assert.equal(
     resolveWindowsExecutableCandidate(
@@ -2565,8 +2496,6 @@ test("session list query options accept known sort and starred values only", () 
   assert.equal(resolveStarredFilter(new URLSearchParams("starred=1")), true);
   assert.equal(resolveStarredFilter(new URLSearchParams("starred=true")), true);
   assert.equal(resolveStarredFilter(new URLSearchParams("starred=false")), false);
-  assert.equal(resolveSessionKindFilter(new URLSearchParams()), "all");
-  assert.equal(resolveSessionKindFilter(new URLSearchParams("kind=unknown")), "all");
 });
 
 test("mobile topbar keeps settings reachable when utility links collapse", () => {

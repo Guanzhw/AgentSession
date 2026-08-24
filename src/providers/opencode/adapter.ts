@@ -19,10 +19,6 @@ function defaultDataPath() {
   return path.join(dataHome, "opencode", "opencode.db");
 }
 
-export function defaultOpenCodeDataPath() {
-  return defaultDataPath();
-}
-
 const baseAdapter = createOpenCodeSqliteAdapter({
   id: "opencode",
   name: "OpenCode",

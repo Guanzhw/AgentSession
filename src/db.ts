@@ -1,7 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { getConfig } from "./config.js";
 import { createSnippet, escapeSqlLikePattern, mapDataRow, parseJson, splitSearchTerms } from "./providers/shared/parser.js";
-import { normalizeSessionKindFilter } from "./session-kind.js";
 import { isEmptyProjectFilter } from "./project-filter.js";
 import {
   getSearchMatchingOverrideIds,
@@ -100,7 +99,6 @@ function sessionFilter(
   project = "",
   excludedIds: Set<string> | undefined = undefined,
   includedIds: string[] | undefined = undefined,
-  sessionKind = "all",
   titleOverrides: SessionTitleOverrides = undefined
 ) {
   const where = ["time_archived IS NULL", "parent_id IS NULL"];
@@ -150,14 +148,12 @@ function sessionFilter(
     }
   }
 
-  normalizeSessionKindFilter(sessionKind);
-
   return { whereClause: `WHERE ${where.join(" AND ")}`, params };
 }
 
-export function listSessions(limit = 50, offset = 0, search = "", timeRange = "", pathOverride: string | undefined = undefined, project = "", excludedIds: Set<string> | undefined = undefined, sort = "updated-desc", includedIds: string[] | undefined = undefined, sessionKind = "all", titleOverrides: SessionTitleOverrides = undefined) {
+export function listSessions(limit = 50, offset = 0, search = "", timeRange = "", pathOverride: string | undefined = undefined, project = "", excludedIds: Set<string> | undefined = undefined, sort = "updated-desc", includedIds: string[] | undefined = undefined, titleOverrides: SessionTitleOverrides = undefined) {
   const db = getDb(pathOverride);
-  const { whereClause, params } = sessionFilter(search, timeRange, project, excludedIds, includedIds, sessionKind, titleOverrides);
+  const { whereClause, params } = sessionFilter(search, timeRange, project, excludedIds, includedIds, titleOverrides);
   const { orderBy, params: sortParams } = sessionSortOrder(sort, titleOverrides);
   const metrics = sessionListMetricColumns(db);
 
@@ -180,9 +176,9 @@ export function listSessions(limit = 50, offset = 0, search = "", timeRange = ""
   return { sessions, total: totalRow?.total ?? 0 };
 }
 
-export function listSessionProjects(search = "", timeRange = "", pathOverride: string | undefined = undefined, excludedIds: Set<string> | undefined = undefined, includedIds: string[] | undefined = undefined, sessionKind = "all", titleOverrides: SessionTitleOverrides = undefined) {
+export function listSessionProjects(search = "", timeRange = "", pathOverride: string | undefined = undefined, excludedIds: Set<string> | undefined = undefined, includedIds: string[] | undefined = undefined, titleOverrides: SessionTitleOverrides = undefined) {
   const db = getDb(pathOverride);
-  const { whereClause, params } = sessionFilter(search, timeRange, "", excludedIds, includedIds, sessionKind, titleOverrides);
+  const { whereClause, params } = sessionFilter(search, timeRange, "", excludedIds, includedIds, titleOverrides);
   const rows = db.prepare(`
     SELECT
       COALESCE(session.project_id, '') AS id,
@@ -540,55 +536,6 @@ export function getTokenStats(days = 30, pathOverride = undefined, opts: { proje
   `).all(...params);
 }
 
-export function getModelDistribution(pathOverride = undefined, opts: { days?: number; fromDate?: string; toDate?: string; project?: string; modelPair?: string; scope?: "root" | "all" } = {}) {
-  const d = getDb(pathOverride);
-  const conds: string[] = [
-    "json_extract(message.data, '$.role') = 'assistant'",
-    "json_extract(message.data, '$.modelID') IS NOT NULL",
-    statsUsableTokenSql(),
-    "session.time_archived IS NULL",
-  ];
-  const params: any[] = [];
-
-  // Only apply date filter when explicitly requested
-  if (opts.fromDate && opts.toDate) {
-    const fromMs = new Date(opts.fromDate + "T00:00:00Z").getTime();
-    const toMs = new Date(opts.toDate + "T23:59:59.999Z").getTime();
-    conds.push("json_extract(message.data, '$.time.created') >= ?");
-    conds.push("json_extract(message.data, '$.time.created') <= ?");
-    params.push(fromMs, toMs);
-  } else if (opts.days) {
-    const today = new Date();
-    today.setUTCHours(0, 0, 0, 0);
-    const cutoffMs = today.getTime() - (Math.max(1, opts.days) - 1) * 86400000;
-    conds.push("json_extract(message.data, '$.time.created') >= ?");
-    params.push(cutoffMs);
-  }
-
-  if (opts.scope === "root") {
-    conds.push("session.parent_id IS NULL");
-  }
-  appendStatsProjectFilter(conds, params, opts.project);
-  if (opts.modelPair) {
-    conds.push("(json_extract(message.data, '$.providerID') || '/' || json_extract(message.data, '$.modelID')) = ?");
-    params.push(opts.modelPair);
-  }
-
-  const where = conds.join(" AND ");
-
-  return d.prepare(`
-    SELECT json_extract(message.data, '$.modelID') as model,
-           json_extract(message.data, '$.providerID') as provider,
-           COUNT(*) as count,
-           SUM(${statsTokenValueSql()}) as total_tokens
-    FROM message
-    JOIN session ON session.id = message.session_id
-    WHERE ${where}
-    GROUP BY 1, 2
-    ORDER BY total_tokens DESC
-  `).all(...params);
-}
-
 export function getSessionsByIds(ids: any, pathOverride = undefined) {
   if (!ids.length) return [];
   const db = getDb(pathOverride);
@@ -876,49 +823,6 @@ export function getStatsProjects(pathOverride = undefined, opts: {
     label: String(row.label || row.project_id || ""),
     count: Number(row.count) || 0,
   }));
-}
-
-/**
- * Get filtered session count for overview using message timestamps.
- */
-export function getFilteredSessionCount(pathOverride = undefined, opts: {
-  days?: number; fromDate?: string; toDate?: string;
-  project?: string; modelPair?: string; scope?: "root" | "all";
-} = {}): number {
-  const d = getDb(pathOverride);
-  const conds: string[] = [
-    "json_extract(message.data, '$.role') = 'assistant'",
-    statsUsableTokenSql(),
-    "session.time_archived IS NULL",
-  ];
-  const params: any[] = [];
-  const days = opts.days || 30;
-
-  if (opts.fromDate && opts.toDate) {
-    const fromMs = new Date(opts.fromDate + "T00:00:00Z").getTime();
-    const toMs = new Date(opts.toDate + "T23:59:59.999Z").getTime();
-    conds.push("json_extract(message.data, '$.time.created') >= ?");
-    conds.push("json_extract(message.data, '$.time.created') <= ?");
-    params.push(fromMs, toMs);
-  } else {
-    const today = new Date();
-    today.setUTCHours(0, 0, 0, 0);
-    const cutoffMs = today.getTime() - (Math.max(1, days) - 1) * 86400000;
-    conds.push("json_extract(message.data, '$.time.created') >= ?");
-    params.push(cutoffMs);
-  }
-
-  if (opts.scope === "root") {
-    conds.push("session.parent_id IS NULL");
-  }
-  appendStatsProjectFilter(conds, params, opts.project);
-  if (opts.modelPair) {
-    conds.push("(json_extract(message.data, '$.providerID') || '/' || json_extract(message.data, '$.modelID')) = ?");
-    params.push(opts.modelPair);
-  }
-
-  const where = conds.join(" AND ");
-  return d.prepare(`SELECT COUNT(DISTINCT session.id) as cnt FROM message JOIN session ON session.id = message.session_id WHERE ${where}`).get(...params)?.cnt ?? 0;
 }
 
 /**

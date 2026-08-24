@@ -14,13 +14,15 @@ of transcript parsing, resume behavior, structured views, and source paths.
 
 All adapters populate the viewer-owned `session_index` table at startup. The
 global query reads this index by the composite `(provider, id)` identity and
-applies time, title/directory, project, sort, and session-kind filters in one
-bounded SQL query. Viewer deletion metadata is translated into provider-aware
+applies time, title/directory, project, and sort filters in one bounded SQL
+query. Viewer deletion metadata is translated into provider-aware
 exclusions, so equal session IDs from two providers cannot hide each other.
 
 The page and `/api/sessions` return the source provider with every row. Infinite
-scroll therefore builds the correct canonical detail link after the first page
-as well as during the server-rendered initial response. Provider-specific pages
+scroll receives a server-rendered `html` card fragment alongside the stable JSON
+fields, so the browser inserts the same canonical card markup as the initial
+response, including provider badges, management controls, and return navigation.
+Provider-specific pages
 and APIs remain available for compatibility and for provider-owned operations
 such as starring, renaming, deletion, content search, and resume.
 

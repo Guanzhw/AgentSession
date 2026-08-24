@@ -87,7 +87,7 @@ function protocolAdapter(id = "codex-fake", calls = []) {
     id,
     name: "Protocol fixture",
     icon: "",
-    capabilities: {},
+    capabilities: { localManagement: true },
     protocolCapabilities: {
       sessionEvents: { support: "partial", provenance: "derived" },
       sessionRelationships: { support: "none", provenance: "derived" },
@@ -333,7 +333,7 @@ function buildRoutes() {
   const protocolProvider = protocolAdapter("codex");
   const plain = plainAdapter("gemini");
   const providerInfo = [
-    { id: "codex", name: "Codex Fixture", icon: "", available: true, manageable: false },
+    { id: "codex", name: "Codex Fixture", icon: "", available: true, manageable: true },
     { id: "gemini", name: "Gemini", icon: "", available: true, manageable: false }
   ];
   const routes = captureGetRoutes(registerSessions, {
@@ -361,7 +361,7 @@ test("list routes attach stats only for the current page on every surface", asyn
 
   // Global API: current page only (limit 2 -> exactly 2 cached derivations).
   const apiResponse = createResponseCapture();
-  await apiRoute.handler({ url: "/api/sessions?provider=codex&provider=gemini&limit=2" }, apiResponse);
+  await apiRoute.handler({ url: "/api/sessions?provider=codex&provider=gemini&limit=2&returnTo=%2Fsessions%3Fprovider%3Dcodex%26provider%3Dgemini" }, apiResponse);
   const payload = JSON.parse(apiResponse.body);
   assert.equal(payload.sessions.length, 2);
   assert.equal(sessionListStatsCacheSize(), 2, "only the returned page enters the cache");
@@ -371,6 +371,9 @@ test("list routes attach stats only for the current page on every surface", asyn
   assert.equal(protocolSession.stats.compactions, 2);
   assert.equal(protocolSession.stats.activeStatuses[0], "running");
   assert.equal(protocolSession.stats.memoryCount, 1);
+  assert.match(protocolSession.html, /class="session-card"/);
+  assert.match(protocolSession.html, /session-provider-badge/);
+  assert.match(protocolSession.html, /from=%2Fsessions%3Fprovider%3Dcodex%26provider%3Dgemini/);
 
   // Unsupported-provider fallback through its own provider API.
   const plainApiResponse = createResponseCapture();
@@ -382,6 +385,7 @@ test("list routes attach stats only for the current page on every surface", asyn
   assert.equal(plainSession.stats.messageCount, 5);
   assert.equal(plainSession.stats.durationMs, 4000);
   assert.equal(plainSession.stats.events, undefined, "raw protocol never leaves the server");
+  assert.match(plainSession.html, /class="session-card"/);
 
   // Provider API.
   const providerApiResponse = createResponseCapture();
@@ -390,6 +394,12 @@ test("list routes attach stats only for the current page on every surface", asyn
   assert.equal(providerPayload.sessions.length, 2);
   assert.ok(providerPayload.sessions.every((s) => s.stats && s.stats.protocol === true));
   assert.equal(providerPayload.sessions[0].stats.compactions, 2);
+  assert.doesNotMatch(providerPayload.sessions[0].html, /session-provider-badge/);
+  assert.match(providerPayload.sessions[0].html, /class="card-checkbox"/);
+
+  const unknownKindResponse = createResponseCapture();
+  await providerApiRoute.handler({ url: "/api/codex/sessions?kind=unknown&limit=1" }, unknownKindResponse, ["", "codex", ""]);
+  assert.equal(JSON.parse(unknownKindResponse.body).sessions.length, 1, "unknown legacy kind parameters are ignored");
 
   // Global HTML page renders the chips.
   const page = await pageRoute.handler({ url: "/sessions?provider=codex&provider=gemini" }, createResponseCapture());

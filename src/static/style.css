@@ -437,19 +437,6 @@ body::before {
   margin-left: 12px;
 }
 
-.session-kind-badge {
-  flex: 0 0 auto;
-  padding: 1px 6px;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  color: var(--text-muted);
-  background: var(--bg-secondary);
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1.5;
-  white-space: nowrap;
-}
-
 .session-id-row {
   display: flex;
   align-items: center;

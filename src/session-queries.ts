@@ -1,7 +1,6 @@
 import { getOverviewStats, getSession, getMessages, getParts, getSessionsByIds, getTodos, listSessionProjects, listSessions, searchMessages } from "./db.js";
 import { getIndexedOverview, getIndexedSessionProjects, getIndexedSessions } from "./index-db.js";
 import { getAllMeta, getExcludedIds, getMeta } from "./meta.js";
-import { normalizeSessionKindFilter } from "./session-kind.js";
 import { usesOpenCodeStatsStore } from "./providers/kinds.js";
 import { safeJsonParse } from "./server-helpers.js";
 import { baseSessionListStats, boundedListStats } from "./session-list-stats.js";
@@ -49,19 +48,14 @@ export function resolveSessionSearchMode(params: URLSearchParams): string {
   return (params.get("mode") || params.get("searchMode")) === "content" ? "content" : "list";
 }
 
-export function resolveSessionKindFilter(params: URLSearchParams): string {
-  return normalizeSessionKindFilter(params.get("kind") || params.get("sessionKind"));
-}
-
-export function getSearchResults(query: string, limit: number, offset: number, dbPath: any = undefined, excludedIds: Set<string> = new Set(), sessionKind = "all", metaMap: any = undefined) {
+export function getSearchResults(query: string, limit: number, offset: number, dbPath: any = undefined, excludedIds: Set<string> = new Set(), metaMap: any = undefined) {
   const term = (query || "").trim();
-  const kind = normalizeSessionKindFilter(sessionKind);
   if (!term) {
     return { sessions: [], total: 0, note: "Enter a search query to find sessions." };
   }
 
   const titleOverrides = getTitleOverrides(metaMap || new Map());
-  const titleMatches = listSessions(1000, 0, term, "", dbPath, "", excludedIds, "updated-desc", undefined, kind, titleOverrides).sessions;
+  const titleMatches = listSessions(1000, 0, term, "", dbPath, "", excludedIds, "updated-desc", undefined, titleOverrides).sessions;
   const contentMatches = searchMessages(term, 500, dbPath, excludedIds);
   const orderedIds: string[] = [];
   const sessionMap = new Map();
@@ -236,9 +230,8 @@ export function getSessionDocument(adapter: any, providerId: string, sessionId: 
   };
 }
 
-function getProviderSearchResults(adapter: any, query: string, limit: number, offset: number, sessionKind = "all", metaMap: any = undefined, excludedIds: Set<string> = new Set()) {
+function getProviderSearchResults(adapter: any, query: string, limit: number, offset: number, metaMap: any = undefined, excludedIds: Set<string> = new Set()) {
   const term = (query || "").trim();
-  normalizeSessionKindFilter(sessionKind);
   if (!term) {
     return { sessions: [], total: 0, note: "Enter a search query to find sessions." };
   }
@@ -295,35 +288,33 @@ export function createSessionCatalog(adapter: any, providerId: string, metadata:
       project = "",
       sort = "updated-desc",
       starredOnly = false,
-      sessionKind = "all"
     }: any) {
       const includedIds = starredOnly ? getStarredIds(metaMap) : undefined;
-      const kind = normalizeSessionKindFilter(sessionKind);
       const results = sqlite
-        ? listSessions(limit, offset, query, range, dbPath, project, excludedIds, sort, includedIds, kind, titleOverrides)
-        : getIndexedSessions(providerId, limit, offset, range, query, project, sort, includedIds as any, kind, excludedIds as any, titleOverrides);
+        ? listSessions(limit, offset, query, range, dbPath, project, excludedIds, sort, includedIds, titleOverrides)
+        : getIndexedSessions(providerId, limit, offset, range, query, project, sort, includedIds as any, excludedIds as any, titleOverrides);
       return { sessions: normalizeRows(results.sessions), total: results.total };
     },
 
-    contentSearch({ query, limit, offset, sessionKind = "all" }: any) {
+    contentSearch({ query, limit, offset }: any) {
       const results = sqlite
-        ? getSearchResults(query, limit, offset, dbPath, excludedIds, sessionKind, metaMap)
-        : getProviderSearchResults(adapter, query, limit, offset, sessionKind, metaMap, excludedIds);
+        ? getSearchResults(query, limit, offset, dbPath, excludedIds, metaMap)
+        : getProviderSearchResults(adapter, query, limit, offset, metaMap, excludedIds);
       return { ...results, sessions: normalizeRows(results.sessions) };
     },
 
-    overview({ range = "", query = "", project = "", sessionKind = "all", starredOnly = false }: any = {}) {
+    overview({ range = "", query = "", project = "", starredOnly = false }: any = {}) {
       const includedIds = starredOnly ? getStarredIds(metaMap) : undefined;
       return sqlite
         ? getOverviewStats(dbPath)
-        : getIndexedOverview(providerId, range, query, project, sessionKind, excludedIds, includedIds, titleOverrides);
+        : getIndexedOverview(providerId, range, query, project, excludedIds, includedIds, titleOverrides);
     },
 
-    projects({ range = "", query = "", sessionKind = "all", starredOnly = false }: any = {}) {
+    projects({ range = "", query = "", starredOnly = false }: any = {}) {
       const includedIds = starredOnly ? getStarredIds(metaMap) : undefined;
       return sqlite
-        ? listSessionProjects(query, range, dbPath, excludedIds, includedIds, sessionKind, titleOverrides)
-        : getIndexedSessionProjects(providerId, range, query, includedIds, sessionKind, excludedIds, titleOverrides);
+        ? listSessionProjects(query, range, dbPath, excludedIds, includedIds, titleOverrides)
+        : getIndexedSessionProjects(providerId, range, query, includedIds, excludedIds, titleOverrides);
     },
 
     byIds(ids: string[] = []) {
@@ -336,8 +327,8 @@ export function createSessionCatalog(adapter: any, providerId: string, metadata:
   };
 }
 
-export function toApiSessionShape(session: any) {
-  return {
+export function toApiSessionShape(session: any, extras: { html?: string } = {}) {
+  const shape = {
     id: session.id,
     provider: session.provider || "",
     title: session.title || session.slug || session.id,
@@ -352,4 +343,8 @@ export function toApiSessionShape(session: any) {
     // raw protocol is never exposed here.
     stats: boundedListStats(session.stats) ?? baseSessionListStats(session)
   };
+  if (extras.html !== undefined) {
+    (shape as any).html = extras.html;
+  }
+  return shape;
 }
