@@ -62,6 +62,7 @@ const opencode = {
     return buildOpenCodeSessionMetrics(sessionId, baseAdapter.getDataPath() || undefined);
   },
   getSessionProtocol(sessionId: string) {
+    if (!baseAdapter.detect()) return null;
     const tree = getOpenCodeTree(sessionId);
     if (!tree) return null;
     return buildOpenCodeSessionProtocol(tree, this.getStatsRevision());
