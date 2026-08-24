@@ -415,3 +415,43 @@ Before declaring a development task complete:
 7. Update relevant README, config, provider, and architecture documentation.
 8. Report commands run, exact results, and any verification that could not be
    completed.
+
+## Agent-native change governance
+
+Use the lightweight decision lifecycle in [`.agents/decisions/README.md`](.agents/decisions/README.md).
+Create a decision record only for a non-trivial change: a cross-module
+invariant, provider or Session Protocol contract, public configuration or API,
+persistence/release behavior, or a security boundary. Small fixes and local
+refactors do not need a note.
+
+For a non-trivial change, start in `proposed/` when the choice is unsettled and
+move the record to `implemented/` or `rejected/` in the same change once the
+outcome is known. A reversal requires a new record; update the implemented
+record's factual paths and verification when its mechanism changes.
+
+Before handoff, use the [review Skill](.agents/skills/review/SKILL.md) and run
+the [pre-push Skill](.agents/skills/pre-push/SKILL.md) when publishing or
+handing off a branch. The mechanical governance check is
+`npm run check:governance`; it validates decision lifecycle records, local
+Markdown file targets, and provider architecture boundaries.
+
+## Evidence-bounded defensive engineering
+
+Defensive code must follow evidence and ownership boundaries:
+
+- Validate data at real untrusted boundaries: provider files and databases,
+  user configuration, HTTP requests, and subprocess or external-provider
+  output. Normalize it once before it enters the typed in-process contract.
+- Trust a typed same-process contract after its boundary normalization. Do not
+  repeat shape checks, copies, or sanitization in every downstream consumer;
+  strengthen the owning contract or boundary when evidence requires it.
+- Do not add an abstraction without a real consumer, a compatibility layer
+  without current source evidence, or a silent fallback that hides missing or
+  invalid data. Preserve explicit unavailable/invalid diagnostics.
+- Tests should cover observed inputs and meaningful boundary failures. Do not
+  add branches, compatibility fixtures, or tests solely for impossible states
+  that the owning typed contract cannot produce.
+
+When a defensive change crosses module, provider, protocol, configuration, or
+security boundaries, record the evidence and ownership decision under
+`.agents/decisions/`.
