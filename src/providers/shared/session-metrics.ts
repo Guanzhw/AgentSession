@@ -3,7 +3,7 @@ import type { AgentLoop } from "./agent-loop.js";
 import { classifySharedTool } from "./subagent-tools.js";
 import type { SessionContainer } from "./session-container.js";
 import type { SessionContextView } from "./context.js";
-import { aggregateSessionContainerTokenUsage } from "./session-usage.js";
+import { aggregateSessionContainerDirectTokenUsage, aggregateSessionContainerTokenUsage } from "./session-usage.js";
 
 export interface SessionMetricsView {
   sessionId: string;
@@ -18,6 +18,12 @@ export interface SessionMetricsView {
     cacheReadTokens: number;
     cacheWriteTokens: number;
     totalTokens: number;
+    directInputTokens: number;
+    directOutputTokens: number;
+    directReasoningTokens: number;
+    directCacheReadTokens: number;
+    directCacheWriteTokens: number;
+    directTotalTokens: number;
     cost: number;
     runtimeMs: number;
   };
@@ -167,6 +173,12 @@ export function buildSessionMetrics(
       // A provider-reported total remains authoritative if an older record
       // cannot expose every component needed for the stacked breakdown.
       totalTokens: aggregateSessionContainerTokenUsage(container).total || 0,
+      directInputTokens: metrics.directInputTokens,
+      directOutputTokens: metrics.directOutputTokens,
+      directReasoningTokens: metrics.directReasoningTokens,
+      directCacheReadTokens: metrics.directCacheReadTokens,
+      directCacheWriteTokens: metrics.directCacheWriteTokens,
+      directTotalTokens: aggregateSessionContainerDirectTokenUsage(container).total || 0,
       cost: metrics.cost,
       runtimeMs: metrics.runtimeMs
     },

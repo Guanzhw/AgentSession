@@ -28,7 +28,7 @@ function responseText(payload: any) {
     .join("");
 }
 
-type CodexMessageProvenance = "session" | "inherited-parent-context-candidate";
+type CodexMessageProvenance = "session" | "inherited-parent-context";
 type CodexRecordProvenance = "session" | "inherited-parent-context" | "duplicate-token-usage";
 
 function primarySessionMeta(records: any[]) {
@@ -45,15 +45,6 @@ function codexParentSessionId(primaryMeta: any) {
 export function extractCodexSessionId(records: any[], fallbackId: string) {
   const primaryMeta = primarySessionMeta(records);
   return String(primaryMeta.id || primaryMeta.session_id || fallbackId);
-}
-
-function isChildOwnedOutput(record: any) {
-  if (record.type === "event_msg") {
-    return ["agent_message", "agent_reasoning"].includes(record.payload?.type);
-  }
-  if (record.type !== "response_item") return false;
-  return record.payload?.role === "assistant"
-    || ["reasoning", "function_call", "custom_tool_call"].includes(record.payload?.type);
 }
 
 function agentMessageText(payload: any) {
@@ -117,6 +108,96 @@ function codexTokenUsageRecordFingerprint(record: any) {
     last,
     total: tokenUsageFingerprint(info.total_token_usage)
   });
+}
+
+function stableCodexValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableCodexValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => key !== "timestamp")
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, stableCodexValue(entry)])
+  );
+}
+
+function codexRecordFingerprint(record: any) {
+  if (!record || typeof record !== "object") return null;
+  return JSON.stringify(stableCodexValue(record));
+}
+
+function codexCopyFingerprint(record: any) {
+  const payload = record?.payload && typeof record.payload === "object" ? record.payload : {};
+  if (record?.type === "event_msg" && payload.type === "user_message") {
+    return JSON.stringify({ kind: "message", role: "user", content: payload.message || "" });
+  }
+  if (record?.type === "event_msg" && payload.type === "agent_message") {
+    return JSON.stringify({ kind: "message", role: "assistant", content: payload.message || "" });
+  }
+  if (record?.type === "event_msg" && payload.type === "agent_reasoning") {
+    return JSON.stringify({ kind: "reasoning", content: payload.text || "" });
+  }
+  if (record?.type === "response_item" && payload.type === "message") {
+    return JSON.stringify({ kind: "message", role: payload.role || "", content: responseText(payload) });
+  }
+  if (record?.type === "response_item" && payload.type === "reasoning") {
+    return JSON.stringify({
+      kind: "reasoning",
+      content: responseText({ content: payload.summary || payload.content || [] })
+    });
+  }
+  return codexRecordFingerprint(record);
+}
+
+function codexSessionMetaIds(record: any) {
+  if (record?.type !== "session_meta") return [];
+  const payload = record.payload && typeof record.payload === "object" ? record.payload : {};
+  return [payload.id, payload.session_id]
+    .filter((value) => value != null && String(value))
+    .map((value) => String(value));
+}
+
+function copiedParentRecordPrefix(records: any[], parentRecords: any[], parentId: any, hasTaskEnvelope: boolean) {
+  if (!parentId || hasTaskEnvelope || !parentRecords.length) return new Set<any>();
+
+  const childStart = records.findIndex((record) => record.type === "session_meta");
+  const parentStart = parentRecords.findIndex((record) => record.type === "session_meta");
+  if (childStart < 0 || parentStart < 0) return new Set<any>();
+  const parentIdText = String(parentId);
+  const copiedParentHeader = records[childStart + 1];
+  if (!copiedParentHeader
+    || copiedParentHeader.type !== "session_meta"
+    || !codexSessionMetaIds(copiedParentHeader).includes(parentIdText)) {
+    return new Set<any>();
+  }
+  const child = records.slice(childStart + 2);
+  const parent = parentRecords.slice(parentStart + 1);
+  if (child.length < 2 || parent.length < 2) return new Set<any>();
+  if (codexCopyFingerprint(child[0]) !== codexCopyFingerprint(parent[0])
+    || codexCopyFingerprint(child[1]) !== codexCopyFingerprint(parent[1])) {
+    return new Set<any>();
+  }
+
+  let matched = 0;
+  let parentCursor = 0;
+  while (matched < child.length && matched < parent.length) {
+    const childFingerprint = codexCopyFingerprint(child[matched]);
+    let parentMatch = -1;
+    for (let index = parentCursor; index < parent.length; index += 1) {
+      if (codexCopyFingerprint(parent[index]) === childFingerprint) {
+        parentMatch = index;
+        break;
+      }
+    }
+    if (parentMatch < 0) break;
+    parentCursor = parentMatch + 1;
+    matched += 1;
+  }
+  if (matched < 2) return new Set<any>();
+
+  // Include the copied parent header itself, so its source-owned metadata is
+  // not treated as a child record by any downstream projection.
+  return new Set(records.slice(childStart + 1, childStart + matched + 2));
 }
 
 /**
@@ -186,6 +267,7 @@ export function classifyCodexRecordProvenance(records: any[], parentRecords: any
   const parentId = codexParentSessionId(primaryMeta);
   const provenance = new Map<any, CodexRecordProvenance>();
   const hasTaskEnvelope = records.some((record) => isSubagentTaskEnvelope(record, primaryMeta));
+  const inheritedRecordPrefix = copiedParentRecordPrefix(records, parentRecords, parentId, hasTaskEnvelope);
   const inheritedTokenPrefix = copiedParentTokenPrefix(records, parentRecords, parentId, hasTaskEnvelope);
   let insideInheritedParentContext = Boolean(parentId && hasTaskEnvelope);
 
@@ -198,6 +280,9 @@ export function classifyCodexRecordProvenance(records: any[], parentRecords: any
     provenance.set(record, insideInheritedParentContext ? "inherited-parent-context" : "session");
   }
   for (const record of inheritedTokenPrefix) {
+    provenance.set(record, "inherited-parent-context");
+  }
+  for (const record of inheritedRecordPrefix) {
     provenance.set(record, "inherited-parent-context");
   }
   for (const record of duplicateCodexTokenUsageRecords(records, provenance)) {
@@ -216,50 +301,28 @@ export function codexOwnedTokenUsageRecords(records: any[], parentRecords: any[]
   ));
 }
 
-/** Mark copied parent user records as candidates. The adapter confirms the
- * exact duplicate against the parent before it hides it. */
+/** Expose the record-level ownership decision to message normalization. */
 export function classifyCodexMessageProvenance(records: any[], parentRecords: any[] = []) {
-  const primaryMeta = primarySessionMeta(records);
-  const parentId = codexParentSessionId(primaryMeta);
-  const hasTaskEnvelope = records.some((record) => isSubagentTaskEnvelope(record, primaryMeta));
   const recordProvenance = classifyCodexRecordProvenance(records, parentRecords);
   const provenance = new Map<any, CodexMessageProvenance>();
-  let childOwnedOutputSeen = false;
   for (const record of records) {
-    if (isChildOwnedOutput(record)) childOwnedOutputSeen = true;
     const isUserRecord = (record.type === "event_msg" && record.payload?.type === "user_message")
       || (record.type === "response_item" && record.payload?.role === "user");
     if (isUserRecord) {
-      provenance.set(
-        record,
-        recordProvenance.get(record) === "inherited-parent-context"
-          || (!hasTaskEnvelope && parentId && !childOwnedOutputSeen)
-          ? "inherited-parent-context-candidate"
-          : "session"
-      );
+      provenance.set(record, recordProvenance.get(record) === "inherited-parent-context"
+        ? "inherited-parent-context"
+        : "session");
     }
   }
   return provenance;
 }
 
-function normalizedUserContent(value: unknown) {
-  return String(value || "").replace(/\s+/g, " ").trim();
-}
-
-/** Hide any user message that is proven to be copied from the parent. The
- * direct record provenance makes the usual case precise; exact matching keeps
- * older rollouts from leaking copied messages after a parent output. */
-export function resolveCodexInheritedContext(messages: Message[], parentMessages: Message[]) {
-  const parentUserContent = new Set(
-    parentMessages
-      .filter((message) => message.role === "user")
-      .map((message) => normalizedUserContent(message.content))
-      .filter(Boolean)
-  );
+/** Remove only messages already marked inherited by the Codex record boundary.
+ * Parent message text is intentionally not used as a deduplication key. */
+export function resolveCodexInheritedContext(messages: Message[], _parentMessages: Message[]) {
   let excludedUserMessages = 0;
   const resolved = messages.flatMap((message) => {
-    const content = normalizedUserContent(message.content);
-    if (message.role === "user" && content && parentUserContent.has(content)) {
+    if (message.metadata?.provenance === "inherited-parent-context") {
       excludedUserMessages += 1;
       return [];
     }
@@ -332,7 +395,7 @@ export function extractMeta(records: any, fallbackId: any, normalizedMessages?: 
         inheritedContext: parentId ? {
           parentSessionId: String(parentId),
           candidateUserRecords: [...messageProvenance.values()]
-            .filter((value) => value === "inherited-parent-context-candidate").length
+            .filter((value) => value === "inherited-parent-context").length
         } : null,
         aliases: [agentPath, agentNickname].filter(Boolean)
       };

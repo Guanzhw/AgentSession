@@ -29,11 +29,16 @@ function fixtureRuntime() {
       version: 2,
       sessionId: "runtime-1",
       session: { state: "completed", harness: "fixture", origin: "test", ref: { provider: "fixture", sessionId: "runtime-1" } },
-      events: [{ id: "event-1", sessionId: "runtime-1", sequence: 1, timestamp: 1, kind: "model.request", normalizedKind: "model.request", category: "model", taskId: "task-1", runId: "run-1", provenance }],
+      events: [
+        { id: "event-1", sessionId: "runtime-1", sequence: 1, timestamp: 1000, kind: "model.request", normalizedKind: "model.request", category: "model", taskId: "task-1", runId: "run-1", provenance },
+        { id: "event-context-start", sessionId: "runtime-1", sequence: 2, timestamp: 2000, kind: "compaction/start", normalizedKind: "context.compaction.started", category: "context", correlationId: "compact-1", provenance },
+        { id: "event-context", sessionId: "runtime-1", sequence: 3, timestamp: 11000, kind: "context.compaction", normalizedKind: "context.compaction", category: "context", correlationId: "compact-1", provenance, compaction: { trigger: "automatic", strategy: "summary", tokensBefore: null, tokensAfter: 42, summary: "Retain <the result> and discard copied history." } },
+        { id: "event-context-end", sessionId: "runtime-1", sequence: 4, timestamp: 11001, kind: "compaction/end", normalizedKind: "context.compaction.completed", category: "context", correlationId: "compact-1", provenance }
+      ],
       relationships: [{ type: "spawned", fromSessionId: "runtime-1", toSessionId: "child-1", fromRef: { provider: "fixture", sessionId: "runtime-1" }, toRef: { provider: "fixture", sessionId: "child-1" }, provenance }],
-      tasks: [{ id: "task-1", sessionId: "runtime-1", kind: "task", status: "completed", title: "Build <fixture>", provenance, dependencies: [] }],
-      agentRuns: [{ id: "run-1", sessionId: "runtime-1", taskId: "task-1", status: "completed", mode: "foreground", agent: "worker", model: "fixture-model", childSessionId: null, provenance }],
-      contextArtifacts: [{ id: "artifact-1", sessionId: "runtime-1", kind: "summary", scope: "session", origin: "provider-generated", contentAccess: "metadata-only", title: "Summary", summary: null, sourcePath: null, producerRunId: null, sourceSessionIds: [], hash: null, redacted: true, provenance }]
+      tasks: [{ id: "task-1", sessionId: "runtime-1", kind: "task", status: "completed", title: "Build <fixture>", provenance, dependencies: [], timeCreated: 1000, timeUpdated: 3000, timeCompleted: 3000 }],
+      agentRuns: [{ id: "run-1", sessionId: "runtime-1", taskId: "task-1", status: "completed", mode: "foreground", agent: "worker", model: "fixture-model", childSessionId: null, timeStart: 1200, timeEnd: 2800, provenance }],
+      contextArtifacts: [{ id: "artifact-1", sessionId: "runtime-1", kind: "summary", scope: "session", origin: "provider-generated", contentAccess: "metadata-only", title: "Summary", summary: null, sourcePath: null, producerRunId: null, sourceSessionIds: [], hash: null, redacted: true, timeCreated: 11000, metadata: { compactionId: "compact-1" }, provenance }]
     }
   };
 }
@@ -52,7 +57,52 @@ test("Runtime Workbench renders every lens, bounded evidence, and canonical sess
   assert.match(html, /Evidence and provenance/);
   assert.match(html, /metadata-only/);
   assert.match(html, /runtime-session-graph/);
+  assert.match(html, /runtime-map-lane-event/);
+  assert.match(html, /runtime-map-lane-work/);
+  assert.match(html, /runtime-map-lane-relationship/);
+  assert.match(html, /runtime-map-lane-context/);
+  assert.match(html, /runtime-trust-panel/);
+  assert.match(html, /runtime-swimlane/);
+  assert.match(html, /runtime-checkpoint/);
+  assert.match(html, /Tokens before.*Not recorded/);
+  assert.match(html, /Context after compaction/);
+  assert.match(html, /Retain &lt;the result&gt; and discard copied history/);
+  assert.doesNotMatch(html, /Retain <the result>/);
+  assert.match(html, /datetime="1970-01-01T00:00:11\.000Z"/);
+  assert.equal((html.match(/<article class="runtime-checkpoint">/g) || []).length, 1);
   assert.match(html, /data-runtime-next-cursor="cursor-next"/);
+  assert.doesNotMatch(html, /runtime-map-marker[^>]*tabindex=/);
+});
+
+test("Runtime Context joins a nearby uncorrelated artifact to its compaction event", () => {
+  const runtime = fixtureRuntime();
+  runtime.protocol.events = [
+    { id: "compact-event", sessionId: "runtime-1", sequence: 1, timestamp: 5000, kind: "context.compaction", normalizedKind: "context.compaction", category: "context", provenance, compaction: { trigger: "automatic", strategy: "summary", tokensBefore: 90, tokensAfter: 30, summary: null } }
+  ];
+  runtime.protocol.contextArtifacts = [
+    { id: "compact-artifact", sessionId: "runtime-1", kind: "summary", scope: "session", origin: "provider-generated", contentAccess: "metadata-only", title: "Summary", summary: null, sourcePath: null, producerRunId: null, sourceSessionIds: [], hash: null, redacted: false, timeCreated: 5150, metadata: {}, provenance: { ...provenance, sourceId: null } }
+  ];
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  assert.equal((html.match(/<article class="runtime-checkpoint">/g) || []).length, 1);
+  assert.match(html, /datetime="1970-01-01T00:00:05\.000Z"/);
+});
+
+test("child session lineage renders the focused session once under its recorded parent", () => {
+  const runtime = fixtureRuntime();
+  runtime.protocol.sessionId = "child-1";
+  runtime.protocol.session.ref = { provider: "fixture", sessionId: "child-1" };
+  runtime.protocol.relationships = [{
+    type: "spawned",
+    fromSessionId: "parent-1",
+    toSessionId: "child-1",
+    fromRef: { provider: "fixture", sessionId: "parent-1" },
+    toRef: { provider: "fixture", sessionId: "child-1" },
+    provenance
+  }];
+  const html = renderRuntimeWorkbench(runtime, "fixture", "child-1");
+  const topology = html.match(/<div class="runtime-session-graph">([\s\S]*?)<\/div><p class="runtime-notice">/)?.[1] || "";
+  assert.equal((topology.match(/href="\/fixture\/session\/child-1"/g) || []).length, 1);
+  assert.equal((topology.match(/href="\/fixture\/session\/parent-1"/g) || []).length, 1);
 });
 
 test("Runtime tab is unconditional and the retired topology tab is not rendered", () => {
@@ -70,6 +120,8 @@ test("top-level session tabs do not hide nested Runtime lens panels", () => {
   const enhancements = readFileSync(path.join(process.cwd(), "src", "static", "app", "enhancements.js"), "utf8");
   assert.match(enhancements, /tabBar\.parentElement\?\.querySelectorAll\(":scope > \[role='tabpanel'\]"\)/);
   assert.doesNotMatch(enhancements, /document\.querySelectorAll\("\[role='tabpanel'\]"\)/);
+  assert.match(enhancements, /targetPanelId === "tab-runtime"/);
+  assert.match(enhancements, /data-runtime-root.*scrollIntoView|data-runtime-root\]\?\.scrollIntoView/);
 });
 
 test("Runtime work cards allow long canonical task and agent ids to wrap on narrow screens", () => {

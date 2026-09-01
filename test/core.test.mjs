@@ -58,7 +58,11 @@ import {
   codexOwnedTokenUsageRecords,
   resolveCodexInheritedContext
 } from "../dist/src/providers/codex/parser.js";
-import { buildMessageSessionViews } from "../dist/src/providers/shared/message-session.js";
+import {
+  buildMessageSessionViews,
+  buildMessageSessionViewsFromTree,
+  refreshMessageSessionTreeMetrics
+} from "../dist/src/providers/shared/message-session.js";
 import { buildSessionMetrics } from "../dist/src/providers/shared/session-metrics.js";
 import { buildLinkedMessageSessionViews } from "../dist/src/providers/shared/linked-message-session.js";
 import { buildAgentLoop } from "../dist/src/providers/shared/agent-loop.js";
@@ -809,6 +813,7 @@ test("shared session metrics preserve a provider-reported total with partial com
   );
 
   assert.equal(metrics?.totals.totalTokens, 42);
+  assert.equal(metrics?.totals.directTotalTokens, 42);
   assert.equal(metrics?.totals.inputTokens, 10);
   assert.equal(metrics?.totals.outputTokens, 5);
 });
@@ -1035,22 +1040,22 @@ test("Codex preserves canonical subagent identity and groups each response as a 
   assert.equal(session.messageCount, 3);
   assert.deepEqual(session.metadata.inheritedContext, {
     parentSessionId: "codex-parent",
-    candidateUserRecords: 2
+    candidateUserRecords: 0
   });
-  assert.equal(candidateMessages.find((message) => message.content === "Inherited parent prompt")?.metadata.provenance, "inherited-parent-context-candidate");
-  assert.equal(resolved.excludedUserMessages, 1);
-  assert.equal(resolved.messages.some((message) => message.content === "Inherited parent prompt"), false);
+  assert.equal(candidateMessages.find((message) => message.content === "Inherited parent prompt")?.metadata.provenance, "session");
+  assert.equal(resolved.excludedUserMessages, 0);
+  assert.equal(resolved.messages.some((message) => message.content === "Inherited parent prompt"), true);
   assert.equal(resolved.messages.at(-1).content, "Reviewer follow-up");
   assert.equal(resolved.messages.at(-1).metadata.provenance, "session");
   const genuineChildPrompt = resolveCodexInheritedContext(candidateMessages, [{ role: "user", content: "Different parent prompt" }]);
   assert.equal(genuineChildPrompt.excludedUserMessages, 0);
   assert.equal(genuineChildPrompt.messages[0].content, "Inherited parent prompt");
   assert.equal(genuineChildPrompt.messages[0].metadata.provenance, "session");
-  assert.equal(views.tree.messages.length, 2);
-  assert.deepEqual(views.tree.messages[0].parts.map((part) => part.type), ["reasoning", "tool", "tool"]);
-  assert.equal(views.tree.messages[0].parts[1].data.state.output, "ok");
-  assert.equal(views.tree.messages[0].parts[2].tool, "exec");
-  assert.equal(views.tree.messages[0].parts[2].data.state.output, "passed");
+  assert.equal(views.tree.messages.length, 3);
+  assert.deepEqual(views.tree.messages[1].parts.map((part) => part.type), ["reasoning", "tool", "tool"]);
+  assert.equal(views.tree.messages[1].parts[1].data.state.output, "ok");
+  assert.equal(views.tree.messages[1].parts[2].tool, "exec");
+  assert.equal(views.tree.messages[1].parts[2].data.state.output, "passed");
 });
 
 test("file session store reuses parsed transcripts, refreshes changed files, and bounds descendants", () => {
@@ -1574,6 +1579,11 @@ test("linked message sessions attach Codex-style spawn tools to child conversati
       messages: [message("nested-answer", "grandchild", "assistant", "Nested review complete")]
     }
   ]);
+  views.tree.messages[0].data.tokens = { input: 7, output: 3, total: 10 };
+  views.tree.messages[0].parts[0].childSessions[0].messages[0].data.tokens = { input: 12, output: 8, total: 20 };
+  views.tree.messages[0].parts[0].childSessions[0].messages[0].parts[1].childSessions[0].messages[0].data.tokens = { input: 21, output: 9, total: 30 };
+  refreshMessageSessionTreeMetrics(views.tree);
+  const usageViews = buildMessageSessionViewsFromTree(views.tree, buildAgentLoop([]));
 
   const taskPart = views.tree.messages[0].parts[0];
   assert.equal(taskPart.childSessions[0].session.id, "child");
@@ -1582,6 +1592,16 @@ test("linked message sessions attach Codex-style spawn tools to child conversati
   assert.equal(nestedTask.childSessions[0].session.id, "grandchild");
   assert.equal(views.metrics.totals.branches, 2);
   assert.equal(views.metrics.totals.messages, 3);
+  assert.equal(usageViews.metrics.totals.directTotalTokens, 10);
+  assert.equal(usageViews.metrics.totals.totalTokens, 60);
+  const usageHtml = renderSessionPage({
+    session: usageViews.tree.session,
+    sessionTree: usageViews.tree,
+    sessionMetrics: usageViews.metrics,
+    provider: "codex"
+  });
+  assert.match(usageHtml, /Selected session: 10 tokens/);
+  assert.match(usageHtml, /Including child sessions: 60 tokens/);
 });
 
 test("linked message sessions attach every shared subagent launcher", () => {
@@ -1878,8 +1898,8 @@ test("Codex subagent transcripts exclude copied parent context and expose encryp
     tokens: null,
     metadata: null
   }]);
-  assert.equal(resolved.excludedUserMessages, 1);
-  assert.deepEqual(resolved.messages.map((message) => message.content), ["Child-specific follow-up"]);
+  assert.equal(resolved.excludedUserMessages, 0);
+  assert.deepEqual(resolved.messages.map((message) => message.content), ["Parent prompt", "Child-specific follow-up"]);
 });
 
 test("file-backed providers preserve ReACT response boundaries and fold tool-only continuations", () => {
@@ -2008,7 +2028,7 @@ test("file-backed providers preserve ReACT response boundaries and fold tool-onl
     {
       timestamp: "2026-07-11T00:00:04.000Z",
       type: "event_msg",
-      payload: { type: "token_count", info: { last_token_usage: { input_tokens: 210, cached_input_tokens: 190, output_tokens: 30, total_tokens: 240 } } }
+      payload: { type: "token_count", info: { last_token_usage: { input_tokens: 210, cached_input_tokens: 190, cache_write_input_tokens: 10, output_tokens: 30, total_tokens: 240 } } }
     },
     {
       timestamp: "2026-07-11T00:00:05.000Z",
@@ -2052,11 +2072,11 @@ test("file-backed providers preserve ReACT response boundaries and fold tool-onl
   assert.deepEqual(codexViews.tree.messages[1].parts.map((part) => part.type), ["reasoning", "tool", "text", "tool"]);
   assert.equal(codexViews.tree.messages[1].parts[0].data.text, "Inspect the changed files.");
   assert.deepEqual(codexViews.tree.messages[0].data.tokens, {
-    input: 40,
+    input: 30,
     output: 50,
     reasoning: 0,
     total: 370,
-    cache: { read: 280, write: 0 }
+    cache: { read: 280, write: 10 }
   });
   assert.equal(codexViews.tree.messages[0].data.tokenRequestCount, 2);
   assert.equal(codexViews.tree.messages[0].data.tokenRequests.length, 2);
@@ -2067,7 +2087,8 @@ test("file-backed providers preserve ReACT response boundaries and fold tool-onl
     provider: "codex"
   });
   assert.match(codexHtml, /message-token-requests" title="Aggregated across 2 model requests">2 requests/);
-  assert.match(codexHtml, /Uncached prompt input uploaded across 2 model requests: 40/);
+  assert.match(codexHtml, /message-context-length" title="Latest model request context length: 210 tokens">Context: 210<\/span>/);
+  assert.match(codexHtml, /Uncached prompt input uploaded across 2 model requests: 30/);
   assert.match(codexHtml, /Total tokens across 2 model requests: 370/);
   assert.equal(extractCodexMeta(codexRecords, "codex-session").messageCount, 2);
 });
@@ -3645,6 +3666,12 @@ function flowMetrics(overrides = {}) {
     descendantCount: 0,
     totalMessages: 0,
     totalToolCalls: 0,
+    directInputTokens: 0,
+    directOutputTokens: 0,
+    directReasoningTokens: 0,
+    directCacheReadTokens: 0,
+    directCacheWriteTokens: 0,
+    directCost: 0,
     inputTokens: 0,
     outputTokens: 0,
     reasoningTokens: 0,
@@ -3726,6 +3753,45 @@ function flowTool(id, options = {}) {
     }
   };
 }
+
+test("detached child sessions contribute one task entry instead of conversation messages to the parent TOC", () => {
+  const child = {
+    session: { id: "background-child", title: "Background review" },
+    detachedChildren: [],
+    metrics: flowMetrics(),
+    messages: [{
+      id: "background-answer",
+      sessionId: "background-child",
+      role: "assistant",
+      timeCreated: 1200,
+      data: { role: "assistant" },
+      parts: [{
+        id: "background-text",
+        messageId: "background-answer",
+        sessionId: "background-child",
+        type: "text",
+        tool: null,
+        timeStart: 0,
+        timeEnd: 0,
+        childSessions: [],
+        data: { type: "text", text: "BACKGROUND_TO_C_ENTRY" }
+      }]
+    }]
+  };
+  const tree = {
+    session: { id: "root", title: "Root" },
+    detachedChildren: [child],
+    metrics: flowMetrics({ directChildCount: 1, descendantCount: 1 }),
+    messages: []
+  };
+  const html = renderSessionPage({ session: tree.session, sessionTree: tree, provider: "codex" });
+  const toc = html.match(/<div class="toc-list">([\s\S]*?)<\/div>\s*<button class="toc-resize-handle"/)?.[1] || "";
+
+  assert.match(toc, /href="#session-background-child"/);
+  assert.match(toc, /Background review/);
+  assert.doesNotMatch(toc, /BACKGROUND_TO_C_ENTRY/);
+  assert.match(html, /BACKGROUND_TO_C_ENTRY/);
+});
 
 
 test("session rendering merges reasoning tokens into output and nests tools in assistant turns", () => {

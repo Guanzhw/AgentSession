@@ -198,6 +198,18 @@ export function initRuntimeWorkbench({ ft, formatText }) {
   nextButton?.addEventListener("click", () => { if (nextButton.dataset.runtimeNextCursor) void loadEvents(nextButton.dataset.runtimeNextCursor, true); });
   previousButton?.addEventListener("click", () => { const cursor = cursors.at(-1) || null; void loadEvents(cursor, false, true); });
   root.addEventListener("click", (event) => {
+    const density = event.target.closest("[data-runtime-density-category]");
+    if (density) {
+      const category = density.dataset.runtimeDensityCategory || "";
+      if (categoryInput) categoryInput.value = category;
+      cursors.length = 0;
+      currentCursor = null;
+      activeTaskId = null;
+      activeRunId = null;
+      selectLens(tabs.find((tab) => tab.dataset.runtimeLens === "events"));
+      void loadEvents();
+      return;
+    }
     const taskTrigger = event.target.closest("[data-runtime-events-task]");
     const runTrigger = event.target.closest("[data-runtime-events-run]");
     if (!taskTrigger && !runTrigger) return;

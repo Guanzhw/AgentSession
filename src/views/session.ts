@@ -332,6 +332,7 @@ function renderMessageGroup(message: any, markup: any, provider: string) {
     ? messageHeader(role, {
       model: messageModelLabel(data),
       tokens: data.tokens,
+      tokenRequests: data.tokenRequests,
       tokenRequestCount: data.tokenRequestCount,
       cacheWarning: data.cacheWarning,
       time: data.time?.created
@@ -466,7 +467,13 @@ function collectTocNodes(tree: SessionTree, userDepth = 0): any[] {
   }
 
   for (const child of tree.detachedChildren) {
-    nodes.push(...collectTocNodes(child, userDepth + 1));
+    nodes.push(makeTocNode(
+      anchorId("session", child.session.id || ""),
+      "Task",
+      child.session.title || child.session.slug || child.session.id || t("detail.subsession"),
+      t("detail.subsession"),
+      userDepth + 1
+    ));
   }
   return nodes;
 }
@@ -531,12 +538,14 @@ function renderSessionMetricsPanel(sessionMetrics: any) {
   const topTools = Array.isArray(sessionMetrics.tools)
     ? sessionMetrics.tools.slice(0, 5).map((tool: any) => `${tool.name} ${tool.count}`).join(" · ")
     : "";
-  const tokenPieces = [
-    `${formatCount(totals.inputTokens)} in`,
-    `${formatCount((Number(totals.outputTokens) || 0) + (Number(totals.reasoningTokens) || 0))} out`,
-    totals.cacheReadTokens ? `${formatCount(totals.cacheReadTokens)} cache read` : "",
-    totals.cacheWriteTokens ? `${formatCount(totals.cacheWriteTokens)} cache write` : ""
+  const directTokenPieces = [
+    `${formatCount(totals.directInputTokens)} in`,
+    `${formatCount((Number(totals.directOutputTokens) || 0) + (Number(totals.directReasoningTokens) || 0))} out`,
+    totals.directCacheReadTokens ? `${formatCount(totals.directCacheReadTokens)} cache read` : "",
+    totals.directCacheWriteTokens ? `${formatCount(totals.directCacheWriteTokens)} cache write` : ""
   ].filter(Boolean).join(" · ");
+  const hasFamilyUsage = Number(totals.totalTokens) !== Number(totals.directTotalTokens);
+  const tokenPieces = `${t("detail.tokens_direct", { count: formatCount(totals.directTotalTokens) })}${directTokenPieces ? ` · ${directTokenPieces}` : ""}${hasFamilyUsage ? ` · ${t("detail.tokens_inclusive", { count: formatCount(totals.totalTokens) })}` : ""}`;
 
   return `<section class="session-metrics-panel">
     <div class="metrics-grid">
@@ -547,7 +556,7 @@ function renderSessionMetricsPanel(sessionMetrics: any) {
       ${renderMetric("runtime", formatMilliseconds(totals.runtimeMs))}
       ${renderMetric("cost", totals.cost ? `$${Number(totals.cost).toFixed(4)}` : "$0")}
     </div>
-    <p class="metrics-detail">${escapeHtml(tokenPieces || "No token totals available.")}</p>
+    <p class="metrics-detail">${escapeHtml(tokenPieces)}</p>
     ${topTools ? `<p class="metrics-detail">${escapeHtml(`top tools: ${topTools}`)}</p>` : ""}
   </section>`;
 }
@@ -577,6 +586,7 @@ function renderPart(messageData: any, partData: any, partId: any, reasoningMarku
       partId,
       model: messageModelLabel(messageData),
       tokens: messageData.tokens,
+      tokenRequests: messageData.tokenRequests,
       tokenRequestCount: messageData.tokenRequestCount,
       cacheWarning: messageData.cacheWarning,
       time: messageData.time?.created

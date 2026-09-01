@@ -93,6 +93,119 @@ export function codexCompactionRecord(record: Row) {
   };
 }
 
+type CodexCompaction = NonNullable<ReturnType<typeof codexCompactionRecord>>;
+
+function codexCompactionShape(record: Row) {
+  const recordType = String(record?.type || "").toLowerCase();
+  const payloadType = String(record?.payload?.type || "").toLowerCase();
+  if (recordType === "compacted") return "top-level-compacted";
+  if (recordType === "event_msg" && payloadType === "context_compacted") {
+    return "event-context-compacted";
+  }
+  return null;
+}
+
+function codexCompactionExplicitId(record: Row) {
+  const payload = record?.payload && typeof record.payload === "object" ? record.payload : null;
+  return firstString(payload?.id, payload?.compaction_id, record?.id);
+}
+
+function compactionTimestamp(compaction: CodexCompaction) {
+  const value = compaction.record?.timestamp;
+  if (!value) return null;
+  const timestamp = new Date(String(value)).getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function mergedCompactionTimestamp(compaction: CodexCompaction & { records?: Row[] }) {
+  for (const record of compaction.records || [compaction.record]) {
+    const timestamp = record.timestamp ? new Date(String(record.timestamp)).getTime() : NaN;
+    if (Number.isFinite(timestamp)) return timestamp;
+  }
+  return null;
+}
+
+function sameCodexCompaction(left: CodexCompaction, right: CodexCompaction) {
+  const leftShape = codexCompactionShape(left.record);
+  const rightShape = codexCompactionShape(right.record);
+  if (!leftShape || !rightShape || leftShape === rightShape) return false;
+  const leftId = codexCompactionExplicitId(left.record);
+  const rightId = codexCompactionExplicitId(right.record);
+  if (leftId && rightId && leftId === rightId) return true;
+  if (leftId && rightId) return false;
+
+  // Codex emits these two records for one operation at the same source
+  // position. Without a shared id, the paired native shapes and timestamp
+  // are the recorded evidence needed to join them; distant operations stay
+  // separate.
+  const leftTimestamp = compactionTimestamp(left);
+  const rightTimestamp = compactionTimestamp(right);
+  if (leftTimestamp == null || rightTimestamp == null || Math.abs(leftTimestamp - rightTimestamp) > 1000) {
+    return false;
+  }
+  return true;
+}
+
+function mergeCodexCompactions(group: CodexCompaction[]) {
+  const first = group[0];
+  const summary = group.map((item) => item.summary).find((value) => value) ?? null;
+  const trigger = group.map((item) => item.trigger).find((value) => value !== "unknown") || first.trigger;
+  const strategy = summary
+    ? (group.some((item) => item.strategy === "summary") ? "summary" : first.strategy)
+    : first.strategy;
+  return {
+    ...first,
+    summary,
+    trigger,
+    strategy,
+    tokensBefore: group.map((item) => item.tokensBefore).find((value) => value != null) ?? null,
+    tokensAfter: group.map((item) => item.tokensAfter).find((value) => value != null) ?? null,
+    retainedFromEventId: group.map((item) => item.retainedFromEventId).find((value) => value) ?? null,
+    sourceId: group.map((item) => item.sourceId).find((value) => value) ?? null,
+    records: group.map((item) => item.record)
+  };
+}
+
+/** Normalize Codex's paired `compacted` and `event_msg.context_compacted`
+ * observations into one logical operation while retaining both sources. */
+export function codexCompactionEvents(records: Row[]) {
+  const candidates = records
+    .map((record, index) => ({ compaction: codexCompactionRecord(record), index }))
+    .filter((entry): entry is { compaction: CodexCompaction; index: number } => Boolean(entry.compaction));
+  const result: Array<CodexCompaction & { records: Row[]; recordIndices: number[] }> = [];
+  for (let index = 0; index < candidates.length; index += 1) {
+    const current = candidates[index];
+    const next = candidates[index + 1];
+    const group = next && sameCodexCompaction(current.compaction, next.compaction)
+      ? [current.compaction, next.compaction]
+      : [current.compaction];
+    result.push({
+      ...mergeCodexCompactions(group),
+      recordIndices: (next && group.length > 1) ? [current.index, next.index] : [current.index]
+    });
+    if (group.length > 1) index += 1;
+  }
+  return result;
+}
+
+function codexCompactionProvenance(compaction: CodexCompaction & { records?: Row[] }) {
+  const records = compaction.records || [compaction.record];
+  const sourceTypes = [...new Set(records.map((record) => `codex.${String(record.type || "record")}`))];
+  const sourceIds = [...new Set(records.map((record) => codexCompactionRecord(record)?.sourceId).filter(Boolean))];
+  return {
+    fidelity: "recorded" as const,
+    sourceType: sourceTypes.join("+") || "codex.record",
+    sourceId: sourceIds[0] || compaction.sourceId || null
+  };
+}
+
+function codexCompactionSourceEvidence(compaction: CodexCompaction & { records?: Row[] }) {
+  return (compaction.records || [compaction.record]).map((record) => ({
+    sourceType: `codex.${String(record.type || "record")}`,
+    sourceId: codexCompactionRecord(record)?.sourceId || null
+  }));
+}
+
 function envelopeText(payload: Row): string {
   const content = payload.content ?? payload.message;
   if (typeof content === "string") return content;
@@ -233,36 +346,38 @@ export function buildCodexSessionProtocol(input: CodexProtocolInput): SessionPro
     });
   };
 
-  // Recorded compaction events.
+  // Recorded compaction events. Codex may persist one operation twice under
+  // two native record shapes; the provider helper joins those observations.
   const envelopeByTaskId = new Map<string, Row>();
-  input.records.forEach((record, index) => {
-    const compaction = codexCompactionRecord(record);
-    if (compaction) {
-      const ts = record.timestamp ? new Date(String(record.timestamp)).getTime() : null;
-      pushAnchored(compactionEnvelope({
-        id: `event:compaction:${compaction.sourceId || index}`,
-        sessionId,
-        timestamp: asNumber(ts),
-        correlationId: compaction.sourceId,
-        provenance: {
-          fidelity: "recorded",
-          sourceType: `codex.${String(record.type || "record")}`,
-          sourceId: compaction.sourceId
-        },
-        providerData: {
-          tokensBefore: compaction.tokensBefore,
-          tokensAfter: compaction.tokensAfter
-        }
-      }, contextCompactionEvent({
-        trigger: compaction.trigger,
-        strategy: compaction.strategy,
+  for (const compaction of codexCompactionEvents(input.records)) {
+    const recordIndex = Math.min(...compaction.recordIndices);
+    const record = compaction.record;
+    const ts = mergedCompactionTimestamp(compaction);
+    const provenance = codexCompactionProvenance(compaction);
+    const sourceEvidence = codexCompactionSourceEvidence(compaction);
+    pushAnchored(compactionEnvelope({
+      id: `event:compaction:${compaction.sourceId || recordIndex}`,
+      sessionId,
+      timestamp: asNumber(ts),
+      correlationId: compaction.sourceId,
+      provenance,
+      providerData: {
         tokensBefore: compaction.tokensBefore,
         tokensAfter: compaction.tokensAfter,
-        summary: compaction.summary,
-        retainedFromEventId: compaction.retainedFromEventId
-      })), index);
-    }
+        sourceRecordCount: compaction.records?.length || 1,
+        sourceEvidence
+      }
+    }, contextCompactionEvent({
+      trigger: compaction.trigger,
+      strategy: compaction.strategy,
+      tokensBefore: compaction.tokensBefore,
+      tokensAfter: compaction.tokensAfter,
+      summary: compaction.summary,
+      retainedFromEventId: compaction.retainedFromEventId
+    })), recordIndex);
+  }
 
+  input.records.forEach((record, index) => {
     // Recorded task lifecycle events from NEW_TASK envelopes.
     if (isSubagentTaskEnvelopeRecord(record)) {
       const taskId = firstString(record.payload.id, record.payload.call_id);
@@ -659,28 +774,27 @@ export function buildCodexSessionProtocol(input: CodexProtocolInput): SessionPro
     }));
   }
 
-  const artifacts = input.records.flatMap((record) => {
-    const compaction = codexCompactionRecord(record);
-    if (!compaction) return [];
-    const ts = record.timestamp ? new Date(String(record.timestamp)).getTime() : null;
-    return [compactionSummaryArtifact({
-      id: `artifact:${compaction.sourceId || input.records.indexOf(record)}`,
+  const artifacts = codexCompactionEvents(input.records).map((compaction) => {
+    const record = compaction.record;
+    const ts = mergedCompactionTimestamp(compaction);
+    const provenance = codexCompactionProvenance(compaction);
+    const sourceEvidence = codexCompactionSourceEvidence(compaction);
+    return compactionSummaryArtifact({
+      id: `artifact:${compaction.sourceId || compaction.recordIndices[0]}`,
       sessionId,
       sourceSessionIds: [sessionId],
-      provenance: {
-        fidelity: "recorded",
-        sourceType: `codex.${String(record.type || "record")}`,
-        sourceId: compaction.sourceId
-      },
+      provenance,
       timeCreated: asNumber(ts),
       metadata: {
         retainedFromEventId: compaction.retainedFromEventId,
         trigger: compaction.trigger,
         strategy: compaction.strategy,
         tokensBefore: compaction.tokensBefore,
-        tokensAfter: compaction.tokensAfter
+        tokensAfter: compaction.tokensAfter,
+        sourceRecordCount: compaction.records?.length || 1,
+        sourceEvidence
       }
-    })];
+    });
   });
 
   return {

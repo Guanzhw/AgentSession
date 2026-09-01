@@ -223,6 +223,24 @@ export function formatTokens(tokens: any, { cacheWarning = null, requestCount = 
   return pieces.join("");
 }
 
+function latestRequestContextLength(meta: any) {
+  const requests = Array.isArray(meta?.tokenRequests)
+    ? meta.tokenRequests.filter((tokens: unknown) => tokens && typeof tokens === "object")
+    : [];
+  const tokens = requests.at(-1) || meta?.tokens;
+  if (!tokens || typeof tokens !== "object") {
+    return null;
+  }
+
+  // Providers normalize the request prompt into mutually exclusive uncached,
+  // cache-read, and cache-write components. Recombine all three to recover the
+  // context supplied to this request without mixing in generated output.
+  const contextLength = (Number(tokens.input) || 0)
+    + (Number(tokens.cache?.read) || 0)
+    + (Number(tokens.cache?.write) || 0);
+  return contextLength > 0 ? contextLength : null;
+}
+
 export function formatTime(ts: any) {
   const value = Number(ts);
   if (!value) {
@@ -423,6 +441,10 @@ export function messageHeader(role: any, meta: any = {}) {
   const requestLabel = requestCount > 1
     ? `<span class="message-token-requests" title="${escapeHtml(t("detail.token_requests_aggregate", { count: requestCountText }))}">${escapeHtml(t("detail.token_requests", { count: requestCountText }))}</span>`
     : "";
+  const contextLength = latestRequestContextLength(meta);
+  const contextLabel = contextLength == null
+    ? ""
+    : `<span class="message-context-length" title="${escapeHtml(t("detail.context_length_latest", { count: formatCompactCount(contextLength) }))}">${escapeHtml(t("detail.context_length", { count: formatCompactCount(contextLength) }))}</span>`;
   const total = meta.tokens?.total != null
     ? ` title="Total tokens${requestCount > 1 ? ` across ${escapeHtml(requestCountText)} model requests` : ""}: ${escapeHtml(formatCompactCount(meta.tokens.total))}"`
     : "";
@@ -433,6 +455,7 @@ export function messageHeader(role: any, meta: any = {}) {
       <span class="message-role">${safeRole}</span>
       ${model}
       ${tokenMarkup}
+      ${contextLabel}
       ${requestLabel}
       ${time}
     </header>`;

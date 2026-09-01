@@ -43,6 +43,14 @@ export function initEnhancements({ ft, formatText, showToast, escapeHtmlClient }
         panel.setAttribute("hidden", "");
       }
     });
+    if (targetPanelId === "tab-runtime") {
+      // The conversation panel can leave the Runtime controls beneath the
+      // fixed topbar. Reveal first, then align the runtime header without
+      // stealing focus from the selected tab (including keyboard users).
+      requestAnimationFrame(function () {
+        document.querySelector("[data-runtime-root]")?.scrollIntoView({ block: "start", behavior: "instant" });
+      });
+    }
   }
 
   // Click handler

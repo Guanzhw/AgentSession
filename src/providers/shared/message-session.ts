@@ -7,7 +7,7 @@ import {
 import { asNumber } from "./parser.js";
 import { treeToContainer } from "./session-container.js";
 import { buildSessionMetricSteps, type SessionMetricsView } from "./session-metrics.js";
-import { aggregateSessionTreeTokenUsage } from "./session-usage.js";
+import { aggregateSessionTreeDirectTokenUsage, aggregateSessionTreeTokenUsage } from "./session-usage.js";
 import type {
   SessionMessageNode,
   SessionPartNode,
@@ -106,6 +106,12 @@ export function buildMessageSessionTree(
     descendantCount: 0,
     totalMessages: nodes.length,
     totalToolCalls: 0,
+    directInputTokens: 0,
+    directOutputTokens: 0,
+    directReasoningTokens: 0,
+    directCacheReadTokens: 0,
+    directCacheWriteTokens: 0,
+    directCost: 0,
     inputTokens: 0,
     outputTokens: 0,
     reasoningTokens: 0,
@@ -121,6 +127,11 @@ export function buildMessageSessionTree(
     ? Math.max(0, metrics.timeEnd - metrics.timeStart)
     : 0;
   nodes.forEach((message) => addUsage(metrics, message.data?.tokens || null));
+  metrics.directInputTokens = metrics.inputTokens;
+  metrics.directOutputTokens = metrics.outputTokens;
+  metrics.directReasoningTokens = metrics.reasoningTokens;
+  metrics.directCacheReadTokens = metrics.cacheReadTokens;
+  metrics.directCacheWriteTokens = metrics.cacheWriteTokens;
 
   return {
     session: {
@@ -156,6 +167,12 @@ export function refreshMessageSessionTreeMetrics(tree: SessionTree): SessionTree
     descendantCount: children.length + children.reduce((sum, child) => sum + child.metrics.descendantCount, 0),
     totalMessages: tree.messages.length + children.reduce((sum, child) => sum + child.metrics.totalMessages, 0),
     totalToolCalls: directToolCalls + children.reduce((sum, child) => sum + child.metrics.totalToolCalls, 0),
+    directInputTokens: 0,
+    directOutputTokens: 0,
+    directReasoningTokens: 0,
+    directCacheReadTokens: 0,
+    directCacheWriteTokens: 0,
+    directCost: 0,
     inputTokens: children.reduce((sum, child) => sum + child.metrics.inputTokens, 0),
     outputTokens: children.reduce((sum, child) => sum + child.metrics.outputTokens, 0),
     reasoningTokens: children.reduce((sum, child) => sum + child.metrics.reasoningTokens, 0),
@@ -168,8 +185,15 @@ export function refreshMessageSessionTreeMetrics(tree: SessionTree): SessionTree
   };
   for (const message of tree.messages) {
     addUsage(directMetrics, message.data?.tokens || null);
-    directMetrics.cost += asNumber(message.data?.cost);
+    const cost = asNumber(message.data?.cost);
+    directMetrics.cost += cost;
+    directMetrics.directCost += cost;
   }
+  directMetrics.directInputTokens = directMetrics.inputTokens - children.reduce((sum, child) => sum + child.metrics.inputTokens, 0);
+  directMetrics.directOutputTokens = directMetrics.outputTokens - children.reduce((sum, child) => sum + child.metrics.outputTokens, 0);
+  directMetrics.directReasoningTokens = directMetrics.reasoningTokens - children.reduce((sum, child) => sum + child.metrics.reasoningTokens, 0);
+  directMetrics.directCacheReadTokens = directMetrics.cacheReadTokens - children.reduce((sum, child) => sum + child.metrics.cacheReadTokens, 0);
+  directMetrics.directCacheWriteTokens = directMetrics.cacheWriteTokens - children.reduce((sum, child) => sum + child.metrics.cacheWriteTokens, 0);
   const session = tree.session || {};
   const times = [
     asNumber(session.timeCreated ?? session.time_created),
@@ -223,6 +247,12 @@ export function buildMessageSessionViewsFromTree(tree: SessionTree, loop: AgentL
       // Provider totals remain authoritative when a transcript cannot break a
       // request into all components (for example a legacy Codex token event).
       totalTokens: aggregateSessionTreeTokenUsage(tree).total || 0,
+      directInputTokens: tree.metrics.directInputTokens,
+      directOutputTokens: tree.metrics.directOutputTokens,
+      directReasoningTokens: tree.metrics.directReasoningTokens,
+      directCacheReadTokens: tree.metrics.directCacheReadTokens,
+      directCacheWriteTokens: tree.metrics.directCacheWriteTokens,
+      directTotalTokens: aggregateSessionTreeDirectTokenUsage(tree).total || 0,
       cost: 0,
       runtimeMs: tree.metrics.runtimeMs
     },

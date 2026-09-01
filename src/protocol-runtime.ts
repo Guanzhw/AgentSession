@@ -371,19 +371,19 @@ export function buildRuntimeGraph(
   for (const task of root.tasks) {
     if (truncated) break;
     const id = entityNodeId("task", root.sessionId, task.id);
-    if (!addNode({ id, kind: "task", label: task.title || task.id, status: task.status, session: rootRef, resolution: "resolved", provenance: task.provenance })) break;
+    if (!addNode({ id, kind: "task", label: task.title || task.agentPath || task.id, status: task.status, session: rootRef, resolution: "resolved", provenance: task.provenance })) break;
     for (const dependency of task.dependencies || []) {
       if (truncated) break;
       const dependencyId = entityNodeId("task", root.sessionId, dependency);
       const dependencyTask = taskById.get(dependency);
-      if (!addNode({ id: dependencyId, kind: "task", label: dependencyTask?.title || dependency, status: dependencyTask?.status || null, session: rootRef, resolution: dependencyTask ? "resolved" : "missing", provenance: dependencyTask?.provenance || task.provenance })) break;
+      if (!addNode({ id: dependencyId, kind: "task", label: dependencyTask?.title || dependencyTask?.agentPath || dependency, status: dependencyTask?.status || null, session: rootRef, resolution: dependencyTask ? "resolved" : "missing", provenance: dependencyTask?.provenance || task.provenance })) break;
       addEdge({ id: `task-dependency:${task.id}:${dependency}`, type: "depends-on", from: id, to: dependencyId, provenance: task.provenance, inferred: false });
     }
   }
   for (const run of root.agentRuns) {
     if (truncated) break;
     const id = entityNodeId("run", root.sessionId, run.id);
-    if (!addNode({ id, kind: "run", label: run.agent || run.id, status: run.status, session: rootRef, resolution: "resolved", provenance: run.provenance })) break;
+    if (!addNode({ id, kind: "run", label: run.agent || run.model || run.id, status: run.status, session: rootRef, resolution: "resolved", provenance: run.provenance })) break;
     if (run.taskId) addEdge({ id: `task-run:${run.taskId}:${run.id}`, type: "executed-by", from: entityNodeId("task", root.sessionId, run.taskId), to: id, provenance: run.provenance, inferred: run.provenance.fidelity === "derived" });
     if (run.childSessionId) {
       const childRef = { provider: adapter.id, sessionId: run.childSessionId };

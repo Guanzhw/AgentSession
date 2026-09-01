@@ -38,6 +38,12 @@ export interface SessionTreeMetrics {
   descendantCount: number;
   totalMessages: number;
   totalToolCalls: number;
+  directInputTokens: number;
+  directOutputTokens: number;
+  directReasoningTokens: number;
+  directCacheReadTokens: number;
+  directCacheWriteTokens: number;
+  directCost: number;
   inputTokens: number;
   outputTokens: number;
   reasoningTokens: number;
@@ -139,6 +145,12 @@ function calculateMetrics(
     descendantCount,
     totalMessages,
     totalToolCalls,
+    directInputTokens: usage.inputTokens,
+    directOutputTokens: usage.outputTokens,
+    directReasoningTokens: usage.reasoningTokens,
+    directCacheReadTokens: usage.cacheReadTokens,
+    directCacheWriteTokens: usage.cacheWriteTokens,
+    directCost: usage.cost,
     inputTokens: usage.inputTokens + childMetrics.reduce((sum, metrics) => sum + metrics.inputTokens, 0),
     outputTokens: usage.outputTokens + childMetrics.reduce((sum, metrics) => sum + metrics.outputTokens, 0),
     reasoningTokens: usage.reasoningTokens + childMetrics.reduce((sum, metrics) => sum + metrics.reasoningTokens, 0),
