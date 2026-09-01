@@ -65,7 +65,7 @@ export function getDshStorageDiagnostic(root = getDshDir()): DshStorageDiagnosti
       path: filePath,
       detectedSchema: null,
       expectedSchema: 17,
-      message: `DeepSeek Harness SQLite persistence was detected at ${filePath}, but AgentSession does not inspect or migrate that database. The reader currently supports JSONL; the compatibility snapshot documents upstream SQLite schema 17.`
+      message: `Legacy DeepSeek Harness SQLite persistence was detected at ${filePath}, but AgentSession does not inspect or migrate that database. The current reader supports JSONL; schema 17 remains documented for existing stores.`
     };
   }
   return null;
@@ -209,8 +209,8 @@ const deepseekHarness = {
   },
 
   detect() {
-    // A current SQLite store is still a detected DSH installation even though
-    // this adapter cannot read schema 17 yet. Keeping the provider visible is
+    // A legacy SQLite store is still a detected DSH installation even though
+    // this adapter cannot read schema 17. Keeping the provider visible is
     // what makes the unsupported-backend diagnostic inspectable instead of
     // silently treating durable sessions as absent.
     return existsSync(path.join(getDshDir(), "sessions")) || getDshStorageDiagnostic() !== null;

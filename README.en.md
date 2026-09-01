@@ -102,28 +102,31 @@ it is never reported as an empty successful source.
 
 ## DeepSeek Harness compatibility
 
-The DSH adapter is pinned to the official `deepseek-ai/deepseek-harness`
-compatibility snapshot: commit
-`141eb6fef83422698aef7a981029e843e8161534`, tag `dsh-v0.1.0-rc.8`, npm stable
-`@deepseek-ai/dsh@0.1.0-rc.7`, npm `next` `0.1.0-rc.8`, and session format
-version `0`.
+The DSH adapter follows the newest official `deepseek-ai/deepseek-harness`
+release directly. Its current compatibility snapshot is commit
+`dd6322d604e00eec1ba5e0c8541159906a21094a`, tag `dsh-v0.1.2-alpha.3`, package
+`@deepseek-ai/dsh@0.1.2-alpha.3`, and session format version `0`.
 
 JSONL is the supported primary backend. It accepts raw `.jsonl`, multi-frame
 `.jsonl.zstd`, and packed `text-chunks`, `reasoning-chunks`, and
-`tool-call-chunks`. The adapter preserves zero-based source sequence,
-core rc.8 `turn/start`, `turn/end`, `step/start`, `step/end`, `user/message`,
+`tool-call-chunks`. Alpha.3 range-encoded `sourceEventSeqs` are decoded once at
+the provider boundary. The adapter preserves zero-based source sequence,
+core `turn/start`, `turn/end`, `step/start`, `step/end`, `user/message`,
 `assistant/chunk`, `assistant/message`, `tool/call`, `tool/result`,
 `request/header`, `request/context`, surface/source-event citations,
 `session/end-seed`, fork `parentSession`/`seedLength`, compaction,
-cancellation/interruption, workflow/subagent evidence, and rc.8
+cancellation/interruption, workflow/subagent evidence,
 `agent/inbox/spliced` plus Agent Teams `team/member`, `team/task`,
-`team/message/queued`, and `team/message/delivered`. The latter are
-control/team/task/delivery facts, not ordinary conversation messages.
+`team/message/queued`, and `team/message/delivered`. Alpha.3 also records
+`model/selection`, `subagent/model-selection-policy`, and
+`session-log-deepseek/delivery-accepted`. These are control/model/delivery facts,
+not ordinary conversation messages.
 
-When DSH SQLite persistence is detected, schema 17 is surfaced as an explicit
-**unsupported backend/schema diagnostic**. It never silently disappears or
-appears as an empty provider. The stock headless CLI has no stable default
-resume argument, so AgentSession does not invent a DSH resume command.
+Alpha.3 removed the SQLite persistence backend. When a legacy schema 17 store
+is detected, it is still surfaced as an explicit **unsupported backend/schema
+diagnostic**; it never silently disappears or appears as an empty provider.
+The stock headless CLI has no declared default resume argument, so AgentSession
+does not invent a DSH resume command.
 
 ## Installation
 

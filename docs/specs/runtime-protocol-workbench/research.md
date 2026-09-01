@@ -70,10 +70,9 @@ formats rather than promising migrations. The upstream snapshot used by this
 specification is:
 
 - repository: `deepseek-ai/deepseek-harness`;
-- master commit: `141eb6fef83422698aef7a981029e843e8161534`;
-- matching upstream tag: `dsh-v0.1.0-rc.8`;
-- npm stable package at inspection: `@deepseek-ai/dsh@0.1.0-rc.7`;
-- npm `next` tag at inspection: `0.1.0-rc.8`;
+- tracked commit: `dd6322d604e00eec1ba5e0c8541159906a21094a`;
+- matching upstream tag: `dsh-v0.1.2-alpha.3`;
+- package at inspection: `@deepseek-ai/dsh@0.1.2-alpha.3`;
 - `SESSION_FORMAT_VERSION`: `0`, deliberately without compatibility promise.
 
 Current upstream facts relevant to AgentSession:
@@ -86,28 +85,28 @@ Current upstream facts relevant to AgentSession:
 - surface events can cite earlier event sequences and replace surface nodes;
 - fork lineage persists `parentSession` and `seedLength`; `session/end-seed`
   identifies the inherited prefix boundary;
-- JSONL persistence still supports raw `.jsonl` and multi-frame
-  `.jsonl.zstd`, including packed chunk rows;
-- an opt-in SQLite persistence backend exists at schema 17 and has no migration
-  guarantee;
+- JSONL persistence supports raw `.jsonl` and multi-frame `.jsonl.zstd`,
+  including packed chunk rows and range-encoded `sourceEventSeqs`;
+- alpha.3 removed the SQLite persistence backend; schema 17 remains relevant
+  only for explicit diagnostics on existing stores;
 - the upstream `session-query` service now provides bounded event reads,
   surface projection, event tracing, lineage traversal, filtering, and search;
 - the event map is declaration-merge extensible, so unknown non-ignorable
   events must remain a truthful compatibility failure.
 
-Master/rc.8 also adds `agent/inbox/spliced` plus the experimental Agent Teams
+The tracked event vocabulary includes `agent/inbox/spliced` plus Agent Teams
 events `team/member`, `team/task`, `team/message/queued`, and
-`team/message/delivered`. They are log-only control-plane facts, not ordinary
-conversation messages. The local required-event allowlist predates them and
-would currently reject an otherwise readable session containing one.
+`team/message/delivered`, together with alpha.3 `model/selection`,
+`subagent/model-selection-policy`, and
+`session-log-deepseek/delivery-accepted`. They are log-only control/model/
+delivery facts, not ordinary conversation messages.
 
-The existing AgentSession DSH adapter understands the v0 JSONL/Zstd layout and
-packed rows, but its protocol normalization predates several current semantics.
-In particular, it must preserve current request headers/context,
-`session/end-seed`, cited source events, surface replacement, exact cancellation
-reasons, and the distinction between inherited and child-owned events. The
-SQLite backend must be detected explicitly; it must not be silently reported as
-an empty provider when configured upstream storage is inaccessible.
+The AgentSession DSH adapter understands the v0 JSONL/Zstd layout, packed rows,
+and alpha.3 provenance ranges. Its protocol normalization preserves request
+headers/context, `session/end-seed`, cited source events, surface replacement,
+exact cancellation reasons, and the distinction between inherited and
+child-owned events. Legacy SQLite stores remain explicitly detected rather than
+being reported as an empty provider.
 
 Because DSH changes quickly, upstream commit/package/schema information is a
 tested compatibility input, not prose that can drift unnoticed.

@@ -49,10 +49,10 @@ Status values: `[ ]` pending, `[-]` active, `[x]` complete
   depth, cancellation/interruption, usage, and workflow provenance.
 - [x] Detect SQLite persistence/schema 17 and return an explicit diagnostic;
   implement read support only if a validated current fixture is available.
-- [x] Add an official rc.8 current-format fixture with packed-row coverage.
-- [ ] Run a real DSH store smoke when one is available locally (blocked in this
-  delivery because no local DSH store is available; the pinned official rc.8
-  round-trip fixture is covered instead).
+- [x] Preserve the official rc.8 fixture as legacy packed-row coverage and add
+  a derived alpha.3 physical-shape fixture with explicit provenance.
+- [x] Run real alpha.3 headless and subagent store smokes for parser, token,
+  lineage, API, and browser evidence.
 
 ## S4. Runtime Workbench
 

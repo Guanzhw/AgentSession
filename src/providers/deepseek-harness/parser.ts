@@ -30,6 +30,7 @@ export const DSH_KNOWN_EVENT_TYPES = new Set([
   "hook/result",
   "llm/retry",
   "llm/retry-started",
+  "model/selection",
   "permission/preset",
   "plan/mode",
   "request/context",
@@ -39,9 +40,11 @@ export const DSH_KNOWN_EVENT_TYPES = new Set([
   "session/end-seed",
   "session/title",
   "session/title-llm-request",
+  "session-log-deepseek/delivery-accepted",
   "step/end",
   "step/start",
   "subagent/descriptor",
+  "subagent/model-selection-policy",
   "team/member",
   "team/message/delivered",
   "team/message/queued",
@@ -274,7 +277,42 @@ export function decodeDshStorageRecord(value: unknown): DshRecord[] {
   if (!isRecord(value)) return [value as DshRecord];
   const tag = value.type;
   if (tag !== "text-chunks" && tag !== "reasoning-chunks" && tag !== "tool-call-chunks") {
-    return [value];
+    if (!Object.hasOwn(value, "sourceEventSeqs")) return [value];
+    const eventType = typeof value.type === "string" ? value.type : "event";
+    const eventSeq = nonNegativeSafeInteger(value.seq, `${eventType}.seq`);
+    const encoded = value.sourceEventSeqs;
+    if (!Array.isArray(encoded)) {
+      throw new DshSessionParseError(`Invalid ${eventType}.sourceEventSeqs in DeepSeek Harness session storage`);
+    }
+    const decoded: number[] = [];
+    let containsRange = false;
+    for (const entry of encoded) {
+      if (!Array.isArray(entry)) {
+        if (decoded.length >= eventSeq) {
+          throw new DshSessionParseError(`Too many ${eventType}.sourceEventSeqs entries in DeepSeek Harness session storage`);
+        }
+        decoded.push(nonNegativeSafeInteger(entry, `${eventType}.sourceEventSeqs entry`));
+        continue;
+      }
+      if (entry.length !== 2) {
+        throw new DshSessionParseError(`Invalid ${eventType}.sourceEventSeqs range in DeepSeek Harness session storage`);
+      }
+      const start = nonNegativeSafeInteger(entry[0], `${eventType}.sourceEventSeqs range start`);
+      const end = nonNegativeSafeInteger(entry[1], `${eventType}.sourceEventSeqs range end`);
+      if (start > end) {
+        throw new DshSessionParseError(`Invalid ${eventType}.sourceEventSeqs range in DeepSeek Harness session storage`);
+      }
+      const width = end - start + 1;
+      if (width > eventSeq - decoded.length) {
+        throw new DshSessionParseError(`Too many ${eventType}.sourceEventSeqs entries in DeepSeek Harness session storage`);
+      }
+      for (let sourceSeq = start; sourceSeq <= end; sourceSeq += 1) decoded.push(sourceSeq);
+      containsRange = true;
+    }
+    if (containsRange && decoded.some((sourceSeq, index) => index > 0 && sourceSeq <= decoded[index - 1])) {
+      throw new DshSessionParseError(`Non-increasing ${eventType}.sourceEventSeqs in DeepSeek Harness session storage`);
+    }
+    return [{ ...value, sourceEventSeqs: decoded }];
   }
   return expandPackedChunkRow(value, tag);
 }

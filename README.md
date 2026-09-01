@@ -71,11 +71,11 @@ GET /api/:provider/session/:id/runtime/graph?depth=&maxNodes=
 
 ## DeepSeek Harness compatibility
 
-DSH 适配器以官方 `deepseek-ai/deepseek-harness` 快照为兼容边界：commit `141eb6fef83422698aef7a981029e843e8161534`、tag `dsh-v0.1.0-rc.8`、npm stable `@deepseek-ai/dsh@0.1.0-rc.7`、npm `next` `0.1.0-rc.8`，session format version `0`。
+DSH 适配器直接跟进官方 `deepseek-ai/deepseek-harness` 的最新版本。当前兼容快照为 commit `dd6322d604e00eec1ba5e0c8541159906a21094a`、tag `dsh-v0.1.2-alpha.3`、package `@deepseek-ai/dsh@0.1.2-alpha.3`，session format version `0`。
 
-JSONL 是当前主支持后端，支持 raw `.jsonl`、multi-frame `.jsonl.zstd` 和 packed `text-chunks`、`reasoning-chunks`、`tool-call-chunks`。适配器保留 zero-based source sequence、rc.8 核心 `turn/start`、`turn/end`、`step/start`、`step/end`、`user/message`、`assistant/chunk`、`assistant/message`、`tool/call`、`tool/result`、`request/header` 与 `request/context`、surface/source-event citations、`session/end-seed`、fork `parentSession`/`seedLength`、compaction、cancellation/interruption、workflow/subagent，以及 rc.8 的 `agent/inbox/spliced` 和 Agent Teams `team/member`、`team/task`、`team/message/queued`、`team/message/delivered`。后四类是 control/team/task/delivery facts，不会变成普通 conversation message。
+JSONL 是当前主支持后端，支持 raw `.jsonl`、multi-frame `.jsonl.zstd` 和 packed `text-chunks`、`reasoning-chunks`、`tool-call-chunks`。alpha.3 的 range-encoded `sourceEventSeqs` 会在 Provider 边界统一解码。适配器保留 zero-based source sequence、`turn/start`、`turn/end`、`step/start`、`step/end`、`user/message`、`assistant/chunk`、`assistant/message`、`tool/call`、`tool/result`、`request/header` 与 `request/context`、surface/source-event citations、`session/end-seed`、fork `parentSession`/`seedLength`、compaction、cancellation/interruption、workflow/subagent、`agent/inbox/spliced` 和 Agent Teams `team/member`、`team/task`、`team/message/queued`、`team/message/delivered`。alpha.3 还记录 `model/selection`、`subagent/model-selection-policy`、`session-log-deepseek/delivery-accepted`。这些属于 control/model/delivery facts，不会变成普通 conversation message。
 
-检测到 DSH SQLite persistence 时，schema 17 会明确显示为 **unsupported backend/schema diagnostic**；它不会静默消失，也不会被当作空 Provider。当前官方 headless CLI 没有稳定的默认 resume 参数，因此 AgentSession 不伪造 DSH resume 命令。
+alpha.3 已移除 SQLite persistence backend。检测到遗留 schema 17 store 时仍会明确显示 **unsupported backend/schema diagnostic**；它不会静默消失，也不会被当作空 Provider。官方 headless CLI 没有声明默认 resume 参数，因此 AgentSession 不伪造 DSH resume 命令。
 
 ## Installation
 

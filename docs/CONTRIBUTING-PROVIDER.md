@@ -154,21 +154,24 @@ tools to AgentSession-MCP.
 For DSH, keep compatibility metadata synchronized with the checked-in snapshot:
 
 - repository `deepseek-ai/deepseek-harness`;
-- commit `141eb6fef83422698aef7a981029e843e8161534`;
-- tag `dsh-v0.1.0-rc.8`;
-- npm stable `0.1.0-rc.7`, `next` `0.1.0-rc.8`;
-- session format `0`, SQLite schema `17`.
+- commit `dd6322d604e00eec1ba5e0c8541159906a21094a`;
+- tag `dsh-v0.1.2-alpha.3`;
+- package `@deepseek-ai/dsh@0.1.2-alpha.3`;
+- session format `0`; current SQLite schema `null`, legacy schema `17`.
 
 JSONL is the primary backend. Test raw and multi-frame `.jsonl.zstd`, packed
 `text-chunks`/`reasoning-chunks`/`tool-call-chunks`, zero-based upstream
-sequence, header identity, `request/header` and `request/context`,
+sequence, range-encoded `sourceEventSeqs`, header identity, `request/header` and
+`request/context`,
 `session/end-seed`, fork seed length, source-event citations, surface
 replacement, compaction, cancellation/interruption, workflow/subagent facts,
-`agent/inbox/spliced`, and Agent Teams member/task/mailbox events. Team and
-inbox records are control-plane facts, not ordinary messages. Preserve dangling
-references as unresolved diagnostics; never invent a readable child session.
+`agent/inbox/spliced`, Agent Teams member/task/mailbox events, `model/selection`,
+`subagent/model-selection-policy`, and `session-log-deepseek/delivery-accepted`.
+These records are control/model/delivery facts, not ordinary messages. Preserve
+dangling references as unresolved diagnostics; never invent a readable child
+session.
 
-If SQLite persistence or another known backend is detected but unsupported,
+If legacy SQLite persistence or another known backend is detected but unsupported,
 return an explicit storage diagnostic naming the detected and expected schema.
 Never silently treat durable data as an empty provider.
 

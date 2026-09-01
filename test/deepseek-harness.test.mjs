@@ -263,14 +263,25 @@ test("DeepSeek Harness provider reads current raw sessions, system evidence, wor
 });
 
 test("DeepSeek Harness compatibility snapshot and SQLite diagnostic are explicit", () => {
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.commit, "141eb6fef83422698aef7a981029e843e8161534");
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.tag, "dsh-v0.1.0-rc.8");
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.npm.stable, "0.1.0-rc.7");
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.npm.next, "0.1.0-rc.8");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.commit, "dd6322d604e00eec1ba5e0c8541159906a21094a");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.tag, "dsh-v0.1.2-alpha.3");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.npm.current, "0.1.2-alpha.3");
   assert.equal(DSH_COMPATIBILITY_SNAPSHOT.sessionFormatVersion, 0);
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.sqliteSchemaVersion, 17);
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.sqliteSchemaVersion, null);
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousRelease.sqliteSchemaVersion, 17);
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousRelease.package, "@deepseek-ai/dsh");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousRelease.version, "0.1.1-rc.2");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousRelease.commit, "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousRelease.tag, "dsh-v0.1.1-rc.2");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.legacyFixture.tag, "dsh-v0.1.0-rc.8");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.fixture.provenance, "derived-current-shape");
   assert.ok(DSH_COMPATIBILITY_SNAPSHOT.requiredEventTypes.includes("agent/inbox/spliced"));
   assert.ok(DSH_COMPATIBILITY_SNAPSHOT.requiredEventTypes.includes("team/message/delivered"));
+  for (const type of ["model/selection", "session-log-deepseek/delivery-accepted", "subagent/model-selection-policy"]) {
+    assert.ok(DSH_COMPATIBILITY_SNAPSHOT.requiredEventTypes.includes(type));
+    assert.ok(DSH_KNOWN_EVENT_TYPES.has(type));
+    assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousRelease.requiredEventTypes.includes(type), false);
+  }
   assert.deepEqual(
     [...DSH_KNOWN_EVENT_TYPES].sort(),
     [...DSH_COMPATIBILITY_SNAPSHOT.requiredEventTypes].sort()
@@ -333,6 +344,34 @@ test("DeepSeek Harness parser expands multi-frame Zstd chunks, rejects unsafe vo
     });
     assert.equal(dshRecordsToMessages(parsed, id)[0]?.content, "packed text");
     assert.equal(extractDshMeta(parsed).id, id);
+
+    const alphaPath = path.join(root, "alpha-ranges.jsonl");
+    writeJsonl(alphaPath, [
+      header("session-dsh-alpha-ranges"),
+      ...events([
+        { type: "model/selection", data: { provider: "deepseek", model: "deepseek-v4-flash" } },
+        { type: "session-log-deepseek/delivery-accepted", data: { sessionId: "session-dsh-alpha-ranges", throughSeq: 0 } },
+        { type: "subagent/model-selection-policy", data: { allowedModels: [{ provider: "deepseek-official", model: "deepseek-v4-flash" }] } },
+        { type: "assistant/message", sourceEventSeqs: [[0, 2]], data: { message: { id: "alpha-assistant", role: "assistant", content: [{ type: "text", text: "alpha" }] } } }
+      ])
+    ]);
+    const alphaRecords = parseDshSession(alphaPath);
+    assert.deepEqual(alphaRecords[4]?.sourceEventSeqs, [0, 1, 2]);
+
+    assert.deepEqual(
+      decodeDshStorageRecord({ type: "assistant/message", seq: 4, time: 1, sourceEventSeqs: [0, [1, 3]], data: {} })[0].sourceEventSeqs,
+      [0, 1, 2, 3]
+    );
+    assert.throws(() => decodeDshStorageRecord({ type: "assistant/message", seq: 4, time: 1, sourceEventSeqs: [[3, 2]], data: {} }), /range/);
+    assert.throws(() => decodeDshStorageRecord({ type: "assistant/message", seq: 4, time: 1, sourceEventSeqs: [1, [1, 2]], data: {} }), /Non-increasing/);
+    assert.throws(() => decodeDshStorageRecord({ type: "assistant/message", seq: 2, time: 1, sourceEventSeqs: [0, [1, 2]], data: {} }), /Too many/);
+    assert.throws(() => decodeDshStorageRecord({ type: "assistant/message", seq: 4, time: 1, sourceEventSeqs: [[0, 1, 2]], data: {} }), /range/);
+    assert.throws(() => decodeDshStorageRecord({ type: "assistant/message", seq: 4, time: 1, sourceEventSeqs: [-1], data: {} }), /entry/);
+    assert.deepEqual(
+      decodeDshStorageRecord({ type: "assistant/message", seq: 3, time: 1, sourceEventSeqs: [2, 1], data: {} })[0].sourceEventSeqs,
+      [2, 1],
+      "flat legacy provenance remains byte-order compatible"
+    );
 
     assert.throws(() => decodeDshStorageRecord({ type: "text-chunks", seq0: 0, time0: 1, data: { turn: 1, step: 1, index: 0, texts: ["bad"], dt: [1] } }), DshSessionParseError);
     assert.throws(() => decodeDshStorageRecord({ type: "tool-call-chunks", seq0: 0, time0: 1, data: { turn: 1, step: 1, index: 0, id: "call", name: 1, args: ["{}"], dt: [] } }), DshSessionParseError);

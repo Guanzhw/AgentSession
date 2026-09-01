@@ -75,6 +75,9 @@ function eventKind(event: DshRecord): string {
     case "session/end-seed": return "session.end-seed";
     case "request/header": return "request.header";
     case "request/context": return "request.context";
+    case "model/selection": return "model.selection";
+    case "subagent/model-selection-policy": return "model.subagent-selection-policy";
+    case "session-log-deepseek/delivery-accepted": return "control.delivery.accepted";
     case "user/message": return "message.user";
     case "assistant/message": return "message.assistant";
     case "tool/call": return "tool.call";
@@ -164,6 +167,22 @@ function commonProviderData(event: DshRecord) {
     providerData.provider = firstString(data.provider);
     providerData.model = firstString(data.model);
     providerData.contextWindow = asNumber(data.contextWindow);
+  } else if (event.type === "model/selection") {
+    providerData.provider = firstString(data.provider);
+    providerData.model = firstString(data.model);
+    providerData.reasoningEffort = firstString(data.reasoningEffort);
+  } else if (event.type === "subagent/model-selection-policy") {
+    providerData.allowedModels = Array.isArray(data.allowedModels)
+      ? data.allowedModels.flatMap((value) => {
+        if (!isRecord(value)) return [];
+        const provider = firstString(value.provider);
+        const model = firstString(value.model);
+        return provider && model ? [{ provider, model }] : [];
+      })
+      : [];
+  } else if (event.type === "session-log-deepseek/delivery-accepted") {
+    providerData.sessionId = firstString(data.sessionId);
+    providerData.throughSeq = asNumber(data.throughSeq);
   } else if (event.type === "assistant/message") {
     providerData.usage = dshUsageToTokens(data.usage);
   } else if (event.type === "turn/end") {

@@ -122,18 +122,46 @@ test("DSH protocol preserves dangling workflow references without inventing a ch
   assert.equal(protocol.relationships.find((relation) => relation.toSessionId === "missing-child")?.details?.includes("not present"), true);
 });
 
-test("official rc.8 fresh-round-trip fixture parses packed rows into protocol v2", () => {
+test("derived alpha.3 storage fixture normalizes provenance ranges and recorded facts into protocol v2", () => {
   const fixturePath = path.join(process.cwd(), DSH_COMPATIBILITY_SNAPSHOT.fixture.local);
+  const recordsValue = parseDshSession(fixturePath);
+  const session = extractDshMeta(recordsValue, "alpha3-official-fixture");
+  const messages = dshRecordsToMessages(recordsValue, session.id);
+  const protocol = buildDshSessionProtocol({ session, records: recordsValue, messages, children: [] });
+
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.fixture.provenance, "derived-current-shape");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.upstreamReferences.sequenceCodec, "packages/core/session/src/seq-ranges.ts");
+  assert.equal(protocol.version, 2);
+  assert.equal(protocol.validation?.ok, true);
+  assert.deepEqual(recordsValue.find((record) => record.type === "assistant/message")?.sourceEventSeqs, [0, 1, 2, 3, 4]);
+  const modelSelection = protocol.events.find((event) => event.providerData?.eventType === "model/selection");
+  assert.equal(modelSelection?.category, "model");
+  assert.deepEqual(
+    { provider: modelSelection?.providerData?.provider, model: modelSelection?.providerData?.model, reasoningEffort: modelSelection?.providerData?.reasoningEffort },
+    { provider: "deepseek-official", model: "deepseek-v4-flash", reasoningEffort: "high" }
+  );
+  const modelPolicy = protocol.events.find((event) => event.providerData?.eventType === "subagent/model-selection-policy");
+  assert.equal(modelPolicy?.category, "model");
+  assert.deepEqual(modelPolicy?.providerData?.allowedModels, [{ provider: "deepseek-official", model: "deepseek-v4-flash" }]);
+  const delivery = protocol.events.find((event) => event.providerData?.eventType === "session-log-deepseek/delivery-accepted");
+  assert.equal(delivery?.category, "control");
+  assert.deepEqual(
+    { sessionId: delivery?.providerData?.sessionId, throughSeq: delivery?.providerData?.throughSeq },
+    { sessionId: "session-alpha3-fixture", throughSeq: 2 }
+  );
+  assert.ok(protocol.events.some((event) => event.providerData?.eventType === "assistant/message" && event.providerData?.usage));
+  assert.ok(messages.some((message) => message.role === "assistant" && message.tokens?.total > 0));
+});
+
+test("previous rc.8 fixture remains readable and expands packed rows", () => {
+  const fixturePath = path.join(process.cwd(), DSH_COMPATIBILITY_SNAPSHOT.legacyFixture.local);
   const recordsValue = parseDshSession(fixturePath);
   const session = extractDshMeta(recordsValue, "rc8-official-fixture");
   const messages = dshRecordsToMessages(recordsValue, session.id);
   const protocol = buildDshSessionProtocol({ session, records: recordsValue, messages, children: [] });
 
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.fixture.source, "apps/web/tests/snapshots/fresh-round-trip/session.jsonl");
-  assert.equal(protocol.version, 2);
   assert.equal(protocol.validation?.ok, true);
   assert.ok(recordsValue.some((record) => record.type === "assistant/chunk" && record.seq > 6), "packed reasoning/tool rows expand into source events");
-  assert.ok(protocol.events.some((event) => event.providerData?.eventType === "assistant/message" && event.providerData?.usage));
   assert.ok(protocol.events.some((event) => event.normalizedKind === "tool.called"));
   assert.ok(messages.some((message) => message.role === "assistant" && message.tokens?.total > 0));
 });
