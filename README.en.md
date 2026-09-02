@@ -16,22 +16,22 @@ AgentSession metadata.
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
 
-## Runtime Workbench
+## Work Graph
 
-Session detail navigation is `Overview | Conversation | Runtime | Raw`.
-Runtime appears for every readable session and degrades by protocol capability;
+Session detail navigation is `Work Graph | Conversation | Overview | Raw`, with
+Work Graph selected by default. It appears for every readable session and degrades by protocol evidence;
 unsupported, unavailable, missing, and invalid states are explicit rather than
 rendered as observed zeroes.
 
-Runtime has five server-derived lenses:
+Work Graph has five server-derived lenses:
 
-- **Summary**: session state, harness, capability coverage, counts, and validation diagnostics.
-- **Events**: bounded, source-ordered events with category, kind, phase, and correlation filters.
-- **Work**: Task (requested work) is separate from AgentRun (one attempt, mode, model, child session, outcome, or cancellation reason).
-- **Sessions**: typed parent, spawned, forked, continued, compacted-into, scheduled-run-of, and handed-off relationships with canonical links.
-- **Context**: metadata-first memory, instruction, skill, rule, and summary artifacts plus evidence-backed load, injection, citation, compaction, and re-injection events.
+- **Work**: goals, Tasks, dependencies, and explicit links from a Task to each AgentRun attempt.
+- **Execution**: actors, run attempts, and request usage for the selected session; inherited or shared context slices are not added to direct token totals.
+- **Coordination**: recorded observations and canonical parent, spawned, forked, continued, compacted-into, scheduled-run-of, and handed-off session relationships.
+- **Context**: compaction results, context versions, and scoped artifacts such as memory, experience, and user info, with direct, inherited, and shared origins.
+- **Evidence**: bounded, source-ordered events, protocol status, diagnostics, and provenance.
 
-### Session Protocol v2
+### Session Protocol v2 and v3
 
 Every registered provider implements `getSessionProtocol()` for every readable
 session. Graph and query boundaries use the canonical composite `SessionRef`
@@ -57,6 +57,12 @@ Adapters do not invent child sessions, hidden prompts, context text, or
 lifecycle observations absent from source evidence. In-file message branches
 remain branch topology and never become cross-session relationships.
 
+Session Protocol v3 adds the Work, Execution, Coordination, and Context domains
+to the same canonical session boundary, including direct, inherited, and shared
+origin slices for request usage. The shared upgrade currently preserves v2
+facts and marks unrecorded v3 coverage as unknown; providers can add native v3
+evidence incrementally without moving provider interpretation into the browser.
+
 ## Read-only HTTP API
 
 These `GET` APIs return bounded, server-normalized JSON:
@@ -66,13 +72,18 @@ GET /api/:provider/session/:id/protocol
 GET /api/:provider/session/:id/runtime/summary
 GET /api/:provider/session/:id/runtime/events?cursor=&limit=&category=&kind=&phase=&correlationId=
 GET /api/:provider/session/:id/runtime/graph?depth=&maxNodes=
+GET /api/:provider/session/:id/runtime/work?maxItems=
+GET /api/:provider/session/:id/runtime/execution?maxItems=
+GET /api/:provider/session/:id/runtime/coordination?maxItems=
+GET /api/:provider/session/:id/runtime/context?maxItems=
 ```
 
 The full `/protocol` response contains the v2 snapshot, capability
-descriptors, validation, and any storage diagnostic. `events` uses a cursor and
-limit; `graph` uses depth and maxNodes and reports truncation, missing sessions,
-unavailable providers, and validation diagnostics. Unknown sessions return 404;
-known incomplete or invalid sessions retain their diagnostics.
+descriptors, validation, and any storage diagnostic. The four domain APIs return
+bounded v3 projections. `events` uses a cursor and limit; `graph` uses depth and
+maxNodes. Responses report truncation, missing sessions, unavailable providers,
+and validation diagnostics. Unknown sessions return 404; known incomplete or
+invalid sessions retain their diagnostics.
 
 ## Provider coverage
 

@@ -89,7 +89,7 @@ export function initEnhancements({ ft, formatText, showToast, escapeHtmlClient }
     switchTab(tabs[nextIndex]);
   });
 
-  document.querySelector(".session-workbench")?.classList.add("session-conversation-tab-active");
+  document.querySelector(".session-workbench")?.classList.toggle("session-conversation-tab-active", initiallySelected?.getAttribute("aria-controls") === "tab-conversation");
 })();
 
 // ── Token Explorer interactivity ───────────────────────────────────────

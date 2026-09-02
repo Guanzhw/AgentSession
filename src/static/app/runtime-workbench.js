@@ -206,7 +206,7 @@ export function initRuntimeWorkbench({ ft, formatText }) {
       currentCursor = null;
       activeTaskId = null;
       activeRunId = null;
-      selectLens(tabs.find((tab) => tab.dataset.runtimeLens === "events"));
+      selectLens(tabs.find((tab) => tab.dataset.runtimeLens === "evidence"));
       void loadEvents();
       return;
     }
@@ -217,7 +217,7 @@ export function initRuntimeWorkbench({ ft, formatText }) {
     activeRunId = runTrigger?.dataset.runtimeEventsRun || null;
     cursors.length = 0;
     currentCursor = null;
-    selectLens(tabs.find((tab) => tab.dataset.runtimeLens === "events"));
+    selectLens(tabs.find((tab) => tab.dataset.runtimeLens === "evidence"));
     void loadEvents();
   });
 }

@@ -4475,6 +4475,22 @@ pre code.hljs {
 .runtime-pagination { justify-content: flex-end; margin-top: 12px; }
 .runtime-work-list,
 .runtime-context-grid { display: grid; gap: 9px; margin-top: 16px; }
+.runtime-projection-overview { display: flex; flex-wrap: wrap; gap: 7px; margin: 14px 0; color: var(--text-muted); font-size: 11px; }
+.runtime-projection-overview span, .runtime-evidence-status span { padding: 7px 9px; border: 1px solid var(--border-color); border-radius: 7px; background: var(--bg-secondary); }
+.runtime-projection-group { margin-top: 16px; }
+.runtime-projection-group h3 { margin: 0 0 8px; font-size: 13px; }
+.runtime-projection-group ul { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.runtime-projection-group li.runtime-card { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.runtime-projection-group li.runtime-card strong { min-width: 0; overflow-wrap: anywhere; }
+.runtime-projection-group li.runtime-card > span { color: var(--text-muted); font-size: 11px; }
+.runtime-projection-group li.runtime-card .runtime-evidence-trigger { margin-left: auto; }
+.runtime-relation-list li { overflow-wrap: anywhere; color: var(--text-secondary); font-size: 12px; }
+.runtime-relation-list small, .runtime-origin-list small { color: var(--text-muted); }
+.runtime-usage-summary { margin-top: 16px; padding: 11px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); }
+.runtime-usage-summary h3 { margin: 0; font-size: 13px; }
+.runtime-usage-summary p, .runtime-usage-summary small { display: block; margin: 7px 0 0; color: var(--text-muted); overflow-wrap: anywhere; }
+.runtime-evidence-status { display: flex; flex-wrap: wrap; gap: 7px; margin: 14px 0; color: var(--text-muted); font-size: 11px; }
+.runtime-origin-list a { overflow-wrap: anywhere; }
 .runtime-task { border-left: 3px solid var(--border-color); }
 .runtime-status-border-running { border-left-color: var(--accent-color); }
 .runtime-status-border-completed { border-left-color: var(--success-border); }

@@ -390,10 +390,17 @@ function makeTocNode(id: any, type: any, label: any, meta: any, depth: any, chil
 
 function collectMessageTaskTocNodes(message: any, parentAgentDepth: any): any[] {
   const nodes: any[] = [];
+  const childNode = (child: any) => makeTocNode(
+    anchorId("session", child.session?.id || ""),
+    "Task",
+    child.session?.title || child.session?.slug || child.session?.id || t("detail.subsession"),
+    t("detail.subsession"),
+    parentAgentDepth + 1
+  );
 
   for (const part of message.parts) {
     if (part.type === "tool" && isTaskTool(part.data)) {
-      const children = part.childSessions.flatMap((child: any) => collectTocNodes(child, parentAgentDepth));
+      const children = part.childSessions.map(childNode);
       nodes.push(makeTocNode(
         anchorId("part", part.id),
         "Task",
@@ -406,7 +413,7 @@ function collectMessageTaskTocNodes(message: any, parentAgentDepth: any): any[] 
 
     for (const child of part.childSessions) {
       if (!(part.type === "tool" && isTaskTool(part.data))) {
-        nodes.push(...collectTocNodes(child, parentAgentDepth));
+        nodes.push(childNode(child));
       }
     }
   }
@@ -1018,18 +1025,18 @@ ${actions}
     ${breadcrumb}
     ${header}
     <div class="tab-bar" role="tablist" aria-label="${escapeHtml(t("detail.tab_bar_label"))}" hidden>
+      <button role="tab" aria-selected="true" aria-controls="tab-runtime" id="tab-btn-runtime" tabindex="0">${t("detail.tab_runtime")}</button>
+      <button role="tab" aria-selected="false" aria-controls="tab-conversation" id="tab-btn-conversation" tabindex="-1">${t("detail.tab_conversation")}</button>
       <button role="tab" aria-selected="false" aria-controls="tab-overview" id="tab-btn-overview" tabindex="-1">${t("detail.tab_overview")}</button>
-      <button role="tab" aria-selected="true" aria-controls="tab-conversation" id="tab-btn-conversation" tabindex="0">${t("detail.tab_conversation")}</button>
-      <button role="tab" aria-selected="false" aria-controls="tab-runtime" id="tab-btn-runtime" tabindex="-1">${t("detail.tab_runtime")}</button>
       <button role="tab" aria-selected="false" aria-controls="tab-raw" id="tab-btn-raw" tabindex="-1">${t("detail.tab_raw")}</button>
+    </div>
+    <div role="tabpanel" id="tab-runtime" aria-labelledby="tab-btn-runtime">
+      ${runtimeWorkbench || `<p class="empty-state">${t("runtime.unavailable")}</p>`}
     </div>
     <div role="tabpanel" id="tab-conversation" aria-labelledby="tab-btn-conversation">
       <section id="session-messages" class="messages">
         ${messageMarkup || `<p class="empty-state">${t("detail.no_messages")}</p>`}
       </section>
-    </div>
-    <div role="tabpanel" id="tab-runtime" aria-labelledby="tab-btn-runtime">
-      ${runtimeWorkbench || `<p class="empty-state">${t("runtime.unavailable")}</p>`}
     </div>
     <div role="tabpanel" id="tab-overview" aria-labelledby="tab-btn-overview">
       ${renderSessionMetricsPanel(sessionMetrics)}

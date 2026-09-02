@@ -3746,6 +3746,47 @@ test("detached child sessions contribute one task entry instead of conversation 
   assert.match(html, /BACKGROUND_TO_C_ENTRY/);
 });
 
+test("attached child sessions stop the parent TOC at the task boundary", () => {
+  const child = {
+    session: { id: "attached-child", title: "Attached review" },
+    detachedChildren: [],
+    metrics: flowMetrics(),
+    messages: [{
+      id: "child-answer",
+      sessionId: "attached-child",
+      role: "assistant",
+      timeCreated: 1200,
+      data: { role: "assistant" },
+      parts: [{
+        id: "child-text",
+        messageId: "child-answer",
+        sessionId: "attached-child",
+        type: "text",
+        tool: null,
+        timeStart: 0,
+        timeEnd: 0,
+        childSessions: [],
+        data: { type: "text", text: "CHILD_SHARED_CONTEXT_SHOULD_NOT_BE_IN_PARENT_TOC" }
+      }]
+    }]
+  };
+  const task = flowTool("task-part", {
+    tool: "task",
+    status: "completed",
+    childSessions: [child]
+  });
+  task.type = task.partType;
+  const tree = flowSession("root", [flowMessage("root-agent", "assistant", 1000, [task])], { title: "Root" });
+
+  const html = renderSessionPage({ session: tree.session, sessionTree: tree, provider: "codex" });
+  const toc = html.match(/<div class="toc-list">([\s\S]*?)<\/div>\s*<button class="toc-resize-handle"/)?.[1] || "";
+
+  assert.match(toc, /href="#part-task-part"/);
+  assert.match(toc, /href="#session-attached-child"/);
+  assert.doesNotMatch(toc, /CHILD_SHARED_CONTEXT_SHOULD_NOT_BE_IN_PARENT_TOC/);
+  assert.match(html, /CHILD_SHARED_CONTEXT_SHOULD_NOT_BE_IN_PARENT_TOC/);
+});
+
 
 test("session rendering merges reasoning tokens into output and nests tools in assistant turns", () => {
   const sessionTree = {

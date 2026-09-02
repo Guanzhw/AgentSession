@@ -10,19 +10,19 @@ AgentSession 是本地优先、只读的 harness runtime inspector。它从 Open
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
 
-## Runtime Workbench
+## Work Graph
 
-session 详情页固定为 `Overview | Conversation | Runtime | Raw`。Runtime 对每个可读 session 都显示，并按协议能力降级；不会把“不支持”“不可用”“缺失”“无效”渲染成观测到的零值。
+session 详情页固定为 `Work Graph | Conversation | Overview | Raw`，并默认打开 Work Graph。每个可读 session 都显示 Work Graph，并按协议证据降级；不会把“不支持”“不可用”“缺失”“无效”渲染成观测到的零值。
 
-Runtime 提供五个服务端派生 lens：
+Work Graph 提供五个服务端派生 lens：
 
-- **Summary**：session 状态、harness、能力覆盖、事件/任务/run/context 数量和校验异常。
-- **Events**：按来源顺序分页的标准化事件，可按 category、kind、phase 和 correlation 过滤。
-- **Work**：分离显示 Task（请求的工作）和 AgentRun（一次尝试、模式、模型、子 session、结果或取消原因）。
-- **Sessions**：parent、spawned、forked、continued、compacted-into、scheduled-run-of 和 handed-off 关系，带 canonical session 链接。
-- **Context**：元数据优先的 memory、instruction、skill、rule、summary 产物，以及有来源证据的加载、注入、引用、压缩和 reinjection 生命周期事件。
+- **Work**：目标、Task、依赖关系，以及 Task 与每次 AgentRun 的明确关联。
+- **Execution**：参与者、运行尝试和当前 session 的请求用量；继承或共享的上下文切片不会重复计入直接 token 总量。
+- **Coordination**：已记录的协调观察，以及 parent、spawned、forked、continued、compacted-into、scheduled-run-of 和 handed-off 等 canonical session 关系。
+- **Context**：压缩结果、上下文版本和 memory、experience、user-info 等带 scope 的产物，并区分 direct、inherited 和 shared 来源。
+- **Evidence**：按来源顺序分页的标准化事件、协议状态、诊断和 provenance。
 
-### Session Protocol v2
+### Session Protocol v2 与 v3
 
 每个注册 Provider 都为每个可读 session 提供 `getSessionProtocol()`。协议边界使用 canonical composite `SessionRef`：`{ provider, sessionId }`；Provider 自己的 session ID 始终保留。
 
@@ -37,6 +37,8 @@ v2 snapshot 包含：
 
 只要来源没有保存事实，适配器就不会发明 child session、隐藏 prompt、context 正文或 lifecycle。in-file message branch 是 branch topology，不会伪造成跨 session 关系。
 
+Session Protocol v3 在同一 canonical session 边界上增加 Work、Execution、Coordination 和 Context 四个领域，以及 request usage 的 direct、inherited、shared 来源切片。当前共享升级层保留 v2 事实并把未记录的 v3 覆盖状态标为 unknown；Provider 可以逐步提供原生 v3 证据，浏览器端不会推断 Provider 语义。
+
 ## Read-only HTTP API
 
 以下 API 都是 `GET`，返回 bounded、服务端归一化的 JSON：
@@ -46,9 +48,13 @@ GET /api/:provider/session/:id/protocol
 GET /api/:provider/session/:id/runtime/summary
 GET /api/:provider/session/:id/runtime/events?cursor=&limit=&category=&kind=&phase=&correlationId=
 GET /api/:provider/session/:id/runtime/graph?depth=&maxNodes=
+GET /api/:provider/session/:id/runtime/work?maxItems=
+GET /api/:provider/session/:id/runtime/execution?maxItems=
+GET /api/:provider/session/:id/runtime/coordination?maxItems=
+GET /api/:provider/session/:id/runtime/context?maxItems=
 ```
 
-完整 `/protocol` 返回 v2 snapshot、capability descriptors、validation 和可用的 storage diagnostic。`events` 使用 cursor/limit；`graph` 使用 depth/maxNodes，并报告 truncation、缺失 session、不可用 Provider 和校验诊断。未知 session 返回 404；已知但不完整或无效的 session 保留诊断，不会被伪装成完整结果。
+完整 `/protocol` 返回 v2 snapshot、capability descriptors、validation 和可用的 storage diagnostic。四个领域 API 返回有界的 v3 投影；`events` 使用 cursor/limit，`graph` 使用 depth/maxNodes。响应会报告 truncation、缺失 session、不可用 Provider 和校验诊断。未知 session 返回 404；已知但不完整或无效的 session 保留诊断，不会被伪装成完整结果。
 
 ## Provider coverage
 

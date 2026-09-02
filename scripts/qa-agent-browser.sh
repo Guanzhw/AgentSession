@@ -267,10 +267,16 @@ ab "open search" open "$BASE/opencode/search?q=assistant" >/dev/null
 ab "wait for search" wait --text "Search" >/dev/null
 
 ab "open session detail" open "$BASE/opencode/session/$SAMPLE_SESSION_ID" >/dev/null
+work_graph_default="$(read_ab "verify Work Graph default tab" eval "document.getElementById('tab-btn-runtime')?.getAttribute('aria-selected') === 'true' && !document.getElementById('tab-runtime')?.hidden")"
+if [[ "$work_graph_default" != "true" ]]; then
+  echo "Session detail should open on Work Graph, got $work_graph_default" >&2
+  exit 1
+fi
+ab "open Conversation tab" click "#tab-btn-conversation" >/dev/null
 ab "wait for reasoning" wait ".reasoning-block" >/dev/null
 detail="$(read_ab "read session detail" get text body)"
 assert_not_contains "detail" "$detail" "System Prompts"
-assert_contains "detail" "$detail" "Runtime"
+assert_contains "detail" "$detail" "Work Graph"
 detail_session_workbench_id="$(read_ab "read detail session id" get attr ".session-workbench" data-session-id)"
 if [[ "$detail_session_workbench_id" != "$SAMPLE_SESSION_ID" && "$detail_session_workbench_id" != "\"$SAMPLE_SESSION_ID\"" ]]; then
   echo "Detail session workbench ID did not include $SAMPLE_SESSION_ID" >&2
@@ -462,19 +468,19 @@ fi
 
 runtime_lens_count="$(read_ab "count runtime lenses" get count "#tab-runtime [data-runtime-lens]")"
 if [[ "$runtime_lens_count" != "5" ]]; then
-  echo "Runtime workbench should expose five protocol lenses, got $runtime_lens_count" >&2
+  echo "Work Graph should expose four domains plus Evidence, got $runtime_lens_count" >&2
   exit 1
 fi
 
-runtime_stat_count="$(read_ab "count runtime summary stats" get count "#tab-runtime .runtime-stat-card")"
-assert_positive_count "runtime summary stats" "$runtime_stat_count"
-runtime_summary_visible="$(read_ab "verify runtime summary visibility" eval "(() => { const panel = document.querySelector('#tab-runtime [data-runtime-panel=summary]'); return Boolean(panel && !panel.hidden && panel.getBoundingClientRect().height > 0); })()")"
-if [[ "$runtime_summary_visible" != "true" ]]; then
-  echo "Runtime summary lens should be visibly rendered, got $runtime_summary_visible" >&2
+runtime_domain_ids="$(read_ab "read work graph lens ids" eval "[...document.querySelectorAll('#tab-runtime [data-runtime-lens]')].map((node) => node.dataset.runtimeLens).join(',')")"
+assert_contains "work graph domain order" "$runtime_domain_ids" "work,execution,coordination,context,evidence"
+runtime_work_visible="$(read_ab "verify Work domain visibility" eval "(() => { const panel = document.querySelector('#tab-runtime [data-runtime-panel=work]'); return Boolean(panel && !panel.hidden && panel.getBoundingClientRect().height > 0); })()")"
+if [[ "$runtime_work_visible" != "true" ]]; then
+  echo "Work should be the visibly selected Work Graph domain, got $runtime_work_visible" >&2
   exit 1
 fi
 
-ab "open runtime events lens" click "#tab-runtime [data-runtime-lens='events']" >/dev/null
+ab "open Evidence lens" click "#tab-runtime [data-runtime-lens='evidence']" >/dev/null
 runtime_event_count="$(read_ab "count runtime events" get count "#tab-runtime [data-runtime-event]")"
 assert_positive_count "runtime events" "$runtime_event_count"
 
@@ -489,7 +495,7 @@ fi
 ab "close runtime evidence drawer" press Escape >/dev/null
 
 ab "reveal runtime lens tabs" scrollintoview "#tab-runtime .runtime-lens-tabs" >/dev/null
-ab "open runtime sessions lens" click "#tab-runtime [data-runtime-lens='sessions']" >/dev/null
+ab "open Coordination lens" click "#tab-runtime [data-runtime-lens='coordination']" >/dev/null
 runtime_relationship_count="$(read_ab "count runtime relationship rows" get count "#tab-runtime .runtime-session-edge")"
 assert_positive_count "runtime relationship rows" "$runtime_relationship_count"
 runtime_session_link_count="$(read_ab "count canonical runtime session links" get count "#tab-runtime .runtime-session-edge a[href^='/opencode/session/']")"

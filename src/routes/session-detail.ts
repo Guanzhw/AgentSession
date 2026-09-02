@@ -51,16 +51,34 @@ export function registerSessionDetail(
   const runtimeRenderData = (adapter: any, sessionId: string, session: Record<string, unknown>) => {
     try {
       const protocol = getRuntimeProtocol(adapter, sessionId, session);
+      let v3: SessionProtocolV3;
+      try {
+        v3 = getRuntimeProtocolV3(adapter, sessionId);
+      } catch (error) {
+        if (error instanceof TypeError) {
+          throw new ProtocolRuntimeError("protocol_invalid", "Runtime protocol is invalid for this session.");
+        }
+        throw error;
+      }
+      const projectionOptions = { maxItems: 100 };
       return {
         protocol: protocol as SessionProtocol,
+        v3,
+        projections: {
+          work: projectWork(v3, projectionOptions),
+          execution: projectExecution(v3, projectionOptions),
+          coordination: projectCoordination(v3, projectionOptions),
+          context: projectContext(v3, projectionOptions)
+        },
         summary: summarizeRuntimeProtocol(protocol, adapter.protocolCapabilities),
-        graph: buildRuntimeGraph(adapter, protocol, { depth: 0, maxNodes: 100 }),
         eventNextCursor: queryRuntimeEvents(protocol, { limit: 50 }).nextCursor,
         storageDiagnostic: adapter.getStorageDiagnostic?.() || null
       };
     } catch (error) {
       return {
         protocol: null,
+        v3: null,
+        projections: null,
         summary: {
           version: 2,
           completeness: "partial",
@@ -69,7 +87,9 @@ export function registerSessionDetail(
         },
         storageDiagnostic: adapter.getStorageDiagnostic?.() || null,
         runtimeError: {
-          code: error instanceof ProtocolRuntimeError ? error.code : "runtime_unavailable",
+          code: error instanceof ProtocolRuntimeError
+            ? error.code
+            : "runtime_unavailable",
           message: error instanceof ProtocolRuntimeError
             ? "Runtime protocol is unavailable for this session."
             : "Runtime protocol could not be loaded."
@@ -78,10 +98,13 @@ export function registerSessionDetail(
     }
   };
 
-  const runtimeError = (res: any, error: unknown) => {
+  const runtimeError = (res: any, error: unknown, options: { protocolInvalid?: boolean } = {}) => {
     if (error instanceof ProtocolRuntimeError) {
       const status = error.code === "invalid_input" ? 400 : error.code === "protocol_invalid" ? 422 : 404;
       return json(res, { ok: false, error: error.message, code: error.code }, status);
+    }
+    if (options.protocolInvalid && error instanceof TypeError) {
+      return json(res, { ok: false, error: "Runtime protocol is invalid for this session.", code: "protocol_invalid" }, 422);
     }
     console.error(`Runtime protocol route error: ${error instanceof Error ? error.message : String(error)}`);
     return json(res, { ok: false, error: "Internal server error" }, 500);
@@ -483,7 +506,7 @@ export function registerSessionDetail(
         if (error instanceof ProtocolProjectionError) {
           return json(res, { ok: false, error: error.message, code: error.code }, 400);
         }
-        return runtimeError(res, error);
+        return runtimeError(res, error, { protocolInvalid: true });
       }
     }
   );
