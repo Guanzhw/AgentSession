@@ -21,7 +21,7 @@ export interface SessionRef {
 
 export type ProtocolEntityRef =
   | { kind: "session"; ref: SessionRef }
-  | { kind: "event" | "task" | "run" | "artifact" | "branch"; id: string };
+  | { kind: "event" | "task" | "run" | "artifact" | "branch" | "goal" | "actor" | "coordination" | "context-version" | "context-transformation" | "usage"; id: string };
 
 export interface EventProvenance {
   /** recorded = the provider's own data contains this fact; derived = the adapter reconstructed it from other evidence. */
@@ -248,7 +248,7 @@ export interface AgentRun {
   metadata?: Record<string, unknown> | null;
 }
 
-export type ContextArtifactKind = "memory" | "instruction" | "skill" | "rule" | "summary";
+export type ContextArtifactKind = "memory" | "instruction" | "skill" | "rule" | "summary" | "experience" | "user-info";
 export type ContextArtifactScope = "session" | "agent" | "project" | "user" | "organization";
 export type ContextArtifactOrigin = "user-authored" | "agent-generated" | "provider-generated";
 export type ContentAccess = "full" | "summary" | "metadata-only" | "unavailable";
@@ -372,7 +372,7 @@ const EXECUTION_MODES = new Set<ExecutionMode>([
   "foreground", "background", "subagent", "scheduled", "team"
 ]);
 const ARTIFACT_KINDS = new Set<ContextArtifactKind>([
-  "memory", "instruction", "skill", "rule", "summary"
+  "memory", "instruction", "skill", "rule", "summary", "experience", "user-info"
 ]);
 const ARTIFACT_SCOPES = new Set<ContextArtifactScope>([
   "session", "agent", "project", "user", "organization"
