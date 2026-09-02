@@ -15,14 +15,23 @@ test("removed Gemini and Copilot providers stay unavailable at the public bounda
 
   const temp = mkdtempSync(path.join(os.tmpdir(), "agentsession-provider-removal-"));
   try {
+    // This test validates retired-config cleanup, not Windows path semantics:
+    // paths are derived from the temp directory so they are absolute on every platform.
+    const legacyGeminiDir = path.join(temp, "old-gemini");
+    const legacyCopilotDir = path.join(temp, "old-copilot");
+    const legacyGeminiProject = path.join(temp, "old-gemini-project");
+    const legacyCopilotProject = path.join(temp, "old-copilot-project");
+    const legacyCodexProject = path.join(temp, "current-codex-project");
+    const removedGeminiDir = path.join(temp, "removed-gemini");
+    const removedCopilotDir = path.join(temp, "removed-copilot");
     const configPath = path.join(temp, "legacy.json");
     const legacyConfig = {
-      geminiDir: "C:\\old-gemini",
-      copilotDir: "C:\\old-copilot",
+      geminiDir: legacyGeminiDir,
+      copilotDir: legacyCopilotDir,
       projectPaths: {
-        gemini: { old: "C:\\old-gemini-project" },
-        copilot: { old: "C:\\old-copilot-project" },
-        codex: { current: "C:\\current-codex-project" }
+        gemini: { old: legacyGeminiProject },
+        copilot: { old: legacyCopilotProject },
+        codex: { current: legacyCodexProject }
       },
       resumeCommands: {
         gemini: { executable: "gemini", args: ["--resume", "{sessionId}"] },
@@ -31,16 +40,16 @@ test("removed Gemini and Copilot providers stay unavailable at the public bounda
       }
     };
     writeFileSync(configPath, JSON.stringify(legacyConfig));
-    const config = parseArgs(["--config", configPath, "--gemini-dir", "C:\\removed-gemini", "--copilot-dir", "C:\\removed-copilot"]);
+    const config = parseArgs(["--config", configPath, "--gemini-dir", removedGeminiDir, "--copilot-dir", removedCopilotDir]);
     assert.equal(Object.hasOwn(config, "geminiDir"), false);
     assert.equal(Object.hasOwn(config, "copilotDir"), false);
-    assert.deepEqual(config.projectPaths, { codex: { current: "C:\\current-codex-project" } });
+    assert.deepEqual(config.projectPaths, { codex: { current: legacyCodexProject } });
     assert.deepEqual(config.resumeCommands, { codex: { executable: "codex", args: ["resume", "{sessionId}"] } });
 
     const savedPath = path.join(temp, "saved.json");
     writeUserConfig(savedPath, legacyConfig);
     const saved = JSON.parse(readFileSync(savedPath, "utf8"));
-    assert.deepEqual(saved.projectPaths, { codex: { current: "C:\\current-codex-project" } });
+    assert.deepEqual(saved.projectPaths, { codex: { current: legacyCodexProject } });
     assert.deepEqual(saved.resumeCommands, { codex: { executable: "codex", args: ["resume", "{sessionId}"] } });
     assert.equal(Object.hasOwn(saved, "geminiDir"), false);
     assert.equal(Object.hasOwn(saved, "copilotDir"), false);

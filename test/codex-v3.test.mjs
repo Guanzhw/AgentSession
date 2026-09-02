@@ -275,6 +275,71 @@ test("Codex v3 context coverage is not-observed without any compacted evidence",
   assert.equal(v3.coverage.context.state, "not-observed");
 });
 
+test("Codex v3 excludes self-authored FINAL_ANSWER envelopes regardless of parent path", () => {
+  // (a) parent path unresolvable: no agent_path, no child match; the envelope
+  // is self-addressed on a path that appears only in envelopes.
+  const records = [
+    { type: "session_meta", timestamp: ts("10:00:00"), ordinal: 0, payload: { session_id: "root-unresolved" } },
+    { type: "response_item", timestamp: ts("10:01:00"), ordinal: 1, payload: { type: "agent_message", id: "amsg-self", author: "/root/self", recipient: "/root/self", content: [{ type: "input_text", text: "Message Type: FINAL_ANSWER\nTask name: /root/unresolved\nPayload:\nSelf summary." }] } }
+  ];
+  const session = rawSession("root-unresolved", null, null, 1000, 1000);
+  const input = { session, messages: [], records, children: [] };
+  const base = finalizeSessionProtocol(buildCodexSessionProtocol(input), { provider: "codex", session, revision: protocolRevision("fixture") });
+  const v3 = finalizeSessionProtocolV3(buildCodexSessionProtocolV3(input, base));
+  assert.equal(v3.validation?.ok, true);
+  assert.equal(v3.coordination.filter((value) => value.kind === "result-delivery").length, 0);
+
+  // (b) parent path resolves to /root through a real child delivery, but the
+  // self-addressed envelope carries a different path and is still excluded;
+  // the genuine child→parent delivery remains.
+  const records2 = [
+    { type: "session_meta", timestamp: ts("10:00:00"), ordinal: 0, payload: { session_id: "root-resolved" } },
+    { type: "response_item", timestamp: ts("10:01:00"), ordinal: 1, payload: { type: "agent_message", id: "amsg-other", author: "/root/self", recipient: "/root/self", content: [{ type: "input_text", text: "Message Type: FINAL_ANSWER\nTask name: /root\nPayload:\nSelf summary." }] } },
+    { type: "response_item", timestamp: ts("10:02:00"), ordinal: 2, payload: { type: "agent_message", id: "amsg-real", author: "/root/child", recipient: "/root", content: [{ type: "input_text", text: "Message Type: FINAL_ANSWER\nTask name: /root\nPayload:\nDone." }] } }
+  ];
+  const session2 = rawSession("root-resolved", null, null, 1000, 1000);
+  const child = rawSession("child-b", "root-resolved", { agentPath: "/root/child" }, 1070, 1080);
+  const input2 = { session: session2, messages: [], records: records2, children: [{ session: child, messages: [], records: [] }] };
+  const base2 = finalizeSessionProtocol(buildCodexSessionProtocol(input2), { provider: "codex", session: session2, revision: protocolRevision("fixture") });
+  const v3b = finalizeSessionProtocolV3(buildCodexSessionProtocolV3(input2, base2));
+  assert.equal(v3b.validation?.ok, true);
+  const deliveries = v3b.coordination.filter((value) => value.kind === "result-delivery");
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0].correlationId, "amsg-real");
+  assert.equal(deliveries[0].fromSessionRef?.sessionId, "child-b");
+});
+
+test("native v3 cache evicts the true LRU entry after a hit refreshes recency", () => {
+  clearProtocolRuntimeCache();
+  let calls = 0;
+  const native = finalizeSessionProtocolV3(buildCodexSessionProtocolV3(buildFixture().input, finalizeSessionProtocol(buildCodexSessionProtocol(buildFixture().input), { provider: "codex", session: buildFixture().session, revision: protocolRevision("fixture") })));
+  const adapter = {
+    id: "codex",
+    getStatsRevision: () => "r1",
+    // Each request must observe a snapshot that belongs to it: sessionId-validated natives are the runtime contract.
+    getSessionProtocolV3: (sessionId) => { calls += 1; return { ...native, sessionId }; },
+    getSessionProtocol: () => null,
+    getSession: () => ({ id: "root" })
+  };
+  // Fill the cache to its bound (MAX_CACHE_ENTRIES = 256).
+  for (let i = 0; i < 256; i += 1) {
+    getRuntimeProtocolV3(adapter, `s-${i}`);
+  }
+  assert.equal(calls, 256);
+  // A hit on s-0 refreshes recency: s-0 becomes the newest entry.
+  getRuntimeProtocolV3(adapter, "s-0");
+  assert.equal(calls, 256);
+  // Overflowing the cache must evict the true LRU (s-1), not s-0.
+  getRuntimeProtocolV3(adapter, "s-256");
+  assert.equal(calls, 257);
+  // s-0 survived its recency refresh; s-1 was evicted.
+  getRuntimeProtocolV3(adapter, "s-0");
+  assert.equal(calls, 257, "refreshed entry must survive overflow eviction");
+  getRuntimeProtocolV3(adapter, "s-1");
+  assert.equal(calls, 258, "the true least-recently-used entry must be evicted");
+  clearProtocolRuntimeCache();
+});
+
 test("getRuntimeProtocolV3 uses the provider-native v3 snapshot when present", () => {
   clearProtocolRuntimeCache();
   let calls = 0;

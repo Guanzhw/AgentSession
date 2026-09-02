@@ -17,7 +17,7 @@ session 详情页固定为 `Work Graph | Conversation | Overview | Raw`，并默
 Work Graph 提供五个服务端派生 lens：
 
 - **Work**：目标、Task、依赖关系，以及 Task 与每次 AgentRun 的明确关联。
-- **Execution**：参与者、运行尝试和当前 session 的请求用量；继承或共享的上下文切片不会重复计入直接 token 总量。
+- **Execution**：参与者、运行尝试和当前 session 的请求用量；继承或共享的 input/cacheRead 仍归属发生它的真实请求并计一次，不会因共享上下文而在跨请求间去重（同一共享上下文在不同请求中的 cacheRead 各自计费一次）；继承的已存历史本身不另造一条新请求。
 - **Coordination**：已记录的协调观察，以及 parent、spawned、forked、continued、compacted-into、scheduled-run-of 和 handed-off 等 canonical session 关系。
 - **Context**：压缩结果、上下文版本和 memory、experience、user-info 等带 scope 的产物，并区分 direct、inherited 和 shared 来源。
 - **Evidence**：按来源顺序分页的标准化事件、协议状态、诊断和 provenance。
@@ -65,9 +65,9 @@ GET /api/:provider/session/:id/runtime/context?maxItems=
 | OpenCode | active | `$XDG_DATA_HOME/opencode/opencode.db` 或 `~/.local/share/opencode/opencode.db` | `partial/derived` messages/parts 事件；原生 child/session 记录支持关系、Task、AgentRun。 |
 | Claude Code | active | `~/.claude/transcripts/`、`~/.claude/projects/` | `partial/derived` transcript、compact 边界和 sidechain/task-notification 证据。 |
 | Codex CLI | active | `~/.codex/sessions/**/*.jsonl` | `full/recorded` response/item、工具和 compaction；`partial/derived` NEW_TASK 关系、Task、AgentRun。 |
-| OpenClaw | active | `~/.openclaw/agents/*/sessions/*.jsonl` | `partial/derived` branch、reasoning、工具和 registry lineage；无来源证据不创建 child。 |
+| OpenClaw | active — JSONL reader (legacy/archive); 最新 SQLite refresh pending | `~/.openclaw/agents/*/sessions/*.jsonl`（legacy/archive）；最新 upstream 主存储为 `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite` | `partial/derived` branch、reasoning、工具和 registry lineage；无来源证据不创建 child。 |
 | Hermes Agent | active | `$HERMES_HOME/state.db` | `full/recorded` SQLite 事件；`partial/derived` 压缩延续/delegation lineage，压缩不是 spawned。 |
-| Pi | active | `~/.pi/agent/sessions/**/*.jsonl` | `full/recorded` branch/compaction 和 `partial/derived` parent lineage；不虚构 spawn。 |
+| Pi | active | `~/.pi/agent/sessions/**/*.jsonl` | `full/recorded` branch/compaction 和 `partial/derived` parent lineage；不虚构 spawn。当前 upstream package/repo 已迁移到 `@earendil-works/pi-coding-agent`（官方 session format v3），现有 reader 需持续对 v3/当前版本验证。 |
 | DeepSeek Harness | active preview | `$DSH_HOME/sessions/**/session.jsonl[.zstd]` 或 `~/.dsh/sessions/**` | `full/recorded` v0 event/context；`partial/derived` workflow、team 和跨 session 关系。 |
 
 当前 Provider 也提供消息搜索、token 统计、导出和只修改 AgentSession 元数据的本地管理。Runtime Environment 与 system-prompt evidence 仍是独立的只读能力：只展示可解析的本地来源，不声称恢复隐藏 prompt。
@@ -75,7 +75,7 @@ GET /api/:provider/session/:id/runtime/context?maxItems=
 
 ## DeepSeek Harness compatibility
 
-DSH 适配器直接跟进官方 `deepseek-ai/deepseek-harness` 的最新版本。当前兼容快照为 commit `dd6322d604e00eec1ba5e0c8541159906a21094a`、tag `dsh-v0.1.2-alpha.3`、package `@deepseek-ai/dsh@0.1.2-alpha.3`，session format version `0`。
+DSH 适配器当前兼容 **alpha.3 snapshot**（不等同于最新版本）；项目策略是跟随最近的 alpha/official HEAD（稳定 rc 不作为“最新预览”依据）。当前兼容快照为 commit `dd6322d604e00eec1ba5e0c8541159906a21094a`、tag `dsh-v0.1.2-alpha.3`、package `@deepseek-ai/dsh@0.1.2-alpha.3`，session format version `0`。Upstream alpha.5 与官方 HEAD 的 refresh **pending**（见 evidence-matrix freshness snapshot）。
 
 JSONL 是当前主支持后端，支持 raw `.jsonl`、multi-frame `.jsonl.zstd` 和 packed `text-chunks`、`reasoning-chunks`、`tool-call-chunks`。alpha.3 的 range-encoded `sourceEventSeqs` 会在 Provider 边界统一解码。适配器保留 zero-based source sequence、`turn/start`、`turn/end`、`step/start`、`step/end`、`user/message`、`assistant/chunk`、`assistant/message`、`tool/call`、`tool/result`、`request/header` 与 `request/context`、surface/source-event citations、`session/end-seed`、fork `parentSession`/`seedLength`、compaction、cancellation/interruption、workflow/subagent、`agent/inbox/spliced` 和 Agent Teams `team/member`、`team/task`、`team/message/queued`、`team/message/delivered`。alpha.3 还记录 `model/selection`、`subagent/model-selection-policy`、`session-log-deepseek/delivery-accepted`。这些属于 control/model/delivery facts，不会变成普通 conversation message。
 

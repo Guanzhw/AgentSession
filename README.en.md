@@ -26,7 +26,7 @@ rendered as observed zeroes.
 Work Graph has five server-derived lenses:
 
 - **Work**: goals, Tasks, dependencies, and explicit links from a Task to each AgentRun attempt.
-- **Execution**: actors, run attempts, and request usage for the selected session; inherited or shared context slices are not added to direct token totals.
+- **Execution**: actors, run attempts, and request usage for the selected session; inherited or shared input/cache still belongs to the real request where it occurred and is counted once there — the same shared context's cacheRead across distinct requests is not deduplicated, and inherited stored history is never a new request.
 - **Coordination**: recorded observations and canonical parent, spawned, forked, continued, compacted-into, scheduled-run-of, and handed-off session relationships.
 - **Context**: compaction results, context versions, and scoped artifacts such as memory, experience, and user info, with direct, inherited, and shared origins.
 - **Evidence**: bounded, source-ordered events, protocol status, diagnostics, and provenance.
@@ -96,9 +96,9 @@ fact was stored natively.
 | OpenCode | active | `$XDG_DATA_HOME/opencode/opencode.db` or `~/.local/share/opencode/opencode.db` | `partial/derived` message/part events plus native child/session records for relationships, Tasks, and AgentRuns. |
 | Claude Code | active | `~/.claude/transcripts/`, `~/.claude/projects/` | `partial/derived` transcript, compact-boundary, and sidechain/task-notification evidence. |
 | Codex CLI | active | `~/.codex/sessions/**/*.jsonl` | `full/recorded` response/item, tool, and compaction events; `partial/derived` NEW_TASK relationships, Tasks, and AgentRuns. |
-| OpenClaw | active | `~/.openclaw/agents/*/sessions/*.jsonl` | `partial/derived` branch topology, reasoning, tools, and registry lineage; no child without source evidence. |
+| OpenClaw | active — JSONL reader (legacy/archive); latest SQLite refresh pending | `~/.openclaw/agents/*/sessions/*.jsonl` (legacy/archive); latest upstream primary storage is `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite` | `partial/derived` branch topology, reasoning, tools, and registry lineage; no child without source evidence. |
 | Hermes Agent | active | `$HERMES_HOME/state.db` | `full/recorded` SQLite events and `partial/derived` compression continuation/delegation lineage; compression is not spawned work. |
-| Pi | active | `~/.pi/agent/sessions/**/*.jsonl` | `full/recorded` branch/compaction events and `partial/derived` parent lineage; never invented spawn. |
+| Pi | active | `~/.pi/agent/sessions/**/*.jsonl` | `full/recorded` branch/compaction events and `partial/derived` parent lineage; never invented spawn. The current upstream package/repo has moved to `@earendil-works/pi-coding-agent` (official session format v3); the existing reader needs continued validation against v3/current versions. |
 | DeepSeek Harness | active preview | `$DSH_HOME/sessions/**/session.jsonl[.zstd]` or `~/.dsh/sessions/**` | `full/recorded` v0 event log/context and `partial/derived` workflow, team, and cross-session relationships. |
 
 All providers also expose message search, token statistics, export, and local
@@ -110,10 +110,14 @@ it is never reported as an empty successful source.
 
 ## DeepSeek Harness compatibility
 
-The DSH adapter follows the newest official `deepseek-ai/deepseek-harness`
-release directly. Its current compatibility snapshot is commit
+The DSH adapter is currently a **alpha.3 compatibility snapshot** (not the
+newest version); the project policy is to track the newest alpha/official
+HEAD (the stable `latest` rc is not treated as the newest preview). Its
+current compatibility snapshot is commit
 `dd6322d604e00eec1ba5e0c8541159906a21094a`, tag `dsh-v0.1.2-alpha.3`, package
-`@deepseek-ai/dsh@0.1.2-alpha.3`, and session format version `0`.
+`@deepseek-ai/dsh@0.1.2-alpha.3`, and session format version `0`. Upstream
+alpha.5 and official HEAD refresh is **pending** (see the evidence-matrix
+freshness snapshot).
 
 JSONL is the supported primary backend. It accepts raw `.jsonl`, multi-frame
 `.jsonl.zstd`, and packed `text-chunks`, `reasoning-chunks`, and

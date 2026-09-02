@@ -147,10 +147,36 @@ export function getRuntimeProtocolV3(
     } catch {
       // A revision is an optimization, never a reason to make the source unreadable.
     }
+    if (revision === null) {
+      // Without a stats revision a null key would permanently match stale
+      // snapshots. Establish the canonical session at the shared boundary and
+      // derive a stable fallback revision: the session's recorded
+      // timeUpdated/messageCount/tokenCount invalidate the cache when they
+      // change, while a missing or mismatched reference keeps
+      // session_not_found semantics.
+      const session = knownSession === undefined
+        ? adapter.getSession(sessionId) as Record<string, unknown> | null
+        : knownSession;
+      if (!session || String(session.id || "") !== sessionId) {
+        throw new ProtocolRuntimeError("session_not_found", "No provider-stored session matches this reference.");
+      }
+      revision = sessionRevision(adapter, session);
+    }
     const cached = v3NativeCache.get(key);
-    if (cached?.revision === revision) return cached.protocol;
+    if (cached?.revision === revision) {
+      // Refresh recency (delete + set) so eviction below stays LRU: a plain
+      // hit return would keep the key at the oldest position and evict FIFO.
+      v3NativeCache.delete(key);
+      v3NativeCache.set(key, cached);
+      return cached.protocol;
+    }
     const native = adapter.getSessionProtocolV3(sessionId);
     if (native) {
+      if (String(native.sessionId || "") !== sessionId) {
+        // Only id-matching snapshots may be cached: a mismatched snapshot must
+        // not shadow the requested session's protocol.
+        throw new ProtocolRuntimeError("protocol_invalid", "Native session protocol does not belong to the requested session.");
+      }
       while (v3NativeCache.size >= MAX_CACHE_ENTRIES) {
         const oldest = v3NativeCache.keys().next().value;
         if (oldest === undefined) break;

@@ -1,6 +1,6 @@
 # Work Graph protocol evidence matrix
 
-Status: accepted research input (updated 2026-09-02)
+Status: accepted research input (updated 2026-09-03)
 
 Date: 2026-09-02
 
@@ -23,6 +23,26 @@ Date: 2026-09-02
 > until an attempt entity exists. `world_state` snapshots (instructions,
 > skills, environments) stay unmapped: the protocol artifact contract is
 > metadata-first and would require synthesizing summaries.
+
+## Provider freshness snapshot (2026-09-03)
+
+Verified by the main agent on 2026-09-03 against official docs, upstream
+repository HEAD/releases, npm dist-tags, locally installed versions, and the
+newest local real data. Every row is a **snapshot claim**: it does not cover
+versions checked later, and negative observations apply only to that snapshot.
+Pending rows mean the newest upstream format has not been refreshed against
+the adapter yet — absence of verification is not evidence of absence of
+features.
+
+| Provider | Official docs / repository | Installed | npm dist-tag | Upstream HEAD / tag | Adapter format status |
+|:---|:---|:---|:---|:---|:---|
+| OpenCode | <https://opencode.ai/docs/> | 1.17.11 (Windows) | opencode-ai 1.18.26 | — | OpenCode SQLite schema support; refresh pending against 1.18.26 evidence. |
+| Claude Code | <https://code.claude.com/docs/en/overview> · <https://github.com/anthropics/claude-code> | 2.1.207 | 2.1.258 | `aef74afe01f65b602258d6102b0da9730ac6f0aa` | Transcript parsing verified on installed 2.1.207; npm 2.1.258 / repo HEAD not yet verified. |
+| Codex CLI | <https://github.com/openai/codex> + official Codex docs | 0.152.1 | 0.152.1 | `5e26f7621c1c470fe62350d61c9eb4d6c772a0da` | Native v3 mapping was verified on a **0.151 alpha historical snapshot**; it does not cover 0.152.1 — refresh pending. |
+| OpenClaw | <https://github.com/openclaw/openclaw> · <https://docs.openclaw.ai/> | 2026.7.1-2 | 2026.8.2 | `f92a12c5813fb880ed6a05c4a728fd5f4ccc5473` | Latest official docs state current session rows/transcript/metadata live in `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite`; `sessions/*.jsonl` is **legacy/archive**. Adapter supports JSONL only → **current-format support pending**. |
+| Hermes Agent | <https://hermes-agent.nousresearch.com/docs/> · <https://github.com/NousResearch/hermes-agent> | v0.19.1 (upstream `0cd26ce9`, local `840fb55a`) | — | `1cb3ab617363ffab9e55239a7d2ab0d6f9c10473` | `state.db` conclusions hold only for this verified version and local samples; remote HEAD refresh pending. |
+| Pi | <https://github.com/earendil-works/pi> · package `@earendil-works/pi-coding-agent` | 0.80.10 | 0.84.4 | `e266507b606b9552fa277252644054afd4384b11` | Current official session format **v3**; reader needs continued validation against v3 / 0.84.4. Former `@mariozechner/badlogic` references are **legacy**, not the current upstream. |
+| DeepSeek Harness | <https://www.deepseek.com/harness/en/> · <https://github.com/deepseek-ai/deepseek-harness> | 0.1.2-alpha.3 | alpha dist-tag `0.1.2-alpha.5` (the `latest` tag points to an old rc — it is not the newest preview) | `49a606bc5b5934603f22a26957a07dc799ab0291` (alpha.5 tag `db6bdc3576c2d4e7c965e8e3ed0c2a731eed87f5`) | Adapter snapshot is alpha.3 → **refresh pending**. Project tracks the newest alpha/official HEAD, not the stable rc. |
 
 ## Purpose
 
@@ -52,11 +72,10 @@ Context lens partition when the new UI is implemented: Sessions topology moves
 under Coordination, and Execution becomes independent of requested Work.
 
 Gemini CLI and GitHub Copilot CLI are outside the continuing provider scope.
-Their current adapters are compatibility residue to remove, together with
-registration, configuration, README, localization, tests, and the existing
-"every registered provider" requirement, before provider migration to the new
-contract. Until that removal stage lands, their existing v2 behavior remains
-unchanged; neither is an input to the new protocol design.
+Their adapters plus registration, configuration, README, localization, tests,
+and the "every registered provider" requirement were **removed in `c8c00a9`
+(2026-09-02)**, so there is no residue left to remove here. Neither is an input
+to the new protocol design; this paragraph is retained only as scope history.
 
 ## Current shared boundary
 
@@ -102,7 +121,7 @@ those states.
 
 | Provider | Work | Execution | Coordination | Context | Usage ownership |
 |:---|:---|:---|:---|:---|:---|
-| Codex | Six child sessions in `01a0576a-98e2-7c31-a265-6d98d5fbff12` become six derived Tasks and Runs. `NEW_TASK` is recorded when present. Goals and dependencies are missing. | Six real runs are `subagent`; recorded activity can preserve `background`, but this sample has none. Turn attempts ARE recorded for 0.151+ (`task_started`/`task_complete`/`turn_aborted`: timing, time-to-first-token, context window, mode kind) but map to no protocol Execution mode; scheduling evidence is missing. | The parent records 6 spawn, 5 follow-up, 6 send-message, 28 wait, 15 list, and 1 interrupt calls. V2 projects six typed spawned relationships/tasks/runs while retaining the calls only as generic transcript/message-tool evidence; it lacks typed continuing-coordination facts. | Six recorded compactions become six metadata-only summary artifacts. Window ids exist in source records but no common context-version lineage exists. No memory/experience evidence is present. | Request usage and copied-prefix/duplicate identities are provider-normalized. The live list reports 82,713,620 tokens, but v2 cannot bind request usage to a Run or expose origin ownership. |
+| Codex | **Real-data row superseded.** The research-time observation below (2026-09-02, CLI `0.151.0-alpha.7.2`) is historical evidence and is replaced by the native v3 mapping in `.agents/decisions/implemented/2026-09-02-codex-native-v3-mapping.md`. Currently verified on `01a0576a-98e2-7c31-a265-6d98d5fbff12`: **1 goal / 13 tasks / 13 runs / 14 actors / 158 coordination observations / 11 context versions / 10 transformations**, all domains `observed`, and recorded request usage with **no origin slices** (Codex records none in the 0.151 alpha snapshot verified here). The old row: six child sessions became six derived Tasks and Runs; `NEW_TASK` recorded when present; goals/dependencies missing. | Research time: the six runs were `subagent`; recorded activity can preserve `background`, but that sample had none. Turn attempts ARE recorded for 0.151+ (`task_started`/`task_complete`/`turn_aborted`: timing, time-to-first-token, context window, mode kind) but map to no protocol Execution mode; scheduling evidence is missing. | Research time: the parent recorded 6 spawn, 5 follow-up, 6 send-message, 28 wait, 15 list, and 1 interrupt calls. The native v3 mapping now projects 158 typed coordination observations (spawn bound to child session/run/turn id, non-collaboration `wait`/`exec` excluded). | Research time: six recorded compactions became six metadata-only summary artifacts and no common lineage was provable. Superseded for 0.151+: recorded `window_id`/`previous_window_id`/`first_window_id` form a closed linear lineage (11 versions, no gap; first compaction links back to `session_meta.context_window.window_id`). | **No origin slices** — Codex does not record request context origins; per-request usage records exist (`usage:<session>:<ordinal>`) with `turnId` null (no recorded anchor). Research-time list total (82,713,620 tokens) is deliberately not carried as a permanent fact: session message/usage totals grow as sessions continue and are not stable facts. |
 | Claude Code | `<task-notification>` and sidechains can provide recorded tasks and derived runs. The 11 local files inspected contain neither. | Sidechains map to `subagent`; foreground/background, attempts, scheduling, and teams are missing in current evidence. | Recorded sidechain lineage can be paired with task notifications. Handoff and continuing message/wait evidence are missing. | Compact lifecycle records are supported as recorded metadata-only summaries, but the inspected local files contain none. Memory/experience evidence is missing. | Assistant message ids deduplicate fragmented usage. The sampled session reports 63,490 tokens; v2 has no request/run ownership entity. |
 | DeepSeek Harness alpha.3 | Native events include goal change, workflow, and team tasks; team `blockedBy` can become dependencies. Live data proves subagent work but not live goals or teams. | Native turn/step/tool lifecycle gives recorded execution evidence. Live child descriptors are `one-shot`; background, async, attempt, and scheduled execution remain missing or unknown. | Parent/descriptor lineage, inbox splice, delivery events, workflow, and team message vocabulary are recorded. Live sessions prove inbox and child interaction; fixtures prove teams, while handoff remains missing. | Recorded compaction lifecycle and request context are present. `seedLength` and `session/end-seed` establish inherited boundaries. No live memory/dream/experience evidence exists. | Usage components and inherited seed boundaries are recorded. A live child has 26,383 stored-family tokens but 13,362 owned-suffix tokens. Shared cache ownership and a public dedup identity are missing. |
 | OpenCode | Native storage contains 182 todo rows, but the protocol does not consume them. A live root has 34 derived subagent tasks/runs. Goals and task dependencies are missing. | Tool part status/timing is available; runtime session state remains unknown. Background, async, attempt, and scheduled execution are missing. | `session.parent_id` is recorded and tool parts can pair a child session with a launcher. Mailbox, team, handoff, and continuing coordination are missing. | The inspected database has no populated context epoch/input evidence and the adapter exposes no context artifacts. | Session token columns are recorded. Tree aggregation includes each child once, but no inherited/shared attribution or protocol-level request identity exists. |
@@ -121,7 +140,9 @@ Additional installed-provider evidence guards against false generalization:
 
 The numeric observations above are ephemeral local observations captured on
 2026-09-02; they are evidence for schema decisions, not committed test
-fixtures. They can be reproduced from a running local Viewer with:
+fixtures, and any totals that grow with an ongoing session (message counts,
+usage totals) must not be carried forward as permanent facts. They can be
+reproduced from a running local Viewer with:
 
 ```text
 GET /api/codex/session/01a0576a-98e2-7c31-a265-6d98d5fbff12/protocol
@@ -135,6 +156,41 @@ The Codex observation used CLI `0.151.0-alpha.7.2`; DeepSeek Harness used
 `0.1.2-alpha.3`. Other rows are source-shape observations rather than claims
 about a stable provider release. Real transcripts remain provider-owned and
 are intentionally not copied into this repository.
+
+## Usage origin slice audit (2026-09-03)
+
+The bounded projection stage (task A, decision
+[`2026-09-03-bounded-usage-origin-accounting`](../../../.agents/decisions/implemented/2026-09-03-bounded-usage-origin-accounting.md))
+audited the seven providers against the **then-current adapters, fixtures, and
+locally verified snapshots** for **per-request input/cache context-origin
+slice evidence** before writing any provider-native mapping. Conclusion: **no
+exact request-origin slices were found in that snapshot**, so no provider
+mapping was added — the shared Execution origin aggregate (`usage.origins`)
+reports known lower bounds and an honest `unclassified` remainder, and never
+a fabricated direct/inherited/shared split. The shared projection
+implementation stays valid; it is not rolled back.
+
+This negative conclusion holds only for the audited snapshot. OpenClaw latest
+SQLite (`openclaw-agent.sqlite`), DSH alpha.5, Pi 0.84.4, and other upstream
+versions listed in the freshness snapshot above have not completed a schema
+refresh, so their slice status is **pending/unknown** — never "no slices".
+
+| Provider | Request-context-origin evidence | Conclusion |
+|:---|:---|:---|
+| Codex | Recorded per-request usage components only (`token_count` → components; explicit empty `contextOriginSlices`). | **No slices** in the 0.151 alpha verified snapshot. 0.152.1 refresh pending. |
+| DeepSeek Harness | `seedLength`/`inheritedEventCount`/session `end-seed` and the owned-suffix boundary establish session/context inheritance; they are not per-request token origin slices. | Not slice evidence in alpha.3; **no mapping** (do not force-map). alpha.5 refresh pending — slice status **pending/unknown**. |
+| Claude Code | Assistant usage carries `input_tokens`/`output_tokens`/`cache_read_input_tokens`/`cache_creation_input_tokens`/`reasoning_tokens`; no request-context-origin record. | **No slices in snapshot** (2.1.207 evidence). npm 2.1.258 / repo HEAD unverified. |
+| OpenCode | Session/message token columns `input_tokens`/`output_tokens`/`cache_read_tokens`/`cache_write_tokens`/`reasoning_tokens`; no origin record. | **No slices in snapshot** (1.17.11 evidence). npm 1.18.26 unverified. |
+| Pi | Per-assistant-message usage `{input, output, cache.read, cache.write, reasoning, total}`; no origin record. | **No slices in snapshot** (0.80.10 evidence). 0.84.4 / session v3 unverified — **pending/unknown**. |
+| OpenClaw | Per-event usage `{input, output, reasoningTokens, cacheRead, cacheWrite, totalTokens}`; no origin record. | **No slices in snapshot** (JSONL evidence). Latest SQLite backend unverified — **pending/unknown**. |
+| Hermes | Session-level token columns (input/output/reasoning/cache read/cache write) aggregated at the store boundary; no per-request origin record. | **No slices in snapshot** (v0.19.1 local `840fb55a` evidence). Remote HEAD `1cb3ab61…` unverified. |
+
+Because origin slices were absent in the audited snapshot, the Codex-style
+projection row describes the current truth for those snapshot-verified cases:
+`classified` zero lower bound, `unclassified` = known component total,
+`complete: false`. When a provider later records real slices (after its
+freshness refresh), the native v3 mapping pattern in
+`.agents/decisions/implemented/2026-09-02-codex-native-v3-mapping.md` applies.
 
 ## Evidence-backed invariants
 

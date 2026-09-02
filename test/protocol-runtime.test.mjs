@@ -11,6 +11,7 @@ import {
   summarizeRuntimeProtocol
 } from "../dist/src/protocol-runtime.js";
 import { capabilityDescriptor } from "../dist/src/providers/shared/session-protocol.js";
+import { finalizeSessionProtocolV3, upgradeSessionProtocolV2 } from "../dist/src/providers/shared/session-protocol-v3.js";
 
 const provenance = { fidelity: "recorded", sourceType: "fixture" };
 
@@ -100,6 +101,62 @@ test("runtime v3 projections reuse one explicit upgrade of the cached v2 snapsho
   clearProtocolRuntimeCache();
   assert.notEqual(getRuntimeProtocolV3(adapter, "root"), first);
   assert.equal(getBuilds(), 2);
+});
+
+test("native v3 cache falls back to the canonical session revision when getStatsRevision is absent", () => {
+  clearProtocolRuntimeCache();
+  const { adapter: v2Adapter } = adapterFixture();
+  const native = finalizeSessionProtocolV3(upgradeSessionProtocolV2(getRuntimeProtocol(v2Adapter, "root")));
+  assert.equal(native.sessionId, "root");
+  let session = { id: "root", timeUpdated: 2, messageCount: 2, tokenCount: 3 };
+  let builds = 0;
+  const adapter = {
+    id: "fixture",
+    getSessionProtocolV3: (id) => { builds += 1; return id === "root" ? native : null; },
+    getSessionProtocol: () => null,
+    getSession: (id) => (id === "root" ? session : null)
+  };
+  assert.equal(getRuntimeProtocolV3(adapter, "root"), native);
+  assert.equal(builds, 1);
+  getRuntimeProtocolV3(adapter, "root");
+  assert.equal(builds, 1, "an unchanged session revision must keep serving the cached snapshot");
+  session = { ...session, timeUpdated: 3 };
+  getRuntimeProtocolV3(adapter, "root");
+  assert.equal(builds, 2, "a changed timeUpdated must rebuild the snapshot");
+  session = { ...session, messageCount: 3 };
+  getRuntimeProtocolV3(adapter, "root");
+  assert.equal(builds, 3, "a changed messageCount must rebuild the snapshot");
+  session = { ...session, tokenCount: 4 };
+  getRuntimeProtocolV3(adapter, "root");
+  assert.equal(builds, 4, "a changed tokenCount must rebuild the snapshot");
+  clearProtocolRuntimeCache();
+});
+
+test("native v3 snapshot with a mismatched sessionId is rejected and never cached", () => {
+  clearProtocolRuntimeCache();
+  const { adapter: v2Adapter } = adapterFixture();
+  const native = finalizeSessionProtocolV3(upgradeSessionProtocolV2(getRuntimeProtocol(v2Adapter, "root")));
+  assert.equal(native.sessionId, "root");
+  let calls = 0;
+  const adapter = {
+    id: "fixture",
+    getStatsRevision: () => "stats-1",
+    getSessionProtocolV3: () => { calls += 1; return native; },
+    getSessionProtocol: () => null,
+    getSession: () => ({ id: "root" })
+  };
+  for (let i = 0; i < 2; i += 1) {
+    assert.throws(() => getRuntimeProtocolV3(adapter, "other"), (error) => (
+      error instanceof ProtocolRuntimeError && error.code === "protocol_invalid"
+    ));
+    assert.equal(calls, i + 1, "a rejected snapshot must not enter the cache");
+  }
+  // The correct id still resolves and is cached independently.
+  assert.equal(getRuntimeProtocolV3(adapter, "root"), native);
+  assert.equal(calls, 3);
+  getRuntimeProtocolV3(adapter, "root");
+  assert.equal(calls, 3, "the accepted snapshot is served from the cache");
+  clearProtocolRuntimeCache();
 });
 
 test("runtime event queries are bounded, filterable, cursor-bound, and omit provider data", () => {

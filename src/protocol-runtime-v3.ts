@@ -9,6 +9,7 @@ import type {
 } from "./providers/shared/session-protocol.js";
 import type {
   Actor,
+  ContextOriginComponent,
   ContextOriginSlice,
   ContextTransformation,
   ContextVersion,
@@ -104,6 +105,51 @@ export interface ExecutionRun extends EntityRef {
   childSession: SessionRef | null;
 }
 
+/** Known-lower-bound classification of recorded origin slices; never an authoritative partition by itself. */
+export interface UsageOriginClassification {
+  direct: number;
+  inherited: number;
+  shared: number;
+}
+
+/**
+ * Bounded origin accounting for one input/cache component over the same
+ * projected request record set as the aggregate totals. `classified` sums only
+ * origin slices that were actually inspected, so it is a known lower bound;
+ * `unclassified` is the exact remainder only when every projected record and
+ * every one of its slices was inspected and the component total is known.
+ */
+export interface UsageOriginComponentAggregate {
+  /** Component total over the projected records; identical to the aggregate's own component value. */
+  total: number | null;
+  /** Sum of recorded slices inspected for this component: known lower bound, `0` means no slices were recorded/inspected, not that usage has no origins. */
+  classified: UsageOriginClassification;
+  /** `total - sum(classified)` when the partition was fully inspected and total is known; null otherwise. */
+  unclassified: number | null;
+  /** True only when no request or slice was omitted, total is known, and unclassified is 0. A known-zero component with no slices is complete. */
+  complete: boolean;
+}
+
+/**
+ * Bounded usage-origin accounting for the Execution projection. Output size is
+ * fixed regardless of how many slices/source refs a record carries; the slice
+ * scan stops at the projection `maxItems` bound and reports truncation instead
+ * of claiming a full partition.
+ */
+export interface UsageOriginAggregate {
+  /** True only when all three components are complete. */
+  complete: boolean;
+  /** Record count inspected for origins; identical to `usage.requestCount`. */
+  inspectedRecords: number;
+  /** True when the global maxItems bound omitted protocol usageRecords before their slices could be inspected. */
+  recordsTruncated: boolean;
+  /** True when the slice scan stopped at the maxItems bound before all slices of the inspected records were seen. */
+  slicesTruncated: boolean;
+  input: UsageOriginComponentAggregate;
+  cacheRead: UsageOriginComponentAggregate;
+  cacheWrite: UsageOriginComponentAggregate;
+}
+
 export interface UsageAggregate {
   requestCount: number;
   complete: boolean;
@@ -113,6 +159,7 @@ export interface UsageAggregate {
   output: number | null;
   reasoning: number | null;
   total: number | null;
+  origins: UsageOriginAggregate;
 }
 
 export interface ExecutionUsage extends EntityRef {
@@ -364,9 +411,61 @@ function publicArtifact(artifact: ContextArtifact): PublicArtifact {
   return value;
 }
 
-function sumUsage(records: readonly UsageRecord[], complete: boolean, coverage: ProtocolDomainCoverage): UsageAggregate {
+const ORIGIN_COMPONENT_NAMES = ["input", "cacheRead", "cacheWrite"] as const;
+
+function emptyOriginClassification(): UsageOriginClassification {
+  return { direct: 0, inherited: 0, shared: 0 };
+}
+
+function originAccounting(
+  records: readonly UsageRecord[],
+  totals: Record<ContextOriginComponent, number | null>,
+  recordsComplete: boolean,
+  maxItems: number
+): UsageOriginAggregate {
+  const classified: Record<ContextOriginComponent, UsageOriginClassification> = {
+    input: emptyOriginClassification(),
+    cacheRead: emptyOriginClassification(),
+    cacheWrite: emptyOriginClassification()
+  };
+  const scan = { count: 0, truncated: false };
+  for (const record of records) {
+    const slices = record.contextOriginSlices || [];
+    for (let index = 0; index < slices.length; index += 1) {
+      if (scan.count >= maxItems) {
+        scan.truncated = true;
+        break;
+      }
+      scan.count += 1;
+      const slice = slices[index];
+      classified[slice.component][slice.origin] += slice.tokens;
+    }
+    if (scan.truncated) break;
+  }
+  const component = (name: ContextOriginComponent): UsageOriginComponentAggregate => {
+    const total = totals[name];
+    const sum = classified[name].direct + classified[name].inherited + classified[name].shared;
+    const fullyInspected = recordsComplete && !scan.truncated && total !== null;
+    const unclassified = fullyInspected ? total - sum : null;
+    return { total, classified: classified[name], unclassified, complete: fullyInspected && unclassified === 0 };
+  };
+  const input = component("input");
+  const cacheRead = component("cacheRead");
+  const cacheWrite = component("cacheWrite");
+  return {
+    complete: input.complete && cacheRead.complete && cacheWrite.complete,
+    inspectedRecords: records.length,
+    recordsTruncated: !recordsComplete,
+    slicesTruncated: scan.truncated,
+    input,
+    cacheRead,
+    cacheWrite
+  };
+}
+
+function sumUsage(records: readonly UsageRecord[], complete: boolean, coverage: ProtocolDomainCoverage): Omit<UsageAggregate, "origins"> {
   const hasNoObservedUsage = records.length === 0 && coverage.state !== "not-observed";
-  const aggregate: UsageAggregate = {
+  const aggregate: Omit<UsageAggregate, "origins"> = {
     requestCount: records.length,
     complete: complete && !hasNoObservedUsage,
     input: hasNoObservedUsage ? null : 0,
@@ -448,6 +547,10 @@ export function projectExecution(protocol: SessionProtocolV3, options: Projectio
   result.usageRecords = [];
   result.actorMembers = [];
   result.actorRuns = [];
+  // Raw records are kept in parallel with the public projection set so origin
+  // accounting inspects exactly the same request records that the aggregate
+  // totals are computed from (public entities omit contextOriginSlices).
+  const usageRaw: UsageRecord[] = [];
   const state = { count: 0, truncated: false };
   collect(protocol.actors, maxItems, state, (actor) => result.actors.push({ actor: publicActor(actor), ref: entityRef("actor", actor.id) }));
   collect(protocol.agentRuns, maxItems, state, (run) => result.runs.push({
@@ -469,12 +572,30 @@ export function projectExecution(protocol: SessionProtocolV3, options: Projectio
       result.actorRuns.push({ actor: result.actors[index].ref, run: entityRef("run", runId), provenance: actor.provenance });
     }
   }
-  collect(protocol.usageRecords, maxItems, state, (usage) => result.usageRecords.push({ usage: publicUsage(usage), ref: entityRef("usage", usage.id) }));
-  result.usage = sumUsage(
+  collect(protocol.usageRecords, maxItems, state, (usage) => {
+    usageRaw.push(usage);
+    result.usageRecords.push({ usage: publicUsage(usage), ref: entityRef("usage", usage.id) });
+  });
+  const projectedUsage = sumUsage(
     result.usageRecords.map((value) => value.usage),
     result.usageRecords.length === protocol.usageRecords.length,
     protocol.coverage.usage
   );
+  // Origin accounting is checked against the same projected records; the slice
+  // scan is independently bounded by maxItems and never enumerates source refs.
+  result.usage = {
+    ...projectedUsage,
+    origins: originAccounting(
+      usageRaw,
+      {
+        input: projectedUsage.input,
+        cacheRead: projectedUsage.cacheRead,
+        cacheWrite: projectedUsage.cacheWrite
+      },
+      result.usageRecords.length === protocol.usageRecords.length,
+      maxItems
+    )
+  };
   result.truncated = state.truncated;
   return result;
 }

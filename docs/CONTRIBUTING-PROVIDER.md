@@ -10,6 +10,35 @@ deleted, or repaired.
 `src/providers/<provider-id>/` and do not add central provider-ID branches in
 routes, projections, or browser code.
 
+## Provider evidence freshness
+
+Provider formats evolve independently. Before changing any provider parser,
+schema mapping, or protocol mapping, verify the evidence snapshot:
+
+1. Check the official docs, the upstream repository HEAD or release/package
+   dist-tag, the locally installed version, and the newest local real data
+   available for that provider.
+2. Record `verified-at` (date), the version/commit checked, the official
+   source link(s), and the sample format(s) inspected. Keep this record with
+   the change (decision record or evidence note); never reuse an old record
+   for a new change.
+3. Negative conclusions ("no X recorded") hold only for that snapshot. Do not
+   restate them as permanent provider capabilities, and never write an
+   absence as an indefinite negation.
+4. When format drift is found, mark the affected support explicitly as
+   `supported` / `legacy` / `pending` (e.g. "current-format support pending
+   until refreshed against the newest version") and keep the
+   unsupported/legacy diagnostic truthful.
+5. Never auto-upgrade the user's installation and never write provider data:
+   documentation and adapter refresh is read-only with respect to provider
+   storage and installed versions.
+
+When capability or format-support wording changes, update the provider table
+in both READMEs and the evidence matrix, then run `npm run
+check:governance` and `git diff --check`.
+
+## Contract boundary
+
 ## Contract boundary
 
 Every adapter implements `ProviderAdapter`:

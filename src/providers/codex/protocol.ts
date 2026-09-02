@@ -1081,9 +1081,10 @@ export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: Ses
     const recipient = firstString(record.payload.recipient);
     const senderActorId = author ? actorIdByPath.get(author) ?? null : null;
     if (!author || !senderActorId) continue;
-    // The session's own FINAL_ANSWER envelope (author == recipient) is a
-    // self-authored summary, not delivery from another agent.
-    if (author === parentPath && recipient === parentPath) continue;
+    // Self-authored FINAL_ANSWER envelopes (author == recipient) are summary
+    // bodies, not delivery from another agent, regardless of the resolved
+    // parent path (parentPath may be unresolvable or differ).
+    if (author === recipient) continue;
     const child = input.children.find((candidate) => (
       firstString(candidate.session.metadata?.agentPath, candidate.session.metadata?.agentNickname) === author
     )) ?? null;

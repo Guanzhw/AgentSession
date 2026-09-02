@@ -59,6 +59,42 @@ mark `complete: false` for unknown/unsupported coverage, missing components,
 or bounded omission. An explicit `not-observed` usage domain with no records
 is the only empty aggregate reported as complete zero.
 
+### Execution usage origin accounting
+
+The Execution `usage` aggregate exposes a bounded `origins` object over the
+same projected request record set the authoritative totals are computed from:
+
+- per component (`input`, `cacheRead`, `cacheWrite`):
+  - `total` mirrors the component value of the aggregate (`null` when
+    unknown);
+  - `classified: { direct, inherited, shared }` sums only recorded origin
+    slices actually inspected — a **known lower bound**; `0` means "no slices
+    recorded/inspected", never "this usage has no origins";
+  - `unclassified` = `total - sum(classified)` only when every protocol
+    usage record was inspected (no request omission), no slice was skipped by
+    the bound, and `total` is known; otherwise `null`;
+  - `complete` true only when nothing was omitted, `total` is known, and
+    `unclassified === 0` (a known-zero component with no slices is complete);
+- `origins.complete` is true only when all three components are complete;
+  it states only the completeness of the origin partition over the three
+  components and says nothing about the aggregate: `usage.total` may still be
+  unknown and the usage aggregate itself incomplete. Consumers must check the
+  aggregate-level `usage.complete` separately;
+- `inspectedRecords` (same as `usage.requestCount`), `recordsTruncated`
+  (global `maxItems` omitted protocol usage records), and `slicesTruncated`
+  (the slice scan hit the bound) keep the accounting honest without a large
+  surface.
+
+Construction stays bounded: the slice scan stops after `maxItems` inspected
+slices across the projected records and never enumerates source-session refs.
+Coverage semantics: `observed` records without slices report a recorded-zero
+lower bound with `unclassified` equal to the known component total and
+`complete: false`; `not-observed` with no records is complete zero;
+`unknown`/`unsupported` with no records keep totals and `unclassified` null
+with `complete: false`. Output and reasoning never carry origin slices.
+The API never claims a full direct/inherited/shared partition unless
+every record and slice was inspected and the remainder is zero.
+
 ## Evidence coverage
 
 Every graph domain carries coverage independent of entity provenance:
@@ -192,3 +228,36 @@ The v3 validator first revalidates the v2-compatible base, then checks:
 This stage adds bounded Work, Execution, Coordination, and Context projections
 over this contract. Summary and Events remain cross-cutting inspection
 utilities. The next stage maps provider-native evidence into the four domains.
+
+## Evolution backlog (open items surfaced by the UI information design)
+
+`docs/design/ui-v2.md` consumes this contract without inventing facts. Items it
+surfaced that need protocol evolution:
+
+1. **Usage origin-slice exposure.** §Request usage already defines per-component
+   origin slices (`direct | inherited | shared`). The bounded Execution/Usage
+   projections now expose a **bounded origin aggregate** (`usage.origins`:
+   per-component `total`/`classified`/`unclassified`/`complete` plus
+   `inspectedRecords`/`recordsTruncated`/`slicesTruncated`, implemented
+   2026-09-03, decision
+   [2026-09-03-bounded-usage-origin-accounting](../../../.agents/decisions/implemented/2026-09-03-bounded-usage-origin-accounting.md))
+   with coverage semantics above; the UI therefore receives authoritative
+   totals plus an honest unclassified remainder instead of a fabricated
+   three-way split. The 2026-09-03 snapshot audit
+   (`evidence-matrix.md` → "Usage origin slice audit") found no per-request
+   context-origin evidence in the then-current adapters/fixtures/local
+   snapshots — OpenClaw latest SQLite, DSH alpha.5, Pi 0.84.4 and other newer
+   upstream versions are not yet refreshed and stay **pending/unknown** — so
+   **provider-native origin mappings remain pending real provider evidence**
+   and are not invented. Until a provider
+   records slices, the UI shows authoritative totals plus unclassified;
+   once one does, the Codex native v3 mapping pattern applies.
+2. **First-class enabled-inventory facts** (skills/plugins/hooks in effect for a
+   session). Today the only evidence is resolved system-prompt sources and
+   `ContextArtifact` kind `skill`. Decide whether the protocol gains an
+   environment/inventory domain or whether resolved evidence stays the source.
+   Later optional enhancement, after the core provider/ownership work.
+3. **Harness environment reloads** (plugin/skill hot reload mid-session). No
+   normalized event kind exists; tracked in the v2 event backlog of
+   `docs/specs/runtime-protocol-workbench/design.md`. Later optional
+   enhancement, after the core provider/ownership work.

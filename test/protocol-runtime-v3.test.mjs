@@ -48,7 +48,18 @@ test("v3 projections are typed, canonical, and bounded", () => {
 
   const execution = projectExecution(protocol);
   assert.deepEqual(execution.runs[0].childSession, { provider: "fixture", sessionId: "child" });
-  assert.deepEqual(execution.usage, { requestCount: 1, complete: true, input: 10, cacheRead: 2, cacheWrite: 0, output: 3, reasoning: 0, total: 15 });
+  assert.deepEqual(execution.usage, {
+    requestCount: 1, complete: true, input: 10, cacheRead: 2, cacheWrite: 0, output: 3, reasoning: 0, total: 15,
+    origins: {
+      complete: false,
+      inspectedRecords: 1,
+      recordsTruncated: false,
+      slicesTruncated: false,
+      input: { total: 10, classified: { direct: 0, inherited: 4, shared: 0 }, unclassified: 6, complete: false },
+      cacheRead: { total: 2, classified: { direct: 0, inherited: 0, shared: 0 }, unclassified: 2, complete: false },
+      cacheWrite: { total: 0, classified: { direct: 0, inherited: 0, shared: 0 }, unclassified: 0, complete: true }
+    }
+  });
   assert.deepEqual(execution.usageCoverage, protocol.coverage.usage);
   assert.equal(execution.usageRecords[0].ref.id, "request-1");
   assert.equal("metadata" in execution.runs[0].run, false);
@@ -79,11 +90,27 @@ test("v2 upgrade keeps new projection domains explicit and does not invent facts
   assert.equal(projectExecution(upgraded).usage.input, null);
   const notObserved = structuredClone(upgraded);
   notObserved.coverage.usage = { state: "not-observed", details: null };
-  assert.deepEqual(projectExecution(notObserved).usage, { requestCount: 0, complete: true, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, reasoning: 0, total: 0 });
+  assert.deepEqual(projectExecution(notObserved).usage, {
+    requestCount: 0, complete: true, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, reasoning: 0, total: 0,
+    origins: {
+      complete: true,
+      inspectedRecords: 0,
+      recordsTruncated: false,
+      slicesTruncated: false,
+      input: { total: 0, classified: { direct: 0, inherited: 0, shared: 0 }, unclassified: 0, complete: true },
+      cacheRead: { total: 0, classified: { direct: 0, inherited: 0, shared: 0 }, unclassified: 0, complete: true },
+      cacheWrite: { total: 0, classified: { direct: 0, inherited: 0, shared: 0 }, unclassified: 0, complete: true }
+    }
+  });
   const unsupported = structuredClone(upgraded);
   unsupported.coverage.usage = { state: "unsupported", details: null };
-  assert.equal(projectExecution(unsupported).usage.complete, false);
-  assert.equal(projectExecution(unsupported).usage.input, null);
+  const unsupportedUsage = projectExecution(unsupported).usage;
+  assert.equal(unsupportedUsage.complete, false);
+  assert.equal(unsupportedUsage.input, null);
+  assert.equal(unsupportedUsage.origins.input.total, null);
+  assert.equal(unsupportedUsage.origins.input.unclassified, null);
+  assert.equal(unsupportedUsage.origins.input.complete, false);
+  assert.equal(unsupportedUsage.origins.complete, false);
 });
 
 test("v3 projections reject invalid bounds and missing canonical focus", () => {
@@ -119,7 +146,175 @@ test("execution usage remains explicitly incomplete when totals or records are o
   actorLimited.coverage.usage = { state: "not-observed", details: null };
   const knownEmpty = projectExecution(actorLimited, { maxItems: 1 });
   assert.equal(knownEmpty.truncated, true);
-  assert.deepEqual(knownEmpty.usage, { requestCount: 0, complete: true, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, reasoning: 0, total: 0 });
+  assert.deepEqual(knownEmpty.usage, {
+    requestCount: 0, complete: true, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, reasoning: 0, total: 0,
+    origins: {
+      complete: true,
+      inspectedRecords: 0,
+      recordsTruncated: false,
+      slicesTruncated: false,
+      input: { total: 0, classified: { direct: 0, inherited: 0, shared: 0 }, unclassified: 0, complete: true },
+      cacheRead: { total: 0, classified: { direct: 0, inherited: 0, shared: 0 }, unclassified: 0, complete: true },
+      cacheWrite: { total: 0, classified: { direct: 0, inherited: 0, shared: 0 }, unclassified: 0, complete: true }
+    }
+  });
+});
+
+test("execution origin accounting partitions exact full slices across records and origins", () => {
+  const protocol = structuredClone(v3Fixture());
+  protocol.actors = [];
+  protocol.agentRuns = [];
+  protocol.usageRecords = [
+    {
+      id: "request-a", scope: "request", sessionRef: protocol.session.ref, runId: null,
+      tokens: { input: 10, cacheRead: 3, cacheWrite: 2, output: 1, reasoning: 0, total: 16 },
+      contextOriginSlices: [
+        { component: "input", origin: "direct", tokens: 2 },
+        { component: "input", origin: "inherited", tokens: 3, sourceSessionRefs: [{ provider: "fixture", sessionId: "parent" }] },
+        { component: "input", origin: "shared", tokens: 5, sourceSessionRefs: [{ provider: "fixture", sessionId: "shared" }] },
+        { component: "cacheRead", origin: "inherited", tokens: 1 },
+        { component: "cacheRead", origin: "shared", tokens: 2 },
+        { component: "cacheWrite", origin: "direct", tokens: 2 }
+      ], provenance
+    },
+    {
+      id: "request-b", scope: "request", sessionRef: protocol.session.ref, runId: null,
+      tokens: { input: 7, cacheRead: 1, cacheWrite: 0, output: 0, reasoning: 0, total: 8 },
+      contextOriginSlices: [
+        { component: "input", origin: "direct", tokens: 7 },
+        { component: "cacheRead", origin: "direct", tokens: 1 }
+      ], provenance
+    }
+  ];
+  const usage = projectExecution(protocol).usage;
+  assert.equal(usage.requestCount, 2);
+  assert.equal(usage.complete, true);
+  assert.deepEqual(usage.origins.input, { total: 17, classified: { direct: 9, inherited: 3, shared: 5 }, unclassified: 0, complete: true });
+  assert.deepEqual(usage.origins.cacheRead, { total: 4, classified: { direct: 1, inherited: 1, shared: 2 }, unclassified: 0, complete: true });
+  assert.deepEqual(usage.origins.cacheWrite, { total: 2, classified: { direct: 2, inherited: 0, shared: 0 }, unclassified: 0, complete: true });
+  assert.equal(usage.origins.complete, true);
+  assert.equal(usage.origins.inspectedRecords, 2);
+  assert.equal(usage.origins.recordsTruncated, false);
+  assert.equal(usage.origins.slicesTruncated, false);
+  // Public usage records still omit the raw origin slices.
+  assert.equal("contextOriginSlices" in projectExecution(protocol).usageRecords[0].usage, false);
+});
+
+test("execution origin accounting reports partial slices with a known unclassified remainder", () => {
+  const protocol = structuredClone(v3Fixture());
+  protocol.actors = [];
+  protocol.agentRuns = [];
+  protocol.usageRecords = [
+    {
+      id: "request-partial", scope: "request", sessionRef: protocol.session.ref, runId: null,
+      tokens: { input: 10, cacheRead: 8, cacheWrite: 0, output: 0, reasoning: 0, total: 18 },
+      contextOriginSlices: [
+        { component: "input", origin: "direct", tokens: 4 },
+        { component: "cacheRead", origin: "inherited", tokens: 5 }
+      ], provenance
+    }
+  ];
+  const origins = projectExecution(protocol).usage.origins;
+  assert.deepEqual(origins.input, { total: 10, classified: { direct: 4, inherited: 0, shared: 0 }, unclassified: 6, complete: false });
+  assert.deepEqual(origins.cacheRead, { total: 8, classified: { direct: 0, inherited: 5, shared: 0 }, unclassified: 3, complete: false });
+  assert.deepEqual(origins.cacheWrite, { total: 0, classified: { direct: 0, inherited: 0, shared: 0 }, unclassified: 0, complete: true });
+  assert.equal(origins.complete, false);
+});
+
+test("execution origin accounting treats origin-less records as recorded-zero lower bounds (Codex-like)", () => {
+  const protocol = structuredClone(v3Fixture());
+  protocol.actors = [];
+  protocol.agentRuns = [];
+  protocol.usageRecords = [
+    {
+      id: "request-plain", scope: "request", sessionRef: protocol.session.ref, runId: null,
+      tokens: { input: 100, cacheRead: 25, cacheWrite: 0, output: 10, reasoning: 0, total: 135 },
+      contextOriginSlices: [], provenance
+    },
+    {
+      id: "request-no-slices-field", scope: "request", sessionRef: protocol.session.ref, runId: null,
+      tokens: { input: 3, cacheRead: 0, cacheWrite: 0, output: 0, reasoning: 0, total: 3 }, provenance
+    }
+  ];
+  const origins = projectExecution(protocol).usage.origins;
+  assert.deepEqual(origins.input, { total: 103, classified: { direct: 0, inherited: 0, shared: 0 }, unclassified: 103, complete: false });
+  assert.deepEqual(origins.cacheRead, { total: 25, classified: { direct: 0, inherited: 0, shared: 0 }, unclassified: 25, complete: false });
+  assert.deepEqual(origins.cacheWrite, { total: 0, classified: { direct: 0, inherited: 0, shared: 0 }, unclassified: 0, complete: true });
+  assert.equal(origins.complete, false);
+});
+
+test("execution origin accounting keeps missing components unknown and incomplete", () => {
+  const protocol = structuredClone(v3Fixture());
+  protocol.actors = [];
+  protocol.agentRuns = [];
+  protocol.usageRecords = [
+    {
+      id: "request-null", scope: "request", sessionRef: protocol.session.ref, runId: null,
+      tokens: { input: 10, cacheRead: null, output: 5, total: 15 },
+      contextOriginSlices: [{ component: "input", origin: "direct", tokens: 10 }], provenance
+    }
+  ];
+  const origins = projectExecution(protocol).usage.origins;
+  assert.deepEqual(origins.input, { total: 10, classified: { direct: 10, inherited: 0, shared: 0 }, unclassified: 0, complete: true });
+  assert.equal(origins.cacheRead.total, null);
+  assert.equal(origins.cacheRead.unclassified, null);
+  assert.equal(origins.cacheRead.complete, false);
+  assert.equal(origins.complete, false);
+});
+
+test("execution origin accounting reflects requests omitted by the global maxItems bound", () => {
+  const protocol = structuredClone(v3Fixture());
+  protocol.actors = Array.from({ length: 100 }, (_, index) => ({ id: `actor-${index}`, kind: "agent", name: `a${index}`, provenance }));
+  protocol.agentRuns = [];
+  protocol.usageRecords = [
+    {
+      id: "request-hidden", scope: "request", sessionRef: protocol.session.ref, runId: null,
+      tokens: { input: 5, output: 1, total: 6 },
+      contextOriginSlices: [{ component: "input", origin: "direct", tokens: 5 }], provenance
+    }
+  ];
+  const allConsumed = projectExecution(protocol, { maxItems: 100 });
+  assert.equal(allConsumed.usage.requestCount, 0);
+  assert.equal(allConsumed.usage.origins.recordsTruncated, true);
+  assert.equal(allConsumed.usage.origins.input.total, null);
+  assert.equal(allConsumed.usage.origins.input.unclassified, null);
+  assert.equal(allConsumed.usage.origins.complete, false);
+  assert.equal(allConsumed.truncated, true);
+
+  const partiallyConsumed = structuredClone(protocol);
+  partiallyConsumed.usageRecords.push({
+    id: "request-hidden-2", scope: "request", sessionRef: protocol.session.ref, runId: null,
+    tokens: { input: 3, output: 0, total: 3 },
+    contextOriginSlices: [{ component: "input", origin: "shared", tokens: 3 }], provenance
+  });
+  const projected = projectExecution(partiallyConsumed, { maxItems: 101 });
+  assert.equal(projected.usage.requestCount, 1);
+  assert.equal(projected.usage.origins.recordsTruncated, true);
+  assert.equal(projected.usage.origins.input.total, 5);
+  assert.equal(projected.usage.origins.input.unclassified, null);
+  assert.equal(projected.usage.origins.input.complete, false);
+  assert.equal(projected.usage.origins.complete, false);
+});
+
+test("execution origin accounting bounds the slice scan of a single oversized record", () => {
+  const protocol = structuredClone(v3Fixture());
+  protocol.actors = [];
+  protocol.agentRuns = [];
+  protocol.usageRecords = [
+    {
+      id: "request-big", scope: "request", sessionRef: protocol.session.ref, runId: null,
+      tokens: { input: 10000, cacheRead: 0, cacheWrite: 0, output: 0, reasoning: 0, total: 10000 },
+      contextOriginSlices: Array.from({ length: 1000 }, () => ({ component: "input", origin: "direct", tokens: 10 })), provenance
+    }
+  ];
+  const origins = projectExecution(protocol, { maxItems: 100 }).usage.origins;
+  assert.equal(origins.slicesTruncated, true);
+  assert.equal(origins.recordsTruncated, false);
+  assert.equal(origins.inspectedRecords, 1);
+  assert.equal(origins.input.classified.direct, 1000);
+  assert.equal(origins.input.unclassified, null);
+  assert.equal(origins.input.complete, false);
+  assert.equal(origins.complete, false);
 });
 
 test("context projection reports truncation when bounded usage inspection misses later origins", () => {

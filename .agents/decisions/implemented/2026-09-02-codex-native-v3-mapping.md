@@ -158,3 +158,56 @@ truthful v2 upgrade path unchanged.
   (actor provenance branch, turn anchors on result delivery, cache revision
   guard, LRU-style eviction, single input load, test gaps) are addressed too.
 
+### Follow-up verification (bounded review fixes)
+
+A follow-up review found the native v3 cache hit path and the FINAL_ANSWER
+self-envelope exclusion did not match the decision above, and both are now
+tested and fixed:
+
+- **Native v3 cache is now LRU on hit.** The v3 native cache hit path
+  previously returned without refreshing recency (FIFO eviction); it now
+  deletes + re-sets the key on hit, so overflow eviction removes the true
+  least-recently-used entry. Regression test `native v3 cache evicts the true
+  LRU entry after a hit refreshes recency` fills the 256-entry cache, refreshes
+  one entry, overflows, and asserts the refreshed entry survives while the
+  actual LRU is evicted. The revision checksum and `MAX_CACHE_ENTRIES` bound are
+  unchanged; the no-revision provider path is untouched.
+- **Self-authored FINAL_ANSWER exclusion now matches the decision.** The
+  exclusion previously required both `author` and `recipient` to equal the
+  resolved parent path; it now excludes every envelope with `author ===
+  recipient`, matching the recorded "self-authored envelopes" rule. Regression
+  test `Codex v3 excludes self-authored FINAL_ANSWER envelopes regardless of
+  parent path` covers an unresolvable parent path and a parent path that
+  resolves elsewhere, and asserts the genuine child→parent delivery is still
+  emitted.
+- Commands run for the follow-up: `npm run build` (clean), `npm run review`
+  (governance + TypeScript, clean), `git diff --check` (clean), focused
+  `test/codex-v3.test.mjs` + `test/protocol-runtime*.test.mjs` (all pass),
+  and `npm test` (326/327; the single failure is the pre-existing
+  `provider-removal.test.mjs` Windows-path fixture, which fails identically
+  on the pre-change tree because `C:\...` paths are not absolute under the
+  WSL/POSIX test environment — unrelated to this change). Both new tests
+  fail against the pre-fix code and pass after the fix.
+
+### Portability and cache revision follow-up (bounded review fixes, round 2)
+
+The 326/327 WSL/POSIX result above was how the portability fixture was
+**discovered**, not a product regression: `provider-removal.test.mjs` is a
+retired-config cleanup test and used hard-coded `C:\...` paths that are not
+absolute under WSL/POSIX. That fixture is now fixed in this follow-up: all
+paths are derived from the test's temp directory as cross-platform absolute
+path variables (CLI args and assertions updated accordingly);
+`src/config.ts` is untouched and absolute-path validation is not weakened.
+The focused test passes 1/1 on the current WSL/POSIX environment.
+
+- Main agent verified on Windows native: `npm test` 327/327, `npm run review`
+  pass, `git diff --check` pass (state before this round's test additions).
+- This round (WSL/POSIX, after the fix): `npm run build` clean, focused
+  `test/protocol-runtime.test.mjs` + `test/codex-v3.test.mjs` 22/22, focused
+  `test/provider-removal.test.mjs` 1/1, `npm test` 329/329 (2 new shared
+  cache revision tests added), `npm run review` (governance + typecheck)
+  pass, `git diff --check` clean. No commit or push performed.
+- The shared native v3 cache revision fix is recorded separately in
+  `.agents/decisions/implemented/2026-09-03-session-protocol-v3-cache-revision.md`;
+  the Codex provider-owned mapping in this record is unchanged by it.
+
