@@ -12,8 +12,9 @@ import {
   countCodexRenderedMessages,
   classifyCodexRecordProvenance
 } from "./parser.js";
-import { buildCodexSessionProtocol } from "./protocol.js";
+import { buildCodexSessionProtocol, buildCodexSessionProtocolV3 } from "./protocol.js";
 import { finalizeSessionProtocol, protocolRevision } from "../shared/session-protocol.js";
+import { finalizeSessionProtocolV3 } from "../shared/session-protocol-v3.js";
 import { icons } from "../../icons.js";
 import type { Message, ProviderAdapter, RawSession } from "../interface.js";
 import { buildLinkedMessageSessionViews } from "../shared/linked-message-session.js";
@@ -157,7 +158,7 @@ const codexProtocolCapabilities = {
   branches: { support: "none" as const, provenance: "derived" as const, details: "Codex fork lineage remains a session relationship" }
 };
 
-function buildCodexSessionProtocolFor(sessionId: string) {
+function loadCodexProtocolInput(sessionId: string) {
   const root = sessionFiles.get(sessionId);
   if (!root) return null;
   const canonicalId = String(root.session.id);
@@ -174,22 +175,41 @@ function buildCodexSessionProtocolFor(sessionId: string) {
   const children = family.filter((item) => (
     item.session.parentId && String(item.session.parentId) === canonicalId
   ));
-  const protocol = buildCodexSessionProtocol({
-    session: rootEntry.session,
-    messages: rootEntry.messages,
-    records: ownedRecords,
-    children: children.map((child) => ({
-      session: child.session,
-      messages: child.messages,
-      records: sessionFiles.get(String(child.session.id))?.records || []
-    }))
-  });
-  return finalizeSessionProtocol(protocol, {
+  return {
+    canonicalId,
+    rootEntry,
+    input: {
+      session: rootEntry.session,
+      messages: rootEntry.messages,
+      records: ownedRecords,
+      children: children.map((child) => ({
+        session: child.session,
+        messages: child.messages,
+        records: sessionFiles.get(String(child.session.id))?.records || []
+      }))
+    }
+  };
+}
+
+function finalizeCodexV2Protocol(loaded: NonNullable<ReturnType<typeof loadCodexProtocolInput>>) {
+  return finalizeSessionProtocol(buildCodexSessionProtocol(loaded.input), {
     provider: "codex",
-    session: rootEntry.session,
+    session: loaded.rootEntry.session,
     capabilities: codexProtocolCapabilities,
     revision: protocolRevision(sessionFiles.getStatsRevision())
   });
+}
+
+function buildCodexSessionProtocolFor(sessionId: string) {
+  const loaded = loadCodexProtocolInput(sessionId);
+  return loaded ? finalizeCodexV2Protocol(loaded) : null;
+}
+
+function buildCodexSessionProtocolV3For(sessionId: string) {
+  const loaded = loadCodexProtocolInput(sessionId);
+  if (!loaded) return null;
+  const base = finalizeCodexV2Protocol(loaded);
+  return finalizeSessionProtocolV3(buildCodexSessionProtocolV3(loaded.input, base));
 }
 
 const getCodexViews = createStructuredViewCache(generateCodexViews);
@@ -313,6 +333,10 @@ const codex = {
 
   getSessionProtocol(sessionId) {
     return buildCodexSessionProtocolFor(sessionId);
+  },
+
+  getSessionProtocolV3(sessionId) {
+    return buildCodexSessionProtocolV3For(sessionId);
   },
 
   ...createStructuredViewMethods(getCodexViews),

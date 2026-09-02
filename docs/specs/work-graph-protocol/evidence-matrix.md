@@ -1,8 +1,16 @@
 # Work Graph protocol evidence matrix
 
-Status: accepted research input
+Status: accepted research input (updated 2026-09-02)
 
 Date: 2026-09-02
+
+> Update: the Codex provider stage landed as
+> [`.agents/decisions/implemented/2026-09-02-codex-native-v3-mapping.md`](../../../.agents/decisions/implemented/2026-09-02-codex-native-v3-mapping.md).
+> Its recorded window ids form a linear context-version lineage
+> (`window_id`/`previous_window_id`/`first_window_id`), so the earlier "no
+> common context-version lineage" observation is superseded for 0.151+ rollouts;
+> the four graph domains for Codex sessions are now native v3 facts rather than
+> unknown. Other provider stages remain as ordered below.
 
 ## Purpose
 

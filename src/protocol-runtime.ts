@@ -27,6 +27,7 @@ interface CachedProtocol {
 
 const protocolCache = new Map<string, CachedProtocol>();
 let v3UpgradeCache = new WeakMap<SessionProtocol, SessionProtocolV3>();
+let v3NativeCache = new Map<string, { revision: string | number | null; protocol: SessionProtocolV3 }>();
 
 export class ProtocolRuntimeError extends Error {
   constructor(
@@ -76,6 +77,7 @@ function touchCache(key: string, value: CachedProtocol): void {
 export function clearProtocolRuntimeCache(): void {
   protocolCache.clear();
   v3UpgradeCache = new WeakMap<SessionProtocol, SessionProtocolV3>();
+  v3NativeCache.clear();
 }
 
 /**
@@ -137,6 +139,27 @@ export function getRuntimeProtocolV3(
   sessionId: string,
   knownSession?: Record<string, unknown> | null
 ): SessionProtocolV3 {
+  if (typeof adapter.getSessionProtocolV3 === "function") {
+    const key = `${adapter.id}\u0000${sessionId}`;
+    let revision: string | number | null = null;
+    try {
+      revision = adapter.getStatsRevision?.() ?? null;
+    } catch {
+      // A revision is an optimization, never a reason to make the source unreadable.
+    }
+    const cached = v3NativeCache.get(key);
+    if (cached?.revision === revision) return cached.protocol;
+    const native = adapter.getSessionProtocolV3(sessionId);
+    if (native) {
+      while (v3NativeCache.size >= MAX_CACHE_ENTRIES) {
+        const oldest = v3NativeCache.keys().next().value;
+        if (oldest === undefined) break;
+        v3NativeCache.delete(oldest);
+      }
+      v3NativeCache.set(key, { revision, protocol: native });
+      return native;
+    }
+  }
   const protocol = getRuntimeProtocol(adapter, sessionId, knownSession);
   const cached = v3UpgradeCache.get(protocol);
   if (cached) return cached;

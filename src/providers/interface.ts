@@ -1,4 +1,5 @@
 import type { ProtocolCapabilities, SessionProtocol } from "./shared/session-protocol.js";
+import type { SessionProtocolV3 } from "./shared/session-protocol-v3.js";
 
 export type ProviderId = "opencode" | "claude-code" | "codex" | "openclaw" | "hermes" | "pi" | "deepseek-harness";
 
@@ -133,6 +134,15 @@ export interface ProviderAdapter {
    * without native support must not implement this accessor.
    */
   getSessionProtocol?(sessionId: string): SessionProtocol | null;
+  /**
+   * Optional provider-native Session Protocol v3 snapshot: a finalized v3
+   * snapshot whose v2 facts match the finalized v2 snapshot for the same
+   * session and whose new domains carry recorded evidence. Providers without
+   * native v3 evidence must not implement this accessor; the runtime falls
+   * back to the explicit v2-to-v3 upgrade. Returns null when the session is
+   * unknown.
+   */
+  getSessionProtocolV3?(sessionId: string): SessionProtocolV3 | null;
   capabilities?: {
     localManagement?: boolean;
     /** Data path uses the OpenCode SQLite schema accepted by native stats and list queries. */

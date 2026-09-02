@@ -13,8 +13,29 @@ import {
   sessionTask,
   sourceSequence,
   type ExecutionMode,
-  type SessionProtocol
+  type SessionProtocol,
+  type SessionRef
 } from "../shared/session-protocol.js";
+import {
+  actor,
+  coordinationObservation,
+  contextTransformation,
+  contextVersion,
+  goal,
+  protocolCoverage,
+  protocolDomainCoverage,
+  usageRecord,
+  type Actor,
+  type ContextTransformation,
+  type ContextVersion,
+  type CoordinationKind,
+  type CoordinationObservation,
+  type Goal,
+  type GoalStatus,
+  type ProtocolCoverage,
+  type SessionProtocolV3,
+  type UsageRecord
+} from "../shared/session-protocol-v3.js";
 import { isSubagentToolName } from "../shared/subagent-tools.js";
 
 type Row = Record<string, any>;
@@ -89,7 +110,11 @@ export function codexCompactionRecord(record: Row) {
     retainedFromEventId: firstString(
       source.first_kept_token_id, source.first_kept_id, source.retained_from_event_id, source.first_kept_entry_id
     ),
-    sourceId: firstString(source.id, source.compaction_id, record.id) ?? null
+    sourceId: firstString(source.id, source.compaction_id, record.id) ?? null,
+    windowNumber: firstNumber(source.window_number, source.windowNumber),
+    windowId: firstString(source.window_id, source.windowId),
+    previousWindowId: firstString(source.previous_window_id, source.previousWindowId),
+    firstWindowId: firstString(source.first_window_id, source.firstWindowId)
   };
 }
 
@@ -162,6 +187,10 @@ function mergeCodexCompactions(group: CodexCompaction[]) {
     tokensAfter: group.map((item) => item.tokensAfter).find((value) => value != null) ?? null,
     retainedFromEventId: group.map((item) => item.retainedFromEventId).find((value) => value) ?? null,
     sourceId: group.map((item) => item.sourceId).find((value) => value) ?? null,
+    windowNumber: group.map((item) => item.windowNumber).find((value) => value != null) ?? null,
+    windowId: group.map((item) => item.windowId).find((value) => value) ?? null,
+    previousWindowId: group.map((item) => item.previousWindowId).find((value) => value) ?? null,
+    firstWindowId: group.map((item) => item.firstWindowId).find((value) => value) ?? null,
     records: group.map((item) => item.record)
   };
 }
@@ -804,5 +833,404 @@ export function buildCodexSessionProtocol(input: CodexProtocolInput): SessionPro
     tasks,
     agentRuns: runs,
     contextArtifacts: artifacts
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Native Session Protocol v3 facts.
+//
+// The recorded Codex shapes mapped below were verified against real
+// `0.151.0-alpha.7.2` rollouts: `event_msg/thread_goal_updated` (goal
+// lifecycle), the `collaboration` subagent tool family (`spawn_agent`,
+// `followup_task`, `send_message`, `wait_agent`/`wait`, `interrupt_agent`),
+// `response_item/agent_message` FINAL_ANSWER envelopes (result delivery), the
+// `compacted` window chain (`window_id`/`previous_window_id`), and
+// `event_msg/token_count` request usage. Unknown or absent evidence stays
+// explicit; nothing is synthesized from entity counts.
+// ---------------------------------------------------------------------------
+
+const CODEX_COORDINATION_KINDS: Record<string, CoordinationKind> = {
+  spawn_agent: "spawn",
+  followup_task: "follow-up",
+  send_message: "message",
+  wait_agent: "wait",
+  wait: "wait",
+  interrupt_agent: "interrupt"
+};
+
+/** Only four recorded statuses map onto the protocol vocabulary; Codex's
+ * `paused` is a user suspension, not the protocol `blocked` semantics, so it
+ * stays `unknown` rather than inventing a meaning. */
+const CODEX_GOAL_STATUSES: Record<string, GoalStatus> = {
+  active: "active",
+  completed: "completed",
+  failed: "failed",
+  cancelled: "cancelled"
+};
+
+function callArgumentsOf(record: Row): Row {
+  const raw = record.payload?.arguments ?? record.payload?.input;
+  if (typeof raw === "string") {
+    try { return JSON.parse(raw) || {}; } catch { return {}; }
+  }
+  return raw && typeof raw === "object" ? raw : {};
+}
+
+function passthroughTurnId(record: Row): string | null {
+  return firstString(record.payload?.internal_chat_message_metadata_passthrough?.turn_id);
+}
+
+function isAgentEnvelope(record: Row): record is Row & { payload: { id?: unknown; author?: unknown; recipient?: unknown } } {
+  return record.type === "response_item" && record.payload?.type === "agent_message";
+}
+
+function isFinalAnswerEnvelope(record: Row): boolean {
+  return isAgentEnvelope(record) && /^Message Type:\s*FINAL_ANSWER\b/m.test(envelopeText(record.payload).replace(/\s+/g, " ").trim());
+}
+
+function recordTimestamp(record: Row): number | null {
+  const ts = record.timestamp ? new Date(String(record.timestamp)).getTime() : NaN;
+  return Number.isFinite(ts) ? ts : null;
+}
+
+/**
+ * Build native Session Protocol v3 facts over a finalized v2 snapshot for one
+ * Codex session. `base` must be the finalized v2 snapshot built from the same
+ * input; every v2 fact is preserved verbatim, and v3 facts come only from
+ * recorded evidence present in `input.records`.
+ */
+export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: SessionProtocol): SessionProtocolV3 {
+  const sessionId = String(input.session.id);
+  const ownRef = { provider: "codex", sessionId };
+  const primaryMeta = primarySessionMeta(input.records);
+  const childById = new Map(input.children.map((child) => [String(child.session.id), child]));
+  const runByChildId = new Map(base.agentRuns.map((run) => [String(run.childSessionId), run]));
+
+  // --- Actors --------------------------------------------------------------
+  // Parent identity: `session_meta.agent_path` when recorded, otherwise the
+  // recipient of child FINAL_ANSWER envelopes (the recorded "/root" path).
+  const parentMetaPath = firstString(primaryMeta.agent_path);
+  let parentPath: string | null = parentMetaPath;
+  if (!parentPath) {
+    for (const record of input.records) {
+      if (!isFinalAnswerEnvelope(record)) continue;
+      const author = firstString(record.payload.author);
+      const recipient = firstString(record.payload.recipient);
+      if (!author || !recipient) continue;
+      const childMatches = input.children.some((child) => (
+        firstString(child.session.metadata?.agentPath, child.session.metadata?.agentNickname) === author
+      ));
+      if (childMatches) { parentPath = recipient; break; }
+    }
+  }
+
+  const actors: Actor[] = [];
+  const actorIdByPath = new Map<string, string>();
+  const parentActorId = `actor:${sessionId}`;
+  actors.push(actor({
+    id: parentActorId,
+    kind: "agent",
+    name: parentPath,
+    providerActorId: parentPath,
+    sessionRef: ownRef,
+    runIds: [],
+    provenance: parentMetaPath
+      ? { fidelity: "recorded", sourceType: "codex.session_meta.agent_path", sourceId: parentMetaPath }
+      : parentPath
+        ? { fidelity: "recorded", sourceType: "codex.response_item:agent_message:recipient", sourceId: parentPath }
+        : { fidelity: "derived", sourceType: "codex.session", sourceId: sessionId }
+  }));
+  if (parentPath) actorIdByPath.set(parentPath, parentActorId);
+
+  for (const child of input.children) {
+    const childId = String(child.session.id);
+    const childPath = firstString(child.session.metadata?.agentPath, child.session.metadata?.agentNickname);
+    const run = runByChildId.get(childId);
+    if (childPath) actorIdByPath.set(childPath, `actor:${childId}`);
+    actors.push(actor({
+      id: `actor:${childId}`,
+      kind: "agent",
+      name: childPath,
+      providerActorId: childPath,
+      sessionRef: { provider: "codex", sessionId: childId },
+      runIds: run ? [childId] : [],
+      provenance: { fidelity: "recorded", sourceType: "codex.session_meta", sourceId: childId }
+    }));
+  }
+
+  // Paths that appear only as agent-message senders/recipients still identify
+  // recorded agents (grandchildren, reviews); they carry no session ref.
+  for (const record of input.records) {
+    if (!isAgentEnvelope(record)) continue;
+    for (const path of [record.payload.author, record.payload.recipient]) {
+      const value = firstString(path);
+      if (!value || actorIdByPath.has(value)) continue;
+      const id = `actor:path:${value}`;
+      actorIdByPath.set(value, id);
+      actors.push(actor({
+        id,
+        kind: "agent",
+        name: value,
+        providerActorId: value,
+        sessionRef: null,
+        runIds: [],
+        provenance: { fidelity: "recorded", sourceType: "codex.response_item:agent_message", sourceId: firstString(record.payload.id) ?? value }
+      }));
+    }
+  }
+
+  // --- Goals ---------------------------------------------------------------
+  const goalUpdates = new Map<string, { objective: string | null; status: string; createdAtMs: number | null; updatedAtMs: number | null }>();
+  for (const record of input.records) {
+    if (record.type !== "event_msg" || record.payload?.type !== "thread_goal_updated") continue;
+    const goalPayload = record.payload?.goal;
+    const threadId = firstString(record.payload?.threadId, goalPayload?.threadId);
+    if (!threadId) continue;
+    const status = String(goalPayload?.status || "unknown");
+    const createdAtMs = typeof goalPayload?.createdAt === "number" ? goalPayload.createdAt * 1000 : null;
+    const updatedAtMs = typeof goalPayload?.updatedAt === "number" ? goalPayload.updatedAt * 1000 : null;
+    const previous = goalUpdates.get(threadId);
+    goalUpdates.set(threadId, {
+      objective: firstString(goalPayload?.objective) ?? previous?.objective ?? null,
+      status,
+      createdAtMs: previous?.createdAtMs ?? createdAtMs,
+      updatedAtMs: updatedAtMs ?? previous?.updatedAtMs ?? null
+    });
+  }
+  const goals: Goal[] = [...goalUpdates].map(([threadId, update]) => goal({
+    id: `goal:${threadId}`,
+    sessionId,
+    title: null,
+    description: update.objective,
+    status: CODEX_GOAL_STATUSES[update.status] ?? "unknown",
+    taskIds: [],
+    timeCreated: update.createdAtMs,
+    timeUpdated: update.updatedAtMs,
+    timeCompleted: update.status === "completed" ? update.updatedAtMs : null,
+    provenance: { fidelity: "recorded", sourceType: "codex.event_msg:thread_goal_updated", sourceId: threadId }
+  }));
+
+  // --- Coordination ---------------------------------------------------------
+  const observations: CoordinationObservation[] = [];
+  const bindTarget = (target: string | null, callId: string): { taskId: string | null; runId: string | null; recipientActorId: string | null; toSessionRef: SessionRef | null } => {
+    // Exact recorded identity first: the call's own id binds its v2 task.
+    let task = base.tasks.find((candidate) => candidate.toolCallId === callId || candidate.correlationId === callId) ?? null;
+    if (!task && target) {
+      // Recorded task-name evidence: exact agent path, then the path's
+      // task-name suffix. Ambiguous matches stay unbound rather than guessed.
+      const exact = base.tasks.filter((candidate) => candidate.agentPath === target);
+      const suffix = base.tasks.filter((candidate) => {
+        const agentPath = candidate.agentPath || "";
+        return Boolean(agentPath && agentPath.endsWith(`/${target}`));
+      });
+      const candidates = exact.length > 0 ? exact : suffix;
+      task = candidates.length === 1 ? candidates[0] : null;
+    }
+    const run = task ? base.agentRuns.find((candidate) => candidate.taskId === task?.id) ?? null : null;
+    const child = run ? childById.get(String(run.childSessionId)) : undefined;
+    const recipientPath = run?.agent ?? child?.session.metadata?.agentPath ?? child?.session.metadata?.agentNickname ?? null;
+    return {
+      taskId: task?.id ?? null,
+      runId: run?.id ?? null,
+      recipientActorId: recipientPath ? actorIdByPath.get(String(recipientPath)) ?? null : null,
+      toSessionRef: run ? { provider: "codex", sessionId: String(run.childSessionId) } : null
+    };
+  };
+
+  for (const [index, record] of input.records.entries()) {
+    if (record.type !== "response_item") continue;
+    if (record.payload?.type !== "function_call" && record.payload?.type !== "custom_tool_call") continue;
+    // Only the collaboration namespace is the recorded subagent tool family;
+    // same-named tools elsewhere (e.g. cell `wait`) are not coordination.
+    if (record.payload?.namespace !== "collaboration") continue;
+    const name = String(record.payload?.name ?? "");
+    const kind = CODEX_COORDINATION_KINDS[name];
+    if (!kind) continue;
+    const callId = firstString(record.payload?.call_id, record.payload?.id) ?? `collab-${index}`;
+    const argumentsValue = callArgumentsOf(record);
+    const target = firstString(argumentsValue.target, argumentsValue.task_name, argumentsValue.taskName);
+    const bound = bindTarget(target, callId);
+    const hasOutput = input.records.some((candidate) => (
+      candidate.type === "response_item"
+      && (candidate.payload?.type === "function_call_output" || candidate.payload?.type === "custom_tool_call_output")
+      && firstString(candidate.payload?.call_id, candidate.payload?.id) === callId
+    ));
+    observations.push(coordinationObservation({
+      id: `coord:${kind}:${callId}`,
+      sessionId,
+      kind,
+      state: kind === "spawn" ? (bound.toSessionRef || hasOutput ? "started" : "requested") : "unknown",
+      timestamp: recordTimestamp(record),
+      senderActorId: parentActorId,
+      recipientActorId: bound.recipientActorId,
+      fromSessionRef: null,
+      toSessionRef: bound.toSessionRef,
+      relationshipType: kind === "spawn" && bound.toSessionRef ? "spawned" : null,
+      taskId: bound.taskId,
+      runId: bound.runId,
+      eventId: null,
+      turnId: passthroughTurnId(record),
+      correlationId: callId,
+      provenance: { fidelity: "recorded", sourceType: `codex.response_item:${String(record.payload?.type)}:collaboration`, sourceId: callId }
+    }));
+  }
+
+  for (const [index, record] of input.records.entries()) {
+    if (!isFinalAnswerEnvelope(record)) continue;
+    const author = firstString(record.payload.author);
+    const recipient = firstString(record.payload.recipient);
+    const senderActorId = author ? actorIdByPath.get(author) ?? null : null;
+    if (!author || !senderActorId) continue;
+    // The session's own FINAL_ANSWER envelope (author == recipient) is a
+    // self-authored summary, not delivery from another agent.
+    if (author === parentPath && recipient === parentPath) continue;
+    const child = input.children.find((candidate) => (
+      firstString(candidate.session.metadata?.agentPath, candidate.session.metadata?.agentNickname) === author
+    )) ?? null;
+    const run = child ? runByChildId.get(String(child.session.id)) ?? null : null;
+    const taskId = run?.taskId ?? null;
+    observations.push(coordinationObservation({
+      id: `coord:result-delivery:${firstString(record.payload.id) ?? `envelope-${index}`}`,
+      sessionId,
+      kind: "result-delivery",
+      state: "delivered",
+      timestamp: recordTimestamp(record),
+      senderActorId,
+      recipientActorId: recipient ? actorIdByPath.get(recipient) ?? parentActorId : parentActorId,
+      fromSessionRef: child ? { provider: "codex", sessionId: String(child.session.id) } : null,
+      toSessionRef: ownRef,
+      relationshipType: null,
+      taskId,
+      runId: run?.id ?? null,
+      eventId: null,
+      turnId: passthroughTurnId(record),
+      correlationId: firstString(record.payload.id) ?? null,
+      provenance: { fidelity: "recorded", sourceType: "codex.response_item:agent_message:FINAL_ANSWER", sourceId: firstString(record.payload.id) ?? author }
+    }));
+  }
+
+  // --- Context versions and transformations ---------------------------------
+  const versionMeta = new Map<string, { sequence: number | null; parent: string | null; createdAt: number | null }>();
+  const touchVersion = (id: string, sequence: number | null, createdAt: number | null) => {
+    const entry = versionMeta.get(id) ?? { sequence: null, parent: null, createdAt: null };
+    if (sequence != null) entry.sequence = sequence;
+    if (createdAt != null && (entry.createdAt == null || createdAt < entry.createdAt)) entry.createdAt = createdAt;
+    versionMeta.set(id, entry);
+  };
+  const compactions = codexCompactionEvents(input.records);
+  for (const compaction of compactions) {
+    const timestamp = mergedCompactionTimestamp(compaction);
+    const previousId = compaction.previousWindowId ?? null;
+    const windowId = compaction.windowId ?? null;
+    if (previousId) touchVersion(previousId, null, null);
+    if (windowId) {
+      touchVersion(windowId, compaction.windowNumber ?? null, timestamp);
+      if (previousId && windowId !== previousId) {
+        const entry = versionMeta.get(windowId);
+        if (entry) entry.parent = previousId;
+      }
+    }
+  }
+  const contextVersions: ContextVersion[] = [...versionMeta].map(([id, meta]) => contextVersion({
+    id,
+    sessionId,
+    sequence: meta.sequence,
+    parentVersionIds: meta.parent ? [meta.parent] : [],
+    artifactIds: [],
+    createdAt: meta.createdAt,
+    provenance: { fidelity: "recorded", sourceType: "codex.compacted.window_id", sourceId: id }
+  }));
+  const contextTransformations: ContextTransformation[] = compactions.map((compaction) => {
+    const recordIndex = Math.min(...compaction.recordIndices);
+    return contextTransformation({
+      id: `ctx-transform:compaction:${compaction.sourceId || recordIndex}`,
+      sessionId,
+      kind: "compaction",
+      sourceVersionIds: compaction.previousWindowId ? [compaction.previousWindowId] : [],
+      resultVersionId: compaction.windowId ?? null,
+      sourceArtifactIds: [],
+      resultArtifactIds: [`artifact:${compaction.sourceId || recordIndex}`],
+      eventId: `event:compaction:${compaction.sourceId || recordIndex}`,
+      runId: null,
+      turnId: null,
+      timestamp: asNumber(mergedCompactionTimestamp(compaction)),
+      provenance: codexCompactionProvenance(compaction)
+    });
+  });
+
+  // --- Request usage --------------------------------------------------------
+  const usageRecords: UsageRecord[] = [];
+  let activeModel: string | null = null;
+  input.records.forEach((record, index) => {
+    if (record.type !== "event_msg") return;
+    if (record.payload?.type === "thread_settings_applied") {
+      activeModel = firstString(record.payload?.thread_settings?.model) ?? activeModel;
+      return;
+    }
+    if (record.payload?.type !== "token_count") return;
+    const usage = record.payload?.info?.last_token_usage;
+    if (!usage || typeof usage !== "object") return;
+    const inputRaw = firstNumber(usage.input_tokens, usage.input) ?? 0;
+    const cacheRead = firstNumber(usage.cached_input_tokens, usage.cache_read) ?? null;
+    const cacheWrite = firstNumber(usage.cache_write_input_tokens, usage.cache_write) ?? null;
+    const outputRaw = firstNumber(usage.output_tokens, usage.output) ?? 0;
+    const reasoningRaw = firstNumber(usage.reasoning_output_tokens, usage.reasoning) ?? null;
+    // Window-reset markers (same ms as a compaction) report the context size
+    // in total_tokens with every component zero: they are not model requests.
+    if (inputRaw === 0 && outputRaw === 0 && (cacheRead ?? 0) === 0 && (cacheWrite ?? 0) === 0 && (reasoningRaw ?? 0) === 0) return;
+    // Codex `input_tokens` includes cached/cache-write tokens and
+    // `output_tokens` includes reasoning. Normalize to the v3 component
+    // contract so components sum exactly to the recorded total.
+    const input = Math.max(0, inputRaw - (cacheRead ?? 0) - (cacheWrite ?? 0));
+    const reasoning = Math.min(reasoningRaw ?? 0, outputRaw);
+    const output = Math.max(0, outputRaw - reasoning);
+    const total = firstNumber(usage.total_tokens, usage.total) ?? input + (cacheRead ?? 0) + (cacheWrite ?? 0) + output + reasoning;
+    const sourceId = String(record.ordinal ?? index);
+    usageRecords.push(usageRecord({
+      id: `usage:${sessionId}:${sourceId}`,
+      scope: "request",
+      sessionRef: ownRef,
+      timestamp: recordTimestamp(record),
+      model: activeModel,
+      runId: null,
+      eventId: null,
+      turnId: null,
+      tokens: { input, cacheRead, cacheWrite, output, reasoning, total },
+      contextOriginSlices: [],
+      provenance: {
+        fidelity: activeModel ? "derived" : "recorded",
+        sourceType: activeModel ? "codex.event_msg:token_count+thread_settings_applied" : "codex.event_msg:token_count",
+        sourceId
+      }
+    }));
+  });
+
+  // --- Coverage -------------------------------------------------------------
+  const coverage: ProtocolCoverage = protocolCoverage({
+    work: protocolDomainCoverage(goals.length + base.tasks.length > 0 ? "observed" : "not-observed", "recorded thread_goal_updated goals plus normalized subagent tasks"),
+    execution: protocolDomainCoverage(actors.length + base.agentRuns.length > 0 ? "observed" : "not-observed", "recorded agent-path actors plus normalized child agent runs"),
+    coordination: protocolDomainCoverage(observations.length > 0 ? "observed" : "not-observed", "recorded collaboration calls and FINAL_ANSWER envelopes"),
+    context: protocolDomainCoverage(base.contextArtifacts.length + contextVersions.length + contextTransformations.length > 0 ? "observed" : "not-observed", "recorded compacted window lineage plus summary artifacts"),
+    usage: protocolDomainCoverage(usageRecords.length > 0 ? "observed" : "not-observed", "recorded event_msg token_count request usage")
+  });
+
+  return {
+    sessionId,
+    version: 3,
+    session: base.session,
+    events: base.events,
+    relationships: base.relationships,
+    tasks: base.tasks,
+    agentRuns: base.agentRuns,
+    contextArtifacts: base.contextArtifacts,
+    branches: base.branches,
+    revision: base.revision,
+    goals,
+    actors,
+    coordination: observations,
+    contextVersions,
+    contextTransformations,
+    usageRecords,
+    coverage
   };
 }
