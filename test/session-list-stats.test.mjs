@@ -125,7 +125,7 @@ function protocolAdapter(id = "codex-fake", calls = []) {
   };
 }
 
-function plainAdapter(id = "gemini") {
+function plainAdapter(id = "pi") {
   return { id, name: "Plain", icon: "", capabilities: {} };
 }
 
@@ -203,7 +203,7 @@ test("protocol stats never double-count Task and AgentRun", () => {
 });
 
 test("unsupported adapters and unknown sessions degrade to base stats", () => {
-  const base = deriveSessionListStats(plainAdapter("gemini"), { id: "g1", provider: "gemini", message_count: 3, token_count: 10, time_created: 1000, time_updated: 2000 });
+  const base = deriveSessionListStats(plainAdapter("pi"), { id: "g1", provider: "pi", message_count: 3, token_count: 10, time_created: 1000, time_updated: 2000 });
   assert.equal(base.protocol, false);
   assert.equal(base.compactions, 0);
   assert.equal(base.activeStatuses.length, 0);
@@ -258,8 +258,8 @@ test("protocol results are cached by provider+id+revision and bounded", () => {
   deriveSessionListStats(adapter, { id: "p-1", provider: "codex-fake", time_updated: 9100, message_count: 9, token_count: 100 });
   assert.equal(calls.length, 5, "revision change (messageCount) invalidates the entry");
 
-  const plain = plainAdapter("gemini");
-  deriveSessionListStats(plain, { id: "g1", provider: "gemini", time_updated: 1 });
+  const plain = plainAdapter("pi");
+  deriveSessionListStats(plain, { id: "g1", provider: "pi", time_updated: 1 });
   assert.equal(sessionListStatsCacheSize(), 5, "one entry per distinct revision; unsupported providers never enter the cache");
 
   clearSessionListStatsCache();
@@ -307,7 +307,7 @@ test("toApiSessionShape exposes only the bounded stats object", () => {
   assert.equal(shape.stats.compactions, 2);
   assert.equal(shape.stats.events, undefined, "bounded projection strips protocol payloads");
 
-  const plain = toApiSessionShape({ id: "g1", provider: "gemini", title: "T", directory: "D", time_updated: 5000, message_count: 7, token_count: 21, time_created: 1000 });
+  const plain = toApiSessionShape({ id: "g1", provider: "pi", title: "T", directory: "D", time_updated: 5000, message_count: 7, token_count: 21, time_created: 1000 });
   assert.equal(plain.stats.messageCount, 7);
   assert.equal(plain.stats.tokenCount, 21);
   assert.equal(plain.stats.durationMs, 4000);
@@ -331,10 +331,10 @@ function buildRoutes() {
   // fixture mounts under the real "codex" id; the providerMap still supplies
   // our own adapters, so no real provider code runs.
   const protocolProvider = protocolAdapter("codex");
-  const plain = plainAdapter("gemini");
+  const plain = plainAdapter("pi");
   const providerInfo = [
     { id: "codex", name: "Codex Fixture", icon: "", available: true, manageable: true },
-    { id: "gemini", name: "Gemini", icon: "", available: true, manageable: false }
+    { id: "pi", name: "Pi", icon: "", available: true, manageable: false }
   ];
   const routes = captureGetRoutes(registerSessions, {
     appConfig: {},
@@ -349,8 +349,8 @@ test("list routes attach stats only for the current page on every surface", asyn
   seedIndex([
     { id: "p-1", provider: "codex", title: "Protocol session", directory: "D:\\p", timeCreated: 1000, timeUpdated: 9000, messageCount: 8, tokenCount: 100 },
     { id: "p-2", provider: "codex", title: "Second session", directory: "D:\\p", timeCreated: 2000, timeUpdated: 8000, messageCount: 3, tokenCount: 40 },
-    { id: "g-1", provider: "gemini", title: "Plain session", directory: "D:\\g", timeCreated: 3000, timeUpdated: 7000, messageCount: 5, tokenCount: 60 },
-    { id: "g-2", provider: "gemini", title: "Plain two", directory: "D:\\g", timeCreated: 4000, timeUpdated: 6000, messageCount: 2, tokenCount: 20 }
+    { id: "g-1", provider: "pi", title: "Plain session", directory: "D:\\g", timeCreated: 3000, timeUpdated: 7000, messageCount: 5, tokenCount: 60 },
+    { id: "g-2", provider: "pi", title: "Plain two", directory: "D:\\g", timeCreated: 4000, timeUpdated: 6000, messageCount: 2, tokenCount: 20 }
   ]);
   const routes = buildRoutes();
   const pageRoute = routes.find(({ pattern }) => pattern === "/sessions");
@@ -361,7 +361,7 @@ test("list routes attach stats only for the current page on every surface", asyn
 
   // Global API: current page only (limit 2 -> exactly 2 cached derivations).
   const apiResponse = createResponseCapture();
-  await apiRoute.handler({ url: "/api/sessions?provider=codex&provider=gemini&limit=2&returnTo=%2Fsessions%3Fprovider%3Dcodex%26provider%3Dgemini" }, apiResponse);
+  await apiRoute.handler({ url: "/api/sessions?provider=codex&provider=pi&limit=2&returnTo=%2Fsessions%3Fprovider%3Dcodex%26provider%3Dpi" }, apiResponse);
   const payload = JSON.parse(apiResponse.body);
   assert.equal(payload.sessions.length, 2);
   assert.equal(sessionListStatsCacheSize(), 2, "only the returned page enters the cache");
@@ -373,11 +373,11 @@ test("list routes attach stats only for the current page on every surface", asyn
   assert.equal(protocolSession.stats.memoryCount, 1);
   assert.match(protocolSession.html, /class="session-card"/);
   assert.match(protocolSession.html, /session-provider-badge/);
-  assert.match(protocolSession.html, /from=%2Fsessions%3Fprovider%3Dcodex%26provider%3Dgemini/);
+  assert.match(protocolSession.html, /from=%2Fsessions%3Fprovider%3Dcodex%26provider%3Dpi/);
 
   // Unsupported-provider fallback through its own provider API.
   const plainApiResponse = createResponseCapture();
-  await providerApiRoute.handler({ url: "/api/gemini/sessions?limit=30" }, plainApiResponse, ["", "gemini", ""]);
+  await providerApiRoute.handler({ url: "/api/pi/sessions?limit=30" }, plainApiResponse, ["", "pi", ""]);
   const plainPayload = JSON.parse(plainApiResponse.body);
   assert.equal(plainPayload.sessions.length, 2);
   const plainSession = plainPayload.sessions[0];
@@ -402,7 +402,7 @@ test("list routes attach stats only for the current page on every surface", asyn
   assert.equal(JSON.parse(unknownKindResponse.body).sessions.length, 1, "unknown legacy kind parameters are ignored");
 
   // Global HTML page renders the chips.
-  const page = await pageRoute.handler({ url: "/sessions?provider=codex&provider=gemini" }, createResponseCapture());
+  const page = await pageRoute.handler({ url: "/sessions?provider=codex&provider=pi" }, createResponseCapture());
   assert.equal(page.status, 200);
   assert.match(page.body, /class="stat-chip"/);
   assert.match(page.body, /2× compacted/);
@@ -426,9 +426,9 @@ test("list routes attach stats only for the current page on every surface", asyn
 
   // Unsupported-provider HTML page has no protocol chips, only base stats.
   const plainPage = await providerPageRoute.handler(
-    { url: "/gemini" },
+    { url: "/pi" },
     createResponseCapture(),
-    { provider: "gemini" }
+    { provider: "pi" }
   );
   assert.equal(plainPage.status, 200);
   assert.doesNotMatch(plainPage.body, /compacted/, "no protocol compaction chips for unsupported providers");
@@ -469,9 +469,9 @@ test("sessionCard renders bounded statistic chips with titles and aria labels", 
 
 test("sessionCard omits unknown and protocol-specific zero values", () => {
   const html = sessionCard({
-    id: "s1", provider: "gemini", title: "Plain", time_updated: Date.now(),
+    id: "s1", provider: "pi", title: "Plain", time_updated: Date.now(),
     stats: {
-      provider: "gemini", sessionId: "s1",
+      provider: "pi", sessionId: "s1",
       messageCount: null, tokenCount: 0, durationMs: null, durationSource: null,
       protocol: false, compactions: 0, lastCompactionAt: null,
       taskCount: 0, agentRunCount: 0, subagentRunCount: 0, backgroundRunCount: 0,
@@ -498,7 +498,7 @@ test("sessionCard omits unknown and protocol-specific zero values", () => {
   assert.doesNotMatch(protocolZeros, /memory/, "zero memory omitted");
   assert.doesNotMatch(protocolZeros, /stat-chip-running/, "no active statuses");
 
-  const noStats = sessionCard({ id: "s1", provider: "gemini", title: "None", time_updated: Date.now() });
+  const noStats = sessionCard({ id: "s1", provider: "pi", title: "None", time_updated: Date.now() });
   assert.doesNotMatch(noStats, /stat-chip/);
 });
 

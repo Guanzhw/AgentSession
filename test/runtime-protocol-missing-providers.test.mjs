@@ -2,8 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildOpenCodeSessionProtocol } from "../dist/src/providers/opencode/protocol.js";
 import { buildOpenClawSessionProtocol } from "../dist/src/providers/openclaw/protocol.js";
-import { buildCopilotSessionProtocol } from "../dist/src/providers/copilot/protocol.js";
-import { buildGeminiSessionProtocol } from "../dist/src/providers/gemini/protocol.js";
 
 function session(id, provider, parentId = null) {
   return { id, provider, parentId, title: null, directory: null, timeCreated: 1, timeUpdated: 2, messageCount: 0, tokenCount: null, metadata: null };
@@ -34,29 +32,4 @@ test("OpenClaw protocol keeps active path and recorded branch heads", () => {
   assert.equal(protocol.events.some((event) => event.id === "record:c"), true);
   assert.equal(protocol.events.some((event) => event.id === "record:branch"), false);
   assert.equal(protocol.branches.length, 2);
-});
-
-test("Copilot inline agents do not become resumable child sessions", () => {
-  const records = [
-    { type: "session.start", id: "start" },
-    { type: "subagent.started", id: "spawn", data: { agentId: "inline-1", agentName: "reviewer" } },
-    { type: "subagent.completed", id: "done", agentId: "inline-1", data: {} }
-  ];
-  const protocol = buildCopilotSessionProtocol(session("cop", "copilot"), records, 1);
-  assert.equal(protocol.validation.ok, true);
-  assert.equal(protocol.relationships.length, 0);
-  assert.equal(protocol.agentRuns[0].childSessionId, null);
-  assert.equal(protocol.tasks[0].status, "completed");
-});
-
-test("Gemini protocol truthfully exposes only derived events", () => {
-  const protocol = buildGeminiSessionProtocol(session("gem", "gemini"), {
-    sessionId: "gem", messages: [{ id: "u", type: "user", text: "hi", timestamp: "2026-01-01T00:00:00Z" }]
-  }, 1);
-  assert.equal(protocol.validation.ok, true);
-  assert.equal(protocol.events[1].provenance.fidelity, "derived");
-  assert.deepEqual(protocol.relationships, []);
-  assert.deepEqual(protocol.tasks, []);
-  assert.deepEqual(protocol.agentRuns, []);
-  assert.equal(protocol.completeness, "complete");
 });

@@ -1,8 +1,8 @@
 # AgentSession
 
 AgentSession is a local-first, read-only harness runtime inspector for
-OpenCode, Claude Code, Codex CLI, OpenClaw, Hermes Agent, GitHub Copilot CLI,
-Gemini CLI, Pi, and DeepSeek Harness.
+OpenCode, Claude Code, Codex CLI, OpenClaw, Hermes Agent, Pi, and DeepSeek
+Harness.
 
 It reads provider-owned session data and exposes the Runtime Workbench:
 `Overview | Conversation | Runtime | Raw`, with Summary, Events, Work,

@@ -5,7 +5,7 @@ history. It queries the providers configured for AgentSession without starting
 a web server or modifying provider-owned data.
 
 Supported provider references include OpenCode, Claude Code, Codex CLI,
-OpenClaw, Hermes Agent, Pi, and legacy Copilot/Gemini CLI histories.
+OpenClaw, Hermes Agent, Pi, and DeepSeek Harness histories.
 
 ## Install into coding agents
 
@@ -16,8 +16,7 @@ npx --yes --prefer-online @acetamido/agentsession-mcp@latest install
 ```
 
 It detects and configures the user-level MCP settings for Codex, Claude Code,
-and OpenCode. Copilot remains a legacy history provider and is no longer an
-installer target. The generated launcher uses
+and OpenCode. The generated launcher uses
 `npx --prefer-online @acetamido/agentsession-mcp@latest`, which checks for a
 new published package whenever the host starts. Existing `agentsession` entries
 are never overwritten by `install`, and `update` refreshes only installer-managed

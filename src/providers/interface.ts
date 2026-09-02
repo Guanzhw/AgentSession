@@ -1,8 +1,6 @@
 import type { ProtocolCapabilities, SessionProtocol } from "./shared/session-protocol.js";
 
-export type ProviderId = "opencode" | "claude-code" | "codex" | "openclaw" | "hermes" | "copilot" | "gemini" | "pi" | "deepseek-harness";
-
-export type ProviderLifecycle = "active" | "legacy";
+export type ProviderId = "opencode" | "claude-code" | "codex" | "openclaw" | "hermes" | "pi" | "deepseek-harness";
 
 export interface ResumeCommandSpec {
   executable: string;
@@ -118,8 +116,6 @@ export interface ProviderAdapter {
   id: ProviderId;
   name: string;
   icon: string;
-  /** Legacy adapters remain readable for historic sessions but are not a current host integration. */
-  lifecycle?: ProviderLifecycle;
   resumeCommand?: ResumeCommandSpec;
   /** Resolve a provider-owned session selector when it differs from the canonical session ID. */
   getResumeCommandSpec?(sessionId: string): ResumeCommandSpec | null;

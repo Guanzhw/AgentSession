@@ -5,8 +5,6 @@ import claudeCode from "./claude-code/adapter.js";
 import codex from "./codex/adapter.js";
 import openclaw from "./openclaw/adapter.js";
 import hermes from "./hermes/adapter.js";
-import copilot from "./copilot/adapter.js";
-import gemini from "./gemini/adapter.js";
 import pi from "./pi/adapter.js";
 import deepseekHarness from "./deepseek-harness/adapter.js";
 
@@ -16,8 +14,6 @@ const ALL_PROVIDERS: readonly ProviderAdapter[] = [
   codex,
   openclaw,
   hermes,
-  copilot,
-  gemini,
   pi,
   deepseekHarness
 ];

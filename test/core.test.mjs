@@ -28,7 +28,6 @@ import {
 } from "../dist/src/providers/claude-code/views.js";
 import { buildCodexRuntimeEnvironment } from "../dist/src/providers/codex/runtime-environment.js";
 import { codexDailyTokenComponents } from "../dist/src/providers/codex/adapter.js";
-import { buildGeminiRuntimeEnvironment } from "../dist/src/providers/gemini/runtime-environment.js";
 import { buildPiRuntimeEnvironment } from "../dist/src/providers/pi/runtime-environment.js";
 import { renderSessionPage } from "../dist/src/views/session.js";
 import { renderSettingsPage } from "../dist/src/views/settings.js";
@@ -87,7 +86,6 @@ import {
   getIndexedTokenStats,
   refreshSqliteTokenStatsIndex,
 } from "../dist/src/stats-index.js";
-import { dataToMessages as geminiDataToMessages } from "../dist/src/providers/gemini/parser.js";
 import {
   activePiEntries,
   extractPiMeta,
@@ -1922,30 +1920,6 @@ test("file-backed providers preserve ReACT response boundaries and fold tool-onl
   assert.equal(claudeViews.tree.messages.length, 1);
   assert.deepEqual(claudeViews.tree.messages[0].parts.map((part) => part.type), ["reasoning", "tool"]);
 
-  const geminiMessages = geminiDataToMessages({
-    messages: [{
-      id: "gemini-response",
-      type: "gemini",
-      text: "I checked it.",
-      timestamp: "2026-07-11T00:00:00.000Z",
-      toolCalls: [{ id: "tool-2", name: "read_file", args: { path: "README.md" }, result: "failed", status: "error" }]
-    }]
-  }, "gemini-session");
-  const geminiViews = buildMessageSessionViews({
-    id: "gemini-session",
-    provider: "gemini",
-    parentId: null,
-    title: "Gemini",
-    directory: null,
-    timeCreated: 0,
-    timeUpdated: 0,
-    messageCount: 1,
-    tokenCount: null
-  }, geminiMessages);
-  assert.equal(geminiViews.tree.messages.length, 1);
-  assert.deepEqual(geminiViews.tree.messages[0].parts.map((part) => part.type), ["text", "tool"]);
-  assert.equal(geminiViews.tree.messages[0].parts[1].data.state.status, "error");
-
   const piRecords = [
     {
       type: "message",
@@ -2133,7 +2107,7 @@ test("provider registration distinguishes source-supported resume commands from 
   const providers = getAllProviders();
   assert.deepEqual(
     providers.map((provider) => provider.id),
-    ["opencode", "claude-code", "codex", "openclaw", "hermes", "copilot", "gemini", "pi", "deepseek-harness"]
+    ["opencode", "claude-code", "codex", "openclaw", "hermes", "pi", "deepseek-harness"]
   );
   for (const provider of providers.filter((provider) => provider.resumeCommand)) {
     assert.equal(typeof provider.resumeCommand?.executable, "string", provider.id);
@@ -2141,15 +2115,9 @@ test("provider registration distinguishes source-supported resume commands from 
     assert.ok(Array.isArray(provider.resumeCommand?.args), provider.id);
     assert.ok(provider.resumeCommand?.args.includes("{sessionId}"), provider.id);
   }
-  assert.equal(providers.find((provider) => provider.id === "gemini")?.resumeCommand, undefined);
-  assert.equal(providers.find((provider) => provider.id === "gemini")?.lifecycle, "legacy");
-  assert.equal(providers.find((provider) => provider.id === "copilot")?.resumeCommand, undefined);
-  assert.equal(providers.find((provider) => provider.id === "copilot")?.lifecycle, "legacy");
   assert.equal(providers.find((provider) => provider.id === "deepseek-harness")?.resumeCommand, undefined);
-  assert.notEqual(providers.find((provider) => provider.id === "deepseek-harness")?.lifecycle, "legacy");
   assert.equal(parseArgs(["--pi-dir", "D:\\fixtures\\pi-agent"]).piDir, "D:\\fixtures\\pi-agent");
   assert.equal(parseArgs(["--dsh-dir", "D:\\fixtures\\dsh"]).dshDir, "D:\\fixtures\\dsh");
-  assert.equal(parseArgs(["--copilot-dir", "D:\\fixtures\\copilot"]).copilotDir, "D:\\fixtures\\copilot");
   assert.equal(parseArgs(["--openclaw-dir", "D:\\fixtures\\openclaw"]).openclawDir, "D:\\fixtures\\openclaw");
   assert.equal(parseArgs(["--hermes-dir", "D:\\fixtures\\hermes"]).hermesDir, "D:\\fixtures\\hermes");
 });
@@ -2162,7 +2130,7 @@ test("every provider exposes the complete shared session capability surface", ()
     assert.equal(typeof provider.getSessionMetrics, "function", provider.id);
     assert.equal(supportsSystemPromptEvidence(provider), true, provider.id);
     assert.equal(supportsRuntimeEnvironment(provider), true, provider.id);
-    assert.equal(Boolean(provider.resumeCommand || provider.getResumeCommandSpec), provider.lifecycle !== "legacy" && provider.id !== "deepseek-harness", provider.id);
+    assert.equal(Boolean(provider.resumeCommand || provider.getResumeCommandSpec), provider.id !== "deepseek-harness", provider.id);
     assert.equal(usesOpenCodeStatsStore(provider), provider.id === "opencode", provider.id);
   }
 });
@@ -2976,8 +2944,8 @@ test("session detail shows a safe source breadcrumb and activates Usage for a st
 test("session raw data exposes an opaque project key and configured directory provenance", () => {
   const html = renderSessionPage({
     session: {
-      id: "gemini-project-key",
-      title: "Mapped Gemini session",
+      id: "codex-project-key",
+      title: "Mapped Codex session",
       directory: "D:\\WorkSpace\\project",
       time_created: 1,
       metadata: {
@@ -2985,7 +2953,7 @@ test("session raw data exposes an opaque project key and configured directory pr
         projectDirectorySource: "configured"
       }
     },
-    provider: "gemini"
+    provider: "codex"
   });
 
   assert.match(html, /Project key/);
@@ -3301,7 +3269,7 @@ test("stats advanced modules are capability-gated and export URLs are canonical"
     tokenStats: [], modelRanking: [], topSessions: [], coverage: null,
     overview: { totalSessions: 0, totalMessages: 0, totalTokens: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, peakDay: "", peakDayTokens: 0, avgTokensPerSession: 0 },
     filters: { days: 7, from: null, to: null, project: "", modelPair: null, scope: "all", compareA: null, compareB: null, rangePreset: "7", requestedFrom: "", requestedTo: "", validationError: null },
-    provider: "codex", providers: [{ id: "codex", name: "Codex", available: true }, { id: "gemini", name: "Gemini", available: false }], manageable: true,
+    provider: "codex", providers: [{ id: "codex", name: "Codex", available: true }, { id: "pi", name: "Pi", available: false }], manageable: true,
   };
   const limited = renderStatsPage({ ...base, capabilities: { customRange: false, project: false, model: false, scope: false, dayDrill: false, composition: false, modelRanking: false, sessionBreakdown: false, coverage: false } });
   assert.match(limited, /href="\/api\/codex\/stats\/export\.json\?days=7"/);
@@ -3432,19 +3400,15 @@ test("provider runtime environments classify instruction files as runtime extens
   const projectPath = path.join(temp, "project");
   const codexDir = path.join(temp, "codex");
   const claudeDir = path.join(temp, "claude");
-  const geminiDir = path.join(temp, "gemini");
   mkdirSync(path.join(projectPath, ".git"), { recursive: true });
   mkdirSync(path.join(projectPath, ".claude", "rules"), { recursive: true });
   mkdirSync(codexDir, { recursive: true });
   mkdirSync(claudeDir, { recursive: true });
-  mkdirSync(geminiDir, { recursive: true });
   writeFileSync(path.join(codexDir, "AGENTS.md"), "# Global Codex instructions\n");
   writeFileSync(path.join(projectPath, "AGENTS.override.md"), "# Project Codex instructions\n");
   writeFileSync(path.join(claudeDir, "CLAUDE.md"), "# User Claude instructions\n");
   writeFileSync(path.join(projectPath, "CLAUDE.md"), "# Project Claude instructions\n");
   writeFileSync(path.join(projectPath, ".claude", "rules", "review.md"), "# Review rules\n");
-  writeFileSync(path.join(geminiDir, "GEMINI.md"), "# User Gemini context\n");
-  writeFileSync(path.join(projectPath, "GEMINI.md"), "# Project Gemini context\n");
 
   const codex = buildCodexRuntimeEnvironment("codex-session", projectPath, codexDir);
   assert.ok(codex.extensions.some((entry) => (
@@ -3475,17 +3439,6 @@ test("provider runtime environments classify instruction files as runtime extens
     && entry.sourcePath === realpathSync(path.join(projectPath, ".claude", "rules", "review.md"))
   )));
 
-  const gemini = buildGeminiRuntimeEnvironment("gemini-session", projectPath, geminiDir);
-  assert.ok(gemini.extensions.some((entry) => (
-    entry.scope === "user"
-    && entry.kind === "instruction"
-    && entry.sourcePath === realpathSync(path.join(geminiDir, "GEMINI.md"))
-  )));
-  assert.ok(gemini.extensions.some((entry) => (
-    entry.scope === "project"
-    && entry.kind === "instruction"
-    && entry.sourcePath === realpathSync(path.join(projectPath, "GEMINI.md"))
-  )));
 });
 
 test("settings browser script blocks save while advanced JSON is invalid", () => {

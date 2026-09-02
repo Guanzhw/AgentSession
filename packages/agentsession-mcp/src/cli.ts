@@ -19,7 +19,7 @@ Options:
   -h, --help       Show this help
 
 Run \`agentsession-mcp install --help\` to install the MCP interactively into
-Codex, Claude Code, GitHub Copilot CLI, or OpenCode with automatic npm updates.`);
+Codex, Claude Code, or OpenCode with automatic npm updates.`);
 }
 
 const argv = process.argv.slice(2);

@@ -1,8 +1,7 @@
 # AgentSession
 
 AgentSession is a local-first, read-only harness runtime inspector. It reads
-OpenCode, Claude Code, Codex CLI, OpenClaw, Hermes Agent, GitHub Copilot CLI,
-Gemini CLI, Pi, and DeepSeek Harness data to reconstruct how a harness ran,
+OpenCode, Claude Code, Codex CLI, OpenClaw, Hermes Agent, Pi, and DeepSeek Harness data to reconstruct how a harness ran,
 derived sessions, scheduled work, and loaded, compacted, inherited, or
 re-injected context.
 
@@ -77,7 +76,7 @@ known incomplete or invalid sessions retain their diagnostics.
 
 ## Provider coverage
 
-All nine registered providers expose Session Protocol v2. The table separates
+All seven registered providers expose Session Protocol v2. The table separates
 source-recorded facts from adapter-derived facts; `partial` never means that a
 fact was stored natively.
 
@@ -88,8 +87,6 @@ fact was stored natively.
 | Codex CLI | active | `~/.codex/sessions/**/*.jsonl` | `full/recorded` response/item, tool, and compaction events; `partial/derived` NEW_TASK relationships, Tasks, and AgentRuns. |
 | OpenClaw | active | `~/.openclaw/agents/*/sessions/*.jsonl` | `partial/derived` branch topology, reasoning, tools, and registry lineage; no child without source evidence. |
 | Hermes Agent | active | `$HERMES_HOME/state.db` | `full/recorded` SQLite events and `partial/derived` compression continuation/delegation lineage; compression is not spawned work. |
-| GitHub Copilot CLI | legacy | `~/.copilot/session-state/*/events.jsonl` and `session-store.db` | `partial/derived` event-log message/tool and inline-agent Task/AgentRun facts; no independently resumable child session. |
-| Gemini CLI | legacy | `~/.gemini/tmp/*/chats/*.json` | `partial/derived` message/model/tool events; unrecorded relationships, Tasks, runs, and context are `none`/unsupported. |
 | Pi | active | `~/.pi/agent/sessions/**/*.jsonl` | `full/recorded` branch/compaction events and `partial/derived` parent lineage; never invented spawn. |
 | DeepSeek Harness | active preview | `$DSH_HOME/sessions/**/session.jsonl[.zstd]` or `~/.dsh/sessions/**` | `full/recorded` v0 event log/context and `partial/derived` workflow, team, and cross-session relationships. |
 
@@ -158,8 +155,6 @@ agentsession [options]
 --opencode-db <path>  OpenCode database
 --claude-dir <path>   Claude Code data directory
 --codex-dir <path>    Codex CLI data directory
---copilot-dir <path>  GitHub Copilot CLI data directory
---gemini-dir <path>   Gemini CLI data directory
 --pi-dir <path>       Pi agent data directory
 --dsh-dir <path>      DeepSeek Harness data directory (default: $DSH_HOME or ~/.dsh)
 --openclaw-dir <path> OpenClaw state directory
@@ -186,7 +181,7 @@ are top-level `projectPaths`, not a provider-specific nested setting:
 ```json
 {
   "projectPaths": {
-    "gemini": {
+    "codex": {
       "opaque-project-key": "C:\\work\\project"
     }
   },
@@ -210,8 +205,8 @@ overrides resume commands; `resumeShell` defines the trusted local host.
 `allowTerminalLaunch` is a startup switch and is not persisted.
 
 Common environment variables are `PORT`, `AGENTSESSION_DB_PATH`,
-`XDG_DATA_HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME`,
-`GEMINI_HOME`, `OPENCLAW_STATE_DIR`, `OPENCLAW_HOME`, `HERMES_HOME`,
+`XDG_DATA_HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `OPENCLAW_STATE_DIR`,
+`OPENCLAW_HOME`, `HERMES_HOME`,
 `PI_CODING_AGENT_DIR`, `DSH_HOME`, `AGENTSESSION_META_PATH`, and
 `AGENTSESSION_CONFIG`.
 

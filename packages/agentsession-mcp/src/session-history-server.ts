@@ -18,8 +18,6 @@ const providerIds = [
   "codex",
   "openclaw",
   "hermes",
-  "copilot",
-  "gemini",
   "pi",
   "deepseek-harness"
 ] as const;

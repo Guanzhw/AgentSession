@@ -2,12 +2,12 @@ import { escapeHtml } from "../markdown.js";
 import { t, getLocale } from "../i18n.js";
 import { icons } from "../icons.js";
 
-export function layout(title: string, body: string, page = "home", { provider = null, providers = [], providerAvailable = true, manageable = false, searchQuery = "" }: { provider?: string | null; providers?: { id: string; name: string; icon: string; available: boolean; lifecycle?: string }[]; providerAvailable?: boolean; manageable?: boolean; searchQuery?: string } = {}) {
+export function layout(title: string, body: string, page = "home", { provider = null, providers = [], providerAvailable = true, manageable = false, searchQuery = "" }: { provider?: string | null; providers?: { id: string; name: string; icon: string; available: boolean }[]; providerAvailable?: boolean; manageable?: boolean; searchQuery?: string } = {}) {
   const providerPrefix = provider ? `/${encodeURIComponent(provider)}` : "";
   const settingsProvider = provider || providers.find((item) => item.available !== false)?.id || null;
   const currentProvider = provider ? providers.find((item) => item.id === provider) : null;
   const providerContext = currentProvider
-    ? `<span class="provider-context" title="${escapeHtml(currentProvider.name)}"><span>${currentProvider.icon}</span>${escapeHtml(currentProvider.name)}${currentProvider.lifecycle === "legacy" ? `<span class="provider-legacy-badge">${escapeHtml(t("provider.legacy"))}</span>` : ""}</span>`
+    ? `<span class="provider-context" title="${escapeHtml(currentProvider.name)}"><span>${currentProvider.icon}</span>${escapeHtml(currentProvider.name)}</span>`
     : "";
 
   return `<!DOCTYPE html>

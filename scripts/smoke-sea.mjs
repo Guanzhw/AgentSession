@@ -13,7 +13,7 @@ const viewer = path.join(binaryDir, `agentsession${extension}`);
 const mcp = path.join(binaryDir, `agentsession-mcp${extension}`);
 const metadata = JSON.parse(readFileSync(path.join(binaryDir, "binary-metadata.json"), "utf8"));
 const packageVersion = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).version;
-const expectedProviderIds = ["opencode", "claude-code", "codex", "openclaw", "hermes", "copilot", "gemini", "pi", "deepseek-harness"];
+const expectedProviderIds = ["opencode", "claude-code", "codex", "openclaw", "hermes", "pi", "deepseek-harness"];
 if (metadata.version !== packageVersion) throw new Error("Binary metadata version does not match package version");
 
 for (const [executable, expected] of [[viewer, "AgentSession —"], [mcp, "AgentSession-MCP"]]) {
@@ -32,8 +32,6 @@ const server = spawn(viewer, [
   "--opencode-db", path.join(temp, "missing-opencode.db"),
   "--claude-dir", path.join(temp, "missing-claude"),
   "--codex-dir", path.join(temp, "missing-codex"),
-  "--copilot-dir", path.join(temp, "missing-copilot"),
-  "--gemini-dir", path.join(temp, "missing-gemini"),
   "--pi-dir", path.join(temp, "missing-pi"),
   "--dsh-dir", path.join(temp, "missing-dsh"),
   "--openclaw-dir", path.join(temp, "missing-openclaw"),
@@ -75,8 +73,6 @@ writeFileSync(configPath, JSON.stringify({
   dbPath: path.join(temp, "missing-opencode.db"),
   claudeDir: path.join(temp, "missing-claude"),
   codexDir: path.join(temp, "missing-codex"),
-  copilotDir: path.join(temp, "missing-copilot"),
-  geminiDir: path.join(temp, "missing-gemini"),
   piDir: path.join(temp, "missing-pi"),
   dshDir: path.join(temp, "missing-dsh"),
   openclawDir: path.join(temp, "missing-openclaw"),

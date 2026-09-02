@@ -495,11 +495,8 @@ export const en = {
   "provider.opencode": "OpenCode",
   "provider.claude-code": "Claude Code",
   "provider.codex": "Codex CLI",
-  "provider.copilot": "GitHub Copilot CLI",
-  "provider.gemini": "Gemini CLI",
   "provider.pi": "Pi",
   "provider.deepseek-harness": "DeepSeek Harness",
-  "provider.legacy": "Legacy",
   "provider.read_only": "Read-only mode",
   "provider.not_detected": "Not installed",
 };

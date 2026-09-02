@@ -1,6 +1,6 @@
 # AgentSession
 
-AgentSession 是本地优先、只读的 harness runtime inspector。它从 OpenCode、Claude Code、Codex CLI、OpenClaw、Hermes Agent、GitHub Copilot CLI、Gemini CLI、Pi 和 DeepSeek Harness 的本地记录中重建：harness 如何运行、如何派生 session、如何调度工作，以及上下文如何被加载、压缩、继承和重新注入。
+AgentSession 是本地优先、只读的 harness runtime inspector。它从 OpenCode、Claude Code、Codex CLI、OpenClaw、Hermes Agent、Pi 和 DeepSeek Harness 的本地记录中重建：harness 如何运行、如何派生 session、如何调度工作，以及上下文如何被加载、压缩、继承和重新注入。
 
 对话仍然是兼容的阅读投影，但不是唯一的结构模型。所有 Provider 原始数据库、transcript 和事件日志都保持只读；收藏、自定义标题和排除状态写入独立的 AgentSession 元数据。
 
@@ -52,7 +52,7 @@ GET /api/:provider/session/:id/runtime/graph?depth=&maxNodes=
 
 ## Provider coverage
 
-九个已注册 Provider 都覆盖 Session Protocol v2。能力表区分来源记录和适配器派生的事实；`partial` 不等于来源原生保存。
+七个已注册 Provider 都覆盖 Session Protocol v2。能力表区分来源记录和适配器派生的事实；`partial` 不等于来源原生保存。
 
 | Provider | 生命周期 | 本地来源 | Protocol fidelity 与覆盖 |
 |:---|:---|:---|:---|
@@ -61,8 +61,6 @@ GET /api/:provider/session/:id/runtime/graph?depth=&maxNodes=
 | Codex CLI | active | `~/.codex/sessions/**/*.jsonl` | `full/recorded` response/item、工具和 compaction；`partial/derived` NEW_TASK 关系、Task、AgentRun。 |
 | OpenClaw | active | `~/.openclaw/agents/*/sessions/*.jsonl` | `partial/derived` branch、reasoning、工具和 registry lineage；无来源证据不创建 child。 |
 | Hermes Agent | active | `$HERMES_HOME/state.db` | `full/recorded` SQLite 事件；`partial/derived` 压缩延续/delegation lineage，压缩不是 spawned。 |
-| GitHub Copilot CLI | legacy | `~/.copilot/session-state/*/events.jsonl` 与 `session-store.db` | `partial/derived` event-log message/tool 和 inline-agent Task/AgentRun；无可独立恢复 child。 |
-| Gemini CLI | legacy | `~/.gemini/tmp/*/chats/*.json` | `partial/derived` message/model/tool；未记录的关系、Task、run、context 为 `none`/unsupported。 |
 | Pi | active | `~/.pi/agent/sessions/**/*.jsonl` | `full/recorded` branch/compaction 和 `partial/derived` parent lineage；不虚构 spawn。 |
 | DeepSeek Harness | active preview | `$DSH_HOME/sessions/**/session.jsonl[.zstd]` 或 `~/.dsh/sessions/**` | `full/recorded` v0 event/context；`partial/derived` workflow、team 和跨 session 关系。 |
 
@@ -106,8 +104,6 @@ agentsession [options]
 --opencode-db <path>  OpenCode 数据库
 --claude-dir <path>   Claude Code 数据目录
 --codex-dir <path>    Codex CLI 数据目录
---copilot-dir <path>  GitHub Copilot CLI 数据目录
---gemini-dir <path>   Gemini CLI 数据目录
 --pi-dir <path>       Pi agent 数据目录
 --dsh-dir <path>      DeepSeek Harness 数据目录（默认 $DSH_HOME 或 ~/.dsh）
 --openclaw-dir <path> OpenClaw state 目录
@@ -129,7 +125,7 @@ agentsession [options]
 ```json
 {
   "projectPaths": {
-    "gemini": {
+    "codex": {
       "opaque-project-key": "C:\\work\\project"
     }
   },
@@ -148,7 +144,7 @@ agentsession [options]
 
 `projectPaths.<provider>` 的 key 必须是来源提供的稳定 opaque project key，value 必须是已存在的绝对目录；AgentSession 不猜测或写回该映射。`resumeCommands` 只覆盖 resume 命令，`resumeShell` 只定义受信任的本地宿主。`allowTerminalLaunch` 是启动时开关，不写入保存配置。
 
-常用环境变量：`PORT`、`AGENTSESSION_DB_PATH`、`XDG_DATA_HOME`、`CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`COPILOT_HOME`、`GEMINI_HOME`、`OPENCLAW_STATE_DIR`、`OPENCLAW_HOME`、`HERMES_HOME`、`PI_CODING_AGENT_DIR`、`DSH_HOME`、`AGENTSESSION_META_PATH`、`AGENTSESSION_CONFIG`。
+常用环境变量：`PORT`、`AGENTSESSION_DB_PATH`、`XDG_DATA_HOME`、`CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`OPENCLAW_STATE_DIR`、`OPENCLAW_HOME`、`HERMES_HOME`、`PI_CODING_AGENT_DIR`、`DSH_HOME`、`AGENTSESSION_META_PATH`、`AGENTSESSION_CONFIG`。
 
 ## AgentSession-MCP
 

@@ -37,11 +37,9 @@ boundary.
 
 | Source shape | Reference | Boundary to preserve |
 |:---|:---|:---|
-| One JSON file per session | `src/providers/gemini/` | Flat messages and truthful unsupported domains. |
 | JSONL transcript | `src/providers/claude-code/` or `src/providers/codex/` | Record order, response boundaries, and child evidence. |
 | Branch-tree JSONL | `src/providers/pi/` or `src/providers/openclaw/` | In-file branches and canonical parent/session IDs. |
 | Event-sourced JSONL with Zstd frames | `src/providers/deepseek-harness/` | Frame decoding, packed-row keys, source sequence, and required event vocabulary. |
-| Inline event log plus catalog database | `src/providers/copilot/` | Event log is canonical; inline agents remain non-detached facts. |
 | Provider-native SQLite | `src/providers/hermes/` | Provider schema, WAL snapshots, and lineage remain local to the adapter. |
 | OpenCode SQLite | `src/providers/opencode/` | Only the OpenCode schema is supported; arbitrary SQLite is not interchangeable. |
 
@@ -209,6 +207,6 @@ not changed, and update both READMEs when public capabilities change.
 - `src/providers/shared/session-protocol.ts` — v2 types, factories, validator, and finalizer.
 - `src/protocol-runtime.ts` — cache and bounded Runtime projections.
 - `src/providers/deepseek-harness/compatibility.ts` — DSH compatibility snapshot.
-- `src/providers/gemini/`, `src/providers/copilot/`, `src/providers/pi/` — compact provider-specific protocol examples.
+- `src/providers/pi/` — compact provider-specific protocol example.
 - `packages/agentsession-mcp/src/session-history-server.ts` — read-only MCP boundary.
 - [`docs/specs/runtime-protocol-workbench/`](./specs/runtime-protocol-workbench/) — requirements and design source.

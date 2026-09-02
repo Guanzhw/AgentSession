@@ -19,7 +19,7 @@ The package is intentionally small:
 - Server-rendered HTML with plain browser JavaScript and CSS.
 - Node's built-in test runner.
 - Provider adapters for OpenCode, Claude Code, Codex CLI, OpenClaw, Hermes
-  Agent, GitHub Copilot CLI, Gemini CLI, Pi, and DeepSeek Harness.
+  Agent, Pi, and DeepSeek Harness.
 
 ## Non-Negotiable Invariants
 
@@ -121,8 +121,6 @@ src/
     codex/                       Codex JSONL adapter/parser
     openclaw/                    OpenClaw branch-aware JSONL adapter/parser
     hermes/                      Hermes read-only SQLite adapter/parser
-    copilot/                     GitHub Copilot CLI event-log adapter/parser
-    gemini/                      Gemini JSON adapter/parser
     pi/                          Pi branch-aware JSONL adapter/parser
     deepseek-harness/            DSH multi-frame Zstd adapter/parser/protocol
   views/                         server-rendered page and component templates
@@ -191,10 +189,9 @@ When adding or changing a provider:
 9. Update the provider table and `docs/CONTRIBUTING-PROVIDER.md` when the
    contract or supported capabilities change.
 
-Use Gemini as a compact file-provider example, Claude and Codex as linear
-JSONL examples, Pi as a branch-tree JSONL example, and OpenCode as the
-structured SQLite example. Read the actual adapter before copying a pattern
-because provider capabilities differ.
+Use Claude and Codex as linear JSONL examples, Pi as a branch-tree JSONL
+example, and OpenCode as the structured SQLite example. Read the actual
+adapter before copying a pattern because provider capabilities differ.
 
 ### Server and APIs
 

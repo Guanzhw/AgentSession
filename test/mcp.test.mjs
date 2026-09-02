@@ -224,9 +224,9 @@ test("session-history ignores viewer hidden/permanent-excluded metadata; provide
 });
 
 test("session-history default search diagnoses unavailable registered providers", () => {
-  const gemini = {
-    id: "gemini",
-    name: "Fixture Gemini",
+  const unavailable = {
+    id: "pi",
+    name: "Fixture Pi",
     icon: "",
     detect: () => false,
     getDataPath: () => null,
@@ -239,13 +239,13 @@ test("session-history default search diagnoses unavailable registered providers"
   const diagnosticService = createSessionHistoryService({
     dependencies: {
       getAvailableProviders: () => [],
-      getAllProviders: () => [gemini],
+      getAllProviders: () => [unavailable],
       findIndexedSessionMetadata: () => [],
       getIndexedSessionChildren: () => []
     }
   });
   assert.deepEqual(diagnosticService.search({ query: "Needle" }).diagnostics, [
-    { provider: "gemini", status: "unavailable" }
+    { provider: "pi", status: "unavailable" }
   ]);
 });
 
@@ -346,8 +346,6 @@ test("AgentSession-MCP lists exactly five read-only tools over the MCP protocol"
     "codex",
     "openclaw",
     "hermes",
-    "copilot",
-    "gemini",
     "pi",
     "deepseek-harness"
   ]);

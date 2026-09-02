@@ -41,7 +41,7 @@ filters. A session still present in provider storage remains queryable.
 
 The MCP uses the same provider registry and configuration paths as AgentSession.
 The current ProviderId set is `opencode`, `claude-code`, `codex`, `openclaw`,
-`hermes`, `copilot`, `gemini`, `pi`, and `deepseek-harness`.
+`hermes`, `pi`, and `deepseek-harness`.
 
 All public identifiers use structured references:
 

@@ -435,7 +435,7 @@ test("session protocol route exposes descriptors and protocol with 404 semantics
       };
     }
   };
-  const plain = { id: "gemini", name: "Plain", icon: "", capabilities: {}, getSession() { return null; } };
+  const plain = { id: "pi", name: "Plain", icon: "", capabilities: {}, getSession() { return null; } };
   const routes = captureGetRoutes(registerSessionDetail, {
     appConfig: { port: 0, metaDir: temp, projectPaths: {}, resumeCommands: {}, allowTerminalLaunch: false },
     providerMap: new Map([[provider.id, provider], [plain.id, plain]]),
@@ -472,7 +472,7 @@ test("session protocol route exposes descriptors and protocol with 404 semantics
 
   // Provider without a protocol accessor -> 404, never fabricated data.
   const unsupportedResponse = createResponseCapture();
-  await route.handler({ url: "/api/gemini/session/x/protocol" }, unsupportedResponse, ["", "gemini", "x"]);
+  await route.handler({ url: "/api/pi/session/x/protocol" }, unsupportedResponse, ["", "pi", "x"]);
   assert.equal(unsupportedResponse.statusCode, 404);
   assert.equal(JSON.parse(unsupportedResponse.body).error, "Session protocol not supported");
 
@@ -561,7 +561,7 @@ test("runtime protocol routes return bounded summary, event pages, and graph pro
 });
 
 test("provider page keeps unavailable paths and management capability provider-owned", async () => {
-  const providers = ["gemini"].map((providerId) => getProvider(providerId));
+  const providers = ["pi"].map((providerId) => getProvider(providerId));
   assert.ok(providers.every(Boolean));
   const providerInfo = providers.map((provider) => ({
     id: provider.id,
@@ -614,10 +614,10 @@ test("centralized sessions page queries multiple providers and keeps canonical p
     (id, provider, parent_id, title, directory, time_created, time_updated, message_count, token_count, last_indexed)
     VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`);
   insert.run("shared-id", "codex", "Codex session", "D:\\codex", 1000, 3000, 3, 30, Date.now());
-  insert.run("shared-id", "gemini", "Gemini session", "D:\\gemini", 1000, 2000, 2, 20, Date.now());
+  insert.run("shared-id", "pi", "Pi session", "D:\\pi", 1000, 2000, 2, 20, Date.now());
   const providerInfo = [
     { id: "codex", name: "Codex", icon: "", available: true, manageable: false },
-    { id: "gemini", name: "Gemini", icon: "", available: true, manageable: false },
+    { id: "pi", name: "Pi", icon: "", available: true, manageable: false },
   ];
   const routes = captureGetRoutes(registerSessions, {
     appConfig: {},
@@ -629,25 +629,25 @@ test("centralized sessions page queries multiple providers and keeps canonical p
   assert.ok(pageRoute);
   assert.ok(apiRoute);
 
-  const page = await pageRoute.handler({ url: "/sessions?provider=codex&provider=gemini" }, createResponseCapture());
+  const page = await pageRoute.handler({ url: "/sessions?provider=codex&provider=pi" }, createResponseCapture());
   assert.equal(page.status, 200);
   assert.match(page.body, /href="\/codex\/session\/shared-id\?from=/);
-  assert.match(page.body, /href="\/gemini\/session\/shared-id\?from=/);
+  assert.match(page.body, /href="\/pi\/session\/shared-id\?from=/);
   assert.match(page.body, /class="session-provider-badge" title="codex">Codex</);
-  assert.match(page.body, /class="session-provider-badge" title="gemini">Gemini</);
-  assert.match(page.body, /href="\/stats\?provider=codex&amp;provider=gemini"/);
+  assert.match(page.body, /class="session-provider-badge" title="pi">Pi</);
+  assert.match(page.body, /href="\/stats\?provider=codex&amp;provider=pi"/);
 
-  renameSession("gemini", "shared-id", "Renamed global fixture");
-  const renamed = await pageRoute.handler({ url: "/sessions?provider=gemini&q=Renamed" }, createResponseCapture());
+  renameSession("pi", "shared-id", "Renamed global fixture");
+  const renamed = await pageRoute.handler({ url: "/sessions?provider=pi&q=Renamed" }, createResponseCapture());
   assert.equal(renamed.status, 200);
   assert.match(renamed.body, /Renamed global fixture/);
   assert.doesNotMatch(renamed.body, /Codex session/);
 
   const response = createResponseCapture();
-  await apiRoute.handler({ url: "/api/sessions?provider=gemini" }, response);
+  await apiRoute.handler({ url: "/api/sessions?provider=pi" }, response);
   const payload = JSON.parse(response.body);
   assert.equal(payload.total, 1);
-  assert.equal(payload.sessions[0].provider, "gemini");
+  assert.equal(payload.sessions[0].provider, "pi");
 });
 
 test("centralized project filters merge equivalent Windows and WSL paths", async () => {
@@ -657,11 +657,11 @@ test("centralized project filters merge equivalent Windows and WSL paths", async
     VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`);
   insert.run("project-alias-win", "codex", "Project alias fixture", "D:\\WorkSpace\\ProjectAliases", 1000, 4000, 1, 10, Date.now());
   insert.run("project-alias-slash", "codex", "Project alias fixture", "D:/WorkSpace/ProjectAliases", 1000, 3000, 1, 10, Date.now());
-  insert.run("project-alias-wsl", "gemini", "Project alias fixture", "/mnt/d/WorkSpace/ProjectAliases", 1000, 2000, 1, 10, Date.now());
+  insert.run("project-alias-wsl", "pi", "Project alias fixture", "/mnt/d/WorkSpace/ProjectAliases", 1000, 2000, 1, 10, Date.now());
 
   const providerInfo = [
     { id: "codex", name: "Codex", icon: "", available: true, manageable: false },
-    { id: "gemini", name: "Gemini", icon: "", available: true, manageable: false },
+    { id: "pi", name: "Pi", icon: "", available: true, manageable: false },
   ];
   const routes = captureGetRoutes(registerSessions, {
     appConfig: {},
@@ -671,13 +671,13 @@ test("centralized project filters merge equivalent Windows and WSL paths", async
   const pageRoute = routes.find(({ pattern }) => pattern === "/sessions");
   const apiRoute = routes.find(({ pattern }) => pattern === "/api/sessions");
 
-  const page = await pageRoute.handler({ url: "/sessions?provider=codex&provider=gemini&q=Project%20alias%20fixture" }, createResponseCapture());
+  const page = await pageRoute.handler({ url: "/sessions?provider=codex&provider=pi&q=Project%20alias%20fixture" }, createResponseCapture());
   assert.equal(page.status, 200);
   assert.equal((page.body.match(/ProjectAliases \(3\)/g) || []).length, 1);
 
   const response = createResponseCapture();
   await apiRoute.handler({
-    url: "/api/sessions?provider=codex&provider=gemini&q=Project%20alias%20fixture&project=D%3A%5CWorkSpace%5CProjectAliases"
+    url: "/api/sessions?provider=codex&provider=pi&q=Project%20alias%20fixture&project=D%3A%5CWorkSpace%5CProjectAliases"
   }, response);
   const payload = JSON.parse(response.body);
   assert.equal(payload.total, 3);
@@ -754,7 +754,7 @@ test("centralized Usage page aggregates selected providers and preserves compone
       getTokenStats() { return [{ day: currentDay, inputTokens: 10, outputTokens: 4, reasoningTokens: 2, cacheReadTokens: 5, cacheWriteTokens: 0, totalTokens: 21, messageCount: 2 }]; }
     },
     {
-      id: "gemini", name: "Gemini", icon: "", capabilities: {},
+      id: "pi", name: "Pi", icon: "", capabilities: {},
       getTokenStats() { return [{ day: currentDay, inputTokens: 7, outputTokens: 3, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 1, totalTokens: 11, messageCount: 1 }]; }
     }
   ];
@@ -766,25 +766,25 @@ test("centralized Usage page aggregates selected providers and preserves compone
   });
   const route = routes.find(({ pattern }) => pattern === "/stats");
   assert.ok(route);
-  const result = await route.handler({ url: "/stats?provider=codex&provider=gemini&days=7" }, createResponseCapture());
+  const result = await route.handler({ url: "/stats?provider=codex&provider=pi&days=7" }, createResponseCapture());
   assert.equal(result.status, 200);
   assert.match(result.body, /Usage by provider/);
   assert.match(result.body, /Codex/);
-  assert.match(result.body, /Gemini/);
+  assert.match(result.body, /Pi/);
   assert.match(result.body, /data-token-total="32"/);
   assert.match(result.body, /name="provider" value="codex" checked/);
-  assert.match(result.body, /name="provider" value="gemini" checked/);
+  assert.match(result.body, /name="provider" value="pi" checked/);
   assert.match(result.body, /href="\/stats\?provider=codex&amp;days=7"/);
-  assert.match(result.body, /href="\/stats\?provider=gemini&amp;days=7"/);
+  assert.match(result.body, /href="\/stats\?provider=pi&amp;days=7"/);
   assert.match(result.body, /href="\/codex\/stats\?days=7"/);
-  assert.match(result.body, /href="\/gemini\/stats\?days=7"/);
+  assert.match(result.body, /href="\/pi\/stats\?days=7"/);
   assert.match(result.body, /data-provider-token-total="32">32<\/strong>/);
   assert.match(result.body, /Selected providers total/);
   assert.match(result.body, /Total Token Trend/);
   assert.match(result.body, /Providers shown/);
   assert.ok(result.body.indexOf("Total Token Trend") < result.body.indexOf("Usage by provider"));
   assert.match(result.body, /Show only Codex/);
-  assert.match(result.body, /Show only Gemini/);
+  assert.match(result.body, /Show only Pi/);
   assert.equal((result.body.match(/Provider details/g) || []).length, 2);
 
   const focused = await route.handler({ url: "/stats?provider=codex&days=7" }, createResponseCapture());

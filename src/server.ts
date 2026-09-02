@@ -106,7 +106,6 @@ export async function startServer(config = getConfig()) {
       icon: p.icon,
       available: availableIds.has(p.id),
       manageable: supportsLocalManagement(p),
-      lifecycle: p.lifecycle || "active",
       storageDiagnostic: p.getStorageDiagnostic?.() || null,
       // Descriptor-aware protocol capabilities; absent accessors default to
       // support "none" for every domain without breaking legacy fields.

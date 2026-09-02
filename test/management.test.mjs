@@ -244,7 +244,7 @@ test("viewer metadata filters and manages SQLite and indexed providers without t
     assert.deepEqual(indexedCatalog.overview({ starredOnly: true }), { totalSessions: 1, totalMessages: 2 });
 
     const providers = new Map(getAllProviders().map((provider) => [provider.id, provider]));
-    for (const id of ["claude-code", "codex", "copilot", "gemini", "pi", "deepseek-harness"]) {
+    for (const id of ["claude-code", "codex", "pi", "deepseek-harness"]) {
       assert.equal(providers.get(id)?.capabilities?.localManagement, true, id);
     }
   } finally {
