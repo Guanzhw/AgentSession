@@ -268,3 +268,15 @@ The implementation lands in reviewable commits:
 There is no runtime feature flag preserving old Flow/Analysis. Git history is
 the rollback mechanism. Provider data is never migrated, so rollback cannot
 damage source sessions.
+
+## 10. Backlog (open evolution items)
+
+1. **Normalized event kind for harness environment reloads.** A session may
+   reload plugins/skills/configuration mid-flight. No normalized kind exists;
+   such records currently land in `context`/`control`/`unknown` events with
+   provider-native types only. Propose `environment.reloaded` (category
+   `control`), and `environment.loaded` for a startup inventory, once provider
+   evidence demonstrates the recorded shape. Pending decision — the UI
+   information design (`docs/design/ui-v2.md`) must not invent this kind.
+   Later optional enhancement, evaluated only after the core provider/ownership
+   work (see the work-graph Evolution backlog).

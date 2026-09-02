@@ -1,0 +1,53 @@
+# 后端演进 · Provider evidence freshness refresh(下一阶段 bounded spec)
+
+```text
+任务:按照 evidence-matrix 的 2026-09-03 freshness snapshot,逐 provider 刷新
+parser/schema/protocol 映射,把"所有 provider 都会演进,必须维护最新 provider
+文档"落实为可执行流程。本文件是**下一阶段的有界 spec,不是立即实现**。
+
+**状态:规划中(bounded spec,不落地代码)。** 当前 adapter 快照已落后于多个
+upstream 版本;refresh 必须逐 provider 独立进行(单独决策/fixture/真实数据/提交),
+不做大爆炸式一次性重构。任何 parser/protocol 变更前,先满足证据门槛:
+官方 docs + upstream source + 本地真实记录三方面证据齐全,并按
+docs/CONTRIBUTING-PROVIDER.md 「Provider evidence freshness」规则记录
+verified-at、版本/commit、官方来源链接与样本格式。
+
+刷新优先级(用户明确要求跟最近版本的 DSH 与 OpenClaw 先行):
+
+1. **DeepSeek Harness alpha.5** — upstream HEAD 49a606bc5b5934603f22a26957a07dc799ab0291,
+   alpha.5 tag db6bdc3576c2d4e7c965e8e3ed0c2a731eed87f5;当前 adapter 是 alpha.3
+   快照,已落后。策略是跟随最近 alpha/official HEAD,不等待稳定 rc。
+2. **OpenClaw current SQLite** — 官方最新 docs 明确 current session rows/
+   transcript/metadata 主存储为 ~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite,
+   sessions/*.jsonl 是 legacy/archive;当前 adapter 仅支持 JSONL,须按
+   supported/legacy/pending 显式标记,不得继续声称一般性 active current support。
+3. **Pi current v3 / 0.84.4** — 官方当前包/源为 @earendil-works/pi-coding-agent 与
+   https://github.com/earendil-works/pi,HEAD e266507b606b9552fa277252644054afd4384b11;
+   当前安装 0.80.10,官方 session format 为 v3。旧 @mariozechner/badlogic 信息只能标
+   legacy,不得作为最新源。现有 reader 需针对 v3/当前版本持续验证。
+4. **Codex CLI 0.152.1** — installed/npm 0.152.1,HEAD
+   5e26f7621c1c470fe62350d61c9eb4d6c772a0da;现有 native-v3 验证样本(0.151 alpha)
+   是历史快照,不等同最新版本已覆盖。
+5. **Claude Code 2.1.258** — npm 2.1.258,repo HEAD
+   aef74afe01f65b602258d6102b0da9730ac6f0aa;本机安装 2.1.207。
+6. **OpenCode 1.18.26** — npm opencode-ai 1.18.26;本机安装 1.17.11(Windows)。
+7. **Hermes Agent remote HEAD** — 1cb3ab617363ffab9e55239a7d2ab0d6f9c10473;
+   本地 v0.19.1(upstream 0cd26ce9 / local 840fb55a)的 state.db 结论只对已验证
+   版本/本地样本成立。
+
+纪律:
+- 每个 provider 独立决策记录、独立 fixtures、独立真实数据验证、独立提交;
+  一个 provider 的 refresh 不阻塞也不依赖其余 provider。
+- 只在官方文档 + source + 真实记录证据后改 parser/protocol;负面结论只对该
+  快照成立,格式漂移显式标记 supported/legacy/pending;禁止自动升级用户安装、
+  禁止写 provider 数据。
+- 保持核心 Work Graph provider-native v3 mapping 的优先级:本 refresh 是
+  "证据时效"维护,不改变 v3 映射的设计与实施顺序;若与核心 v3 映射冲突,
+  以核心 v3 映射为准,refresh 推迟。
+- 每完成一个 provider:更新 evidence-matrix freshness snapshot 对应行
+  (verified-at/版本/来源/样本),同步 README.md 与 README.en.md 的
+  provider 表与兼容段。
+
+完成动作:每个 provider 完成后独立 pi_review 只读审查(范围/证据有界);
+主 agent 汇总验收;git diff --check + npm run check:governance。
+```
