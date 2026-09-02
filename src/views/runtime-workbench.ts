@@ -57,7 +57,9 @@ function evidenceButton(kind: string, id: string, label = "") {
 }
 
 function entityLabel(value: any, fallback: string) {
-  return value?.title || value?.agentPath || value?.agent || value?.model || fallback;
+  // Goals record their objective in `description` (title is null); the
+  // remaining fields are the entity-label chain for actors/runs/artifacts.
+  return value?.title || value?.description || value?.agentPath || value?.agent || value?.model || fallback;
 }
 
 function renderEvent(event: any) {

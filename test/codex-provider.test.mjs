@@ -7,6 +7,7 @@ import {
 } from "../dist/src/providers/codex/protocol.js";
 import {
   classifyCodexRecordProvenance,
+  extractMeta,
   recordsToMessages
 } from "../dist/src/providers/codex/parser.js";
 
@@ -145,4 +146,111 @@ test("Codex does not treat a later matching parent subsequence as a copied prefi
   const provenance = classifyCodexRecordProvenance(childRecords, parentRecords);
   assert.equal(provenance.get(childRecords[2]), "session");
   assert.equal(provenance.get(childRecords[3]), "session");
+});
+
+test("Codex emits new-format user messages only from recorded user.text rows", () => {
+  const records = [
+    { type: "session_meta", payload: { id: "root" }, timestamp: "2026-08-31T10:43:18.959Z" },
+    {
+      type: "response_item",
+      payload: {
+        type: "message", role: "user", id: "ctx-env",
+        content: [{ type: "input_text", text: "<environment_context>\n  <cwd>D:</cwd>" }],
+        internal_chat_message_metadata_passthrough: { turn_id: "turn-0", content_item_kinds: ["environments.environment_context"] }
+      }
+    },
+    {
+      type: "response_item",
+      payload: {
+        type: "message", role: "user", id: "ctx-goal",
+        content: [{ type: "input_text", text: "<codex_internal_context>" }],
+        internal_chat_message_metadata_passthrough: { turn_id: "turn-0", content_item_kinds: ["goal.internal_context"] }
+      }
+    },
+    {
+      type: "response_item",
+      payload: {
+        type: "message", role: "user", id: "ctx-legacy",
+        content: [{ type: "input_text", text: "# AGENTS.md" }]
+      }
+    },
+    {
+      type: "response_item",
+      payload: {
+        type: "message", role: "user", id: "msg-1",
+        content: [{ type: "input_text", text: "排查问题:\n\n1. compact 位置" }],
+        internal_chat_message_metadata_passthrough: { turn_id: "turn-1", content_item_kinds: ["user.text"] }
+      }
+    },
+    {
+      type: "event_msg",
+      payload: { type: "token_count", info: { last_token_usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } } }
+    },
+    {
+      type: "response_item",
+      payload: { type: "message", role: "assistant", id: "asst-1", content: [{ type: "output_text", text: "answer" }] }
+    }
+  ];
+  const messages = recordsToMessages(records, "root");
+  const users = messages.filter((message) => message.role === "user");
+  assert.equal(users.length, 1);
+  assert.deepEqual(users.map((message) => message.id), ["msg-1"]);
+  assert.match(users[0].content, /^排查问题/);
+  assert.equal(users[0].metadata.provenance, "session");
+  assert.equal(users[0].metadata.turnId, "turn-1");
+  // The token_count arrives before any assistant output: it belongs to the
+  // new user request, never to the preceding turn (same rule as legacy rows).
+  assert.equal(users[0].tokens.total, 12);
+});
+
+test("Codex emits a hybrid-format turn once, preferring the user.text row", () => {
+  const records = [
+    { type: "session_meta", payload: { id: "root" }, timestamp: "2026-08-27T12:54:39.000Z" },
+    {
+      type: "response_item",
+      payload: {
+        type: "message", role: "user", id: "msg-hybrid",
+        content: [{ type: "input_text", text: "pi-wsl mcp 现在还会返回一个事无巨细的 json 吗？" }],
+        internal_chat_message_metadata_passthrough: { turn_id: "turn-hybrid", content_item_kinds: ["user.text"] }
+      }
+    },
+    { type: "event_msg", payload: { type: "user_message", message: "pi-wsl mcp 现在还会返回一个事无巨细的 json 吗？" } }
+  ];
+  const users = recordsToMessages(records, "root").filter((message) => message.role === "user");
+  assert.equal(users.length, 1);
+  assert.equal(users[0].id, "msg-hybrid");
+  assert.equal(users[0].metadata.turnId, "turn-hybrid");
+  assert.equal(users[0].content, "pi-wsl mcp 现在还会返回一个事无巨细的 json 吗？");
+});
+
+test("Codex keeps the legacy user_message row when the response_item row is untagged injection", () => {
+  const records = [
+    { type: "session_meta", payload: { id: "root" }, timestamp: "2026-08-31T10:43:18.959Z" },
+    { type: "event_msg", payload: { type: "user_message", message: "legacy prompt" } },
+    {
+      type: "response_item",
+      payload: {
+        type: "message", role: "user", id: "ctx-env",
+        content: [{ type: "input_text", text: "<environment_context>" }]
+      }
+    }
+  ];
+  const users = recordsToMessages(records, "root").filter((message) => message.role === "user");
+  assert.deepEqual(users.map((message) => message.content), ["legacy prompt"]);
+});
+
+test("Codex session title falls back to the first recorded user.text row", () => {
+  const records = [
+    { type: "session_meta", payload: { id: "root" }, timestamp: "2026-08-31T10:43:18.959Z" },
+    {
+      type: "response_item",
+      payload: {
+        type: "message", role: "user", id: "msg-1",
+        content: [{ type: "input_text", text: "排查问题:\n\n1. compact 在会话中出现的位置好像不对" }],
+        internal_chat_message_metadata_passthrough: { turn_id: "turn-1", content_item_kinds: ["user.text"] }
+      }
+    }
+  ];
+  const meta = extractMeta(records, "root");
+  assert.match(String(meta.title), /^排查问题/);
 });

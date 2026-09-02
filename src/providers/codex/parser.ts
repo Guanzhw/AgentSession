@@ -31,6 +31,24 @@ function responseText(payload: any) {
 type CodexMessageProvenance = "session" | "inherited-parent-context";
 type CodexRecordProvenance = "session" | "inherited-parent-context" | "duplicate-token-usage";
 
+/**
+ * New-format Codex transcripts (0.151+ with paginated history) record user
+ * turns as `response_item` message/role=user rows. The recorded passthrough
+ * `content_item_kinds` tag the genuine user text (`user.text`) separately
+ * from system-injected context rows (plugin recommendations, AGENTS.md
+ * instructions, environment context, internal goal context); only tagged
+ * rows are user messages. Legacy-format `response_item` user rows carry no
+ * passthrough at all, and in all observed rollouts they are injected context
+ * or copied parent history, never real user text.
+ */
+export function codexUserTextRecord(record: any): string | null {
+  if (record?.type !== "response_item") return null;
+  if (record.payload?.type !== "message" || record.payload?.role !== "user") return null;
+  const kinds = record.payload?.internal_chat_message_metadata_passthrough?.content_item_kinds;
+  if (!Array.isArray(kinds) || !kinds.includes("user.text")) return null;
+  return responseText(record.payload) || null;
+}
+
 function primarySessionMeta(records: any[]) {
   return records.find((record: any) => record.type === "session_meta")?.payload || {};
 }
@@ -409,6 +427,12 @@ export function extractMeta(records: any, fallbackId: any, normalizedMessages?: 
         title = String(r.payload.message).replace(/\s+/g, " ").trim().slice(0, 120);
       }
     }
+    if (!title && r.type === "response_item") {
+      const responseUserText = codexUserTextRecord(r);
+      if (responseUserText) {
+        title = responseUserText.replace(/\s+/g, " ").trim().slice(0, 120);
+      }
+    }
     if (r.type === "event_msg" && r.payload?.type === "token_count") {
       if (recordProvenance.get(r) !== "session") continue;
       totalTokens += codexUsageToTokens(r.payload.info?.last_token_usage)?.total || 0;
@@ -517,6 +541,19 @@ export function recordsToMessages(records: any, sessionId: any, parentRecords: a
   const messageProvenance = classifyCodexMessageProvenance(records, parentRecords);
   const recordProvenance = classifyCodexRecordProvenance(records, parentRecords);
 
+  // Hybrid rollouts (observed across a Codex version transition, e.g.
+  // 01a04191-...) record the same turn BOTH as a response_item user.text row
+  // and as a legacy event_msg/user_message row with the same text. The
+  // response_item row carries the recorded kind and turn id, so the legacy
+  // duplicate is skipped by exact normalized content comparison.
+  const normalizeMessageText = (value: unknown) => String(value || "").replace(/\s+/g, " ").trim();
+  const recordedUserTexts = new Set<string>();
+  for (const record of records) {
+    if (recordProvenance.get(record) !== "session") continue;
+    const text = codexUserTextRecord(record);
+    if (text) recordedUserTexts.add(normalizeMessageText(text));
+  }
+
   const currentResponseGroup = () => {
     if (!responseGroup) responseGroup = `${sessionId}:response:${responseIndex++}`;
     return responseGroup;
@@ -536,6 +573,10 @@ export function recordsToMessages(records: any, sessionId: any, parentRecords: a
 
     // User message
     if (r.type === "event_msg" && r.payload?.type === "user_message") {
+      // Hybrid rollout: the same turn is also recorded as a user.text
+      // response_item row; that row is richer (kind + turn id) and has
+      // already been emitted (or will be) — skip the legacy duplicate.
+      if (recordedUserTexts.has(normalizeMessageText(r.payload.message))) continue;
       responseGroup = null;
       const provenance = messageProvenance.get(r) || "session";
       const message = {
@@ -555,6 +596,35 @@ export function recordsToMessages(records: any, sessionId: any, parentRecords: a
       // A token_count can arrive after an interrupted request, before Codex
       // emits any assistant item. It belongs to this new user request, never
       // to the preceding assistant turn.
+      pendingUsageTarget = null;
+      lastUsageTarget = null;
+      lastUserTarget = message;
+    }
+
+    // New-format user turn (recorded "user.text" kind). Rows without the
+    // recorded kind carry injected context, not the user's own words.
+    const responseUserText = codexUserTextRecord(r);
+    if (responseUserText) {
+      responseGroup = null;
+      const passthrough = r.payload?.internal_chat_message_metadata_passthrough;
+      const message = {
+        id: r.payload.id || `msg-${idx++}`,
+        sessionId,
+        role: "user",
+        content: responseUserText,
+        thinking: null,
+        toolName: null,
+        toolInput: null,
+        toolOutput: null,
+        timestamp: ts,
+        tokens: null,
+        metadata: {
+          images: r.payload.images || null,
+          turnId: typeof passthrough?.turn_id === "string" ? passthrough.turn_id : null,
+          provenance: messageProvenance.get(r) || "session"
+        }
+      };
+      messages.push(message);
       pendingUsageTarget = null;
       lastUsageTarget = null;
       lastUserTarget = message;
