@@ -8,6 +8,10 @@ import {
   type SessionProtocol,
   type SessionRef
 } from "./providers/shared/session-protocol.js";
+import {
+  upgradeSessionProtocolV2,
+  type SessionProtocolV3
+} from "./providers/shared/session-protocol-v3.js";
 
 const DEFAULT_EVENT_LIMIT = 100;
 const MAX_EVENT_LIMIT = 200;
@@ -22,10 +26,11 @@ interface CachedProtocol {
 }
 
 const protocolCache = new Map<string, CachedProtocol>();
+let v3UpgradeCache = new WeakMap<SessionProtocol, SessionProtocolV3>();
 
 export class ProtocolRuntimeError extends Error {
   constructor(
-    public readonly code: "session_not_found" | "protocol_unavailable" | "invalid_input",
+    public readonly code: "session_not_found" | "protocol_unavailable" | "invalid_input" | "protocol_invalid",
     message: string
   ) {
     super(message);
@@ -70,6 +75,7 @@ function touchCache(key: string, value: CachedProtocol): void {
 
 export function clearProtocolRuntimeCache(): void {
   protocolCache.clear();
+  v3UpgradeCache = new WeakMap<SessionProtocol, SessionProtocolV3>();
 }
 
 /**
@@ -123,6 +129,28 @@ export function getRuntimeProtocol(
   }
   touchCache(key, { revision, protocol });
   return protocol;
+}
+
+/** Resolve a v3 snapshot, preserving v2 facts and leaving new domains explicit. */
+export function getRuntimeProtocolV3(
+  adapter: ProviderAdapter,
+  sessionId: string,
+  knownSession?: Record<string, unknown> | null
+): SessionProtocolV3 {
+  const protocol = getRuntimeProtocol(adapter, sessionId, knownSession);
+  const cached = v3UpgradeCache.get(protocol);
+  if (cached) return cached;
+  let upgraded: SessionProtocolV3;
+  try {
+    upgraded = upgradeSessionProtocolV2(protocol);
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new ProtocolRuntimeError("protocol_invalid", "Session protocol is invalid and cannot be projected.");
+    }
+    throw error;
+  }
+  v3UpgradeCache.set(protocol, upgraded);
+  return upgraded;
 }
 
 function capabilityState(capabilities: ProtocolCapabilities | undefined, domain: keyof ProtocolCapabilities) {

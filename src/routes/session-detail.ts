@@ -23,10 +23,20 @@ import { parseSessionNavigationContext } from "../navigation-context.js";
 import {
   buildRuntimeGraph,
   getRuntimeProtocol,
+  getRuntimeProtocolV3,
   ProtocolRuntimeError,
   queryRuntimeEvents,
   summarizeRuntimeProtocol
 } from "../protocol-runtime.js";
+import {
+  projectContext,
+  projectCoordination,
+  projectExecution,
+  projectWork,
+  ProtocolProjectionError
+} from "../protocol-runtime-v3.js";
+import type { ProjectionOptions, V3Projection } from "../protocol-runtime-v3.js";
+import type { SessionProtocolV3 } from "../providers/shared/session-protocol-v3.js";
 
 export function registerSessionDetail(
   app: any,
@@ -70,7 +80,7 @@ export function registerSessionDetail(
 
   const runtimeError = (res: any, error: unknown) => {
     if (error instanceof ProtocolRuntimeError) {
-      const status = error.code === "invalid_input" ? 400 : 404;
+      const status = error.code === "invalid_input" ? 400 : error.code === "protocol_invalid" ? 422 : 404;
       return json(res, { ok: false, error: error.message, code: error.code }, status);
     }
     console.error(`Runtime protocol route error: ${error instanceof Error ? error.message : String(error)}`);
@@ -451,6 +461,37 @@ export function registerSessionDetail(
       return runtimeError(res, error);
     }
   });
+
+  // v3 Work Graph domains are explicit typed projections. A v2 protocol is
+  // upgraded at this boundary, preserving v2 facts while leaving unsupported
+  // v3 evidence unknown. These routes never expose provider-private fields.
+  const v3ProjectionRoute = (project: (protocol: SessionProtocolV3, options: ProjectionOptions) => V3Projection) => (
+    async (req: any, res: any, match: RegExpMatchArray) => {
+      const providerId = match[1];
+      const sessionId = safeDecodeId(match[2]);
+      const adapter = providerMap.get(providerId);
+      if (!adapter) {
+        const missing = missingProviderResponse(providerId);
+        return json(res, missing.body, missing.status);
+      }
+      if (!sessionId) return json(res, { ok: false, error: "Invalid session id" }, 404);
+      try {
+        const params = new URL(req.url || "/", `http://localhost:${appConfig.port}`).searchParams;
+        const projection = project(getRuntimeProtocolV3(adapter, sessionId), { maxItems: params.get("maxItems") });
+        return json(res, projection);
+      } catch (error) {
+        if (error instanceof ProtocolProjectionError) {
+          return json(res, { ok: false, error: error.message, code: error.code }, 400);
+        }
+        return runtimeError(res, error);
+      }
+    }
+  );
+
+  app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/runtime\/work$/, v3ProjectionRoute(projectWork));
+  app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/runtime\/execution$/, v3ProjectionRoute(projectExecution));
+  app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/runtime\/coordination$/, v3ProjectionRoute(projectCoordination));
+  app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/runtime\/context$/, v3ProjectionRoute(projectContext));
 
   // API: evidence-backed system prompt sources. This is deliberately separate
   // from transcript retrieval: adapters only return locally resolvable sources

@@ -5,6 +5,7 @@ import {
   buildRuntimeGraph,
   clearProtocolRuntimeCache,
   getRuntimeProtocol,
+  getRuntimeProtocolV3,
   ProtocolRuntimeError,
   queryRuntimeEvents,
   summarizeRuntimeProtocol
@@ -84,6 +85,21 @@ test("runtime protocol reuses immutable finalized provider snapshots and finaliz
   assert.notEqual(fallback, mutableV2, "mutable v2 sources still use the finalizer");
   assert.equal(fallback.validation.ok, true);
   assert.equal(Object.isFrozen(fallback), true);
+});
+
+test("runtime v3 projections reuse one explicit upgrade of the cached v2 snapshot", () => {
+  clearProtocolRuntimeCache();
+  const { adapter, getBuilds } = adapterFixture();
+  const first = getRuntimeProtocolV3(adapter, "root");
+  const second = getRuntimeProtocolV3(adapter, "root");
+  assert.equal(first, second);
+  assert.equal(first.version, 3);
+  assert.equal(first.coverage.work.state, "unknown");
+  assert.equal(getBuilds(), 1);
+
+  clearProtocolRuntimeCache();
+  assert.notEqual(getRuntimeProtocolV3(adapter, "root"), first);
+  assert.equal(getBuilds(), 2);
 });
 
 test("runtime event queries are bounded, filterable, cursor-bound, and omit provider data", () => {

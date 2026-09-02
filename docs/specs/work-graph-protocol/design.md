@@ -1,6 +1,6 @@
 # Session Protocol v3 Work Graph design
 
-Status: foundation implemented; projections and provider mappings pending
+Status: v3 foundation and bounded projections implemented; provider mappings pending
 
 Date: 2026-09-02
 
@@ -21,6 +21,43 @@ a context transformation, or message token totals into request usage.
 Invalid v2 snapshots cannot be upgraded. Partial source diagnostics survive
 the upgrade. Finalization owns and freezes a cloned snapshot, so later changes
 to provider drafts cannot invalidate cached validation.
+
+## Bounded projection API
+
+The first v3 consumer stage exposes four explicit, provider-neutral runtime
+projections. Existing v2 Runtime routes remain unchanged:
+
+```text
+GET /api/:provider/session/:id/runtime/work
+GET /api/:provider/session/:id/runtime/execution
+GET /api/:provider/session/:id/runtime/coordination
+GET /api/:provider/session/:id/runtime/context
+```
+
+Each response is versioned (`version: 3`) and contains the canonical `focus`
+session reference, selected-domain `coverage`, protocol completeness, bounded
+diagnostics, `maxItems`, and `truncated`. `maxItems` defaults to 100 and
+accepts 1..300. Invalid bounds return HTTP 400. Invalid v2 snapshots that
+cannot be upgraded return HTTP 422 with `code: "protocol_invalid"`.
+The current bounded snapshots do not paginate; a later paged contract must
+bind cursors to its complete filter identity.
+
+The response shapes are typed rather than a generic node and edge bag. Work
+returns goals, tasks, goal membership, dependencies, and task/run relations.
+Execution returns actors, runs, additive request usage, usage coverage, and
+actor membership/run relations. Coordination returns explicit observations
+plus existing session lineage. Context returns metadata-first artifacts,
+versions, transformations, usage-origin records, and typed lineage/source
+relations. Every observed fact retains its recorded/derived provenance.
+
+Public entities omit nested relation arrays such as task dependencies, actor
+members, context-version parents, artifact source sessions, and usage origin
+slices. Those relations are emitted as separately typed collections under the
+same strict construction/output budget. Execution usage aggregates preserve
+authoritative totals when present, use null for unavailable components, and
+mark `complete: false` for unknown/unsupported coverage, missing components,
+or bounded omission. An explicit `not-observed` usage domain with no records
+is the only empty aggregate reported as complete zero.
 
 ## Evidence coverage
 
@@ -152,7 +189,6 @@ The v3 validator first revalidates the v2-compatible base, then checks:
 - coverage/fact contradictions;
 - bounded diagnostics.
 
-The next stage adds bounded Work, Execution, Coordination, and Context
-projections over this contract. Summary and Events remain cross-cutting
-inspection utilities. Provider mapping begins only after those projections and
-their API fixtures stabilize.
+This stage adds bounded Work, Execution, Coordination, and Context projections
+over this contract. Summary and Events remain cross-cutting inspection
+utilities. The next stage maps provider-native evidence into the four domains.
