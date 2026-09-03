@@ -30,6 +30,7 @@ import {
   type ContextVersion,
   type CoordinationKind,
   type CoordinationObservation,
+  type CoordinationState,
   type Goal,
   type GoalStatus,
   type ProtocolCoverage,
@@ -37,6 +38,7 @@ import {
   type UsageRecord
 } from "../shared/session-protocol-v3.js";
 import { isSubagentToolName } from "../shared/subagent-tools.js";
+import { codexOwnedTokenUsageRecords, codexUsagePayload } from "./parser.js";
 
 type Row = Record<string, any>;
 
@@ -853,10 +855,17 @@ const CODEX_COORDINATION_KINDS: Record<string, CoordinationKind> = {
   spawn_agent: "spawn",
   followup_task: "follow-up",
   send_message: "message",
+  send_input: "message",
+  resume_agent: "follow-up",
   wait_agent: "wait",
   wait: "wait",
-  interrupt_agent: "interrupt"
+  interrupt_agent: "interrupt",
+  // The legacy v1 `multi_agent_v1/close_agent` operation has no distinct v3
+  // kind; retain its lifecycle as the closest interrupt observation.
+  close_agent: "interrupt"
 };
+
+const CODEX_COORDINATION_NAMESPACES = new Set(["collaboration", "multi_agent", "multi_agents", "multi_agent_v1"]);
 
 /** Only four recorded statuses map onto the protocol vocabulary; Codex's
  * `paused` is a user suspension, not the protocol `blocked` semantics, so it
@@ -874,6 +883,28 @@ function callArgumentsOf(record: Row): Row {
     try { return JSON.parse(raw) || {}; } catch { return {}; }
   }
   return raw && typeof raw === "object" ? raw : {};
+}
+
+function closeAgentOutputState(records: Row[], callId: string): CoordinationState | null {
+  const outputRecord = records.find((candidate) => (
+    candidate.type === "response_item"
+      && (candidate.payload?.type === "function_call_output" || candidate.payload?.type === "custom_tool_call_output")
+      && firstString(candidate.payload?.call_id, candidate.payload?.id) === callId
+  ));
+  if (!outputRecord) return null;
+  let output = outputRecord.payload?.output;
+  if (typeof output === "string") {
+    const trimmed = output.trim();
+    if (!trimmed) return "unknown";
+    try { output = JSON.parse(trimmed); } catch { return "unknown"; }
+  }
+  if (!output || typeof output !== "object") return "unknown";
+  if (output.success === true) return "completed";
+  if (output.success === false) return "failed";
+  const status = firstString(output.status, output.state, output.result, output.error)?.toLowerCase();
+  if (["completed", "complete", "success", "succeeded", "closed", "done", "ok"].includes(status || "")) return "completed";
+  if (["failed", "failure", "error", "errored"].includes(status || "")) return "failed";
+  return "unknown";
 }
 
 function passthroughTurnId(record: Row): string | null {
@@ -979,6 +1010,32 @@ export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: Ses
     }
   }
 
+  // Current Codex v2 persists communication between agents as a first-class
+  // rollout item rather than a model-visible agent_message envelope.
+  for (const record of input.records) {
+    if (record.type !== "inter_agent_communication") continue;
+    const paths = [
+      record.payload?.author,
+      record.payload?.recipient,
+      ...(Array.isArray(record.payload?.other_recipients) ? record.payload.other_recipients : [])
+    ];
+    for (const path of paths) {
+      const value = firstString(path);
+      if (!value || actorIdByPath.has(value)) continue;
+      const id = `actor:path:${value}`;
+      actorIdByPath.set(value, id);
+      actors.push(actor({
+        id,
+        kind: "agent",
+        name: value,
+        providerActorId: value,
+        sessionRef: null,
+        runIds: [],
+        provenance: { fidelity: "recorded", sourceType: "codex.inter_agent_communication", sourceId: firstString(record.payload?.id) ?? value }
+      }));
+    }
+  }
+
   // --- Goals ---------------------------------------------------------------
   const goalUpdates = new Map<string, { objective: string | null; status: string; createdAtMs: number | null; updatedAtMs: number | null }>();
   for (const record of input.records) {
@@ -1040,9 +1097,10 @@ export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: Ses
   for (const [index, record] of input.records.entries()) {
     if (record.type !== "response_item") continue;
     if (record.payload?.type !== "function_call" && record.payload?.type !== "custom_tool_call") continue;
-    // Only the collaboration namespace is the recorded subagent tool family;
-    // same-named tools elsewhere (e.g. cell `wait`) are not coordination.
-    if (record.payload?.namespace !== "collaboration") continue;
+    // Only the recorded collaboration namespaces are the subagent tool
+    // families; same-named tools elsewhere (e.g. cell `wait`) are not
+    // coordination.
+    if (!CODEX_COORDINATION_NAMESPACES.has(String(record.payload?.namespace || ""))) continue;
     const name = String(record.payload?.name ?? "");
     const kind = CODEX_COORDINATION_KINDS[name];
     if (!kind) continue;
@@ -1055,11 +1113,16 @@ export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: Ses
       && (candidate.payload?.type === "function_call_output" || candidate.payload?.type === "custom_tool_call_output")
       && firstString(candidate.payload?.call_id, candidate.payload?.id) === callId
     ));
+    const closeState = name === "close_agent" ? closeAgentOutputState(input.records, callId) : null;
     observations.push(coordinationObservation({
       id: `coord:${kind}:${callId}`,
       sessionId,
       kind,
-      state: kind === "spawn" ? (bound.toSessionRef || hasOutput ? "started" : "requested") : "unknown",
+      state: kind === "spawn"
+        ? (bound.toSessionRef || hasOutput ? "started" : "requested")
+        : name === "close_agent"
+          ? (closeState ?? "requested")
+          : "unknown",
       timestamp: recordTimestamp(record),
       senderActorId: parentActorId,
       recipientActorId: bound.recipientActorId,
@@ -1071,7 +1134,42 @@ export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: Ses
       eventId: null,
       turnId: passthroughTurnId(record),
       correlationId: callId,
-      provenance: { fidelity: "recorded", sourceType: `codex.response_item:${String(record.payload?.type)}:collaboration`, sourceId: callId }
+      provenance: {
+        fidelity: "recorded",
+        sourceType: `codex.response_item:${String(record.payload?.type)}:${String(record.payload?.namespace)}`,
+        sourceId: callId
+      }
+    }));
+  }
+
+  // Current Codex v2 persists inter-agent communication as a first-class
+  // item. The item identifies the sender and recipient, but does not carry an
+  // acknowledgement, so delivery remains unknown at this boundary.
+  for (const [index, record] of input.records.entries()) {
+    if (record.type !== "inter_agent_communication") continue;
+    const author = firstString(record.payload?.author);
+    const recipient = firstString(record.payload?.recipient);
+    observations.push(coordinationObservation({
+      id: `coord:message:${firstString(record.payload?.id) ?? index}`,
+      sessionId,
+      kind: "message",
+      state: "unknown",
+      timestamp: recordTimestamp(record),
+      senderActorId: author ? actorIdByPath.get(author) ?? null : null,
+      recipientActorId: recipient ? actorIdByPath.get(recipient) ?? null : null,
+      fromSessionRef: null,
+      toSessionRef: null,
+      relationshipType: null,
+      taskId: null,
+      runId: null,
+      eventId: null,
+      turnId: passthroughTurnId(record),
+      correlationId: firstString(record.payload?.id),
+      provenance: {
+        fidelity: "recorded",
+        sourceType: "codex.inter_agent_communication",
+        sourceId: firstString(record.payload?.id) ?? String(index)
+      }
     }));
   }
 
@@ -1161,15 +1259,15 @@ export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: Ses
 
   // --- Request usage --------------------------------------------------------
   const usageRecords: UsageRecord[] = [];
+  const ownedUsageRecords = new Set(codexOwnedTokenUsageRecords(input.records));
   let activeModel: string | null = null;
   input.records.forEach((record, index) => {
-    if (record.type !== "event_msg") return;
-    if (record.payload?.type === "thread_settings_applied") {
+    if (record.type === "event_msg" && record.payload?.type === "thread_settings_applied") {
       activeModel = firstString(record.payload?.thread_settings?.model) ?? activeModel;
       return;
     }
-    if (record.payload?.type !== "token_count") return;
-    const usage = record.payload?.info?.last_token_usage;
+    if (!ownedUsageRecords.has(record)) return;
+    const usage = codexUsagePayload(record);
     if (!usage || typeof usage !== "object") return;
     const inputRaw = firstNumber(usage.input_tokens, usage.input) ?? 0;
     const cacheRead = firstNumber(usage.cached_input_tokens, usage.cache_read) ?? null;
@@ -1186,7 +1284,8 @@ export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: Ses
     const reasoning = Math.min(reasoningRaw ?? 0, outputRaw);
     const output = Math.max(0, outputRaw - reasoning);
     const total = firstNumber(usage.total_tokens, usage.total) ?? input + (cacheRead ?? 0) + (cacheWrite ?? 0) + output + reasoning;
-    const sourceId = String(record.ordinal ?? index);
+    const sourceId = firstString(record.payload?.response_id, record.payload?.turn_id)
+      ?? String(record.ordinal ?? index);
     usageRecords.push(usageRecord({
       id: `usage:${sessionId}:${sourceId}`,
       scope: "request",
@@ -1195,12 +1294,14 @@ export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: Ses
       model: activeModel,
       runId: null,
       eventId: null,
-      turnId: null,
+      turnId: firstString(record.payload?.turn_id),
       tokens: { input, cacheRead, cacheWrite, output, reasoning, total },
       contextOriginSlices: [],
       provenance: {
         fidelity: activeModel ? "derived" : "recorded",
-        sourceType: activeModel ? "codex.event_msg:token_count+thread_settings_applied" : "codex.event_msg:token_count",
+        sourceType: record.type === "token_usage_record"
+          ? (activeModel ? "codex.token_usage_record+thread_settings_applied" : "codex.token_usage_record")
+          : (activeModel ? "codex.event_msg:token_count+thread_settings_applied" : "codex.event_msg:token_count"),
         sourceId
       }
     }));
@@ -1212,7 +1313,7 @@ export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: Ses
     execution: protocolDomainCoverage(actors.length + base.agentRuns.length > 0 ? "observed" : "not-observed", "recorded agent-path actors plus normalized child agent runs"),
     coordination: protocolDomainCoverage(observations.length > 0 ? "observed" : "not-observed", "recorded collaboration calls and FINAL_ANSWER envelopes"),
     context: protocolDomainCoverage(base.contextArtifacts.length + contextVersions.length + contextTransformations.length > 0 ? "observed" : "not-observed", "recorded compacted window lineage plus summary artifacts"),
-    usage: protocolDomainCoverage(usageRecords.length > 0 ? "observed" : "not-observed", "recorded event_msg token_count request usage")
+    usage: protocolDomainCoverage(usageRecords.length > 0 ? "observed" : "not-observed", "recorded Codex request usage records")
   });
 
   return {

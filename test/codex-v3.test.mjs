@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import test from "node:test";
 
 import { buildCodexSessionProtocol, buildCodexSessionProtocolV3 } from "../dist/src/providers/codex/protocol.js";
+import { extractMeta, parseSession, recordsToMessages } from "../dist/src/providers/codex/parser.js";
 import { finalizeSessionProtocol, protocolRevision } from "../dist/src/providers/shared/session-protocol.js";
 import { finalizeSessionProtocolV3 } from "../dist/src/providers/shared/session-protocol-v3.js";
 import { clearProtocolRuntimeCache, getRuntimeProtocolV3 } from "../dist/src/protocol-runtime.js";
@@ -273,6 +275,87 @@ test("Codex v3 context coverage is not-observed without any compacted evidence",
   assert.equal(v3.contextTransformations.length, 0);
   assert.equal(v3.contextArtifacts.length, 0);
   assert.equal(v3.coverage.context.state, "not-observed");
+});
+
+test("Codex current v153 fixture maps first-class communication and usage records", () => {
+  const records = parseSession(path.join(process.cwd(), "test", "fixtures", "codex-current-v153.jsonl"));
+  const session = rawSession("codex-current", null, { agentPath: "/root" }, 1000, 2000);
+  const messages = recordsToMessages(records, "codex-current");
+  assert.equal(messages.filter((message) => message.role === "user").length, 1);
+  assert.equal(messages.some((message) => message.metadata?.source === "codex_inter_agent_communication"), false);
+  assert.equal(extractMeta(records, "codex-current", messages).messageCount, extractMeta(records.filter((record) => record.type !== "inter_agent_communication"), "codex-current").messageCount);
+  assert.equal(extractMeta(records, "codex-current", messages).tokenCount, 130);
+  const base = finalizeSessionProtocol(buildCodexSessionProtocol({ session, messages, records, children: [] }), {
+    provider: "codex",
+    session,
+    revision: protocolRevision("codex-current-v153")
+  });
+  const v3 = finalizeSessionProtocolV3(buildCodexSessionProtocolV3({ session, messages, records, children: [] }, base));
+  assert.equal(v3.validation?.ok, true);
+  assert.equal(v3.usageRecords.length, 1);
+  assert.equal(v3.usageRecords[0].id, "usage:codex-current:response-1");
+  assert.equal(v3.usageRecords[0].turnId, "turn-1");
+  assert.deepEqual(v3.usageRecords[0].tokens, { input: 75, cacheRead: 20, cacheWrite: 5, output: 20, reasoning: 10, total: 130 });
+  const communication = v3.coordination.find((value) => value.correlationId === "communication-1");
+  assert.equal(communication?.state, "unknown");
+  assert.equal(communication?.correlationId, "communication-1");
+  const sendInput = v3.coordination.find((value) => value.correlationId === "call-send-input");
+  assert.equal(sendInput?.kind, "message");
+  assert.equal(sendInput?.state, "unknown");
+  const close = v3.coordination.find((value) => value.correlationId === "call-close");
+  assert.equal(close?.kind, "interrupt");
+  assert.equal(close?.state, "completed");
+  assert.equal(close?.provenance.sourceType, "codex.response_item:function_call:multi_agent_v1");
+});
+
+test("Codex v3 mixed event and canonical usage records count one request", () => {
+  const usage = { input_tokens: 100, cached_input_tokens: 20, cache_write_input_tokens: 5, output_tokens: 30, reasoning_output_tokens: 10, total_tokens: 130 };
+  const records = [
+    { type: "session_meta", timestamp: ts("10:00:00"), ordinal: 0, payload: { id: "mixed-v3" } },
+    { type: "event_msg", timestamp: ts("10:00:01"), ordinal: 1, payload: { type: "token_count", info: { last_token_usage: usage } } },
+    { type: "token_usage_record", timestamp: ts("10:00:02"), ordinal: 2, payload: { response_id: "response-mixed-1", usage } },
+    { type: "response_item", timestamp: ts("10:00:03"), ordinal: 3, payload: { type: "message", role: "assistant", id: "assistant-mixed-2", content: [{ type: "output_text", text: "second" }] } },
+    { type: "event_msg", timestamp: ts("10:00:04"), ordinal: 4, payload: { type: "token_count", info: { last_token_usage: usage } } },
+    { type: "token_usage_record", timestamp: ts("10:00:05"), ordinal: 5, payload: { response_id: "response-mixed-2", usage } }
+  ];
+  const session = rawSession("mixed-v3", null, null, 1000, 2000);
+  const messages = recordsToMessages(records, "mixed-v3");
+  const base = finalizeSessionProtocol(buildCodexSessionProtocol({ session, messages, records, children: [] }), {
+    provider: "codex",
+    session,
+    revision: protocolRevision("mixed-v3")
+  });
+  const v3 = finalizeSessionProtocolV3(buildCodexSessionProtocolV3({ session, messages, records, children: [] }, base));
+  assert.equal(v3.validation?.ok, true);
+  assert.equal(v3.usageRecords.length, 2);
+  assert.equal(v3.usageRecords[0].tokens.total, 130);
+  assert.equal(v3.usageRecords[1].tokens.total, 130);
+});
+
+test("Codex close_agent preserves requested, unknown, completed, and failed states", () => {
+  const variants = [
+    ["success", "{\"status\":\"completed\"}", "completed"],
+    ["failure", "{\"status\":\"error\"}", "failed"],
+    ["empty", "", "unknown"],
+    ["ambiguous", "{\"status\":\"pending\"}", "unknown"],
+    ["missing", null, "requested"]
+  ];
+  for (const [label, output, expected] of variants) {
+    const records = [
+      { type: "session_meta", timestamp: ts("10:00:00"), ordinal: 0, payload: { id: `close-${label}` } },
+      { type: "response_item", timestamp: ts("10:00:01"), ordinal: 1, payload: { type: "function_call", id: `close-${label}`, call_id: `close-${label}`, name: "close_agent", namespace: "multi_agent_v1", arguments: "{}" } },
+      ...(output === null ? [] : [{ type: "response_item", timestamp: ts("10:00:02"), ordinal: 2, payload: { type: "function_call_output", id: `output-${label}`, call_id: `close-${label}`, output } }])
+    ];
+    const session = rawSession(`close-${label}`, null, null, 1000, 2000);
+    const messages = recordsToMessages(records, session.id);
+    const base = finalizeSessionProtocol(buildCodexSessionProtocol({ session, messages, records, children: [] }), {
+      provider: "codex",
+      session,
+      revision: protocolRevision(`close-${label}`)
+    });
+    const v3 = finalizeSessionProtocolV3(buildCodexSessionProtocolV3({ session, messages, records, children: [] }, base));
+    assert.equal(v3.coordination.find((value) => value.correlationId === `close-${label}`)?.state, expected, label);
+  }
 });
 
 test("Codex v3 excludes self-authored FINAL_ANSWER envelopes regardless of parent path", () => {

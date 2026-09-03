@@ -44,9 +44,22 @@ verified-at、版本/commit、官方来源链接与样本格式。
    fixture 覆盖（显式记录）；49 个嵌套 run-N/session.jsonl 为 pi-subagents
    产物（parentSession null，不虚构 lineage）。决策记录：
    `.agents/decisions/implemented/2026-09-03-pi-v3-current-compatibility.md`。
-4. **Codex CLI 0.152.1** — installed/npm 0.152.1,HEAD
-   5e26f7621c1c470fe62350d61c9eb4d6c772a0da;现有 native-v3 验证样本(0.151 alpha)
-   是历史快照,不等同最新版本已覆盖。
+4. **Codex CLI 0.152.1 → 0.153.0** — ✅ **已完成（2026-09-03）**。本机
+   `codex --version` 为 0.152.1；官方 `openai/codex` release
+   `rust-v0.153.0`（release tag peeled commit `41e22fee981a63b3698df7ed36bad393cda24715`）与
+   HEAD `36984da4424cb91b6bc88c6af8d73207930ac729` 已核验。当前 HEAD
+   rollout source 新增 `.jsonl.zst`、
+   `token_usage_record`、仅进入 Runtime v3 的 `inter_agent_communication` 和 v1
+   `multi_agent_v1/close_agent`；本机 0.152.1 真实样本仍是 `token_count` + collaboration
+   response items，并含 `inter_agent_communication_metadata`。实现：Codex
+   parser/protocol 支持 plain/compressed rollouts、per-response usage、
+   first-class communication（不进入线性 transcript），以及把 close 归一为
+   `interrupt`；明确成功/失败/模糊/缺失输出分别保留对应状态；累计
+   `turn_token_usage`/`thread_token_usage` 不会被重复计数。新增
+   `test/fixtures/codex-current-v153.jsonl`（source-derived bounded synthetic fixture，非 live capture）与压缩读取回归，决策记录见
+   `.agents/decisions/implemented/2026-09-03-codex-current-compatibility.md`。
+   限制：本机尚未安装 0.153.0，真实 0.153 rollout 仅由官方 source 与
+   有界 fixture 覆盖；本机最新 0.152.1 样本已做只读 parser/protocol smoke。
 5. **Claude Code 2.1.258** — npm 2.1.258,repo HEAD
    aef74afe01f65b602258d6102b0da9730ac6f0aa;本机安装 2.1.207。
 6. **OpenCode 1.18.26** — npm opencode-ai 1.18.26;本机安装 1.17.11(Windows)。

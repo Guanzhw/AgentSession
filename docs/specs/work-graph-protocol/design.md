@@ -1,6 +1,7 @@
 # Session Protocol v3 Work Graph design
 
-Status: v3 foundation and bounded projections implemented; provider mappings pending
+Status: v3 foundation and bounded projections implemented; Codex current-format
+refresh implemented (installed 0.152.1, official 0.153.0 source)
 
 Date: 2026-09-02
 
@@ -21,6 +22,23 @@ a context transformation, or message token totals into request usage.
 Invalid v2 snapshots cannot be upgraded. Partial source diagnostics survive
 the upgrade. Finalization owns and freezes a cloned snapshot, so later changes
 to provider drafts cannot invalidate cached validation.
+
+## Codex current-format evidence
+
+The Codex adapter keeps provider-native semantics at the rollout boundary. It
+reads both plain `.jsonl` and official cold `.jsonl.zst` representations,
+accepts `token_usage_record.usage` as one per-response request, and ignores
+cumulative `turn_token_usage`/`thread_token_usage` as additional requests.
+First-class `inter_agent_communication` records preserve sender/recipient
+actors and an unknown delivery state without entering the linear transcript;
+v1 `multi_agent_v1/close_agent` is
+exposed as the protocol's existing `interrupt` kind. Current child relationships still
+require recorded session metadata or a matching child rollout. These mappings
+were verified against the official `openai/codex` release tag `rust-v0.153.0`
+(peeled commit `41e22fee981a63b3698df7ed36bad393cda24715`) and repository HEAD
+`36984da4424cb91b6bc88c6af8d73207930ac729`, plus a source-derived bounded
+synthetic fixture (not a live capture); installed 0.152.1 local rollouts were
+smoke-tested read-only.
 
 ## Bounded projection API
 

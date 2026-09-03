@@ -61,6 +61,28 @@ paths are covered by the official source/docs plus
 `test/fixtures/pi-v3-current.jsonl`; nested `run-N/session.jsonl` files are
 pi-subagents run artifacts (header `parentSession: null`, no lineage).
 
+### Codex CLI evidence snapshot (2026-09-03)
+
+The installed CLI is `0.152.1` (`codex --version`). The official
+[`openai/codex` repository](https://github.com/openai/codex) released
+`rust-v0.153.0`; its peeled release-tag commit is
+`41e22fee981a63b3698df7ed36bad393cda24715`. The repository HEAD checked on
+this date is `36984da4424cb91b6bc88c6af8d73207930ac729`; its current rollout
+source defines `.jsonl.zst` compression, first-class
+`token_usage_record` and `inter_agent_communication` items, and the v1
+namespaced `multi_agent_v1/close_agent` tool. Local 0.152.1 rollouts contain `session_meta`,
+`event_msg/token_count`, `response_item` collaboration calls, and
+`inter_agent_communication_metadata`; the inspection snapshot had 413 records,
+65 usage records, and no first-class communication item. The adapter accepts
+plain and compressed rollouts, maps current usage records, and keeps
+first-class communication in Runtime v3 actors/coordination rather than the
+linear transcript. It normalizes `close_agent` to the protocol `interrupt`
+kind. The checked-in current fixture is source-derived and bounded, not a
+live capture. Cumulative
+`turn_token_usage`/`thread_token_usage` fields are not counted as requests;
+only the recorded per-response `usage` is used. Child lineage still requires
+recorded parent/session metadata or a matching child rollout.
+
 ## Contract boundary
 
 Every adapter implements `ProviderAdapter`:

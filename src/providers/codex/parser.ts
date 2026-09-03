@@ -1,6 +1,9 @@
 import { readFileSync } from "node:fs";
+import { zstdDecompressSync } from "node:zlib";
 import type { Message, RawSession } from "../interface.js";
 import { asNumber } from "../shared/parser.js";
+
+export const CODEX_MAX_DECOMPRESSED_ROLLOUT_BYTES = 64 * 1024 * 1024;
 
 export function codexUsageToTokens(usage: any) {
   if (!usage || typeof usage !== "object") return null;
@@ -94,8 +97,21 @@ function subagentTaskMessage(payload: any) {
   };
 }
 
+export function codexUsagePayload(record: any) {
+  if (record?.type === "event_msg" && record.payload?.type === "token_count") {
+    return record.payload?.info?.last_token_usage || null;
+  }
+  if (record?.type === "token_usage_record") {
+    // Current Codex rollouts persist one completed Responses API usage row.
+    // `turn_token_usage` and `thread_token_usage` are cumulative views and are
+    // intentionally not used as another request.
+    return record.payload?.usage || null;
+  }
+  return null;
+}
+
 function isCodexTokenUsageRecord(record: any) {
-  return record.type === "event_msg" && record.payload?.type === "token_count";
+  return Boolean(codexUsagePayload(record));
 }
 
 const tokenUsageFingerprintFields = [
@@ -117,14 +133,24 @@ function tokenUsageFingerprint(usage: any) {
   return tokenUsageFingerprintFields.map((field) => asNumber(usage[field]));
 }
 
+function codexTokenUsageResponseId(record: any) {
+  return record?.type === "token_usage_record"
+    ? record.payload?.response_id || null
+    : record?.payload?.response_id || record?.payload?.info?.response_id || null;
+}
+
+function codexTokenUsageSnapshotFingerprint(record: any) {
+  return JSON.stringify(tokenUsageFingerprint(codexUsagePayload(record)));
+}
+
 function codexTokenUsageRecordFingerprint(record: any) {
   if (!isCodexTokenUsageRecord(record)) return null;
-  const info = record.payload?.info || {};
-  const last = tokenUsageFingerprint(info.last_token_usage);
+  const last = tokenUsageFingerprint(codexUsagePayload(record));
   if (!last) return null;
   return JSON.stringify({
     last,
-    total: tokenUsageFingerprint(info.total_token_usage)
+    total: tokenUsageFingerprint(record.type === "event_msg" ? record.payload?.info?.total_token_usage : null),
+    responseId: record.type === "token_usage_record" ? record.payload?.response_id || null : null
   });
 }
 
@@ -253,24 +279,40 @@ function copiedParentTokenPrefix(records: any[], parentRecords: any[], parentId:
     : new Set<any>();
 }
 
-/** A repeated adjacent usage event with the same cumulative snapshot cannot
+/**
+ * A repeated adjacent usage event with the same cumulative snapshot cannot
  * represent another model request. Codex occasionally persists this replay
- * while resuming a rollout, so retain the first event only. */
+ * while resuming a rollout, so retain the first event only. Current rollouts
+ * can also contain both the legacy event and the canonical usage row for one
+ * response: use a shared response id when both sides record it; otherwise
+ * allow only an immediately adjacent, cross-format snapshot match.
+ */
 function duplicateCodexTokenUsageRecords(records: any[], provenance: Map<any, CodexRecordProvenance>) {
   const duplicates = new Set<any>();
-  for (let index = 1; index < records.length; index += 1) {
-    const previous = records[index - 1];
-    const current = records[index];
-    if (
-      !isCodexTokenUsageRecord(previous)
-      || !isCodexTokenUsageRecord(current)
-      || provenance.get(previous) !== "session"
-      || provenance.get(current) !== "session"
-    ) continue;
-    const previousFingerprint = codexTokenUsageRecordFingerprint(previous);
-    if (previousFingerprint && previousFingerprint === codexTokenUsageRecordFingerprint(current)) {
-      duplicates.add(current);
+  const usageRecords = records
+    .map((record, index) => ({ record, index }))
+    .filter(({ record }) => isCodexTokenUsageRecord(record));
+  const firstByResponseId = new Map<string, string>();
+  for (let index = 0; index < usageRecords.length; index += 1) {
+    const currentEntry = usageRecords[index];
+    const current = currentEntry.record;
+    if (provenance.get(current) !== "session") continue;
+    const currentResponseId = codexTokenUsageResponseId(current);
+    const currentSnapshot = codexTokenUsageSnapshotFingerprint(current);
+    if (currentResponseId) {
+      const previousSnapshot = firstByResponseId.get(String(currentResponseId));
+      if (previousSnapshot === currentSnapshot) duplicates.add(current);
+      else firstByResponseId.set(String(currentResponseId), currentSnapshot);
+      if (duplicates.has(current)) continue;
     }
+
+    const previous = records[currentEntry.index - 1];
+    if (!isCodexTokenUsageRecord(previous)
+      || provenance.get(previous) !== "session"
+      || codexTokenUsageSnapshotFingerprint(previous) !== currentSnapshot) continue;
+    const previousResponseId = codexTokenUsageResponseId(previous);
+    if (currentResponseId && previousResponseId && currentResponseId !== previousResponseId) continue;
+    duplicates.add(current);
   }
   return duplicates;
 }
@@ -358,7 +400,10 @@ export function resolveCodexInheritedContext(messages: Message[], _parentMessage
  * @returns {object[]}
  */
 export function parseSession(filePath: any) {
-  const content = readFileSync(filePath, "utf-8");
+  const bytes = readFileSync(filePath);
+  const content = /\.jsonl\.zst$/i.test(String(filePath))
+    ? zstdDecompressSync(bytes, { maxOutputLength: CODEX_MAX_DECOMPRESSED_ROLLOUT_BYTES }).toString("utf-8")
+    : bytes.toString("utf-8");
   const records = [];
   for (const line of content.split("\n")) {
     const trimmed = line.trim();
@@ -433,9 +478,9 @@ export function extractMeta(records: any, fallbackId: any, normalizedMessages?: 
         title = responseUserText.replace(/\s+/g, " ").trim().slice(0, 120);
       }
     }
-    if (r.type === "event_msg" && r.payload?.type === "token_count") {
+    if (isCodexTokenUsageRecord(r)) {
       if (recordProvenance.get(r) !== "session") continue;
-      totalTokens += codexUsageToTokens(r.payload.info?.last_token_usage)?.total || 0;
+      totalTokens += codexUsageToTokens(codexUsagePayload(r))?.total || 0;
     }
   }
 
@@ -851,8 +896,8 @@ export function recordsToMessages(records: any, sessionId: any, parentRecords: a
       }
     }
 
-    if (r.type === "event_msg" && r.payload?.type === "token_count") {
-      const tokens = codexUsageToTokens(r.payload.info?.last_token_usage);
+    if (isCodexTokenUsageRecord(r)) {
+      const tokens = codexUsageToTokens(codexUsagePayload(r));
       const target = pendingUsageTarget || lastUsageTarget || lastUserTarget;
       if (tokens && target) {
         appendTokenUsage(target, tokens, target === lastUserTarget ? "request-start" : "direct");

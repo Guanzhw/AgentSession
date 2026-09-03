@@ -1,13 +1,21 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
+import { zstdCompressSync } from "node:zlib";
 
 import {
   buildCodexSessionProtocol,
   codexCompactionEvents
 } from "../dist/src/providers/codex/protocol.js";
+import { codexDailyTokenComponents } from "../dist/src/providers/codex/adapter.js";
 import {
   classifyCodexRecordProvenance,
+  codexOwnedTokenUsageRecords,
+  CODEX_MAX_DECOMPRESSED_ROLLOUT_BYTES,
   extractMeta,
+  parseSession,
   recordsToMessages
 } from "../dist/src/providers/codex/parser.js";
 
@@ -253,4 +261,51 @@ test("Codex session title falls back to the first recorded user.text row", () =>
   ];
   const meta = extractMeta(records, "root");
   assert.match(String(meta.title), /^排查问题/);
+});
+
+test("Codex reads the official compressed rollout representation", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "agentsession-codex-zst-"));
+  const file = path.join(temp, "rollout-2026-09-03T01-00-00-000Z_codex-zst.jsonl.zst");
+  const source = [
+    { type: "session_meta", payload: { id: "codex-zst", session_id: "codex-zst" }, timestamp: "2026-09-03T01:00:00.000Z" },
+    { type: "response_item", payload: { type: "message", role: "user", id: "user-zst", content: [{ type: "input_text", text: "compressed" }], internal_chat_message_metadata_passthrough: { content_item_kinds: ["user.text"] } } }
+  ].map((record) => JSON.stringify(record)).join("\n") + "\n";
+  writeFileSync(file, zstdCompressSync(Buffer.from(source)));
+  const records = parseSession(file);
+  assert.equal(records.length, 2);
+  assert.equal(records[0].payload.id, "codex-zst");
+  assert.equal(recordsToMessages(records, "codex-zst")[0].content, "compressed");
+});
+
+test("Codex mixed usage records are deduplicated once at the provider boundary", () => {
+  const usage = { input_tokens: 100, cached_input_tokens: 20, cache_write_input_tokens: 5, output_tokens: 30, reasoning_output_tokens: 10, total_tokens: 130 };
+  const event = (timestamp, responseId = undefined) => ({
+    type: "event_msg",
+    timestamp,
+    payload: { type: "token_count", ...(responseId ? { response_id: responseId } : {}), info: { last_token_usage: usage } }
+  });
+  const current = [
+    { type: "session_meta", timestamp: "2026-09-03T01:00:00.000Z", payload: { id: "mixed" } },
+    { type: "response_item", timestamp: "2026-09-03T01:00:01.000Z", payload: { type: "message", role: "assistant", id: "assistant-1", content: [{ type: "output_text", text: "one" }] } },
+    event("2026-09-03T01:00:02.000Z"),
+    { type: "token_usage_record", timestamp: "2026-09-03T01:00:03.000Z", payload: { response_id: "response-1", usage } },
+    { type: "response_item", timestamp: "2026-09-03T01:00:04.000Z", payload: { type: "message", role: "assistant", id: "assistant-2", content: [{ type: "output_text", text: "two" }] } },
+    event("2026-09-03T01:00:05.000Z", "response-1"),
+    { type: "token_usage_record", timestamp: "2026-09-03T01:00:06.000Z", payload: { response_id: "response-2", usage } }
+  ];
+  const owned = codexOwnedTokenUsageRecords(current);
+  assert.equal(owned.length, 2);
+  assert.equal(extractMeta(current, "mixed", recordsToMessages(current, "mixed")).tokenCount, 260);
+  assert.equal(owned.reduce((sum, record) => sum + codexDailyTokenComponents(record.type === "event_msg" ? record.payload.info.last_token_usage : record.payload.usage).total, 0), 260);
+  const messages = recordsToMessages(current, "mixed");
+  assert.deepEqual(messages.filter((message) => message.role === "assistant").map((message) => message.tokens?.total), [130, 130]);
+  assert.equal(CODEX_MAX_DECOMPRESSED_ROLLOUT_BYTES, 64 * 1024 * 1024);
+});
+
+test("Codex rejects compressed rollouts over the provider-owned output bound", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "agentsession-codex-zst-bound-"));
+  const file = path.join(temp, "rollout-too-large.jsonl.zst");
+  const source = Buffer.from(`{"type":"session_meta","payload":{"id":"${"x".repeat(CODEX_MAX_DECOMPRESSED_ROLLOUT_BYTES)}"}}`);
+  writeFileSync(file, zstdCompressSync(source));
+  assert.throws(() => parseSession(file), /larger than|larger than the maximum/);
 });

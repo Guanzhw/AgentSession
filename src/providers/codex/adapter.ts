@@ -7,6 +7,7 @@ import {
   extractMeta,
   recordsToMessages,
   codexOwnedTokenUsageRecords,
+  codexUsagePayload,
   codexUsageToTokens,
   resolveCodexInheritedContext,
   countCodexRenderedMessages,
@@ -53,8 +54,11 @@ function discoverSessionFiles() {
           const stat = lstatSync(full);
           if (stat.isSymbolicLink()) continue;
           if (stat.isDirectory()) walk(full);
-          else if (entry.endsWith(".jsonl")) {
-            const stem = entry.replace(/\.jsonl$/, "").replace(/^rollout-/, "");
+          else if (/\.jsonl(?:\.zst)?$/i.test(entry)) {
+            // Codex compresses cold rollouts as `.jsonl.zst`; prefer the
+            // plain sibling while a representation transition is in flight.
+            if (/\.jsonl\.zst$/i.test(entry) && existsSync(full.replace(/\.zst$/i, ""))) continue;
+            const stem = entry.replace(/\.jsonl(?:\.zst)?$/i, "").replace(/^rollout-/, "");
             const canonicalSuffix = stem.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
             const sessionId = canonicalSuffix?.[0] || stem;
             files.push({ sessionId, filePath: full });
@@ -97,7 +101,7 @@ function parentEntryFor(entry: { session: RawSession }) {
 
 function ownedTokenCount(records: any[], parentRecords: any[] = []) {
   return codexOwnedTokenUsageRecords(records, parentRecords).reduce(
-    (total, record) => total + (codexUsageToTokens(record.payload?.info?.last_token_usage)?.total || 0),
+    (total, record) => total + (codexUsageToTokens(codexUsagePayload(record))?.total || 0),
     0
   );
 }
@@ -233,18 +237,18 @@ export function codexDailyTokenComponents(usage: any) {
 }
 
 const codexTokenMapping: TokenFieldMapping = {
-  filterRecord: (r) => r.type === "event_msg" && r.payload?.type === "token_count",
+  filterRecord: (r) => Boolean(codexUsagePayload(r)),
   getTimestamp: (r) => r.timestamp ? new Date(r.timestamp).getTime() : 0,
   inputTokens: (r) => {
-    return codexDailyTokenComponents(r.payload.info?.last_token_usage).input;
+    return codexDailyTokenComponents(codexUsagePayload(r)).input;
   },
   outputTokens: (r) => {
-    return codexDailyTokenComponents(r.payload.info?.last_token_usage).output;
+    return codexDailyTokenComponents(codexUsagePayload(r)).output;
   },
-  totalTokens: (r) => codexDailyTokenComponents(r.payload.info?.last_token_usage).total,
-  reasoningTokens: (r) => codexDailyTokenComponents(r.payload.info?.last_token_usage).reasoning,
-  cacheReadTokens: (r) => codexDailyTokenComponents(r.payload.info?.last_token_usage).cacheRead,
-  cacheWriteTokens: (r) => codexDailyTokenComponents(r.payload.info?.last_token_usage).cacheWrite,
+  totalTokens: (r) => codexDailyTokenComponents(codexUsagePayload(r)).total,
+  reasoningTokens: (r) => codexDailyTokenComponents(codexUsagePayload(r)).reasoning,
+  cacheReadTokens: (r) => codexDailyTokenComponents(codexUsagePayload(r)).cacheRead,
+  cacheWriteTokens: (r) => codexDailyTokenComponents(codexUsagePayload(r)).cacheWrite,
 };
 
 const getCodexTokenStats = createIncrementalTokenStats(
