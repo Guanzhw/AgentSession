@@ -33,6 +33,11 @@ import { buildPiSessionProtocol, piCompactionEntry } from "../dist/src/providers
 import { buildHermesSessionProtocol } from "../dist/src/providers/hermes/protocol.js";
 import { buildDshSessionProtocol } from "../dist/src/providers/deepseek-harness/protocol.js";
 import { buildLinkedMessageSessionViews } from "../dist/src/providers/shared/linked-message-session.js";
+import { parseTranscript, extractSessionMeta, recordsToMessages } from "../dist/src/providers/claude-code/parser.js";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const testRoot = fileURLToPath(new URL(".", import.meta.url));
 
 const recorded = (sourceType, sourceId = null) => ({ fidelity: "recorded", sourceType, sourceId });
 const derived = (sourceType, sourceId = null) => ({ fidelity: "derived", sourceType, sourceId });
@@ -1022,11 +1027,16 @@ test("Claude compact, PreCompact, and PostCompact records become compaction even
   const [summary, pre, post, auto] = compactionEvents;
   assert.equal(summary.compaction.strategy, "summary");
   assert.equal(summary.compaction.summary, "Conversation was compacted manually.");
-  assert.equal(summary.compaction.trigger, "manual");
+  assert.equal(summary.compaction.trigger, "unknown");
   assert.equal(pre.compaction.strategy, "opaque");
   assert.equal(pre.compaction.summary, null);
   assert.equal(post.compaction.strategy, "opaque", "encoded payload is not a readable summary");
-  assert.equal(auto.compaction.trigger, "automatic");
+  assert.equal(auto.compaction.trigger, "unknown");
+  assert.deepEqual(
+    compactionEvents.map((event) => event.id),
+    ["event:compaction:compact-1:0", "event:compaction:compact-2:1", "event:compaction:compact-2:2", "event:compaction:compact-3:3"]
+  );
+  assert.equal(new Set(protocol.contextArtifacts.map((artifact) => artifact.id)).size, 4);
   assert.equal(protocol.contextArtifacts.length, 4);
   assert.ok(protocol.contextArtifacts.every((artifact) => (
     artifact.contentAccess === "metadata-only"
@@ -1042,6 +1052,39 @@ test("Claude compact, PreCompact, and PostCompact records become compaction even
     protocol.events.some((event) => isContextLifecycleEventKind(event.kind)),
     false
   );
+});
+
+test("Claude compact_boundary system records use official compactMetadata evidence", () => {
+  const records = parseTranscript(join(testRoot, "fixtures", "claude-current-v259-synthetic.jsonl"));
+  const fixtureSession = extractSessionMeta(records, "claude-current-v259");
+  const protocol = buildClaudeSessionProtocol({
+    session: session("compact-boundary"),
+    messages: recordsToMessages(records, fixtureSession.id),
+    records,
+    children: []
+  });
+  const event = protocol.events.find((candidate) => candidate.kind === "context.compaction");
+  assert.equal(event.compaction.trigger, "automatic");
+  assert.equal(event.compaction.strategy, "opaque");
+  assert.equal(event.compaction.tokensBefore, 167189);
+  assert.equal(event.compaction.tokensAfter, null);
+  assert.equal(event.provenance.fidelity, "recorded");
+  assert.equal(event.provenance.sourceType, "claude.transcript:system");
+  assert.equal(protocol.contextArtifacts.length, 1);
+  assert.equal(fixtureSession.tokenCount, 137);
+});
+
+test("Claude compact metadata without a trigger stays unknown and ignores unsupported postTokens", () => {
+  const compaction = claudeCompactionRecord({
+    type: "system",
+    subtype: "compact_boundary",
+    compactMetadata: { preTokens: 123, postTokens: 7 },
+    tokensAfter: 5,
+    compactUuid: "compact-unknown"
+  });
+  assert.equal(compaction.trigger, "unknown");
+  assert.equal(compaction.tokensBefore, 123);
+  assert.equal(compaction.tokensAfter, 5);
 });
 
 test("Claude sidechain records yield spawned relationships with recorded provenance", () => {

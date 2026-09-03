@@ -62,8 +62,14 @@ function sidechainOf(record: Row) {
 export function claudeCompactionRecord(record: Row) {
   const type = String(record?.type || "");
   const normalized = type.toLowerCase();
-  const isBoundary = normalized === "precompact" || normalized === "postcompact";
-  const isCompaction = isBoundary || normalized.includes("compact");
+  const subtype = String(record?.subtype || "").toLowerCase();
+  const compactMetadata = record?.compactMetadata && typeof record.compactMetadata === "object"
+    ? record.compactMetadata
+    : null;
+  const isBoundary = normalized === "precompact"
+    || normalized === "postcompact"
+    || subtype === "compact_boundary";
+  const isCompaction = isBoundary || normalized.includes("compact") || subtype.includes("compact");
   if (!isCompaction) return null;
 
   let summary: string | null = null;
@@ -78,10 +84,13 @@ export function claudeCompactionRecord(record: Row) {
   return {
     record,
     summary,
-    trigger: normalized.startsWith("auto") ? "automatic" as const : "manual" as const,
+    trigger: compactMetadata?.trigger ?? "unknown",
     strategy: summary ? "summary" as const : "opaque" as const,
     tokensBefore: (() => {
-      const value = record.tokens_before ?? record.tokensBefore ?? record.input_tokens;
+      const value = compactMetadata?.preTokens
+        ?? record.tokens_before
+        ?? record.tokensBefore
+        ?? record.input_tokens;
       return typeof value === "number" && Number.isFinite(value) ? value : null;
     })(),
     tokensAfter: (() => {
@@ -232,7 +241,7 @@ export function buildClaudeSessionProtocol(input: ClaudeProtocolInput): SessionP
     const compaction = claudeCompactionRecord(record);
     if (compaction) {
       pushAnchored(compactionEnvelope({
-        id: `event:compaction:${compaction.sourceId || index}`,
+        id: `event:compaction:${compaction.sourceId || "record"}:${index}`,
         sessionId,
         timestamp: recordTimestamp(record),
         correlationId: compaction.sourceId,
@@ -424,11 +433,11 @@ export function buildClaudeSessionProtocol(input: ClaudeProtocolInput): SessionP
     }));
   }
 
-  const artifacts = input.records.flatMap((record) => {
+  const artifacts = input.records.flatMap((record, index) => {
     const compaction = claudeCompactionRecord(record);
     if (!compaction) return [];
     return [compactionSummaryArtifact({
-      id: `artifact:${compaction.sourceId || input.records.indexOf(record)}`,
+      id: `artifact:${compaction.sourceId || "record"}:${index}`,
       sessionId,
       sourceSessionIds: [sessionId],
       provenance: {

@@ -2,22 +2,43 @@ import { readFileSync } from "node:fs";
 import type { Message, RawSession } from "../interface.js";
 import { asNumber } from "../shared/parser.js";
 
+function numericValue(value: unknown): number | null {
+  if (value === undefined || value === null || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 export function claudeUsageToTokens(usage: any) {
   if (!usage || typeof usage !== "object") {
     return null;
   }
 
-  const input = asNumber(usage.input_tokens);
-  const output = asNumber(usage.output_tokens);
+  const input = Math.max(0, asNumber(usage.input_tokens));
+  const rawOutput = Math.max(0, asNumber(usage.output_tokens));
   const cacheRead = asNumber(usage.cache_read_input_tokens);
-  const cacheWrite = asNumber(usage.cache_creation_input_tokens);
-  const reasoning = asNumber(usage.reasoning_tokens);
+  const cacheWrite = numericValue(usage.cache_creation_input_tokens) !== null
+    ? asNumber(usage.cache_creation_input_tokens)
+    : usage.cache_creation && typeof usage.cache_creation === "object"
+      ? (asNumber(usage.cache_creation.ephemeral_5m_input_tokens) || 0)
+        + (asNumber(usage.cache_creation.ephemeral_1h_input_tokens) || 0)
+      : 0;
+  const reasoning = Math.min(
+    rawOutput,
+    Math.max(0, numericValue(usage.reasoning_tokens)
+      ?? numericValue(usage.output_tokens_details?.thinking_tokens)
+      ?? 0)
+  );
+  const output = Math.max(0, rawOutput - reasoning);
+  const normalizedTotal = input + cacheRead + cacheWrite + output + reasoning;
+  const explicitTotal = numericValue(usage.total_tokens);
   return {
     input,
     output,
     reasoning,
     cache: { read: cacheRead, write: cacheWrite },
-    total: asNumber(usage.total_tokens) || input + output + reasoning + cacheRead + cacheWrite
+    total: explicitTotal !== null && explicitTotal === normalizedTotal
+      ? explicitTotal
+      : normalizedTotal
   };
 }
 

@@ -83,6 +83,31 @@ live capture. Cumulative
 only the recorded per-response `usage` is used. Child lineage still requires
 recorded parent/session metadata or a matching child rollout.
 
+### Claude Code evidence snapshot (2026-09-03)
+
+The installed CLI is `2.1.207` (`claude --version`). The npm package currently
+publishes `2.1.259` on `latest`/`next` and `2.1.236` on `stable`; these are npm
+dist-tags, not a local upgrade. The official repository
+<https://github.com/anthropics/claude-code> has `HEAD` and release tag
+`v2.1.259` at `f173a697aa6486945f1b9c4aa9ce5383d2c87db6` on this date. The
+older installed release tag `v2.1.207` is `d4d8fbbb333c627d8fe2c1c583a5ccc26fdb1aed`.
+The official docs describe project-scoped JSONL transcripts and document
+subagent `system`/`compact_boundary` records with
+`compactMetadata.trigger`/`preTokens`. The protocol recognizes that recorded
+boundary and keeps it metadata-only; it does not turn background, teammate,
+mailbox, or memory behavior into linear messages without a transcript record.
+Assistant usage normalizes Anthropic's total input as
+`input_tokens + cache_creation_input_tokens + cache_read_input_tokens`, keeps
+`output_tokens` inclusive of thinking while exposing mutually exclusive visible
+output/reasoning components, and supports the observed nested `cache_creation`
+object when the scalar is absent. Repeated assistant fragments with one
+response id remain one usage record. The local snapshot contains 11 project
+transcripts and 132 records (21 assistant usage records, 14 distinct response
+ids, no sidechains, task notifications, or compaction boundaries); a read-only
+adapter/protocol smoke loaded 11 sessions. Current 2.1.259 format support is
+docs/upstream-verified; no live 2.1.259 transcript was available. The checked-in
+fixture is source-derived bounded synthetic data, not a live capture.
+
 ## Contract boundary
 
 Every adapter implements `ProviderAdapter`:

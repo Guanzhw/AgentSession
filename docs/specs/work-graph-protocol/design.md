@@ -200,11 +200,25 @@ Artifact content remains metadata-first and respects `ContentAccess`. Optional
 memory, experience, or user-info support is expressed through coverage and
 content access, never inferred from tool names or an empty count.
 
+For Claude Code, the provider-owned adapter maps the documented subagent
+`system`/`compact_boundary` record and its `compactMetadata` to a recorded
+metadata-only compaction event/artifact. Background agents, teammates, and
+auto-memory remain separate provider concerns unless their transcript evidence
+can be anchored to this session.
+
 ## Request usage
 
 `UsageRecord` is one canonical additive model request. Turn and session totals
 are projections over request records, not additional records, so generic
 consumers cannot count the same request twice.
+
+Claude Code usage normalization accepts both the scalar
+`cache_creation_input_tokens` and the observed nested `cache_creation` object
+at the provider boundary; when both are present, the scalar is authoritative.
+Anthropic's `output_tokens` is inclusive of thinking, so the adapter exposes
+`output = max(0, output_tokens - reasoning)` and `reasoning` from the recorded
+reasoning field or `output_tokens_details.thinking_tokens`. A recorded
+`total_tokens` is retained only when it equals the normalized component sum.
 
 A usage record carries:
 

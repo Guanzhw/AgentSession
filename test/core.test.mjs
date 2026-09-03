@@ -278,6 +278,66 @@ test("Claude token usage keeps optional fields numeric and deduplicates response
   assert.equal(extractSessionMeta(records, "fragmented-response").tokenCount, 21);
 });
 
+test("Claude usage accepts the recorded cache_creation object without double counting", () => {
+  assert.deepEqual(claudeUsageToTokens({
+    input_tokens: 100,
+    output_tokens: 10,
+    cache_read_input_tokens: 20,
+    cache_creation_input_tokens: 7,
+    cache_creation: { ephemeral_5m_input_tokens: 4, ephemeral_1h_input_tokens: 3 }
+  }), {
+    input: 100,
+    output: 10,
+    reasoning: 0,
+    cache: { read: 20, write: 7 },
+    total: 137
+  });
+  assert.equal(claudeUsageToTokens({
+    input_tokens: 100,
+    output_tokens: 10,
+    cache_read_input_tokens: 20,
+    cache_creation: { ephemeral_5m_input_tokens: 4, ephemeral_1h_input_tokens: 3 }
+  }).cache.write, 7);
+  assert.equal(claudeUsageToTokens({
+    input_tokens: 100,
+    output_tokens: 10,
+    cache_read_input_tokens: 20,
+    cache_creation_input_tokens: 0,
+    cache_creation: { ephemeral_5m_input_tokens: 4, ephemeral_1h_input_tokens: 3 }
+  }).cache.write, 0);
+});
+
+test("Claude usage separates thinking from inclusive output and trusts only consistent totals", () => {
+  assert.deepEqual(claudeUsageToTokens({
+    input_tokens: 100,
+    output_tokens: 30,
+    output_tokens_details: { thinking_tokens: 10 },
+    cache_read_input_tokens: 20,
+    cache_creation_input_tokens: 7,
+    total_tokens: 157
+  }), {
+    input: 100,
+    output: 20,
+    reasoning: 10,
+    cache: { read: 20, write: 7 },
+    total: 157
+  });
+  assert.equal(claudeUsageToTokens({
+    input_tokens: 100,
+    output_tokens: 30,
+    cache_read_input_tokens: 20,
+    cache_creation_input_tokens: 7,
+    total_tokens: 150
+  }).total, 157);
+  assert.equal(claudeUsageToTokens({
+    input_tokens: 100,
+    output_tokens: 30,
+    reasoning_tokens: 10,
+    output_tokens_details: { thinking_tokens: 20 },
+    total_tokens: 157
+  }).reasoning, 10);
+});
+
 test("normalized message providers build structured tree, metrics, and model-aware cache data", () => {
   const records = parseTranscript(fixture("claude-current.jsonl"));
   const session = extractSessionMeta(records, "session-current");

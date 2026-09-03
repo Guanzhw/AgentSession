@@ -60,8 +60,22 @@ verified-at、版本/commit、官方来源链接与样本格式。
    `.agents/decisions/implemented/2026-09-03-codex-current-compatibility.md`。
    限制：本机尚未安装 0.153.0，真实 0.153 rollout 仅由官方 source 与
    有界 fixture 覆盖；本机最新 0.152.1 样本已做只读 parser/protocol smoke。
-5. **Claude Code 2.1.258** — npm 2.1.258,repo HEAD
-   aef74afe01f65b602258d6102b0da9730ac6f0aa;本机安装 2.1.207。
+5. **Claude Code 2.1.259** — 本机安装 2.1.207；npm `latest`/`next` 为
+   2.1.259，`stable` 为 2.1.236。官方仓库 `HEAD` 与 release tag `v2.1.259`
+   均为 `f173a697aa6486945f1b9c4aa9ce5383d2c87db6`（2026-09-03）；已区分
+   npm dist-tag、release tag 与源码 HEAD。官方文档确认 project-scoped
+   JSONL、subagent `system`/`compact_boundary` 与
+   `compactMetadata.preTokens`；adapter/protocol 已补齐该有界 compaction
+   证据与 `cache_creation` 对象 fallback；Anthropic total input 按
+   `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`，
+   `output_tokens` 拆分为 visible output/reasoning 且不重复计费，保持
+   metadata-only，不污染线性 transcript。真实本机快照 11 个 project
+   transcript / 132 records，无
+   sidechain、task-notification 或 compaction；已做只读 adapter/protocol
+   smoke。当前 2.1.259 结论为 docs/upstream-verified；本机没有 live
+   2.1.259 transcript。测试新增 4 个 focused 回归；fixture 为
+   source-derived bounded synthetic fixture，非 live capture。决策记录见
+   `.agents/decisions/implemented/2026-09-03-claude-code-current-compatibility.md`。
 6. **OpenCode 1.18.26** — npm opencode-ai 1.18.26;本机安装 1.17.11(Windows)。
 7. **Hermes Agent remote HEAD** — 1cb3ab617363ffab9e55239a7d2ab0d6f9c10473;
    本地 v0.19.1(upstream 0cd26ce9 / local 840fb55a)的 state.db 结论只对已验证
