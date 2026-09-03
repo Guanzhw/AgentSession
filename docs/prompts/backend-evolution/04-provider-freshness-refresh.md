@@ -76,7 +76,24 @@ verified-at、版本/commit、官方来源链接与样本格式。
    2.1.259 transcript。测试新增 4 个 focused 回归；fixture 为
    source-derived bounded synthetic fixture，非 live capture。决策记录见
    `.agents/decisions/implemented/2026-09-03-claude-code-current-compatibility.md`。
-6. **OpenCode 1.18.26** — npm opencode-ai 1.18.26;本机安装 1.17.11(Windows)。
+6. **OpenCode 1.18.27** — npm `opencode-ai` latest 1.18.27；本机安装
+   1.17.11(Windows)。官方 release tag `v1.18.27` 为
+   `4b7e19e315cca414121ba1d61523fef74bb3ae8b`，官方源码 HEAD 为
+   `b578b7261fc9ec4917fe272df5cc4bd8a056cd5d`，二者证据分开记录。官方
+   schema 保留 `message`/`part` 投影，并记录 `todo`、task subtask/compaction
+   part 与 task 工具的 background/job 状态；适配器已补 todo Task、
+   subtask/compaction 事件和 background 状态。真实本机库只读快照为 131
+   sessions/73 parent links/182 todos/2,968 messages/13,091 parts，context
+   epoch/input 均为 0；回归使用 bounded synthetic shape，不复制真实 body。
+   todo 没有独立 row id，Task identity 使用稳定字段 fingerprint，不把可重排
+   position 当作唯一身份；compaction tail 仅在对应 message 存在时建立 anchor。
+   官方 Todo status 文档值为 pending/in_progress/completed/cancelled，未知值
+   显式跳过，不伪造状态。synthetic fixture 使用官方
+   `CompactionPart(type/auto/overflow/tail_start_id)`、
+   `SubtaskPart(type/prompt/description/agent/model/command)` 与 task
+   `state(title/metadata/output)` 的 bounded keys，文件为
+   `test/fixtures/opencode-current-v1.18.27-synthetic.jsonl`，非 live capture；
+   最终 focused OpenCode/SQLite 回归为 3/3，完整 `npm test` 为 369/369。
 7. **Hermes Agent remote HEAD** — 1cb3ab617363ffab9e55239a7d2ab0d6f9c10473;
    本地 v0.19.1(upstream 0cd26ce9 / local 840fb55a)的 state.db 结论只对已验证
    版本/本地样本成立。

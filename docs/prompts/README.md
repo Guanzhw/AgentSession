@@ -28,8 +28,8 @@
 5. `backend-evolution/04-provider-freshness-refresh.md` — **下一阶段 bounded spec
    (不立即实现)**:按证据时效逐 provider 刷新 parser/schema/protocol 映射——DSH
    alpha.5、OpenClaw current SQLite、Pi v3/0.84.4、Codex 0.153.0 与 Claude
-   Code 2.1.259 已刷新完成(2026-09-03);剩余 OpenCode 1.18.26、Hermes remote
-   HEAD;每个 provider 单独决策/fixture/真实数据/提交,保持核心
+   Code 2.1.259 与 OpenCode 1.18.27 已刷新完成(2026-09-03);剩余 Hermes
+   remote HEAD;每个 provider 单独决策/fixture/真实数据/提交,保持核心
    Work Graph provider-native v3 mapping 优先级。
 
 建议顺序:A 的投影部分已落地;剩余的 provider-native origin 映射等待真实证据;B 与 C

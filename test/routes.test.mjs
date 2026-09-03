@@ -22,8 +22,11 @@ const { registerSessions } = await import("../dist/src/routes/sessions.js");
 const { renderSessionsPage } = await import("../dist/src/views/sessions.js");
 const { registerSettingsStatsTrash } = await import("../dist/src/routes/settings-stats-trash.js");
 const { closeIndexDb, getIndexDb } = await import("../dist/src/index-db.js");
-const { closeDb } = await import("../dist/src/db.js");
+const { closeDb, getTodos } = await import("../dist/src/db.js");
 const { closeMetaDb, renameSession } = await import("../dist/src/meta.js");
+const { buildOpenCodeSessionTree } = await import("../dist/src/providers/opencode/session-tree.js");
+const { createOpenCodeSqliteAdapter } = await import("../dist/src/providers/opencode/sqlite-adapter.js");
+const { renderSessionPage } = await import("../dist/src/views/session.js");
 
 function captureGetRoutes(register, deps) {
   const routes = [];
@@ -278,6 +281,10 @@ test("SQLite session documents preserve parsed parts, todos, and viewer metadata
       .run("sqlite-message", "sqlite-document", JSON.stringify({ role: "assistant", time: { created: 1500 } }));
     db.prepare("INSERT INTO part VALUES (?, ?, ?, ?)")
       .run("sqlite-part", "sqlite-message", "sqlite-document", JSON.stringify({ type: "text", text: "SQLite body" }));
+    db.prepare("INSERT INTO part VALUES (?, ?, ?, ?)")
+      .run("sqlite-subtask", "sqlite-message", "sqlite-document", JSON.stringify({ type: "subtask", prompt: "hidden prompt", description: "hidden task", agent: "worker" }));
+    db.prepare("INSERT INTO part VALUES (?, ?, ?, ?)")
+      .run("sqlite-compaction", "sqlite-message", "sqlite-document", JSON.stringify({ type: "compaction", auto: true, tail_start_id: "missing-message" }));
     db.prepare("INSERT INTO todo VALUES (?, ?, ?, ?, ?, ?)")
       .run("sqlite-document", "Verify SQLite fidelity", "pending", "high", 0, 1600);
     db.close();
@@ -296,9 +303,38 @@ test("SQLite session documents preserve parsed parts, todos, and viewer metadata
     assert.equal(document.apiMessages[0].parts[0].text, "SQLite body");
     assert.equal(document.exportMessages[0].parts[0].text, "SQLite body");
     assert.equal(document.todos[0].content, "Verify SQLite fidelity");
+    assert.equal(document.todos[0].time_updated, null);
+
+    const adapter = createOpenCodeSqliteAdapter({
+      id: "opencode", name: "OpenCode", defaultDataPath: () => dbPath,
+      capabilities: { openCodeStatsStore: true }
+    });
+    const linearMessages = adapter.getMessages("sqlite-document");
+    assert.deepEqual(linearMessages.map((message) => message.content), ["SQLite body"]);
+    const tree = buildOpenCodeSessionTree("sqlite-document", dbPath);
+    const html = renderSessionPage({
+      session: tree.session, sessionTree: tree, messages: document.messages,
+      partsByMessage: document.partsByMessage, todos: document.todos, provider: "opencode"
+    });
+    const toc = html.match(/<div class="toc-list">([\s\S]*?)<\/div>\s*<button class="toc-resize-handle"/)?.[1] || "";
+    assert.doesNotMatch(toc, /hidden task|hidden prompt|Verify SQLite fidelity|sqlite-subtask|sqlite-compaction/);
   } finally {
     closeDb(dbPath);
     rmSync(documentTemp, { recursive: true, force: true });
+  }
+});
+
+test("getTodos stays empty when a legacy SQLite source has no todo table", () => {
+  const legacyTemp = mkdtempSync(path.join(os.tmpdir(), "agentsession-legacy-todo-"));
+  const dbPath = path.join(legacyTemp, "sessions.db");
+  try {
+    const db = new DatabaseSync(dbPath);
+    db.exec("CREATE TABLE session (id TEXT PRIMARY KEY)");
+    db.close();
+    assert.deepEqual(getTodos("missing-todo-session", dbPath), []);
+  } finally {
+    closeDb(dbPath);
+    rmSync(legacyTemp, { recursive: true, force: true });
   }
 });
 

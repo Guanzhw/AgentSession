@@ -62,7 +62,7 @@ GET /api/:provider/session/:id/runtime/context?maxItems=
 
 | Provider | 生命周期 | 本地来源 | Protocol fidelity 与覆盖 |
 |:---|:---|:---|:---|
-| OpenCode | active | `$XDG_DATA_HOME/opencode/opencode.db` 或 `~/.local/share/opencode/opencode.db` | `partial/derived` messages/parts 事件；原生 child/session 记录支持关系、Task、AgentRun。 |
+| OpenCode | active | `$XDG_DATA_HOME/opencode/opencode.db` 或 `~/.local/share/opencode/opencode.db` | `partial/derived` message/part 事件；原生 child/session 关系、todo Task、subtask/compaction 事件与 task background AgentRun（官方 1.18.27；本机 1.17.11）。 |
 | Claude Code | active | `~/.claude/transcripts/`、`~/.claude/projects/` | `partial/derived` transcript、`system/compact_boundary`（`compactMetadata`）和 sidechain/task-notification 证据；官方 npm latest 2.1.259 / upstream 已核验，本机 2.1.207，暂无 live 2.1.259 transcript。 |
 | Codex CLI | active | `~/.codex/sessions/**/*.jsonl`、冷文件 `*.jsonl.zst` | `full/recorded` response/item、工具、compaction 和当前 `token_usage_record`；`inter_agent_communication` 只进入 Runtime v3 actors/coordination，不改变线性 transcript；`partial/derived` NEW_TASK 关系、Task、AgentRun。`close_agent` 归一化为 `interrupt`；本机 0.152.1 仍主要写旧 `token_count`/collaboration 形状，官方 0.153.0 release 与当前源码 HEAD 已验证新形状。 |
 | OpenClaw | active — current SQLite（含 legacy/archive JSONL 回退） | `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite`（agent schema 19，2026-09-03 验证）；legacy/archive `sessions/*.jsonl` | `partial/derived` branch/window 代数、reasoning、工具、session_nodes parent/spawn/fork lineage；无来源证据不创建 child。Task/Run 为 `none`：current 与 legacy 构建器恒返回空数组，无已验证映射。 |

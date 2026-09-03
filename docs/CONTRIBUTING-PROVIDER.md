@@ -108,6 +108,35 @@ adapter/protocol smoke loaded 11 sessions. Current 2.1.259 format support is
 docs/upstream-verified; no live 2.1.259 transcript was available. The checked-in
 fixture is source-derived bounded synthetic data, not a live capture.
 
+### OpenCode evidence snapshot (2026-09-03)
+
+The installed CLI is `1.17.11` (`opencode --version`). npm `opencode-ai`
+currently publishes `1.18.27` as the newest release. The official repository
+is <https://github.com/anomalyco/opencode> (the historical `sst/opencode` URL
+redirects there): release tag `v1.18.27` is
+`4b7e19e315cca414121ba1d61523fef74bb3ae8b`, while the separately checked
+repository HEAD is `b578b7261fc9ec4917fe272df5cc4bd8a056cd5d`.
+The release schema keeps `message`/`part` as the read projection and defines
+`todo`, `subtask`, and `compaction` records. The current task tool records
+`background`, `jobId`, child `sessionId`, and bounded task-state result
+envelopes. AgentSession maps those provider-owned facts to todo Tasks,
+task-request/compaction events, and background AgentRuns; it does not infer
+context artifacts from the empty local context-epoch table. The real local
+read-only snapshot contained 131 sessions (73 with a parent), 182 todos,
+2,968 messages, and 13,091 parts; no context epoch/input rows were populated,
+and no background task envelope appeared. The regression shape is bounded
+synthetic data derived from official source, not a live capture, and contains
+no local transcript body. Because the current todo table has no row id, Task
+identity uses a bounded fingerprint of stable recorded fields rather than
+position alone; compaction tail anchors are emitted only when the referenced
+message is present. The official Todo status contract documents `pending`,
+`in_progress`, `completed`, and `cancelled`; an unrecognized status is skipped
+with no invented lifecycle state. The synthetic fixture preserves the exact
+source keys `CompactionPart.type/auto/overflow/tail_start_id`,
+`SubtaskPart.type/prompt/description/agent/model/command`, and task metadata
+`parentSessionId/sessionId/background/jobId` plus state `title` and the task
+output `id/state` envelope.
+
 ## Contract boundary
 
 Every adapter implements `ProviderAdapter`:

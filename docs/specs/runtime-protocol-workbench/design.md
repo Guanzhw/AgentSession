@@ -172,8 +172,12 @@ validator and graph anchors.
 
 ### New protocol providers
 
-- OpenCode derives events from normalized messages/parts and uses canonical
-  parent/child records for relationships and tasks/runs.
+- OpenCode derives events from normalized messages/parts, projects native todo
+  rows as recorded Tasks, preserves subtask/compaction parts as provider-owned
+  task/context events, and uses canonical parent/child records for
+  relationships and task/runs. Task tool result envelopes and `background`
+  metadata determine run status/mode; empty context epochs do not create
+  artifacts.
 - OpenClaw preserves its in-file active path plus branch topology and registry
   spawn evidence.
 - Copilot exposes event-log messages/tools and inline-agent task/run facts but

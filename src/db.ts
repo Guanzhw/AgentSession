@@ -299,8 +299,15 @@ export function getParts(messageId: any, pathOverride: string | undefined = unde
 
 export function getTodos(sessionId: any, pathOverride: string | undefined = undefined) {
   const db = getDb(pathOverride);
+  const hasTodoTable = db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'todo'"
+  ).get();
+  if (!hasTodoTable) return [];
+  const todoColumns = db.prepare('PRAGMA table_info("todo")').all();
+  const hasUpdatedTime = todoColumns.some((column: any) => column.name === "time_updated");
   return db.prepare(`
-    SELECT session_id, content, status, priority, position, time_created
+    SELECT session_id, content, status, priority, position, time_created,
+           ${hasUpdatedTime ? "time_updated" : "NULL AS time_updated"}
     FROM todo
     WHERE session_id = ?
     ORDER BY position ASC, time_created ASC

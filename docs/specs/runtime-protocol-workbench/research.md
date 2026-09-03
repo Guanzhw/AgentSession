@@ -33,12 +33,17 @@ The protocol is incomplete as a harness inspection contract:
 - relationship endpoints are bare session ids rather than canonical composite
   session references;
 - the only HTTP query returns an unbounded single-session snapshot;
-- OpenCode, OpenClaw, Copilot CLI, and Gemini CLI expose no protocol accessor.
+- At the original 2026-08-20 snapshot OpenCode, OpenClaw, Copilot CLI, and
+  Gemini CLI exposed no protocol accessor. The later provider refreshes now
+  supply OpenCode and OpenClaw protocol builders; the historical observation
+  remains a record of the pre-implementation baseline.
 
-Current local data confirms the coverage gap. On this machine, OpenCode,
-OpenClaw, and Copilot data are available but return no protocol. Claude Code,
-Codex, Hermes, and Pi return protocols, with sampled sessions dominated by
-derived message events and often-empty orchestration/context domains.
+Current local data confirms the remaining coverage gaps rather than a missing
+accessor. OpenCode and OpenClaw now return validated protocols, while their
+provider snapshots still have bounded orchestration/context domains; Claude
+Code, Codex, Hermes, and Pi likewise return protocols with sampled sessions
+dominated by derived message events and often-empty orchestration/context
+domains.
 
 ## Simplification evidence
 
