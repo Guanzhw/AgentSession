@@ -11,7 +11,8 @@ license-tracked bundle at `src/static/vendor/highlight.js`.
 
 > 状态:`proposed` · 作者:UI planner · 日期:2026-09
 > 本文是**信息设计**:展示哪些信息、层级如何、什么默认隐藏、状态如何呈现。
-> 视觉(配色、字号、间距、图标)不在本文范围,留到实现期由具备视觉能力的人定稿。
+> P1-P4 的视觉语言、响应式规则与截图验收由
+> [`ui-v2-visual-system.md`](ui-v2-visual-system.md) 定义。
 >
 > **对齐说明(2026-09-02 已实现决策)**:本文保留的信息设计(线程化、agent 卡/频道、
 > 检查点、工作叙事、scoped 记忆/经验/用户信息、有界证据、规范会话链接)仍然有效;
@@ -153,7 +154,9 @@ AgentSession
 
 **多 agent 长程协作(subagent 已不是一次性工具)**:
 
-- agent 生命周期:active(活跃)→ waiting(等待输入)→ interrupted(被打断)→ completed(结束);
+- agent 生命周期展示来自已记录事实:`running`→active(活跃)、`waiting_input`→waiting
+  (等待输入);terminal task/run 状态保留自身标签。只有 session state 或 `interrupt`
+  observation 明确记录时才显示 interrupted(被打断),不把 cancelled 静默改名;
   一个 agent 可以跨多个用户轮次存活。对话页用 **agent 卡**(取代一次性"子代理卡")展示:
   跨轮活跃区间、消息数、最后活动、当前状态;
 - **agent 频道**:卡展开后是该 agent 的长程通信时间线——message / mailbox-delivery / interrupt /
@@ -167,12 +170,16 @@ AgentSession
 - token 归属:direct / inherited / shared 三分(协议已定义;当前无 provider 记录
   来源切片,投影未暴露时 UI 只显权威总量——见 §7 与 work-graph 规格 Evolution backlog)。
 
+工作页可显示最新的**上下文结果态**(例如 compact 后的当前大小与 provider 记录的保留摘要)
+以及 scoped 资产计数入口,但不复制 compact 过程卡或单条 memory/experience/user-info;
+compact 因果检查点仍只在对话流出现一次,完整证据仍在事件页。
+
 **后台任务**:
 
 - 压缩 compact:过程事实 → 对话页内联检查点(合并呈现,显示压缩后上下文变成了什么 +
   before→after tokens);完整列表在事件页,不重复;
 - 记忆/经验/用户信息(memory/experience/user-info):长期资产,不是过程 →
-  检查器新增"记忆与经验"折叠区,按 scope(session/agent/project/user/org)分组,
+  检查器新增"记忆与经验"折叠区,按 scope(session/agent/project/user/organization)分组,
   只列标题+摘要(metadata-first),内容按需展开;
 - 检查点/整理(checkpoint/dream/reinjection):改变上下文的过程 → 对话页按影响内联 + 事件页完整列表;
 - 原则:后台任务分两类——"改变上下文的"进对话流(检查点)+ 事件页列表;"长期资产"进检查器资产区。

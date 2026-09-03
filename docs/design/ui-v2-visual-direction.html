@@ -1,0 +1,222 @@
+<div id="as-ui-v2-visual" role="region" aria-label="AgentSession UI v2 visual direction mockup">
+  <div class="as-window">
+    <aside class="as-rail" aria-label="主导航">
+      <div class="as-brand"><span class="as-brand-mark" aria-hidden="true">⌁</span><span>AgentSession</span></div>
+      <nav>
+        <button type="button" class="as-nav is-active"><span aria-hidden="true">▦</span><span>库</span></button>
+        <button type="button" class="as-nav"><span aria-hidden="true">◒</span><span>统计</span></button>
+        <button type="button" class="as-nav"><span aria-hidden="true">⚙</span><span>设置</span></button>
+      </nav>
+      <div class="as-provider"><span class="as-provider-dot"></span><span>Codex CLI</span><small>可用</small></div>
+    </aside>
+    <main class="as-main">
+      <header class="as-header">
+        <div class="as-back">← 返回库</div>
+        <div class="as-title-row">
+          <div>
+            <h1>演进 AgentSession 工作视图</h1>
+            <p>D:\WorkSpace\OpenSession · 今天 18:42 · Codex CLI</p>
+          </div>
+          <div class="as-actions">
+            <button type="button">导出</button>
+            <button type="button" class="as-primary">在终端中继续</button>
+          </div>
+        </div>
+        <div class="as-status-line">
+          <span class="as-state"><i></i>进行中</span>
+          <span>44 个任务 · 38 完成 · 3 运行 · 3 等待</span>
+          <span>上下文已压缩 10 次</span>
+          <span>1.84M tokens · 来源未完全分类</span>
+        </div>
+      </header>
+
+      <div class="as-tabs" role="tablist" aria-label="会话详情">
+        <button type="button" role="tab" aria-selected="true">工作</button>
+        <button type="button" role="tab" aria-selected="false">对话</button>
+        <button type="button" role="tab" aria-selected="false">事件</button>
+      </div>
+
+      <section class="as-story" aria-labelledby="as-story-title">
+        <div class="as-story-copy">
+          <span class="as-eyebrow">当前目标</span>
+          <h2 id="as-story-title">从线性会话走向多智能体 Work Graph</h2>
+          <p>协议与七个 provider 已完成刷新。UI 正在重组为工作、执行、协作与上下文四个可理解的视角。</p>
+        </div>
+        <div class="as-progress" role="status" aria-label="38 of 44 tasks completed">
+          <strong>38 / 44</strong>
+          <span>任务完成</span>
+          <div><i></i></div>
+        </div>
+      </section>
+
+      <section class="as-grid">
+        <div class="as-graph" role="region" aria-labelledby="as-graph-title">
+          <div class="as-section-heading">
+            <div><span class="as-eyebrow">协作结构</span><h3 id="as-graph-title">谁在推进这项工作</h3></div>
+            <button type="button">查看全部 13 个 agent</button>
+          </div>
+          <div class="as-lanes">
+            <div class="as-agent as-agent-main"><b>主 Agent</b><span>整合与验证</span><small>活跃</small></div>
+            <div class="as-edge as-edge-a"></div>
+            <div class="as-edge as-edge-b"></div>
+            <div class="as-agent as-agent-ui"><b>ui-worker</b><span>UI P0</span><small>已交付</small></div>
+            <div class="as-agent as-agent-review"><b>reviewer</b><span>只读审查</span><small>已完成</small></div>
+            <div class="as-agent as-agent-provider"><b>provider-worker</b><span>Hermes 映射</span><small>已完成</small></div>
+          </div>
+        </div>
+
+        <aside class="as-context" aria-labelledby="as-context-title">
+          <div class="as-section-heading"><div><span class="as-eyebrow">上下文</span><h3 id="as-context-title">最近变化</h3></div></div>
+          <div class="as-context-item"><span class="as-context-kind">当前</span><div><b>71k tokens · compact 后</b><small>保留目标、未完成任务与关键决策 · provider 记录</small></div></div>
+          <div class="as-context-item"><span class="as-context-kind">资产</span><div><b>3 条记忆 · 1 条经验</b><small>session 2 · project 2</small></div></div>
+          <button type="button" class="as-context-link">查看全部上下文资产 →</button>
+        </aside>
+      </section>
+
+      <section class="as-tasks" aria-labelledby="as-tasks-title">
+        <div class="as-section-heading">
+          <div><span class="as-eyebrow">任务</span><h3 id="as-tasks-title">当前推进</h3></div>
+          <button type="button">全部任务</button>
+        </div>
+        <div class="as-task-row"><span class="as-task-state is-running"></span><div><b>建立 UI v2 视觉系统</b><small>主 Agent · 进行中</small></div><span>现在</span><button type="button">证据</button></div>
+        <div class="as-task-row"><span class="as-task-state is-done"></span><div><b>完成 P0 信息骨架</b><small>ui-worker · 已完成</small></div><span>12m</span><button type="button">证据</button></div>
+        <div class="as-task-row"><span class="as-task-state is-done"></span><div><b>审查 SEA 与窄屏布局</b><small>reviewer · 已完成</small></div><span>8m</span><button type="button">证据</button></div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<style>
+  #as-ui-v2-visual {
+    --as-bg: light-dark(#f4f3ef, #0d1117);
+    --as-panel: light-dark(#fffefa, #151b24);
+    --as-raised: light-dark(#ffffff, #1b2430);
+    --as-text: light-dark(#191c20, #eef2f6);
+    --as-secondary: light-dark(#5a626b, #aab5c2);
+    --as-subtle: light-dark(#e3e0d9, #303b48);
+    --as-accent: light-dark(#345d55, #83b8aa);
+    --as-accent-soft: light-dark(#e3efeb, #203a35);
+    --as-warm: light-dark(#9b673d, #d7a071);
+    color-scheme: light dark;
+    color: var(--as-text);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  #as-ui-v2-visual * { box-sizing: border-box; }
+  #as-ui-v2-visual button { font: inherit; color: inherit; }
+  #as-ui-v2-visual .as-window { display: grid; grid-template-columns: 176px minmax(0, 1fr); min-height: 720px; background: var(--as-bg); border: 1px solid var(--as-subtle); }
+  #as-ui-v2-visual .as-rail { display: flex; flex-direction: column; gap: 28px; padding: 24px 14px; background: var(--as-panel); border-right: 1px solid var(--as-subtle); }
+  #as-ui-v2-visual .as-brand { display: flex; gap: 9px; align-items: center; padding: 0 10px; font: 500 14px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  #as-ui-v2-visual .as-brand-mark { display: grid; place-items: center; width: 24px; height: 24px; color: var(--as-accent); border: 1px solid currentColor; border-radius: 6px; }
+  #as-ui-v2-visual .as-rail nav { display: grid; gap: 4px; }
+  #as-ui-v2-visual .as-nav { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 0 11px; border: 0; border-radius: 7px; background: transparent; text-align: left; cursor: pointer; }
+  #as-ui-v2-visual .as-nav.is-active { background: var(--as-accent-soft); color: var(--as-accent); font-weight: 500; }
+  #as-ui-v2-visual .as-provider { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: center; margin-top: auto; padding: 10px; color: var(--as-secondary); border-top: 1px solid var(--as-subtle); }
+  #as-ui-v2-visual .as-provider-dot { width: 8px; height: 8px; background: var(--as-accent); border-radius: 50%; }
+  #as-ui-v2-visual .as-provider small { grid-column: 2; }
+  #as-ui-v2-visual .as-main { min-width: 0; padding: 28px 32px 44px; }
+  #as-ui-v2-visual .as-back, #as-ui-v2-visual .as-eyebrow { color: var(--as-secondary); font-size: 12px; }
+  #as-ui-v2-visual .as-title-row, #as-ui-v2-visual .as-section-heading { display: flex; min-width: 0; justify-content: space-between; gap: 18px; align-items: flex-start; }
+  #as-ui-v2-visual .as-title-row > div:first-child, #as-ui-v2-visual .as-task-row > div { min-width: 0; }
+  #as-ui-v2-visual .as-title-row p, #as-ui-v2-visual .as-task-row b { overflow-wrap: anywhere; }
+  #as-ui-v2-visual h1 { margin: 13px 0 6px; max-width: 720px; font-size: 27px; line-height: 1.15; font-weight: 500; letter-spacing: -0.02em; }
+  #as-ui-v2-visual h2 { margin: 6px 0 10px; max-width: 650px; font-size: 22px; line-height: 1.2; font-weight: 500; letter-spacing: -0.015em; }
+  #as-ui-v2-visual h3 { margin: 4px 0 0; font-size: 16px; font-weight: 500; }
+  #as-ui-v2-visual p { margin: 0; color: var(--as-secondary); line-height: 1.55; }
+  #as-ui-v2-visual .as-actions { display: flex; gap: 8px; }
+  #as-ui-v2-visual .as-actions button, #as-ui-v2-visual .as-section-heading button, #as-ui-v2-visual .as-task-row button, #as-ui-v2-visual .as-context-link { min-height: 34px; padding: 0 12px; border: 1px solid var(--as-subtle); border-radius: 7px; background: var(--as-panel); cursor: pointer; }
+  #as-ui-v2-visual .as-actions .as-primary { color: light-dark(#ffffff, #10201c); background: var(--as-accent); border-color: var(--as-accent); }
+  #as-ui-v2-visual .as-status-line { display: flex; flex-wrap: wrap; gap: 10px 20px; margin-top: 20px; padding: 12px 0; color: var(--as-secondary); font-size: 12px; border-top: 1px solid var(--as-subtle); border-bottom: 1px solid var(--as-subtle); }
+  #as-ui-v2-visual .as-state { color: var(--as-text); }
+  #as-ui-v2-visual .as-state i { display: inline-block; width: 7px; height: 7px; margin-right: 6px; background: var(--as-accent); border-radius: 50%; }
+  #as-ui-v2-visual .as-tabs { display: flex; gap: 26px; margin: 22px 0 20px; border-bottom: 1px solid var(--as-subtle); }
+  #as-ui-v2-visual .as-tabs button { position: relative; padding: 0 0 11px; border: 0; background: none; color: var(--as-secondary); cursor: pointer; }
+  #as-ui-v2-visual .as-tabs button[aria-selected="true"] { color: var(--as-text); }
+  #as-ui-v2-visual .as-tabs button[aria-selected="true"]::after { content: ""; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--as-accent); }
+  #as-ui-v2-visual .as-story { display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 28px; align-items: end; padding: 26px 0 28px; }
+  #as-ui-v2-visual .as-progress { display: grid; gap: 4px; text-align: right; }
+  #as-ui-v2-visual .as-progress strong { font-size: 24px; font-weight: 500; }
+  #as-ui-v2-visual .as-progress span { color: var(--as-secondary); font-size: 12px; }
+  #as-ui-v2-visual .as-progress div { height: 5px; margin-top: 8px; background: var(--as-subtle); }
+  #as-ui-v2-visual .as-progress i { display: block; width: 86%; height: 100%; background: var(--as-accent); }
+  #as-ui-v2-visual .as-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(250px, .85fr); gap: 18px; }
+  #as-ui-v2-visual .as-graph, #as-ui-v2-visual .as-context { padding: 20px; background: var(--as-panel); border: 1px solid var(--as-subtle); }
+  #as-ui-v2-visual .as-section-heading button { min-height: 30px; color: var(--as-secondary); background: transparent; }
+  #as-ui-v2-visual .as-lanes { position: relative; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto auto; gap: 18px 70px; min-height: 220px; padding: 30px 24px 10px; }
+  #as-ui-v2-visual .as-agent { position: relative; z-index: 2; display: grid; gap: 3px; min-width: 0; padding: 13px 14px; background: var(--as-raised); border-left: 3px solid var(--as-subtle); box-shadow: 0 1px 0 color-mix(in srgb, var(--as-text) 7%, transparent); }
+  #as-ui-v2-visual .as-agent b { font-weight: 500; }
+  #as-ui-v2-visual .as-agent span, #as-ui-v2-visual .as-agent small { color: var(--as-secondary); font-size: 11px; }
+  #as-ui-v2-visual .as-agent-main { grid-row: 1 / 3; align-self: center; border-left-color: var(--as-accent); }
+  #as-ui-v2-visual .as-agent-ui { border-left-color: var(--as-warm); }
+  #as-ui-v2-visual .as-edge { position: absolute; z-index: 1; left: 42%; width: 19%; border-top: 1px solid var(--as-secondary); }
+  #as-ui-v2-visual .as-edge::after { content: ""; position: absolute; right: -1px; top: -3px; width: 5px; height: 5px; border-top: 1px solid var(--as-secondary); border-right: 1px solid var(--as-secondary); transform: rotate(45deg); }
+  #as-ui-v2-visual .as-edge-a { top: 37%; }
+  #as-ui-v2-visual .as-edge-b { top: 71%; }
+  #as-ui-v2-visual .as-context { display: grid; align-content: start; gap: 18px; }
+  #as-ui-v2-visual .as-context-item { display: grid; grid-template-columns: auto 1fr; gap: 10px; padding-top: 14px; border-top: 1px solid var(--as-subtle); }
+  #as-ui-v2-visual .as-context-kind { color: var(--as-accent); font-size: 11px; }
+  #as-ui-v2-visual .as-context-item div { display: grid; gap: 4px; }
+  #as-ui-v2-visual .as-context-item b { font-size: 13px; font-weight: 500; }
+  #as-ui-v2-visual .as-context-item small { color: var(--as-secondary); line-height: 1.4; }
+  #as-ui-v2-visual .as-context-link { justify-self: start; color: var(--as-accent); border: 0; padding: 0; }
+  #as-ui-v2-visual .as-tasks { margin-top: 18px; padding: 20px; background: var(--as-panel); border: 1px solid var(--as-subtle); }
+  #as-ui-v2-visual .as-task-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 12px; align-items: center; min-height: 58px; border-top: 1px solid var(--as-subtle); }
+  #as-ui-v2-visual .as-task-row:nth-of-type(2) { margin-top: 14px; }
+  #as-ui-v2-visual .as-task-row div { display: grid; gap: 3px; }
+  #as-ui-v2-visual .as-task-row b { font-size: 13px; font-weight: 500; }
+  #as-ui-v2-visual .as-task-row small, #as-ui-v2-visual .as-task-row > span { color: var(--as-secondary); font-size: 11px; }
+  #as-ui-v2-visual .as-task-state { width: 9px; height: 9px; border: 1px solid var(--as-secondary); border-radius: 50%; }
+  #as-ui-v2-visual .as-task-state.is-running { background: var(--as-accent); border-color: var(--as-accent); }
+  #as-ui-v2-visual .as-task-state.is-done { position: relative; background: var(--as-accent-soft); border-color: var(--as-accent); }
+
+  @media (max-width: 768px) {
+    #as-ui-v2-visual .as-window { grid-template-columns: 1fr; }
+    #as-ui-v2-visual .as-rail { position: static; flex-direction: row; align-items: center; gap: 10px; padding: 8px 10px; border-right: 0; border-bottom: 1px solid var(--as-subtle); }
+    #as-ui-v2-visual .as-brand span:last-child, #as-ui-v2-visual .as-nav span:first-child, #as-ui-v2-visual .as-provider { display: none; }
+    #as-ui-v2-visual .as-rail nav { display: flex; flex: 1; }
+    #as-ui-v2-visual .as-nav { justify-content: center; min-height: 38px; }
+    #as-ui-v2-visual .as-main { padding: 20px 16px 36px; }
+    #as-ui-v2-visual .as-title-row { display: grid; }
+    #as-ui-v2-visual .as-actions { flex-wrap: wrap; }
+    #as-ui-v2-visual .as-story { grid-template-columns: 1fr; }
+    #as-ui-v2-visual .as-progress { text-align: left; }
+    #as-ui-v2-visual .as-grid { grid-template-columns: 1fr; }
+    #as-ui-v2-visual .as-lanes { gap: 12px 28px; padding-inline: 0; }
+    #as-ui-v2-visual .as-edge { left: 45%; width: 10%; }
+    #as-ui-v2-visual .as-task-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+    #as-ui-v2-visual .as-task-row > span:nth-last-child(2) { display: none; }
+  }
+
+  @media (max-width: 480px) {
+    #as-ui-v2-visual .as-main { padding-inline: 16px; }
+    #as-ui-v2-visual h1 { font-size: 25px; }
+    #as-ui-v2-visual .as-actions button { min-height: 44px; }
+    #as-ui-v2-visual .as-section-heading { align-items: center; }
+    #as-ui-v2-visual .as-section-heading button { max-width: 118px; }
+    #as-ui-v2-visual .as-lanes { grid-template-columns: 1fr; grid-template-rows: none; gap: 8px; min-height: 0; padding: 20px 0 0; }
+    #as-ui-v2-visual .as-agent-main { grid-row: auto; }
+    #as-ui-v2-visual .as-agent:not(.as-agent-main) { margin-left: 20px; }
+    #as-ui-v2-visual .as-agent:not(.as-agent-main)::before { content: "↳"; position: absolute; left: -18px; color: var(--as-secondary); }
+    #as-ui-v2-visual .as-edge { display: none; }
+    #as-ui-v2-visual .as-task-row button { min-height: 44px; }
+  }
+</style>
+
+<script>
+  (() => {
+    const state = { density: "calm", graph: true };
+    const root = document.getElementById("as-ui-v2-visual");
+    const render = () => {
+      const compact = state.density === "compact";
+      root.style.setProperty("--as-row-scale", compact ? ".82" : "1");
+      root.querySelector(".as-lanes").hidden = !state.graph;
+      root.querySelector(".as-graph").style.minHeight = state.graph ? "auto" : "150px";
+      root.querySelectorAll(".as-task-row").forEach((row) => row.style.minHeight = compact ? "48px" : "58px");
+    };
+    render();
+    if (globalThis.Tweak) {
+      const tweak = new Tweak({ container: root, onChange: render });
+      tweak.addSelect(state, "density", { label: "信息密度", options: [{ label: "舒展", value: "calm" }, { label: "紧凑", value: "compact" }], reference: "ui.density" });
+      tweak.addToggle(state, "graph", { label: "显示协作结构", reference: "work.graph" });
+    }
+  })();
+</script>
