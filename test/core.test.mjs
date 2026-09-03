@@ -2303,7 +2303,10 @@ test("Pi sessions preserve the active branch, tools, reasoning, usage, names, an
   assert.equal(meta.parentId, "019f7a00-0000-7000-8000-000000000000");
   assert.equal(meta.title, "Pi provider fixture");
   assert.equal(meta.directory, "D:\\WorkSpace\\pi-fixture");
-  assert.equal(meta.tokenCount, 30);
+  // Billed session total: ALL recorded usage entries (incl. the abandoned
+  // oldasst1 line, which carries 2) - assistant-only active-branch sum would
+  // be 30.
+  assert.equal(meta.tokenCount, 32);
 
   const messages = piRecordsToMessages(records, meta.id);
   assert.equal(messages.some((message) => message.content.includes("abandoned")), false);

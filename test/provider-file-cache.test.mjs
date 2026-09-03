@@ -283,7 +283,9 @@ test("Pi file cache preserves active-branch sessions and the last good transcrip
     assert.equal(pi.getSession("019f7b00-0000-7000-8000-000000000001")?.title, "Pi provider fixture");
     assert.equal(pi.searchMessages("Pi provider fixture")[0]?.sessionId, "019f7b00-0000-7000-8000-000000000001");
     assert.equal(pi.getMessages("019f7b00-0000-7000-8000-000000000001").some((message) => message.content.includes("abandoned")), false);
-    assert.ok(pi.getTokenStats(30).some((day) => day.outputTokens === 9 && day.cacheReadTokens === 6));
+    // Billed session total over ALL recorded entries: output 1+4+3+2=10,
+    // cacheRead 0+3+2+1=6 (abandoned oldasst1 line included).
+    assert.ok(pi.getTokenStats(30).some((day) => day.outputTokens === 10 && day.cacheReadTokens === 6));
     assert.match(JSON.stringify(pi.getSessionTree("019f7b00-0000-7000-8000-000000000001")), /call_read_1/);
     assert.ok(pi.getSessionMetrics("019f7b00-0000-7000-8000-000000000001")?.totals.steps);
     assert.equal(pi.getSystemPrompts("019f7b00-0000-7000-8000-000000000001")?.mode, "pi-resolved");

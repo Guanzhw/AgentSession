@@ -40,8 +40,8 @@ P0–P4 计划,不另立平行架构;在核心后端项落地后按 frontend-imp
 > 有界 origin 聚合与 coverage 语义已实现(决策记录
 > `.agents/decisions/implemented/2026-09-03-bounded-usage-origin-accounting.md`),
 > 对当时 snapshot(适配器/fixtures/本地已验证快照)的七 provider 审计未发现精确来源
-> 切片:DSH alpha.5 已于同日完成 refresh(官方 snapshot/源码确认无 origin-slice
-> 记录,credentialed live run 仍不可用),OpenClaw 最新 SQLite、Pi 0.84.4 等
+> 切片:DSH alpha.5、OpenClaw 最新 SQLite、Pi 0.84.4 已于同日完成 refresh
+> (官方 snapshot/源码确认无 origin-slice 记录,credentialed live run 仍不可用),
 > 其余上游新版本未 refresh,slice 状态 pending/unknown;provider-native origin
 > 映射保持 evidence-pending;其余内容作为历史 bootstrap 保留。
 

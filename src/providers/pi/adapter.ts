@@ -16,7 +16,9 @@ import {
 import {
   extractPiMeta,
   parsePiSession,
-  piAssistantUsageRecords,
+  piRecordedUsage,
+  piRecordedUsageRecord,
+  piRecordedUsageRecords,
   piUsageToTokens,
   piRecordsToMessages
 } from "./parser.js";
@@ -83,7 +85,7 @@ const piProtocolCapabilities = {
   sessionRelationships: { support: "partial" as const, provenance: "derived" as const, details: "header parentSession lineage only" },
   tasks: { support: "none" as const, provenance: "derived" as const, details: "Pi session files record no task abstraction" },
   agentRuns: { support: "none" as const, provenance: "derived" as const, details: "Pi session files record no agent-run abstraction" },
-  contextArtifacts: { support: "full" as const, provenance: "recorded" as const, details: "compaction entries, metadata-only summaries" },
+  contextArtifacts: { support: "full" as const, provenance: "recorded" as const, details: "compaction/branch_summary entries, metadata-only summaries, recorded retainedTail/fromHook evidence" },
   branches: { support: "partial" as const, provenance: "derived" as const, details: "active in-file branch and optional parentSession lineage" }
 };
 
@@ -141,19 +143,24 @@ function generatePiViews(sessionId: string) {
 const getPiViews = createStructuredViewCache(generatePiViews);
 
 const piTokenMapping: TokenFieldMapping = {
-  filterRecord: (entry) => entry.type === "message" && entry.message?.role === "assistant" && Boolean(entry.message?.usage),
+  // Pi's own billed session total (agent-session.js getSessionStats and
+  // usage-totals.js getUsageCostBreakdown) aggregates ALL recorded entries:
+  // assistant usage, nested toolResult usage, and compaction/branch_summary
+  // summary usage — including abandoned/history branches. The component
+  // totals are recorded fields (totalTokens); no origin slices are inferred.
+  filterRecord: (entry) => piRecordedUsageRecord(entry),
   getTimestamp: (entry) => Number(entry.message?.timestamp) || (entry.timestamp ? new Date(entry.timestamp).getTime() : 0),
-  inputTokens: (entry) => piUsageToTokens(entry.message?.usage)?.input || 0,
-  outputTokens: (entry) => piUsageToTokens(entry.message?.usage)?.output || 0,
-  totalTokens: (entry) => piUsageToTokens(entry.message?.usage)?.total || 0,
-  reasoningTokens: (entry) => piUsageToTokens(entry.message?.usage)?.reasoning || 0,
-  cacheReadTokens: (entry) => piUsageToTokens(entry.message?.usage)?.cache?.read || 0,
-  cacheWriteTokens: (entry) => piUsageToTokens(entry.message?.usage)?.cache?.write || 0
+  inputTokens: (entry) => piUsageToTokens(piRecordedUsage(entry))?.input || 0,
+  outputTokens: (entry) => piUsageToTokens(piRecordedUsage(entry))?.output || 0,
+  totalTokens: (entry) => piUsageToTokens(piRecordedUsage(entry))?.total || 0,
+  reasoningTokens: (entry) => piUsageToTokens(piRecordedUsage(entry))?.reasoning || 0,
+  cacheReadTokens: (entry) => piUsageToTokens(piRecordedUsage(entry))?.cache?.read || 0,
+  cacheWriteTokens: (entry) => piUsageToTokens(piRecordedUsage(entry))?.cache?.write || 0
 };
 
 const getPiTokenStats = createIncrementalTokenStats(
   () => sessionFiles.getFileSignatures(),
-  (filePath) => piAssistantUsageRecords(sessionFiles.getByFilePath(filePath)?.records || []),
+  (filePath) => piRecordedUsageRecords(sessionFiles.getByFilePath(filePath)?.records || []),
   piTokenMapping
 );
 

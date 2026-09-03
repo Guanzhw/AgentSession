@@ -246,8 +246,9 @@ surfaced that need protocol evolution:
    three-way split. The 2026-09-03 snapshot audit
    (`evidence-matrix.md` → "Usage origin slice audit") found no per-request
    context-origin evidence in the then-current adapters/fixtures/local
-   snapshots — OpenClaw latest SQLite, DSH alpha.5, Pi 0.84.4 and other newer
-   upstream versions are not yet refreshed and stay **pending/unknown** — so
+   snapshots — OpenClaw latest SQLite, DSH alpha.5, and Pi 0.84.4 were
+   refreshed 2026-09-03 and likewise show no origin slices; other newer
+   upstream versions stay **pending/unknown** — so
    **provider-native origin mappings remain pending real provider evidence**
    and are not invented. Until a provider
    records slices, the UI shows authoritative totals plus unclassified;

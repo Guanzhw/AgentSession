@@ -17,9 +17,9 @@
    recordsTruncated/slicesTruncated)与 coverage 语义已落地,决策记录
    `implemented/2026-09-03-bounded-usage-origin-accounting.md`;对 2026-09-03
    snapshot(当下适配器/fixtures/本地已验证快照)的七 provider 审计未发现精确来源
-   切片;DSH alpha.5 已于 2026-09-03 完成 refresh(官方 snapshot/源码确认无
-   origin-slice 记录,credentialed live run 仍不可用),OpenClaw 最新 SQLite、
-   Pi 0.84.4 等其余上游新版本尚未 refresh,其 slice 状态为 pending/unknown;
+   切片;DSH alpha.5、OpenClaw 最新 SQLite、Pi 0.84.4 已于 2026-09-03 完成
+   refresh(官方 snapshot/源码/真实数据确认无 origin-slice 记录,credentialed live
+   run 仍不可用),其余上游新版本尚未 refresh,其 slice 状态为 pending/unknown;
    provider-native origin 映射保持 evidence-pending(不发明三分)
 3. `backend-evolution/02-harness-environment-evidence.md` — 任务 B(后续可选增强):
    环境清单 + 环境重载。排在核心 provider/ownership 工作之后,证据优先,无证据不落代码
@@ -27,8 +27,8 @@
    会话 ↔ git commit 关联。当前只评审、不实现;决策记录保持 proposed
 5. `backend-evolution/04-provider-freshness-refresh.md` — **下一阶段 bounded spec
    (不立即实现)**:按证据时效逐 provider 刷新 parser/schema/protocol 映射——DSH
-   alpha.5 已刷新完成(2026-09-03),OpenClaw current SQLite 是下一个;随后
-   Pi v3/0.84.4、Codex 0.152.1、Claude 2.1.258、OpenCode 1.18.26、
+   alpha.5、OpenClaw current SQLite、Pi v3/0.84.4 已刷新完成(2026-09-03);
+   剩余 Codex 0.152.1、Claude 2.1.258、OpenCode 1.18.26、
    Hermes remote HEAD;每个 provider 单独决策/fixture/真实数据/提交,保持核心
    Work Graph provider-native v3 mapping 优先级。
 

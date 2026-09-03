@@ -46,6 +46,8 @@ export function piCompactionEntry(entry: Row) {
     tokensBefore: asNumber(Number(entry.tokensBefore) || null),
     tokensAfter: asNumber(Number(entry.tokensAfter) || null),
     retainedFromEventId: typeof entry.firstKeptEntryId === "string" ? entry.firstKeptEntryId : null,
+    retainedTailCount: Array.isArray(entry.retainedTail) ? entry.retainedTail.length : null,
+    fromHook: typeof entry.fromHook === "boolean" ? entry.fromHook : null,
     sourceId: typeof entry.id === "string" ? entry.id : null
   };
 }
@@ -120,7 +122,12 @@ export function buildPiSessionProtocol(input: PiProtocolInput): SessionProtocol 
       },
       providerData: {
         entryType: String(record.type),
-        branch: typeof record.branch === "string" ? record.branch : null
+        branch: typeof record.branch === "string" ? record.branch : null,
+        // Recorded v3 evidence: materialized retained tail (harness-generated
+        // compactions embed it instead of firstKeptEntryId) and extension-vs-
+        // pi-owner origin. Both are recorded entry fields; never invented.
+        retainedTailCount: compaction.retainedTailCount,
+        fromHook: compaction.fromHook
       }
     }, contextCompactionEvent({
       trigger: compaction.trigger,
@@ -175,6 +182,8 @@ export function buildPiSessionProtocol(input: PiProtocolInput): SessionProtocol 
       metadata: {
         entryType: String(entry.type),
         retainedFromEventId: compaction.retainedFromEventId,
+        retainedTailCount: compaction.retainedTailCount,
+        fromHook: compaction.fromHook,
         tokensBefore: compaction.tokensBefore,
         tokensAfter: compaction.tokensAfter
       }

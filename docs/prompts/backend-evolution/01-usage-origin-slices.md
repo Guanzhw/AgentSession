@@ -19,8 +19,9 @@
   input/cache token 的来源切片"证据——Codex 在 0.151 alpha 样本确认没有;
   DSH 的 seedLength/inheritedEventCount/owned suffix 是继承边界,不是
   request token origin slice,不强行映射;因此**未写任何 provider-native 映射**;
-  OpenClaw 最新 SQLite、DSH alpha.5、Pi 0.84.4 及其他上游新版本未 refresh,
-  slice 状态 pending/unknown,不得作为"无 slice"证据。
+  OpenClaw 最新 SQLite、DSH alpha.5、Pi 0.84.4 已通过 2026-09-03 的 refresh
+  完成确认(官方 snapshot/源码/真实数据均无 request origin slice),其余上游新版本
+  未 refresh,slice 状态 pending/unknown,不得作为"无 slice"证据。
   审计结论写入 `docs/specs/work-graph-protocol/evidence-matrix.md` →
   "Usage origin slice audit"。
 

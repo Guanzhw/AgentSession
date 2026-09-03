@@ -37,7 +37,29 @@ When capability or format-support wording changes, update the provider table
 in both READMEs and the evidence matrix, then run `npm run
 check:governance` and `git diff --check`.
 
-## Contract boundary
+### Pi evidence snapshot (2026-09-03)
+
+Pi current upstream: package `@earendil-works/pi-coding-agent` npm `0.84.4`
+(2026-08-28, tag `b79e4cc8…`), source repo
+<https://github.com/earendil-works/pi-mono> (official `docs/session-format.md`
+reference), HEAD `4e69b0c28060f0f02fbe38bfa7c21a2e2eb25057` (2026-09-02).
+Session format `CURRENT_SESSION_VERSION = 3`: v3 = v2 + rename
+`message.role "hookMessage"` → `"custom"`; all other entry types (message /
+model_change / thinking_level_change / compaction / branch_summary / custom /
+custom_message / label / session_info) are unchanged from v2. Compaction
+entries may carry `retainedTail` (materialized kept context, replacing
+`firstKeptEntryId` in harness-generated compactions), `usage`, `details`, and
+`fromHook`; toolResult messages may carry nested `usage`; Pi's own
+session totals (`agent-session.js getSessionStats` / `usage-totals.js
+getUsageCostBreakdown`) are billed/session totals over ALL recorded file
+entries (assistant + toolResult + compaction/branch_summary usage, including
+abandoned/history branches; recorded `totalTokens` fields only; retainedTail
+copies never counted separately). Locally installed 0.82.1
+writes v3; 547 live files (all v3) verified — no `role custom` /
+`retainedTail` / toolResult-usage records present locally yet, so those
+paths are covered by the official source/docs plus
+`test/fixtures/pi-v3-current.jsonl`; nested `run-N/session.jsonl` files are
+pi-subagents run artifacts (header `parentSession: null`, no lineage).
 
 ## Contract boundary
 

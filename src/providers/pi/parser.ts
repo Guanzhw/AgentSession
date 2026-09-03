@@ -216,6 +216,32 @@ export function piRecordsToMessages(records: Row[], sessionId: string): Message[
           }
         });
       }
+
+      // v3 format: extensions inject context as `message` entries with role
+      // "custom" (v2 called it "hookMessage"; current Pi renamed the role on
+      // migration). The official AgentMessage union includes CustomMessage, so
+      // both spellings are valid session records. Mirror the custom_message
+      // entry rule: `display` is a boolean gate and only the recorded
+      // `display === true` value joins the conversation view; any other value
+      // (false, missing, or a truthy non-boolean) stays out of the read view.
+      // The rendered role is "system", the established viewer convention for
+      // custom context, not a provider-recorded role.
+      if (source.role === "custom" || source.role === "hookMessage") {
+        if (source.display !== true) continue;
+        messages.push({
+          id: String(entry.id), sessionId, role: "system", content: textContent(source.content),
+          thinking: null, toolName: null, toolInput: null, toolOutput: null,
+          timestamp: eventTime, tokens: null,
+          metadata: {
+            customType: source.customType || null,
+            display: source.display ?? null,
+            details: source.details ?? null,
+            legacyRole: source.role === "hookMessage" ? "hookMessage" : null,
+            provenance: "session"
+          }
+        });
+        continue;
+      }
       continue;
     }
 
@@ -239,6 +265,8 @@ export function piRecordsToMessages(records: Row[], sessionId: string): Message[
           fromId: entry.fromId || null,
           firstKeptEntryId: entry.firstKeptEntryId || null,
           tokensBefore: Number(entry.tokensBefore) || null,
+          retainedTailCount: Array.isArray(entry.retainedTail) ? entry.retainedTail.length : null,
+          fromHook: typeof entry.fromHook === "boolean" ? entry.fromHook : null,
           // The protocol surface (context.compaction events + metadata-only
           // artifacts) is the canonical representation of compaction; this
           // system message remains as a read/compatibility view.
@@ -262,7 +290,16 @@ export function extractPiMeta(records: Row[], fallbackId = ""): RawSession {
   const sessionName = typeof latestInfo?.name === "string" ? latestInfo.name.trim() : "";
   const firstUser = messages.find((message) => message.role === "user" && message.content.trim());
   const times = [timestamp(header.timestamp), ...records.map((record) => entryTimestamp(record))].filter(Boolean);
-  const tokenCount = messages.reduce((sum, message) => sum + (Number(message.tokens?.total) || 0), 0);
+  // Authoritative session token total: sum of every recorded component total
+  // (totalTokens field) across ALL file entries, matching Pi's own billed
+  // session total (agent-session.js getSessionStats / usage-totals.js
+  // getUsageCostBreakdown): assistant usage + nested toolResult usage +
+  // compaction/branch_summary summary usage, including abandoned/history
+  // branches. retainedTail copies are never counted (they are embedded
+  // message copies, not recorded entries).
+  const tokenCount = piRecordedUsageRecords(records).reduce(
+    (sum, entry) => sum + (piUsageToTokens(piRecordedUsage(entry))?.total || 0), 0
+  );
   return {
     id: sessionId,
     provider: "pi",
@@ -282,8 +319,44 @@ export function extractPiMeta(records: Row[], fallbackId = ""): RawSession {
   };
 }
 
+/**
+ * Narrow view kept for compatibility: assistant-only usage records on the
+ * active branch. Not Pi's billed session total — use
+ * piRecordedUsageRecords for that.
+ */
 export function piAssistantUsageRecords(records: Row[]) {
   return activePiEntries(records).filter(
     (entry) => entry.type === "message" && entry.message?.role === "assistant" && entry.message?.usage
   );
+}
+
+/**
+ * True when a Pi record carries usage in Pi's billed session-total scope
+ * (agent-session.js getSessionStats / usage-totals.js getUsageCostBreakdown):
+ * assistant messages, toolResult messages with nested-LLM usage, and
+ * compaction/branch_summary entries (summary-generation usage).
+ */
+export function piRecordedUsageRecord(entry: Row): boolean {
+  if (entry?.type === "message") {
+    const role = entry.message?.role;
+    return (role === "assistant" || role === "toolResult") && Boolean(entry.message?.usage);
+  }
+  return (entry?.type === "compaction" || entry?.type === "branch_summary") && Boolean(entry?.usage);
+}
+
+/**
+ * All recorded usage-bearing records in the file, matching Pi's own billed
+ * session total. Pi's getSessionStats aggregates over ALL session entries
+ * (including history that was compacted away and abandoned/history branches),
+ * not just the active branch. Only recorded component totals (the
+ * totalTokens field) are surfaced; no origin slices are inferred, and
+ * retainedTail embedded message copies are never counted as separate entries.
+ */
+export function piRecordedUsageRecords(records: Row[]) {
+  return records.filter(piRecordedUsageRecord);
+}
+
+/** Recorded usage of one Pi record: message usage or entry-level summary usage. */
+export function piRecordedUsage(entry: Row): unknown {
+  return entry?.type === "message" ? entry.message?.usage : entry?.usage;
 }
