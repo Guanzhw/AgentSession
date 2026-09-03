@@ -12,15 +12,24 @@ upstream 版本;refresh 必须逐 provider 独立进行(单独决策/fixture/真
 docs/CONTRIBUTING-PROVIDER.md 「Provider evidence freshness」规则记录
 verified-at、版本/commit、官方来源链接与样本格式。
 
-刷新优先级(用户明确要求跟最近版本的 DSH 与 OpenClaw 先行):
+刷新优先级（用户明确要求跟最近版本的 DSH 与 OpenClaw 先行）：
 
-1. **DeepSeek Harness alpha.5** — upstream HEAD 49a606bc5b5934603f22a26957a07dc799ab0291,
-   alpha.5 tag db6bdc3576c2d4e7c965e8e3ed0c2a731eed87f5;当前 adapter 是 alpha.3
-   快照,已落后。策略是跟随最近 alpha/official HEAD,不等待稳定 rc。
-2. **OpenClaw current SQLite** — 官方最新 docs 明确 current session rows/
-   transcript/metadata 主存储为 ~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite,
-   sessions/*.jsonl 是 legacy/archive;当前 adapter 仅支持 JSONL,须按
-   supported/legacy/pending 显式标记,不得继续声称一般性 active current support。
+1. **DeepSeek Harness alpha.5** — ✅ **已完成（2026-09-03）**。upstream HEAD
+   49a606bc5b5934603f22a26957a07dc799ab0291, alpha.5 tag
+   db6bdc3576c2d4e7c965e8e3ed0c2a731eed87f5。证据：官方 alpha.5 checkout
+   源码 + 官方检查入库 web snapshot（byte-identical, sha256
+   07473442…）+ npm 安装 0.1.2-alpha.5。结论：物理存储格式与 alpha.3
+   相同（version 0、同一 event catalog、seedLength 头部行、packed rows、
+   range-encoded provenance），无需 parser/protocol 变更；新增
+   `.agents/decisions/implemented/2026-09-03-dsh-alpha5-compatibility-snapshot.md`
+   与 alpha.5 官方快照 fixture/回归。限制：credentialed live run 不可用
+   （key auth 失败），未产生新的 live 证据（已显式记录，不当作成功）。
+2. **OpenClaw current SQLite** — **进行中（下一阶段）**。官方最新 docs
+   明确 current session rows/transcript/metadata 主存储为
+   ~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite，
+   sessions/*.jsonl 是 legacy/archive；当前 adapter 仅支持 JSONL，须按
+   supported/legacy/pending 显式标记，不得继续声称一般性 active current
+   support。
 3. **Pi current v3 / 0.84.4** — 官方当前包/源为 @earendil-works/pi-coding-agent 与
    https://github.com/earendil-works/pi,HEAD e266507b606b9552fa277252644054afd4384b11;
    当前安装 0.80.10,官方 session format 为 v3。旧 @mariozechner/badlogic 信息只能标

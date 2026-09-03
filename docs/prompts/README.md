@@ -17,18 +17,20 @@
    recordsTruncated/slicesTruncated)与 coverage 语义已落地,决策记录
    `implemented/2026-09-03-bounded-usage-origin-accounting.md`;对 2026-09-03
    snapshot(当下适配器/fixtures/本地已验证快照)的七 provider 审计未发现精确来源
-   切片,OpenClaw 最新 SQLite、DSH alpha.5、Pi 0.84.4 等上游新版本尚未 refresh,
-   其 slice 状态为 pending/unknown;provider-native origin 映射保持 evidence-pending
-   (不发明三分)
+   切片;DSH alpha.5 已于 2026-09-03 完成 refresh(官方 snapshot/源码确认无
+   origin-slice 记录,credentialed live run 仍不可用),OpenClaw 最新 SQLite、
+   Pi 0.84.4 等其余上游新版本尚未 refresh,其 slice 状态为 pending/unknown;
+   provider-native origin 映射保持 evidence-pending(不发明三分)
 3. `backend-evolution/02-harness-environment-evidence.md` — 任务 B(后续可选增强):
    环境清单 + 环境重载。排在核心 provider/ownership 工作之后,证据优先,无证据不落代码
 4. `backend-evolution/03-git-commit-association.md` — 任务 C(后续可选增强):
    会话 ↔ git commit 关联。当前只评审、不实现;决策记录保持 proposed
 5. `backend-evolution/04-provider-freshness-refresh.md` — **下一阶段 bounded spec
    (不立即实现)**:按证据时效逐 provider 刷新 parser/schema/protocol 映射——DSH
-   alpha.5 与 OpenClaw current SQLite 优先,随后 Pi v3/0.84.4、Codex 0.152.1、
-   Claude 2.1.258、OpenCode 1.18.26、Hermes remote HEAD;每个 provider 单独决策/
-   fixture/真实数据/提交,保持核心 Work Graph provider-native v3 mapping 优先级。
+   alpha.5 已刷新完成(2026-09-03),OpenClaw current SQLite 是下一个;随后
+   Pi v3/0.84.4、Codex 0.152.1、Claude 2.1.258、OpenCode 1.18.26、
+   Hermes remote HEAD;每个 provider 单独决策/fixture/真实数据/提交,保持核心
+   Work Graph provider-native v3 mapping 优先级。
 
 建议顺序:A 的投影部分已落地;剩余的 provider-native origin 映射等待真实证据;B 与 C
 相互独立,均在核心工作(usage-origin 记账 + provider-native v3 映射)落地后再评估。
@@ -45,4 +47,16 @@
 P0 做完先给用户看信息骨架再继续;P2 风险最高,拆两个提交。
 注意:详情页默认标签是**工作**(已实现决策 2026-09-02 Work Graph-first);
 本目录的"对话线程化 / agent 卡 / 检查器"spec 面向对话投影本身,不是默认产品轴。
+完整 UI 重设计(docs/design/ui-v2.md P0–P4)是 Work Graph 演进目标的主要后期
+阶段,沿用该 P0–P4 计划,不另立平行架构。
 每个任务完成后回写 `docs/design/ui-v2.md` §7 绑定表,保持 UI 侧与协议侧同步。
+
+UI 重设计前置条件(2026-09-03 已满足):
+- 必需能力:前端设计翻译、真实浏览器功能/视觉 QA、持久浏览器调试、截图;
+- Codex 官方 skills 已装:figma、figma-implement-design、playwright、
+  playwright-interactive、screenshot;仓库可重复 E2E 路径仍是
+  `scripts/qa-agent-browser.sh`(agent-browser),不依赖 playwright skills;
+- figma/figma-implement-design 仅在任务包含 Figma 源文件时有用,须显式连接,
+  不得声称已安装/已连接;
+- 实现开始前先建 QA 清单:映射需求 → 控件/状态与预期断言、viewport(320/768/1280)/
+  主题(light/dark)/locale(zh/en)覆盖、至少两个非 happy-path 场景。

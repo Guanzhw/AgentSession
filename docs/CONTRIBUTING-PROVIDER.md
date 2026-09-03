@@ -181,10 +181,13 @@ tools to AgentSession-MCP.
 For DSH, keep compatibility metadata synchronized with the checked-in snapshot:
 
 - repository `deepseek-ai/deepseek-harness`;
-- commit `dd6322d604e00eec1ba5e0c8541159906a21094a`;
-- tag `dsh-v0.1.2-alpha.3`;
-- package `@deepseek-ai/dsh@0.1.2-alpha.3`;
-- session format `0`; current SQLite schema `null`, legacy schema `17`.
+- alpha.5 tag commit `db6bdc3576c2d4e7c965e8e3ed0c2a731eed87f5` (official
+  HEAD `49a606bc5b5934603f22a26957a07dc799ab0291`);
+- tag `dsh-v0.1.2-alpha.5`;
+- package `@deepseek-ai/dsh@0.1.2-alpha.5`;
+- session format `0`; current SQLite schema `null`, legacy schema `17`
+  (alpha.5 has no session-persistence SQLite plugin; its SQLite packages are
+  a storage-kv facet and an FTS5 query backend).
 
 JSONL is the primary backend. Test raw and multi-frame `.jsonl.zstd`, packed
 `text-chunks`/`reasoning-chunks`/`tool-call-chunks`, zero-based upstream
@@ -196,7 +199,9 @@ replacement, compaction, cancellation/interruption, workflow/subagent facts,
 `subagent/model-selection-policy`, and `session-log-deepseek/delivery-accepted`.
 These records are control/model/delivery facts, not ordinary messages. Preserve
 dangling references as unresolved diagnostics; never invent a readable child
-session.
+session. Keep the alpha.3-derived and rc.8 fixtures as readability regressions
+and the official alpha.5 web snapshot (byte-for-byte) as the current fixture,
+synthesising its omitted `seq`/`time` per upstream `parseSessionLog`.
 
 If legacy SQLite persistence or another known backend is detected but unsupported,
 return an explicit storage diagnostic naming the detected and expected schema.

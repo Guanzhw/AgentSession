@@ -53,6 +53,12 @@ Status values: `[ ]` pending, `[-]` active, `[x]` complete
   a derived alpha.3 physical-shape fixture with explicit provenance.
 - [x] Run real alpha.3 headless and subagent store smokes for parser, token,
   lineage, API, and browser evidence.
+- [x] Refresh the compatibility snapshot to alpha.5 (tag `db6bdc3576…`,
+  HEAD `49a606bc…`): prove version `0`/catalog/header-line/packed-row/
+  provenance-range formats unchanged; adopt the official checked-in web
+  snapshot byte-for-byte with upstream envelope synthesis; keep alpha.3 and
+  rc.8 readability regressions; record the unavailable credentialed live
+  run (key auth failure) instead of live evidence.
 
 ## S4. Runtime Workbench
 

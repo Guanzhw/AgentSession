@@ -38,5 +38,15 @@
   npm test、npm run check:governance;views/static/locales 变更补 npm run qa:e2e;
 - 每阶段独立可审查提交;非平凡变更走 .agents/decisions/ 生命周期;P0 完成先给用户看。
 
+UI 重设计前置条件(2026-09-03 已满足):
+- 必需能力:前端设计翻译、真实浏览器功能/视觉 QA、持久浏览器调试、截图;
+- Codex 官方 skills 已装:figma、figma-implement-design、playwright、
+  playwright-interactive、screenshot;仓库可重复 E2E 路径仍是
+  `scripts/qa-agent-browser.sh`(agent-browser),不依赖 playwright skills;
+- figma/figma-implement-design 仅在任务包含 Figma 源文件时有用,须显式连接,
+  不得声称已安装/已连接;
+- 实现开始前先建 QA 清单:映射需求 → 控件/状态与预期断言、viewport(320/768/1280)/
+  主题(light/dark)/locale(zh/en)覆盖、至少两个非 happy-path 场景。
+
 按 P0→P4 顺序执行,每阶段开始前读对应 prompt。
 ```

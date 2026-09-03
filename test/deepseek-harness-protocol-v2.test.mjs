@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
 import { DSH_COMPATIBILITY_SNAPSHOT } from "../dist/src/providers/deepseek-harness/compatibility.js";
 import {
+  decodeDshStorageRecord,
   dshRecordsToMessages,
   extractDshMeta,
   parseDshSession
@@ -123,13 +126,13 @@ test("DSH protocol preserves dangling workflow references without inventing a ch
 });
 
 test("derived alpha.3 storage fixture normalizes provenance ranges and recorded facts into protocol v2", () => {
-  const fixturePath = path.join(process.cwd(), DSH_COMPATIBILITY_SNAPSHOT.fixture.local);
+  const fixturePath = path.join(process.cwd(), DSH_COMPATIBILITY_SNAPSHOT.previousSnapshot.fixture.local);
   const recordsValue = parseDshSession(fixturePath);
   const session = extractDshMeta(recordsValue, "alpha3-official-fixture");
   const messages = dshRecordsToMessages(recordsValue, session.id);
   const protocol = buildDshSessionProtocol({ session, records: recordsValue, messages, children: [] });
 
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.fixture.provenance, "derived-current-shape");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousSnapshot.fixture.provenance, "derived-current-shape");
   assert.equal(DSH_COMPATIBILITY_SNAPSHOT.upstreamReferences.sequenceCodec, "packages/core/session/src/seq-ranges.ts");
   assert.equal(protocol.version, 2);
   assert.equal(protocol.validation?.ok, true);
@@ -151,6 +154,52 @@ test("derived alpha.3 storage fixture normalizes provenance ranges and recorded 
   );
   assert.ok(protocol.events.some((event) => event.providerData?.eventType === "assistant/message" && event.providerData?.usage));
   assert.ok(messages.some((message) => message.role === "assistant" && message.tokens?.total > 0));
+});
+
+test("official alpha.5 checked-in snapshot projects into protocol v2 after envelope synthesis", () => {
+  // Reproduce upstream parseSessionLog so the checked-in snapshot stays
+  // byte-identical; the physical format itself is unchanged from alpha.3.
+  const fixturePath = path.join(process.cwd(), DSH_COMPATIBILITY_SNAPSHOT.fixture.local);
+  const raw = readFileSync(fixturePath, "utf8");
+  const rows = [];
+  let nextSeq = 0;
+  let headerSkipped = false;
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const value = JSON.parse(line);
+    if (!headerSkipped) {
+      headerSkipped = true;
+      rows.push(value);
+      continue;
+    }
+    const packed = value.type === "text-chunks" || value.type === "reasoning-chunks" || value.type === "tool-call-chunks";
+    const seqKey = packed ? "seq0" : "seq";
+    const timeKey = packed ? "time0" : "time";
+    if (!Object.hasOwn(value, seqKey)) value[seqKey] = nextSeq;
+    if (!Object.hasOwn(value, timeKey)) value[timeKey] = 0;
+    rows.push(value);
+    // Upstream advances the running seq by the row's expanded event count.
+    nextSeq += decodeDshStorageRecord(value).length;
+  }
+  const materialized = path.join(os.tmpdir(), `opensession-dsh-a5-${process.pid}.jsonl`);
+  try {
+    writeFileSync(materialized, `${rows.map((record) => JSON.stringify(record)).join("\n")}\n`);
+    const recordsValue = parseDshSession(materialized);
+    const session = extractDshMeta(recordsValue, "alpha5-official-fixture");
+    const messages = dshRecordsToMessages(recordsValue, session.id);
+    const protocol = buildDshSessionProtocol({ session, records: recordsValue, messages, children: [] });
+
+    assert.equal(session.metadata?.agentPreset, "standard");
+    assert.equal(protocol.version, 2);
+    assert.equal(protocol.validation?.ok, true);
+    // The recorded web fixture runs one bash call with one completed turn.
+    assert.ok(recordsValue.some((record) => record.type === "assistant/chunk" && record.data?.chunk?.type === "tool-call-delta"));
+    assert.ok(protocol.events.some((event) => event.normalizedKind === "tool.called"));
+    assert.ok(protocol.events.some((event) => event.providerData?.eventType === "assistant/message" && event.providerData?.usage));
+    assert.equal(protocol.events.at(-1)?.kind, "turn.completed");
+  } finally {
+    rmSync(materialized, { force: true });
+  }
 });
 
 test("previous rc.8 fixture remains readable and expands packed rows", () => {

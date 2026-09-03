@@ -110,14 +110,22 @@ it is never reported as an empty successful source.
 
 ## DeepSeek Harness compatibility
 
-The DSH adapter is currently a **alpha.3 compatibility snapshot** (not the
-newest version); the project policy is to track the newest alpha/official
-HEAD (the stable `latest` rc is not treated as the newest preview). Its
-current compatibility snapshot is commit
-`dd6322d604e00eec1ba5e0c8541159906a21094a`, tag `dsh-v0.1.2-alpha.3`, package
-`@deepseek-ai/dsh@0.1.2-alpha.3`, and session format version `0`. Upstream
-alpha.5 and official HEAD refresh is **pending** (see the evidence-matrix
-freshness snapshot).
+The DSH adapter is currently an **alpha.5 compatibility snapshot**; the
+project policy is to track the newest alpha/official HEAD (the stable
+`latest` rc is not treated as the newest preview). Its current compatibility
+snapshot is tag `dsh-v0.1.2-alpha.5`, commit
+`db6bdc3576c2d4e7c965e8e3ed0c2a731eed87f5`, official HEAD
+`49a606bc5b5934603f22a26957a07dc799ab0291`, package
+`@deepseek-ai/dsh@0.1.2-alpha.5`, and session format version `0`. Alpha.5 does
+not change the physical storage format relative to alpha.3 (same event
+catalog, `seedLength`-based header line, packed rows, range-encoded
+provenance), so no parser/protocol change was needed; the official alpha.5
+checked-in web snapshot (`snapshots/web/fresh-round-trip/session.jsonl`) is
+adopted as a fixture whose `seq`/`time` are synthesised on read per upstream
+`parseSessionLog`. No new official live-session evidence exists for alpha.5
+(the credentialed live run was unavailable because the configured key failed
+authentication); the alpha.3-era local live observations remain the live
+record.
 
 JSONL is the supported primary backend. It accepts raw `.jsonl`, multi-frame
 `.jsonl.zstd`, and packed `text-chunks`, `reasoning-chunks`, and
@@ -134,7 +142,9 @@ cancellation/interruption, workflow/subagent evidence,
 `session-log-deepseek/delivery-accepted`. These are control/model/delivery facts,
 not ordinary conversation messages.
 
-Alpha.3 removed the SQLite persistence backend. When a legacy schema 17 store
+Alpha.3 removed the SQLite persistence backend, and alpha.5 has not
+restored it (its SQLite packages are a storage-hub kv facet and an FTS5
+session-query backend, not session persistence). When a legacy schema 17 store
 is detected, it is still surfaced as an explicit **unsupported backend/schema
 diagnostic**; it never silently disappears or appears as an empty provider.
 The stock headless CLI has no declared default resume argument, so AgentSession

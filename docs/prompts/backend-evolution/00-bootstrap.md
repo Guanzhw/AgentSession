@@ -21,7 +21,9 @@ SSR + 原生 JS;服务器在 127.0.0.1:3456。
 绑定表,§11 开放问题)。总体目标来自一个真实 Codex 会话的目标描述:建立
 direct/inherited/shared token ownership;异步任务、后台运行、持续 subagent 交互、
 compact/dream/memory/experience、teams/swarm 能被准确呈现和统计;不同 scope 的
-memory/experience/userInfo 作为 provider 可选项展示。
+memory/experience/userInfo 作为 provider 可选项展示。完整 UI 重设计
+(docs/design/ui-v2.md P0–P4)是同一 Work Graph 演进目标的主要后期阶段,沿用该
+P0–P4 计划,不另立平行架构;在核心后端项落地后按 frontend-implementation/ 推进。
 
 当前 HEAD 事实(2026-09-02 两个提交,均已完成):
 - Codex native Session Protocol v3 映射已实现(goals/actors/coordination/context/
@@ -38,9 +40,10 @@ memory/experience/userInfo 作为 provider 可选项展示。
 > 有界 origin 聚合与 coverage 语义已实现(决策记录
 > `.agents/decisions/implemented/2026-09-03-bounded-usage-origin-accounting.md`),
 > 对当时 snapshot(适配器/fixtures/本地已验证快照)的七 provider 审计未发现精确来源
-> 切片(OpenClaw 最新 SQLite、DSH alpha.5、Pi 0.84.4 等上游新版本未 refresh,状态
-> pending/unknown),provider-native origin 映射保持 evidence-pending;其余内容作为
-> 历史 bootstrap 保留。
+> 切片:DSH alpha.5 已于同日完成 refresh(官方 snapshot/源码确认无 origin-slice
+> 记录,credentialed live run 仍不可用),OpenClaw 最新 SQLite、Pi 0.84.4 等
+> 其余上游新版本未 refresh,slice 状态 pending/unknown;provider-native origin
+> 映射保持 evidence-pending;其余内容作为历史 bootstrap 保留。
 
 验收数据:Codex 会话 01a0576a-98e2-7c31-a265-6d98d5fbff12(1 目标/13 任务/
 13 子代理/10× 压缩)。纪律:证据有界(不发明 provider 没记录的事实);非平凡改动走

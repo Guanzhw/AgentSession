@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import {
+  createHash
+} from "node:crypto";
+import {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync
 } from "node:fs";
@@ -19,6 +23,7 @@ import {
   DSH_KNOWN_EVENT_TYPES,
   decodeDshStorageRecord,
   dshAssistantUsageRecords,
+  dshHeader,
   dshOwnedEvents,
   dshRecordsToMessages,
   extractDshMeta,
@@ -262,10 +267,11 @@ test("DeepSeek Harness provider reads current raw sessions, system evidence, wor
   }
 });
 
-test("DeepSeek Harness compatibility snapshot and SQLite diagnostic are explicit", () => {
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.commit, "dd6322d604e00eec1ba5e0c8541159906a21094a");
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.tag, "dsh-v0.1.2-alpha.3");
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.npm.current, "0.1.2-alpha.3");
+test("DeepSeek Harness alpha.5 compatibility snapshot and SQLite diagnostic are explicit", () => {
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.commit, "db6bdc3576c2d4e7c965e8e3ed0c2a731eed87f5");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.headCommit, "49a606bc5b5934603f22a26957a07dc799ab0291");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.tag, "dsh-v0.1.2-alpha.5");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.npm.current, "0.1.2-alpha.5");
   assert.equal(DSH_COMPATIBILITY_SNAPSHOT.sessionFormatVersion, 0);
   assert.equal(DSH_COMPATIBILITY_SNAPSHOT.sqliteSchemaVersion, null);
   assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousRelease.sqliteSchemaVersion, 17);
@@ -273,14 +279,20 @@ test("DeepSeek Harness compatibility snapshot and SQLite diagnostic are explicit
   assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousRelease.version, "0.1.1-rc.2");
   assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousRelease.commit, "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e");
   assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousRelease.tag, "dsh-v0.1.1-rc.2");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousSnapshot.tag, "dsh-v0.1.2-alpha.3");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousSnapshot.fixture.provenance, "derived-current-shape");
   assert.equal(DSH_COMPATIBILITY_SNAPSHOT.legacyFixture.tag, "dsh-v0.1.0-rc.8");
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.fixture.provenance, "derived-current-shape");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.fixture.provenance, "official-checked-in-web-snapshot");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.fixture.commit, "db6bdc3576c2d4e7c965e8e3ed0c2a731eed87f5");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.fixture.sha256, "0747344224d4222f861dd9692c4332badfba221afc6e686c3dee18177055d845");
   assert.ok(DSH_COMPATIBILITY_SNAPSHOT.requiredEventTypes.includes("agent/inbox/spliced"));
   assert.ok(DSH_COMPATIBILITY_SNAPSHOT.requiredEventTypes.includes("team/message/delivered"));
   for (const type of ["model/selection", "session-log-deepseek/delivery-accepted", "subagent/model-selection-policy"]) {
     assert.ok(DSH_COMPATIBILITY_SNAPSHOT.requiredEventTypes.includes(type));
     assert.ok(DSH_KNOWN_EVENT_TYPES.has(type));
     assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousRelease.requiredEventTypes.includes(type), false);
+    // The alpha.3 snapshot already tracked these facts; alpha.5 keeps them.
+    assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousSnapshot.requiredEventTypes.includes(type), true);
   }
   assert.deepEqual(
     [...DSH_KNOWN_EVENT_TYPES].sort(),
@@ -298,6 +310,90 @@ test("DeepSeek Harness compatibility snapshot and SQLite diagnostic are explicit
       expectedSchema: diagnostic.expectedSchema
     }, { backend: "sqlite", status: "unsupported", detectedSchema: null, expectedSchema: 17 });
     assert.match(diagnostic?.message || "", /schema 17/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("official alpha.5 checked-in web snapshot validates after upstream envelope synthesis", () => {
+  const fixturePath = path.join(process.cwd(), DSH_COMPATIBILITY_SNAPSHOT.fixture.local);
+  const hash = createHash("sha256").update(readFileSync(fixturePath)).digest("hex");
+  assert.equal(hash, DSH_COMPATIBILITY_SNAPSHOT.fixture.sha256, "fixture must stay byte-identical to upstream");
+
+  // Upstream seeds the envelope-free web snapshot through parseSessionLog:
+  // seq is synthesised by log order (packed rows advance by their expanded
+  // count), timing is 0, and provenance ranges decode at the same boundary.
+  const root = mkdtempSync(path.join(os.tmpdir(), "opensession-dsh-a5-"));
+  try {
+    const materialized = path.join(root, "alpha5.jsonl");
+    const rows = [];
+    let nextSeq = 0;
+    let headerSkipped = false;
+    for (const line of readFileSync(fixturePath, "utf8").split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      const value = JSON.parse(line);
+      if (!headerSkipped) {
+        headerSkipped = true;
+        rows.push(value);
+        continue;
+      }
+      const packed = value.type === "text-chunks" || value.type === "reasoning-chunks" || value.type === "tool-call-chunks";
+      const seqKey = packed ? "seq0" : "seq";
+      const timeKey = packed ? "time0" : "time";
+      if (!Object.hasOwn(value, seqKey)) value[seqKey] = nextSeq;
+      if (!Object.hasOwn(value, timeKey)) value[timeKey] = 0;
+      rows.push(value);
+      nextSeq += decodeDshStorageRecord(value).length;
+    }
+    writeJsonl(materialized, rows);
+
+    const parsed = parseDshSession(materialized);
+    assert.equal(parsed.length, 102);
+    const header = dshHeader(parsed);
+    assert.equal(header?.version, 0);
+    assert.equal(header?.agentPreset, "standard");
+    assert.equal(header?.seedLength, undefined, "unseeded official snapshot has no seedLength");
+    const meta = extractDshMeta(parsed, "alpha5-official-fixture");
+    assert.equal(meta.id, "{{session:1}}");
+    assert.equal(meta.title, "Use the bash tool to");
+    assert.equal(meta.messageCount, 4);
+    const messages = dshRecordsToMessages(parsed, meta.id);
+    const assistants = messages.filter((message) => message.role === "assistant");
+    assert.equal(assistants.length, 2);
+    assert.ok(assistants.every((message) => message.tokens?.total > 0));
+    const tool = messages.find((message) => message.role === "tool" && message.metadata?.callId === "call_00_BYXlxjFaalMg95YVqEeF2495");
+    assert.equal(tool?.toolName, "bash");
+    assert.deepEqual(tool?.toolInput, { command: "echo WEB_E2E_OK", description: "Echo the test string" });
+    assert.equal(tool?.toolOutput, "WEB_E2E_OK\n");
+    assert.equal(dshAssistantUsageRecords(parsed).length, 2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("DeepSeek Harness rejects unknown required events and incompatible session versions", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "opensession-dsh-reject-"));
+  try {
+    const versionPath = path.join(root, "future-version.jsonl");
+    writeJsonl(versionPath, [header("session-dsh-future-version", { version: 1 })]);
+    assert.throws(() => parseDshSession(versionPath), /Unsupported DeepSeek Harness session version 1/);
+
+    const requiredPath = path.join(root, "future-required.jsonl");
+    writeJsonl(requiredPath, [
+      header("session-dsh-future-required"),
+      { type: "future/required", seq: 0, time: Date.now(), data: {} }
+    ]);
+    assert.throws(() => parseDshSession(requiredPath), /Unsupported required DeepSeek Harness event/);
+
+    // Explicitly marked ignorable external events are tolerated rather than
+    // rejected: the persisted marker is the upstream compatibility mechanism.
+    const ignorablePath = path.join(root, "ignorable.jsonl");
+    writeJsonl(ignorablePath, [
+      header("session-dsh-ignorable"),
+      { type: "future/plugin", seq: 0, time: Date.now(), data: {}, ignorable: true },
+      { type: "turn/end", seq: 1, time: Date.now(), data: { turn: 1, reason: { kind: "completed" } } }
+    ]);
+    assert.doesNotThrow(() => parseDshSession(ignorablePath));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
