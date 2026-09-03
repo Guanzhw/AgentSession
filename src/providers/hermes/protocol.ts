@@ -5,6 +5,7 @@ import {
   compactionSummaryArtifact,
   contextCompactionEvent,
   messageSessionEvents,
+  sessionEvent,
   sequenceEventsBySource,
   sourceSequence,
   sessionRelationship,
@@ -18,12 +19,14 @@ export interface HermesProtocolEntry {
   session: RawSession;
   messages: Message[];
   rawSession: Row;
+  asyncDelegations?: Row[];
 }
 
 export interface HermesProtocolInput {
   session: RawSession;
   messages: Message[];
   rawSession: Row;
+  asyncDelegations?: Row[];
   /** Validated family: delegates and compression continuations. */
   family: HermesProtocolEntry[];
 }
@@ -42,18 +45,48 @@ function delegateParentOf(entry: HermesProtocolEntry): string | null {
   return value ? String(value) : null;
 }
 
+type DelegationStatus = "running" | "completed" | "failed" | "cancelled";
+
+function asyncDelegationStatus(value: unknown): DelegationStatus | null {
+  const state = String(value || "").toLowerCase();
+  if (state === "running" || state === "finalizing") return "running";
+  if (state === "completed" || state === "success") return "completed";
+  if (state === "failed" || state === "error" || state === "timeout" || state === "stalled") return "failed";
+  if (state === "interrupted") return "cancelled";
+  return null;
+}
+
+function epochMilliseconds(value: unknown): number | null {
+  const number = asNumber(value);
+  if (number == null) return null;
+  return Math.abs(number) < 1e12 ? number * 1000 : number;
+}
+
+function delegationGoal(row: Row): string | null {
+  if (typeof row.task_json !== "string") return null;
+  try {
+    const task = JSON.parse(row.task_json);
+    const goal = typeof task?.goal === "string" ? task.goal.trim() : "";
+    return goal ? goal.slice(0, 240) : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Normalized protocol for one Hermes session:
  * - events: derived message envelopes plus derived context.compaction events
- *   for outgoing compression continuations, sequenced by database row order
- *   (message row id, then per-row ordinal); compression boundary events are
- *   placed after the compacted session's last message row (the edge lives in
- *   the store, not in the session's message rows).
+ *   for outgoing compression continuations, anchored by message row order
+ *   (message row id, then per-row ordinal). Async registry events retain only
+ *   their table-local order; their source table is different, so no cross-table
+ *   sourceSequence or timestamp order is claimed.
  * - relationships: validated compression lineage becomes compacted-into;
  *   _delegate_from lineage becomes spawned. Both carry derived provenance
  *   because they are reconstructed from the store's validated metadata.
- * - tasks/agentRuns: delegate children become subagent Tasks and AgentRuns;
- *   compression continuations never become tasks.
+ * - tasks/agentRuns: a recorded async handle is the Task and a persisted
+ *   delegate child is a separate unbound AgentRun; legacy delegate children
+ *   without async registry evidence remain Task/AgentRun pairs. Compression
+ *   continuations never become tasks.
  * - contextArtifacts: metadata-only compaction artifacts referencing the
  *   continuation session.
  */
@@ -88,16 +121,28 @@ export function buildHermesSessionProtocol(input: HermesProtocolInput): SessionP
       }
     });
   };
-  for (const event of messageSessionEvents(input.messages, sessionId, "hermes.normalized-message")) {
+  const messageEvents = messageSessionEvents(input.messages, sessionId, "hermes.normalized-message");
+  for (const [messageIndex, message] of input.messages.entries()) {
+    const event = messageEvents[messageIndex];
     const messageId = event.provenance.sourceId || "";
-    const rowId = Number(messageId);
+    // Tool messages are normalized from a separate row but are produced by
+    // the recorded assistant turn. Use that turn row as the source anchor so
+    // tool events stay in the assistant turn's within-row order.
+    const sourceId = message.role === "tool" && typeof message.metadata?.turnId === "string"
+      ? message.metadata.turnId
+      : messageId;
+    const rowId = Number(sourceId);
     const anchor = Number.isFinite(rowId) && rowId > 0 ? rowId : null;
     if (anchor == null) {
-      events.push(event); // documented fallback: normalized message order, appended
+      events.push(message.role === "tool" && sourceId !== messageId
+        ? { ...event, provenance: { ...event.provenance, sourceId } }
+        : event); // documented fallback: normalized message order, appended
       continue;
     }
     maxRowId = Math.max(maxRowId, anchor);
-    pushAnchored(event, anchor);
+    pushAnchored(message.role === "tool" && sourceId !== messageId
+      ? { ...event, provenance: { ...event.provenance, sourceId } }
+      : event, anchor);
   }
   compressedInto.forEach((child, index) => {
     pushAnchored(compactionEnvelope({
@@ -119,6 +164,32 @@ export function buildHermesSessionProtocol(input: HermesProtocolInput): SessionP
       summary: null,
       continuationSessionId: String(child.session.id)
     })), maxRowId + 1 + index);
+  });
+
+  const asyncDelegations = (input.asyncDelegations || []).filter((row) => row && row.delegation_id);
+  asyncDelegations.forEach((row, index) => {
+    const delegationId = String(row.delegation_id);
+    const status = asyncDelegationStatus(row.state);
+    events.push(sessionEvent({
+      id: `event:async-delegation:${delegationId}`,
+      sessionId,
+      timestamp: epochMilliseconds(row.dispatched_at),
+      kind: "delegation.async",
+      normalizedKind: "task.requested",
+      category: "task",
+      phase: status === "completed" ? "completed" : status === "failed" || status === "cancelled" ? "failed" : status === "running" ? "started" : undefined,
+      taskId: status ? delegationId : null,
+      runId: null,
+      correlationId: delegationId,
+      provenance: { fidelity: "recorded", sourceType: "hermes.async_delegations", sourceId: delegationId },
+      providerData: {
+        sourceTable: "async_delegations",
+        sourceOrdinal: index,
+        state: String(row.state || ""),
+        deliveryState: row.delivery_state == null ? null : String(row.delivery_state),
+        deliveryAttempts: asNumber(row.delivery_attempts)
+      }
+    }));
   });
 
   const relationships = [];
@@ -165,6 +236,7 @@ export function buildHermesSessionProtocol(input: HermesProtocolInput): SessionP
       details: "Hermes delegated agent session"
     }));
   }
+  const hasAsyncRegistryEvidence = asyncDelegations.length > 0;
   for (const child of delegates) {
     relationships.push(sessionRelationship({
       type: "spawned",
@@ -185,27 +257,35 @@ export function buildHermesSessionProtocol(input: HermesProtocolInput): SessionP
   const runs = [];
   for (const child of delegates) {
     const childId = String(child.session.id);
-    const ended = asNumber(child.session.timeUpdated) ?? asNumber(child.session.timeCreated);
-    tasks.push(sessionTask({
-      id: childId,
-      sessionId,
-      kind: "delegate",
-      status: ended ? "completed" : "running",
-      title: child.session.title || null,
-      correlationId: childId,
-      timeCreated: asNumber(child.session.timeCreated),
-      timeUpdated: ended,
-      timeCompleted: ended,
-      provenance: {
-        fidelity: "derived",
-        sourceType: "hermes.sessions.source:delegate",
-        sourceId: childId
-      }
-    }));
+    // extractHermesMeta falls back timeUpdated to started_at for open rows;
+    // completion must use the recorded raw ended_at column instead.
+    const ended = child.rawSession.ended_at == null ? null : asNumber(child.session.timeUpdated);
+    // A current async registry row is the recorded delegation Task. A
+    // persisted delegate child is the separate session-backed AgentRun. The
+    // source has no correlation key between those tables, so do not create a
+    // second derived Task or claim which async handle launched this child.
+    if (!hasAsyncRegistryEvidence) {
+      tasks.push(sessionTask({
+        id: childId,
+        sessionId,
+        kind: "delegate",
+        status: ended ? "completed" : "running",
+        title: child.session.title || null,
+        correlationId: childId,
+        timeCreated: asNumber(child.session.timeCreated),
+        timeUpdated: ended,
+        timeCompleted: ended,
+        provenance: {
+          fidelity: "derived",
+          sourceType: "hermes.sessions.source:delegate",
+          sourceId: childId
+        }
+      }));
+    }
     runs.push(agentRun({
       id: childId,
       sessionId,
-      taskId: childId,
+      taskId: hasAsyncRegistryEvidence ? null : childId,
       status: ended ? "completed" : "running",
       mode: "subagent",
       agent: child.session.title || null,
@@ -218,6 +298,41 @@ export function buildHermesSessionProtocol(input: HermesProtocolInput): SessionP
         sourceType: "hermes.sessions.source:delegate",
         sourceId: childId
       }
+    }));
+  }
+
+  for (const row of asyncDelegations) {
+    const delegationId = String(row.delegation_id);
+    const status = asyncDelegationStatus(row.state);
+    // Unknown provider states remain an evidence event only. TaskStatus is a
+    // closed enum, so mapping an unrecognized state would invent lifecycle.
+    if (!status) continue;
+    const eventId = `event:async-delegation:${delegationId}`;
+    const created = epochMilliseconds(row.dispatched_at);
+    const updated = epochMilliseconds(row.updated_at);
+    const completed = status === "completed" || status === "failed" || status === "cancelled"
+      ? epochMilliseconds(row.completed_at) ?? updated
+      : null;
+    const metadata = {
+      sourceState: String(row.state || ""),
+      deliveryState: row.delivery_state == null ? null : String(row.delivery_state),
+      deliveryAttempts: asNumber(row.delivery_attempts),
+      childSessionLinkRecorded: false
+    };
+    tasks.push(sessionTask({
+      id: delegationId,
+      sessionId,
+      kind: "async-delegation",
+      status,
+      title: delegationGoal(row),
+      correlationId: delegationId,
+      requestEventId: eventId,
+      triggerEventId: eventId,
+      timeCreated: created,
+      timeUpdated: updated,
+      timeCompleted: completed,
+      provenance: { fidelity: "recorded", sourceType: "hermes.async_delegations", sourceId: delegationId },
+      metadata
     }));
   }
 

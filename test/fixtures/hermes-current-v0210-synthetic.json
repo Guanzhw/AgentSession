@@ -1,0 +1,100 @@
+{
+  "provenance": {
+    "kind": "source-derived-bounded-synthetic",
+    "source": "NousResearch/hermes-agent",
+    "releaseTag": "v2026.8.31",
+    "releaseTagObject": "6e8f8418e6378eb2617e4de074e13dedd091b8af",
+    "releaseCommit": "29112bef099274229cadff79cdff7bf7b99c4b77",
+    "sourceHead": "7b72fd12476aedc06a993d92c4337e2ceb214bc7",
+    "fixtureNote": "No live transcript or provider message body"
+  },
+  "schemaVersion": 29,
+  "sessions": [
+    {
+      "id": "fixture-hermes-root",
+      "source": "cli",
+      "model": "fixture-model",
+      "model_config": "{}",
+      "parent_session_id": null,
+      "started_at": 1788000000,
+      "ended_at": null,
+      "end_reason": null,
+      "title": "Bounded Hermes fixture",
+      "input_tokens": 10,
+      "output_tokens": 7,
+      "cache_read_tokens": 3,
+      "cache_write_tokens": 0,
+      "reasoning_tokens": 2,
+      "cwd": null,
+      "billing_provider": "fixture",
+      "archived": 0
+    },
+    {
+      "id": "fixture-hermes-child",
+      "source": "subagent",
+      "model": "fixture-model",
+      "model_config": "{\"_delegate_from\":\"fixture-hermes-root\"}",
+      "parent_session_id": "fixture-hermes-root",
+      "started_at": 1788000002,
+      "ended_at": 1788000005,
+      "end_reason": "stop",
+      "title": "Bounded Hermes child",
+      "input_tokens": 2,
+      "output_tokens": 1,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "reasoning_tokens": 0,
+      "cwd": null,
+      "billing_provider": "fixture",
+      "archived": 0
+    }
+  ],
+  "messages": [
+    {
+      "session_id": "fixture-hermes-root",
+      "role": "user",
+      "content": "bounded user marker",
+      "timestamp": 1788000000,
+      "active": 1,
+      "compacted": 0
+    },
+    {
+      "session_id": "fixture-hermes-root",
+      "role": "assistant",
+      "content": "active row with compacted marker",
+      "timestamp": 1788000000.5,
+      "active": 1,
+      "compacted": 1
+    },
+    {
+      "session_id": "fixture-hermes-root",
+      "role": "assistant",
+      "content": "bounded compacted history marker",
+      "timestamp": 1787999999,
+      "active": 0,
+      "compacted": 1
+    },
+    {
+      "session_id": "fixture-hermes-child",
+      "role": "assistant",
+      "content": "bounded child marker",
+      "timestamp": 1788000002,
+      "active": 1,
+      "compacted": 0
+    }
+  ],
+  "asyncDelegations": [
+    {
+      "delegation_id": "deleg_fixture_1",
+      "origin_session": "fixture-hermes-root",
+      "parent_session_id": "fixture-hermes-root",
+      "state": "completed",
+      "dispatched_at": 1788000001,
+      "completed_at": 1788000004,
+      "updated_at": 1788000004,
+      "delivery_state": "pending",
+      "delivery_attempts": 0,
+      "task_json": "{\"goal\":\"bounded async delegation\",\"model\":\"fixture-model\"}"
+    }
+  ]
+}

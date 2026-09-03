@@ -8,6 +8,7 @@ export interface HermesSessionEntry {
   messages: Message[];
   rawSession: HermesRow;
   rawMessages: HermesRow[];
+  asyncDelegations: HermesRow[];
 }
 
 function fileSignature(filePath: string) {
@@ -51,8 +52,12 @@ export function createHermesSessionStore(getDbPath: () => string, refreshInterva
       return;
     }
     const now = Date.now();
-    if (!force && cache && now - cache.refreshedAt < refreshIntervalMs) return;
     const signature = fileSignature(dbPath);
+    // The configured provider path can change during one process (tests and
+    // settings reloads do this); compare the current source signature before
+    // honoring the refresh interval so a previous directory cannot leak into
+    // the next snapshot.
+    if (!force && cache && cache.signature === signature && now - cache.refreshedAt < refreshIntervalMs) return;
     if (cache?.signature === signature) {
       cache.refreshedAt = now;
       return;
@@ -66,9 +71,51 @@ export function createHermesSessionStore(getDbPath: () => string, refreshInterva
         throw new Error("Hermes state database is missing required session tables");
       }
       const sessionWhere = sessionColumns.has("archived") ? "WHERE COALESCE(archived, 0) = 0" : "";
-      const messageWhere = messageColumns.has("active") ? "WHERE COALESCE(active, 1) = 1" : "";
+      // Hermes' live-context reader uses active=1. A brief schema variant
+      // exposed compacted without active; preserve the same boundary there
+      // without assuming either column exists in older state.db files.
+      const messageWhere = messageColumns.has("active")
+        ? "WHERE COALESCE(active, 1) = 1"
+        : messageColumns.has("compacted")
+          ? "WHERE COALESCE(compacted, 0) = 0"
+          : "";
       const sessions = db.prepare(`SELECT * FROM sessions ${sessionWhere} ORDER BY started_at`).all() as HermesRow[];
       const messages = db.prepare(`SELECT * FROM messages ${messageWhere} ORDER BY session_id, id`).all() as HermesRow[];
+      const asyncDelegationsBySession = new Map<string, HermesRow[]>();
+      const asyncTable = (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'async_delegations' LIMIT 1").get() as { 1?: number } | undefined);
+      if (asyncTable) {
+        try {
+          const asyncColumns = columns(db, "async_delegations");
+          const selectable = [
+            "delegation_id", "origin_session", "parent_session_id", "state",
+            "dispatched_at", "completed_at", "updated_at", "delivery_state",
+            "delivery_attempts", "delivered_at", "task_json"
+          ].filter(name => asyncColumns.has(name));
+          if (asyncColumns.has("delegation_id") && asyncColumns.has("state") && selectable.length) {
+            const orderBy = asyncColumns.has("dispatched_at") && asyncColumns.has("updated_at")
+              ? "COALESCE(dispatched_at, updated_at), delegation_id"
+              : asyncColumns.has("dispatched_at")
+                ? "dispatched_at, delegation_id"
+                : asyncColumns.has("updated_at")
+                  ? "updated_at, delegation_id"
+                  : "delegation_id";
+            const asyncRows = db.prepare(`SELECT ${selectable.join(", ")} FROM async_delegations ORDER BY ${orderBy}`).all() as HermesRow[];
+            const sessionIds = new Set(sessions.map(session => String(session.id)));
+            for (const row of asyncRows) {
+              const owner = row.parent_session_id || row.origin_session;
+              if (!owner || !sessionIds.has(String(owner))) continue;
+              const list = asyncDelegationsBySession.get(String(owner)) || [];
+              list.push(row);
+              asyncDelegationsBySession.set(String(owner), list);
+            }
+          }
+        } catch (error) {
+          // The registry is optional. Keep readable sessions when a partial
+          // migration left an incompatible registry, while retaining a
+          // diagnostic for genuinely unexpected SQLite failures.
+          console.warn("Skipping unreadable optional Hermes async_delegations evidence:", error);
+        }
+      }
       const messagesBySession = new Map<string, HermesRow[]>();
       for (const message of messages) {
         const sessionId = String(message.session_id);
@@ -83,7 +130,8 @@ export function createHermesSessionStore(getDbPath: () => string, refreshInterva
           session: extractHermesMeta(rawSession, normalizedMessages),
           messages: normalizedMessages,
           rawSession,
-          rawMessages
+          rawMessages,
+          asyncDelegations: asyncDelegationsBySession.get(String(rawSession.id)) || []
         };
       });
       const byId = new Map(entries.map(entry => [entry.session.id, entry]));

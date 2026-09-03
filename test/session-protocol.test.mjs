@@ -1208,7 +1208,11 @@ function hermesEntry(id, parentId = null, compressionParentId = null, source = "
       }
     },
     messages: [message(`${id}-msg`, "assistant", 1050)],
-    rawSession: { id, end_reason: compressionParentId ? "compression" : "stop" }
+    rawSession: {
+      id,
+      end_reason: compressionParentId ? "compression" : "stop",
+      ended_at: 1100
+    }
   };
 }
 
@@ -1293,6 +1297,18 @@ test("Hermes delegates yield spawned relationships plus Task and AgentRun pairs"
   assert.equal(protocol.agentRuns[0].childSessionId, "hermes-delegate");
   assert.equal(protocol.agentRuns[0].taskId, "hermes-delegate");
   assert.equal(protocol.agentRuns[0].model, "deepseek-v4-flash");
+  const openDelegate = {
+    ...delegate,
+    rawSession: { ...delegate.rawSession, ended_at: null },
+    session: { ...delegate.session, timeUpdated: 1100 }
+  };
+  const openProtocol = buildHermesSessionProtocol({
+    ...root,
+    family: [root, openDelegate]
+  });
+  assert.equal(openProtocol.tasks[0].status, "running");
+  assert.equal(openProtocol.agentRuns[0].status, "running");
+  assert.equal(openProtocol.tasks[0].timeCompleted, null);
   // Delegates are not compaction: no artifacts, no compaction events.
   assert.equal(protocol.contextArtifacts.length, 0);
   assert.equal(protocol.events.some((event) => event.kind === "context.compaction"), false);

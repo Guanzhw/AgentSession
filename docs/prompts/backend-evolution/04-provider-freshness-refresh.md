@@ -94,9 +94,27 @@ verified-at、版本/commit、官方来源链接与样本格式。
    `state(title/metadata/output)` 的 bounded keys，文件为
    `test/fixtures/opencode-current-v1.18.27-synthetic.jsonl`，非 live capture；
    最终 focused OpenCode/SQLite 回归为 3/3，完整 `npm test` 为 369/369。
-7. **Hermes Agent remote HEAD** — 1cb3ab617363ffab9e55239a7d2ab0d6f9c10473;
-   本地 v0.19.1(upstream 0cd26ce9 / local 840fb55a)的 state.db 结论只对已验证
-   版本/本地样本成立。
+7. **Hermes Agent v0.21.0 / v2026.8.31** — ✅ **已完成（2026-09-03）**。
+   本机安装/本地源码为 v0.19.1 (`840fb55a8aaeb69bfcd6f34a80e57f9a5bcd44ce`)；
+   官方 annotated release tag object 为
+   `6e8f8418e6378eb2617e4de074e13dedd091b8af`，peeled source commit 为
+   `29112bef099274229cadff79cdff7bf7b99c4b77`；另行核验的官方源码 HEAD
+   为 `7b72fd12476aedc06a993d92c4337e2ceb214bc7`，两类 provenance 已分开，
+   并在本次交付前立即复核。
+   当前 source/state schema 证据含 `messages.active`/`compacted` 与
+   `async_delegations` handle/state/delivery 字段；adapter 在 store 边界只读
+   active transcript，压缩只生成 metadata-only context evidence，并将有记录的
+   async delegation 映射为 background Task；若另有 persisted child，则单独映射
+   为无 taskId 的 AgentRun。未知状态、
+   无 child session、memory/experience/team/handoff/continuing interaction
+   均保留 unknown；adapter 消费 session 聚合 token，已观察到的
+   `session_model_usage` 行与其一致但不重复相加，也不推断 inherited/shared
+   ownership。新增
+   `test/fixtures/hermes-current-v0210-synthetic.json`（source-derived bounded
+   synthetic fixture，非 live capture）与 focused 回归。async registry Task
+   与 persisted child AgentRun 不做无证据绑定；跨表事件只保留各自表内顺序，
+   tool event 使用 assistant row anchor；决策记录见
+   `.agents/decisions/implemented/2026-09-03-hermes-current-compatibility.md`。
 
 纪律:
 - 每个 provider 独立决策记录、独立 fixtures、独立真实数据验证、独立提交;

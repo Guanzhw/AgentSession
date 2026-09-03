@@ -21,6 +21,7 @@ import codex from "../dist/src/providers/codex/adapter.js";
 import pi from "../dist/src/providers/pi/adapter.js";
 import openclaw from "../dist/src/providers/openclaw/adapter.js";
 import hermes from "../dist/src/providers/hermes/adapter.js";
+import { buildHermesSessionProtocol } from "../dist/src/providers/hermes/protocol.js";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const recentFixtureEpoch = (() => {
@@ -501,6 +502,11 @@ test("Hermes snapshot store reads SQLite once per revision and separates delegat
     assert.equal(hermes.getSystemPrompts("hermes-root")?.hiddenPromptStored, true);
     assert.match(JSON.stringify(hermes.getSystemPrompts("hermes-root")), /Stored Hermes prompt/);
     assert.ok(hermes.getRuntimeEnvironment("hermes-root")?.extensions.some(entry => entry.name === "SOUL.md"));
+    const rootProtocol = hermes.getSessionProtocol("hermes-root");
+    const toolEvent = rootProtocol?.events.find((event) => event.kind === "message.tool");
+    assert.equal(toolEvent?.provenance.sourceId, "2", "tool event uses its recorded assistant row");
+    assert.equal(toolEvent?.turnId, "2");
+    assert.equal(toolEvent?.providerData.sourceSequence, 2001, "tool stays in assistant row order");
     // Whitespace-only reasoning is treated as absent: no thinking on the
     // normalized message and no reasoning part in the tree, while the real
     // "inspect" reasoning on the read_file turn stays byte-for-byte.
@@ -612,6 +618,183 @@ test("Hermes snapshot store reads SQLite once per revision and separates delegat
     const selfCycleTree = hermes.getSessionTree("hermes-self-cycle");
     assert.equal(selfCycleTree.session.id, "hermes-self-cycle");
     assert.ok(selfCycleTree.messages.some(message => message.parts.some(part => part.type === "text" && part.data.text === "Self cycle reply")));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Hermes current state keeps compacted history out of messages and records async delegation lifecycle", () => {
+  const fixture = JSON.parse(readFileSync(new URL("./fixtures/hermes-current-v0210-synthetic.json", import.meta.url), "utf8"));
+  const root = mkdtempSync(path.join(os.tmpdir(), "agentsession-hermes-current-"));
+  try {
+    const db = new DatabaseSync(path.join(root, "state.db"));
+    db.exec(`
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY, source TEXT, model TEXT, model_config TEXT,
+        parent_session_id TEXT, started_at REAL, ended_at REAL, end_reason TEXT,
+        title TEXT, input_tokens INTEGER, output_tokens INTEGER,
+        cache_read_tokens INTEGER, cache_write_tokens INTEGER,
+        reasoning_tokens INTEGER, cwd TEXT, billing_provider TEXT,
+        archived INTEGER DEFAULT 0
+      );
+      CREATE TABLE messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, role TEXT,
+        content TEXT, timestamp REAL, active INTEGER, compacted INTEGER
+      );
+      CREATE TABLE async_delegations (
+        delegation_id TEXT PRIMARY KEY, origin_session TEXT,
+        parent_session_id TEXT, state TEXT, dispatched_at REAL,
+        completed_at REAL, updated_at REAL, delivery_state TEXT,
+        delivery_attempts INTEGER, task_json TEXT
+      );
+    `);
+    const session = fixture.sessions[0];
+    const insertSession = db.prepare(`INSERT INTO sessions
+      (id, source, model, model_config, parent_session_id, started_at, ended_at,
+       end_reason, title, input_tokens, output_tokens, cache_read_tokens,
+       cache_write_tokens, reasoning_tokens, cwd, billing_provider, archived)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    for (const sessionRow of fixture.sessions) {
+      insertSession.run(sessionRow.id, sessionRow.source, sessionRow.model, sessionRow.model_config,
+        sessionRow.parent_session_id, sessionRow.started_at, sessionRow.ended_at,
+        sessionRow.end_reason, sessionRow.title, sessionRow.input_tokens,
+        sessionRow.output_tokens, sessionRow.cache_read_tokens,
+        sessionRow.cache_write_tokens, sessionRow.reasoning_tokens, sessionRow.cwd,
+        sessionRow.billing_provider, sessionRow.archived);
+    }
+    const insertMessage = db.prepare("INSERT INTO messages (session_id, role, content, timestamp, active, compacted) VALUES (?, ?, ?, ?, ?, ?)");
+    for (const message of fixture.messages) {
+      insertMessage.run(message.session_id, message.role, message.content,
+        message.timestamp, message.active, message.compacted);
+    }
+    const delegation = fixture.asyncDelegations[0];
+    db.prepare(`INSERT INTO async_delegations
+      (delegation_id, origin_session, parent_session_id, state, dispatched_at,
+       completed_at, updated_at, delivery_state, delivery_attempts, task_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(delegation.delegation_id, delegation.origin_session,
+        delegation.parent_session_id, delegation.state, delegation.dispatched_at,
+        delegation.completed_at, delegation.updated_at, delegation.delivery_state,
+        delegation.delivery_attempts, delegation.task_json);
+    db.close();
+
+    initConfig(["--hermes-dir", root]);
+    const messages = hermes.getMessages(session.id);
+    assert.deepEqual(messages.map((message) => message.content), ["bounded user marker", "active row with compacted marker"]);
+    const protocol = hermes.getSessionProtocol(session.id);
+    assert.ok(protocol);
+    assert.equal(protocol.tasks.length, 1);
+    assert.equal(protocol.tasks[0].id, delegation.delegation_id);
+    assert.equal(protocol.tasks[0].status, "completed");
+    assert.equal(protocol.tasks[0].provenance.fidelity, "recorded");
+    assert.equal(protocol.agentRuns.length, 1);
+    assert.equal(protocol.agentRuns[0].mode, "subagent");
+    assert.equal(protocol.agentRuns[0].childSessionId, fixture.sessions[1].id);
+    assert.equal(protocol.agentRuns[0].taskId, null);
+    assert.equal(protocol.agentRuns[0].status, "completed");
+    const spawned = protocol.relationships.filter((relationship) => relationship.type === "spawned");
+    assert.equal(spawned.length, 1);
+    assert.equal(spawned[0].taskId, null);
+    assert.ok(protocol.events.some((event) => event.kind === "delegation.async" && event.provenance.fidelity === "recorded"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Hermes async registry keeps no-child and unknown states bounded", () => {
+  const protocol = buildHermesSessionProtocol({
+    session: {
+      id: "hermes-async-root", provider: "hermes", parentId: null, title: "Async",
+      directory: null, timeCreated: 1000, timeUpdated: 1100, messageCount: 0,
+      tokenCount: null, metadata: {}
+    },
+    messages: [],
+    rawSession: { id: "hermes-async-root" },
+    asyncDelegations: [
+      { delegation_id: "async-complete", state: "completed", dispatched_at: 1000, completed_at: 1100 },
+      { delegation_id: "async-mystery", state: "vendor_future", dispatched_at: 1001 }
+    ],
+    family: []
+  });
+  assert.deepEqual(protocol.tasks.map((task) => task.id), ["async-complete"]);
+  assert.equal(protocol.agentRuns.length, 0);
+  assert.deepEqual(protocol.events.filter((event) => event.kind === "delegation.async").map((event) => event.provenance.sourceId), ["async-complete", "async-mystery"]);
+  assert.equal(protocol.events.every((event) => !(event.providerData && "sourceSequence" in event.providerData)), true);
+});
+
+test("Hermes async registry orders safely when dispatched_at is absent", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "agentsession-hermes-async-order-"));
+  try {
+    const db = new DatabaseSync(path.join(root, "state.db"));
+    db.exec(`
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, source TEXT, model TEXT,
+        model_config TEXT, parent_session_id TEXT, started_at REAL,
+        ended_at REAL, end_reason TEXT, title TEXT, input_tokens INTEGER,
+        output_tokens INTEGER, cache_read_tokens INTEGER,
+        cache_write_tokens INTEGER, reasoning_tokens INTEGER, cwd TEXT,
+        billing_provider TEXT, archived INTEGER DEFAULT 0);
+      CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT, role TEXT, content TEXT, timestamp REAL);
+      CREATE TABLE async_delegations (
+        delegation_id TEXT PRIMARY KEY, origin_session TEXT,
+        parent_session_id TEXT, state TEXT, updated_at REAL,
+        task_json TEXT
+      );
+      INSERT INTO sessions (id, source, started_at, title) VALUES ('async-order-root', 'cli', 1788000000, 'Async order');
+      INSERT INTO async_delegations (delegation_id, origin_session, parent_session_id, state, updated_at, task_json)
+        VALUES ('async-b', 'async-order-root', 'async-order-root', 'completed', 1788000002, '{"goal":"b"}');
+      INSERT INTO async_delegations (delegation_id, origin_session, parent_session_id, state, updated_at, task_json)
+        VALUES ('async-a', 'async-order-root', 'async-order-root', 'completed', 1788000001, '{"goal":"a"}');
+    `);
+    db.close();
+    initConfig(["--hermes-dir", root]);
+    const protocol = hermes.getSessionProtocol("async-order-root");
+    assert.deepEqual(protocol?.tasks.map((task) => task.id), ["async-a", "async-b"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Hermes partial async registry does not hide readable sessions", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "agentsession-hermes-async-partial-"));
+  try {
+    const db = new DatabaseSync(path.join(root, "state.db"));
+    db.exec(`
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, source TEXT, started_at REAL, title TEXT);
+      CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, role TEXT, content TEXT, timestamp REAL);
+      CREATE TABLE async_delegations (delegation_id TEXT, origin_session TEXT, malformed_payload BLOB);
+      INSERT INTO sessions (id, source, started_at, title) VALUES ('partial-root', 'cli', 1788000000, 'Partial');
+      INSERT INTO async_delegations (delegation_id, origin_session, malformed_payload) VALUES ('partial-1', 'partial-root', X'00');
+    `);
+    db.close();
+    initConfig(["--hermes-dir", root]);
+    assert.ok(hermes.getSession("partial-root"));
+    assert.equal(hermes.getSessionProtocol("partial-root")?.tasks.length, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Hermes store filters compacted rows when active is absent", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "agentsession-hermes-legacy-"));
+  try {
+    const db = new DatabaseSync(path.join(root, "state.db"));
+    db.exec(`
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, source TEXT, model TEXT,
+        model_config TEXT, parent_session_id TEXT, started_at REAL,
+        ended_at REAL, end_reason TEXT, title TEXT, input_tokens INTEGER,
+        output_tokens INTEGER, cache_read_tokens INTEGER,
+        cache_write_tokens INTEGER, reasoning_tokens INTEGER, cwd TEXT,
+        billing_provider TEXT, archived INTEGER DEFAULT 0);
+      CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT, role TEXT, content TEXT, timestamp REAL, compacted INTEGER);
+      INSERT INTO sessions (id, source, started_at, title) VALUES ('legacy', 'cli', 1788000000, 'Legacy');
+      INSERT INTO messages (session_id, role, content, timestamp, compacted) VALUES ('legacy', 'user', 'legacy marker', 1788000000, 0);
+      INSERT INTO messages (session_id, role, content, timestamp, compacted) VALUES ('legacy', 'user', 'compacted marker', 1787999999, 1);
+    `);
+    db.close();
+    initConfig(["--hermes-dir", root]);
+    assert.deepEqual(hermes.getMessages("legacy").map((message) => message.content), ["legacy marker"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

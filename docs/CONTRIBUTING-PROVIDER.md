@@ -108,6 +108,33 @@ adapter/protocol smoke loaded 11 sessions. Current 2.1.259 format support is
 docs/upstream-verified; no live 2.1.259 transcript was available. The checked-in
 fixture is source-derived bounded synthetic data, not a live capture.
 
+### Hermes Agent evidence snapshot (2026-09-03)
+
+The installed Hermes package is `0.19.1` (local source checkout
+`840fb55a8aaeb69bfcd6f34a80e57f9a5bcd44ce`). The official release
+`v2026.8.31` / Hermes Agent v0.21.0 has annotated tag object
+`6e8f8418e6378eb2617e4de074e13dedd091b8af` and peeled source commit
+`29112bef099274229cadff79cdff7bf7b99c4b77`; separately, current upstream
+HEAD is `7b72fd12476aedc06a993d92c4337e2ceb214bc7`, rechecked immediately
+before handoff. The release tag and HEAD are distinct evidence sources.
+The local read-only `state.db` snapshot is
+schema 23 with 4 sessions, 21 active messages, 1 child, 1 async delegation,
+and 4 per-model usage rows; it has no compacted rows or memory/experience/
+user/team/handoff tables.
+
+Official current source documents schema 29, `messages.active`/
+`messages.compacted`, and an `async_delegations` registry. The adapter reads
+the active transcript boundary, keeps compacted history out of linear
+messages/ToC, and records async handle/state as one background Task when that
+registry evidence exists. A separately persisted delegate child is one
+unbound AgentRun with its child session id; no handle-to-child binding or
+second Task is inferred. Compression stays metadata-only context lineage; an
+unrecognized async state or missing child session remains unknown.
+Session aggregate token columns are consumed; the observed per-model rows
+match those totals but are not separately added. No request ownership or
+inherited/shared split is invented. The checked-in fixture is
+source-derived bounded synthetic data, not a live transcript.
+
 ### OpenCode evidence snapshot (2026-09-03)
 
 The installed CLI is `1.17.11` (`opencode --version`). npm `opencode-ai`

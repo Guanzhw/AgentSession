@@ -176,8 +176,8 @@ function buildHermesLinkedViews(sessionId: string) {
 const hermesProtocolCapabilities = {
   sessionEvents: { support: "full" as const, provenance: "derived" as const, details: "derived message envelopes plus compression context.compaction events" },
   sessionRelationships: { support: "full" as const, provenance: "derived" as const, details: "validated compacted-into and delegate spawned lineage" },
-  tasks: { support: "partial" as const, provenance: "derived" as const, details: "delegate sessions only" },
-  agentRuns: { support: "partial" as const, provenance: "derived" as const, details: "delegate sessions only" },
+  tasks: { support: "partial" as const, provenance: "derived" as const, details: "recorded delegate sessions and async delegation handles" },
+  agentRuns: { support: "partial" as const, provenance: "derived" as const, details: "recorded persisted delegate sessions; async handles remain Tasks without a derived run" },
   contextArtifacts: { support: "partial" as const, provenance: "derived" as const, details: "compression continuations, metadata-only summaries" },
   branches: { support: "none" as const, provenance: "derived" as const, details: "Hermes compression/delegation are session lineage relationships" }
 };
@@ -189,10 +189,12 @@ function buildHermesSessionProtocolFor(sessionId: string) {
     session: entry.session,
     messages: entry.messages,
     rawSession: entry.rawSession,
+    asyncDelegations: entry.asyncDelegations,
     family: sessions.getFamily(sessionId).map((candidate) => ({
       session: candidate.session,
       messages: candidate.messages,
-      rawSession: candidate.rawSession
+      rawSession: candidate.rawSession,
+      asyncDelegations: candidate.asyncDelegations
     }))
   });
   return finalizeSessionProtocol(protocol, {
