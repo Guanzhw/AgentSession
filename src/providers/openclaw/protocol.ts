@@ -13,13 +13,131 @@ import { activeOpenClawRecords, type OpenClawRecord } from "./parser.js";
 type Child = { session: RawSession; records: OpenClawRecord[] };
 
 export const openClawProtocolCapabilities = {
-  sessionEvents: capabilityDescriptor("full", "recorded", "Active path is read from the provider JSONL"),
-  sessionRelationships: capabilityDescriptor("full", "recorded", "Registry spawnedBy and in-file parentId"),
-  tasks: capabilityDescriptor("partial", "derived", "Delegation records are projected when present"),
-  agentRuns: capabilityDescriptor("partial", "derived", "Registry/in-file delegation is projected when present"),
+  sessionEvents: capabilityDescriptor("full", "recorded", "Active path is read from the provider transcript (current SQLite transcript_events or legacy JSONL)"),
+  sessionRelationships: capabilityDescriptor("full", "recorded", "session_nodes parent/spawn/fork columns and in-file parentId"),
+  tasks: capabilityDescriptor("none", "derived", "Both current SQLite and legacy builders always emit an empty tasks array; no verified task mapping"),
+  agentRuns: capabilityDescriptor("none", "derived", "Both current SQLite and legacy builders always emit an empty agentRuns array; no verified agent-run mapping"),
   contextArtifacts: capabilityDescriptor("none", "derived"),
-  branches: capabilityDescriptor("full", "recorded", "In-file parentId branch topology")
+  branches: capabilityDescriptor("full", "recorded", "In-file/in-window parentId branch topology")
 };
+
+/**
+ * Extra recorded relationships from the current SQLite session_nodes shape.
+ * Legacy JSONL sessions derive lineage from the sessions.json registry.
+ */
+export interface OpenClawSqliteLineageFacts {
+  /** session_key this session was forked from (recorded fork_source_session_key). */
+  forkedFromSessionKey?: string | null;
+}
+
+/** Protocol projection for a current-SQLite session (window-based records). */
+export function buildOpenClawSqliteSessionProtocol(
+  session: RawSession,
+  records: OpenClawRecord[],
+  children: Child[],
+  revision: string | number,
+  facts: OpenClawSqliteLineageFacts = {}
+): SessionProtocol {
+  const sessionId = String(session.id);
+  const active = activeOpenClawRecords(records);
+  const events: ReturnType<typeof sessionEvent>[] = [sessionEvent({
+    id: `session.started:${sessionId}`, sessionId, timestamp: session.timeCreated || null,
+    kind: "session.started", phase: "started",
+    provenance: { fidelity: "recorded", sourceType: "openclaw.sqlite.session_nodes", sourceId: sessionId }
+  })];
+  for (const record of active) {
+    const id = String(record.id);
+    const message = record.message || {};
+    events.push(sessionEvent({
+      id: `record:${id}`, sessionId, timestamp: eventTime(record), kind: eventKind(record),
+      phase: eventKind(record).endsWith("called") ? "started" : eventKind(record).endsWith("failed") ? "failed" : "updated",
+      turnId: message.role ? id : null,
+      provenance: { fidelity: "recorded", sourceType: `openclaw.sqlite.transcript_events.${String(record.type || "record")}`, sourceId: id },
+      providerData: { parentId: record.parentId || null, role: message.role || null }
+    }));
+  }
+  // Session Protocol relationships are built ONLY from the recorded fields:
+  // parent_session_key yields a `parent` edge (child -> parent), spawned_by
+  // yields a `spawned` edge (spawner -> child). When both fields name the
+  // same session the fact is duplicated and a single relationship is emitted;
+  // the `parent` edge wins because parent_session_key is the structural
+  // parent field (consistent with RawSession.parentId precedence). The
+  // conflated RawSession.parentId is never used as evidence here, and no
+  // relationship is fabricated when a field is absent.
+  const relationships: ReturnType<typeof sessionRelationship>[] = [];
+  const pushEdge = (edge: ReturnType<typeof sessionRelationship>) => relationships.push(edge);
+  const metadataParent = (childSession: RawSession): string | null => {
+    const value = childSession.metadata?.parentSessionKey;
+    return typeof value === "string" && value ? value : null;
+  };
+  const metadataSpawned = (childSession: RawSession): string | null => {
+    const value = childSession.metadata?.spawnedBy;
+    return typeof value === "string" && value ? value : null;
+  };
+  for (const child of children) {
+    const childId = String(child.session.id);
+    if (childId === sessionId) continue;
+    const parent = metadataParent(child.session);
+    const spawned = metadataSpawned(child.session);
+    if (parent === sessionId && spawned === sessionId) {
+      pushEdge(sessionRelationship({
+        type: "parent", fromSessionId: childId, toSessionId: sessionId,
+        timestamp: child.session.timeCreated || null,
+        provenance: { fidelity: "recorded", sourceType: "openclaw.sqlite.session_nodes.parent_session_key", sourceId: childId }
+      }));
+      continue;
+    }
+    if (parent === sessionId) {
+      pushEdge(sessionRelationship({
+        type: "parent", fromSessionId: childId, toSessionId: sessionId,
+        timestamp: child.session.timeCreated || null,
+        provenance: { fidelity: "recorded", sourceType: "openclaw.sqlite.session_nodes.parent_session_key", sourceId: childId }
+      }));
+    }
+    if (spawned === sessionId) {
+      pushEdge(sessionRelationship({
+        type: "spawned", fromSessionId: sessionId, toSessionId: childId,
+        timestamp: child.session.timeCreated || null,
+        provenance: { fidelity: "recorded", sourceType: "openclaw.sqlite.session_nodes.spawned_by", sourceId: childId }
+      }));
+    }
+  }
+  const ownParent = metadataParent(session);
+  const ownSpawned = metadataSpawned(session);
+  if (ownParent && ownParent !== sessionId && ownSpawned && ownSpawned === ownParent) {
+    pushEdge(sessionRelationship({
+      type: "parent", fromSessionId: sessionId, toSessionId: ownParent,
+      timestamp: session.timeCreated || null,
+      provenance: { fidelity: "recorded", sourceType: "openclaw.sqlite.session_nodes.parent_session_key", sourceId: sessionId }
+    }));
+  } else {
+    if (ownParent && ownParent !== sessionId) {
+      pushEdge(sessionRelationship({
+        type: "parent", fromSessionId: sessionId, toSessionId: ownParent,
+        timestamp: session.timeCreated || null,
+        provenance: { fidelity: "recorded", sourceType: "openclaw.sqlite.session_nodes.parent_session_key", sourceId: sessionId }
+      }));
+    }
+    if (ownSpawned && ownSpawned !== sessionId) {
+      pushEdge(sessionRelationship({
+        type: "spawned", fromSessionId: ownSpawned, toSessionId: sessionId,
+        timestamp: session.timeCreated || null,
+        provenance: { fidelity: "recorded", sourceType: "openclaw.sqlite.session_nodes.spawned_by", sourceId: sessionId }
+      }));
+    }
+  }
+  if (facts.forkedFromSessionKey && String(facts.forkedFromSessionKey) !== sessionId) {
+    pushEdge(sessionRelationship({
+      type: "forked", fromSessionId: String(facts.forkedFromSessionKey), toSessionId: sessionId,
+      timestamp: session.timeCreated || null,
+      provenance: { fidelity: "recorded", sourceType: "openclaw.sqlite.session_nodes.fork_source", sourceId: sessionId }
+    }));
+  }
+  return finalizeSessionProtocol({
+    sessionId, events, relationships, tasks: [], agentRuns: [], contextArtifacts: [],
+    branches: branchProjection(records, active)
+  }, { provider: "openclaw", session, capabilities: openClawProtocolCapabilities, revision: protocolRevision(revision) });
+}
 
 function eventTime(record: OpenClawRecord): number | null {
   const value = record.message?.timestamp ?? record.timestamp;

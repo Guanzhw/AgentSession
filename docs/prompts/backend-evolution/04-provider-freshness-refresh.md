@@ -24,12 +24,7 @@ verified-at、版本/commit、官方来源链接与样本格式。
    `.agents/decisions/implemented/2026-09-03-dsh-alpha5-compatibility-snapshot.md`
    与 alpha.5 官方快照 fixture/回归。限制：credentialed live run 不可用
    （key auth 失败），未产生新的 live 证据（已显式记录，不当作成功）。
-2. **OpenClaw current SQLite** — **进行中（下一阶段）**。官方最新 docs
-   明确 current session rows/transcript/metadata 主存储为
-   ~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite，
-   sessions/*.jsonl 是 legacy/archive；当前 adapter 仅支持 JSONL，须按
-   supported/legacy/pending 显式标记，不得继续声称一般性 active current
-   support。
+2. **OpenClaw current SQLite** — ✅ **已完成（2026-09-03）**。官方 HEAD `f92a12c5…` 与 release `v2026.8.2` 的 agent schema SQL 字节一致（sha256 `54fa65dc…`，agent schema 19；最新 main `2d9796d6…` 仅 package.json 元数据差异）。实现：`src/providers/openclaw/sqlite-store.ts` 只读快照读取 `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite`（`session_nodes` canonical key、`session_windows` 代数、`transcript_events` 原始事件），复用现有 JSONL record parser；legacy JSONL 保留可读并按 canonical session 与 SQLite 去重（SQLite 恰好一次）；诊断区分 current/legacy-only/unsupported/unreadable。决策记录：`.agents/decisions/implemented/2026-09-03-openclaw-current-sqlite-coexistence.md`。限制：本机安装 2026.7.1-2 为 pre-flip、无当前格式数据目录，真实本地数据验证未完成（显式记录）。
 3. **Pi current v3 / 0.84.4** — 官方当前包/源为 @earendil-works/pi-coding-agent 与
    https://github.com/earendil-works/pi,HEAD e266507b606b9552fa277252644054afd4384b11;
    当前安装 0.80.10,官方 session format 为 v3。旧 @mariozechner/badlogic 信息只能标

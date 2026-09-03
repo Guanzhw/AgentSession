@@ -96,7 +96,7 @@ fact was stored natively.
 | OpenCode | active | `$XDG_DATA_HOME/opencode/opencode.db` or `~/.local/share/opencode/opencode.db` | `partial/derived` message/part events plus native child/session records for relationships, Tasks, and AgentRuns. |
 | Claude Code | active | `~/.claude/transcripts/`, `~/.claude/projects/` | `partial/derived` transcript, compact-boundary, and sidechain/task-notification evidence. |
 | Codex CLI | active | `~/.codex/sessions/**/*.jsonl` | `full/recorded` response/item, tool, and compaction events; `partial/derived` NEW_TASK relationships, Tasks, and AgentRuns. |
-| OpenClaw | active — JSONL reader (legacy/archive); latest SQLite refresh pending | `~/.openclaw/agents/*/sessions/*.jsonl` (legacy/archive); latest upstream primary storage is `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite` | `partial/derived` branch topology, reasoning, tools, and registry lineage; no child without source evidence. |
+| OpenClaw | active — current SQLite (with legacy/archive JSONL fallback) | `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite` (agent schema 19, verified 2026-09-03); legacy/archive `sessions/*.jsonl` | `partial/derived` branch/window generations, reasoning, tools, and recorded session_nodes parent/spawn/fork lineage; no child without source evidence. Tasks/AgentRuns are `none`: both current and legacy builders always emit empty arrays, with no verified mapping. |
 | Hermes Agent | active | `$HERMES_HOME/state.db` | `full/recorded` SQLite events and `partial/derived` compression continuation/delegation lineage; compression is not spawned work. |
 | Pi | active | `~/.pi/agent/sessions/**/*.jsonl` | `full/recorded` branch/compaction events and `partial/derived` parent lineage; never invented spawn. The current upstream package/repo has moved to `@earendil-works/pi-coding-agent` (official session format v3); the existing reader needs continued validation against v3/current versions. |
 | DeepSeek Harness | active preview | `$DSH_HOME/sessions/**/session.jsonl[.zstd]` or `~/.dsh/sessions/**` | `full/recorded` v0 event log/context and `partial/derived` workflow, team, and cross-session relationships. |
@@ -107,6 +107,44 @@ system-prompt evidence remain independent read-only capabilities: only locally
 resolvable sources are shown, and hidden provider prompts are never claimed.
 An undetected installation is shown as unavailable with its provider diagnostic;
 it is never reported as an empty successful source.
+
+## OpenClaw current SQLite compatibility
+
+OpenClaw moved sessions/transcripts into the per-agent SQLite store starting
+with 2026.7.2-beta.1 (agent schema 19 today); `sessions/*.jsonl` and
+`sessions.json` are legacy/archive (doctor migration inputs). AgentSession's
+current implementation (verified 2026-09-03):
+
+- Primary store: `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite`
+  (opened read-only; WAL-aware snapshot signatures). Canonical session id =
+  `session_nodes.session_key` (e.g. `agent:main:main`); `session_windows` are
+  transcript generations (`previous_session_id` + `reason`:
+  initial/reset/rollover/fork/rewind/switch/recovery/compaction), and the
+  viewer exposes the live window with the recorded generation chain in
+  `metadata.windowLineage` (bounded to 20).
+- `transcript_events.event_json` has the same record shape as the legacy
+  JSONL, so the existing parser is reused unchanged; the active path is
+  computed from raw events (`session_transcript_active_events` is a derived
+  projection and is not trusted).
+- Protocol relationships come only from the recorded field: `parent_session_key`
+  yields a `parent` edge, `spawned_by` yields a `spawned` edge (both when
+  distinct, deduplicated to `parent` when identical); tree/family views use the
+  documented structural-parent precedence.
+- Legacy JSONL stays readable; when SQLite and JSONL expose the same canonical
+  session (window id of any generation, or registry sessionKey), the SQLite
+  representation wins exactly once — no double counting. Coverage is
+  agent-scoped, so an identical id recorded by another agent never hides a
+  legacy session; covered old-generation window ids remain resolvable to the
+  canonical session.
+- Diagnostics truthfully distinguish current SQLite / legacy-only JSONL /
+  unsupported schema (version >19 or missing shape) / unreadable (corrupt or
+  permission) / unavailable (no agents dir); one corrupt agent store never
+  hides another agent's usable data.
+- Verification baseline: official HEAD `f92a12c5…` and release `v2026.8.2`
+  (byte-identical schema SQL, sha256 `54fa65dc…`, agent schema 19). The local
+  install 2026.7.1-2 is pre-flip and no current-format data directory exists
+  on this machine, so live local validation was not completed (recorded
+  explicitly, not claimed as success).
 
 ## DeepSeek Harness compatibility
 

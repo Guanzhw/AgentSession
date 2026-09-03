@@ -4,6 +4,12 @@ Status: accepted research input (updated 2026-09-03)
 
 Date: 2026-09-02
 
+> Update: the OpenClaw stage landed as
+> [`.agents/decisions/implemented/2026-09-03-openclaw-current-sqlite-coexistence.md`](../../../.agents/decisions/implemented/2026-09-03-openclaw-current-sqlite-coexistence.md)
+> and refreshed the snapshot row below to agent schema 19 (verified 2026-09-03;
+> `session_nodes`/`session_windows`/`transcript_events` canonical, legacy JSONL
+> archived with exactly-once dedup).
+>
 > Update: the Codex provider stage landed as
 > [`.agents/decisions/implemented/2026-09-02-codex-native-v3-mapping.md`](../../../.agents/decisions/implemented/2026-09-02-codex-native-v3-mapping.md).
 > Its recorded window ids form a linear context-version lineage
@@ -39,7 +45,7 @@ features.
 | OpenCode | <https://opencode.ai/docs/> | 1.17.11 (Windows) | opencode-ai 1.18.26 | — | OpenCode SQLite schema support; refresh pending against 1.18.26 evidence. |
 | Claude Code | <https://code.claude.com/docs/en/overview> · <https://github.com/anthropics/claude-code> | 2.1.207 | 2.1.258 | `aef74afe01f65b602258d6102b0da9730ac6f0aa` | Transcript parsing verified on installed 2.1.207; npm 2.1.258 / repo HEAD not yet verified. |
 | Codex CLI | <https://github.com/openai/codex> + official Codex docs | 0.152.1 | 0.152.1 | `5e26f7621c1c470fe62350d61c9eb4d6c772a0da` | Native v3 mapping was verified on a **0.151 alpha historical snapshot**; it does not cover 0.152.1 — refresh pending. |
-| OpenClaw | <https://github.com/openclaw/openclaw> · <https://docs.openclaw.ai/> | 2026.7.1-2 | 2026.8.2 | `f92a12c5813fb880ed6a05c4a728fd5f4ccc5473` | Latest official docs state current session rows/transcript/metadata live in `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite`; `sessions/*.jsonl` is **legacy/archive**. Adapter supports JSONL only → **current-format support pending**. |
+| OpenClaw | <https://github.com/openclaw/openclaw> · <https://docs.openclaw.ai/> | 2026.7.1-2 | 2026.8.2 | `f92a12c5813fb880ed6a05c4a728fd5f4ccc5473` | **Current-format SQLite support complete 2026-09-03.** Agent schema 19 verified at the recorded HEAD, the `v2026.8.2` release tag (schema SQL byte-identical, sha256 `54fa65dc…dc96f61e`), and newest main `2d9796d6…` (only package.json metadata differs). Canonical storage: `session_nodes(session_key, current_session_id)` + `session_windows` generations + `transcript_events`; legacy `sessions/*.jsonl` stay readable and deduplicated (SQLite wins exactly once). `sessions/*.jsonl` is **legacy/archive**. Live local validation unavailable (local install `2026.7.1-2` is pre-flip, no state dir), recorded explicitly. |
 | Hermes Agent | <https://hermes-agent.nousresearch.com/docs/> · <https://github.com/NousResearch/hermes-agent> | v0.19.1 (upstream `0cd26ce9`, local `840fb55a`) | — | `1cb3ab617363ffab9e55239a7d2ab0d6f9c10473` | `state.db` conclusions hold only for this verified version and local samples; remote HEAD refresh pending. |
 | Pi | <https://github.com/earendil-works/pi> · package `@earendil-works/pi-coding-agent` | 0.80.10 | 0.84.4 | `e266507b606b9552fa277252644054afd4384b11` | Current official session format **v3**; reader needs continued validation against v3 / 0.84.4. Former `@mariozechner/badlogic` references are **legacy**, not the current upstream. |
 | DeepSeek Harness | <https://www.deepseek.com/harness/en/> · <https://github.com/deepseek-ai/deepseek-harness> | 0.1.2-alpha.5 (WSL global) | alpha dist-tag `0.1.2-alpha.5` (the `latest` tag points to an old rc — it is not the newest preview) | `49a606bc5b5934603f22a26957a07dc799ab0291` (alpha.5 tag `db6bdc3576c2d4e7c965e8e3ed0c2a731eed87f5`) | **Adapter snapshot is alpha.5 — refresh complete 2026-09-03.** Physical format unchanged from alpha.3 (version `0`, same event catalog, `seedLength` header line, packed rows, range-encoded provenance); official checked-in web snapshot adopted as fixture. Credentialed live alpha.5 run unavailable (auth failure). Alpha.3/rc.8 readers retained. |
@@ -133,10 +139,15 @@ Additional installed-provider evidence guards against false generalization:
   yields `compacted-into` plus a context summary, while `_delegate_from` yields
   Task/Run/spawned facts. Its sampled root has 9,865 direct and 10,859
   family-inclusive tokens.
-- OpenClaw records branch topology and may record `spawnedBy`, but the current
-  adapter does not produce Task/Run entities. Its registry `contextTokens` is a
-  capacity, not consumed usage. Trajectory context events currently remain
-  outside the adapter.
+- OpenClaw records branch topology (in-window JSONL record shape, current
+  SQLite `transcript_events`) and may record parent/spawn/fork in
+  `session_nodes`; Task/Run are never projected: both current SQLite and
+  legacy builders always emit empty `tasks`/`agentRuns` arrays (capabilities
+  `none`), and no verified delegation mapping exists in the verified agent
+  schema beyond message-tool outcome receipts. Its registry `contextTokens`
+  is a capacity, not consumed usage. The current SQLite reader (agent schema
+  19, verified 2026-09-03) records `windowLineage` generations and
+  session-level parent/spawn/fork facts.
 
 The numeric observations above are ephemeral local observations captured on
 2026-09-02; they are evidence for schema decisions, not committed test
@@ -174,10 +185,12 @@ reports known lower bounds and an honest `unclassified` remainder, and never
 a fabricated direct/inherited/shared split. The shared projection
 implementation stays valid; it is not rolled back.
 
-This negative conclusion holds only for the audited snapshot. OpenClaw latest
-SQLite (`openclaw-agent.sqlite`), DSH alpha.5, Pi 0.84.4, and other upstream
-versions listed in the freshness snapshot above have not completed a schema
-refresh, so their slice status is **pending/unknown** — never "no slices".
+This negative conclusion holds only for the audited snapshot. DSH alpha.5,
+Pi 0.84.4, and other upstream versions listed in the freshness snapshot above
+have not completed a schema refresh, so their slice status is
+**pending/unknown** — never "no slices". OpenClaw's current SQLite format is
+now snapshot-verified (2026-09-03, agent schema 19) and likewise shows no
+origin slices.
 
 | Provider | Request-context-origin evidence | Conclusion |
 |:---|:---|:---|
@@ -186,7 +199,7 @@ refresh, so their slice status is **pending/unknown** — never "no slices".
 | Claude Code | Assistant usage carries `input_tokens`/`output_tokens`/`cache_read_input_tokens`/`cache_creation_input_tokens`/`reasoning_tokens`; no request-context-origin record. | **No slices in snapshot** (2.1.207 evidence). npm 2.1.258 / repo HEAD unverified. |
 | OpenCode | Session/message token columns `input_tokens`/`output_tokens`/`cache_read_tokens`/`cache_write_tokens`/`reasoning_tokens`; no origin record. | **No slices in snapshot** (1.17.11 evidence). npm 1.18.26 unverified. |
 | Pi | Per-assistant-message usage `{input, output, cache.read, cache.write, reasoning, total}`; no origin record. | **No slices in snapshot** (0.80.10 evidence). 0.84.4 / session v3 unverified — **pending/unknown**. |
-| OpenClaw | Per-event usage `{input, output, reasoningTokens, cacheRead, cacheWrite, totalTokens}`; no origin record. | **No slices in snapshot** (JSONL evidence). Latest SQLite backend unverified — **pending/unknown**. |
+| OpenClaw | Per-event usage `{input, output, reasoningTokens, cacheRead, cacheWrite, totalTokens}`; no origin record (verified in the current SQLite `transcript_events` shape 2026-09-03; same record shape as legacy JSONL). | **No slices** in the verified snapshot (agent schema 19 / legacy JSONL) — **no mapping**. |
 | Hermes | Session-level token columns (input/output/reasoning/cache read/cache write) aggregated at the store boundary; no per-request origin record. | **No slices in snapshot** (v0.19.1 local `840fb55a` evidence). Remote HEAD `1cb3ab61…` unverified. |
 
 Because origin slices were absent in the audited snapshot, the Codex-style

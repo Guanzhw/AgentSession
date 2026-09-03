@@ -70,6 +70,7 @@ boundary.
 | Branch-tree JSONL | `src/providers/pi/` or `src/providers/openclaw/` | In-file branches and canonical parent/session IDs. |
 | Event-sourced JSONL with Zstd frames | `src/providers/deepseek-harness/` | Frame decoding, packed-row keys, source sequence, and required event vocabulary. |
 | Provider-native SQLite | `src/providers/hermes/` | Provider schema, WAL snapshots, and lineage remain local to the adapter. |
+| OpenClaw current SQLite + legacy JSONL coexistence | `src/providers/openclaw/` | `session_nodes` canonical keys vs legacy file window ids; exactly-once dedup (SQLite wins); legacy-only/unsupported/unreadable diagnostics. |
 | OpenCode SQLite | `src/providers/opencode/` | Only the OpenCode schema is supported; arbitrary SQLite is not interchangeable. |
 
 Shared helpers in `src/providers/shared/` are schema-neutral: file caching,

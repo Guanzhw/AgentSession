@@ -9,6 +9,11 @@ function timestamp(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+/** Event time in Unix milliseconds for one OpenClaw record (message or envelope timestamp). */
+export function openClawRecordTimestamp(record: OpenClawRecord): number {
+  return timestamp(record.message?.timestamp) || timestamp(record.timestamp);
+}
+
 function textContent(value: unknown) {
   if (typeof value === "string") return value;
   if (!Array.isArray(value)) return "";

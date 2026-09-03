@@ -65,13 +65,24 @@ GET /api/:provider/session/:id/runtime/context?maxItems=
 | OpenCode | active | `$XDG_DATA_HOME/opencode/opencode.db` 或 `~/.local/share/opencode/opencode.db` | `partial/derived` messages/parts 事件；原生 child/session 记录支持关系、Task、AgentRun。 |
 | Claude Code | active | `~/.claude/transcripts/`、`~/.claude/projects/` | `partial/derived` transcript、compact 边界和 sidechain/task-notification 证据。 |
 | Codex CLI | active | `~/.codex/sessions/**/*.jsonl` | `full/recorded` response/item、工具和 compaction；`partial/derived` NEW_TASK 关系、Task、AgentRun。 |
-| OpenClaw | active — JSONL reader (legacy/archive); 最新 SQLite refresh pending | `~/.openclaw/agents/*/sessions/*.jsonl`（legacy/archive）；最新 upstream 主存储为 `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite` | `partial/derived` branch、reasoning、工具和 registry lineage；无来源证据不创建 child。 |
+| OpenClaw | active — current SQLite（含 legacy/archive JSONL 回退） | `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite`（agent schema 19，2026-09-03 验证）；legacy/archive `sessions/*.jsonl` | `partial/derived` branch/window 代数、reasoning、工具、session_nodes parent/spawn/fork lineage；无来源证据不创建 child。Task/Run 为 `none`：current 与 legacy 构建器恒返回空数组，无已验证映射。 |
 | Hermes Agent | active | `$HERMES_HOME/state.db` | `full/recorded` SQLite 事件；`partial/derived` 压缩延续/delegation lineage，压缩不是 spawned。 |
 | Pi | active | `~/.pi/agent/sessions/**/*.jsonl` | `full/recorded` branch/compaction 和 `partial/derived` parent lineage；不虚构 spawn。当前 upstream package/repo 已迁移到 `@earendil-works/pi-coding-agent`（官方 session format v3），现有 reader 需持续对 v3/当前版本验证。 |
 | DeepSeek Harness | active preview | `$DSH_HOME/sessions/**/session.jsonl[.zstd]` 或 `~/.dsh/sessions/**` | `full/recorded` v0 event/context；`partial/derived` workflow、team 和跨 session 关系。 |
 
 当前 Provider 也提供消息搜索、token 统计、导出和只修改 AgentSession 元数据的本地管理。Runtime Environment 与 system-prompt evidence 仍是独立的只读能力：只展示可解析的本地来源，不声称恢复隐藏 prompt。
 未检测到的安装会显示为 unavailable 并保留 Provider diagnostic，不会被报告为空的成功来源。
+
+## OpenClaw current SQLite compatibility
+
+OpenClaw 自 2026.7.2-beta.1 起把 session/transcript 主存储迁入每 agent 的 SQLite（agent schema 至 19）；`sessions/*.jsonl` 与 `sessions.json` 是 legacy/archive（doctor 迁移输入）。AgentSession 当前实现（2026-09-03 验证）：
+
+- 主存储：`~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite`（只读打开，支持 WAL 快照签名），canonical session id = `session_nodes.session_key`（如 `agent:main:main`）；`session_windows` 是 transcript 代数（`previous_session_id` + `reason`：initial/reset/rollover/fork/rewind/switch/recovery/compaction），展示层只暴露 live 窗口并记录代数链（`metadata.windowLineage`，有界 20）。
+- `transcript_events.event_json` 与 legacy JSONL record 同形，parser 复用不变；active path 直接由 raw events 计算（`session_transcript_active_events` 是派生投影，不可依赖）。
+- Protocol 关系只来自记录的字段：`parent_session_key` 产生 `parent` 边，`spawned_by` 产生 `spawned` 边（两者不同时都发出，相同时去重为 `parent`）；tree/family 视图使用已记录的 structural-parent 优先级。
+- legacy JSONL 保持可读；与 SQLite 暴露同一 canonical session（任意代数 window id，或 registry sessionKey）时以 SQLite 表示为准，恰好一次，不重复计数。覆盖按 agent 限定：另一 agent 记录的相同 id 不会隐藏本 agent 的 legacy session；被覆盖的旧代数 window id 仍可解析到 canonical session。
+- 诊断：current SQLite / legacy-only JSONL / unsupported schema（版本 >19 或形状缺失）/ unreadable（损坏/权限）/ unavailable（无 agents 目录）状态显式区分；单个 agent 坏库不隐藏其余 agent 的可用数据。
+- 验证基线：官方 HEAD `f92a12c5…` 与 release `v2026.8.2`（schema SQL 字节一致，sha256 `54fa65dc…`，agent schema 19）。本机安装 2026.7.1-2 为 pre-flip，无当前格式数据目录，真实本地数据验证未完成（已显式记录，不当作成功）。
 
 ## DeepSeek Harness compatibility
 

@@ -31,7 +31,10 @@ Status values: `[ ]` pending, `[-]` active, `[x]` complete
 - [x] Migrate Hermes protocol and compression/delegation lineage.
 - [x] Implement OpenCode protocol from native messages/parts/child sessions.
 - [x] Implement OpenClaw protocol with active path, branches, and registry
-  lineage.
+  lineage; then refresh to current-format SQLite (agent schema 19,
+  2026-09-03): `session_nodes` canonical keys, `session_windows` generations,
+  `transcript_events` raw events; legacy JSONL stays readable with exactly-once
+  dedup (SQLite wins).
 - [x] Implement Copilot protocol with inline-agent task/run semantics.
 - [x] Implement truthful derived Gemini protocol.
 - [x] Add provider-wide contract tests for unknown/corrupt sessions and
