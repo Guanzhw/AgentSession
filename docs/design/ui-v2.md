@@ -1,5 +1,14 @@
 # AgentSession UI v2 信息设计方案(草案)
 
+## P0 implementation status (2026-09-03)
+
+The information skeleton is implemented: the primary rail is Library / Statistics /
+Settings, session details are Work (default) / Conversation / Events, and the
+existing Work Graph lenses remain nested inside Work. Events currently provide a
+server-rendered shell that focuses the recorded Evidence lens; no event data is
+invented. Code highlighting is local and offline through the vendored,
+license-tracked bundle at `src/static/vendor/highlight.js`.
+
 > 状态:`proposed` · 作者:UI planner · 日期:2026-09
 > 本文是**信息设计**:展示哪些信息、层级如何、什么默认隐藏、状态如何呈现。
 > 视觉(配色、字号、间距、图标)不在本文范围,留到实现期由具备视觉能力的人定稿。

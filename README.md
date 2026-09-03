@@ -12,7 +12,14 @@ AgentSession 是本地优先、只读的 harness runtime inspector。它从 Open
 
 ## Work Graph
 
-session 详情页固定为 `Work Graph | Conversation | Overview | Raw`，并默认打开 Work Graph。每个可读 session 都显示 Work Graph，并按协议证据降级；不会把“不支持”“不可用”“缺失”“无效”渲染成观测到的零值。
+UI v2 信息骨架的顶层 rail 为 `库 | 统计 | 设置`（Library | Statistics | Settings）。session 详情页固定为
+`工作 | 对话 | 事件`，并默认打开工作；已有 Work Graph 五个 lens 保留在工作内部。
+事件标签当前是真实可用的壳：有记录时链接到工作中的证据视图。每个可读
+session 都按协议证据降级；不会把“不支持”“不可用”“缺失”“无效”渲染成观测到的零值。
+
+浏览器代码高亮使用仓库内 vendored 的
+`@highlightjs/cdn-assets` 11.12.0 bundle，位于
+`src/static/vendor/highlight.js`；许可证与来源记录和资产并列，支持离线使用。
 
 Work Graph 提供五个服务端派生 lens：
 

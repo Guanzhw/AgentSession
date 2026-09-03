@@ -517,7 +517,7 @@ function renderTocNode(node: any) {
 
 function renderToc(tree: SessionTree | null) {
   if (!tree) {
-    return `<aside class="session-toc"><h2>Navigate</h2><p class="toc-empty">No indexed messages.</p><button class="toc-resize-handle" type="button" aria-label="Resize table of contents"></button></aside>`;
+    return `<aside class="session-toc"><h2>${escapeHtml(t("detail.toc_navigate"))}</h2><p class="toc-empty">${escapeHtml(t("detail.toc_no_indexed_messages"))}</p><button class="toc-resize-handle" type="button" aria-label="${escapeHtml(t("detail.toc_resize"))}"></button></aside>`;
   }
 
   const nodes = collectTocNodes(tree);
@@ -525,14 +525,14 @@ function renderToc(tree: SessionTree | null) {
 
   return `<aside class="session-toc">
     <div class="toc-header">
-      <h2>TOC</h2>
-      <div class="toc-controls" aria-label="Navigate controls">
-        <button type="button" class="toc-control" data-toc-action="collapse" title="Collapse all">-</button>
-        <button type="button" class="toc-control" data-toc-action="expand" title="Expand all">+</button>
+      <h2>${escapeHtml(t("detail.toc_title"))}</h2>
+      <div class="toc-controls" aria-label="${escapeHtml(t("detail.toc_controls"))}">
+        <button type="button" class="toc-control" data-toc-action="collapse" title="${escapeHtml(t("detail.toc_collapse_all"))}">-</button>
+        <button type="button" class="toc-control" data-toc-action="expand" title="${escapeHtml(t("detail.toc_expand_all"))}">+</button>
       </div>
     </div>
-    <div class="toc-list">${markup || `<p class="toc-empty">No indexed messages.</p>`}</div>
-    <button class="toc-resize-handle" type="button" aria-label="Resize table of contents"></button>
+    <div class="toc-list">${markup || `<p class="toc-empty">${escapeHtml(t("detail.toc_no_indexed_messages"))}</p>`}</div>
+    <button class="toc-resize-handle" type="button" aria-label="${escapeHtml(t("detail.toc_resize"))}"></button>
   </aside>`;
 }
 
@@ -905,14 +905,27 @@ export function renderSessionPage({
   resumeCommand = null,
   terminalLaunchAllowed = false,
   runtimeWorkbench = "",
+  runtimeAvailable = false,
   navigationContext = null
-}: { session: any; sessionTree?: any; sessionMetrics?: any; messages?: any[]; partsByMessage?: Map<any, any>; todos?: any[]; recentSessions?: any[]; meta?: any; provider?: string; providers?: any[]; manageable?: boolean; resumeCommand?: any; terminalLaunchAllowed?: boolean; runtimeWorkbench?: string; navigationContext?: SessionNavigationContext | null }) {
+}: { session: any; sessionTree?: any; sessionMetrics?: any; messages?: any[]; partsByMessage?: Map<any, any>; todos?: any[]; recentSessions?: any[]; meta?: any; provider?: string; providers?: any[]; manageable?: boolean; resumeCommand?: any; terminalLaunchAllowed?: boolean; runtimeWorkbench?: string; runtimeAvailable?: boolean; navigationContext?: SessionNavigationContext | null }) {
   const title = session.title || session.slug || session.id;
   const starred = meta?.starred ? 1 : 0;
   const encodedProvider = encodeURIComponent(provider);
   const encodedSessionId = encodeURIComponent(session.id);
   const providerName = providers.find((item: any) => item.id === provider)?.name || provider;
+  const recordedFiles = session.summary_files != null ? String(Number(session.summary_files) || 0) : null;
+  const recordedAdditions = session.summary_additions != null ? String(Number(session.summary_additions) || 0) : null;
+  const recordedDeletions = session.summary_deletions != null ? String(Number(session.summary_deletions) || 0) : null;
+  const startTime = Number(session.time_created);
+  const recordedStart = Number.isFinite(startTime) && startTime > 0
+    ? new Date(startTime).toLocaleString()
+    : t("detail.not_recorded");
   const sourceLabel = navigationContext?.section === "stats" ? t("nav.stats") : t("nav.sessions");
+  const backHref = navigationContext?.href || "/sessions";
+  const currentRecentIndex = recentSessions.findIndex((item: any) => String(item.id) === String(session.id));
+  const previousSession = currentRecentIndex > 0 ? recentSessions[currentRecentIndex - 1] : null;
+  const nextSession = currentRecentIndex >= 0 && currentRecentIndex < recentSessions.length - 1 ? recentSessions[currentRecentIndex + 1] : null;
+  const sessionHref = (item: any) => `/${encodeURIComponent(item.provider || provider)}/session/${encodeURIComponent(item.id)}`;
   const breadcrumb = navigationContext ? `<nav class="session-breadcrumb" aria-label="${escapeHtml(t("detail.breadcrumb_label"))}">
     <a href="${escapeHtml(navigationContext.href)}">← ${escapeHtml(t("detail.back_to_source", { source: sourceLabel }))}</a>
     <span>${escapeHtml(providerName)}</span>
@@ -927,7 +940,11 @@ export function renderSessionPage({
   ` : "";
   const resumeActions = resumeCommand && terminalLaunchAllowed ? `
         <button class="action-btn" data-action="resume-session" data-id="${escapeHtml(session.id)}" ${resumeCommand.available ? "" : "disabled"}>${t("action.open_terminal")}</button>
-  ` : "";
+  ` : `<span class="action-btn action-unavailable" aria-disabled="true">${escapeHtml(t("detail.resume_unavailable"))}</span>`;
+  const exportActions = `
+        <a class="action-btn" href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=md">${t("action.export_md")}</a>
+        <a class="action-btn" href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=json">${t("action.export_json")}</a>
+  `;
   const moreActionsDropdown = manageable ? `
         <details class="more-actions">
           <summary class="action-btn">${t("action.more_actions")}</summary>
@@ -964,7 +981,11 @@ export function renderSessionPage({
       <div class="session-actions-shell">
         <div class="session-actions">
           ${visibleStarAction}
+          <a class="action-btn session-back-link" href="${escapeHtml(backHref)}">← ${escapeHtml(t("detail.back"))}</a>
+          ${previousSession ? `<a class="action-btn session-neighbor" href="${sessionHref(previousSession)}" aria-label="${escapeHtml(t("detail.previous"))}">← ${escapeHtml(t("detail.previous"))}</a>` : ""}
+          ${nextSession ? `<a class="action-btn session-neighbor" href="${sessionHref(nextSession)}" aria-label="${escapeHtml(t("detail.next"))}">${escapeHtml(t("detail.next"))} →</a>` : ""}
           ${resumeActions}
+          ${exportActions}
           ${renderTranscriptSearch()}
           ${moreActionsDropdown}
         </div>
@@ -974,15 +995,18 @@ export function renderSessionPage({
 
   const header = `
     <header class="session-header">
-      <h1>${escapeHtml(title)}</h1>
+      <div class="session-title-row">
+        <h1>${escapeHtml(title)}</h1>
+        <span class="session-provider-badge" title="${escapeHtml(providerName || t("detail.no_provider"))}">${escapeHtml(providerName || t("detail.no_provider"))}</span>
+      </div>
       <div class="session-meta-row">
-        <span class="session-directory">${escapeHtml(session.directory || "")}</span>
+        <span class="session-directory"><span class="session-meta-label">${escapeHtml(t("detail.project"))}</span> ${escapeHtml(session.directory || t("detail.no_project"))}</span>
         <span class="session-meta-sep">·</span>
-        <span>${escapeHtml(new Date(Number(session.time_created) || Date.now()).toLocaleString())}</span>
+        <span><span class="session-meta-label">${escapeHtml(t("detail.started"))}</span> ${escapeHtml(recordedStart)}</span>
         <span class="session-meta-sep">·</span>
-        <span>${escapeHtml(String(Number(session.summary_files) || 0))} ${t("detail.files")}</span>
-        <span class="additions">+${escapeHtml(String(Number(session.summary_additions) || 0))}</span>
-        <span class="deletions">-${escapeHtml(String(Number(session.summary_deletions) || 0))}</span>
+        <span>${escapeHtml(recordedFiles ?? t("detail.not_recorded"))} ${t("detail.files")}</span>
+        ${recordedAdditions == null ? `<span class="session-meta-empty">${escapeHtml(t("detail.not_recorded"))} ${t("detail.additions")}</span>` : `<span class="additions">+${escapeHtml(recordedAdditions)}</span>`}
+        ${recordedDeletions == null ? `<span class="session-meta-empty">${escapeHtml(t("detail.not_recorded"))} ${t("detail.deletions")}</span>` : `<span class="deletions">-${escapeHtml(recordedDeletions)}</span>`}
       </div>
 ${actions}
     </header>
@@ -998,54 +1022,40 @@ ${actions}
   const projectKey = typeof sessionMetadata.projectKey === "string" && sessionMetadata.projectKey.trim()
     ? sessionMetadata.projectKey.trim()
     : null;
-  const projectKeyDetails = projectKey ? `
-    <p><strong>${t("detail.project_key")}</strong> <code>${escapeHtml(projectKey)}</code>${sessionMetadata.projectDirectorySource === "configured" ? ` · ${t("detail.project_directory_configured")}` : ""}</p>
-  ` : "";
-
-  // Raw data tab content
-  const rawDataContent = `
-    <div class="raw-data-section">
-      <p><strong>${t("detail.created")}</strong> ${escapeHtml(new Date(Number(session.time_created) || Date.now()).toLocaleString())}</p>
-      <p><strong>${t("detail.updated")}</strong> ${escapeHtml(new Date(Number(session.time_updated) || Date.now()).toLocaleString())}</p>
-      <p><strong>${t("detail.files")}</strong> ${escapeHtml(String(Number(session.summary_files) || 0))} / ${t("detail.additions")} +${escapeHtml(String(Number(session.summary_additions) || 0))} / ${t("detail.deletions")} -${escapeHtml(String(Number(session.summary_deletions) || 0))}</p>
-      ${session.directory ? `<p><strong>Directory</strong> ${escapeHtml(session.directory)}</p>` : ""}
-      ${projectKeyDetails}
-      <p><strong>Session ID</strong> <code>${escapeHtml(session.id)}</code></p>
-    </div>
-    <div class="raw-data-export">
-      <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=md" class="btn">${t("action.export_md")}</a>
-      <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=json" class="btn">${t("action.export_json")}</a>
-    </div>
-  `;
+  const projectEvidence = projectKey
+    ? `<p class="session-project-evidence"><strong>${escapeHtml(t("detail.project_key"))}</strong> <code>${escapeHtml(projectKey)}</code>${sessionMetadata.projectDirectorySource === "configured" ? ` · ${escapeHtml(t("detail.project_directory_configured"))}` : ""}</p>`
+    : "";
 
   const body = `
 <div class="session-workbench" data-session-id="${escapeHtml(session.id)}" data-provider="${escapeHtml(provider)}">
   ${renderToc(sessionTree)}
-  <main id="${escapeHtml(anchorId("session", session.id))}" class="main-content">
+  <section id="${escapeHtml(anchorId("session", session.id))}" class="main-content">
     ${breadcrumb}
     ${header}
     <div class="tab-bar" role="tablist" aria-label="${escapeHtml(t("detail.tab_bar_label"))}" hidden>
-      <button role="tab" aria-selected="true" aria-controls="tab-runtime" id="tab-btn-runtime" tabindex="0">${t("detail.tab_runtime")}</button>
+      <button role="tab" aria-selected="true" aria-controls="tab-work" id="tab-btn-work" tabindex="0">${t("detail.tab_work")}</button>
       <button role="tab" aria-selected="false" aria-controls="tab-conversation" id="tab-btn-conversation" tabindex="-1">${t("detail.tab_conversation")}</button>
-      <button role="tab" aria-selected="false" aria-controls="tab-overview" id="tab-btn-overview" tabindex="-1">${t("detail.tab_overview")}</button>
-      <button role="tab" aria-selected="false" aria-controls="tab-raw" id="tab-btn-raw" tabindex="-1">${t("detail.tab_raw")}</button>
+      <button role="tab" aria-selected="false" aria-controls="tab-events" id="tab-btn-events" tabindex="-1">${t("detail.tab_events")}</button>
     </div>
-    <div role="tabpanel" id="tab-runtime" aria-labelledby="tab-btn-runtime">
+    <div role="tabpanel" id="tab-work" aria-labelledby="tab-btn-work">
       ${runtimeWorkbench || `<p class="empty-state">${t("runtime.unavailable")}</p>`}
+      ${projectEvidence}
+      ${renderSessionMetricsPanel(sessionMetrics)}
+      ${todoList(todos)}
     </div>
     <div role="tabpanel" id="tab-conversation" aria-labelledby="tab-btn-conversation">
       <section id="session-messages" class="messages">
         ${messageMarkup || `<p class="empty-state">${t("detail.no_messages")}</p>`}
       </section>
     </div>
-    <div role="tabpanel" id="tab-overview" aria-labelledby="tab-btn-overview">
-      ${renderSessionMetricsPanel(sessionMetrics)}
-      ${todoList(todos)}
+    <div role="tabpanel" id="tab-events" aria-labelledby="tab-btn-events">
+      <section id="detail-events-shell" class="detail-events-shell">
+        <h2>${escapeHtml(t("detail.events_shell_title"))}</h2>
+        <p>${escapeHtml(t("detail.events_shell_description"))}</p>
+        ${runtimeAvailable ? `<button type="button" class="action-btn" data-detail-focus="runtime-evidence">${escapeHtml(t("detail.events_shell_open"))}</button>` : `<p class="empty-state">${escapeHtml(t("runtime.unavailable"))}</p>`}
+      </section>
     </div>
-    <div role="tabpanel" id="tab-raw" aria-labelledby="tab-btn-raw">
-      ${rawDataContent}
-    </div>
-  </main>
+  </section>
 </div>
   `;
 

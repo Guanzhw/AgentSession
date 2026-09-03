@@ -171,6 +171,7 @@ export function registerSessionDetail(
           meta: document.meta,
           resumeCommand,
           runtimeWorkbench: renderRuntimeWorkbench(runtime, providerSegment, sessionId),
+          runtimeAvailable: Boolean(runtime.protocol),
           terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),
           navigationContext,
           ...renderContext

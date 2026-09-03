@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
@@ -25,7 +26,16 @@ for (const [executable, expected] of [[viewer, "AgentSession —"], [mcp, "Agent
 
 
 const temp = mkdtempSync(path.join(os.tmpdir(), "agentsession-sea-smoke-"));
-const port = 35000 + (process.pid % 20000);
+const port = await new Promise((resolve, reject) => {
+  const probe = createServer();
+  probe.once("error", reject);
+  probe.listen(0, "127.0.0.1", () => {
+    const address = probe.address();
+    const selectedPort = typeof address === "object" && address ? address.port : null;
+    probe.close((error) => error ? reject(error) : resolve(selectedPort));
+  });
+});
+if (!port) throw new Error("Could not reserve a local SEA smoke port");
 const server = spawn(viewer, [
   "--port", String(port),
   "--disable-terminal-launch",
@@ -59,10 +69,21 @@ try {
     || JSON.stringify(providers.map((provider) => provider.id)) !== JSON.stringify(expectedProviderIds)) {
     throw new Error("Viewer binary returned an invalid provider list");
   }
-  for (const asset of ["style.css", "app.js"]) {
+  for (const asset of [
+    "style.css",
+    "app.js",
+    "vendor/highlight.js/highlight.min.js",
+    "vendor/highlight.js/github.min.css",
+    "vendor/highlight.js/LICENSE.txt"
+  ]) {
     const response = await fetch(`http://127.0.0.1:${port}/static/${asset}`);
     const body = await response.text();
-    if (!response.ok || body.length < 1000) throw new Error(`Embedded ${asset} is unavailable`);
+    if (!response.ok || body.length < (asset.endsWith("LICENSE.txt") ? 500 : 1000)) {
+      throw new Error(`Embedded ${asset} is unavailable`);
+    }
+    if (asset.endsWith("LICENSE.txt") && !body.includes("BSD 3-Clause")) {
+      throw new Error("Embedded Highlight.js license is not the vendored license");
+    }
   }
 } finally {
   server.kill();

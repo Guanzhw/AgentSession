@@ -10,6 +10,16 @@ deleted, or repaired.
 `src/providers/<provider-id>/` and do not add central provider-ID branches in
 routes, projections, or browser code.
 
+### UI v2 P0 surface contract
+
+The shared viewer presents Library / Statistics / Settings in the primary rail. A
+session detail has Work (default), Conversation, and Events tabs. Provider
+adapters continue to supply only normalized evidence: Work embeds the existing
+Work Graph lenses, Conversation renders the linear message projection, and the
+Events shell links to recorded evidence without fabricating an event stream.
+Missing provider fields remain empty or unknown. The browser only switches
+server-rendered panels and does not interpret provider data.
+
 ## Provider evidence freshness
 
 Provider formats evolve independently. Before changing any provider parser,

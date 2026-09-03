@@ -106,6 +106,13 @@ export function normalizeSessionRecord(session: any): any {
     return null;
   }
 
+  const normalizeRecordedCount = (key: string) => {
+    if (!Object.prototype.hasOwnProperty.call(session, key)) return 0;
+    if (session[key] == null) return null;
+    const value = Number(session[key]);
+    return Number.isFinite(value) ? value : null;
+  };
+
   return {
     ...session,
     id: session.id,
@@ -113,9 +120,9 @@ export function normalizeSessionRecord(session: any): any {
     directory: session.directory || "",
     time_created: Number(session.time_created ?? session.timeCreated) || 0,
     time_updated: Number(session.time_updated ?? session.timeUpdated) || 0,
-    summary_files: Number(session.summary_files) || 0,
-    summary_additions: Number(session.summary_additions) || 0,
-    summary_deletions: Number(session.summary_deletions) || 0,
+    summary_files: normalizeRecordedCount("summary_files"),
+    summary_additions: normalizeRecordedCount("summary_additions"),
+    summary_deletions: normalizeRecordedCount("summary_deletions"),
     starred: Boolean(session.starred),
   };
 }
@@ -328,15 +335,21 @@ export function createSessionCatalog(adapter: any, providerId: string, metadata:
 }
 
 export function toApiSessionShape(session: any, extras: { html?: string } = {}) {
+  const apiRecordedCount = (key: string) => {
+    if (!Object.prototype.hasOwnProperty.call(session, key)) return 0;
+    if (session[key] == null) return null;
+    const value = Number(session[key]);
+    return Number.isFinite(value) ? value : null;
+  };
   const shape = {
     id: session.id,
     provider: session.provider || "",
     title: session.title || session.slug || session.id,
     directory: session.directory || "",
     time_updated: Number(session.time_updated) || 0,
-    summary_files: Number(session.summary_files) || 0,
-    summary_additions: Number(session.summary_additions) || 0,
-    summary_deletions: Number(session.summary_deletions) || 0,
+    summary_files: apiRecordedCount("summary_files"),
+    summary_additions: apiRecordedCount("summary_additions"),
+    summary_deletions: apiRecordedCount("summary_deletions"),
     starred: Boolean(session.starred),
     // Bounded list statistics: attached for the current page by the list
     // routes; a base summary is derived from the row fields otherwise. The

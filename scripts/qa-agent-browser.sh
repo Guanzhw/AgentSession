@@ -95,7 +95,7 @@ wait_for_server
 ab "clear previous session" close --all >/dev/null || true
 
 ab "open centralized sessions" open "$BASE/sessions" >/dev/null
-ab "wait for centralized sessions" wait --text "Recent Sessions" >/dev/null
+ab "wait for centralized sessions" wait --text "Library" >/dev/null
 global_session_state="$(read_ab "verify centralized session providers" eval "JSON.stringify({ filters: document.querySelectorAll('.provider-filter input[name=provider]:checked').length, badges: document.querySelectorAll('.session-provider-badge').length, badLinks: [...document.querySelectorAll('.session-card-title-link')].filter((link) => !/^\\/[a-z][a-z0-9-]*\\/session\\//.test(link.getAttribute('href') || '')).length })")"
 if ! printf '%s' "$global_session_state" | grep -Eq 'filters[^0-9]*[1-9][0-9]*' || ! printf '%s' "$global_session_state" | grep -Eq 'badLinks[^0-9]*0'; then
   echo "Centralized sessions should expose selected provider filters and canonical provider-owned detail links, got $global_session_state" >&2
@@ -137,9 +137,9 @@ read_ab "restore all usage providers" eval "document.querySelector('.stats-provi
 ab "wait for unified usage reset" wait --text "Show only" >/dev/null
 
 ab "open dashboard" open "$BASE/opencode" >/dev/null
-ab "wait for dashboard" wait --text "Recent Sessions" >/dev/null
+ab "wait for dashboard" wait --text "Library" >/dev/null
 dashboard="$(read_ab "read dashboard" get text body)"
-assert_contains "dashboard" "$dashboard" "Recent Sessions"
+assert_contains "dashboard" "$dashboard" "Library"
 dashboard_session_ids="$(read_ab "count dashboard session ids" get count ".session-card[data-session-id]")"
 assert_positive_count "dashboard session ids" "$dashboard_session_ids"
 dashboard_copy_buttons="$(read_ab "count dashboard copy buttons" get count ".session-card [data-action='copy-session-id']")"
@@ -152,6 +152,31 @@ fi
 list_filter_label="$(read_ab "read list filter label" get text ".filter-keyword > span")"
 if [[ "${list_filter_label,,}" != "filter current list" ]]; then
   echo "List filter should identify its scoped behavior, got $list_filter_label" >&2
+  exit 1
+fi
+rail_state="$(read_ab "verify primary rail links" eval "JSON.stringify([...document.querySelectorAll('.rail-link')].map((link) => ({ text: link.textContent.trim(), href: link.getAttribute('href'), shortcut: link.dataset.navShortcut, current: link.getAttribute('aria-current') })))")"
+assert_contains "primary rail" "$rail_state" "Library"
+assert_contains "primary rail" "$rail_state" "Statistics"
+assert_contains "primary rail" "$rail_state" "Settings"
+assert_contains "primary rail" "$rail_state" "\\\"shortcut\\\":\\\"1\\\""
+assert_contains "primary rail" "$rail_state" "\\\"shortcut\\\":\\\"2\\\""
+assert_contains "primary rail" "$rail_state" "\\\"shortcut\\\":\\\"3\\\""
+MSYS2_ARG_CONV_EXCL='*' browser --session "$SESSION_NAME" press 2 >/dev/null
+keyboard_stats_path="$(read_ab "verify keyboard Statistics shortcut" eval "location.pathname")"
+if [[ "$keyboard_stats_path" != "/stats" && "$keyboard_stats_path" != "\"/stats\"" ]]; then
+  echo "Keyboard 2 should navigate to Statistics, got $keyboard_stats_path" >&2
+  exit 1
+fi
+ab "return to Library after keyboard shortcut" open "$BASE/opencode" >/dev/null
+editable_shortcut_path="$(read_ab "verify editable shortcut protection" eval "(() => { const input = document.querySelector('#search-input'); input?.focus(); return document.activeElement === input; })()")"
+if [[ "$editable_shortcut_path" != "true" ]]; then
+  echo "Dashboard search input should be focusable for editable-target protection" >&2
+  exit 1
+fi
+MSYS2_ARG_CONV_EXCL='*' browser --session "$SESSION_NAME" press 1 >/dev/null
+editable_shortcut_path="$(read_ab "read editable shortcut destination" eval "location.pathname")"
+if [[ "$editable_shortcut_path" != "/opencode" && "$editable_shortcut_path" != "\"/opencode\"" ]]; then
+  echo "Keyboard 1 should not navigate while the dashboard search is focused, got $editable_shortcut_path" >&2
   exit 1
 fi
 rename_dialog_count="$(read_ab "open rename dialog" eval "(() => { const card = document.querySelector('.session-card'); const trigger = card?.querySelector('.card-menu-trigger'); trigger?.click(); card?.querySelector('[data-action=\"rename\"]')?.click(); return document.querySelectorAll('.rename-dialog[role=\"dialog\"][aria-modal=\"true\"]').length; })()")"
@@ -200,7 +225,7 @@ post_delete_dashboard_count="$(read_ab "count dashboard sessions after dismissed
 assert_positive_count "dashboard sessions after dismissed delete" "$post_delete_dashboard_count"
 
 ab "open stats" open "$BASE/opencode/stats" >/dev/null
-ab "wait for stats" wait --text "Token Explorer" >/dev/null
+ab "wait for stats" wait --text "Statistics" >/dev/null
 page_token_total="$(read_ab "read stats token total" get attr ".stats-summary-value[data-token-total]" data-token-total)"
 api_token_total="$(curl -fsS "$BASE/api/opencode/stats" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>process.stdout.write(String(JSON.parse(s).totalTokens)))")"
 if [[ "$page_token_total" != "$api_token_total" ]]; then
@@ -224,7 +249,7 @@ if [[ "$saved_view_result" != "ok" && "$saved_view_result" != '"ok"' ]]; then
 fi
 
 ab "open file-provider stats" open "$BASE/codex/stats?days=7" >/dev/null
-ab "wait for file-provider stats" wait --text "Token Explorer" >/dev/null
+ab "wait for file-provider stats" wait --text "Statistics" >/dev/null
 file_stats_capability_state="$(read_ab "verify file-provider stats capability gates" eval "document.querySelectorAll('[name=model], [name=scope], .stats-advanced-details, .stats-model-ranking, .stats-top-sessions, .stats-coverage').length === 0 && document.body.innerText.includes('aggregate token data only')")"
 if [[ "$file_stats_capability_state" != "true" ]]; then
   echo "File-provider Token Explorer should stay aggregate-only without advanced SQLite controls" >&2
@@ -267,16 +292,26 @@ ab "open search" open "$BASE/opencode/search?q=assistant" >/dev/null
 ab "wait for search" wait --text "Search" >/dev/null
 
 ab "open session detail" open "$BASE/opencode/session/$SAMPLE_SESSION_ID" >/dev/null
-work_graph_default="$(read_ab "verify Work Graph default tab" eval "document.getElementById('tab-btn-runtime')?.getAttribute('aria-selected') === 'true' && !document.getElementById('tab-runtime')?.hidden")"
+work_graph_default="$(read_ab "verify Work default tab" eval "document.getElementById('tab-btn-work')?.getAttribute('aria-selected') === 'true' && !document.getElementById('tab-work')?.hidden")"
 if [[ "$work_graph_default" != "true" ]]; then
-  echo "Session detail should open on Work Graph, got $work_graph_default" >&2
+  echo "Session detail should open on Work, got $work_graph_default" >&2
   exit 1
 fi
-ab "open Conversation tab" click "#tab-btn-conversation" >/dev/null
+ab "open Find in conversation from Work" click "[data-session-search-toggle]" >/dev/null
+sleep 0.25
+find_from_work_state="$(read_ab "verify Find switches to Conversation" eval "JSON.stringify({ selected: document.querySelector('#tab-btn-conversation')?.getAttribute('aria-selected'), panelHidden: document.querySelector('#tab-conversation')?.hidden, searchOpen: document.querySelector('[data-session-search]')?.open, focused: document.activeElement === document.querySelector('[data-session-search-input]') })")"
+assert_contains "Find from Work" "$find_from_work_state" "\\\"selected\\\":\\\"true\\\""
+assert_contains "Find from Work" "$find_from_work_state" "\\\"searchOpen\\\":true"
+assert_contains "Find from Work" "$find_from_work_state" "\\\"focused\\\":true"
 ab "wait for reasoning" wait ".reasoning-block" >/dev/null
 detail="$(read_ab "read session detail" get text body)"
 assert_not_contains "detail" "$detail" "System Prompts"
-assert_contains "detail" "$detail" "Work Graph"
+assert_contains "detail" "$detail" "Find in conversation"
+detail_header_state="$(read_ab "verify recorded detail header evidence" eval "(() => { const text = document.querySelector('.session-header')?.innerText || ''; return ['project=' + text.includes('PROJECT'), 'started=' + text.includes('STARTED'), 'files=' + text.includes('Files'), 'clean=' + !/undefined|null/.test(text)].join(';'); })()")"
+assert_contains "detail header" "$detail_header_state" "project=true"
+assert_contains "detail header" "$detail_header_state" "started=true"
+assert_contains "detail header" "$detail_header_state" "files=true"
+assert_contains "detail header" "$detail_header_state" "clean=true"
 detail_session_workbench_id="$(read_ab "read detail session id" get attr ".session-workbench" data-session-id)"
 if [[ "$detail_session_workbench_id" != "$SAMPLE_SESSION_ID" && "$detail_session_workbench_id" != "\"$SAMPLE_SESSION_ID\"" ]]; then
   echo "Detail session workbench ID did not include $SAMPLE_SESSION_ID" >&2
@@ -324,6 +359,15 @@ if [[ "$transcript_search_shortcut_state" != "true" ]]; then
 fi
 ab "close transcript search after shortcut" press Escape >/dev/null
 
+ab "open Work before slash shortcut" click "#tab-btn-work" >/dev/null
+MSYS2_ARG_CONV_EXCL='*' browser --session "$SESSION_NAME" press / >/dev/null
+sleep 0.25
+slash_from_work_state="$(read_ab "verify slash switches to Conversation" eval "JSON.stringify({ selected: document.querySelector('#tab-btn-conversation')?.getAttribute('aria-selected'), searchOpen: document.querySelector('[data-session-search]')?.open, focused: document.activeElement === document.querySelector('[data-session-search-input]') })")"
+assert_contains "slash from Work" "$slash_from_work_state" "\\\"selected\\\":\\\"true\\\""
+assert_contains "slash from Work" "$slash_from_work_state" "\\\"searchOpen\\\":true"
+assert_contains "slash from Work" "$slash_from_work_state" "\\\"focused\\\":true"
+ab "close transcript search after Work slash" press Escape >/dev/null
+
 resume_preview_count="$(read_ab "count resume command previews" get count ".resume-command-preview")"
 resume_copy_count="$(read_ab "count resume command copy buttons" get count ".resume-command-preview [data-action='copy-resume-command']")"
 resume_launch_count="$(read_ab "count terminal launch buttons" get count ".session-actions [data-action='resume-session']")"
@@ -339,11 +383,25 @@ else
   fi
 fi
 
-tab_layout_state="$(read_ab "verify stable session tab layout" eval "(() => { const workbench = document.querySelector('.session-workbench'); const main = workbench?.querySelector('.main-content'); const tabBar = workbench?.querySelector('.tab-bar'); const overview = document.getElementById('tab-btn-overview'); const conversation = document.getElementById('tab-btn-conversation'); if (!workbench || !main || !tabBar || !overview || !conversation) return JSON.stringify({ ready: false }); const measure = () => { const mainRect = main.getBoundingClientRect(); const tabRect = tabBar.getBoundingClientRect(); return { x: mainRect.x, width: mainRect.width, tabDocumentTop: tabRect.top + window.scrollY }; }; const before = measure(); overview.click(); const after = measure(); const nonConversation = !workbench.classList.contains('session-conversation-tab-active'); conversation.click(); const restored = measure(); return JSON.stringify({ ready: true, nonConversation, restoredConversation: workbench.classList.contains('session-conversation-tab-active'), stableX: Math.abs(before.x - after.x) < 1, stableWidth: Math.abs(before.width - after.width) < 1, stableTabTop: Math.abs(before.tabDocumentTop - after.tabDocumentTop) < 1, restoredX: Math.abs(before.x - restored.x) < 1 }); })()")"
-if ! printf '%s' "$tab_layout_state" | grep -Eq 'ready[^a-z]*true' || ! printf '%s' "$tab_layout_state" | grep -Eq 'nonConversation[^a-z]*true' || ! printf '%s' "$tab_layout_state" | grep -Eq 'restoredConversation[^a-z]*true' || ! printf '%s' "$tab_layout_state" | grep -Eq 'stableX[^a-z]*true' || ! printf '%s' "$tab_layout_state" | grep -Eq 'stableWidth[^a-z]*true' || ! printf '%s' "$tab_layout_state" | grep -Eq 'stableTabTop[^a-z]*true' || ! printf '%s' "$tab_layout_state" | grep -Eq 'restoredX[^a-z]*true'; then
+tab_layout_state="$(read_ab "verify stable session tab layout" eval "(() => { const workbench = document.querySelector('.session-workbench'); const main = workbench?.querySelector('.main-content'); const events = document.getElementById('tab-btn-events'); const conversation = document.getElementById('tab-btn-conversation'); if (!workbench || !main || !events || !conversation) return false; conversation.click(); const conversationGrid = getComputedStyle(workbench).gridTemplateColumns.trim().split(/\\s+/).length; events.click(); const eventGrid = getComputedStyle(workbench).gridTemplateColumns.trim().split(/\\s+/).length; const eventMainColumn = getComputedStyle(main).gridColumnStart; conversation.click(); return conversationGrid === 2 && eventGrid === 1 && eventMainColumn === '1' && workbench.classList.contains('session-conversation-tab-active'); })()")"
+if [[ "$tab_layout_state" != "true" ]]; then
   echo "Session tab changes should preserve the content position and width, got $tab_layout_state" >&2
   exit 1
 fi
+
+deep_link_state="$(read_ab "verify Conversation deep link" eval "(() => { const target = document.querySelector('#tab-conversation [id^=msg_]'); if (!target) return JSON.stringify({ ready: false }); location.assign(location.pathname + '?qa_deep_link=conversation#' + target.id); return JSON.stringify({ ready: true, id: target.id }); })()")"
+sleep 0.7
+conversation_hash_state="$(read_ab "read Conversation deep link state" eval "JSON.stringify({ hash: location.hash, selected: document.querySelector('#tab-btn-conversation')?.getAttribute('aria-selected'), hidden: document.querySelector('#tab-conversation')?.hidden })")"
+assert_contains "Conversation deep link" "$deep_link_state" "ready"
+assert_contains "Conversation deep link" "$conversation_hash_state" "\\\"selected\\\":\\\"true\\\""
+assert_contains "Conversation deep link" "$conversation_hash_state" "\\\"hidden\\\":false"
+ab "open Events deep link" open "$BASE/opencode/session/$SAMPLE_SESSION_ID?qa_deep_link=events#detail-events-shell" >/dev/null
+sleep 0.7
+events_hash_state="$(read_ab "read Events deep link state" eval "JSON.stringify({ hash: location.hash, selected: document.querySelector('#tab-btn-events')?.getAttribute('aria-selected'), hidden: document.querySelector('#tab-events')?.hidden })")"
+assert_contains "Events deep link" "$events_hash_state" "detail-events-shell"
+assert_contains "Events deep link" "$events_hash_state" "\\\"selected\\\":\\\"true\\\""
+assert_contains "Events deep link" "$events_hash_state" "\\\"hidden\\\":false"
+ab "restore Conversation after deep links" click "#tab-btn-conversation" >/dev/null
 
 toc_unexpected="$(read_ab "count unexpected toc entries" get count ".session-toc .toc-link:not(.toc-user):not(.toc-assistant):not(.toc-agent):not(.toc-task)")"
 if [[ "$toc_unexpected" != "0" ]]; then
@@ -448,45 +506,45 @@ if [[ "$subagent_branch_word_count" != "0" ]]; then
   exit 1
 fi
 
-runtime_tab_click="$(read_ab "open runtime tab" eval "(() => { const tab = document.getElementById('tab-btn-runtime'); if (!tab) return 'missing'; tab.click(); return 'clicked'; })()")"
+runtime_tab_click="$(read_ab "open Work tab" eval "(() => { const tab = document.getElementById('tab-btn-work'); if (!tab) return 'missing'; tab.click(); return 'clicked'; })()")"
 if [[ "$runtime_tab_click" != "clicked" && "$runtime_tab_click" != '"clicked"' ]]; then
   echo "Runtime tab should open the workbench, got $runtime_tab_click" >&2
   exit 1
 fi
 
-runtime_tab_selected="$(read_ab "verify runtime tab selection" get attr "#tab-btn-runtime" aria-selected)"
+runtime_tab_selected="$(read_ab "verify Work tab selection" get attr "#tab-btn-work" aria-selected)"
 if [[ "$runtime_tab_selected" != "true" && "$runtime_tab_selected" != '"true"' ]]; then
   echo "Runtime tab should be selected after opening the workbench, got state $runtime_tab_selected" >&2
   exit 1
 fi
 
-runtime_root_count="$(read_ab "count runtime workbenches" get count "#tab-runtime .runtime-workbench[data-runtime-available='true']")"
+runtime_root_count="$(read_ab "count runtime workbenches" get count "#tab-work .runtime-workbench[data-runtime-available='true']")"
 if [[ "$runtime_root_count" != "1" ]]; then
   echo "Runtime tab should contain one available workbench, got $runtime_root_count" >&2
   exit 1
 fi
 
-runtime_lens_count="$(read_ab "count runtime lenses" get count "#tab-runtime [data-runtime-lens]")"
+runtime_lens_count="$(read_ab "count runtime lenses" get count "#tab-work [data-runtime-lens]")"
 if [[ "$runtime_lens_count" != "5" ]]; then
   echo "Work Graph should expose four domains plus Evidence, got $runtime_lens_count" >&2
   exit 1
 fi
 
-runtime_domain_ids="$(read_ab "read work graph lens ids" eval "[...document.querySelectorAll('#tab-runtime [data-runtime-lens]')].map((node) => node.dataset.runtimeLens).join(',')")"
+runtime_domain_ids="$(read_ab "read work graph lens ids" eval "[...document.querySelectorAll('#tab-work [data-runtime-lens]')].map((node) => node.dataset.runtimeLens).join(',')")"
 assert_contains "work graph domain order" "$runtime_domain_ids" "work,execution,coordination,context,evidence"
-runtime_work_visible="$(read_ab "verify Work domain visibility" eval "(() => { const panel = document.querySelector('#tab-runtime [data-runtime-panel=work]'); return Boolean(panel && !panel.hidden && panel.getBoundingClientRect().height > 0); })()")"
+runtime_work_visible="$(read_ab "verify Work domain visibility" eval "(() => { const panel = document.querySelector('#tab-work [data-runtime-panel=work]'); return Boolean(panel && !panel.hidden && panel.getBoundingClientRect().height > 0); })()")"
 if [[ "$runtime_work_visible" != "true" ]]; then
   echo "Work should be the visibly selected Work Graph domain, got $runtime_work_visible" >&2
   exit 1
 fi
 
-ab "open Evidence lens" click "#tab-runtime [data-runtime-lens='evidence']" >/dev/null
-runtime_event_count="$(read_ab "count runtime events" get count "#tab-runtime [data-runtime-event]")"
+ab "open Evidence lens" click "#tab-work [data-runtime-lens='evidence']" >/dev/null
+runtime_event_count="$(read_ab "count runtime events" get count "#tab-work [data-runtime-event]")"
 assert_positive_count "runtime events" "$runtime_event_count"
 
-runtime_evidence_count="$(read_ab "count runtime evidence controls" get count "#tab-runtime [data-runtime-evidence-kind='event']")"
+runtime_evidence_count="$(read_ab "count runtime evidence controls" get count "#tab-work [data-runtime-evidence-kind='event']")"
 assert_positive_count "runtime event evidence controls" "$runtime_evidence_count"
-ab "open runtime event evidence" click "#tab-runtime [data-runtime-evidence-kind='event']" >/dev/null
+ab "open runtime event evidence" click "#tab-work [data-runtime-evidence-kind='event']" >/dev/null
 runtime_drawer_open="$(read_ab "verify runtime evidence drawer" eval "Boolean(document.querySelector('[data-runtime-drawer]')?.open)")"
 if [[ "$runtime_drawer_open" != "true" ]]; then
   echo "Runtime evidence control should open the provenance drawer, got $runtime_drawer_open" >&2
@@ -494,11 +552,11 @@ if [[ "$runtime_drawer_open" != "true" ]]; then
 fi
 ab "close runtime evidence drawer" press Escape >/dev/null
 
-ab "reveal runtime lens tabs" scrollintoview "#tab-runtime .runtime-lens-tabs" >/dev/null
-ab "open Coordination lens" click "#tab-runtime [data-runtime-lens='coordination']" >/dev/null
-runtime_relationship_count="$(read_ab "count runtime relationship rows" get count "#tab-runtime .runtime-session-edge")"
+ab "reveal runtime lens tabs" scrollintoview "#tab-work .runtime-lens-tabs" >/dev/null
+ab "open Coordination lens" click "#tab-work [data-runtime-lens='coordination']" >/dev/null
+runtime_relationship_count="$(read_ab "count runtime relationship rows" get count "#tab-work .runtime-session-edge")"
 assert_positive_count "runtime relationship rows" "$runtime_relationship_count"
-runtime_session_link_count="$(read_ab "count canonical runtime session links" get count "#tab-runtime .runtime-session-edge a[href^='/opencode/session/']")"
+runtime_session_link_count="$(read_ab "count canonical runtime session links" get count "#tab-work .runtime-session-edge a[href^='/opencode/session/']")"
 assert_positive_count "canonical runtime session links" "$runtime_session_link_count"
 
 toc_resize_count="$(read_ab "count toc resize handles" get count ".session-toc .toc-resize-handle")"

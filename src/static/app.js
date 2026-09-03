@@ -268,14 +268,29 @@ function isEditableShortcutTarget(target) {
 }
 
 document.addEventListener("keydown", (e) => {
+  if (["1", "2", "3"].includes(e.key)
+    && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey
+    && !isEditableShortcutTarget(e.target)) {
+    const destination = document.querySelector(`[data-nav-shortcut="${e.key}"]`);
+    if (destination) {
+      e.preventDefault();
+      destination.click();
+      return;
+    }
+  }
   if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey && !isEditableShortcutTarget(e.target)) {
     e.preventDefault();
     const transcriptSearch = document.querySelector("[data-session-search]");
     if (transcriptSearch) {
+      const conversationTab = document.querySelector("[aria-controls='tab-conversation']");
+      if (conversationTab && conversationTab.getAttribute("aria-selected") !== "true") {
+        conversationTab.click();
+      }
       transcriptSearch.open = true;
-      transcriptSearch.querySelector("[data-session-search-input]")?.focus();
+      requestAnimationFrame(() => transcriptSearch.querySelector("[data-session-search-input]")?.focus());
     } else {
-      document.getElementById("search-input")?.focus();
+      const globalSearch = document.getElementById("search-input");
+      if (globalSearch && getComputedStyle(globalSearch).display !== "none") globalSearch.focus();
     }
   }
   if (e.key === "Escape") {
@@ -287,11 +302,6 @@ document.addEventListener("keydown", (e) => {
 
 if (typeof hljs !== "undefined") {
   hljs.highlightAll();
-}
-
-const activeSidebarCard = document.querySelector(".sidebar .session-card.active");
-if (activeSidebarCard) {
-  activeSidebarCard.scrollIntoView({ block: "center", behavior: "instant" });
 }
 
 document.addEventListener("click", async (e) => {

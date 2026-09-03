@@ -18,10 +18,17 @@ AgentSession metadata.
 
 ## Work Graph
 
-Session detail navigation is `Work Graph | Conversation | Overview | Raw`, with
-Work Graph selected by default. It appears for every readable session and degrades by protocol evidence;
+The UI v2 information skeleton uses `Library | Statistics | Settings` in the primary
+rail. Session detail navigation is `Work | Conversation | Events`, with Work
+selected by default; the existing Work Graph five-lens surface remains inside
+Work. The Events tab is a truthful shell that links to recorded evidence when
+available. It appears for every readable session and degrades by protocol evidence;
 unsupported, unavailable, missing, and invalid states are explicit rather than
 rendered as observed zeroes.
+
+Browser code highlighting is served from the repository's vendored
+`@highlightjs/cdn-assets` 11.12.0 bundle under `src/static/vendor/highlight.js`,
+with its license and provenance recorded beside the assets for offline use.
 
 Work Graph has five server-derived lenses:
 

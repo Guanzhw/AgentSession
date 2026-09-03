@@ -2550,7 +2550,7 @@ test("session list query options accept known sort and starred values only", () 
   assert.equal(resolveStarredFilter(new URLSearchParams("starred=false")), false);
 });
 
-test("mobile topbar keeps settings reachable when utility links collapse", () => {
+test("primary rail keeps library, stats, and settings reachable on narrow screens", () => {
   const html = renderSessionsPage({
     sessions: [],
     total: 0,
@@ -2563,21 +2563,15 @@ test("mobile topbar keeps settings reachable when utility links collapse", () =>
   });
   const style = readFileSync(path.join(process.cwd(), "dist", "src", "static", "style.css"), "utf8");
 
-  assert.match(html, /href="\/stats" class="nav-link nav-link-stats /);
+  assert.match(html, /href="\/sessions" class="nav-link rail-link rail-link-library /);
+  assert.match(html, /data-nav-shortcut="1"/);
+  assert.match(html, /href="\/stats" class="nav-link nav-link-stats [^"]*rail-link rail-link-stats/);
+  assert.match(html, /data-nav-shortcut="2"/);
   assert.match(html, /href="\/opencode\/trash" class="nav-link nav-link-trash /);
-  assert.match(html, /href="\/opencode\/settings" class="nav-link nav-link-settings [^"]*" title="Settings" aria-label="Settings"/);
-  const mobileTopbarStart = style.indexOf("@media (max-width: 480px)");
-  const nextResponsiveBlock = style.indexOf("@media (max-width: 1180px)", mobileTopbarStart);
-  assert.notEqual(mobileTopbarStart, -1);
-  assert.notEqual(nextResponsiveBlock, -1);
-  const mobileTopbarCss = style.slice(mobileTopbarStart, nextResponsiveBlock);
-
-  assert.match(mobileTopbarCss, /\.topbar-actions \.nav-link \{\s*display: none;[\s\S]*\.topbar-actions \.nav-link-settings \{\s*display: inline-flex;/);
-  assert.match(mobileTopbarCss, /--topbar-height: 104px;/);
-  assert.match(mobileTopbarCss, /--session-anchor-offset: 136px;/);
-  assert.match(mobileTopbarCss, /--settings-anchor-offset: 164px;/);
-  assert.match(mobileTopbarCss, /\.topbar-actions \{\s*grid-column: 1 \/ -1;[\s\S]*grid-template-columns: auto minmax\(0, 1fr\) auto;/);
-  assert.match(mobileTopbarCss, /\.search-input \{\s*width: 100%;\s*min-width: 0;/);
+  assert.match(html, /href="\/opencode\/settings" class="nav-link nav-link-settings rail-link rail-link-settings /);
+  assert.match(html, /data-nav-shortcut="3"/);
+  assert.match(style, /\.app-rail \{[\s\S]*width: 184px;[\s\S]*height: 100vh;/);
+  assert.match(style, /@media \(max-width: 768px\) \{[\s\S]*\.app-rail \{[\s\S]*width: 100%;[\s\S]*height: 56px;/);
 });
 
 
@@ -2632,6 +2626,7 @@ test("sqlite session queries exclude viewer-deleted sessions from paging, projec
     insertSession.run("a", "p1", "a", "needle project", "/p1", 100, 300);
     insertSession.run("b", "p1", "b", "deleted content", "/p1", 100, 200);
     insertSession.run("c", "p2", "c", "active content", "/p2", 100, 100);
+    db.prepare("UPDATE session SET summary_additions = NULL, summary_deletions = NULL, summary_files = NULL WHERE id = ?").run("a");
 
     const insertMessage = db.prepare("INSERT INTO message (id, session_id, data) VALUES (?, ?, ?)");
     const insertPart = db.prepare("INSERT INTO part (id, message_id, session_id, data) VALUES (?, ?, ?, ?)");
@@ -2661,6 +2656,9 @@ test("sqlite session queries exclude viewer-deleted sessions from paging, projec
     const sessionA = getSession("a", dbPath);
     assert.equal(sessionA.message_count, 2);
     assert.equal(sessionA.token_count, 40);
+    assert.equal(sessionA.summary_additions, null);
+    assert.equal(sessionA.summary_deletions, null);
+    assert.equal(sessionA.summary_files, null);
     assert.deepEqual(secondPage.sessions.map((session) => session.id), ["c"]);
     assert.deepEqual(
       listSessions(10, 0, "", "", dbPath, "", excluded, "updated-asc").sessions.map((session) => session.id),
@@ -2761,6 +2759,65 @@ test("session cards omit zero-value change metrics", () => {
   assert.doesNotMatch(changed, /\-0/);
 });
 
+test("session detail P0 header preserves evidence boundaries and local exports", () => {
+  const html = renderSessionPage({
+    session: { id: "p0-detail", title: "P0 detail" },
+    provider: "fixture",
+    manageable: true
+  });
+  assert.match(html, /id="tab-btn-work"[^>]*>Work<\/button>/);
+  assert.match(html, /id="tab-btn-conversation"[^>]*>Conversation<\/button>/);
+  assert.match(html, /id="tab-btn-events"[^>]*>Events<\/button>/);
+  assert.match(html, /Project path not recorded/);
+  assert.match(html, /Started<\/span> Not recorded/);
+  assert.doesNotMatch(html, /1970/);
+  assert.match(html, /Resume command unavailable/);
+  assert.match(html, /export\?format=md/);
+  assert.match(html, /export\?format=json/);
+  assert.doesNotMatch(html, /tab-overview|tab-raw|tab-runtime/);
+});
+
+test("session detail Events shell follows typed runtime availability", () => {
+  const unavailable = renderSessionPage({
+    session: { id: "p0-events-missing", title: "Missing events" },
+    provider: "fixture",
+    runtimeWorkbench: "<div>should not make Events available</div>",
+    runtimeAvailable: false
+  });
+  assert.match(unavailable, /id="detail-events-shell"/);
+  assert.match(unavailable, /Runtime protocol is unavailable/);
+  assert.doesNotMatch(unavailable, /data-detail-focus="runtime-evidence"/);
+
+  const available = renderSessionPage({
+    session: { id: "p0-events-recorded", title: "Recorded events" },
+    provider: "fixture",
+    runtimeWorkbench: "<div>recorded runtime</div>",
+    runtimeAvailable: true
+  });
+  assert.match(available, /data-detail-focus="runtime-evidence"/);
+});
+
+test("highlight assets are repository-local and keyboard rail shortcuts protect editors", () => {
+  const layout = readFileSync(path.join(process.cwd(), "src", "views", "layout.ts"), "utf8");
+  const app = readFileSync(path.join(process.cwd(), "src", "static", "app.js"), "utf8");
+  const enhancements = readFileSync(path.join(process.cwd(), "src", "static", "app", "enhancements.js"), "utf8");
+  const style = readFileSync(path.join(process.cwd(), "src", "static", "style.css"), "utf8");
+  const vendorReadme = readFileSync(path.join(process.cwd(), "src", "static", "vendor", "highlight.js", "README.md"), "utf8");
+  assert.doesNotMatch(layout, /cdnjs|unpkg|jsdelivr|highlight\.js\/.*https?:/i);
+  assert.match(layout, /\/static\/vendor\/highlight\.js\/highlight\.min\.js/);
+  assert.match(layout, /\/static\/vendor\/highlight\.js\/github\.min\.css/);
+  assert.match(vendorReadme, /11\.12\.0/);
+  assert.match(vendorReadme, /LICENSE\.txt/);
+  assert.match(app, /data-nav-shortcut/);
+  assert.match(app, /\["1", "2", "3"\]/);
+  assert.match(app, /!isEditableShortcutTarget\(e\.target\)/);
+  assert.match(app, /getComputedStyle\(globalSearch\)\.display !== "none"/);
+  assert.match(enhancements, /location\.hash/);
+  assert.match(enhancements, /data-session-search-toggle/);
+  assert.match(style, /\.tab-bar\[hidden\] \{\s*display: none;/);
+  assert.match(style, /\.session-workbench:not\(.session-conversation-tab-active\) \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\);/);
+});
+
 test("session management uses in-page dialogs", () => {
   const appJs = readFileSync(path.join(process.cwd(), "dist", "src", "static", "app.js"), "utf-8");
 
@@ -2775,7 +2832,7 @@ test("session management uses in-page dialogs", () => {
   assert.match(appJs, /function isEditableShortcutTarget/);
   assert.match(appJs, /tagName === "TEXTAREA"/);
   assert.match(appJs, /!isEditableShortcutTarget\(e\.target\)/);
-  assert.match(appJs, /document\.getElementById\("search-input"\)\?\.focus\(\)/);
+  assert.match(appJs, /globalSearch && getComputedStyle\(globalSearch\)\.display !== "none"/);
   const style = readFileSync(path.join(process.cwd(), "dist", "src", "static", "style.css"), "utf-8");
   assert.match(style, /\.btn:disabled \{/);
   assert.match(style, /cursor: not-allowed;/);
@@ -2999,7 +3056,7 @@ test("session detail shows a safe source breadcrumb and activates Usage for a st
     navigationContext: parseSessionNavigationContext("/opencode/stats?day=2026-07-11#stats-session-results"),
   });
   assert.match(html, /class="session-breadcrumb"/);
-  assert.match(html, /Back to Usage/);
+  assert.match(html, /Back to Statistics/);
   assert.match(html, /2026-07-11/);
   assert.match(html, /nav-link nav-link-stats active/);
 });
@@ -3036,7 +3093,7 @@ test("Token Explorer renders with no data without crashing", () => {
     providers: []
   });
 
-  assert.match(html, /Token Explorer/);
+  assert.match(html, /Statistics/);
   assert.match(html, /No data/);
 });
 
@@ -3344,8 +3401,7 @@ test("stats advanced modules are capability-gated and export URLs are canonical"
   assert.match(full, /Advanced insights and estimates/);
 });
 
-test("navigate Token to Usage", () => {
-  // The nav label should be "Usage" not "Token"
+test("stats page uses the Stats primary rail label", () => {
   const html = renderStatsPage({
     tokenStats: [],
     modelRanking: [],
@@ -3357,8 +3413,7 @@ test("navigate Token to Usage", () => {
     providers: []
   });
 
-  // Nav label should no longer be "Token"
-  assert.match(html, />Usage</);
+  assert.match(html, />Statistics</);
   assert.doesNotMatch(html, />Token</);
 });
 

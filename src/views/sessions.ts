@@ -48,14 +48,14 @@ export function renderSessionsPage({
   const cards = !isAvailable
     ? `<p class="empty-state">${t("provider.not_detected")}</p>`
   : sessions.length
-    ? sessions.map((session) => sessionCard(session, false, { showCheckbox: !global, provider: provider || session.provider, manageable: isManageableProvider, showProvider: global, providerName: providerNames.get(session.provider || provider) || "", returnTo: listPath })).join("\n")
+    ? sessions.map((session) => sessionCard(session, false, { showCheckbox: !global, provider: provider || session.provider, manageable: isManageableProvider, showProvider: true, providerName: providerNames.get(session.provider || provider) || "", returnTo: listPath })).join("\n")
     : hasActiveFilters
       ? `<p class="empty-state">${query ? t("sessions.empty_search").replace("{query}", escapeHtml(query)) : t("sessions.empty_filter")}</p>`
       : `<p class="empty-state">${t("sessions.empty")}</p>`;
 
   const searchNote = note ? `<p class="search-note">${escapeHtml(note)}</p>` : "";
   const storageNotice = storageDiagnostic
-    ? `<p class="search-note settings-status-warn" data-storage-diagnostic="${escapeHtml(String(storageDiagnostic.code || "storage"))}">${escapeHtml(String(storageDiagnostic.message || storageDiagnostic.code || storageDiagnostic))}</p>`
+    ? `<p class="search-note settings-status-warn" data-storage-diagnostic="${escapeHtml(String(storageDiagnostic.code || "storage"))}"><strong>${escapeHtml(t("sessions.storage_diagnostic"))}:</strong> ${escapeHtml(String(storageDiagnostic.message || storageDiagnostic.code || storageDiagnostic))}</p>`
     : "";
 
   const shortProjectLabel = (value: any, id: any = "") => {

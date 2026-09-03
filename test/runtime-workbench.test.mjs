@@ -151,16 +151,18 @@ test("child session lineage renders the focused session once under its recorded 
   assert.equal((coordination.match(/href="\/fixture\/session\/parent-1"/g) || []).length, 1);
 });
 
-test("Work Graph is the unconditional default top-level tab", () => {
+test("Work is the unconditional default top-level tab", () => {
   const html = renderSessionPage({
     session: { id: "linear", title: "Linear", time_created: 1 },
     provider: "fixture",
     runtimeWorkbench: renderRuntimeWorkbench(fixtureRuntime(), "fixture", "linear")
   });
-  assert.match(html, /id="tab-btn-runtime"/);
-  assert.match(html, /id="tab-runtime"/);
-  assert.match(html, /aria-selected="true" aria-controls="tab-runtime"/);
-  assert.match(html, /id="tab-btn-runtime"[^>]*>Work Graph<\/button>/);
+  assert.match(html, /id="tab-btn-work"/);
+  assert.match(html, /id="tab-work"/);
+  assert.match(html, /aria-selected="true" aria-controls="tab-work"/);
+  assert.match(html, /id="tab-btn-work"[^>]*>Work<\/button>/);
+  assert.match(html, /id="tab-btn-conversation"[^>]*>Conversation<\/button>/);
+  assert.match(html, /id="tab-btn-events"[^>]*>Events<\/button>/);
   assert.doesNotMatch(html, /id="tab-btn-flow"/);
 });
 
@@ -168,7 +170,7 @@ test("top-level session tabs do not hide nested Runtime lens panels", () => {
   const enhancements = readFileSync(path.join(process.cwd(), "src", "static", "app", "enhancements.js"), "utf8");
   assert.match(enhancements, /tabBar\.parentElement\?\.querySelectorAll\(":scope > \[role='tabpanel'\]"\)/);
   assert.doesNotMatch(enhancements, /document\.querySelectorAll\("\[role='tabpanel'\]"\)/);
-  assert.match(enhancements, /targetPanelId === "tab-runtime"/);
+  assert.match(enhancements, /targetPanelId === "tab-work"/);
   assert.match(enhancements, /data-runtime-root.*scrollIntoView|data-runtime-root\]\?\.scrollIntoView/);
 });
 

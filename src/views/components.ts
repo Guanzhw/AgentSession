@@ -327,7 +327,7 @@ function renderListStatChips(s: any) {
     const help = listStats.durationSource === "protocol"
       ? t("card.observed_duration_help")
       : t("card.recorded_duration_help");
-    chips.push(`<span class="stat-chip" title="${escapeHtml(help)}" aria-label="${escapeHtml(`${duration}. ${help}`)}">${escapeHtml(duration)}</span>`);
+    chips.push(`<span class="stat-chip" title="${escapeHtml(help)}">${escapeHtml(duration)}</span>`);
   }
   if (listStats.protocol && Number(listStats.compactions) > 0) {
     const count = formatCompactCount(listStats.compactions);
@@ -370,7 +370,7 @@ function renderListStatChips(s: any) {
   return chips.join("");
 }
 
-export function sessionCard(s: any, active = false, { showCheckbox = false, provider = "opencode", manageable = false, showProvider = false, providerName = "", returnTo = "" } = {}) {
+export function sessionCard(s: any, active = false, { showCheckbox = false, provider = "opencode", manageable = false, showProvider = true, providerName = "", returnTo = "" } = {}) {
   const sessionProvider = s.provider || provider;
   const title = s.title || s.slug || s.id;
   const encodedProvider = encodeURIComponent(sessionProvider);
@@ -389,7 +389,7 @@ export function sessionCard(s: any, active = false, { showCheckbox = false, prov
     deletions > 0 ? `<span class="deletions">-${formatCount(deletions)}</span>` : ""
   ].filter(Boolean).join("");
   const protocolStats = renderListStatChips(s);
-  const statsHtml = stats || protocolStats ? `<footer class="session-card-stats">${stats}${protocolStats}</footer>` : "";
+  const statsHtml = stats || protocolStats ? `<footer class="session-card-stats">${stats ? `<span class="session-card-file-stats">${stats}</span>` : ""}${protocolStats ? `<span class="session-card-signals">${protocolStats}</span>` : ""}</footer>` : "";
   const providerBadge = showProvider ? `<span class="session-provider-badge" title="${escapeHtml(sessionProvider)}">${escapeHtml(providerName || sessionProvider)}</span>` : "";
   const detailHref = `/${encodedProvider}/session/${encodeURIComponent(s.id)}${returnTo ? `?from=${encodeURIComponent(returnTo)}` : ""}`;
 

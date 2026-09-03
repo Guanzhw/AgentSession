@@ -312,6 +312,14 @@ test("toApiSessionShape exposes only the bounded stats object", () => {
   assert.equal(plain.stats.tokenCount, 21);
   assert.equal(plain.stats.durationMs, 4000);
   assert.equal(plain.stats.protocol, false, "fallback base summary for rows without attached stats");
+
+  const missingChanges = toApiSessionShape({
+    id: "g2", provider: "opencode", title: "Missing changes", directory: "D", time_updated: 5000,
+    summary_files: null, summary_additions: null, summary_deletions: null
+  });
+  assert.equal(missingChanges.summary_files, null);
+  assert.equal(missingChanges.summary_additions, null);
+  assert.equal(missingChanges.summary_deletions, null);
 });
 
 // ── Route integration ───────────────────────────────────────────────────
@@ -436,13 +444,13 @@ test("list routes attach stats only for the current page on every surface", asyn
   assert.doesNotMatch(plainPage.body, /stat-chip-running|stat-chip-blocked/, "no active-status chips for unsupported providers");
   assert.match(plainPage.body, /5 messages/);
   assert.match(plainPage.body, /60 tokens/);
-  assert.match(plainPage.body, /4s\. Recorded session duration/, "base duration chip remains for every provider");
+  assert.match(plainPage.body, /title="Recorded session duration/, "base duration chip remains for every provider");
   clearSessionListStatsCache();
 });
 
 // ── sessionCard rendering ───────────────────────────────────────────────
 
-test("sessionCard renders bounded statistic chips with titles and aria labels", () => {
+test("sessionCard renders bounded statistic chips with titles", () => {
   const stats = {
     provider: "codex-fake", sessionId: "p-1",
     messageCount: 8, tokenCount: 1200, durationMs: 3600000, durationSource: "protocol",
@@ -455,7 +463,7 @@ test("sessionCard renders bounded statistic chips with titles and aria labels", 
   assert.match(html, /8 messages/);
   assert.match(html, /1\.2k tokens/);
   assert.match(html, /60m/);
-  assert.match(html, /aria-label="60m\. Observed session duration/);
+  assert.match(html, /title="Observed session duration/);
   assert.match(html, /2× compacted/);
   assert.match(html, /last at /);
   assert.match(html, /2 subagents/);

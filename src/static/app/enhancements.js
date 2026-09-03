@@ -12,7 +12,27 @@ export function initEnhancements({ ft, formatText, showToast, escapeHtmlClient }
   // nested tabpanels with their own controller and must retain their state.
   const tabPanels = tabBar.parentElement?.querySelectorAll(":scope > [role='tabpanel']") || [];
 
-  const initiallySelected = tabBar.querySelector("[role='tab'][aria-selected='true']") || tabButtons[0];
+  let hashTarget = null;
+  if (location.hash) {
+    try {
+      hashTarget = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    } catch {}
+  }
+  const hashPanel = hashTarget?.matches("[role='tabpanel']")
+    ? hashTarget
+    : hashTarget?.closest("[role='tabpanel']");
+  const hashTab = hashPanel
+    ? Array.from(tabButtons).find((tab) => tab.getAttribute("aria-controls") === hashPanel.id)
+    : null;
+  const initiallySelected = hashTab || tabBar.querySelector("[role='tab'][aria-selected='true']") || tabButtons[0];
+
+  // Server-rendered markup defaults to Work. Apply the deep-link selection to
+  // the tab semantics as well as the panel visibility before the first paint.
+  tabButtons.forEach((tab) => {
+    const selected = tab === initiallySelected;
+    tab.setAttribute("aria-selected", selected ? "true" : "false");
+    tab.setAttribute("tabindex", selected ? "0" : "-1");
+  });
 
   // JavaScript progressively enhances the no-JS stacked content into tabs.
   tabPanels.forEach(function (panel) {
@@ -43,7 +63,7 @@ export function initEnhancements({ ft, formatText, showToast, escapeHtmlClient }
         panel.setAttribute("hidden", "");
       }
     });
-    if (targetPanelId === "tab-runtime") {
+    if (targetPanelId === "tab-work") {
       // The conversation panel can leave the Runtime controls beneath the
       // fixed topbar. Reveal first, then align the runtime header without
       // stealing focus from the selected tab (including keyboard users).
@@ -90,6 +110,31 @@ export function initEnhancements({ ft, formatText, showToast, escapeHtmlClient }
   });
 
   document.querySelector(".session-workbench")?.classList.toggle("session-conversation-tab-active", initiallySelected?.getAttribute("aria-controls") === "tab-conversation");
+
+  document.addEventListener("click", function (e) {
+    const searchToggle = e.target.closest("[data-session-search-toggle]");
+    if (searchToggle) {
+      e.preventDefault();
+      const conversationTab = tabBar.querySelector("[aria-controls='tab-conversation']");
+      if (conversationTab) switchTab(conversationTab);
+      const search = document.querySelector("[data-session-search]");
+      if (search) {
+        search.open = true;
+        requestAnimationFrame(() => search.querySelector("[data-session-search-input]")?.focus());
+      }
+      return;
+    }
+    const focusLink = e.target.closest("[data-detail-focus='runtime-evidence']");
+    if (!focusLink) return;
+    const workTab = tabBar.querySelector("[aria-controls='tab-work']");
+    if (!workTab) return;
+    e.preventDefault();
+    switchTab(workTab);
+    requestAnimationFrame(() => {
+      const evidenceTab = document.querySelector("[data-runtime-lens='evidence']");
+      evidenceTab?.click();
+    });
+  });
 })();
 
 // ── Token Explorer interactivity ───────────────────────────────────────

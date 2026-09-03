@@ -34,6 +34,9 @@ const bundle = async (entryPoint, outfile, define = {}) => {
 const viewerEntry = path.join(workDir, "agentsession.mjs");
 const mcpEntry = path.join(workDir, "agentsession-mcp.mjs");
 const staticAppAsset = path.join(workDir, "app.js");
+const staticHighlightAsset = path.join(root, "src", "static", "vendor", "highlight.js", "highlight.min.js");
+const staticHighlightThemeAsset = path.join(root, "src", "static", "vendor", "highlight.js", "github.min.css");
+const staticHighlightLicenseAsset = path.join(root, "src", "static", "vendor", "highlight.js", "LICENSE.txt");
 
 await Promise.all([
   bundle("bin/binary.ts", viewerEntry),
@@ -62,6 +65,9 @@ const targets = [
     assets: {
       "static/app.js": staticAppAsset,
       "static/style.css": path.join(root, "src", "static", "style.css"),
+      "static/vendor/highlight.js/highlight.min.js": staticHighlightAsset,
+      "static/vendor/highlight.js/github.min.css": staticHighlightThemeAsset,
+      "static/vendor/highlight.js/LICENSE.txt": staticHighlightLicenseAsset,
     }
   },
   {
