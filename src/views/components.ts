@@ -1,12 +1,12 @@
 import { escapeHtml, renderMarkdown } from "../markdown.js";
-import { t } from "../i18n.js";
+import { t, getLocale } from "../i18n.js";
 
 function formatCount(value: any, prefix = "") {
   const amount = Number(value) || 0;
   return `${prefix}${amount}`;
 }
 
-function formatCompactCount(value: any) {
+export function formatCompactCount(value: any) {
   const amount = Number(value) || 0;
   if (Math.abs(amount) >= 1_000_000) {
     return `${(amount / 1_000_000).toFixed(amount >= 10_000_000 ? 0 : 1)}m`;
@@ -293,6 +293,40 @@ const STATUS_LABEL_KEYS: Record<string, string> = {
   queued: "card.status_queued"
 };
 
+/** Local calendar day key (YYYY-MM-DD) used to bucket the library timeline. */
+export function sessionDayKey(ts: any) {
+  const value = Number(ts) || 0;
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+/** Editorial day heading label for a day key; today and yesterday stay human. */
+export function sessionDayLabel(key: string) {
+  if (!key) {
+    return "";
+  }
+  const today = sessionDayKey(Date.now());
+  const yesterday = sessionDayKey(Date.now() - 86_400_000);
+  if (key === today) {
+    return t("timeline.today");
+  }
+  if (key === yesterday) {
+    return t("timeline.yesterday");
+  }
+  const [year, month, day] = key.split("-").map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString(getLocale() === "zh" ? "zh-CN" : "en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric"
+  });
+}
+
 function listStatChip(label: any, title: any, className = "") {
   const classes = ["stat-chip", className].filter(Boolean).join(" ");
   return `<span class="${classes}" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
@@ -379,6 +413,7 @@ export function sessionCard(s: any, active = false, { showCheckbox = false, prov
   const classes = ["session-card"];
   if (active) classes.push("active");
   if (s.starred) classes.push("starred");
+  const dayKey = sessionDayKey(s.time_updated);
 
   const changedFiles = Number(s.summary_files) || 0;
   const additions = Number(s.summary_additions) || 0;
@@ -394,26 +429,26 @@ export function sessionCard(s: any, active = false, { showCheckbox = false, prov
   const detailHref = `/${encodedProvider}/session/${encodeURIComponent(s.id)}${returnTo ? `?from=${encodeURIComponent(returnTo)}` : ""}`;
 
   const checkboxHtml = showCheckbox
-    ? `<input type="checkbox" class="card-checkbox" data-id="${escapeHtml(s.id)}">`
+    ? `<input type="checkbox" class="card-checkbox" data-id="${escapeHtml(s.id)}" data-provider="${escapeHtml(sessionProvider)}">`
     : "";
 
   const actionsHtml = manageable ? `
     <div class="card-actions">
-      <button class="star-btn ${s.starred ? "starred" : ""}" type="button" data-star-format="icon" data-id="${escapeHtml(s.id)}" title="${s.starred ? t("action.starred") : t("action.star")}" aria-label="${s.starred ? t("action.starred") : t("action.star")}">
+      <button class="star-btn ${s.starred ? "starred" : ""}" type="button" data-star-format="icon" data-id="${escapeHtml(s.id)}" data-provider="${escapeHtml(sessionProvider)}" title="${s.starred ? t("action.starred") : t("action.star")}" aria-label="${s.starred ? t("action.starred") : t("action.star")}">
         ${s.starred ? "★" : "☆"}
       </button>
-      <button class="card-menu-trigger" type="button" data-id="${escapeHtml(s.id)}" title="${t("action.more")}" aria-label="${t("action.more")}">⋮</button>
+      <button class="card-menu-trigger" type="button" data-id="${escapeHtml(s.id)}" data-provider="${escapeHtml(sessionProvider)}" title="${t("action.more")}" aria-label="${t("action.more")}">⋮</button>
       <div class="card-menu hidden" data-id="${escapeHtml(s.id)}">
-        <button type="button" data-action="rename" data-id="${escapeHtml(s.id)}">${t("menu.rename")}</button>
-        <button type="button" data-action="copy-session-id" data-id="${escapeHtml(s.id)}" title="${t("action.copy_session_id")}" aria-label="${t("action.copy_session_id")}">${t("menu.copy_session_id")}</button>
+        <button type="button" data-action="rename" data-id="${escapeHtml(s.id)}" data-provider="${escapeHtml(sessionProvider)}">${t("menu.rename")}</button>
+        <button type="button" data-action="copy-session-id" data-id="${escapeHtml(s.id)}" data-provider="${escapeHtml(sessionProvider)}" title="${t("action.copy_session_id")}" aria-label="${t("action.copy_session_id")}">${t("menu.copy_session_id")}</button>
         <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=md" download="${escapeHtml(exportFilePrefix)}.md">${t("menu.export_md")}</a>
         <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=json" download="${escapeHtml(exportFilePrefix)}.json">${t("menu.export_json")}</a>
-        <button type="button" data-action="delete" data-id="${escapeHtml(s.id)}" class="menu-danger">${t("menu.delete")}</button>
+        <button type="button" data-action="delete" data-id="${escapeHtml(s.id)}" data-provider="${escapeHtml(sessionProvider)}" class="menu-danger">${t("menu.delete")}</button>
       </div>
     </div>
   ` : "";
 
-  return `<article class="${classes.join(" ")}" data-session-id="${escapeHtml(s.id)}">
+  return `<article class="${classes.join(" ")}" data-session-id="${escapeHtml(s.id)}" data-provider="${escapeHtml(sessionProvider)}" data-day="${escapeHtml(dayKey)}" data-ts="${escapeHtml(String(Number(s.time_updated) || 0))}">
     ${checkboxHtml}
     <div class="session-card-content">
       <header class="session-card-header">

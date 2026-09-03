@@ -30,7 +30,7 @@ export function resolveStarredFilter(params: URLSearchParams): boolean {
   return value === "1" || value === "true";
 }
 
-function getStarredIds(metaMap: Map<string, any>): string[] {
+export function getStarredIds(metaMap: Map<string, any>): string[] {
   return [...metaMap.entries()]
     .filter(([, meta]) => Boolean(meta?.starred))
     .map(([id]) => id);
@@ -295,11 +295,12 @@ export function createSessionCatalog(adapter: any, providerId: string, metadata:
       project = "",
       sort = "updated-desc",
       starredOnly = false,
+      hasSubagent = false,
     }: any) {
       const includedIds = starredOnly ? getStarredIds(metaMap) : undefined;
       const results = sqlite
-        ? listSessions(limit, offset, query, range, dbPath, project, excludedIds, sort, includedIds, titleOverrides)
-        : getIndexedSessions(providerId, limit, offset, range, query, project, sort, includedIds as any, excludedIds as any, titleOverrides);
+        ? listSessions(limit, offset, query, range, dbPath, project, excludedIds, sort, includedIds, titleOverrides, hasSubagent)
+        : getIndexedSessions(providerId, limit, offset, range, query, project, sort, includedIds as any, excludedIds as any, titleOverrides, hasSubagent);
       return { sessions: normalizeRows(results.sessions), total: results.total };
     },
 
@@ -310,18 +311,18 @@ export function createSessionCatalog(adapter: any, providerId: string, metadata:
       return { ...results, sessions: normalizeRows(results.sessions) };
     },
 
-    overview({ range = "", query = "", project = "", starredOnly = false }: any = {}) {
+    overview({ range = "", query = "", project = "", starredOnly = false, hasSubagent = false }: any = {}) {
       const includedIds = starredOnly ? getStarredIds(metaMap) : undefined;
       return sqlite
-        ? getOverviewStats(dbPath)
-        : getIndexedOverview(providerId, range, query, project, excludedIds, includedIds, titleOverrides);
+        ? getOverviewStats(dbPath, query, range, project, excludedIds, includedIds, titleOverrides, hasSubagent)
+        : getIndexedOverview(providerId, range, query, project, excludedIds, includedIds, titleOverrides, hasSubagent);
     },
 
-    projects({ range = "", query = "", starredOnly = false }: any = {}) {
+    projects({ range = "", query = "", starredOnly = false, hasSubagent = false }: any = {}) {
       const includedIds = starredOnly ? getStarredIds(metaMap) : undefined;
       return sqlite
-        ? listSessionProjects(query, range, dbPath, excludedIds, includedIds, titleOverrides)
-        : getIndexedSessionProjects(providerId, range, query, includedIds, excludedIds, titleOverrides);
+        ? listSessionProjects(query, range, dbPath, excludedIds, includedIds, titleOverrides, hasSubagent)
+        : getIndexedSessionProjects(providerId, range, query, includedIds, excludedIds, titleOverrides, hasSubagent);
     },
 
     byIds(ids: string[] = []) {

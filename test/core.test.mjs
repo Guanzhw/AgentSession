@@ -2570,7 +2570,7 @@ test("primary rail keeps library, stats, and settings reachable on narrow screen
   assert.match(html, /href="\/opencode\/trash" class="nav-link nav-link-trash /);
   assert.match(html, /href="\/opencode\/settings" class="nav-link nav-link-settings rail-link rail-link-settings /);
   assert.match(html, /data-nav-shortcut="3"/);
-  assert.match(style, /\.app-rail \{[\s\S]*width: 184px;[\s\S]*height: 100vh;/);
+  assert.match(style, /\.app-rail \{[\s\S]*width: var\(--rail-width\);[\s\S]*height: 100vh;/);
   assert.match(style, /@media \(max-width: 768px\) \{[\s\S]*\.app-rail \{[\s\S]*width: 100%;[\s\S]*height: 56px;/);
 });
 

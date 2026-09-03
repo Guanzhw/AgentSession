@@ -233,6 +233,56 @@ export function registerMutations(
     }
   });
 
+  // Batch actions across providers (viewer metadata only).
+  app.post("/api/sessions/batch", async (req: any, res: any, _match: any) => {
+    if (!isTrustedLocalJsonRequest(req)) return json(res, { ok: false, error: "Batch requests must be same-origin JSON from loopback" }, 403);
+    try {
+      const body = await readBody(req);
+      const items = Array.isArray(body.items) ? body.items : [];
+      const validActions = ["delete", "star", "unstar", "restore", "permanent-delete"];
+      if (!validActions.includes(body.action)) {
+        return json(res, { ok: false, error: "Invalid action" }, 400);
+      }
+      const idsByProvider = new Map<string, string[]>();
+      for (const item of items) {
+        const providerId = String(item?.provider || "");
+        const id = String(item?.id || "");
+        if (!providerId || !id) continue;
+        idsByProvider.set(providerId, [...(idsByProvider.get(providerId) || []), id]);
+      }
+      let affected = 0;
+      let skipped = 0;
+      for (const [providerId, ids] of idsByProvider) {
+        const adapter = providerMap.get(providerId);
+        if (!adapter || !supportsLocalManagement(adapter)) {
+          skipped += ids.length;
+          continue;
+        }
+        affected += batchAction(providerId, ids, body.action);
+      }
+      recordRuntimeEvent(appConfig.metaDir, {
+        event: "session.meta.batch",
+        provider: "cross-provider",
+        action: body.action,
+        requestedCount: items.length,
+        affected,
+        skipped,
+        ok: true
+      });
+      return json(res, { ok: true, affected, skipped });
+    } catch (error: any) {
+      console.error("Mutation error:", error?.message || error);
+      recordRuntimeEvent(appConfig.metaDir, {
+        event: "session.meta.batch",
+        level: "error",
+        provider: "cross-provider",
+        ok: false,
+        error: runtimeErrorMessage(error)
+      });
+      return json(res, { ok: false, error: "Internal server error" }, 500);
+    }
+  });
+
   // Prefixed batch
   app.post(/^\/api\/([a-z][a-z0-9-]*)\/batch$/, async (req: any, res: any, match: RegExpMatchArray) => {
     if (!isTrustedLocalJsonRequest(req)) return json(res, { ok: false, error: "Batch requests must be same-origin JSON from loopback" }, 403);

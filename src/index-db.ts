@@ -106,7 +106,8 @@ function indexedFilter(
   project = "",
   includedIds: string[] | undefined = undefined,
   excludedIds: Set<string> | undefined = undefined,
-  titleOverrides: SessionTitleOverrides = undefined
+  titleOverrides: SessionTitleOverrides = undefined,
+  hasSubagent = false
 ) {
   const where = ["provider = ?"];
   const params = [];
@@ -114,6 +115,12 @@ function indexedFilter(
   const now = Date.now();
   const included = normalizeIncludedIds(includedIds);
   const excluded = (normalizeIncludedIds as any)(excludedIds) || [];
+
+  if (hasSubagent) {
+    // A session "has subagents" when the viewer index records at least one
+    // child row (provider-recorded parent_id) for the same provider.
+    where.push("EXISTS (SELECT 1 FROM session_index AS child WHERE child.provider = session_index.provider AND child.parent_id = session_index.id)");
+  }
 
   // Normal provider lists mirror SQLite providers by showing root sessions.
   // Explicit ID lookups (search, trash, or starred filters) may still surface
@@ -168,8 +175,8 @@ function indexedFilter(
   return { db, whereClause: `WHERE ${where.join(" AND ")}`, params };
 }
 
-export function getIndexedSessions(provider: any, limit = 50, offset = 0, timeRange = "", search = "", project = "", sort = "updated-desc", includedIds = undefined, excludedIds = undefined, titleOverrides: SessionTitleOverrides = undefined) {
-  const { db, whereClause, params } = indexedFilter(timeRange, search, project, includedIds, excludedIds, titleOverrides);
+export function getIndexedSessions(provider: any, limit = 50, offset = 0, timeRange = "", search = "", project = "", sort = "updated-desc", includedIds = undefined, excludedIds = undefined, titleOverrides: SessionTitleOverrides = undefined, hasSubagent = false) {
+  const { db, whereClause, params } = indexedFilter(timeRange, search, project, includedIds, excludedIds, titleOverrides, hasSubagent);
   const { orderBy, params: sortParams } = indexedSortOrder(sort, titleOverrides);
   const total = db.prepare(`SELECT COUNT(*) as c FROM session_index ${whereClause}`).get(provider, ...params).c;
   const sessions = db.prepare(`
@@ -180,8 +187,8 @@ export function getIndexedSessions(provider: any, limit = 50, offset = 0, timeRa
   return { sessions, total };
 }
 
-export function getIndexedSessionProjects(provider: any, timeRange = "", search = "", includedIds: string[] | undefined = undefined, excludedIds: Set<string> | undefined = undefined, titleOverrides: SessionTitleOverrides = undefined) {
-  const { db, whereClause, params } = indexedFilter(timeRange, search, "", includedIds, excludedIds, titleOverrides);
+export function getIndexedSessionProjects(provider: any, timeRange = "", search = "", includedIds: string[] | undefined = undefined, excludedIds: Set<string> | undefined = undefined, titleOverrides: SessionTitleOverrides = undefined, hasSubagent = false) {
+  const { db, whereClause, params } = indexedFilter(timeRange, search, "", includedIds, excludedIds, titleOverrides, hasSubagent);
   return db.prepare(`
     SELECT COALESCE(directory, '') AS id,
            COALESCE(NULLIF(directory, ''), 'Unknown project') AS label,
@@ -198,18 +205,20 @@ export function getIndexedSessionProjects(provider: any, timeRange = "", search 
   }));
 }
 
-export function getIndexedOverview(provider: any, timeRange = "", search = "", project = "", excludedIds: Set<string> | undefined = undefined, includedIds: string[] | undefined = undefined, titleOverrides: SessionTitleOverrides = undefined) {
-  const { db, whereClause, params } = indexedFilter(timeRange, search, project, includedIds, excludedIds, titleOverrides);
+export function getIndexedOverview(provider: any, timeRange = "", search = "", project = "", excludedIds: Set<string> | undefined = undefined, includedIds: string[] | undefined = undefined, titleOverrides: SessionTitleOverrides = undefined, hasSubagent = false) {
+  const { db, whereClause, params } = indexedFilter(timeRange, search, project, includedIds, excludedIds, titleOverrides, hasSubagent);
   const row = db.prepare(`
     SELECT COUNT(*) AS totalSessions,
-           COALESCE(SUM(COALESCE(message_count, 0)), 0) AS totalMessages
+           COALESCE(SUM(COALESCE(message_count, 0)), 0) AS totalMessages,
+           COALESCE(SUM(COALESCE(token_count, 0)), 0) AS totalTokens
     FROM session_index
     ${whereClause}
   `).get(provider, ...params);
 
   return {
     totalSessions: Number(row?.totalSessions) || 0,
-    totalMessages: Number(row?.totalMessages) || 0
+    totalMessages: Number(row?.totalMessages) || 0,
+    totalTokens: Number(row?.totalTokens) || 0
   };
 }
 
@@ -222,6 +231,8 @@ export interface CrossProviderSessionQuery {
   project?: string;
   sort?: string;
   excluded?: Array<{ provider: string; id: string }>;
+  included?: Array<{ provider: string; id: string }>;
+  hasSubagent?: boolean;
   titleOverrides?: Array<{ provider: string; id: string; title: string }>;
 }
 
@@ -238,7 +249,9 @@ function crossProviderTitleExpression(params: any[], overrides: CrossProviderSes
 function crossProviderFilter(query: CrossProviderSessionQuery, includeProject = true) {
   const db = getIndexDb();
   const providers = [...new Set(query.providers.filter(Boolean))];
-  const where = ["provider IN (SELECT value FROM json_each(?))", "parent_id IS NULL"];
+  const included = query.included;
+  const where = ["provider IN (SELECT value FROM json_each(?))"];
+  if (included === undefined) where.push("parent_id IS NULL");
   const params: any[] = [JSON.stringify(providers)];
   const now = Date.now();
 
@@ -270,6 +283,17 @@ function crossProviderFilter(query: CrossProviderSessionQuery, includeProject = 
   if (excluded.length > 0) {
     where.push("NOT EXISTS (SELECT 1 FROM json_each(?) AS hidden WHERE json_extract(hidden.value, '$.provider') = session_index.provider AND json_extract(hidden.value, '$.id') = session_index.id)");
     params.push(JSON.stringify(excluded));
+  }
+  if (included !== undefined) {
+    if (included.length === 0) {
+      where.push("0 = 1");
+    } else {
+      where.push("EXISTS (SELECT 1 FROM json_each(?) AS visible WHERE json_extract(visible.value, '$.provider') = session_index.provider AND json_extract(visible.value, '$.id') = session_index.id)");
+      params.push(JSON.stringify(included));
+    }
+  }
+  if (query.hasSubagent) {
+    where.push("EXISTS (SELECT 1 FROM session_index AS child WHERE child.provider = session_index.provider AND child.parent_id = session_index.id)");
   }
   return { db, whereClause: `WHERE ${where.join(" AND ")}`, params };
 }
@@ -323,8 +347,12 @@ export function getCrossProviderSessionProjects(query: CrossProviderSessionQuery
 
 export function getCrossProviderOverview(query: CrossProviderSessionQuery) {
   const { db, whereClause, params } = crossProviderFilter(query);
-  const row = db.prepare(`SELECT COUNT(*) AS totalSessions, COALESCE(SUM(message_count), 0) AS totalMessages FROM session_index ${whereClause}`).get(...params);
-  return { totalSessions: Number(row?.totalSessions) || 0, totalMessages: Number(row?.totalMessages) || 0 };
+  const row = db.prepare(`SELECT COUNT(*) AS totalSessions, COALESCE(SUM(message_count), 0) AS totalMessages, COALESCE(SUM(token_count), 0) AS totalTokens FROM session_index ${whereClause}`).get(...params);
+  return {
+    totalSessions: Number(row?.totalSessions) || 0,
+    totalMessages: Number(row?.totalMessages) || 0,
+    totalTokens: Number(row?.totalTokens) || 0
+  };
 }
 
 /**

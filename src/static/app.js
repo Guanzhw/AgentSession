@@ -1,6 +1,7 @@
 import { initSessionWorkbench } from "./app/session-workbench.js";
 import { initEnhancements } from "./app/enhancements.js";
 import { initRuntimeWorkbench } from "./app/runtime-workbench.js";
+import { initLibrary } from "./app/library.js";
 import { ft, formatText } from "./app/i18n.js";
 const PROVIDER = document.body.dataset.provider || "opencode";
 const IS_MANAGEABLE_PROVIDER = document.body.dataset.manageable === "true";
@@ -289,8 +290,13 @@ document.addEventListener("keydown", (e) => {
       transcriptSearch.open = true;
       requestAnimationFrame(() => transcriptSearch.querySelector("[data-session-search-input]")?.focus());
     } else {
-      const globalSearch = document.getElementById("search-input");
-      if (globalSearch && getComputedStyle(globalSearch).display !== "none") globalSearch.focus();
+      const librarySearch = document.getElementById("library-search-input");
+      if (librarySearch) {
+        librarySearch.focus();
+      } else {
+        const globalSearch = document.getElementById("search-input");
+        if (globalSearch && getComputedStyle(globalSearch).display !== "none") globalSearch.focus();
+      }
     }
   }
   if (e.key === "Escape") {
@@ -311,8 +317,9 @@ document.addEventListener("click", async (e) => {
   e.stopPropagation();
   const id = btn.dataset.id;
   if (!id) return;
+  const providerId = btn.dataset.provider || PROVIDER;
   try {
-    const res = await fetch(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/star`, { method: "POST" });
+    const res = await fetch(`/api/${encodeURIComponent(providerId)}/session/${encodeURIComponent(id)}/star`, { method: "POST" });
     const data = await res.json();
     btn.classList.toggle("starred", data.starred);
     const label = data.starred ? ft("starred_label") : ft("star_label");
@@ -412,6 +419,7 @@ document.addEventListener("click", async (e) => {
 
   const id = btn.dataset.id;
   if (!id) return;
+  const actionProvider = btn.dataset.provider || PROVIDER;
 
   if (btn.classList.contains("batch-action")) return;
 
@@ -430,7 +438,7 @@ document.addEventListener("click", async (e) => {
 
   if (action === "resume-session") {
     try {
-      const res = await fetch(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/resume`, {
+      const res = await fetch(`/api/${encodeURIComponent(actionProvider)}/session/${encodeURIComponent(id)}/resume`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: "{}"
@@ -457,7 +465,7 @@ document.addEventListener("click", async (e) => {
     const newTitle = await openRenameDialog(current, restoreFocusTarget);
     if (newTitle === null) return;
     try {
-      await fetch(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/rename`, {
+      await fetch(`/api/${encodeURIComponent(actionProvider)}/session/${encodeURIComponent(id)}/rename`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: newTitle })
@@ -483,10 +491,10 @@ document.addEventListener("click", async (e) => {
     });
     if (!confirmed) return;
     try {
-      await fetch(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/delete`, { method: "POST" });
+      await fetch(`/api/${encodeURIComponent(actionProvider)}/session/${encodeURIComponent(id)}/delete`, { method: "POST" });
       queueToast(ft("toast_deleted"), "success");
       if (document.querySelector(".session-actions")) {
-        location.href = `/${PROVIDER}`;
+        location.href = `/${actionProvider}`;
       } else {
         location.reload();
       }
@@ -498,7 +506,7 @@ document.addEventListener("click", async (e) => {
 
   if (action === "restore") {
     try {
-      await fetch(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/restore`, { method: "POST" });
+      await fetch(`/api/${encodeURIComponent(actionProvider)}/session/${encodeURIComponent(id)}/restore`, { method: "POST" });
       queueToast(ft("toast_restored"), "success");
       location.reload();
     } catch {
@@ -515,7 +523,7 @@ document.addEventListener("click", async (e) => {
     });
     if (!confirmed) return;
     try {
-      await fetch(`/api/${PROVIDER}/session/${encodeURIComponent(id)}/permanent-delete`, { method: "POST" });
+      await fetch(`/api/${encodeURIComponent(actionProvider)}/session/${encodeURIComponent(id)}/permanent-delete`, { method: "POST" });
       queueToast(ft("toast_permanent_deleted"), "success");
       location.reload();
     } catch {
@@ -613,11 +621,13 @@ document.addEventListener("click", async (e) => {
   if (!btn || btn.id === "batch-cancel") return;
   const action = btn.dataset.action;
   if (!action) return;
-  const ids = [...document.querySelectorAll(".card-checkbox:checked")].map((cb) => cb.dataset.id);
+  const checked = [...document.querySelectorAll(".card-checkbox:checked")];
+  const ids = checked.map((cb) => cb.dataset.id);
   if (!ids.length) {
     showToast(ft("select_first"), "error");
     return;
   }
+  const isGlobalLibrary = !document.body.dataset.provider;
   if (action === "delete") {
     const confirmed = await openConfirmDialog(ft("batch_delete_confirm").replace("{count}", ids.length), {
       confirmLabel: ft("confirm_delete"),
@@ -628,12 +638,19 @@ document.addEventListener("click", async (e) => {
   }
 
   try {
-    await fetch(`/api/${PROVIDER}/batch`, {
+    const items = checked.map((cb) => ({ provider: cb.dataset.provider || PROVIDER, id: cb.dataset.id }));
+    const endpoint = isGlobalLibrary ? "/api/sessions/batch" : `/api/${encodeURIComponent(PROVIDER)}/batch`;
+    const payload = isGlobalLibrary ? { action, items } : { action, ids };
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, ids })
+      body: JSON.stringify(payload)
     });
-    queueToast(ft("toast_batch_done").replace("{count}", ids.length), "success");
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok === false) {
+      throw new Error(result.error || `HTTP ${response.status}`);
+    }
+    queueToast(ft("toast_batch_done").replace("{count}", Number(result.affected) || ids.length), "success");
     location.reload();
   } catch {
     showToast(ft("toast_error"), "error");
@@ -657,6 +674,7 @@ if (scrollSentinel && sessionList) {
   const scrollSort = scrollSentinel.dataset.sort || "";
   const scrollStarred = scrollSentinel.dataset.starred || "";
   const scrollProviders = scrollSentinel.dataset.providers || "";
+  const scrollHasSubagent = scrollSentinel.dataset.hasSubagent || "";
   const isGlobalSessions = scrollSentinel.dataset.global === "true";
   let isLoading = false;
   let observer = null;
@@ -686,6 +704,7 @@ if (scrollSentinel && sessionList) {
       if (scrollMode) params.set("mode", scrollMode);
       if (scrollSort) params.set("sort", scrollSort);
       if (scrollStarred) params.set("starred", scrollStarred);
+      if (scrollHasSubagent) params.set("has-subagent", scrollHasSubagent);
       if (scrollSentinel.dataset.returnTo) params.set("returnTo", scrollSentinel.dataset.returnTo);
       if (scrollProviders) scrollProviders.split(",").filter(Boolean).forEach((provider) => params.append("provider", provider));
 
@@ -697,6 +716,7 @@ if (scrollSentinel && sessionList) {
       const data = await res.json();
       const markup = Array.isArray(data.sessions) ? data.sessions.map((session) => session.html || "").join("") : "";
       sessionList.insertAdjacentHTML("beforeend", markup);
+      window.__libraryRegroup?.();
       updateBatchCount();
       scrollOffset = (Number(data.offset) || 0) + (Array.isArray(data.sessions) ? data.sessions.length : 0);
 
@@ -736,3 +756,4 @@ if (scrollSentinel && sessionList) {
 initSessionWorkbench({ ft, formatText, showToast });
 initEnhancements({ ft, formatText, showToast, escapeHtmlClient });
 initRuntimeWorkbench({ ft, formatText });
+initLibrary({ ft });

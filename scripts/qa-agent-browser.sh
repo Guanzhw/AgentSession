@@ -154,6 +154,29 @@ if [[ "${list_filter_label,,}" != "filter current list" ]]; then
   echo "List filter should identify its scoped behavior, got $list_filter_label" >&2
   exit 1
 fi
+summary_present="$(read_ab "verify library summary strip" get count ".library-summary")"
+assert_positive_count "library summary strip" "$summary_present"
+chip_count="$(read_ab "count quick filter chips" get count ".filter-chip")"
+if [[ "$chip_count" -lt 4 ]]; then
+  echo "Library should expose today/week/starred/has-subagent chips, got $chip_count" >&2
+  exit 1
+fi
+view_toggle_count="$(read_ab "count view toggle buttons" get count ".library-view-toggle [data-view]")"
+if [[ "$view_toggle_count" -ne 2 ]]; then
+  echo "Library view toggle should expose timeline and compact modes, got $view_toggle_count" >&2
+  exit 1
+fi
+advanced_filters_present="$(read_ab "verify advanced filters disclosure" get count "#advanced-filters")"
+assert_positive_count "advanced filters disclosure" "$advanced_filters_present"
+summary_chip_roundtrip="$(read_ab "verify chip links preserve the current list context" eval "(() => { const chips = [...document.querySelectorAll('.filter-chip')]; const samePath = chips.every((chip) => (chip.getAttribute('href') || '').split('?')[0] === location.pathname); const params = new URLSearchParams((chips[0]?.getAttribute('href') || '').split('?')[1] || ''); return (samePath ? 'same-path' : 'wrong-path') + '|' + params.getAll('provider').join(','); })()")"
+if [[ "$summary_chip_roundtrip" != *"same-path|"* ]]; then
+  echo "Filter chips should round-trip to the same list path, got $summary_chip_roundtrip" >&2
+  exit 1
+fi
+if [[ "$summary_chip_roundtrip" != *"same-path|\""* ]]; then
+  echo "Provider-page chips should not invent cross-provider params, got $summary_chip_roundtrip" >&2
+  exit 1
+fi
 rail_state="$(read_ab "verify primary rail links" eval "JSON.stringify([...document.querySelectorAll('.rail-link')].map((link) => ({ text: link.textContent.trim(), href: link.getAttribute('href'), shortcut: link.dataset.navShortcut, current: link.getAttribute('aria-current') })))")"
 assert_contains "primary rail" "$rail_state" "Library"
 assert_contains "primary rail" "$rail_state" "Statistics"

@@ -440,7 +440,7 @@ test("list routes attach stats only for the current page on every surface", asyn
   );
   assert.equal(plainPage.status, 200);
   assert.doesNotMatch(plainPage.body, /compacted/, "no protocol compaction chips for unsupported providers");
-  assert.doesNotMatch(plainPage.body, /subagents/, "no protocol run chips for unsupported providers");
+  assert.doesNotMatch(plainPage.body, /\d+ subagents/, "no protocol run chips for unsupported providers");
   assert.doesNotMatch(plainPage.body, /stat-chip-running|stat-chip-blocked/, "no active-status chips for unsupported providers");
   assert.match(plainPage.body, /5 messages/);
   assert.match(plainPage.body, /60 tokens/);

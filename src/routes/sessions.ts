@@ -2,6 +2,7 @@ import { getAllMeta, getDeletedIds, getExcludedIds } from "../meta.js";
 import { getCrossProviderOverview, getCrossProviderSessionProjects, getCrossProviderSessions } from "../index-db.js";
 import {
   getTitleOverrides,
+  getStarredIds,
   resolveSessionSearchMode,
   resolveSessionSort,
   resolveStarredFilter,
@@ -40,11 +41,16 @@ export function registerSessions(
     const query = searchParams.get("q") || "";
     const project = searchParams.get("project") || "";
     const sort = resolveSessionSort(searchParams);
+    const starredOnly = resolveStarredFilter(searchParams);
+    const hasSubagent = searchParams.has("has-subagent");
     const excluded = providers.flatMap((provider) => [...getExcludedIds(provider)].map((id) => ({ provider, id })));
     const metaByProvider = new Map(providers.map((provider) => [provider, getAllMeta(provider)]));
+    const included = starredOnly
+      ? providers.flatMap((provider) => getStarredIds(metaByProvider.get(provider) || new Map()).map((id) => ({ provider, id })))
+      : undefined;
     const titleOverrides = providers.flatMap((provider) => [...getTitleOverrides(metaByProvider.get(provider) || new Map())]
       .map(([id, title]) => ({ provider, id, title })));
-    const queryOptions = { providers, limit, offset, timeRange: range, search: query, project, sort, excluded, titleOverrides };
+    const queryOptions = { providers, limit, offset, timeRange: range, search: query, project, sort, excluded, included, hasSubagent, titleOverrides };
     const results = getCrossProviderSessions(queryOptions);
     const sessions = results.sessions.map((session: any) => normalizeSessionRecord(enrichSession(session, metaByProvider.get(session.provider))));
     attachSessionListStats(sessions, (provider) => providerMap.get(provider));
@@ -56,7 +62,10 @@ export function registerSessions(
       query,
       project,
       sort,
+      starredOnly,
+      hasSubagent,
       excluded,
+      included,
       titleOverrides,
     };
   }
@@ -69,16 +78,22 @@ export function registerSessions(
       const result = buildCrossProviderList(searchParams, limit, offset);
       const returnTo = searchParams.get("returnTo") || "";
       const providerNames = new Map(providerInfo.map((item: any) => [item.id, item.name || item.id]));
+      const manageableByProvider = new Map(providerInfo.map((item: any) => [item.id, Boolean(item.manageable)]));
       return json(res, {
-        sessions: result.sessions.map((session: any) => toApiSessionShape(session, {
-          html: sessionCard(session, false, {
-            provider: "",
-            manageable: false,
-            showProvider: true,
-            providerName: providerNames.get(session.provider) || session.provider || "",
-            returnTo
-          })
-        })),
+        sessions: result.sessions.map((session: any) => {
+          const providerId = session.provider || "";
+          const cardManageable = manageableByProvider.get(providerId) === true;
+          return toApiSessionShape(session, {
+            html: sessionCard(session, false, {
+              provider: providerId,
+              manageable: cardManageable,
+              showCheckbox: cardManageable,
+              showProvider: true,
+              providerName: providerNames.get(providerId) || providerId || "",
+              returnTo
+            })
+          });
+        }),
         total: result.total,
         offset,
         hasMore: offset + result.sessions.length < result.total,
@@ -100,6 +115,8 @@ export function registerSessions(
         search: result.query,
         project: result.project,
         excluded: result.excluded,
+        included: result.included,
+        hasSubagent: result.hasSubagent,
         titleOverrides: result.titleOverrides,
       });
       const projectOptions = getCrossProviderSessionProjects({
@@ -107,6 +124,8 @@ export function registerSessions(
         timeRange: result.range,
         search: result.query,
         excluded: result.excluded,
+        included: result.included,
+        hasSubagent: result.hasSubagent,
         titleOverrides: result.titleOverrides,
       });
       return {
@@ -120,8 +139,11 @@ export function registerSessions(
           range: result.range,
           project: result.project,
           sort: result.sort,
+          starredOnly: result.starredOnly,
+          hasSubagent: result.hasSubagent,
           projectOptions,
           totalMessages: overview.totalMessages,
+          totalTokens: overview.totalTokens,
           provider: null,
           providers: providerInfo,
           selectedProviders: result.providers,
@@ -155,10 +177,11 @@ export function registerSessions(
       const searchMode = resolveSessionSearchMode(url.searchParams);
       const sort = resolveSessionSort(url.searchParams);
       const starredOnly = resolveStarredFilter(url.searchParams);
+      const hasSubagent = url.searchParams.has("has-subagent");
       const catalog = createSessionCatalog(adapter, providerId);
       const results = query && searchMode === "content"
         ? catalog.contentSearch({ query, limit: apiLimit, offset: apiOffset })
-        : catalog.list({ limit: apiLimit, offset: apiOffset, query, range, project, sort, starredOnly });
+        : catalog.list({ limit: apiLimit, offset: apiOffset, query, range, project, sort, starredOnly, hasSubagent });
       const sessions = results.sessions;
       const total = results.total;
       attachSessionListStats(sessions, () => adapter, providerId);
@@ -219,16 +242,17 @@ export function registerSessions(
     const project = url.searchParams.get("project") || "";
     const sort = resolveSessionSort(url.searchParams);
     const starredOnly = resolveStarredFilter(url.searchParams);
+    const hasSubagent = url.searchParams.has("has-subagent");
 
     const renderContext = providerRenderContext(providerSegment, providerInfo, adapter);
 
     try {
       const catalog = createSessionCatalog(adapter, providerSegment);
-      const indexed = catalog.list({ limit, offset, range, query, project, sort, starredOnly });
+      const indexed = catalog.list({ limit, offset, range, query, project, sort, starredOnly, hasSubagent });
       const sessions = indexed.sessions;
       attachSessionListStats(sessions, () => adapter, providerSegment);
-      const overviewStats = catalog.overview({ range, query, project, starredOnly });
-      const projectOptions = catalog.projects({ range, query, starredOnly });
+      const overviewStats = catalog.overview({ range, query, project, starredOnly, hasSubagent });
+      const projectOptions = catalog.projects({ range, query, starredOnly, hasSubagent });
       return {
         status: 200,
         body: renderSessionsPage({
@@ -241,9 +265,11 @@ export function registerSessions(
           project,
           sort,
           starredOnly,
+          hasSubagent,
           projectOptions,
           searchMode: "list",
           totalMessages: overviewStats.totalMessages,
+          totalTokens: overviewStats.totalTokens,
           deletedCount: getDeletedIds(providerSegment).length,
           ...renderContext
         }),

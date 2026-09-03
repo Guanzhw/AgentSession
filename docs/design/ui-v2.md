@@ -9,6 +9,20 @@ server-rendered shell that focuses the recorded Evidence lens; no event data is
 invented. Code highlighting is local and offline through the vendored,
 license-tracked bundle at `src/static/vendor/highlight.js`.
 
+## P1 implementation status (2026-09-04)
+
+The Library is implemented on the shared visual system (see §4.1): a summary
+strip with provider/session/message/token totals, visually primary
+cross-provider search, removable chips (today / this week / starred /
+has-subagent) with URL round-trip with remaining filters behind Advanced, a
+day-bucketed timeline default with a localStorage compact-list toggle,
+provider-safe batch star/delete with delete confirmation, and distinct
+empty-library / no-results / source-unavailable states. Infinite loading is
+retained. Evidence-bounded decision record:
+`.agents/decisions/implemented/2026-09-04-ui-v2-p1-library.md`; the shared
+visual contract remains proposed until the real browser screenshot and WCAG
+gates are complete.
+
 > 状态:`proposed` · 作者:UI planner · 日期:2026-09
 > 本文是**信息设计**:展示哪些信息、层级如何、什么默认隐藏、状态如何呈现。
 > P1-P4 的视觉语言、响应式规则与截图验收由

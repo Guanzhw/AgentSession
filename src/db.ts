@@ -99,7 +99,8 @@ function sessionFilter(
   project = "",
   excludedIds: Set<string> | undefined = undefined,
   includedIds: string[] | undefined = undefined,
-  titleOverrides: SessionTitleOverrides = undefined
+  titleOverrides: SessionTitleOverrides = undefined,
+  hasSubagent = false
 ) {
   const where = ["time_archived IS NULL", "parent_id IS NULL"];
   const params = [];
@@ -107,6 +108,12 @@ function sessionFilter(
   const cutoff = timeRangeCutoff(timeRange);
   const excluded = normalizeExcludedIds(excludedIds);
   const included = normalizeIncludedIds(includedIds);
+
+  if (hasSubagent) {
+    // Provider-recorded parent/child rows: a root session has subagents when
+    // at least one non-archived child row points back at it.
+    where.push("EXISTS (SELECT 1 FROM session AS child WHERE child.parent_id = session.id AND child.time_archived IS NULL)");
+  }
 
   if (searchTerm) {
     const searchConditions = [
@@ -151,9 +158,9 @@ function sessionFilter(
   return { whereClause: `WHERE ${where.join(" AND ")}`, params };
 }
 
-export function listSessions(limit = 50, offset = 0, search = "", timeRange = "", pathOverride: string | undefined = undefined, project = "", excludedIds: Set<string> | undefined = undefined, sort = "updated-desc", includedIds: string[] | undefined = undefined, titleOverrides: SessionTitleOverrides = undefined) {
+export function listSessions(limit = 50, offset = 0, search = "", timeRange = "", pathOverride: string | undefined = undefined, project = "", excludedIds: Set<string> | undefined = undefined, sort = "updated-desc", includedIds: string[] | undefined = undefined, titleOverrides: SessionTitleOverrides = undefined, hasSubagent = false) {
   const db = getDb(pathOverride);
-  const { whereClause, params } = sessionFilter(search, timeRange, project, excludedIds, includedIds, titleOverrides);
+  const { whereClause, params } = sessionFilter(search, timeRange, project, excludedIds, includedIds, titleOverrides, hasSubagent);
   const { orderBy, params: sortParams } = sessionSortOrder(sort, titleOverrides);
   const metrics = sessionListMetricColumns(db);
 
@@ -176,9 +183,9 @@ export function listSessions(limit = 50, offset = 0, search = "", timeRange = ""
   return { sessions, total: totalRow?.total ?? 0 };
 }
 
-export function listSessionProjects(search = "", timeRange = "", pathOverride: string | undefined = undefined, excludedIds: Set<string> | undefined = undefined, includedIds: string[] | undefined = undefined, titleOverrides: SessionTitleOverrides = undefined) {
+export function listSessionProjects(search = "", timeRange = "", pathOverride: string | undefined = undefined, excludedIds: Set<string> | undefined = undefined, includedIds: string[] | undefined = undefined, titleOverrides: SessionTitleOverrides = undefined, hasSubagent = false) {
   const db = getDb(pathOverride);
-  const { whereClause, params } = sessionFilter(search, timeRange, "", excludedIds, includedIds, titleOverrides);
+  const { whereClause, params } = sessionFilter(search, timeRange, "", excludedIds, includedIds, titleOverrides, hasSubagent);
   const rows = db.prepare(`
     SELECT
       COALESCE(session.project_id, '') AS id,
@@ -401,26 +408,37 @@ export function getStats(pathOverride: string | undefined = undefined) {
   };
 }
 
-export function getOverviewStats(pathOverride: string | undefined = undefined) {
+export function getOverviewStats(pathOverride: string | undefined = undefined, search = "", timeRange = "", project = "", excludedIds: Set<string> | undefined = undefined, includedIds: string[] | undefined = undefined, titleOverrides: SessionTitleOverrides = undefined, hasSubagent = false) {
   const db = getDb(pathOverride);
+  const { whereClause, params } = sessionFilter(search, timeRange, project, excludedIds, includedIds, titleOverrides, hasSubagent);
   const totalSessions = db.prepare(`
     SELECT COUNT(*) AS count
     FROM session
-    WHERE time_archived IS NULL
-      AND parent_id IS NULL
-  `).get()?.count ?? 0;
+    ${whereClause}
+  `).get(...params)?.count ?? 0;
 
   const totalMessages = db.prepare(`
     SELECT COUNT(*) AS count
     FROM message
     JOIN session ON session.id = message.session_id
-    WHERE session.time_archived IS NULL
-      AND session.parent_id IS NULL
-  `).get()?.count ?? 0;
+    ${whereClause}
+  `).get(...params)?.count ?? 0;
+
+  // Recorded request token values with the same per-message semantics the
+  // list rows and Token Explorer use (recorded total preferred, components
+  // otherwise); never fabricated from counts.
+  const totalTokens = db.prepare(`
+    SELECT COALESCE(SUM(${statsTokenValueSql("message.data")}), 0) AS total
+    FROM message
+    JOIN session ON session.id = message.session_id
+    ${whereClause}
+      AND ${statsUsableTokenSql("message.data")}
+  `).get(...params)?.total ?? 0;
 
   return {
     totalSessions,
-    totalMessages
+    totalMessages,
+    totalTokens
   };
 }
 

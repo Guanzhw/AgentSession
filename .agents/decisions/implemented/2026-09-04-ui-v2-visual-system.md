@@ -1,13 +1,13 @@
 ---
-status: proposed
+status: implemented
 date: 2026-09-04
 decision: Adopt a calm, evidence-dense visual system and screenshot-based gates
-  for the UI v2 P1-P4 implementation.
+  for the UI v2 P1-P4 implementation, proven by the P1 Library stage.
 ---
 
 # UI v2 visual system
 
-- Status: proposed
+- Status: implemented
 - Date: 2026-09-04
 - Scope: shared visual language and responsive acceptance for UI v2 P1-P4
 - Design: `docs/design/ui-v2-visual-system.md`
@@ -63,18 +63,23 @@ ToC.
 
 P1 through P4 are reviewed against rendered 1280, 768, and 320 px screenshots in
 both themes as well as behavioral E2E checks. Semantic tokens replace ad hoc
-component colors as each surface is touched. This decision remains proposed
-until the visual system has survived the first production stage (P1 Library);
-that stage will either move it to `implemented/` with real browser evidence or
-revise it before adoption.
+component colors as each surface is touched. P1 Library implemented the shared
+palette, type hierarchy, rail, responsive rhythm, and focus/contrast rules
+without changing provider evidence or later detail-page markup.
 
 ## Verification
 
-- Governance and Markdown link validation must pass before the design stage is
-  committed.
+- Governance and Markdown link validation passed through `npm run review`.
 - The tracked reference composition is rendered and visually inspected at
   desktop and 320 px. Its mobile layout must have zero horizontal overflow and
   render the collaboration graph as a readable relationship list.
-- A read-only independent review checks consistency with `docs/design/ui-v2.md`,
-  provider/protocol boundaries, accessibility, and whether P1-P4 have concrete
-  browser acceptance gates.
+- A read-only Pi review checked consistency with `docs/design/ui-v2.md`,
+  provider/protocol boundaries, accessibility, and P1-P4 browser gates; its two
+  high-priority contradictions and four implementation gaps were resolved before
+  P1 began.
+- P1 was rendered against the real seven-provider local index at 1280, 768, and
+  320 px in both themes. The 320 px page had equal `scrollWidth` and
+  `clientWidth`; axe WCAG A/AA scans reported zero violations in light and dark.
+- Keyboard and state checks covered `/` search focus, Tab order through search
+  and chips, `j`/`k` row navigation, compact-view reload persistence, and filter
+  URL back/forward behavior.

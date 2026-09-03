@@ -233,7 +233,7 @@ test("viewer metadata filters and manages SQLite and indexed providers without t
     assert.deepEqual(sqliteCatalog.projects({ query: "renamed" }).map((project) => project.id), ["p1"]);
     assert.deepEqual(sqliteCatalog.byIds(["d"]).map((session) => session.id), ["d"]);
     assert.deepEqual(sqliteCatalog.contentSearch({ query: "needle", limit: 10, offset: 0 }).sessions.map((session) => session.id), ["a"]);
-    assert.deepEqual(sqliteCatalog.overview({ starredOnly: true }), { totalSessions: 6, totalMessages: 1 });
+    assert.deepEqual(sqliteCatalog.overview({ starredOnly: true }), { totalSessions: 1, totalMessages: 0, totalTokens: 0 });
 
     const indexedCatalogPage = indexedCatalog.list({ limit: 1, offset: 0, query: "renamed", project: "/p1", starredOnly: true });
     assert.deepEqual(indexedCatalogPage.sessions.map((session) => session.id), ["b"]);
@@ -241,7 +241,7 @@ test("viewer metadata filters and manages SQLite and indexed providers without t
     assert.deepEqual(indexedCatalog.projects({ query: "renamed" }).map((project) => project.id), ["/p1"]);
     assert.deepEqual(indexedCatalog.byIds(["d"]).map((session) => session.id), ["d"]);
     assert.deepEqual(indexedCatalog.contentSearch({ query: "needle", limit: 10, offset: 0 }).sessions.map((session) => session.id), ["b"]);
-    assert.deepEqual(indexedCatalog.overview({ starredOnly: true }), { totalSessions: 1, totalMessages: 2 });
+    assert.deepEqual(indexedCatalog.overview({ starredOnly: true }), { totalSessions: 1, totalMessages: 2, totalTokens: 20 });
 
     const providers = new Map(getAllProviders().map((provider) => [provider.id, provider]));
     for (const id of ["claude-code", "codex", "pi", "deepseek-harness"]) {
