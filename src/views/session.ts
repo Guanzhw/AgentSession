@@ -5,6 +5,7 @@ import { isSubagentTool, mergeToolMetadata } from "../providers/shared/subagent-
 import { formatDuration, formatTime, formatTokens, messageBubble, messageHeader, reasoningBlock, todoList, toolCallBlock } from "./components.js";
 import { layout } from "./layout.js";
 import type { SessionNavigationContext } from "../navigation-context.js";
+import type { ConversationCompaction } from "../protocol-runtime.js";
 
 function safeParse(value: any) {
   if (typeof value !== "string") {
@@ -751,8 +752,21 @@ function renderMessageParts(message: any, depth = 0, provider = "opencode") {
   return renderedParts.filter(Boolean).join("\n");
 }
 
-function renderSessionTree(tree: SessionTree, depth = 0, provider = "opencode", inferred = false): string {
-  const messageBlocks = [];
+interface ConversationEntry {
+  messageId: string;
+  role: string;
+  markup: string;
+  timeCreated: number;
+}
+
+/**
+ * Render each top-level message into one entry (markup may be empty for
+ * messages that produce no visible content). The conversation thread groups
+ * these entries by user turn; nested session rendering keeps its existing
+ * linear behavior inside subagent branches.
+ */
+function renderSessionMessageEntries(tree: SessionTree, depth = 0, provider = "opencode"): ConversationEntry[] {
+  const entries: ConversationEntry[] = [];
   let previousCacheUsage = null;
 
   for (const sourceMessage of tree.messages) {
@@ -761,24 +775,38 @@ function renderSessionTree(tree: SessionTree, depth = 0, provider = "opencode", 
     if (annotated.usage && messageTurnRole(message.role) === "assistant") {
       previousCacheUsage = annotated.usage;
     }
+    let markup = "";
     const result = renderMessagePartsResult(message, depth, provider);
     if (result.hasVisibleContent && result.markup) {
       const group = [renderMessageGroup(message, result.markup, provider)];
       attachPendingReasoning(group, result.pendingReasoning);
-      messageBlocks.push(group[0]);
+      markup = group[0];
     } else if (result.pendingReasoning.length && messageTurnRole(message.role) === "assistant") {
-      messageBlocks.push(renderMessageGroup(
+      markup = renderMessageGroup(
         message,
         renderTurnReasoning(result.pendingReasoning.join("\n")),
         provider
-      ));
+      );
     } else if (!result.pendingReasoning.length && hasVisibleMessagePart(message)) {
       const messageAnchor = escapeHtml(anchorId("msg", message.id));
-      messageBlocks.push(`<span id="${messageAnchor}" class="session-event-anchor" aria-hidden="true"></span>`);
+      markup = `<span id="${messageAnchor}" class="session-event-anchor" aria-hidden="true"></span>`;
     }
+    entries.push({
+      messageId: String(message.id || ""),
+      role: messageTurnRole(message.role),
+      markup,
+      timeCreated: Number(message.timeCreated) || 0
+    });
   }
 
-  const messageMarkup = messageBlocks.filter(Boolean).join("\n");
+  return entries;
+}
+
+function renderSessionTree(tree: SessionTree, depth = 0, provider = "opencode", inferred = false): string {
+  const messageMarkup = renderSessionMessageEntries(tree, depth, provider)
+    .map((entry) => entry.markup)
+    .filter(Boolean)
+    .join("\n");
 
   const detachedMarkup: any = tree.detachedChildren
     .map((child) => renderSessionTree(child, depth + 1, provider, true))
@@ -828,8 +856,8 @@ function renderRawParts(messageData: any, parts: any[] = []) {
   return renderedParts.filter(Boolean).join("\n");
 }
 
-function renderRawMessageGroups(messages: any, partsByMessage: any, provider: any) {
-  const groups = [];
+function renderRawMessageEntries(messages: any, partsByMessage: any, provider: any): ConversationEntry[] {
+  const entries: ConversationEntry[] = [];
   let previousCacheUsage = null;
 
   for (const message of messages) {
@@ -849,27 +877,181 @@ function renderRawMessageGroups(messages: any, partsByMessage: any, provider: an
     }
 
     const role = messageTurnRole(messageData.role);
-    const previous = groups[groups.length - 1];
+    const previous = entries[entries.length - 1];
     if (String(messageData.role || "").toLowerCase() === "tool" && previous?.role === "assistant") {
-      previous.markup.push(renderedParts);
+      previous.markup += `\n${renderedParts}`;
       continue;
     }
 
-    groups.push({
+    entries.push({
+      messageId: String(message.id || ""),
       role,
-      message: {
+      markup: renderMessageGroup({
         id: message.id,
         role,
         data: messageData,
         parts: parts.map((part: any) => ({ id: part.id, data: safeParse(part.data), type: safeParse(part.data)?.type }))
-      },
-      markup: [renderedParts]
+      }, renderedParts, provider),
+      timeCreated: Number(parsedData.time?.created) || Number(message.time_created) || 0
     });
   }
 
-  return groups
-    .map((group) => renderMessageGroup(group.message, group.markup.join("\n"), provider))
-    .join("\n");
+  return entries;
+}
+
+// ── Conversation thread (UI v2 P2a) ────────────────────────────────────
+
+const CONVERSATION_THREAD_THRESHOLD = 20;
+
+function conversationDefaultMode(messageCount: number) {
+  return Number(messageCount) > CONVERSATION_THREAD_THRESHOLD ? "thread" : "linear";
+}
+
+function renderCompactionCheckpoint(compaction: any, provider: string, placement: "anchored" | "timestamp" | "end") {
+  const tokenParts = [];
+  if (compaction.tokensBefore != null) {
+    tokenParts.push(`${t("conversation.checkpoint_before")} ${formatCount(compaction.tokensBefore)}`);
+  }
+  if (compaction.tokensAfter != null) {
+    tokenParts.push(`${t("conversation.checkpoint_after")} ${formatCount(compaction.tokensAfter)}`);
+  }
+  const meta = [
+    tokenParts.length ? tokenParts.join(" · ") : "",
+    compaction.timestamp ? formatTime(compaction.timestamp) : "",
+    // The recorded marker is about the *placed position* (derived from a
+    // timestamp or the thread end), never about the event's fidelity; the
+    // event provenance stays available on the element as a data attribute.
+    placement !== "anchored" ? t("conversation.checkpoint_position_derived") : ""
+  ].filter(Boolean).join(" · ");
+  const summary = compactText(compaction.summary, 160);
+  const facts = [];
+  if (compaction.trigger) {
+    facts.push(`<dt>${escapeHtml(t("conversation.checkpoint_trigger"))}</dt><dd>${escapeHtml(compaction.trigger === "unknown" ? t("conversation.checkpoint_unknown") : compaction.trigger)}</dd>`);
+  }
+  if (compaction.strategy) {
+    facts.push(`<dt>${escapeHtml(t("conversation.checkpoint_strategy"))}</dt><dd>${escapeHtml(compaction.strategy === "unknown" ? t("conversation.checkpoint_unknown") : compaction.strategy)}</dd>`);
+  }
+  if (compaction.continuationSessionId) {
+    const encoded = encodeURIComponent(compaction.continuationSessionId);
+    facts.push(`<dt>${escapeHtml(t("conversation.checkpoint_continuation"))}</dt><dd><a href="/${escapeHtml(provider)}/session/${encoded}">${escapeHtml(compaction.continuationSessionId)}</a></dd>`);
+  }
+  const result = summary
+    ? `<div class="compaction-checkpoint-result"><span class="compaction-checkpoint-result-label">${escapeHtml(t("conversation.checkpoint_result_label"))}</span><span class="compaction-checkpoint-summary">${escapeHtml(summary)}</span></div>`
+    : `<div class="compaction-checkpoint-result compaction-checkpoint-result-missing">${escapeHtml(t("conversation.checkpoint_result_missing"))}</div>`;
+  const evidence = facts.length
+    ? `<details class="compaction-checkpoint-details"><summary>${escapeHtml(t("conversation.checkpoint_details"))}</summary><dl class="compaction-checkpoint-facts">${facts.join("")}</dl></details>`
+    : "";
+  return `<section id="${escapeHtml(anchorId("checkpoint", compaction.id))}" class="compaction-checkpoint" data-compaction-checkpoint="${escapeHtml(compaction.id)}" data-compaction-placement="${placement}" data-compaction-fidelity="${escapeHtml(compaction.fidelity || "")}">
+    <span class="compaction-checkpoint-kicker">${escapeHtml(t("conversation.checkpoint_kicker"))}</span>
+    ${meta ? `<span class="compaction-checkpoint-meta">${escapeHtml(meta)}</span>` : ""}
+    ${result}
+    ${evidence}
+  </section>`;
+}
+
+/**
+ * Group the canonical message spine by user turn and interleave compaction
+ * checkpoints at their causal position. Checkpoints are placed after the
+ * message whose id their protocol anchor names; when the anchor names no
+ * spine message (e.g. DSH sequence ids), the recorded timestamp is used as a
+ * derived fallback, and a checkpoint with neither renders after all segments.
+ * Thread and Linear are presentation modes over the same SSR content;
+ * checkpoints render exactly once, in both modes, and never as a message
+ * group or ToC entry.
+ */
+function renderConversationThread(entries: ConversationEntry[], compactions: any[], provider: string) {
+  // Resolve each checkpoint to the entry index it follows and to one of the
+  // explicit placement kinds: -1 means before the first entry; entries.length
+  // means after the last (explicit end placement). The placement kind is
+  // derived exactly once here and never recomputed downstream.
+  const byEntryIndex = new Map<number, Array<{ compaction: any; placement: "anchored" | "timestamp" | "end" }>>();
+  const indexOf = (messageId: string) => entries.findIndex((entry) => entry.messageId === messageId);
+  const place = (compaction: any) => {
+    const anchored = compaction.anchorMessageId ? indexOf(compaction.anchorMessageId) : -2;
+    let position: number;
+    let placement: "anchored" | "timestamp" | "end";
+    if (anchored >= 0) {
+      position = anchored;
+      placement = "anchored";
+    } else {
+      const timestamp = Number(compaction.timestamp);
+      const hasTimestamp = Number.isFinite(timestamp) && timestamp > 0;
+      position = hasTimestamp
+        ? entries.reduce((found, entry, index) => (entry.timeCreated && entry.timeCreated <= timestamp ? index : found), -1)
+        : entries.length;
+      placement = hasTimestamp ? "timestamp" : "end";
+    }
+    const list = byEntryIndex.get(position) || [];
+    list.push({ compaction, placement });
+    byEntryIndex.set(position, list);
+  };
+  for (const compaction of compactions) {
+    place(compaction);
+  }
+
+  const items: Array<{ kind: "block" | "checkpoint"; role?: string; html: string }> = [];
+  const pushCheckpoints = (position: number) => {
+    for (const placed of byEntryIndex.get(position) || []) {
+      items.push({ kind: "checkpoint", html: renderCompactionCheckpoint(placed.compaction, provider, placed.placement) });
+    }
+  };
+  pushCheckpoints(-1);
+  entries.forEach((entry, index) => {
+    if (entry.markup) {
+      items.push({ kind: "block", role: entry.role, html: entry.markup });
+    }
+    if (byEntryIndex.has(index)) {
+      pushCheckpoints(index);
+    }
+  });
+
+  const segments: Array<{ userTurn: boolean; userTurnIndex: number; blocks: string[] }> = [];
+  let current = null as { userTurn: boolean; userTurnIndex: number; blocks: string[] } | null;
+  let userTurnIndex = 0;
+  for (const item of items) {
+    if (item.kind === "block" && item.role === "user") {
+      userTurnIndex += 1;
+      current = { userTurn: true, userTurnIndex, blocks: [] };
+      segments.push(current);
+    } else if (!current) {
+      current = { userTurn: false, userTurnIndex: 0, blocks: [] };
+      segments.push(current);
+    }
+    current.blocks.push(item.html);
+  }
+
+  const thread = segments.map((segment) => {
+    const header = segment.userTurn
+      ? `<header class="thread-turn-header"><span class="thread-turn-kicker">${escapeHtml(t("conversation.thread_turn"))} ${segment.userTurnIndex}</span></header>`
+      : "";
+    const turnClass = segment.userTurn ? " thread-turn-user" : " thread-turn-prelude";
+    return `<section class="thread-turn${turnClass}">${header}<div class="thread-turn-content">${segment.blocks.join("\n")}</div></section>`;
+  }).join("\n");
+
+  const trailing = byEntryIndex.get(entries.length) || [];
+  return trailing.length
+    ? `${thread}${thread ? "\n" : ""}${trailing.map((placed) => renderCompactionCheckpoint(placed.compaction, provider, placed.placement)).join("\n")}`
+    : thread;
+}
+
+function renderConversationPanel(entries: ConversationEntry[], compactions: any[], provider: string, defaultMode: string, detachedMarkup = "", normalizedMessageCount = entries.length) {
+  const threadMarkup = renderConversationThread(entries, compactions, provider);
+  if (!threadMarkup && !detachedMarkup) {
+    return `<section id="session-messages" class="messages"><p class="empty-state">${escapeHtml(t("detail.no_messages"))}</p></section>`;
+  }
+
+  const toggle = `
+    <div class="conversation-view-bar" data-conversation-view>
+      <div class="conversation-view-toggle" role="group" aria-label="${escapeHtml(t("conversation.view_label"))}">
+        <button type="button" class="conversation-view-btn" data-conversation-view-mode="thread" aria-pressed="${defaultMode === "thread" ? "true" : "false"}">${escapeHtml(t("conversation.view_thread"))}</button>
+        <button type="button" class="conversation-view-btn" data-conversation-view-mode="linear" aria-pressed="${defaultMode === "linear" ? "true" : "false"}">${escapeHtml(t("conversation.view_linear"))}</button>
+      </div>
+    </div>`;
+  return `${toggle}
+    <section id="session-messages" class="messages conversation-${escapeHtml(defaultMode)}" data-conversation-default="${escapeHtml(defaultMode)}" data-conversation-message-count="${normalizedMessageCount}">
+      ${threadMarkup}
+      ${detachedMarkup}
+    </section>`;
 }
 
 function renderTranscriptSearch() {
@@ -906,8 +1088,9 @@ export function renderSessionPage({
   terminalLaunchAllowed = false,
   runtimeWorkbench = "",
   runtimeAvailable = false,
-  navigationContext = null
-}: { session: any; sessionTree?: any; sessionMetrics?: any; messages?: any[]; partsByMessage?: Map<any, any>; todos?: any[]; recentSessions?: any[]; meta?: any; provider?: string; providers?: any[]; manageable?: boolean; resumeCommand?: any; terminalLaunchAllowed?: boolean; runtimeWorkbench?: string; runtimeAvailable?: boolean; navigationContext?: SessionNavigationContext | null }) {
+  navigationContext = null,
+  conversationCompactions = []
+}: { session: any; sessionTree?: any; sessionMetrics?: any; messages?: any[]; partsByMessage?: Map<any, any>; todos?: any[]; recentSessions?: any[]; meta?: any; provider?: string; providers?: any[]; manageable?: boolean; resumeCommand?: any; terminalLaunchAllowed?: boolean; runtimeWorkbench?: string; runtimeAvailable?: boolean; navigationContext?: SessionNavigationContext | null; conversationCompactions?: ConversationCompaction[] }) {
   const title = session.title || session.slug || session.id;
   const starred = meta?.starred ? 1 : 0;
   const encodedProvider = encodeURIComponent(provider);
@@ -1012,9 +1195,20 @@ ${actions}
     </header>
   `;
 
-  const messageMarkup = sessionTree
-    ? renderSessionTree(sessionTree, 0, provider)
-    : renderRawMessageGroups(messages, partsByMessage, provider);
+  const conversationEntries = sessionTree
+    ? renderSessionMessageEntries(sessionTree, 0, provider)
+    : renderRawMessageEntries(messages, partsByMessage, provider);
+  // Canonical rendered top-level conversation entries: raw tool rows are
+  // merged into their assistant entry, messages that render no visible
+  // content produce no block, and tree rows without markup contribute
+  // nothing — so the count reflects the actual thread spine, not the raw
+  // tool/compact/inherited row totals.
+  const renderedEntryCount = conversationEntries.filter((entry) => entry.markup).length;
+  const conversationDefault = conversationDefaultMode(renderedEntryCount);
+  const detachedMarkup = sessionTree
+    ? (sessionTree.detachedChildren || []).map((child: SessionTree) => renderSessionTree(child, 1, provider, true)).filter(Boolean).join("\n")
+    : "";
+  const conversationMarkup = renderConversationPanel(conversationEntries, conversationCompactions, provider, conversationDefault, detachedMarkup, renderedEntryCount);
 
   const sessionMetadata = session.metadata && typeof session.metadata === "object"
     ? session.metadata as Record<string, unknown>
@@ -1044,9 +1238,7 @@ ${actions}
       ${todoList(todos)}
     </div>
     <div role="tabpanel" id="tab-conversation" aria-labelledby="tab-btn-conversation">
-      <section id="session-messages" class="messages">
-        ${messageMarkup || `<p class="empty-state">${t("detail.no_messages")}</p>`}
-      </section>
+      ${conversationMarkup}
     </div>
     <div role="tabpanel" id="tab-events" aria-labelledby="tab-btn-events">
       <section id="detail-events-shell" class="detail-events-shell">

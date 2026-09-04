@@ -3906,6 +3906,231 @@ test("attached child sessions stop the parent TOC at the task boundary", () => {
 });
 
 
+function flowVisible(id, role, timeCreated, parts = [], options = {}) {
+  const message = flowMessage(id, role, timeCreated, parts, options);
+  for (const part of message.parts) {
+    if (!part.type && part.partType) {
+      part.type = part.partType;
+    }
+  }
+  return message;
+}
+
+test("conversation view defaults follow the 20-message threshold between Linear and Thread", () => {
+  const shortTree = flowSession("root", [
+    flowVisible("u1", "user", 1000, [], { text: true }),
+    flowVisible("a1", "assistant", 2000)
+  ]);
+  const short = renderSessionPage({ session: shortTree.session, sessionTree: shortTree, provider: "codex" });
+  assert.match(short, /class="messages conversation-linear" data-conversation-default="linear" data-conversation-message-count="2"/);
+  assert.match(short, /data-conversation-view-mode="thread" aria-pressed="false"/);
+  assert.match(short, /data-conversation-view-mode="linear" aria-pressed="true"/);
+
+  const longMessages = [];
+  for (let index = 1; index <= 11; index += 1) {
+    longMessages.push(flowVisible(`u${index}`, "user", index * 1000, [], { text: true }));
+    longMessages.push(flowVisible(`a${index}`, "assistant", index * 1000 + 500));
+  }
+  const longTree = flowSession("root", longMessages);
+  const long = renderSessionPage({ session: longTree.session, sessionTree: longTree, provider: "codex" });
+  assert.match(long, /class="messages conversation-thread" data-conversation-default="thread" data-conversation-message-count="22"/);
+  assert.match(long, /data-conversation-view-mode="thread" aria-pressed="true"/);
+});
+
+test("conversation thread segments the spine into user turns with a prelude before the first user message", () => {
+  const tree = flowSession("root", [
+    flowVisible("a0", "assistant", 500),
+    flowVisible("u1", "user", 1000, [], { text: true }),
+    flowVisible("a1", "assistant", 2000),
+    flowVisible("u2", "user", 3000, [], { text: true }),
+    flowVisible("a2", "assistant", 4000)
+  ]);
+  const html = renderSessionPage({ session: tree.session, sessionTree: tree, provider: "codex" });
+  assert.equal((html.match(/thread-turn thread-turn-user/g) || []).length, 2);
+  assert.equal((html.match(/thread-turn thread-turn-prelude/g) || []).length, 1);
+  const thread = html.slice(html.indexOf('<section id="session-messages"'));
+  const prelude = thread.indexOf("thread-turn thread-turn-prelude");
+  assert.ok(prelude >= 0, "leading assistant content gets a prelude section");
+  assert.ok(prelude < thread.indexOf("User turn 1"), "prelude precedes the first user turn header");
+  assert.ok(thread.indexOf("User turn 1") < thread.indexOf("user u1"), "turn header precedes the user message it owns");
+  assert.ok(thread.indexOf("user u1") < thread.indexOf("User turn 2"), "first turn ends before the second turn starts");
+  assert.ok(thread.indexOf("User turn 2") < thread.indexOf("user u2"), "second turn header precedes its user message");
+  assert.doesNotMatch(thread.slice(prelude, thread.indexOf('thread-turn thread-turn-user')), /thread-turn-header/);
+});
+
+test("conversation renders one recorded compaction checkpoint at its causal position without a ToC entry", () => {
+  const tree = flowSession("root", [
+    flowVisible("u1", "user", 1000, [], { text: true }),
+    flowVisible("a1", "assistant", 2000),
+    flowVisible("u2", "user", 3000, [], { text: true }),
+    flowVisible("a2", "assistant", 4000)
+  ]);
+  const html = renderSessionPage({
+    session: tree.session,
+    sessionTree: tree,
+    provider: "codex",
+    conversationCompactions: [{
+      id: "cp-1",
+      anchorMessageId: "a1",
+      timestamp: 2500,
+      tokensBefore: 120,
+      tokensAfter: 45,
+      summary: "Kept the session goal.",
+      strategy: "summary",
+      trigger: "automatic",
+      continuationSessionId: "continued-next",
+      fidelity: "recorded"
+    }]
+  });
+  assert.equal((html.match(/data-compaction-checkpoint=/g) || []).length, 1);
+  const thread = html.slice(html.indexOf('<section id="session-messages"'));
+  const checkpoint = thread.indexOf('data-compaction-checkpoint="cp-1"');
+  assert.ok(thread.indexOf("user u1") < checkpoint, "checkpoint follows the anchored message");
+  assert.ok(checkpoint < thread.indexOf("user u2"), "checkpoint precedes the next user turn");
+  assert.match(html, /compaction-checkpoint-kicker[^>]*>Context compacted</);
+  assert.match(html, /compaction-checkpoint-meta[^>]*>before 120 · after 45 ·/);
+  assert.match(html, /compaction-checkpoint-result-label[^>]*>Post-compaction context</);
+  assert.match(html, /compaction-checkpoint-summary[^>]*>Kept the session goal\.</);
+  assert.doesNotMatch(html, /compaction-checkpoint-result-missing/);
+  assert.match(html, /Trigger<\/dt><dd>automatic<\/dd>/);
+  assert.match(html, /Strategy<\/dt><dd>summary<\/dd>/);
+  assert.match(html, /Continued session<\/dt><dd><a href="\/codex\/session\/continued-next">continued-next<\/a><\/dd>/);
+  const toc = html.match(/<div class="toc-list">([\s\S]*?)<\/div>\s*<button class="toc-resize-handle"/)?.[1] || "";
+  assert.doesNotMatch(toc, /checkpoint|cp-1|Context compacted/);
+});
+
+test("conversation checkpoints render only recorded fields with a derived placement marker", () => {
+  const tree = flowSession("root", [
+    flowVisible("u1", "user", 1000, [], { text: true }),
+    flowVisible("a1", "assistant", 2000)
+  ]);
+  const html = renderSessionPage({
+    session: tree.session,
+    sessionTree: tree,
+    provider: "codex",
+    conversationCompactions: [{
+      id: "cp-min",
+      anchorMessageId: null,
+      timestamp: 1500,
+      tokensBefore: null,
+      tokensAfter: null,
+      summary: null,
+      strategy: null,
+      trigger: null,
+      continuationSessionId: null,
+      fidelity: "recorded"
+    }]
+  });
+  assert.equal((html.match(/data-compaction-checkpoint=/g) || []).length, 1);
+  assert.match(html, /data-compaction-placement="timestamp"/);
+  assert.match(html, /class="compaction-checkpoint-meta">[^<]*position derived[^<]*</);
+  assert.match(html, /data-compaction-fidelity="recorded"/);
+  assert.doesNotMatch(html, /compaction-checkpoint-result-label/);
+  assert.match(html, /compaction-checkpoint-result-missing[^>]*>No readable post-compaction context is available in the recorded evidence\.</);
+  assert.doesNotMatch(html, /compaction-checkpoint-facts/);
+  assert.doesNotMatch(html, /before 120|after 45/);
+});
+
+test("conversation checkpoints with neither anchor nor timestamp render after all segments", () => {
+  const tree = flowSession("root", [
+    flowVisible("u1", "user", 1000, [], { text: true }),
+    flowVisible("a1", "assistant", 2000),
+    flowVisible("u2", "user", 3000, [], { text: true }),
+    flowVisible("a2", "assistant", 4000)
+  ]);
+  const html = renderSessionPage({
+    session: tree.session,
+    sessionTree: tree,
+    provider: "codex",
+    conversationCompactions: [{
+      id: "cp-end",
+      anchorMessageId: null,
+      timestamp: null,
+      tokensBefore: 8,
+      tokensAfter: 4,
+      summary: "End of the record.",
+      strategy: null,
+      trigger: null,
+      continuationSessionId: null,
+      fidelity: "recorded"
+    }]
+  });
+  assert.equal((html.match(/data-compaction-checkpoint=/g) || []).length, 1);
+  const thread = html.slice(html.indexOf('<section id="session-messages"'));
+  const checkpoint = thread.indexOf('data-compaction-checkpoint="cp-end"');
+  assert.ok(checkpoint > thread.indexOf("user u2"), "end placement follows the last user turn");
+  assert.ok(checkpoint > thread.indexOf("assistant a2"), "end placement follows the last assistant message");
+  assert.match(html, /data-compaction-placement="end"/);
+  assert.match(html, /class="compaction-checkpoint-meta">[^<]*position derived[^<]*</);
+});
+
+test("conversation default mode counts rendered top-level entries only", () => {
+  // 24 tree rows (11 user + 11 assistant + 2 compact) but only 20 render
+  // visible content: invisible messages and compact rows must not push the
+  // default into Thread nor inflate the rendered message count.
+  const longMessages = [];
+  for (let index = 1; index <= 11; index += 1) {
+    longMessages.push(flowVisible(`u${index}`, "user", index * 1000, [], { text: true }));
+    longMessages.push(flowVisible(`a${index}`, "assistant", index * 1000 + 500, [], { text: index >= 10 ? false : true }));
+  }
+  longMessages.push(flowVisible("shared-1", "compact", 7000, [], { text: false }));
+  longMessages.push(flowVisible("shared-2", "compact", 8000, [], { text: false }));
+  const tree = flowSession("root", longMessages);
+  const html = renderSessionPage({ session: tree.session, sessionTree: tree, provider: "codex" });
+  assert.match(html, /class="messages conversation-linear" data-conversation-default="linear" data-conversation-message-count="20"/);
+});
+
+test("conversation keeps compact and inherited context messages out of the ToC", () => {
+  const inherited = flowVisible("shared-1", "compact", 1500);
+  inherited.metadata = { provenance: "inherited-parent-context" };
+  const tree = flowSession("root", [
+    flowVisible("u1", "user", 1000, [], { text: true }),
+    flowVisible("a1", "assistant", 1200),
+    inherited,
+    flowVisible("u2", "user", 2000, [], { text: true }),
+    flowVisible("a2", "assistant", 2200)
+  ]);
+  const html = renderSessionPage({ session: tree.session, sessionTree: tree, provider: "codex" });
+  const toc = html.match(/<div class="toc-list">([\s\S]*?)<\/div>\s*<button class="toc-resize-handle"/)?.[1] || "";
+  assert.doesNotMatch(toc, /compact shared-1/);
+  assert.doesNotMatch(toc, /href="#msg-shared-1"/);
+  assert.match(html, /compact shared-1/);
+  assert.equal((html.match(/thread-turn thread-turn-user/g) || []).length, 2);
+});
+
+test("raw fallback conversation path segments the same thread spine and merges tool attachments", () => {
+  const messages = [
+    { id: "raw-pre", data: JSON.stringify({ role: "assistant", time: { created: 500 } }) },
+    { id: "raw-u1", data: JSON.stringify({ role: "user", time: { created: 1000 } }) },
+    { id: "raw-a1", data: JSON.stringify({ role: "assistant", time: { created: 1500 } }) },
+    { id: "raw-t1", data: JSON.stringify({ role: "tool", time: { created: 1600 } }) },
+    { id: "raw-u2", data: JSON.stringify({ role: "user", time: { created: 2000 } }) },
+    { id: "raw-a2", data: JSON.stringify({ role: "assistant", time: { created: 2500 } }) }
+  ];
+  const partsByMessage = new Map();
+  partsByMessage.set("raw-pre", [{ id: "p-pre", data: JSON.stringify({ type: "text", text: "raw prologue" }) }]);
+  partsByMessage.set("raw-u1", [{ id: "p-u1", data: JSON.stringify({ type: "text", text: "raw first question" }) }]);
+  partsByMessage.set("raw-a1", [{ id: "p-a1", data: JSON.stringify({ type: "text", text: "raw first answer" }) }]);
+  partsByMessage.set("raw-t1", [{ id: "p-t1", data: JSON.stringify({ type: "tool", tool: "read", state: { status: "completed", input: { filePath: "README.md" }, output: "raw tool output" } }) }]);
+  partsByMessage.set("raw-u2", [{ id: "p-u2", data: JSON.stringify({ type: "text", text: "raw second question" }) }]);
+  partsByMessage.set("raw-a2", [{ id: "p-a2", data: JSON.stringify({ type: "text", text: "raw second answer" }) }]);
+
+  const html = renderSessionPage({
+    session: { id: "raw-root", title: "Raw fallback", directory: "" },
+    provider: "codex",
+    messages,
+    partsByMessage
+  });
+  assert.equal((html.match(/thread-turn thread-turn-user/g) || []).length, 2);
+  assert.equal((html.match(/thread-turn thread-turn-prelude/g) || []).length, 1);
+  assert.match(html, /data-conversation-default="linear"/);
+  assert.match(html, /raw first question/);
+  const thread = html.slice(html.indexOf('<section id="session-messages"'));
+  assert.ok(thread.indexOf('id="msg-raw-a1"') < thread.indexOf("raw tool output"), "tool output merges into the owning assistant entry");
+  assert.ok(thread.indexOf("raw tool output") < thread.indexOf("raw second question"), "merged tool output stays inside the owning user turn");
+});
+
+
 test("session rendering merges reasoning tokens into output and nests tools in assistant turns", () => {
   const sessionTree = {
     session: { id: "root", title: "Render test" },

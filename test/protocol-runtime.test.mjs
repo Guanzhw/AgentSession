@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildRuntimeGraph,
   clearProtocolRuntimeCache,
+  collectConversationCompactions,
   getRuntimeProtocol,
   getRuntimeProtocolV3,
   ProtocolRuntimeError,
@@ -211,4 +212,100 @@ test("runtime graph stops entity projection at maxNodes", () => {
   const graph = buildRuntimeGraph(adapter, protocol, { depth: 0, maxNodes: 10 });
   assert.equal(graph.nodes.length, 10);
   assert.equal(graph.truncated, true);
+});
+
+test("conversation compactions anchor to the preceding conversation-spine message in source order", () => {
+  const filterPayload = (entries) => entries.map((entry) => ({
+    id: entry.id,
+    anchorMessageId: entry.anchorMessageId,
+    tokensBefore: entry.tokensBefore,
+    tokensAfter: entry.tokensAfter,
+    summary: entry.summary,
+    strategy: entry.strategy,
+    trigger: entry.trigger,
+    continuationSessionId: entry.continuationSessionId,
+    fidelity: entry.fidelity
+  }));
+  const events = [
+    { id: "m1", sequence: 1, kind: "message.user", timestamp: 1000, provenance: { sourceId: "first-user", fidelity: "derived" } },
+    { id: "t1", sequence: 2, kind: "message.assistant", timestamp: 2000, provenance: { sourceId: "first-assistant", fidelity: "derived" } },
+    { id: "c1", sequence: 3, kind: "context.compaction", timestamp: 2500, provenance: { fidelity: "recorded" }, compaction: { trigger: "automatic", strategy: "summary", tokensBefore: 100, tokensAfter: 40, summary: "kept goal" } },
+    { id: "m2", sequence: 4, kind: "message.tool", timestamp: 3000, provenance: { sourceId: "tool-message", fidelity: "derived" } },
+    { id: "c2", sequence: 5, kind: "context.compacted", timestamp: null, provenance: { fidelity: "derived" }, compaction: { trigger: "manual", strategy: "opaque", tokensBefore: null, tokensAfter: null, summary: null, continuationSessionId: "child-1" } }
+  ];
+  const out = collectConversationCompactions({ events });
+  assert.deepEqual(filterPayload(out), [
+    {
+      id: "c1", anchorMessageId: "first-assistant", tokensBefore: 100, tokensAfter: 40,
+      summary: "kept goal", strategy: "summary", trigger: "automatic",
+      continuationSessionId: null, fidelity: "recorded"
+    },
+    {
+      id: "c2", anchorMessageId: "first-assistant", tokensBefore: null, tokensAfter: null,
+      summary: null, strategy: "opaque", trigger: "manual",
+      continuationSessionId: "child-1", fidelity: "derived"
+    }
+  ]);
+});
+
+test("conversation compactions without a preceding message anchor before the spine", () => {
+  const out = collectConversationCompactions({
+    events: [
+      { id: "c1", sequence: 1, kind: "context.compaction", timestamp: 10, provenance: { fidelity: "recorded" }, compaction: { trigger: "manual", strategy: "summary", tokensBefore: 5, tokensAfter: 2, summary: null } },
+      { id: "m1", sequence: 2, kind: "message.user", timestamp: 20, provenance: { sourceId: "user-1", fidelity: "derived" } }
+    ]
+  });
+  assert.equal(out.length, 1);
+  assert.equal(out[0].anchorMessageId, null);
+});
+
+test("conversation compactions are bounded and ignore events without a compaction payload", () => {
+  const events = Array.from({ length: 60 }, (_, index) => ({
+    id: `c${index}`,
+    sequence: index + 1,
+    kind: "context.compaction",
+    timestamp: index,
+    provenance: { fidelity: "recorded" },
+    compaction: { trigger: "automatic", strategy: "summary", tokensBefore: index, tokensAfter: index - 1, summary: null }
+  }));
+  events.push({ id: "other", sequence: 100, kind: "tool.call", timestamp: 100, provenance: { fidelity: "recorded" } });
+  const out = collectConversationCompactions({ events });
+  assert.equal(out.length, 50);
+  assert.equal(out[0].id, "c0");
+  assert.equal(out[49].id, "c49");
+  assert.ok(!out.some((entry) => entry.id === "other"));
+});
+
+test("assistant fragments and nested tools never replace the rendered Agent Loop turn anchor", () => {
+  // Current Codex emits a reasoning message whose id becomes the rendered
+  // Agent Loop turn, then another assistant fragment with the same turnId and
+  // several nested tool envelopes before compaction. The anchor must remain
+  // the first message id that owns the rendered turn.
+  const events = [
+    { id: "e1", sequence: 1, kind: "message.user", timestamp: 1000, provenance: { sourceId: "user-1", fidelity: "derived" }, turnId: "user-1" },
+    { id: "e2", sequence: 2, kind: "message.assistant", timestamp: 2000, provenance: { sourceId: "rs-a1", fidelity: "derived" }, turnId: "response-1" },
+    { id: "e3", sequence: 3, kind: "message.assistant", timestamp: 2010, provenance: { sourceId: "msg-a1", fidelity: "recorded" }, turnId: "response-1" },
+    { id: "e4", sequence: 4, kind: "message.tool", timestamp: 2020, provenance: { sourceId: "call-1", fidelity: "recorded" }, turnId: "response-1" },
+    { id: "e5", sequence: 5, kind: "message.text", timestamp: 2030, provenance: { sourceId: "part-a1-0", fidelity: "recorded" }, turnId: "response-1" },
+    { id: "c1", sequence: 6, kind: "context.compaction", timestamp: 2500, turnId: "response-1", provenance: { fidelity: "recorded" }, compaction: { trigger: "automatic", strategy: "summary", tokensBefore: 100, tokensAfter: 40, summary: "kept goal" } },
+    { id: "e6", sequence: 7, kind: "message.assistant", timestamp: 3000, provenance: { sourceId: "msg-a2", fidelity: "derived" }, turnId: "msg-a2" },
+    { id: "e7", sequence: 8, kind: "message.text", timestamp: 3010, provenance: { sourceId: "part-a2-0", fidelity: "recorded" }, turnId: "msg-a2" },
+    { id: "c2", sequence: 9, kind: "context.compaction", timestamp: 3500, turnId: "msg-a2", provenance: { fidelity: "recorded" }, compaction: { trigger: "manual", strategy: "opaque", tokensBefore: null, tokensAfter: null, summary: null } }
+  ];
+  const out = collectConversationCompactions({ events });
+  assert.equal(out[0].anchorMessageId, "rs-a1", "the first assistant fragment owns the rendered turn");
+  assert.equal(out[1].anchorMessageId, "msg-a2", "second compaction also retains its top-level message");
+});
+
+test("compaction without a matching turnId keeps the last top-level message-role anchor and ignores part ids", () => {
+  const events = [
+    { id: "e1", sequence: 1, kind: "message.assistant", timestamp: 1000, provenance: { sourceId: "msg-a1", fidelity: "derived" }, turnId: "msg-a1" },
+    { id: "e2", sequence: 2, kind: "message.text", timestamp: 1010, provenance: { sourceId: "part-a1-0", fidelity: "recorded" }, turnId: "msg-a1" },
+    { id: "c1", sequence: 3, kind: "context.compaction", timestamp: 1200, provenance: { fidelity: "recorded" }, compaction: { trigger: "automatic", strategy: "summary", tokensBefore: 10, tokensAfter: 5, summary: null } },
+    { id: "e3", sequence: 4, kind: "message.text", timestamp: 1300, provenance: { sourceId: "part-after-0", fidelity: "recorded" }, turnId: null },
+    { id: "c2", sequence: 5, kind: "context.compaction", timestamp: 1400, turnId: "not-a-message", provenance: { fidelity: "recorded" }, compaction: { trigger: "manual", strategy: "opaque", tokensBefore: null, tokensAfter: null, summary: null } }
+  ];
+  const out = collectConversationCompactions({ events });
+  assert.equal(out[0].anchorMessageId, "msg-a1", "part id never updates the anchor");
+  assert.equal(out[1].anchorMessageId, "msg-a1", "unmatched turnId falls back to the retained message anchor");
 });

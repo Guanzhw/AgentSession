@@ -432,6 +432,48 @@ if [[ "$toc_unexpected" != "0" ]]; then
   exit 1
 fi
 
+toc_checkpoint_count="$(read_ab "count checkpoint toc entries" get count ".session-toc [data-compaction-checkpoint], .session-toc a[href^='#checkpoint-']")"
+if [[ "$toc_checkpoint_count" != "0" ]]; then
+  echo "Compaction checkpoints must not enter the ToC, got $toc_checkpoint_count" >&2
+  exit 1
+fi
+
+thread_state="$(read_ab "verify conversation thread segments and toggle" eval "(() => { const messages = document.querySelector('#session-messages'); const stored = localStorage.getItem('agentsession.conversationView'); const expected = stored === 'thread' || stored === 'linear' ? stored : messages?.dataset.conversationDefault; const userSections = [...document.querySelectorAll('#session-messages > .thread-turn-user')]; return { defaultMode: messages?.dataset.conversationDefault, storedMode: stored, modeConsistent: messages?.classList.contains('conversation-' + expected), messageCount: messages?.dataset.conversationMessageCount, toggles: document.querySelectorAll('[data-conversation-view] [data-conversation-view-mode]').length, userSegments: userSections.length, userBlocks: document.querySelectorAll('#session-messages > .thread-turn-user > .thread-turn-content > .message-turn-user').length, userTurnsWithBlock: userSections.filter((section) => section.querySelector(':scope > .thread-turn-content > .message-turn-user')).length, checkpoints: document.querySelectorAll('[data-compaction-checkpoint]').length, uniqueCheckpointIds: new Set([...document.querySelectorAll('[data-compaction-checkpoint]')].map((el) => el.getAttribute('data-compaction-checkpoint'))).size }; })()")"
+thread_state_compact="$(printf '%s' "$thread_state" | tr -d '[:space:]')"
+if [[ "$thread_state_compact" == *"\"toggles\":0"* ]]; then
+  echo "Conversation view toggle is missing: $thread_state" >&2
+  exit 1
+fi
+assert_contains "conversation view mode follows the default" "$thread_state_compact" "\"modeConsistent\":true"
+user_turn_blocks="$(echo "$thread_state_compact" | grep -o '"userBlocks":[0-9]*' | cut -d: -f2)"
+user_turns_with_block="$(echo "$thread_state_compact" | grep -o '"userTurnsWithBlock":[0-9]*' | cut -d: -f2)"
+user_turn_segments="$(echo "$thread_state_compact" | grep -o '"userSegments":[0-9]*' | cut -d: -f2)"
+if [[ "$user_turn_blocks" != "$user_turns_with_block" ]]; then
+  echo "Each top-level rendered user block should own exactly one thread turn, got blocks $user_turn_blocks turns-with-block $user_turns_with_block" >&2
+  exit 1
+fi
+if [[ -n "$user_turn_blocks" && -n "$user_turn_segments" ]] && (( user_turn_segments < user_turn_blocks )); then
+  echo "Thread user-turn segments should not be fewer than top-level rendered user blocks, got segments $user_turn_segments blocks $user_turn_blocks" >&2
+  exit 1
+fi
+checkpoint_total="$(echo "$thread_state_compact" | grep -o '"checkpoints":[0-9]*' | cut -d: -f2)"
+checkpoint_unique="$(echo "$thread_state_compact" | grep -o '"uniqueCheckpointIds":[0-9]*' | cut -d: -f2)"
+if [[ "$checkpoint_unique" != "$checkpoint_total" ]]; then
+  echo "Compaction checkpoints must render exactly once, got total $checkpoint_total unique $checkpoint_unique" >&2
+  exit 1
+fi
+
+toggle_to_linear="$(read_ab "switch conversation view to Linear" eval "(() => { const btn = document.querySelector(\"[data-conversation-view-mode='linear']\"); const messages = document.querySelector('#session-messages'); if (!btn || !messages) return 'ready=false'; btn.click(); return [messages.className, 'pressed=' + btn.getAttribute('aria-pressed'), 'stored=' + localStorage.getItem('agentsession.conversationView')].join('|'); })()")"
+if [[ "$toggle_to_linear" != *"ready=false"* ]]; then
+  assert_contains "conversation toggle Linear" "$toggle_to_linear" "conversation-linear"
+  assert_contains "conversation toggle Linear pressed" "$toggle_to_linear" "pressed=true"
+  assert_contains "conversation toggle persisted" "$toggle_to_linear" "stored=linear"
+fi
+toggle_back_to_thread="$(read_ab "switch conversation view back to Thread" eval "(() => { const btn = document.querySelector(\"[data-conversation-view-mode='thread']\"); if (!btn) return 'ready=false'; btn.click(); return [document.querySelector('#session-messages')?.className, 'stored=' + localStorage.getItem('agentsession.conversationView')].join('|'); })()")"
+if [[ "$toggle_back_to_thread" != *"ready=false"* ]]; then
+  assert_contains "conversation toggle Thread" "$toggle_back_to_thread" "conversation-thread"
+fi
+
 toc_user_labels="$(read_ab "read user toc labels" get text ".session-toc .toc-user .toc-type")"
 assert_contains "user toc labels" "$toc_user_labels" "U"
 

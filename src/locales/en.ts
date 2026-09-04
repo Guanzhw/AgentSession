@@ -190,6 +190,23 @@ export const en = {
   "detail.tokens_direct": "Selected session: {count} tokens",
   "detail.tokens_inclusive": "Including child sessions: {count} tokens",
 
+  // Conversation thread (UI v2 P2a)
+  "conversation.view_label": "Conversation view",
+  "conversation.view_thread": "Thread",
+  "conversation.view_linear": "Linear",
+  "conversation.thread_turn": "User turn",
+  "conversation.checkpoint_kicker": "Context compacted",
+  "conversation.checkpoint_before": "before",
+  "conversation.checkpoint_after": "after",
+  "conversation.checkpoint_position_derived": "position derived",
+  "conversation.checkpoint_details": "Evidence",
+  "conversation.checkpoint_trigger": "Trigger",
+  "conversation.checkpoint_strategy": "Strategy",
+  "conversation.checkpoint_unknown": "unknown",
+  "conversation.checkpoint_continuation": "Continued session",
+  "conversation.checkpoint_result_label": "Post-compaction context",
+  "conversation.checkpoint_result_missing": "No readable post-compaction context is available in the recorded evidence.",
+
   // Runtime Workbench
   "runtime.title": "Work Graph",
   "runtime.description": "Inspect recorded work, execution, coordination, context, and evidence.",

@@ -189,6 +189,23 @@ export const zh = {
   "detail.tokens_direct": "当前会话：{count} Token",
   "detail.tokens_inclusive": "包含子会话：{count} Token",
 
+  // Conversation thread (UI v2 P2a)
+  "conversation.view_label": "对话视图",
+  "conversation.view_thread": "线程",
+  "conversation.view_linear": "线性",
+  "conversation.thread_turn": "用户轮次",
+  "conversation.checkpoint_kicker": "上下文已压缩",
+  "conversation.checkpoint_before": "压缩前",
+  "conversation.checkpoint_after": "压缩后",
+  "conversation.checkpoint_position_derived": "位置派生",
+  "conversation.checkpoint_details": "证据",
+  "conversation.checkpoint_trigger": "触发",
+  "conversation.checkpoint_strategy": "策略",
+  "conversation.checkpoint_unknown": "未知",
+  "conversation.checkpoint_continuation": "接续会话",
+  "conversation.checkpoint_result_label": "压缩后上下文",
+  "conversation.checkpoint_result_missing": "记录的证据中没有可读的压缩后上下文。",
+
   // Runtime Workbench
   "runtime.title": "工作图",
   "runtime.description": "查看已记录的工作、执行、协作、上下文与证据。",

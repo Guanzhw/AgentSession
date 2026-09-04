@@ -304,6 +304,93 @@ export function publicEvent(event: SessionEventEnvelope) {
   };
 }
 
+/**
+ * Message roles that can begin a canonical conversation-spine entry. Tool
+ * envelopes remain nested under their assistant turn, while part-level events
+ * that share the message.* prefix never identify a spine entry.
+ */
+const CONVERSATION_SPINE_KINDS = new Set([
+  "message.user",
+  "message.assistant",
+  "message.system",
+  "message.agent"
+]);
+
+export interface ConversationCompaction {
+  id: string;
+  /** Top-level message id the compaction follows in canonical source order. */
+  anchorMessageId: string | null;
+  timestamp: number | null;
+  tokensBefore: number | null;
+  tokensAfter: number | null;
+  summary: string | null;
+  strategy: string | null;
+  trigger: string | null;
+  continuationSessionId: string | null;
+  fidelity: string | null;
+}
+
+/**
+ * Bounded, provider-neutral conversation checkpoints for one finalized
+ * protocol snapshot. The anchor is the compaction event's recorded `turnId`
+ * when it names a previously seen canonical top-level message (OpenCode
+ * compaction parts carry `turnId: message.id`), otherwise the last
+ * conversation-spine message event in source order. Repeated assistant
+ * fragments with one turnId retain that turn's first source id, and nested
+ * tool/part events never replace it. Placement never depends on provider-id
+ * branches. Events whose compaction payload is absent are not checkpoints;
+ * the complete event list stays available through the Events surface.
+ */
+export function collectConversationCompactions(
+  protocol: SessionProtocol | null,
+  maxItems = 50
+): ConversationCompaction[] {
+  if (!protocol) return [];
+  let lastMessageId: string | null = null;
+  let lastAssistantTurnId: string | null = null;
+  const seenMessageIds = new Set<string>();
+  const result: ConversationCompaction[] = [];
+  for (const event of protocol.events || []) {
+    const kind = String(event.kind || "");
+    if (CONVERSATION_SPINE_KINDS.has(kind)) {
+      const sourceId = event.provenance?.sourceId;
+      const assistantTurnId = kind === "message.assistant" && typeof event.turnId === "string"
+        ? event.turnId
+        : null;
+      // One rendered assistant turn can produce several protocol message
+      // envelopes (reasoning/text fragments) with the same turnId. Its first
+      // source id is the canonical Agent Loop turn id; later fragment ids are
+      // parts inside that turn and must not replace the conversation anchor.
+      const repeatedAssistantFragment = Boolean(assistantTurnId && assistantTurnId === lastAssistantTurnId);
+      if (!repeatedAssistantFragment && typeof sourceId === "string" && sourceId) {
+        lastMessageId = sourceId;
+        seenMessageIds.add(sourceId);
+      }
+      lastAssistantTurnId = assistantTurnId;
+      continue;
+    }
+    const compaction = event.compaction;
+    if (!compaction || result.length >= maxItems) continue;
+    const summary = typeof compaction.summary === "string" ? compaction.summary.trim() : "";
+    const turnAnchor = typeof event.turnId === "string" && event.turnId && seenMessageIds.has(event.turnId)
+      ? event.turnId
+      : null;
+    result.push({
+      id: event.id,
+      anchorMessageId: turnAnchor ?? lastMessageId,
+      timestamp: event.timestamp,
+      tokensBefore: compaction.tokensBefore ?? null,
+      tokensAfter: compaction.tokensAfter ?? null,
+      summary: summary || null,
+      strategy: compaction.strategy ?? null,
+      trigger: compaction.trigger ?? null,
+      continuationSessionId: compaction.continuationSessionId ?? null,
+      fidelity: event.provenance?.fidelity ?? null
+    });
+  }
+  return result;
+}
+
 export function queryRuntimeEvents(protocol: SessionProtocol, query: RuntimeEventQuery = {}) {
   const allowedCategories = new Set(query.categories || []);
   const allowedKinds = new Set(query.kinds || []);

@@ -1865,6 +1865,272 @@ details[open] summary {
   padding: 14px;
 }
 
+/* ── Conversation Thread / Linear toggle (UI v2 P2a) ───────────── */
+
+.conversation-view-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.conversation-view-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.conversation-view-btn {
+  appearance: none;
+  border: 0;
+  border-radius: 6px;
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-family);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.conversation-view-btn:hover {
+  color: var(--text-primary);
+}
+
+.conversation-view-btn:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 1px;
+}
+
+.conversation-view-btn[aria-pressed="true"] {
+  background: var(--bg-primary);
+  color: var(--accent-color);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Thread spine: one spine section per user turn; Linear flattens it. */
+#session-messages.conversation-thread {
+  gap: 0;
+}
+
+#session-messages.conversation-thread .thread-turn {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  max-width: 100%;
+  padding-left: 18px;
+  border-left: 2px solid var(--border-color);
+}
+
+#session-messages.conversation-thread .thread-turn + .thread-turn {
+  margin-top: 18px;
+}
+
+#session-messages.conversation-thread .thread-turn::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  top: 14px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--border-color);
+  background: var(--bg-primary);
+}
+
+#session-messages.conversation-thread .thread-turn-user::before {
+  border-color: var(--accent-color);
+  background: var(--accent-color);
+}
+
+.thread-turn-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.thread-turn-kicker {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent-color);
+}
+
+.thread-turn-content {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+#session-messages.conversation-linear .thread-turn,
+#session-messages.conversation-linear .thread-turn-content {
+  display: contents;
+}
+
+#session-messages.conversation-linear .thread-turn-header {
+  display: none;
+}
+
+/* Thread mode: assistant content follows the user-turn spine; quiet its
+   container so the causal sequence leads instead of a wall of cards.
+   Linear mode keeps the full card rhythm, and role badges, reasoning/tool
+   attachment, and focus-visible outlines are unchanged. */
+#session-messages.conversation-thread .message-turn-assistant {
+  padding: 12px 14px;
+  border-color: color-mix(in srgb, var(--border-color) 70%, transparent);
+  border-left-width: 2px;
+  background: color-mix(in srgb, var(--bg-secondary) 28%, transparent);
+  box-shadow: none;
+}
+
+#session-messages.conversation-thread .message-turn-assistant .tool-call {
+  border-color: color-mix(in srgb, var(--border-color) 60%, transparent);
+}
+
+#session-messages.conversation-thread .message-turn-assistant .tool-call summary {
+  background-color: color-mix(in srgb, var(--bg-secondary) 65%, transparent);
+}
+
+/* Compaction checkpoint: one recorded fact at its causal position. */
+.compaction-checkpoint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--warning-color);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-secondary) 60%, var(--bg-primary));
+  font-size: 12px;
+  color: var(--text-secondary);
+  scroll-margin-top: var(--session-anchor-offset);
+}
+
+.compaction-checkpoint-kicker {
+  font-weight: 700;
+  color: var(--warning-color);
+}
+
+.compaction-checkpoint-meta {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.compaction-checkpoint-summary {
+  display: block;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.compaction-checkpoint-result {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.compaction-checkpoint-result-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.compaction-checkpoint-result-missing {
+  flex-basis: 100%;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.compaction-checkpoint-details {
+  flex-basis: 100%;
+  margin-top: 2px;
+}
+
+.compaction-checkpoint-details > summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.compaction-checkpoint-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  font-size: 12px;
+}
+
+.compaction-checkpoint-facts dt {
+  color: var(--text-muted);
+}
+
+.compaction-checkpoint-facts dd {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.compaction-checkpoint-facts a {
+  color: var(--accent-color);
+  text-decoration: none;
+}
+
+@media (max-width: 768px) {
+  .conversation-view-bar {
+    justify-content: stretch;
+  }
+
+  .conversation-view-toggle {
+    flex: 1 1 auto;
+  }
+
+  .conversation-view-btn {
+    flex: 1 1 auto;
+    padding-inline: 6px;
+  }
+
+  #session-messages.conversation-thread .thread-turn {
+    padding-left: 12px;
+  }
+
+  .thread-turn-content {
+    gap: 10px;
+  }
+
+  .compaction-checkpoint {
+    padding: 8px 10px;
+  }
+
+  .compaction-checkpoint-facts {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+}
+
 /* Todos */
 .todo-list-wrap {
   background-color: var(--bg-primary);

@@ -208,6 +208,42 @@ if (sessionWorkbench) {
     void getTranscriptEntries();
   });
 
+  // ── Conversation Thread / Linear toggle (UI v2 P2a) ──────────────────
+  // The server renders the default mode (Thread above 20 normalized messages,
+  // Linear otherwise). An explicit user choice overrides the default and is
+  // stored under a scoped key; both modes present the same canonical content.
+  const conversationView = sessionWorkbench.querySelector("[data-conversation-view]");
+  const conversationMessages = sessionWorkbench.querySelector("#session-messages.conversation-thread, #session-messages.conversation-linear");
+  if (conversationView && conversationMessages) {
+    const CONVERSATION_VIEW_KEY = "agentsession.conversationView";
+    const applyConversationMode = (mode) => {
+      conversationMessages.classList.toggle("conversation-thread", mode === "thread");
+      conversationMessages.classList.toggle("conversation-linear", mode === "linear");
+      conversationView.querySelectorAll("[data-conversation-view-mode]").forEach((button) => {
+        button.setAttribute("aria-pressed", button.dataset.conversationViewMode === mode ? "true" : "false");
+      });
+    };
+
+    let storedConversationMode = null;
+    try {
+      storedConversationMode = localStorage.getItem(CONVERSATION_VIEW_KEY);
+    } catch {}
+    if (storedConversationMode === "thread" || storedConversationMode === "linear") {
+      applyConversationMode(storedConversationMode);
+    }
+
+    conversationView.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-conversation-view-mode]");
+      if (!button) return;
+      const mode = button.dataset.conversationViewMode;
+      if (mode !== "thread" && mode !== "linear") return;
+      applyConversationMode(mode);
+      try {
+        localStorage.setItem(CONVERSATION_VIEW_KEY, mode);
+      } catch {}
+    });
+  }
+
   const tocGroups = [...document.querySelectorAll(".session-toc .toc-group")];
   const tocResizeHandle = document.querySelector(".toc-resize-handle");
   let lastManualNav = 0;

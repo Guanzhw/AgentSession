@@ -22,6 +22,7 @@ import { providerRenderContext } from "./provider-context.js";
 import { parseSessionNavigationContext } from "../navigation-context.js";
 import {
   buildRuntimeGraph,
+  collectConversationCompactions,
   getRuntimeProtocol,
   getRuntimeProtocolV3,
   ProtocolRuntimeError,
@@ -172,6 +173,7 @@ export function registerSessionDetail(
           resumeCommand,
           runtimeWorkbench: renderRuntimeWorkbench(runtime, providerSegment, sessionId),
           runtimeAvailable: Boolean(runtime.protocol),
+          conversationCompactions: collectConversationCompactions(runtime.protocol),
           terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),
           navigationContext,
           ...renderContext
