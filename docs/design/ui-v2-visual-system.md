@@ -144,6 +144,15 @@ and user-info; individual assets are shown in the Conversation inspector,
 grouped by recorded scope (`session`, `agent`, `project`, `user`, or
 `organization`). Missing scopes stay absent.
 
+P3b implements the structural row as two independent SSR-readable graph
+panels: Goal → tasks and Agent collaboration. Each panel exposes at most nine
+visible nodes and reports omitted/incomplete evidence; at 768 px and below it
+retains the bounded node list while using a stacked relationship list. All
+projected goals participate in graph totals and membership edges, including
+multiple roots and child goals. Node and relationship Evidence actions lead to
+bounded raw goal, task, actor, and coordination records. Async styling is
+reserved for observations bound to recorded background or scheduled run modes.
+
 Task rows use state marker, human title, owner/state, elapsed or last activity,
 and Evidence action. The first five are visible; the remainder is an expansion
 count. Background and continuing agents retain live states rather than being

@@ -1,11 +1,61 @@
 import type { SessionProtocolV3 } from "./providers/shared/session-protocol-v3.js";
 import type {
   ContextProjection,
+  CoordinationProjection,
   ExecutionProjection,
   WorkProjection
 } from "./protocol-runtime-v3.js";
 
 const VISIBLE_TASK_LIMIT = 5;
+const VISIBLE_GRAPH_NODE_LIMIT = 9;
+
+export interface WorkGraphNode {
+  id: string;
+  kind: "goal" | "task";
+  label: string | null;
+  state: string;
+}
+
+export interface WorkGraphEdge {
+  from: string;
+  to: string;
+  kind: string;
+  count: number;
+  async: boolean;
+  evidence: { kind: "goal" | "task" | "actor" | "coordination"; id: string }[];
+}
+
+export interface GoalTaskGraph {
+  nodes: WorkGraphNode[];
+  edges: WorkGraphEdge[];
+  knownTotal: number;
+  omitted: number;
+  omittedEdges: number;
+  unlinkedTasks: number;
+  incomplete: boolean;
+}
+
+export interface CollaborationGraphNode {
+  id: string;
+  kind: "actor" | "team";
+  label: string | null;
+  state: string | null;
+  teamId: string | null;
+}
+
+export interface CollaborationGraphEdge extends WorkGraphEdge {
+  kinds: { kind: string; count: number }[];
+}
+
+export interface CollaborationGraph {
+  nodes: CollaborationGraphNode[];
+  edges: CollaborationGraphEdge[];
+  knownTotal: number;
+  omitted: number;
+  omittedEdges: number;
+  unplacedObservations: number;
+  incomplete: boolean;
+}
 
 export interface WorkOverviewTask {
   id: string;
@@ -38,6 +88,8 @@ export interface WorkOverviewModel {
   taskTotal: number;
   evidenceIncomplete: boolean;
   context: WorkOverviewContext;
+  goalTaskGraph: GoalTaskGraph;
+  collaborationGraph: CollaborationGraph;
 }
 
 function finiteTimestamp(value: unknown): number | null {
@@ -68,6 +120,104 @@ function resultArtifactId(context: ContextProjection, transformationId: string):
     && entityId(candidate.transformation) === transformationId
   ));
   return entityId(relation?.artifact) || null;
+}
+
+function projectionEntityId(ref: { id?: string } | { ref?: { sessionId?: string } } | null | undefined): string | null {
+  return entityId(ref);
+}
+
+function goalTaskGraph(work: WorkProjection): GoalTaskGraph {
+  const taskEntries = work.tasks;
+  const taskIds = new Set(taskEntries.map((entry) => entry.task.id));
+  const goalEntries = work.goals;
+  const goalIds = new Set(goalEntries.map((entry) => entry.goal.id));
+  const nodes: WorkGraphNode[] = [
+    ...goalEntries.map(({ goal }) => ({ id: goal.id, kind: "goal" as const, label: goal.title || goal.description || null, state: goal.status })),
+    ...taskEntries.map(({ task }) => ({ id: task.id, kind: "task" as const, label: task.title || task.agentPath || null, state: task.status }))
+  ];
+  const allEdges: WorkGraphEdge[] = [];
+  for (const relation of work.memberships) {
+    const relationGoalId = projectionEntityId(relation.goal);
+    const taskId = projectionEntityId(relation.task);
+    if (relationGoalId && goalIds.has(relationGoalId) && taskId && taskIds.has(taskId)) {
+      allEdges.push({ from: relationGoalId, to: taskId, kind: "membership", count: 1, async: false, evidence: [{ kind: "goal", id: relationGoalId }, { kind: "task", id: taskId }] });
+    }
+  }
+  for (const relation of work.dependencies) {
+    const from = projectionEntityId(relation.from);
+    const to = projectionEntityId(relation.to);
+    if (from && to && taskIds.has(from) && taskIds.has(to)) {
+      allEdges.push({ from, to, kind: "dependency", count: 1, async: false, evidence: [{ kind: "task", id: from }, { kind: "task", id: to }] });
+    }
+  }
+  const visibleNodes = nodes.slice(0, VISIBLE_GRAPH_NODE_LIMIT);
+  const visibleIds = new Set(visibleNodes.map((node) => node.id));
+  const edges = allEdges.filter((edge) => visibleIds.has(edge.from) && visibleIds.has(edge.to));
+  return {
+    nodes: visibleNodes,
+    edges,
+    knownTotal: nodes.length,
+    omitted: Math.max(0, nodes.length - visibleNodes.length),
+    omittedEdges: allEdges.length - edges.length,
+    unlinkedTasks: taskEntries.filter(({ task }) => !allEdges.some((edge) => edge.kind === "membership" && edge.to === task.id)).length,
+    incomplete: work.truncated || work.completeness !== "complete"
+  };
+}
+
+function collaborationGraph(execution: ExecutionProjection, coordination: CoordinationProjection): CollaborationGraph {
+  const allNodes: CollaborationGraphNode[] = execution.actors.map(({ actor }) => ({
+    id: actor.id,
+    kind: actor.kind === "team" ? "team" : "actor",
+    label: actor.name || null,
+    state: null,
+    teamId: actor.teamId || null
+  }));
+  const actorIds = new Set(allNodes.map((node) => node.id));
+  const runModes = new Map(execution.runs.map(({ ref, run }) => [projectionEntityId(ref), run.mode]));
+  const allEdges: CollaborationGraphEdge[] = [];
+  for (const relation of execution.actorMembers) {
+    const teamId = projectionEntityId(relation.team);
+    const memberId = projectionEntityId(relation.member);
+    if (teamId && memberId && actorIds.has(teamId) && actorIds.has(memberId)) {
+      allEdges.push({ from: teamId, to: memberId, kind: "member", count: 1, async: false, evidence: [{ kind: "actor", id: teamId }, { kind: "actor", id: memberId }], kinds: [{ kind: "member", count: 1 }] });
+    }
+  }
+  const observationEdges = new Map<string, CollaborationGraphEdge>();
+  let unplacedObservations = 0;
+  for (const entry of coordination.observations) {
+    const observation = entry.observation;
+    const from = observation.senderActorId || null;
+    const to = observation.recipientActorId || null;
+    if (!from || !to || !actorIds.has(from) || !actorIds.has(to)) {
+      unplacedObservations++;
+      continue;
+    }
+    const key = `${from}\u0000${to}`;
+    const asyncRecorded = observation.runId != null
+      && (runModes.get(observation.runId) === "background" || runModes.get(observation.runId) === "scheduled");
+    const edge = observationEdges.get(key) || { from, to, kind: "observation", count: 0, async: true, evidence: [], kinds: [] };
+    edge.count++;
+    edge.async = edge.async && asyncRecorded;
+    edge.evidence.push({ kind: "coordination", id: observation.id });
+    const kind = observation.kind || "unknown";
+    const kindEntry = edge.kinds.find((candidate) => candidate.kind === kind);
+    if (kindEntry) kindEntry.count++;
+    else edge.kinds.push({ kind, count: 1 });
+    observationEdges.set(key, edge);
+  }
+  allEdges.push(...observationEdges.values());
+  const visibleNodes = allNodes.slice(0, VISIBLE_GRAPH_NODE_LIMIT);
+  const visibleIds = new Set(visibleNodes.map((node) => node.id));
+  const edges = allEdges.filter((edge) => visibleIds.has(edge.from) && visibleIds.has(edge.to));
+  return {
+    nodes: visibleNodes,
+    edges,
+    knownTotal: allNodes.length,
+    omitted: Math.max(0, allNodes.length - visibleNodes.length),
+    omittedEdges: allEdges.length - edges.length,
+    unplacedObservations,
+    incomplete: coordination.truncated || coordination.completeness !== "complete"
+  };
 }
 
 type ContextResultCandidate = {
@@ -180,9 +330,10 @@ export function deriveWorkOverview(input: {
   protocol: SessionProtocolV3;
   work: WorkProjection;
   execution: ExecutionProjection;
+  coordination: CoordinationProjection;
   context: ContextProjection;
 }): WorkOverviewModel {
-  const { protocol, work, execution, context } = input;
+  const { protocol, work, execution, coordination, context } = input;
   const goalEntry = work.goals.find((entry) => !entry.goal.parentGoalId) || work.goals[0] || null;
   const goal = goalEntry?.goal || null;
   const taskRuns = new Map<string, ExecutionProjection["runs"][number]["run"][]>();
@@ -254,6 +405,8 @@ export function deriveWorkOverview(input: {
     completedTasks: tasks.filter(({ task }) => task.status === "completed").length,
     taskTotal: tasks.length,
     evidenceIncomplete: work.truncated || work.completeness !== "complete",
+    goalTaskGraph: goalTaskGraph(work),
+    collaborationGraph: collaborationGraph(execution, coordination),
     context: {
       transformationKind: transformation?.kind || (latestVersion ? "version" : null),
       resultVersionRecorded,

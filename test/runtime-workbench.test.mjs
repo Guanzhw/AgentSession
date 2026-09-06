@@ -194,7 +194,7 @@ test("Work opening is a bounded narrative over finalized v3 projections", () => 
   runtime.projections.work = projectWork(runtime.v3, { maxItems: 100 });
   runtime.projections.context = projectContext(runtime.v3, { maxItems: 100 });
   const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
-  const overview = html.match(/data-runtime-work-overview[\s\S]*?<details class="runtime-legacy-work"/)?.[0] || "";
+  const overview = html.match(/data-runtime-work-overview[\s\S]*?data-runtime-overview-end/)?.[0] || "";
   assert.match(overview, /Ship &lt;fixture&gt;/);
   assert.match(overview, /Keep the recorded result/);
   assert.match(overview, /All 1 visible tasks are completed; the recorded goal is active/);
@@ -248,7 +248,7 @@ test("Work opening chooses a newer recorded context version over an older transf
   }];
   runtime.projections.context = projectContext(runtime.v3, { maxItems: 100 });
   const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
-  const overview = html.match(/data-runtime-work-overview[\s\S]*?<details class="runtime-legacy-work"/)?.[0] || "";
+  const overview = html.match(/data-runtime-work-overview[\s\S]*?data-runtime-overview-end/)?.[0] || "";
   assert.match(overview, /context version · result version recorded/);
   assert.doesNotMatch(overview, /compaction · result version recorded/);
   assert.doesNotMatch(overview, /42 tokens after/);
@@ -266,7 +266,7 @@ test("Work opening uses recorded context ancestry before missing ordering fields
   }];
   runtime.projections.context = projectContext(runtime.v3, { maxItems: 100 });
   const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
-  const overview = html.match(/data-runtime-work-overview[\s\S]*?<details class="runtime-legacy-work"/)?.[0] || "";
+  const overview = html.match(/data-runtime-work-overview[\s\S]*?data-runtime-overview-end/)?.[0] || "";
   assert.match(overview, /compaction · result version recorded/);
   assert.doesNotMatch(overview, /The current context result cannot be ordered from recorded timestamps or sequence/);
 });
@@ -282,7 +282,7 @@ test("Work opening bounds retained context summaries and exposes complete eviden
   }];
   runtime.projections.context = projectContext(runtime.v3, { maxItems: 100 });
   const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
-  const overview = html.match(/data-runtime-work-overview[\s\S]*?<details class="runtime-legacy-work"/)?.[0] || "";
+  const overview = html.match(/data-runtime-work-overview[\s\S]*?data-runtime-overview-end/)?.[0] || "";
   assert.match(overview, /Retained context with important recorded detail/);
   assert.match(overview, /Show complete recorded context summary/);
   assert.match(overview, new RegExp(longSummary));
@@ -313,7 +313,7 @@ test("Work opening keeps context ordering uncertainty explicit", () => {
   }];
   runtime.projections.context = projectContext(runtime.v3, { maxItems: 100 });
   const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
-  const overview = html.match(/data-runtime-work-overview[\s\S]*?<details class="runtime-legacy-work"/)?.[0] || "";
+  const overview = html.match(/data-runtime-work-overview[\s\S]*?data-runtime-overview-end/)?.[0] || "";
   assert.match(overview, /The current context result cannot be ordered from recorded timestamps or sequence/);
   assert.doesNotMatch(overview, /Retain &lt;the result&gt; and discard copied history/);
 });
@@ -331,4 +331,174 @@ test("Work overflow task table repeats header and scope semantics", () => {
   const overflow = html.match(/<details class="runtime-task-overflow">[\s\S]*?<\/details>/)?.[0] || "";
   assert.match(overflow, /<thead>[\s\S]*?<th scope="col">Task<\/th>/);
   assert.match(overflow, /data-label="Owner"/);
+});
+
+test("Work opening renders separate goal-task and collaboration views", () => {
+  const runtime = fixtureRuntime();
+  const task2 = { ...runtime.v3.tasks[0], id: "task-2", title: "Review fixture", dependencies: ["task-1"], status: "running", timeCompleted: null };
+  runtime.v3.tasks = [runtime.v3.tasks[0], task2];
+  runtime.v3.goals = [{
+    id: "goal-graph", sessionId: "runtime-1", title: "Ship fixture", description: null, status: "active", taskIds: ["task-1", "task-2"],
+    parentGoalId: null, ownerActorId: null, timeCreated: 900, timeUpdated: 3000, timeCompleted: null, provenance
+  }];
+  runtime.v3.actors = [
+    { id: "team-build", sessionId: "runtime-1", kind: "team", name: "Build team", providerActorId: null, teamId: null, memberActorIds: ["agent-a"], runIds: [], sessionRef: null, provenance },
+    { id: "agent-a", sessionId: "runtime-1", kind: "agent", name: "Alice", providerActorId: null, teamId: "team-build", memberActorIds: [], runIds: [], sessionRef: null, provenance },
+    { id: "agent-b", sessionId: "runtime-1", kind: "agent", name: "Bob", providerActorId: null, teamId: null, memberActorIds: [], runIds: [], sessionRef: null, provenance }
+  ];
+  runtime.v3.coordination = [
+    { id: "observation-message-1", sessionId: "runtime-1", kind: "message", state: "delivered", timestamp: 4000, senderActorId: "agent-a", recipientActorId: "agent-b", runId: "run-1", eventId: null, turnId: null, correlationId: null, provenance },
+    { id: "observation-message-2", sessionId: "runtime-1", kind: "message", state: "delivered", timestamp: 4001, senderActorId: "agent-a", recipientActorId: "agent-b", runId: "run-1", eventId: null, turnId: null, correlationId: null, provenance }
+  ];
+  runtime.projections.work = projectWork(runtime.v3, { maxItems: 100 });
+  runtime.projections.execution = projectExecution(runtime.v3, { maxItems: 100 });
+  runtime.projections.coordination = projectCoordination(runtime.v3, { maxItems: 100 });
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  assert.match(html, /data-runtime-graph-tabs/);
+  assert.match(html, /data-runtime-graph-tab="goal"/);
+  assert.match(html, /data-runtime-graph-tab="collaboration"/);
+  assert.match(html, /data-runtime-graph-panel="goal"/);
+  assert.match(html, /recorded membership/);
+  assert.match(html, /recorded dependency/);
+  assert.match(html, /data-runtime-graph-panel="collaboration"/);
+  assert.match(html, /message ×2/);
+  assert.match(html, /recorded team member/);
+  assert.doesNotMatch(html, /runtime-legacy-work|runtime-relation-list/);
+});
+
+test("Work graphs state missing goal, actors, and unplaced observations without inventing nodes", () => {
+  const runtime = fixtureRuntime();
+  runtime.v3.goals = [];
+  runtime.v3.actors = [];
+  runtime.v3.coordination = [{
+    id: "observation-unplaced", sessionId: "runtime-1", kind: "wait", state: "started", timestamp: 4000,
+    senderActorId: null, recipientActorId: null, runId: null, eventId: null, turnId: null, correlationId: null, provenance
+  }];
+  runtime.projections.work = projectWork(runtime.v3, { maxItems: 100 });
+  runtime.projections.execution = projectExecution(runtime.v3, { maxItems: 100 });
+  runtime.projections.coordination = projectCoordination(runtime.v3, { maxItems: 100 });
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  assert.match(html, /No recorded goal; the recorded tasks are not associated with a goal/);
+  assert.match(html, /No recorded actors or teams are available/);
+  assert.match(html, /1 recorded observations have no resolvable actor on both ends/);
+  assert.match(html, /No recorded relationships connect the visible nodes/);
+});
+
+test("Collaboration graph aggregates kinds and gates async edges on recorded run mode", () => {
+  const runtime = fixtureRuntime();
+  runtime.v3.actors = [
+    { id: "team-build", sessionId: "runtime-1", kind: "team", name: "Build team", providerActorId: null, teamId: null, memberActorIds: ["agent-a"], runIds: [], sessionRef: null, provenance },
+    { id: "agent-a", sessionId: "runtime-1", kind: "agent", name: "Alice", providerActorId: null, teamId: "team-build", memberActorIds: [], runIds: [], sessionRef: null, provenance },
+    { id: "agent-b", sessionId: "runtime-1", kind: "agent", name: "Bob", providerActorId: null, teamId: null, memberActorIds: [], runIds: [], sessionRef: null, provenance }
+  ];
+  runtime.v3.agentRuns.push({ ...runtime.v3.agentRuns[0], id: "run-background", mode: "background", agent: "Alice", taskId: null, timeStart: 3500, timeEnd: null });
+  runtime.v3.coordination = [
+    { id: "observation-async-1", sessionId: "runtime-1", kind: "message", state: "delivered", timestamp: 4000, senderActorId: "agent-a", recipientActorId: "agent-b", runId: "run-background", eventId: null, turnId: null, correlationId: null, provenance },
+    { id: "observation-async-2", sessionId: "runtime-1", kind: "message", state: "delivered", timestamp: 4001, senderActorId: "agent-a", recipientActorId: "agent-b", runId: "run-background", eventId: null, turnId: null, correlationId: null, provenance },
+    { id: "observation-sync", sessionId: "runtime-1", kind: "handoff", state: "delivered", timestamp: 4002, senderActorId: "agent-b", recipientActorId: "agent-a", runId: "run-1", eventId: null, turnId: null, correlationId: null, provenance },
+    { id: "observation-unplaced", sessionId: "runtime-1", kind: "wait", state: "started", timestamp: 4003, senderActorId: "agent-a", recipientActorId: null, runId: null, eventId: null, turnId: null, correlationId: null, provenance }
+  ];
+  runtime.projections.execution = projectExecution(runtime.v3, { maxItems: 100 });
+  runtime.projections.coordination = projectCoordination(runtime.v3, { maxItems: 100 });
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  assert.match(html, /message ×2 · async by recorded run mode/);
+  assert.match(html, /data-runtime-edge-async="true"/);
+  assert.match(html, /handoff ×1/);
+  assert.match(html, /data-runtime-edge-async="false"/);
+  assert.match(html, /recorded team member/);
+  assert.match(html, /1 recorded observations have no resolvable actor on both ends/);
+  assert.match(html, /data-runtime-evidence-kind="coordination"/);
+  assert.match(html, /"coordinations"/);
+});
+
+test("Work graph views bound nodes and expose incomplete projection plus narrow-screen hooks", () => {
+  const runtime = fixtureRuntime();
+  runtime.v3.tasks = Array.from({ length: 12 }, (_, index) => ({
+    ...runtime.v3.tasks[0], id: `task-${index + 1}`, title: `Task ${index + 1}`, status: index === 11 ? "running" : "completed", timeCompleted: index === 11 ? null : 2000
+  }));
+  runtime.v3.goals = [{
+    id: "goal-bound", sessionId: "runtime-1", title: "Bounded goal", description: null, status: "active", taskIds: runtime.v3.tasks.map((task) => task.id),
+    parentGoalId: null, ownerActorId: null, timeCreated: 900, timeUpdated: 3000, timeCompleted: null, provenance
+  }];
+  runtime.v3.actors = Array.from({ length: 12 }, (_, index) => ({
+    id: `agent-${index + 1}`, sessionId: "runtime-1", kind: "agent", name: `Agent ${index + 1}`, providerActorId: null, teamId: null, memberActorIds: [], runIds: [], sessionRef: null, provenance
+  }));
+  runtime.v3.coordination = [];
+  runtime.projections.work = projectWork(runtime.v3, { maxItems: 100 });
+  runtime.projections.execution = projectExecution(runtime.v3, { maxItems: 100 });
+  runtime.projections.coordination = projectCoordination(runtime.v3, { maxItems: 100 });
+  runtime.projections.work.truncated = true;
+  runtime.projections.coordination.truncated = true;
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  const goalPanel = html.match(/data-runtime-graph-panel="goal"[\s\S]*?data-runtime-graph-panel="collaboration"/)?.[0] || "";
+  const collaborationPanel = html.match(/data-runtime-graph-panel="collaboration"[\s\S]*?data-runtime-overview-end/)?.[0] || "";
+  assert.equal((goalPanel.match(/data-runtime-graph-node/g) || []).length, 9);
+  assert.equal((collaborationPanel.match(/data-runtime-graph-node/g) || []).length, 9);
+  assert.match(html, /more nodes omitted by the nine-node bound/);
+  assert.match(html, /Projection is incomplete or truncated/);
+  assert.match(html, /data-runtime-graph-evidence/);
+  assert.match(html, /data-runtime-evidence-kind="goal"/);
+  assert.match(html, /data-runtime-evidence-kind="actor"/);
+  assert.match(html, /"goals"/);
+  assert.match(html, /"actors"/);
+  const style = readFileSync(path.join(process.cwd(), "src", "static", "style.css"), "utf8");
+  const enhancements = readFileSync(path.join(process.cwd(), "src", "static", "app", "enhancements.js"), "utf8");
+  assert.match(style, /\.runtime-graph-canvas \{ display: grid; \}/);
+  assert.match(style, /\.runtime-graph-edge-list \{ display: none; \}/);
+  assert.match(style, /\.runtime-graph-relationship-list \{ display: grid; margin-top: 12px; \}/);
+  assert.match(enhancements, /data-runtime-graph-tabs/);
+  assert.match(enhancements, /setAttribute\("role", "tablist"\)/);
+  assert.match(enhancements, /setAttribute\("role", "tabpanel"\)/);
+  assert.match(enhancements, /ArrowDown|ArrowRight/);
+});
+
+test("Work graph SSR keeps both named regions readable and JavaScript owns tab semantics", () => {
+  const runtime = fixtureRuntime();
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  const structure = html.match(/<section class="runtime-work-structure"[\s\S]*?<\/section>/)?.[0] || "";
+  assert.match(structure, /class="runtime-graph-tabs" hidden/);
+  assert.doesNotMatch(structure, /class="runtime-graph-tabs"[^>]*role="tablist"/);
+  assert.doesNotMatch(structure, /data-runtime-graph-panel="goal"[^>]*role="tabpanel"/);
+  assert.doesNotMatch(structure, /data-runtime-graph-panel="collaboration"[^>]*role="tabpanel"/);
+  assert.match(structure, /role="region"[^>]*data-runtime-graph-panel="goal"/);
+  assert.match(structure, /role="region"[^>]*data-runtime-graph-panel="collaboration"/);
+  assert.match(structure, /aria-label="Goal to tasks"/);
+  assert.match(structure, /aria-label="Agent collaboration"/);
+});
+
+test("Goal graph includes multiple recorded goals and applies membership across roots", () => {
+  const runtime = fixtureRuntime();
+  runtime.v3.tasks = [
+    { ...runtime.v3.tasks[0], id: "task-root", title: "Root task" },
+    { ...runtime.v3.tasks[0], id: "task-unlinked", title: "Unlinked task", status: "running", timeCompleted: null }
+  ];
+  runtime.v3.goals = [
+    { id: "goal-root", sessionId: "runtime-1", title: "Root goal", description: null, status: "active", taskIds: ["task-root"], parentGoalId: null, ownerActorId: null, timeCreated: 900, timeUpdated: 3000, timeCompleted: null, provenance },
+    { id: "goal-child", sessionId: "runtime-1", title: "Child goal", description: null, status: "active", taskIds: ["task-root"], parentGoalId: "goal-root", ownerActorId: null, timeCreated: 1000, timeUpdated: 3000, timeCompleted: null, provenance }
+  ];
+  runtime.projections.work = projectWork(runtime.v3, { maxItems: 100 });
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  const goalPanel = html.match(/data-runtime-graph-panel="goal"[\s\S]*?data-runtime-graph-panel="collaboration"/)?.[0] || "";
+  assert.match(goalPanel, /Root goal/);
+  assert.match(goalPanel, /Child goal/);
+  assert.match(goalPanel, /4 nodes recorded; 4 shown/);
+  assert.equal((goalPanel.match(/data-runtime-graph-edge data-runtime-edge-kind="membership"/g) || []).length, 2);
+  assert.match(goalPanel, /1 recorded tasks have no recorded membership/);
+});
+
+test("Narrow graph rendering retains task nodes when there are no relationships", () => {
+  const runtime = fixtureRuntime();
+  runtime.v3.goals = [];
+  runtime.v3.actors = [];
+  runtime.v3.coordination = [];
+  runtime.projections.work = projectWork(runtime.v3, { maxItems: 100 });
+  runtime.projections.execution = projectExecution(runtime.v3, { maxItems: 100 });
+  runtime.projections.coordination = projectCoordination(runtime.v3, { maxItems: 100 });
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  const goalPanel = html.match(/data-runtime-graph-panel="goal"[\s\S]*?data-runtime-graph-panel="collaboration"/)?.[0] || "";
+  assert.match(goalPanel, /data-runtime-node-kind="task"/);
+  assert.match(goalPanel, /No recorded relationships connect the visible nodes/);
+  assert.match(goalPanel, /data-runtime-graph-relationships="goal"/);
+  const style = readFileSync(path.join(process.cwd(), "src", "static", "style.css"), "utf8");
+  assert.match(style, /@media \(max-width: 820px\) \{[\s\S]*?\.runtime-graph-canvas \{ display: grid; \}[\s\S]*?\.runtime-graph-edge-list \{ display: none; \}/);
 });

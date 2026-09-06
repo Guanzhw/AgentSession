@@ -5489,6 +5489,39 @@ pre code.hljs {
 .runtime-progress-track { height: 5px; margin-top: 12px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--border-color) 70%, transparent); }
 .runtime-progress-track span { display: block; height: 100%; border-radius: inherit; background: var(--accent-color); }
 .runtime-progress-note { margin: 8px 0 0; }
+.runtime-work-structure { min-width: 0; }
+.runtime-graph-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; border-bottom: 1px solid var(--border-color); }
+.runtime-graph-tabs [role="tab"] { min-height: 34px; padding: 7px 10px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-muted); cursor: pointer; font: inherit; font-size: 12px; }
+.runtime-graph-tabs [role="tab"][aria-selected="true"] { border-bottom-color: var(--accent-color); color: var(--accent-color); }
+.runtime-graph-tabs [role="tab"]:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
+.runtime-graph-panels { min-width: 0; }
+.runtime-graph-panel { min-width: 0; padding-top: 14px; }
+.runtime-graph-panel[hidden] { display: none; }
+.runtime-graph-panel h4 { margin: 0; font-size: 15px; }
+.runtime-graph-description { margin: 5px 0 0; color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
+.runtime-graph-canvas { display: grid; gap: 12px; margin-top: 12px; padding: 12px; border: 1px solid var(--border-color); background: var(--bg-secondary); }
+.runtime-graph-node-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.runtime-graph-node { display: grid; gap: 5px; min-width: 0; padding: 9px; border: 1px solid var(--border-color); border-left: 3px solid var(--accent-color); background: var(--bg-primary); }
+.runtime-graph-node-goal { border-left-color: var(--warm-color, #9b673d); }
+.runtime-graph-node-team { border-left-color: var(--warm-color, #9b673d); }
+.runtime-graph-node strong { min-width: 0; overflow-wrap: anywhere; }
+.runtime-graph-node > span { color: var(--text-muted); font-size: 11px; }
+.runtime-graph-edge-list,
+.runtime-graph-relationship-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.runtime-graph-edge { display: grid; grid-template-columns: minmax(0, 1fr) max-content minmax(0, 1fr) minmax(0, 1.1fr); gap: 8px; align-items: center; min-width: 0; padding: 7px 8px; border-left: 2px solid var(--accent-color); background: var(--bg-primary); font-size: 11px; }
+.runtime-graph-edge > span { min-width: 0; overflow-wrap: anywhere; }
+.runtime-graph-edge small { min-width: 0; color: var(--text-muted); overflow-wrap: anywhere; }
+.runtime-graph-edge-async { border-left-style: dashed; }
+.runtime-graph-relationship-list { display: none; }
+.runtime-graph-edge > .runtime-graph-evidence,
+.runtime-graph-relationship-list .runtime-graph-evidence { grid-column: 1 / -1; }
+.runtime-graph-relationship-list li { display: grid; grid-template-columns: minmax(0, 1fr) max-content minmax(0, 1fr); gap: 8px; align-items: center; min-width: 0; padding: 9px; border: 1px solid var(--border-color); background: var(--bg-secondary); font-size: 12px; }
+.runtime-graph-relationship-list strong { min-width: 0; overflow-wrap: anywhere; }
+.runtime-graph-relationship-list small { grid-column: 1 / -1; color: var(--text-muted); overflow-wrap: anywhere; }
+.runtime-graph-bound { margin: 10px 0 0; }
+.runtime-graph-view-all { display: inline-block; margin-top: 10px; color: var(--accent-color); font-size: 12px; }
+.runtime-graph-view-all[type="button"] { border: 0; padding: 0; background: transparent; cursor: pointer; font: inherit; }
+.runtime-graph-view-all:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
 .runtime-work-overview-grid { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.5fr); gap: 18px; align-items: start; }
 .runtime-work-context { padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); }
 .runtime-work-context .runtime-overview-section-heading { display: block; }
@@ -5512,11 +5545,8 @@ pre code.hljs {
 .runtime-overview-task-table tbody th small,
 .runtime-overview-task-table td small { display: block; margin-top: 4px; color: var(--text-muted); font-size: 10px; }
 .runtime-task-overflow { margin-top: 10px; }
-.runtime-task-overflow > summary,
-.runtime-legacy-work > summary { cursor: pointer; color: var(--accent-color); font-size: 12px; }
+.runtime-task-overflow > summary { cursor: pointer; color: var(--accent-color); font-size: 12px; }
 .runtime-task-overflow .runtime-overview-task-table { margin-top: 8px; }
-.runtime-legacy-work { margin-top: 2px; border-top: 1px solid var(--border-color); padding-top: 14px; }
-.runtime-legacy-work > .runtime-lens { margin-top: 14px; }
 .runtime-projection-overview { display: flex; flex-wrap: wrap; gap: 7px; margin: 14px 0; color: var(--text-muted); font-size: 11px; }
 .runtime-projection-overview span, .runtime-evidence-status span { padding: 7px 9px; border: 1px solid var(--border-color); border-radius: 7px; background: var(--bg-secondary); }
 .runtime-projection-group { margin-top: 16px; }
@@ -5526,8 +5556,7 @@ pre code.hljs {
 .runtime-projection-group li.runtime-card strong { min-width: 0; overflow-wrap: anywhere; }
 .runtime-projection-group li.runtime-card > span { color: var(--text-muted); font-size: 11px; }
 .runtime-projection-group li.runtime-card .runtime-evidence-trigger { margin-left: auto; }
-.runtime-relation-list li { overflow-wrap: anywhere; color: var(--text-secondary); font-size: 12px; }
-.runtime-relation-list small, .runtime-origin-list small { color: var(--text-muted); }
+.runtime-origin-list small { color: var(--text-muted); }
 .runtime-usage-summary { margin-top: 16px; padding: 11px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); }
 .runtime-usage-summary h3 { margin: 0; font-size: 13px; }
 .runtime-usage-summary p, .runtime-usage-summary small { display: block; margin: 7px 0 0; color: var(--text-muted); overflow-wrap: anywhere; }
@@ -5608,6 +5637,10 @@ pre code.hljs {
   .runtime-capabilities ul { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .runtime-map-columns { grid-template-columns: 1fr; }
   .runtime-work-overview-grid { grid-template-columns: 1fr; }
+  .runtime-graph-node-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .runtime-graph-canvas { display: grid; }
+  .runtime-graph-edge-list { display: none; }
+  .runtime-graph-relationship-list { display: grid; margin-top: 12px; }
   .runtime-swimlane-scale { margin-left: 140px; }
 }
 
@@ -5625,6 +5658,9 @@ pre code.hljs {
   .runtime-session-edge > span:nth-of-type(4) { grid-column: 2; }
   .runtime-header, .runtime-section-heading { display: block; }
   .runtime-overview-section-heading { display: block; }
+  .runtime-graph-tabs { display: grid; grid-template-columns: 1fr 1fr; }
+  .runtime-graph-tabs [role="tab"] { min-height: 44px; }
+  .runtime-graph-node-list { grid-template-columns: 1fr; }
   .runtime-progress-ratio { display: block; margin-top: 8px; }
   .runtime-overview-task-table,
   .runtime-overview-task-table tbody,

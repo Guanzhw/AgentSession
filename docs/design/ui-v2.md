@@ -60,8 +60,25 @@ ordering stays explicit. Partial/truncated asset counts
 identify their observed lower-bound status. The existing Work Graph lenses
 remain available in a collapsed legacy evidence disclosure during P3a.
 Evidence-bounded decision record: `.agents/decisions/implemented/2026-09-06-ui-v2-p3a-work-overview.md`.
-P3b remains the goal-task and agent-collaboration graph switch plus removal of
-the old raw relation presentation.
+P3b subsequently replaces that legacy disclosure with bounded goal-task and
+agent-collaboration views.
+
+## P3b implementation status (2026-09-07)
+
+The Work structure section now provides independent SSR-readable and keyboard-
+usable Goal → tasks and Agent collaboration views. Each view is derived from
+finalized v3 Work/Execution/Coordination projections, caps visible nodes at
+nine, reports known/omitted/incomplete evidence, and retains that bounded node
+list while switching relationships to a stacked list at narrow widths. All
+projected goals (including child/multiple roots) participate in known totals
+and membership edges. Goal membership and dependency edges remain separate
+from actor/team nodes; coordination edges aggregate recorded kinds and counts,
+and use dashed styling only when the observation's recorded run mode is
+`background` or `scheduled`. The P3a raw Work Graph disclosure is removed;
+each node and bounded relationship exposes Evidence actions into raw goal,
+task, actor, and coordination records. Execution, Coordination, Context, and
+Evidence remain available as evidence lenses. See
+`.agents/decisions/implemented/2026-09-07-ui-v2-p3b-work-graphs.md`.
 
 > 状态:`proposed` · 作者:UI planner · 日期:2026-09
 > 本文是**信息设计**:展示哪些信息、层级如何、什么默认隐藏、状态如何呈现。

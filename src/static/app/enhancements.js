@@ -150,6 +150,79 @@ export function initEnhancements({ ft, formatText, showToast, escapeHtmlClient }
   });
 })();
 
+// ── Runtime Work graph views ─────────────────────────────────────────
+
+(function initRuntimeGraphTabs() {
+  document.querySelectorAll("[data-runtime-graph-tabs]").forEach(function (graphTabs) {
+    const buttons = Array.from(graphTabs.querySelectorAll("[data-runtime-graph-tab]"));
+    const root = graphTabs.closest("[data-runtime-root]");
+    const panels = Array.from(root?.querySelectorAll("[data-runtime-graph-panel]") || []);
+    if (!buttons.length || !panels.length) return;
+
+    graphTabs.removeAttribute("hidden");
+    graphTabs.setAttribute("role", "tablist");
+    graphTabs.setAttribute("aria-label", graphTabs.dataset.runtimeGraphLabel || "");
+    buttons.forEach((button, index) => {
+      button.setAttribute("role", "tab");
+      button.setAttribute("aria-controls", button.dataset.runtimeGraphPanelId || "");
+      button.setAttribute("aria-selected", index === 0 ? "true" : "false");
+      button.setAttribute("tabindex", index === 0 ? "0" : "-1");
+    });
+    panels.forEach((panel) => {
+      const button = buttons.find((candidate) => candidate.getAttribute("aria-controls") === panel.id);
+      panel.setAttribute("role", "tabpanel");
+      if (button) panel.setAttribute("aria-labelledby", button.id);
+    });
+
+    function select(button, focus) {
+      const targetId = button.getAttribute("aria-controls");
+      buttons.forEach((candidate) => {
+        const selected = candidate === button;
+        candidate.setAttribute("aria-selected", selected ? "true" : "false");
+        candidate.setAttribute("tabindex", selected ? "0" : "-1");
+      });
+      panels.forEach((panel) => {
+        if (panel.id === targetId) panel.removeAttribute("hidden");
+        else panel.setAttribute("hidden", "");
+      });
+      if (focus) button.focus();
+    }
+
+    const initiallySelected = buttons.find((button) => button.getAttribute("aria-selected") === "true") || buttons[0];
+    panels.forEach((panel) => {
+      if (panel.id !== initiallySelected.getAttribute("aria-controls")) panel.setAttribute("hidden", "");
+    });
+    graphTabs.addEventListener("click", function (event) {
+      const button = event.target.closest("[data-runtime-graph-tab]");
+      if (!button) return;
+      event.preventDefault();
+      select(button, true);
+    });
+    graphTabs.addEventListener("keydown", function (event) {
+      const current = buttons.indexOf(document.activeElement);
+      if (current < 0) return;
+      let next = current;
+      if (event.key === "ArrowRight" || event.key === "ArrowDown") next = (current + 1) % buttons.length;
+      else if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = (current - 1 + buttons.length) % buttons.length;
+      else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = buttons.length - 1;
+      else return;
+      event.preventDefault();
+      select(buttons[next], true);
+    });
+  });
+
+  document.addEventListener("click", function (event) {
+    const viewAll = event.target.closest("[data-runtime-goal-view-all]");
+    if (!viewAll) return;
+    event.preventDefault();
+    const overflow = viewAll.closest("[data-runtime-work-overview]")?.querySelector(".runtime-task-overflow");
+    if (!overflow) return;
+    overflow.open = true;
+    requestAnimationFrame(() => overflow.scrollIntoView({ block: "start", behavior: "instant" }));
+  });
+})();
+
 // ── Token Explorer interactivity ───────────────────────────────────────
 
 (function initTokenExplorer() {

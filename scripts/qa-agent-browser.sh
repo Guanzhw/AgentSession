@@ -654,20 +654,23 @@ if [[ "$runtime_work_visible" != "true" ]]; then
   exit 1
 fi
 
-# P3a guarded Work opening: providers without finalized v3 work evidence keep
+# P3b guarded Work opening: providers without finalized v3 work evidence keep
 # the explicit unavailable state, while available overviews expose the
-# narrative, progress rule, current context result entry point, and bounded
-# task surface before legacy Work Graph evidence.
+# narrative, progress rule, current context result entry point, bounded task
+# surface, and two bounded graph views.
 runtime_overview_count="$(read_ab "count P3a work overviews" get count "#tab-work .runtime-workbench[data-runtime-available='true'] [data-runtime-work-overview]")"
 if [[ "$runtime_overview_count" == "1" ]]; then
-  p3a_overview_state="$(read_ab "verify P3a work overview" eval "(() => { const overview = document.querySelector('#tab-work [data-runtime-work-overview]'); const legacy = overview?.querySelector('.runtime-legacy-work'); const firstTask = overview?.querySelector('[data-runtime-overview-task]'); const contextHeading = overview?.querySelector('[data-runtime-context-heading]'); const headingCopy = contextHeading?.querySelector(':scope > div'); const coverage = contextHeading?.querySelector('.runtime-completeness'); const copyRect = headingCopy?.getBoundingClientRect(); const coverageRect = coverage?.getBoundingClientRect(); const headingCoverageSeparated = !copyRect || !coverageRect || coverageRect.top >= copyRect.bottom; return { goal: !!overview?.querySelector('.runtime-work-goal'), progressRule: (overview?.querySelector('.runtime-progress-track')?.getBoundingClientRect().height || 0) === 5, context: !!overview?.querySelector('.runtime-context-inspector-link[data-detail-tab=tab-conversation]'), contextHeading: !!contextHeading, contextCoverageSeparated: headingCoverageSeparated, task: !!firstTask, legacyBelow: !!legacy }; })()" | tr -d '[:space:]')"
+  p3a_overview_state="$(read_ab "verify P3b work overview" eval "(() => { const overview = document.querySelector('#tab-work [data-runtime-work-overview]'); const firstTask = overview?.querySelector('[data-runtime-overview-task]'); const contextHeading = overview?.querySelector('[data-runtime-context-heading]'); const headingCopy = contextHeading?.querySelector(':scope > div'); const coverage = contextHeading?.querySelector('.runtime-completeness'); const copyRect = headingCopy?.getBoundingClientRect(); const coverageRect = coverage?.getBoundingClientRect(); const headingCoverageSeparated = !copyRect || !coverageRect || coverageRect.top >= copyRect.bottom; const goalGraph = overview?.querySelector('[data-runtime-graph-panel=goal]'); const collaborationGraph = overview?.querySelector('[data-runtime-graph-panel=collaboration]'); const graphNodesBounded = [...overview?.querySelectorAll('[data-runtime-graph-panel]') || []].every((panel) => panel.querySelectorAll('[data-runtime-graph-node]').length <= 9); return { goal: !!overview?.querySelector('.runtime-work-goal'), progressRule: (overview?.querySelector('.runtime-progress-track')?.getBoundingClientRect().height || 0) === 5, context: !!overview?.querySelector('.runtime-context-inspector-link[data-detail-tab=tab-conversation]'), contextHeading: !!contextHeading, contextCoverageSeparated: headingCoverageSeparated, task: !!firstTask, goalGraph: !!goalGraph, collaborationGraph: !!collaborationGraph, graphNodesBounded, legacyRemoved: !overview?.querySelector('.runtime-legacy-work') }; })()" | tr -d '[:space:]')"
   assert_contains "P3a goal narrative" "$p3a_overview_state" '"goal":true'
   assert_contains "P3a five-pixel progress rule" "$p3a_overview_state" '"progressRule":true'
   assert_contains "P3a Conversation inspector entry point" "$p3a_overview_state" '"context":true'
   assert_contains "P3a context heading layout" "$p3a_overview_state" '"contextHeading":true'
   assert_contains "P3a context coverage layout" "$p3a_overview_state" '"contextCoverageSeparated":true'
   assert_contains "P3a bounded task table" "$p3a_overview_state" '"task":true'
-  assert_contains "P3a legacy Work evidence" "$p3a_overview_state" '"legacyBelow":true'
+  assert_contains "P3b goal/task graph" "$p3a_overview_state" '"goalGraph":true'
+  assert_contains "P3b collaboration graph" "$p3a_overview_state" '"collaborationGraph":true'
+  assert_contains "P3b graph node bound" "$p3a_overview_state" '"graphNodesBounded":true'
+  assert_contains "P3b legacy relations removed" "$p3a_overview_state" '"legacyRemoved":true'
 fi
 
 ab "open Evidence lens" click "#tab-work [data-runtime-lens='evidence']" >/dev/null

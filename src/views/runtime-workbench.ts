@@ -206,11 +206,105 @@ function renderOverviewTaskTable(model: ReturnType<typeof deriveWorkOverview>) {
   return `<section class="runtime-work-tasks" aria-labelledby="runtime-work-tasks-title"><div class="runtime-overview-section-heading"><div><h3 id="runtime-work-tasks-title">${t("runtime.task_table_title")}</h3><p>${t("runtime.task_table_description")}</p></div></div>${model.taskTotal ? `<table class="runtime-overview-task-table">${renderOverviewTaskHead()}<tbody>${rows}</tbody></table>${hidden}` : `<p class="runtime-empty">${t("runtime.no_tasks_recorded")}</p>`}</section>`;
 }
 
+function graphNodeLabel(node: { label: string | null; kind: string }, index: number) {
+  if (node.label) return node.label;
+  if (node.kind === "goal") return t("runtime.goal_not_recorded");
+  return `${t("runtime.task")} ${index + 1}`;
+}
+
+function renderGraphBoundNotice(graph: { knownTotal: number; nodes: unknown[]; omitted: number; omittedEdges: number; incomplete: boolean }, type: "goal" | "agent") {
+  const parts = [t("runtime.graph_nodes_known", { known: count(graph.knownTotal), visible: count(graph.nodes.length) })];
+  if (graph.omitted) parts.push(t("runtime.graph_nodes_omitted", { count: count(graph.omitted) }));
+  if (graph.omittedEdges) parts.push(t("runtime.graph_edges_omitted", { count: count(graph.omittedEdges) }));
+  if (graph.incomplete) parts.push(t("runtime.graph_projection_incomplete"));
+  return `<p class="runtime-notice runtime-graph-bound" data-runtime-${type}-graph-bound>${escapeHtml(parts.join(" · "))}</p>`;
+}
+
+function renderGraphEvidence(edge: { evidence: { kind: string; id: string }[] }) {
+  const evidence = [...new Map(edge.evidence.map((item) => [`${item.kind}:${item.id}`, item])).values()];
+  if (!evidence.length) return "";
+  return `<details class="runtime-graph-evidence" data-runtime-graph-evidence><summary>${escapeHtml(t("runtime.graph_evidence_count", { count: count(evidence.length) }))}</summary><div>${evidence.map((item) => evidenceButton(item.kind, item.id)).join("")}</div></details>`;
+}
+
+function renderGoalTaskGraph(model: ReturnType<typeof deriveWorkOverview>) {
+  const graph = model.goalTaskGraph;
+  const nodeIndex = new Map(graph.nodes.map((node, index) => [node.id, index]));
+  const nodeFor = (id: string) => {
+    const index = nodeIndex.get(id);
+    return { node: index === undefined ? { label: null, kind: "task" } : graph.nodes[index], index: index ?? 0 };
+  };
+  const nodeMarkup = graph.nodes.map((node, index) => `<article class="runtime-graph-node runtime-graph-node-${escapeHtml(node.kind)}" data-runtime-graph-node data-runtime-node-kind="${escapeHtml(node.kind)}" data-runtime-node-id="${escapeHtml(node.id)}" aria-label="${escapeHtml(`${graphNodeLabel(node, index)} · ${statusLabel(node.state)}`)}"><strong>${escapeHtml(graphNodeLabel(node, index))}</strong><span class="runtime-status runtime-status-${escapeHtml(statusClass(node.state))}">${escapeHtml(statusLabel(node.state))}</span>${evidenceButton(node.kind, node.id, t("runtime.evidence"))}</article>`).join("");
+  const edgeMarkup = graph.edges.map((edge) => {
+    const from = nodeFor(edge.from);
+    const to = nodeFor(edge.to);
+    return `<li class="runtime-graph-edge" data-runtime-graph-edge data-runtime-edge-kind="${escapeHtml(edge.kind)}"><span>${escapeHtml(graphNodeLabel(from.node, from.index))}</span><span aria-hidden="true">→</span><span>${escapeHtml(graphNodeLabel(to.node, to.index))}</span><small>${escapeHtml(t(edge.kind === "membership" ? "runtime.graph_membership" : "runtime.graph_dependency"))}</small>${renderGraphEvidence(edge)}</li>`;
+  }).join("");
+  const relationshipMarkup = graph.edges.map((edge) => {
+    const from = nodeFor(edge.from);
+    const to = nodeFor(edge.to);
+    return `<li data-runtime-relationship data-runtime-edge-kind="${escapeHtml(edge.kind)}"><strong>${escapeHtml(graphNodeLabel(from.node, from.index))}</strong><span aria-hidden="true">→</span><strong>${escapeHtml(graphNodeLabel(to.node, to.index))}</strong><small>${escapeHtml(t(edge.kind === "membership" ? "runtime.graph_membership" : "runtime.graph_dependency"))}</small>${renderGraphEvidence(edge)}</li>`;
+  }).join("");
+  const noGoal = !model.goal;
+  const empty = !graph.nodes.length
+    ? `<p class="runtime-empty">${escapeHtml(t(noGoal ? "runtime.graph_no_goal_or_tasks" : "runtime.graph_no_goal_tasks"))}</p>`
+    : noGoal
+      ? `<p class="runtime-notice">${escapeHtml(t("runtime.graph_tasks_without_goal"))}</p>`
+      : graph.unlinkedTasks
+        ? `<p class="runtime-notice">${escapeHtml(t("runtime.graph_unlinked_tasks", { count: count(graph.unlinkedTasks) }))}</p>`
+        : "";
+  const viewAll = graph.omitted
+    ? `<button type="button" class="runtime-graph-view-all" data-runtime-goal-view-all>${escapeHtml(t("runtime.graph_view_all_tasks"))}</button>`
+    : "";
+  return `<div id="runtime-graph-panel-goal" class="runtime-graph-panel" role="region" aria-label="${escapeHtml(t("runtime.goal_task_graph_title"))}" data-runtime-graph-panel="goal"><h4>${t("runtime.goal_task_graph_title")}</h4><p class="runtime-graph-description">${t("runtime.goal_task_graph_description")}</p>${empty}<div class="runtime-graph-canvas" role="group" data-runtime-graph-canvas="goal" aria-label="${escapeHtml(t("runtime.goal_task_graph_label"))}"><div class="runtime-graph-node-list">${nodeMarkup}</div><ul class="runtime-graph-edge-list">${edgeMarkup || `<li class="runtime-empty">${escapeHtml(t("runtime.graph_no_edges"))}</li>`}</ul></div><ul class="runtime-graph-relationship-list" data-runtime-graph-relationships="goal">${relationshipMarkup || `<li class="runtime-empty">${escapeHtml(t("runtime.graph_no_edges"))}</li>`}</ul>${renderGraphBoundNotice(graph, "goal")}${viewAll}</div>`;
+}
+
+function collaborationNodeLabel(node: { label: string | null; kind: string }, index: number) {
+  if (node.label) return node.label;
+  return `${t(node.kind === "team" ? "runtime.team" : "runtime.agent")} ${index + 1}`;
+}
+
+function renderCollaborationGraph(model: ReturnType<typeof deriveWorkOverview>) {
+  const graph = model.collaborationGraph;
+  const nodeIndex = new Map(graph.nodes.map((node, index) => [node.id, index]));
+  const nodeFor = (id: string) => {
+    const index = nodeIndex.get(id);
+    return { node: index === undefined ? { label: null, kind: "actor" } : graph.nodes[index], index: index ?? 0 };
+  };
+  const nodeMarkup = graph.nodes.map((node, index) => { const teamGroup = node.kind === "team" ? node.id : node.teamId; return `<article class="runtime-graph-node runtime-graph-node-${escapeHtml(node.kind)}" data-runtime-graph-node data-runtime-node-kind="${escapeHtml(node.kind)}" data-runtime-node-id="${escapeHtml(node.id)}"${teamGroup ? ` data-runtime-team-group="${escapeHtml(teamGroup)}"` : ""} aria-label="${escapeHtml(collaborationNodeLabel(node, index))}"><strong>${escapeHtml(collaborationNodeLabel(node, index))}</strong><span>${escapeHtml(t(node.kind === "team" ? "runtime.team" : "runtime.agent"))}</span>${evidenceButton("actor", node.id, t("runtime.evidence"))}</article>`; }).join("");
+  const edgeLabel = (edge: (typeof graph.edges)[number]) => edge.kind === "member"
+    ? t("runtime.graph_member")
+    : edge.kinds.map(({ kind, count: value }) => `${kind} ×${count(value)}`).join(" · ");
+  const renderNode = (id: string) => {
+    const index = nodeIndex.get(id);
+    return index === undefined ? null : { node: graph.nodes[index], index };
+  };
+  const edgeMarkup = graph.edges.map((edge) => {
+    const from = renderNode(edge.from);
+    const to = renderNode(edge.to);
+    if (!from || !to) return "";
+    return `<li class="runtime-graph-edge${edge.async ? " runtime-graph-edge-async" : ""}" data-runtime-graph-edge data-runtime-edge-kind="${escapeHtml(edge.kind)}" data-runtime-edge-async="${edge.async ? "true" : "false"}"><span>${escapeHtml(collaborationNodeLabel(from.node, from.index))}</span><span aria-hidden="true">→</span><span>${escapeHtml(collaborationNodeLabel(to.node, to.index))}</span><small>${escapeHtml(edgeLabel(edge))}${edge.async ? ` · ${escapeHtml(t("runtime.graph_async_recorded"))}` : ""}</small>${renderGraphEvidence(edge)}</li>`;
+  }).join("");
+  const relationshipMarkup = graph.edges.map((edge) => {
+    const from = renderNode(edge.from);
+    const to = renderNode(edge.to);
+    if (!from || !to) return "";
+    return `<li data-runtime-relationship data-runtime-edge-kind="${escapeHtml(edge.kind)}" data-runtime-edge-async="${edge.async ? "true" : "false"}"><strong>${escapeHtml(collaborationNodeLabel(from.node, from.index))}</strong><span aria-hidden="true">→</span><strong>${escapeHtml(collaborationNodeLabel(to.node, to.index))}</strong><small>${escapeHtml(edgeLabel(edge))}${edge.async ? ` · ${escapeHtml(t("runtime.graph_async_recorded"))}` : ""}</small>${renderGraphEvidence(edge)}</li>`;
+  }).join("");
+  const empty = !graph.nodes.length ? `<p class="runtime-empty">${escapeHtml(t("runtime.graph_no_actors"))}</p>` : !graph.edges.length ? `<p class="runtime-notice">${escapeHtml(t("runtime.graph_no_edges"))}</p>` : "";
+  const unplaced = graph.unplacedObservations ? `<p class="runtime-notice" data-runtime-unplaced-observations>${escapeHtml(t("runtime.graph_unplaced_observations", { count: count(graph.unplacedObservations) }))}</p>` : "";
+  const viewAll = graph.omitted ? `<a class="runtime-graph-view-all" data-runtime-agent-view-all data-detail-tab="tab-conversation" href="#tab-conversation">${escapeHtml(t("runtime.graph_view_all_agents"))}</a>` : "";
+  return `<div id="runtime-graph-panel-collaboration" class="runtime-graph-panel" role="region" aria-label="${escapeHtml(t("runtime.collaboration_graph_title"))}" data-runtime-graph-panel="collaboration"><h4>${t("runtime.collaboration_graph_title")}</h4><p class="runtime-graph-description">${t("runtime.collaboration_graph_description")}</p>${empty}${unplaced}<div class="runtime-graph-canvas" role="group" data-runtime-graph-canvas="collaboration" aria-label="${escapeHtml(t("runtime.collaboration_graph_label"))}"><div class="runtime-graph-node-list">${nodeMarkup}</div><ul class="runtime-graph-edge-list">${edgeMarkup || `<li class="runtime-empty">${escapeHtml(t("runtime.graph_no_edges"))}</li>`}</ul></div><ul class="runtime-graph-relationship-list" data-runtime-graph-relationships="collaboration">${relationshipMarkup || `<li class="runtime-empty">${escapeHtml(t("runtime.graph_no_edges"))}</li>`}</ul>${renderGraphBoundNotice(graph, "agent")}${viewAll}</div>`;
+}
+
+function renderWorkStructure(model: ReturnType<typeof deriveWorkOverview>) {
+  return `<section class="runtime-work-structure" aria-labelledby="runtime-work-structure-title"><div class="runtime-overview-section-heading"><div><h3 id="runtime-work-structure-title">${t("runtime.work_structure_title")}</h3><p>${t("runtime.work_structure_description")}</p></div></div><div class="runtime-graph-tabs" hidden data-runtime-graph-tabs data-runtime-graph-label="${escapeHtml(t("runtime.graph_views_label"))}"><button id="runtime-graph-tab-goal" type="button" data-runtime-graph-tab="goal" data-runtime-graph-panel-id="runtime-graph-panel-goal">${t("runtime.goal_task_graph_tab")}</button><button id="runtime-graph-tab-collaboration" type="button" data-runtime-graph-tab="collaboration" data-runtime-graph-panel-id="runtime-graph-panel-collaboration">${t("runtime.collaboration_graph_tab")}</button></div><div class="runtime-graph-panels">${renderGoalTaskGraph(model)}${renderCollaborationGraph(model)}</div></section>`;
+}
+
 function renderWorkOverview(data: RuntimeData) {
   const projections = data.projections;
   const protocol = data.v3;
   if (!protocol || !projections) return `<section class="runtime-work-overview" data-runtime-work-overview><p class="runtime-empty">${escapeHtml(t("runtime.work_overview_unavailable"))}</p></section>`;
-  const model = deriveWorkOverview({ protocol, work: projections.work, execution: projections.execution, context: projections.context });
+  const model = deriveWorkOverview({ protocol, work: projections.work, execution: projections.execution, coordination: projections.coordination, context: projections.context });
   const goal = model.goal;
   const recordedGoalTitle = goal?.title || goal?.description || t("runtime.goal_not_recorded");
   const recordedGoalDescription = goal?.title && goal.description ? goal.description : "";
@@ -233,27 +327,7 @@ function renderWorkOverview(data: RuntimeData) {
           : t("runtime.progress_all_visible_no_goal", { total: count(model.taskTotal) })
         : t("runtime.progress_incomplete", { completed: count(model.completedTasks), total: count(model.taskTotal) });
   const boundedNote = model.evidenceIncomplete ? `<p class="runtime-notice runtime-progress-note">${escapeHtml(t("runtime.progress_evidence_incomplete"))}</p>` : "";
-  return `<section class="runtime-work-overview" data-runtime-work-overview aria-labelledby="runtime-work-overview-title"><div class="runtime-work-goal"><div class="runtime-overview-section-heading"><div><h3 id="runtime-work-overview-title">${t("runtime.goal_title")}</h3><p>${t("runtime.goal_description")}</p></div>${goal ? `<span class="runtime-status runtime-status-${escapeHtml(statusClass(goal.status))}">${escapeHtml(statusLabel(goal.status))}</span>` : ""}</div><h4>${escapeHtml(goalTitle.text)}</h4>${goalDescription ? `<p>${escapeHtml(goalDescription.text)}</p>` : ""}${fullGoalNarrative}${!goal ? `<p class="runtime-notice">${escapeHtml(t("runtime.goal_not_recorded_detail"))}</p>` : ""}</div><div class="runtime-work-progress"><div class="runtime-overview-section-heading"><div><h3>${t("runtime.progress_title")}</h3><p>${escapeHtml(progressSentence)}</p></div><strong class="runtime-progress-ratio">${escapeHtml(`${count(model.completedTasks)} / ${count(model.taskTotal)}`)}</strong></div><div class="runtime-progress-track" role="progressbar" aria-label="${escapeHtml(t("runtime.progress_title"))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${ratio}"><span style="width:${ratio}%"></span></div>${boundedNote}</div><div class="runtime-work-overview-grid">${renderContextResult(data, model)}${renderOverviewTaskTable(model)}</div><details class="runtime-legacy-work"><summary>${escapeHtml(t("runtime.legacy_work_evidence"))}</summary>${renderWorkProjection(data)}</details></section>`;
-}
-
-function renderWorkProjection(data: RuntimeData) {
-  const projection = data.projections?.work;
-  if (!projection) return `<section class="runtime-lens"><p class="runtime-empty">${t("runtime.not_recorded")}</p></section>`;
-  const goals = projection.goals || [];
-  const tasks = projection.tasks || [];
-  const relations = projection.dependencies || [];
-  const memberships = projection.memberships || [];
-  const taskRuns = projection.taskRuns || [];
-  return `<section class="runtime-lens runtime-work-lens" aria-labelledby="runtime-work-title">
-    <div class="runtime-section-heading"><div><h2 id="runtime-work-title">${t("runtime.work_title")}</h2><p>${t("runtime.work_description")}</p></div>${renderProjectionCoverage(projection)}</div>
-    <div class="runtime-projection-overview"><span>${escapeHtml(`${count(goals.length)} ${t("runtime.goals")}`)}</span><span>${escapeHtml(`${count(tasks.length)} ${t("runtime.tasks")}`)}</span><span>${escapeHtml(`${count(relations.length + memberships.length + taskRuns.length)} ${t("runtime.relations")}`)}</span></div>
-    <div class="runtime-work-list">
-      ${goals.length ? `<section class="runtime-projection-group"><h3>${t("runtime.goals")}</h3><ul>${goals.map((entry) => `<li class="runtime-card runtime-goal"><strong>${escapeHtml(entityLabel(entry.goal, projectionRefLabel(entry.ref)))}</strong><span class="runtime-status">${escapeHtml(entry.goal.status || t("runtime.unknown"))}</span></li>`).join("")}</ul></section>` : ""}
-      ${tasks.length ? `<section class="runtime-projection-group"><h3>${t("runtime.tasks")}</h3><ul>${tasks.map((entry) => `<li class="runtime-card runtime-task runtime-swimlane" data-runtime-task-id="${escapeHtml(entry.task.id)}"><strong>${escapeHtml(entityLabel(entry.task, entry.task.id))}</strong><span class="runtime-status">${escapeHtml(entry.task.status || t("runtime.unknown"))}</span>${evidenceButton("task", entry.task.id)}</li>`).join("")}</ul></section>` : ""}
-      ${relations.length || memberships.length || taskRuns.length ? `<section class="runtime-projection-group"><h3>${t("runtime.relations")}</h3><ul class="runtime-relation-list">${relations.map((relation) => `<li>${escapeHtml(`${projectionRefLabel(relation.from)} → ${projectionRefLabel(relation.to)}`)} <small>${escapeHtml(provenanceLabel(relation.provenance))}</small></li>`).join("")}${memberships.map((relation) => `<li>${escapeHtml(`${projectionRefLabel(relation.goal)} → ${projectionRefLabel(relation.task)}`)} <small>${escapeHtml(t("runtime.membership"))}</small></li>`).join("")}${taskRuns.map((relation) => `<li>${escapeHtml(`${projectionRefLabel(relation.task)} → ${projectionRefLabel(relation.run)}`)} <small>${escapeHtml(t("runtime.run"))}</small></li>`).join("")}</ul></section>` : ""}
-      ${!goals.length && !tasks.length && !relations.length && !memberships.length && !taskRuns.length ? `<p class="runtime-empty">${t("runtime.not_recorded")}</p>` : ""}
-    </div>
-  </section>`;
+  return `<section class="runtime-work-overview" data-runtime-work-overview aria-labelledby="runtime-work-overview-title"><div class="runtime-work-goal"><div class="runtime-overview-section-heading"><div><h3 id="runtime-work-overview-title">${t("runtime.goal_title")}</h3><p>${t("runtime.goal_description")}</p></div>${goal ? `<span class="runtime-status runtime-status-${escapeHtml(statusClass(goal.status))}">${escapeHtml(statusLabel(goal.status))}</span>` : ""}</div><h4>${escapeHtml(goalTitle.text)}</h4>${goalDescription ? `<p>${escapeHtml(goalDescription.text)}</p>` : ""}${fullGoalNarrative}${!goal ? `<p class="runtime-notice">${escapeHtml(t("runtime.goal_not_recorded_detail"))}</p>` : ""}</div><div class="runtime-work-progress"><div class="runtime-overview-section-heading"><div><h3>${t("runtime.progress_title")}</h3><p>${escapeHtml(progressSentence)}</p></div><strong class="runtime-progress-ratio">${escapeHtml(`${count(model.completedTasks)} / ${count(model.taskTotal)}`)}</strong></div><div class="runtime-progress-track" role="progressbar" aria-label="${escapeHtml(t("runtime.progress_title"))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${ratio}"><span style="width:${ratio}%"></span></div>${boundedNote}</div>${renderWorkStructure(model)}<div class="runtime-work-overview-grid">${renderContextResult(data, model)}${renderOverviewTaskTable(model)}</div><span data-runtime-overview-end aria-hidden="true"></span></section>`;
 }
 
 function renderExecutionProjection(data: RuntimeData) {
@@ -336,7 +410,7 @@ function renderEvidence(data: RuntimeData) {
   return `<section class="runtime-lens runtime-evidence-lens" aria-labelledby="runtime-evidence-lens-title"><div class="runtime-section-heading"><div><h2 id="runtime-evidence-lens-title">${t("runtime.evidence_lens_title")}</h2><p>${t("runtime.evidence_lens_description")}</p></div><span class="runtime-completeness">${escapeHtml(summary.completeness || t("runtime.unknown"))}</span></div><div class="runtime-evidence-status"><span>${escapeHtml(`${t("runtime.protocol_status")}: ${summary.completeness || t("runtime.unknown")}`)}</span><span>${escapeHtml(`${t("runtime.count_events")}: ${count(summary.counts?.events)}`)}</span></div>${renderEvents(data)}</section>`;
 }
 
-function renderEvidenceData(protocol: SessionProtocol | null) {
+function renderEvidenceData(protocol: SessionProtocol | null, v3: SessionProtocolV3 | null = null) {
   const initialEvents = (protocol?.events || []).slice(0, 50).map(publicEvent);
   const contextEvents = (protocol?.events || [])
     .filter((event) => event.category === "context" || String(event.normalizedKind || event.kind).startsWith("context.") || String(event.normalizedKind || event.kind).startsWith("memory."))
@@ -345,8 +419,11 @@ function renderEvidenceData(protocol: SessionProtocol | null) {
   const events = [...new Map([...initialEvents, ...contextEvents].map((event) => [event.id, event])).values()].slice(0, 100);
   return {
     events,
+    goals: (v3?.goals || []).slice(0, 100),
     tasks: (protocol?.tasks || []).slice(0, 100),
+    actors: (v3?.actors || []).slice(0, 100),
     runs: (protocol?.agentRuns || []).slice(0, 100),
+    coordinations: (v3?.coordination || []).slice(0, 100),
     artifacts: (protocol?.contextArtifacts || []).slice(0, 100),
     relationships: (protocol?.relationships || []).slice(0, 100)
   };
@@ -368,7 +445,7 @@ export function renderRuntimeWorkbench(data: RuntimeData, provider: string, sess
     <div id="runtime-lens-coordination" class="runtime-lens-panel" role="tabpanel" aria-labelledby="runtime-lens-tab-coordination" data-runtime-panel="coordination" tabindex="0" hidden>${renderCoordinationProjection(data)}</div>
     <div id="runtime-lens-context" class="runtime-lens-panel" role="tabpanel" aria-labelledby="runtime-lens-tab-context" data-runtime-panel="context" tabindex="0" hidden>${renderContextProjection(data)}</div>
     <div id="runtime-lens-evidence" class="runtime-lens-panel" role="tabpanel" aria-labelledby="runtime-lens-tab-evidence" data-runtime-panel="evidence" tabindex="0" hidden>${renderEvidence(data)}</div>
-    <script type="application/json" data-runtime-evidence>${jsonScript(renderEvidenceData(protocol))}</script>
+    <script type="application/json" data-runtime-evidence>${jsonScript(renderEvidenceData(protocol, data.v3 || null))}</script>
     <dialog class="runtime-evidence-drawer" data-runtime-drawer aria-labelledby="runtime-drawer-title"><form method="dialog"><button type="submit" class="runtime-drawer-close" aria-label="${escapeHtml(t("runtime.evidence_close"))}">×</button></form><h2 id="runtime-drawer-title">${t("runtime.evidence_title")}</h2><p data-runtime-drawer-summary></p><dl data-runtime-drawer-details></dl></dialog>
   </section>`;
 }
