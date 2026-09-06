@@ -45,6 +45,24 @@ exactly once in an explicit unplaced "Agent activity" section instead of
 being dropped or re-anchored by guess. See
 `.agents/decisions/implemented/2026-09-04-ui-v2-p2b-conversation-agent-cards-inspector.md`.
 
+## P3a implementation status (2026-09-06)
+
+The Work opening now leads with a provider-neutral bounded goal narrative,
+human-readable task progress, current context result, scoped context-asset
+counts, and a first-five task table over finalized Session Protocol v3 and the
+existing Work/Execution/Context projections. Missing goal, context, token, and
+summary evidence stays explicit; opening excerpts and retained summaries are
+bounded with complete recorded text behind details; active goal status and
+truncated projections cannot be presented as completed. Current context
+selection first follows recorded context-version parent ancestry, then compares
+recorded sequence/timestamps when candidates remain comparable; ambiguous
+ordering stays explicit. Partial/truncated asset counts
+identify their observed lower-bound status. The existing Work Graph lenses
+remain available in a collapsed legacy evidence disclosure during P3a.
+Evidence-bounded decision record: `.agents/decisions/implemented/2026-09-06-ui-v2-p3a-work-overview.md`.
+P3b remains the goal-task and agent-collaboration graph switch plus removal of
+the old raw relation presentation.
+
 > 状态:`proposed` · 作者:UI planner · 日期:2026-09
 > 本文是**信息设计**:展示哪些信息、层级如何、什么默认隐藏、状态如何呈现。
 > P1-P4 的视觉语言、响应式规则与截图验收由

@@ -654,6 +654,22 @@ if [[ "$runtime_work_visible" != "true" ]]; then
   exit 1
 fi
 
+# P3a guarded Work opening: providers without finalized v3 work evidence keep
+# the explicit unavailable state, while available overviews expose the
+# narrative, progress rule, current context result entry point, and bounded
+# task surface before legacy Work Graph evidence.
+runtime_overview_count="$(read_ab "count P3a work overviews" get count "#tab-work .runtime-workbench[data-runtime-available='true'] [data-runtime-work-overview]")"
+if [[ "$runtime_overview_count" == "1" ]]; then
+  p3a_overview_state="$(read_ab "verify P3a work overview" eval "(() => { const overview = document.querySelector('#tab-work [data-runtime-work-overview]'); const legacy = overview?.querySelector('.runtime-legacy-work'); const firstTask = overview?.querySelector('[data-runtime-overview-task]'); const contextHeading = overview?.querySelector('[data-runtime-context-heading]'); const headingCopy = contextHeading?.querySelector(':scope > div'); const coverage = contextHeading?.querySelector('.runtime-completeness'); const copyRect = headingCopy?.getBoundingClientRect(); const coverageRect = coverage?.getBoundingClientRect(); const headingCoverageSeparated = !copyRect || !coverageRect || coverageRect.top >= copyRect.bottom; return { goal: !!overview?.querySelector('.runtime-work-goal'), progressRule: (overview?.querySelector('.runtime-progress-track')?.getBoundingClientRect().height || 0) === 5, context: !!overview?.querySelector('.runtime-context-inspector-link[data-detail-tab=tab-conversation]'), contextHeading: !!contextHeading, contextCoverageSeparated: headingCoverageSeparated, task: !!firstTask, legacyBelow: !!legacy }; })()" | tr -d '[:space:]')"
+  assert_contains "P3a goal narrative" "$p3a_overview_state" '"goal":true'
+  assert_contains "P3a five-pixel progress rule" "$p3a_overview_state" '"progressRule":true'
+  assert_contains "P3a Conversation inspector entry point" "$p3a_overview_state" '"context":true'
+  assert_contains "P3a context heading layout" "$p3a_overview_state" '"contextHeading":true'
+  assert_contains "P3a context coverage layout" "$p3a_overview_state" '"contextCoverageSeparated":true'
+  assert_contains "P3a bounded task table" "$p3a_overview_state" '"task":true'
+  assert_contains "P3a legacy Work evidence" "$p3a_overview_state" '"legacyBelow":true'
+fi
+
 ab "open Evidence lens" click "#tab-work [data-runtime-lens='evidence']" >/dev/null
 runtime_event_count="$(read_ab "count runtime events" get count "#tab-work [data-runtime-event]")"
 assert_positive_count "runtime events" "$runtime_event_count"

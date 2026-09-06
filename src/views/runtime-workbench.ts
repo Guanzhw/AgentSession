@@ -8,10 +8,12 @@ import type {
   ExecutionProjection,
   WorkProjection
 } from "../protocol-runtime-v3.js";
+import { deriveWorkOverview, type WorkOverviewTask } from "../work-view-model.js";
+import type { SessionProtocolV3 } from "../providers/shared/session-protocol-v3.js";
 
 type RuntimeData = {
   protocol: SessionProtocol | null;
-  v3?: { version: 3; completeness?: string; validation?: unknown } | null;
+  v3?: SessionProtocolV3 | null;
   projections?: {
     work: WorkProjection;
     execution: ExecutionProjection;
@@ -60,6 +62,36 @@ function entityLabel(value: any, fallback: string) {
   // Goals record their objective in `description` (title is null); the
   // remaining fields are the entity-label chain for actors/runs/artifacts.
   return value?.title || value?.description || value?.agentPath || value?.agent || value?.model || fallback;
+}
+
+function statusLabel(value: unknown) {
+  const status = String(value || "unknown");
+  const key = `runtime.status_${status}`;
+  return t(key) === key ? status : t(key);
+}
+
+function durationLabel(value: number | null) {
+  if (value == null) return t("runtime.not_recorded");
+  const seconds = Math.round(value / 1000);
+  if (seconds < 60) return `${seconds}${t("runtime.seconds_short")}`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder ? `${minutes}${t("runtime.minutes_short")} ${remainder}${t("runtime.seconds_short")}` : `${minutes}${t("runtime.minutes_short")}`;
+}
+
+const GOAL_TITLE_LIMIT = 180;
+const GOAL_DESCRIPTION_LIMIT = 280;
+const CONTEXT_SUMMARY_LIMIT = 280;
+
+function narrativeExcerpt(value: string, maxLength: number) {
+  const text = value.trim();
+  const characters = Array.from(text);
+  if (characters.length <= maxLength) return { text, truncated: false };
+  const candidate = characters.slice(0, maxLength + 1).join("");
+  const breakpoints = ["\n", "。", ". ", "；", "; ", " "];
+  const breakpoint = Math.max(...breakpoints.map((marker) => candidate.lastIndexOf(marker)));
+  const end = breakpoint >= Math.floor(maxLength * 0.6) ? breakpoint + 1 : maxLength;
+  return { text: `${Array.from(candidate).slice(0, end).join("").trimEnd()}…`, truncated: true };
 }
 
 function renderEvent(event: any) {
@@ -114,6 +146,94 @@ function projectionRefLabel(ref: any) {
   return ref.kind === "session"
     ? ref.ref?.sessionId || t("runtime.not_recorded")
     : ref.id || t("runtime.not_recorded");
+}
+
+function taskTitle(task: any) {
+  return task.title || task.agentPath || t("runtime.untitled_task");
+}
+
+function renderOverviewTask(task: WorkOverviewTask) {
+  const runStates = task.runs.map((run) => statusLabel(run.status));
+  const states = [statusLabel(task.task.status), ...runStates];
+  const activity = task.latestActivity == null
+    ? t("runtime.not_recorded")
+    : `${t("runtime.last_activity")}: ${timeLabel(task.latestActivity)}`;
+  const elapsed = task.elapsedMs == null ? "" : `${t("runtime.elapsed")}: ${durationLabel(task.elapsedMs)}`;
+  return `<tr data-runtime-overview-task="${escapeHtml(task.id)}"><th scope="row">${escapeHtml(taskTitle(task.task))}${task.task.agentPath && task.task.title ? `<small>${escapeHtml(task.task.agentPath)}</small>` : ""}</th><td data-label="${escapeHtml(t("runtime.task_owner"))}">${escapeHtml(task.owner || t("runtime.not_recorded"))}</td><td data-label="${escapeHtml(t("runtime.task_state"))}"><span class="runtime-status runtime-status-${escapeHtml(statusClass(task.task.status))}">${escapeHtml(states.join(" · "))}</span></td><td data-label="${escapeHtml(t("runtime.task_activity"))}">${escapeHtml(elapsed || activity)}${elapsed ? `<small>${escapeHtml(activity)}</small>` : ""}</td><td data-label="${escapeHtml(t("runtime.evidence"))}">${evidenceButton("task", task.id, t("runtime.evidence"))}</td></tr>`;
+}
+
+function renderOverviewTaskHead() {
+  return `<thead><tr><th scope="col">${t("runtime.task_title")}</th><th scope="col">${t("runtime.task_owner")}</th><th scope="col">${t("runtime.task_state")}</th><th scope="col">${t("runtime.task_activity")}</th><th scope="col">${t("runtime.evidence")}</th></tr></thead>`;
+}
+
+function renderContextResult(data: RuntimeData, model: ReturnType<typeof deriveWorkOverview>) {
+  const context = model.context;
+  const coverage = data.projections?.context;
+  const contextEvidenceIncomplete = Boolean(coverage && (coverage.truncated || coverage.completeness !== "complete"));
+  const counts = [
+    ["memory", context.memoryCount],
+    ["experience", context.experienceCount],
+    ["user-info", context.userInfoCount]
+  ].filter(([, value]) => Number(value) > 0);
+  const contextLabel = context.transformationKind
+    ? t(`runtime.context_kind_${context.transformationKind}`) === `runtime.context_kind_${context.transformationKind}`
+      ? context.transformationKind
+      : t(`runtime.context_kind_${context.transformationKind}`)
+    : null;
+  const resultDetails = [
+    contextLabel,
+    context.resultVersionRecorded ? t("runtime.result_version_recorded") : "",
+    context.resultArtifactRecorded ? t("runtime.result_artifact_recorded") : "",
+    context.tokensAfter == null ? "" : `${count(context.tokensAfter)} ${t("runtime.tokens_unit")} ${t("runtime.after")}`
+  ].filter(Boolean).join(" · ");
+  const retained = context.retainedSummary ? narrativeExcerpt(context.retainedSummary, CONTEXT_SUMMARY_LIMIT) : null;
+  const retainedEvidence = retained?.truncated
+    ? `<details class="runtime-context-evidence"><summary>${escapeHtml(t("runtime.show_complete_context_summary"))}</summary><p>${escapeHtml(context.retainedSummary || "")}</p></details>`
+    : "";
+  const resultMarkup = context.resultOrderUncertain
+    ? `<p class="runtime-empty runtime-context-result-uncertain" data-runtime-context-result>${escapeHtml(t("runtime.context_result_order_uncertain"))}</p>`
+    : context.hasResult
+      ? `<p class="runtime-context-result" data-runtime-context-result>${escapeHtml(resultDetails || t("runtime.context_result_recorded"))}</p>${retained ? `<p class="runtime-context-retained"><strong>${escapeHtml(t("runtime.retained_content"))}</strong> ${escapeHtml(retained.text)}</p>${retainedEvidence}` : ""}`
+      : `<p class="runtime-empty">${t("runtime.no_context_result")}</p>`;
+  const countBoundNote = counts.length && contextEvidenceIncomplete ? `<p class="runtime-notice runtime-context-counts-note">${escapeHtml(t("runtime.context_counts_lower_bound"))}</p>` : "";
+  return `<section class="runtime-work-context" aria-labelledby="runtime-work-context-title"><div class="runtime-overview-section-heading" data-runtime-context-heading><div><h3 id="runtime-work-context-title">${t("runtime.current_context_title")}</h3><p>${t("runtime.current_context_description")}</p></div>${coverage ? renderProjectionCoverage(coverage) : ""}</div>${resultMarkup}${counts.length ? `<ul class="runtime-context-counts">${counts.map(([kind, value]) => `<li><span>${escapeHtml(t(`runtime.context_count_${kind}`))}</span><strong>${escapeHtml(count(value))}</strong></li>`).join("")}</ul>${countBoundNote}` : ""}<a class="runtime-context-inspector-link" href="#tab-conversation" data-detail-tab="tab-conversation">${escapeHtml(t("runtime.open_conversation_inspector"))}</a></section>`;
+}
+
+function renderOverviewTaskTable(model: ReturnType<typeof deriveWorkOverview>) {
+  const rows = model.visibleTasks.map(renderOverviewTask).join("");
+  const remaining = model.remainingTasks.length;
+  const hidden = remaining ? `<details class="runtime-task-overflow"><summary>${escapeHtml(t("runtime.more_tasks", { count: count(remaining) }))}</summary><table class="runtime-overview-task-table">${renderOverviewTaskHead()}<tbody>${model.remainingTasks.map(renderOverviewTask).join("")}</tbody></table>${model.evidenceIncomplete ? `<p class="runtime-notice">${escapeHtml(t("runtime.task_overflow_bounded"))}</p>` : ""}</details>` : "";
+  return `<section class="runtime-work-tasks" aria-labelledby="runtime-work-tasks-title"><div class="runtime-overview-section-heading"><div><h3 id="runtime-work-tasks-title">${t("runtime.task_table_title")}</h3><p>${t("runtime.task_table_description")}</p></div></div>${model.taskTotal ? `<table class="runtime-overview-task-table">${renderOverviewTaskHead()}<tbody>${rows}</tbody></table>${hidden}` : `<p class="runtime-empty">${t("runtime.no_tasks_recorded")}</p>`}</section>`;
+}
+
+function renderWorkOverview(data: RuntimeData) {
+  const projections = data.projections;
+  const protocol = data.v3;
+  if (!protocol || !projections) return `<section class="runtime-work-overview" data-runtime-work-overview><p class="runtime-empty">${escapeHtml(t("runtime.work_overview_unavailable"))}</p></section>`;
+  const model = deriveWorkOverview({ protocol, work: projections.work, execution: projections.execution, context: projections.context });
+  const goal = model.goal;
+  const recordedGoalTitle = goal?.title || goal?.description || t("runtime.goal_not_recorded");
+  const recordedGoalDescription = goal?.title && goal.description ? goal.description : "";
+  const goalTitle = narrativeExcerpt(recordedGoalTitle, GOAL_TITLE_LIMIT);
+  const goalDescription = recordedGoalDescription ? narrativeExcerpt(recordedGoalDescription, GOAL_DESCRIPTION_LIMIT) : null;
+  const goalNarrativeTruncated = goalTitle.truncated || Boolean(goalDescription?.truncated);
+  const fullGoalNarrative = goalNarrativeTruncated
+    ? `<details class="runtime-goal-evidence"><summary>${escapeHtml(t("runtime.show_complete_goal"))}</summary><p>${escapeHtml(recordedGoalTitle)}</p>${recordedGoalDescription ? `<p>${escapeHtml(recordedGoalDescription)}</p>` : ""}</details>`
+    : "";
+  const ratio = model.taskTotal ? Math.round((model.completedTasks / model.taskTotal) * 100) : 0;
+  const goalStatus = goal?.status || null;
+  const allVisibleCompleted = model.taskTotal > 0 && model.completedTasks === model.taskTotal;
+  const progressSentence = model.taskTotal === 0
+    ? t("runtime.progress_no_tasks")
+    : allVisibleCompleted && goalStatus === "completed" && !model.evidenceIncomplete
+      ? t("runtime.progress_goal_completed", { total: count(model.taskTotal) })
+      : allVisibleCompleted
+        ? goalStatus
+          ? t("runtime.progress_all_visible", { total: count(model.taskTotal), status: statusLabel(goalStatus) })
+          : t("runtime.progress_all_visible_no_goal", { total: count(model.taskTotal) })
+        : t("runtime.progress_incomplete", { completed: count(model.completedTasks), total: count(model.taskTotal) });
+  const boundedNote = model.evidenceIncomplete ? `<p class="runtime-notice runtime-progress-note">${escapeHtml(t("runtime.progress_evidence_incomplete"))}</p>` : "";
+  return `<section class="runtime-work-overview" data-runtime-work-overview aria-labelledby="runtime-work-overview-title"><div class="runtime-work-goal"><div class="runtime-overview-section-heading"><div><h3 id="runtime-work-overview-title">${t("runtime.goal_title")}</h3><p>${t("runtime.goal_description")}</p></div>${goal ? `<span class="runtime-status runtime-status-${escapeHtml(statusClass(goal.status))}">${escapeHtml(statusLabel(goal.status))}</span>` : ""}</div><h4>${escapeHtml(goalTitle.text)}</h4>${goalDescription ? `<p>${escapeHtml(goalDescription.text)}</p>` : ""}${fullGoalNarrative}${!goal ? `<p class="runtime-notice">${escapeHtml(t("runtime.goal_not_recorded_detail"))}</p>` : ""}</div><div class="runtime-work-progress"><div class="runtime-overview-section-heading"><div><h3>${t("runtime.progress_title")}</h3><p>${escapeHtml(progressSentence)}</p></div><strong class="runtime-progress-ratio">${escapeHtml(`${count(model.completedTasks)} / ${count(model.taskTotal)}`)}</strong></div><div class="runtime-progress-track" role="progressbar" aria-label="${escapeHtml(t("runtime.progress_title"))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${ratio}"><span style="width:${ratio}%"></span></div>${boundedNote}</div><div class="runtime-work-overview-grid">${renderContextResult(data, model)}${renderOverviewTaskTable(model)}</div><details class="runtime-legacy-work"><summary>${escapeHtml(t("runtime.legacy_work_evidence"))}</summary>${renderWorkProjection(data)}</details></section>`;
 }
 
 function renderWorkProjection(data: RuntimeData) {
@@ -243,7 +363,7 @@ export function renderRuntimeWorkbench(data: RuntimeData, provider: string, sess
     <header class="runtime-header"><div><h2>${t("runtime.title")}</h2><p>${t("runtime.description")}</p></div><span class="runtime-version">v${escapeHtml(String(data.v3?.version || protocol?.version || summary.version || 2))}</span></header>
     ${notices}
     <div class="runtime-lens-tabs" role="tablist" aria-label="${escapeHtml(t("runtime.lenses_label"))}">${[ ["work", t("runtime.lens_work")], ["execution", t("runtime.lens_execution")], ["coordination", t("runtime.lens_coordination")], ["context", t("runtime.lens_context")], ["evidence", t("runtime.lens_evidence")] ].map(([id, label], index) => `<button id="runtime-lens-tab-${id}" type="button" role="tab" data-runtime-lens="${id}" aria-controls="runtime-lens-${id}" aria-selected="${index === 0 ? "true" : "false"}" tabindex="${index === 0 ? "0" : "-1"}">${label}</button>`).join("")}</div>
-    <div id="runtime-lens-work" class="runtime-lens-panel" role="tabpanel" aria-labelledby="runtime-lens-tab-work" data-runtime-panel="work" tabindex="0">${renderWorkProjection(data)}</div>
+    <div id="runtime-lens-work" class="runtime-lens-panel" role="tabpanel" aria-labelledby="runtime-lens-tab-work" data-runtime-panel="work" tabindex="0">${renderWorkOverview(data)}</div>
     <div id="runtime-lens-execution" class="runtime-lens-panel" role="tabpanel" aria-labelledby="runtime-lens-tab-execution" data-runtime-panel="execution" tabindex="0" hidden>${renderExecutionProjection(data)}</div>
     <div id="runtime-lens-coordination" class="runtime-lens-panel" role="tabpanel" aria-labelledby="runtime-lens-tab-coordination" data-runtime-panel="coordination" tabindex="0" hidden>${renderCoordinationProjection(data)}</div>
     <div id="runtime-lens-context" class="runtime-lens-panel" role="tabpanel" aria-labelledby="runtime-lens-tab-context" data-runtime-panel="context" tabindex="0" hidden>${renderContextProjection(data)}</div>

@@ -112,6 +112,19 @@ export function initEnhancements({ ft, formatText, showToast, escapeHtmlClient }
   document.querySelector(".session-workbench")?.classList.toggle("session-conversation-tab-active", initiallySelected?.getAttribute("aria-controls") === "tab-conversation");
 
   document.addEventListener("click", function (e) {
+    const detailTabLink = e.target.closest("[data-detail-tab]");
+    if (detailTabLink) {
+      const targetPanelId = detailTabLink.getAttribute("data-detail-tab");
+      const targetTab = targetPanelId
+        ? tabBar.querySelector(`[aria-controls='${CSS.escape(targetPanelId)}']`)
+        : null;
+      if (targetTab) {
+        e.preventDefault();
+        targetTab.click();
+        requestAnimationFrame(() => document.getElementById(targetPanelId)?.scrollIntoView({ block: "start", behavior: "instant" }));
+      }
+      return;
+    }
     const searchToggle = e.target.closest("[data-session-search-toggle]");
     if (searchToggle) {
       e.preventDefault();

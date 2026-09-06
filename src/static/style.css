@@ -5472,6 +5472,51 @@ pre code.hljs {
 .runtime-pagination { justify-content: flex-end; margin-top: 12px; }
 .runtime-work-list,
 .runtime-context-grid { display: grid; gap: 9px; margin-top: 16px; }
+.runtime-work-overview { display: grid; gap: 18px; }
+.runtime-work-goal,
+.runtime-work-progress,
+.runtime-work-context,
+.runtime-work-tasks { min-width: 0; }
+.runtime-work-goal h4 { margin: 10px 0 0; font-size: 20px; line-height: 1.25; overflow-wrap: anywhere; }
+.runtime-work-goal > p { margin: 7px 0 0; color: var(--text-secondary); overflow-wrap: anywhere; }
+.runtime-goal-evidence { margin-top: 9px; }
+.runtime-goal-evidence > summary { cursor: pointer; color: var(--accent-color); font-size: 12px; }
+.runtime-goal-evidence > p { margin: 8px 0 0; color: var(--text-secondary); font-size: 12px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.runtime-overview-section-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.runtime-overview-section-heading h3 { margin: 0; font-size: 14px; }
+.runtime-overview-section-heading p { margin: 5px 0 0; color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
+.runtime-progress-ratio { flex: 0 0 auto; color: var(--text-secondary); font: 14px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.runtime-progress-track { height: 5px; margin-top: 12px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--border-color) 70%, transparent); }
+.runtime-progress-track span { display: block; height: 100%; border-radius: inherit; background: var(--accent-color); }
+.runtime-progress-note { margin: 8px 0 0; }
+.runtime-work-overview-grid { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.5fr); gap: 18px; align-items: start; }
+.runtime-work-context { padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); }
+.runtime-work-context .runtime-overview-section-heading { display: block; }
+.runtime-work-context .runtime-overview-section-heading > .runtime-completeness { margin-top: 8px; }
+.runtime-context-result { margin: 14px 0 0; font-weight: 600; overflow-wrap: anywhere; }
+.runtime-context-retained { margin: 8px 0 0; color: var(--text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+.runtime-context-evidence { margin-top: 8px; }
+.runtime-context-evidence > summary { cursor: pointer; color: var(--accent-color); font-size: 12px; }
+.runtime-context-evidence > p { margin: 8px 0 0; color: var(--text-secondary); font-size: 12px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.runtime-context-counts-note { margin: 8px 0 0; }
+.runtime-context-counts { display: flex; flex-wrap: wrap; gap: 7px; margin: 14px 0 0; padding: 0; list-style: none; }
+.runtime-context-counts li { display: flex; gap: 7px; align-items: baseline; padding: 6px 8px; border-left: 2px solid var(--accent-color); background: var(--bg-primary); font-size: 11px; }
+.runtime-context-counts span { color: var(--text-muted); }
+.runtime-context-inspector-link { display: inline-block; margin-top: 14px; color: var(--accent-color); font-size: 12px; }
+.runtime-work-tasks { min-width: 0; }
+.runtime-overview-task-table { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 12px; }
+.runtime-overview-task-table th,
+.runtime-overview-task-table td { padding: 9px 7px; border-bottom: 1px solid var(--border-color); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.runtime-overview-task-table thead th { color: var(--text-muted); font-size: 10px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.runtime-overview-task-table tbody th { font-weight: 600; }
+.runtime-overview-task-table tbody th small,
+.runtime-overview-task-table td small { display: block; margin-top: 4px; color: var(--text-muted); font-size: 10px; }
+.runtime-task-overflow { margin-top: 10px; }
+.runtime-task-overflow > summary,
+.runtime-legacy-work > summary { cursor: pointer; color: var(--accent-color); font-size: 12px; }
+.runtime-task-overflow .runtime-overview-task-table { margin-top: 8px; }
+.runtime-legacy-work { margin-top: 2px; border-top: 1px solid var(--border-color); padding-top: 14px; }
+.runtime-legacy-work > .runtime-lens { margin-top: 14px; }
 .runtime-projection-overview { display: flex; flex-wrap: wrap; gap: 7px; margin: 14px 0; color: var(--text-muted); font-size: 11px; }
 .runtime-projection-overview span, .runtime-evidence-status span { padding: 7px 9px; border: 1px solid var(--border-color); border-radius: 7px; background: var(--bg-secondary); }
 .runtime-projection-group { margin-top: 16px; }
@@ -5562,6 +5607,7 @@ pre code.hljs {
   .runtime-session-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .runtime-capabilities ul { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .runtime-map-columns { grid-template-columns: 1fr; }
+  .runtime-work-overview-grid { grid-template-columns: 1fr; }
   .runtime-swimlane-scale { margin-left: 140px; }
 }
 
@@ -5578,6 +5624,19 @@ pre code.hljs {
   .runtime-session-edge > span:nth-of-type(3) { display: none; }
   .runtime-session-edge > span:nth-of-type(4) { grid-column: 2; }
   .runtime-header, .runtime-section-heading { display: block; }
+  .runtime-overview-section-heading { display: block; }
+  .runtime-progress-ratio { display: block; margin-top: 8px; }
+  .runtime-overview-task-table,
+  .runtime-overview-task-table tbody,
+  .runtime-overview-task-table tr,
+  .runtime-overview-task-table td,
+  .runtime-overview-task-table th { display: block; }
+  .runtime-overview-task-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .runtime-overview-task-table tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; padding: 8px 0; }
+  .runtime-overview-task-table tbody th { grid-column: 1 / -1; padding: 4px 0 8px; }
+  .runtime-overview-task-table tbody td { padding: 5px 0; border: 0; }
+  .runtime-overview-task-table tbody td::before { display: block; margin-bottom: 2px; color: var(--text-muted); content: attr(data-label); font-size: 10px; }
+  .runtime-overview-task-table tbody td:last-child { grid-column: 1 / -1; }
   .runtime-version, .runtime-bounded-label, .runtime-completeness { margin-top: 8px; }
   .runtime-map-overview { grid-template-columns: 1fr; }
   .runtime-map-axis { margin-left: 70px; }

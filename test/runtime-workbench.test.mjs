@@ -172,10 +172,163 @@ test("top-level session tabs do not hide nested Runtime lens panels", () => {
   assert.doesNotMatch(enhancements, /document\.querySelectorAll\("\[role='tabpanel'\]"\)/);
   assert.match(enhancements, /targetPanelId === "tab-work"/);
   assert.match(enhancements, /data-runtime-root.*scrollIntoView|data-runtime-root\]\?\.scrollIntoView/);
+  assert.match(enhancements, /data-detail-tab/);
 });
 
 test("Runtime work cards allow long canonical task and agent ids to wrap on narrow screens", () => {
   const style = readFileSync(path.join(process.cwd(), "src", "static", "style.css"), "utf8");
   assert.match(style, /\.runtime-card-heading > strong \{[\s\S]*?min-width: 0;[\s\S]*?overflow-wrap: anywhere;/);
   assert.match(style, /\.runtime-card-heading > \.runtime-status \{ flex: 0 0 auto; \}/);
+});
+
+test("Work opening is a bounded narrative over finalized v3 projections", () => {
+  const runtime = fixtureRuntime();
+  const recordedGoal = {
+    id: "goal-1", sessionId: "runtime-1", title: "Ship <fixture>", description: "Keep the recorded result", status: "active", taskIds: ["task-1"],
+    parentGoalId: null, ownerActorId: null, timeCreated: 900, timeUpdated: 3000, timeCompleted: null, provenance
+  };
+  refreshProjections(runtime);
+  runtime.v3.goals = [recordedGoal];
+  runtime.v3.contextVersions = [{ id: "version-1", sessionId: "runtime-1", sequence: 1, parentVersionIds: [], artifactIds: ["artifact-1"], createdAt: 11000, provenance }];
+  runtime.v3.contextTransformations = [{ id: "transformation-1", sessionId: "runtime-1", kind: "compaction", sourceVersionIds: [], resultVersionId: "version-1", sourceArtifactIds: [], resultArtifactIds: ["artifact-1"], eventId: "event-context", runId: null, turnId: null, timestamp: 11000, provenance }];
+  runtime.projections.work = projectWork(runtime.v3, { maxItems: 100 });
+  runtime.projections.context = projectContext(runtime.v3, { maxItems: 100 });
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  const overview = html.match(/data-runtime-work-overview[\s\S]*?<details class="runtime-legacy-work"/)?.[0] || "";
+  assert.match(overview, /Ship &lt;fixture&gt;/);
+  assert.match(overview, /Keep the recorded result/);
+  assert.match(overview, /All 1 visible tasks are completed; the recorded goal is active/);
+  assert.match(overview, /1 \/ 1/);
+  assert.match(overview, /height:5px|runtime-progress-track/);
+  assert.match(overview, /42 tokens after/);
+  assert.match(overview, /Retain &lt;the result&gt; and discard copied history/);
+  assert.match(overview, /data-runtime-context-result/);
+  assert.match(overview, /Open the Conversation inspector/);
+  assert.doesNotMatch(overview, /runtime-relation-list/);
+});
+
+test("Work opening keeps missing goal and context evidence explicit", () => {
+  const runtime = fixtureRuntime();
+  runtime.protocol.events = runtime.protocol.events.filter((event) => !event.compaction);
+  runtime.protocol.contextArtifacts = [];
+  refreshProjections(runtime);
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  assert.match(html, /No recorded goal/);
+  assert.match(html, /No current context result is recorded/);
+  assert.doesNotMatch(html, /Retained content:/);
+  assert.doesNotMatch(html, /memory/);
+});
+
+test("Work opening bounds long goal narratives while keeping the complete record reachable", () => {
+  const runtime = fixtureRuntime();
+  const longGoal = `Recorded goal ${"with bounded primary text ".repeat(20)}`;
+  refreshProjections(runtime);
+  runtime.v3.goals = [{
+    id: "goal-long", sessionId: "runtime-1", title: null, description: longGoal, status: "active", taskIds: [],
+    parentGoalId: null, ownerActorId: null, timeCreated: 900, timeUpdated: 3000, timeCompleted: null, provenance
+  }];
+  runtime.projections.work = projectWork(runtime.v3, { maxItems: 100 });
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  const heading = html.match(/<h4>(.*?)<\/h4>/)?.[1] || "";
+  assert.ok(heading.endsWith("…"));
+  assert.ok(heading.length < longGoal.length);
+  assert.match(html, /Show complete recorded goal/);
+  assert.match(html, new RegExp(longGoal));
+});
+
+test("Work opening chooses a newer recorded context version over an older transformation", () => {
+  const runtime = fixtureRuntime();
+  runtime.v3.contextVersions = [
+    { id: "version-old", sessionId: "runtime-1", sequence: 1, parentVersionIds: [], artifactIds: [], createdAt: 1000, provenance },
+    { id: "version-new", sessionId: "runtime-1", sequence: 2, parentVersionIds: ["version-old"], artifactIds: [], createdAt: 12000, provenance }
+  ];
+  runtime.v3.contextTransformations = [{
+    id: "transformation-old", sessionId: "runtime-1", kind: "compaction", sourceVersionIds: [], resultVersionId: "version-old",
+    sourceArtifactIds: [], resultArtifactIds: [], eventId: "event-context", runId: null, turnId: null, timestamp: 11000, provenance
+  }];
+  runtime.projections.context = projectContext(runtime.v3, { maxItems: 100 });
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  const overview = html.match(/data-runtime-work-overview[\s\S]*?<details class="runtime-legacy-work"/)?.[0] || "";
+  assert.match(overview, /context version · result version recorded/);
+  assert.doesNotMatch(overview, /compaction · result version recorded/);
+  assert.doesNotMatch(overview, /42 tokens after/);
+});
+
+test("Work opening uses recorded context ancestry before missing ordering fields", () => {
+  const runtime = fixtureRuntime();
+  runtime.v3.contextVersions = [
+    { id: "version-root", sessionId: "runtime-1", sequence: null, parentVersionIds: [], artifactIds: [], createdAt: null, provenance },
+    { id: "version-result", sessionId: "runtime-1", sequence: 1, parentVersionIds: ["version-root"], artifactIds: [], createdAt: null, provenance }
+  ];
+  runtime.v3.contextTransformations = [{
+    id: "transformation-result", sessionId: "runtime-1", kind: "compaction", sourceVersionIds: ["version-root"], resultVersionId: "version-result",
+    sourceArtifactIds: [], resultArtifactIds: [], eventId: null, runId: null, turnId: null, timestamp: 5000, provenance
+  }];
+  runtime.projections.context = projectContext(runtime.v3, { maxItems: 100 });
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  const overview = html.match(/data-runtime-work-overview[\s\S]*?<details class="runtime-legacy-work"/)?.[0] || "";
+  assert.match(overview, /compaction · result version recorded/);
+  assert.doesNotMatch(overview, /The current context result cannot be ordered from recorded timestamps or sequence/);
+});
+
+test("Work opening bounds retained context summaries and exposes complete evidence", () => {
+  const runtime = fixtureRuntime();
+  const longSummary = `Retained context ${"with important recorded detail ".repeat(20)}`;
+  runtime.v3.contextArtifacts[0].summary = longSummary;
+  runtime.v3.contextVersions = [{ id: "version-summary", sessionId: "runtime-1", sequence: 1, parentVersionIds: [], artifactIds: ["artifact-1"], createdAt: 12000, provenance }];
+  runtime.v3.contextTransformations = [{
+    id: "transformation-summary", sessionId: "runtime-1", kind: "compaction", sourceVersionIds: [], resultVersionId: "version-summary",
+    sourceArtifactIds: [], resultArtifactIds: ["artifact-1"], eventId: null, runId: null, turnId: null, timestamp: 12000, provenance
+  }];
+  runtime.projections.context = projectContext(runtime.v3, { maxItems: 100 });
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  const overview = html.match(/data-runtime-work-overview[\s\S]*?<details class="runtime-legacy-work"/)?.[0] || "";
+  assert.match(overview, /Retained context with important recorded detail/);
+  assert.match(overview, /Show complete recorded context summary/);
+  assert.match(overview, new RegExp(longSummary));
+});
+
+test("Work opening labels context asset counts as a lower bound when bounded", () => {
+  const runtime = fixtureRuntime();
+  runtime.v3.contextArtifacts.push(
+    { id: "memory-asset", sessionId: "runtime-1", kind: "memory", scope: "user", origin: "agent-generated", contentAccess: "metadata-only", title: "Memory", summary: null, sourcePath: null, producerRunId: null, sourceSessionIds: [], hash: null, redacted: false, timeCreated: 12000, provenance },
+    { id: "experience-asset", sessionId: "runtime-1", kind: "experience", scope: "session", origin: "agent-generated", contentAccess: "metadata-only", title: "Experience", summary: null, sourcePath: null, producerRunId: null, sourceSessionIds: [], hash: null, redacted: false, timeCreated: 12001, provenance },
+    { id: "user-info-asset", sessionId: "runtime-1", kind: "user-info", scope: "user", origin: "user-authored", contentAccess: "metadata-only", title: "User info", summary: null, sourcePath: null, producerRunId: null, sourceSessionIds: [], hash: null, redacted: false, timeCreated: 12002, provenance }
+  );
+  runtime.projections.context = projectContext(runtime.v3, { maxItems: 100 });
+  runtime.projections.context.truncated = true;
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  assert.match(html, /Memory/);
+  assert.match(html, /Experience/);
+  assert.match(html, /User info/);
+  assert.match(html, /Observed counts are a lower bound; more context assets may be omitted/);
+});
+
+test("Work opening keeps context ordering uncertainty explicit", () => {
+  const runtime = fixtureRuntime();
+  runtime.v3.contextVersions = [{ id: "version-unordered", sessionId: "runtime-1", sequence: null, parentVersionIds: [], artifactIds: [], createdAt: null, provenance }];
+  runtime.v3.contextTransformations = [{
+    id: "transformation-unordered", sessionId: "runtime-1", kind: "compaction", sourceVersionIds: [], resultVersionId: null,
+    sourceArtifactIds: [], resultArtifactIds: [], eventId: null, runId: null, turnId: null, timestamp: null, provenance
+  }];
+  runtime.projections.context = projectContext(runtime.v3, { maxItems: 100 });
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  const overview = html.match(/data-runtime-work-overview[\s\S]*?<details class="runtime-legacy-work"/)?.[0] || "";
+  assert.match(overview, /The current context result cannot be ordered from recorded timestamps or sequence/);
+  assert.doesNotMatch(overview, /Retain &lt;the result&gt; and discard copied history/);
+});
+
+test("Work overflow task table repeats header and scope semantics", () => {
+  const runtime = fixtureRuntime();
+  runtime.v3.tasks = Array.from({ length: 7 }, (_, index) => ({
+    id: `task-${index + 1}`, sessionId: "runtime-1", kind: "task", status: index === 6 ? "running" : "completed", title: `Task ${index + 1}`,
+    parentTaskId: null, toolCallId: null, agentPath: null, correlationId: null, dependencies: [], assignee: null, owner: null,
+    requestEventId: null, triggerEventId: null, scheduleId: null, deadline: null, runIds: [], revision: null, outcome: null,
+    failureReason: null, cancellationReason: null, timeCreated: 1000, timeUpdated: 2000, timeCompleted: index === 6 ? null : 2000, provenance
+  }));
+  runtime.projections.work = projectWork(runtime.v3, { maxItems: 100 });
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  const overflow = html.match(/<details class="runtime-task-overflow">[\s\S]*?<\/details>/)?.[0] || "";
+  assert.match(overflow, /<thead>[\s\S]*?<th scope="col">Task<\/th>/);
+  assert.match(overflow, /data-label="Owner"/);
 });
