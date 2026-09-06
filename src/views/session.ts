@@ -6,6 +6,13 @@ import { formatDuration, formatTime, formatTokens, messageBubble, messageHeader,
 import { layout } from "./layout.js";
 import type { SessionNavigationContext } from "../navigation-context.js";
 import type { ConversationCompaction } from "../protocol-runtime.js";
+import type {
+  ConversationAgentCard,
+  ConversationChannelItem,
+  ConversationInspectorView,
+  ConversationReference,
+  ConversationViewModel
+} from "../conversation-view-model.js";
 
 function safeParse(value: any) {
   if (typeof value !== "string") {
@@ -248,6 +255,19 @@ function renderSubsessionHeader(tree: SessionTree, inferred = false) {
   </summary>`;
 }
 
+function renderChildSessionExportActions(child: { provider?: string; sessionId: string } | null | undefined, provider: string, suffix = "", available: boolean | null = null) {
+  if (!child?.sessionId || available === false) {
+    return "";
+  }
+  const childProvider = child.provider || provider;
+  const encoded = encodeURIComponent(child.sessionId);
+  return `<span class="subagent-actions" aria-label="Subagent export actions">
+    <a class="subagent-export-btn" href="/${escapeHtml(childProvider)}/session/${encoded}" title="${escapeHtml(`Open${suffix}`)}">Open</a>
+    <a class="subagent-export-btn" href="/api/${escapeHtml(childProvider)}/session/${encoded}/export?format=md" title="${escapeHtml(`Export${suffix} as Markdown`)}">MD</a>
+    <a class="subagent-export-btn" href="/api/${escapeHtml(childProvider)}/session/${encoded}/export?format=json" title="${escapeHtml(`Export${suffix} as JSON`)}">JSON</a>
+  </span>`;
+}
+
 function renderSubagentExportActions(part: SessionPartNode, provider: string) {
   const childSession = part.childSessions[0]?.session;
   if (childSession?.metadata?.embedded === true) {
@@ -258,13 +278,8 @@ function renderSubagentExportActions(part: SessionPartNode, provider: string) {
     return "";
   }
 
-  const encoded = encodeURIComponent(childId);
   const suffix = part.childSessions.length > 1 ? ` first session of ${part.childSessions.length}` : "";
-  return `<span class="subagent-actions" aria-label="Subagent export actions">
-    <a class="subagent-export-btn" href="/${escapeHtml(provider)}/session/${encoded}" title="${escapeHtml(`Open${suffix}`)}">Open</a>
-    <a class="subagent-export-btn" href="/api/${escapeHtml(provider)}/session/${encoded}/export?format=md" title="${escapeHtml(`Export${suffix} as Markdown`)}">MD</a>
-    <a class="subagent-export-btn" href="/api/${escapeHtml(provider)}/session/${encoded}/export?format=json" title="${escapeHtml(`Export${suffix} as JSON`)}">JSON</a>
-  </span>`;
+  return renderChildSessionExportActions({ provider, sessionId: childId }, provider, suffix);
 }
 
 function renderSubagentBranch(part: SessionPartNode, childMarkup: string, provider: string, reasoningMarkup = "") {
@@ -626,8 +641,19 @@ function renderPart(messageData: any, partData: any, partId: any, reasoningMarku
   return "";
 }
 
-function renderPartNode(messageData: any, part: SessionPartNode, depth = 0, provider = "opencode", reasoningMarkup = ""): string {
-  const isTaskWithSession = part.type === "tool" && isTaskTool(part.data) && part.childSessions.length > 0;
+function renderPartNode(messageData: any, part: SessionPartNode, depth = 0, provider = "opencode", reasoningMarkup = "", view: ConversationViewModel | null = null, placedCardIds: Set<string> | null = null): string {
+  const isTaskPart = part.type === "tool" && isTaskTool(part.data);
+  const isTaskWithSession = isTaskPart && part.childSessions.length > 0;
+  // P2b: a compact agent card replaces the noisy nested block on the main
+  // reading spine only when real Task/AgentRun/Actor evidence binds it. The
+  // nested-session rendering stays the fallback when no binding exists.
+  const boundCard = isTaskPart && depth === 0
+    ? conversationCardForPart(view, part, String(messageData?.id || ""), placedCardIds)
+    : null;
+  if (boundCard) {
+    placedCardIds?.add(boundCard.id);
+    return renderAgentCard(boundCard, part, provider);
+  }
   const renderedPart = isTaskWithSession ? "" : renderPart(messageData, part.data, part.id, reasoningMarkup);
   const partAnchor = escapeHtml(anchorId("part", part.id));
   const anchoredPart = renderedPart
@@ -705,7 +731,7 @@ function attachPendingReasoning(renderedParts: any, pendingReasoning: any) {
   pendingReasoning.length = 0;
 }
 
-function renderMessagePartsResult(message: any, depth = 0, provider = "opencode", initialReasoning: any[] = []): any {
+function renderMessagePartsResult(message: any, depth = 0, provider = "opencode", initialReasoning: any[] = [], view: ConversationViewModel | null = null, placedCardIds: Set<string> | null = null): any {
   const renderedParts = [];
   const pendingReasoning = [...initialReasoning];
   let visibleCount = 0;
@@ -721,7 +747,7 @@ function renderMessagePartsResult(message: any, depth = 0, provider = "opencode"
 
     const reasoningMarkup = pendingReasoning.join("\n");
     const isToolPart = part.type === "tool";
-    let rendered: any = renderPartNode(message.data, part, depth, provider, isToolPart ? "" : reasoningMarkup);
+    let rendered: any = renderPartNode(message.data, part, depth, provider, isToolPart ? "" : reasoningMarkup, view, placedCardIds);
     if (rendered && reasoningMarkup && isToolPart) {
       rendered = `${renderTurnReasoning(reasoningMarkup)}\n${rendered}`;
     } else if (rendered && reasoningMarkup && !rendered.includes(reasoningMarkup) && !(part.type === "text" && !part.data?.text)) {
@@ -745,8 +771,8 @@ function renderMessagePartsResult(message: any, depth = 0, provider = "opencode"
   };
 }
 
-function renderMessageParts(message: any, depth = 0, provider = "opencode") {
-  const result = renderMessagePartsResult(message, depth, provider);
+function renderMessageParts(message: any, depth = 0, provider = "opencode", view: ConversationViewModel | null = null, placedCardIds: Set<string> | null = null) {
+  const result = renderMessagePartsResult(message, depth, provider, [], view, placedCardIds);
   const renderedParts = result.markup ? [result.markup] : [];
   attachPendingReasoning(renderedParts, result.pendingReasoning);
   return renderedParts.filter(Boolean).join("\n");
@@ -765,7 +791,7 @@ interface ConversationEntry {
  * these entries by user turn; nested session rendering keeps its existing
  * linear behavior inside subagent branches.
  */
-function renderSessionMessageEntries(tree: SessionTree, depth = 0, provider = "opencode"): ConversationEntry[] {
+function renderSessionMessageEntries(tree: SessionTree, depth = 0, provider = "opencode", view: ConversationViewModel | null = null, placedCardIds: Set<string> | null = null): ConversationEntry[] {
   const entries: ConversationEntry[] = [];
   let previousCacheUsage = null;
 
@@ -776,7 +802,7 @@ function renderSessionMessageEntries(tree: SessionTree, depth = 0, provider = "o
       previousCacheUsage = annotated.usage;
     }
     let markup = "";
-    const result = renderMessagePartsResult(message, depth, provider);
+    const result = renderMessagePartsResult(message, depth, provider, [], view, placedCardIds);
     if (result.hasVisibleContent && result.markup) {
       const group = [renderMessageGroup(message, result.markup, provider)];
       attachPendingReasoning(group, result.pendingReasoning);
@@ -899,10 +925,339 @@ function renderRawMessageEntries(messages: any, partsByMessage: any, provider: a
   return entries;
 }
 
+// ── Conversation agent cards, channels, references, inspector (UI v2 P2b) ──
+
+// One stable anchor per card; sanitized through the same helper as spine
+// anchors so deep links, ToC jumps, and the browser navigation remain stable.
+function agentCardAnchorId(cardId: string) {
+  return anchorId("agent-card", cardId);
+}
+
+function agentReferenceAnchorId(referenceId: string) {
+  return anchorId("agent-ref", referenceId);
+}
+
+function conversationSessionHref(ref: { provider: string; sessionId: string } | null | undefined) {
+  if (!ref?.provider || !ref?.sessionId) {
+    return "";
+  }
+  return `/${encodeURIComponent(ref.provider)}/session/${encodeURIComponent(ref.sessionId)}`;
+}
+
+function conversationStateLabel(state: string | null) {
+  if (!state) {
+    return null;
+  }
+  const label = t(`conversation.state_${state}`);
+  // Unknown presentation keys fall back to the recorded raw state; the status
+  // itself is never rewritten into a friendlier word.
+  return label === `conversation.state_${state}` ? state : label;
+}
+
+function coordinationStateLabel(state: string) {
+  if (!state) {
+    return null;
+  }
+  const normalized = String(state).replace(/[^a-z0-9_-]/gi, "-").toLowerCase();
+  const label = t(`conversation.coordination_state_${normalized}`);
+  return label === `conversation.coordination_state_${normalized}` ? state : label;
+}
+
+function coordinationKindLabel(kind: string) {
+  const normalized = String(kind).replace(/[^a-z0-9_-]/gi, "-").toLowerCase();
+  const label = t(`conversation.channel_${normalized}`);
+  return label === `conversation.channel_${normalized}` ? kind : label;
+}
+
+function channelTimeLabel(timestamp: number | null) {
+  return timestamp ? formatTime(timestamp) : null;
+}
+
+function renderAgentChannel(channel: ConversationChannelItem[], truncated: boolean) {
+  const items = channel.map((item) => {
+    const direction = [
+      item.senderName ? escapeHtml(item.senderName) : "",
+      item.recipientName ? escapeHtml(item.recipientName) : ""
+    ];
+    const directionLabel = item.senderName || item.recipientName
+      ? `<span class="agent-channel-direction">${direction.filter(Boolean).join(" → ")}</span>`
+      : "";
+    const stateLabel = coordinationStateLabel(item.state);
+    return `<li class="agent-channel-item" data-channel-kind="${escapeHtml(item.kind)}" data-channel-id="${escapeHtml(item.id)}">
+      <span class="agent-channel-kind">${escapeHtml(coordinationKindLabel(item.kind))}</span>
+      ${stateLabel ? `<span class="agent-channel-state">${escapeHtml(stateLabel)}</span>` : ""}
+      ${channelTimeLabel(item.timestamp) ? `<time class="agent-channel-time">${escapeHtml(channelTimeLabel(item.timestamp)!)}</time>` : ""}
+      ${directionLabel}
+    </li>`;
+  }).join("\n");
+  const countLabel = channel.length
+    ? escapeHtml(t("conversation.agent_channel_items", { count: String(channel.length) }))
+    : "";
+  return `<details class="agent-channel" data-agent-channel data-disclosure>
+    <summary class="agent-channel-summary" aria-expanded="false"><span>${escapeHtml(t("conversation.agent_channel"))}</span>${countLabel ? `<span class="agent-channel-count">${countLabel}</span>` : ""}</summary>
+    ${items
+      ? `<ol class="agent-channel-list">${items}</ol>${truncated ? `<p class="agent-channel-more">${escapeHtml(t("conversation.agent_channel_more", { count: String(channel.length) }))}</p>` : ""}`
+      : `<p class="agent-channel-empty">${escapeHtml(t("conversation.agent_no_channel"))}</p>`}
+  </details>`;
+}
+
+function renderAgentCard(card: ConversationAgentCard, part: SessionPartNode | null, provider: string) {
+  const displayName = card.name || card.responsibility || t("conversation.agent_unknown");
+  const stateLabel = conversationStateLabel(card.state);
+  const meta = [];
+  if (card.responsibility && card.responsibility !== card.name) {
+    meta.push(`${t("conversation.agent_responsibility")}: ${card.responsibility}`);
+  }
+  if (card.observationCount > 0 && !card.channelTruncated) {
+    meta.push(t("conversation.agent_recorded", { count: String(card.observationCount) }));
+  }
+  const lastActivity = channelTimeLabel(card.lastActivity);
+  if (lastActivity) {
+    meta.push(t("conversation.agent_last_activity", { time: lastActivity }));
+  }
+  const resultArrival = card.channel
+    .filter((item) => item.kind === "result-delivery")
+    .map((item) => item.timestamp)
+    .filter((value): value is number => Boolean(value))
+    .sort((left, right) => right - left)[0];
+  const resultLabel = resultArrival ? channelTimeLabel(resultArrival)! : null;
+  const childSession = card.childSession;
+  const cardAnchor = agentCardAnchorId(card.id);
+  // Preserve the canonical child-session anchor at the dispatch position so
+  // ToC task links and cross-page deep links keep resolving under cards. The
+  // anchor is only emitted when this card actually replaces one of the part's
+  // own child-session blocks; otherwise the nested fallback owns that id.
+  // Standalone (unplaced) cards have no spine position: the card anchor is
+  // the only target, and no invented `part-`/`session-` anchor is emitted.
+  const partChildIds = new Set((part?.childSessions || []).map((child: any) => String(child.session?.id || "")));
+  const childAnchors = part
+    ? [...partChildIds].filter(Boolean).map((id) => `<span id="${escapeHtml(anchorId("session", id))}" class="session-event-anchor" aria-hidden="true"></span>`).join("")
+    : "";
+  const actions = childSession
+    ? renderChildSessionExportActions(
+        childSession,
+        provider,
+        part && part.childSessions.length > 1 ? ` session of ${part.childSessions.length}` : "",
+        card.childSessionAvailable
+      )
+    : "";
+  const cardBody = `
+    <div class="agent-card-body">
+      ${renderAgentChannel(card.channel, card.channelTruncated)}
+    </div>`;
+  const details = `<details class="agent-card" id="${escapeHtml(cardAnchor)}" data-agent-card data-agent-card-id="${escapeHtml(card.id)}" data-agent-name="${escapeHtml(card.name || "")}" data-agent-state="${escapeHtml(card.state || "")}" data-agent-child-session="${escapeHtml(childSession?.sessionId || "")}" data-disclosure>
+      <summary class="agent-card-summary" aria-expanded="false">
+        <span class="agent-card-kicker">${escapeHtml(t("conversation.agent_kicker"))}</span>
+        <span class="agent-card-name">${escapeHtml(displayName)}</span>
+        ${stateLabel ? `<span class="agent-card-state agent-card-state-${escapeHtml(card.state || "")}">${escapeHtml(stateLabel)}</span>` : ""}
+        ${card.childSessionAvailable === false ? `<span class="agent-card-unavailable" data-agent-child-unavailable>${escapeHtml(t("conversation.agent_child_unavailable"))}</span>` : ""}
+        ${meta.length ? `<span class="agent-card-meta">${escapeHtml(meta.join(" · "))}</span>` : ""}
+        ${resultLabel ? `<span class="agent-card-result" data-agent-result-arrival="${escapeHtml(resultLabel)}">${escapeHtml(t("conversation.agent_result_arrived", { time: resultLabel }))}</span>` : ""}
+        ${actions}
+      </summary>
+      ${cardBody}
+    </details>`;
+  if (!part) {
+    return details;
+  }
+  return `<div class="session-part-anchor" id="${escapeHtml(anchorId("part", part.id))}">
+    ${childAnchors}
+    ${details}
+  </div>`;
+}
+
+function renderUnplacedAgentSection(cards: ConversationAgentCard[], provider: string) {
+  if (!cards.length) {
+    return "";
+  }
+  const items = cards.map((card) => renderAgentCard(card, null, provider)).join("\n");
+  return `<section class="agent-cards-unplaced" data-agent-cards-unplaced>
+    <h2 class="agent-cards-unplaced-title">${escapeHtml(t("conversation.agent_unplaced_title"))}</h2>
+    <p class="agent-cards-unplaced-note">${escapeHtml(t("conversation.agent_unplaced_note"))}</p>
+    <div class="agent-cards-unplaced-list">${items}</div>
+  </section>`;
+}
+
+function renderAgentReference(reference: ConversationReference) {
+  const kindLabel = t(`conversation.reference_${reference.kind}`);
+  const link = reference.cardId
+    ? `<a class="agent-reference-target" href="#${escapeHtml(agentCardAnchorId(reference.cardId))}">${escapeHtml(reference.name || t("conversation.agent_unknown"))}</a>`
+    : `<span class="agent-reference-target">${escapeHtml(reference.name || t("conversation.agent_unknown"))}</span>`;
+  const time = channelTimeLabel(reference.timestamp);
+  return `<section id="${escapeHtml(agentReferenceAnchorId(reference.id))}" class="agent-reference-row" data-agent-reference data-reference-id="${escapeHtml(reference.id)}" data-reference-kind="${escapeHtml(reference.kind)}" data-reference-card="${escapeHtml(reference.cardId)}">
+    ${link}
+    <span class="agent-reference-kind">${escapeHtml(kindLabel === `conversation.reference_${reference.kind}` ? reference.kind : kindLabel)}</span>
+    ${time ? `<time class="agent-reference-time">${escapeHtml(time)}</time>` : ""}
+  </section>`;
+}
+
+function renderInspectorCoverage(inspector: ConversationInspectorView) {
+  const completeness = t(`conversation.inspector_completeness_${inspector.completeness}`);
+  const domains = inspector.coverage.map((entry) => (
+    `<span class="inspector-coverage-domain" data-inspector-coverage-domain="${escapeHtml(entry.domain)}" data-coverage-state="${escapeHtml(entry.state)}"${entry.details ? ` title="${escapeHtml(entry.details)}"` : ""}>${escapeHtml(t(`conversation.inspector_domain_${entry.domain}`))}: ${escapeHtml(t(`conversation.inspector_coverage_${entry.state}`))}</span>`
+  )).join(" ");
+  return `<dd data-inspector-coverage data-coverage-completeness="${escapeHtml(inspector.completeness)}">${escapeHtml(completeness)}${inspector.truncated ? ` · ${escapeHtml(t("conversation.inspector_truncated"))}` : ""}${domains ? `<div class="inspector-coverage-domains">${domains}</div>` : ""}</dd>`;
+}
+
+function renderInspectorUsage(inspector: ConversationInspectorView) {
+  const usage = inspector.usage;
+  const pieces = [];
+  pieces.push(t("conversation.inspector_usage_requests", { count: String(usage.requestCount) }));
+  if (usage.total != null) {
+    pieces.push(t("conversation.inspector_usage_total", { count: formatCount(usage.total) }));
+  }
+  if (usage.input != null) {
+    pieces.push(t("conversation.inspector_usage_input", { count: formatCount(usage.input) }));
+  }
+  if (usage.output != null) {
+    pieces.push(t("conversation.inspector_usage_output", { count: formatCount(usage.output) }));
+  }
+  if (usage.cacheRead != null) {
+    pieces.push(t("conversation.inspector_usage_cache_read", { count: formatCount(usage.cacheRead) }));
+  }
+  if (usage.cacheWrite != null) {
+    pieces.push(t("conversation.inspector_usage_cache_write", { count: formatCount(usage.cacheWrite) }));
+  }
+  if (usage.reasoning != null) {
+    pieces.push(t("conversation.inspector_usage_reasoning", { count: formatCount(usage.reasoning) }));
+  }
+  const summary = pieces.length
+    ? pieces.join(" · ")
+    : t("conversation.inspector_not_recorded");
+  let originMarkup = "";
+  if (usage.originsComplete && usage.origins) {
+    const rows = (["input", "cacheRead", "cacheWrite"] as const).map((component) => {
+      const value = usage.origins![component];
+      return `<li class="inspector-origin-row" data-inspector-origin="${component}">
+        <span class="inspector-origin-component">${escapeHtml(t(`conversation.inspector_origin_component_${component}`))}</span>
+        <span data-origin-direct="${value.direct}">${escapeHtml(t("conversation.inspector_origin_direct", { count: formatCount(value.direct) }))}</span>
+        <span data-origin-inherited="${value.inherited}">${escapeHtml(t("conversation.inspector_origin_inherited", { count: formatCount(value.inherited) }))}</span>
+        <span data-origin-shared="${value.shared}">${escapeHtml(t("conversation.inspector_origin_shared", { count: formatCount(value.shared) }))}</span>
+      </li>`;
+    }).join("");
+    originMarkup = `<ul class="inspector-origin-list" data-inspector-origins>${rows}</ul>`;
+  }
+  const incomplete = usage.originsComplete
+    ? ""
+    : `<p class="inspector-usage-note" data-usage-incomplete>${escapeHtml(t("conversation.inspector_usage_incomplete"))}</p>`;
+  return `<section class="inspector-section" data-inspector-section="usage">
+    <h2>${escapeHtml(t("conversation.inspector_usage"))}</h2>
+    <p class="inspector-usage-summary" data-inspector-usage data-usage-complete="${usage.complete ? "true" : "false"}">${escapeHtml(summary)}</p>
+    ${originMarkup}
+    ${incomplete}
+  </section>`;
+}
+
+function renderInspectorRelationships(inspector: ConversationInspectorView) {
+  const rows = inspector.relationships.map((relationship) => {
+    const href = conversationSessionHref(relationship.otherSession);
+    return `<li class="inspector-relationship" data-relationship-type="${escapeHtml(relationship.type)}" data-relationship-direction="${relationship.outgoing ? "outgoing" : "incoming"}">
+      <span class="inspector-relationship-type">${escapeHtml(t(`conversation.relationship_${relationship.type}`))}</span>
+      ${href && relationship.otherSession && relationship.otherSessionAvailable !== false
+        ? `<a class="inspector-relationship-link" href="${escapeHtml(href)}">${escapeHtml(relationship.otherSession.sessionId)}</a>`
+        : `<span class="inspector-relationship-link"${relationship.otherSessionAvailable === false ? " data-relationship-unavailable" : ""}>${escapeHtml(relationship.otherSessionAvailable === false ? t("conversation.inspector_session_unavailable") : t("conversation.inspector_not_recorded"))}</span>`}
+    </li>`;
+  }).join("\n");
+  const overflow = inspector.relationshipCount > inspector.relationships.length
+    ? `<a class="inspector-more-link" data-relationships-more href="#tab-work">${escapeHtml(t("conversation.inspector_relationships_more"))}</a>`
+    : "";
+  return `<section class="inspector-section" data-inspector-section="relationships">
+    <h2>${escapeHtml(t("conversation.inspector_relationships"))}</h2>
+    ${rows ? `<ul class="inspector-relationship-list" data-inspector-relationships>${rows}</ul>` : `<p class="inspector-empty" data-inspector-relationships-empty>${escapeHtml(t("conversation.inspector_relationships_empty"))}</p>`}
+    ${overflow}
+  </section>`;
+}
+
+function renderInspectorAssetGroup(group: { scope: string; items: any[] }) {
+  const items = group.items.map((asset) => {
+    const kindLabel = t(`conversation.asset_kind_${asset.kind}`);
+    const title = asset.title || (kindLabel === `conversation.asset_kind_${asset.kind}` ? asset.kind : kindLabel);
+    const meta = [
+      kindLabel === `conversation.asset_kind_${asset.kind}` ? asset.kind : kindLabel,
+      asset.origin ? t(`conversation.asset_origin_${asset.origin}`) : "",
+      asset.contentAccess ? t(`conversation.asset_content_${asset.contentAccess}`) : ""
+    ].filter(Boolean);
+    const sources = [];
+    for (const source of asset.sourceSessions || []) {
+      const href = conversationSessionHref(source);
+      if (href) {
+        sources.push(`<a class="inspector-asset-source" href="${escapeHtml(href)}">${escapeHtml(t("conversation.asset_source"))}</a>`);
+      }
+    }
+    if (asset.producerRunId) {
+      sources.push(`<a class="inspector-asset-source" href="#tab-work" data-inspector-evidence-kind="run" data-inspector-evidence-id="${escapeHtml(asset.producerRunId)}">${escapeHtml(t("conversation.asset_run_evidence"))}</a>`);
+    }
+    for (const runId of asset.consumerRunIds || []) {
+      sources.push(`<a class="inspector-asset-source" href="#tab-work" data-inspector-evidence-kind="run" data-inspector-evidence-id="${escapeHtml(runId)}">${escapeHtml(t("conversation.asset_run_evidence"))}</a>`);
+    }
+    return `<li class="inspector-asset" data-asset-kind="${escapeHtml(asset.kind)}" data-asset-id="${escapeHtml(asset.id)}">
+      <strong class="inspector-asset-title">${escapeHtml(title)}</strong>
+      ${meta.length ? `<span class="inspector-asset-meta">${escapeHtml(meta.join(" · "))}</span>` : ""}
+      ${asset.summary ? `<p class="inspector-asset-summary">${escapeHtml(asset.summary)}</p>` : ""}
+      ${asset.provenance ? `<span class="inspector-asset-provenance">${escapeHtml(asset.provenance)}</span>` : ""}
+      ${sources.length ? `<span class="inspector-asset-sources">${sources.join(" ")}</span>` : ""}
+    </li>`;
+  }).join("\n");
+  return `<section class="inspector-asset-group" data-asset-scope="${escapeHtml(group.scope)}">
+    <h3>${escapeHtml(t(`conversation.asset_scope_${group.scope}`))}</h3>
+    <ul class="inspector-asset-list">${items}</ul>
+  </section>`;
+}
+
+function renderConversationInspector(inspector: ConversationInspectorView | null, provider: string, sessionId: string) {
+  if (!inspector) {
+    return `<aside class="conversation-inspector" data-conversation-inspector aria-label="${escapeHtml(t("conversation.inspector_title"))}">
+      <p class="inspector-empty" data-inspector-unavailable>${escapeHtml(t("conversation.inspector_not_recorded"))}</p>
+    </aside>`;
+  }
+  const assetGroups = inspector.assets.map(renderInspectorAssetGroup).join("\n");
+  const providerName = provider || inspector.provider;
+  return `<aside class="conversation-inspector" data-conversation-inspector aria-label="${escapeHtml(t("conversation.inspector_title"))}">
+    <div class="inspector-header"><h2>${escapeHtml(t("conversation.inspector_title"))}</h2></div>
+    <section class="inspector-section" data-inspector-section="session">
+      <dl class="inspector-session-dl">
+        <div class="inspector-row"><dt>${escapeHtml(t("conversation.inspector_provider"))}</dt><dd>${escapeHtml(providerName || t("conversation.inspector_not_recorded"))}</dd></div>
+        <div class="inspector-row"><dt>${escapeHtml(t("conversation.inspector_id"))}</dt><dd><code data-inspector-session-id>${escapeHtml(inspector.sessionId || sessionId)}</code></dd></div>
+        <div class="inspector-row"><dt>${escapeHtml(t("conversation.inspector_recorded"))}</dt>${renderInspectorCoverage(inspector)}</div>
+      </dl>
+    </section>
+    ${renderInspectorUsage(inspector)}
+    ${renderInspectorRelationships(inspector)}
+    ${assetGroups
+      ? `<section class="inspector-section" data-inspector-section="assets"><h2>${escapeHtml(t("conversation.inspector_assets"))}</h2>${assetGroups}</section>`
+      : `<section class="inspector-section" data-inspector-section="assets"><h2>${escapeHtml(t("conversation.inspector_assets"))}</h2><p class="inspector-empty" data-inspector-assets-empty>${escapeHtml(t("conversation.inspector_assets_empty"))}</p></section>`}
+  </aside>`;
+}
+
+function conversationCardForPart(view: ConversationViewModel | null, part: SessionPartNode, messageId: string, placedCardIds: Set<string> | null = null) {
+  if (!view?.cards.length || !part) {
+    return null;
+  }
+  // A card already placed at another spine position must not be re-bound
+  // (exactly-once); the part keeps the nested-session fallback instead.
+  const available = (card: ConversationAgentCard) => !placedCardIds?.has(card.id);
+  const childIds = new Set((part.childSessions || []).map((child: any) => String(child.session?.id || "")));
+  for (const card of view.cards) {
+    if (available(card) && card.bindings.taskToolCallId && card.bindings.taskToolCallId === part.id) {
+      return card;
+    }
+  }
+  for (const card of view.cards) {
+    if (available(card) && card.bindings.childSessionId && childIds.has(card.bindings.childSessionId)) {
+      return card;
+    }
+  }
+  for (const card of view.cards) {
+    if (available(card) && card.bindings.turnId && card.bindings.turnId === messageId) {
+      return card;
+    }
+  }
+  return null;
+}
+
 // ── Conversation thread (UI v2 P2a) ────────────────────────────────────
 
 const CONVERSATION_THREAD_THRESHOLD = 20;
-
 function conversationDefaultMode(messageCount: number) {
   return Number(messageCount) > CONVERSATION_THREAD_THRESHOLD ? "thread" : "linear";
 }
@@ -959,7 +1314,7 @@ function renderCompactionCheckpoint(compaction: any, provider: string, placement
  * checkpoints render exactly once, in both modes, and never as a message
  * group or ToC entry.
  */
-function renderConversationThread(entries: ConversationEntry[], compactions: any[], provider: string) {
+function renderConversationThread(entries: ConversationEntry[], compactions: any[], provider: string, view: ConversationViewModel | null = null) {
   // Resolve each checkpoint to the entry index it follows and to one of the
   // explicit placement kinds: -1 means before the first entry; entries.length
   // means after the last (explicit end placement). The placement kind is
@@ -988,17 +1343,38 @@ function renderConversationThread(entries: ConversationEntry[], compactions: any
   for (const compaction of compactions) {
     place(compaction);
   }
+  // Main-thread reference rows are anchored exactly like checkpoints: their
+  // recorded turn name must resolve against the spine, otherwise the fact
+  // stays in the card channel (never placed by guess).
+  const referencesByEntryIndex = new Map<number, ConversationReference[]>();
+  for (const reference of view?.references || []) {
+    const position = reference.anchorMessageId ? indexOf(reference.anchorMessageId) : -1;
+    if (position < 0) {
+      continue;
+    }
+    const list = referencesByEntryIndex.get(position) || [];
+    list.push(reference);
+    referencesByEntryIndex.set(position, list);
+  }
 
-  const items: Array<{ kind: "block" | "checkpoint"; role?: string; html: string }> = [];
+  const items: Array<{ kind: "block" | "checkpoint" | "reference"; role?: string; html: string }> = [];
   const pushCheckpoints = (position: number) => {
     for (const placed of byEntryIndex.get(position) || []) {
       items.push({ kind: "checkpoint", html: renderCompactionCheckpoint(placed.compaction, provider, placed.placement) });
+    }
+  };
+  const pushReferences = (position: number) => {
+    for (const reference of referencesByEntryIndex.get(position) || []) {
+      items.push({ kind: "reference", html: renderAgentReference(reference) });
     }
   };
   pushCheckpoints(-1);
   entries.forEach((entry, index) => {
     if (entry.markup) {
       items.push({ kind: "block", role: entry.role, html: entry.markup });
+    }
+    if (referencesByEntryIndex.has(index)) {
+      pushReferences(index);
     }
     if (byEntryIndex.has(index)) {
       pushCheckpoints(index);
@@ -1034,10 +1410,22 @@ function renderConversationThread(entries: ConversationEntry[], compactions: any
     : thread;
 }
 
-function renderConversationPanel(entries: ConversationEntry[], compactions: any[], provider: string, defaultMode: string, detachedMarkup = "", normalizedMessageCount = entries.length) {
-  const threadMarkup = renderConversationThread(entries, compactions, provider);
-  if (!threadMarkup && !detachedMarkup) {
-    return `<section id="session-messages" class="messages"><p class="empty-state">${escapeHtml(t("detail.no_messages"))}</p></section>`;
+function renderConversationPanel(entries: ConversationEntry[], compactions: any[], provider: string, defaultMode: string, detachedMarkup = "", normalizedMessageCount = entries.length, view: ConversationViewModel | null = null, placedCardIds: Set<string> | null = null) {
+  const threadMarkup = renderConversationThread(entries, compactions, provider, view);
+  const inspectorMarkup = renderConversationInspector(view?.inspector ?? null, provider, "");
+  // P2b truthful fallback: view-model cards without a real transcript/part
+  // binding (e.g. run/task records whose ids name no tree part) render
+  // exactly once in an explicitly unplaced section, never at an invented
+  // causal position. Cards placed on the spine are excluded here.
+  const unplacedCards = view
+    ? view.cards.filter((card) => !placedCardIds?.has(card.id))
+    : [];
+  const unplacedMarkup = renderUnplacedAgentSection(unplacedCards, provider);
+  if (!threadMarkup && !detachedMarkup && !unplacedMarkup) {
+    return `<div class="conversation-layout" data-conversation-layout>
+      <section id="session-messages" class="messages"><p class="empty-state">${escapeHtml(t("detail.no_messages"))}</p></section>
+      ${inspectorMarkup}
+    </div>`;
   }
 
   const toggle = `
@@ -1048,10 +1436,16 @@ function renderConversationPanel(entries: ConversationEntry[], compactions: any[
       </div>
     </div>`;
   return `${toggle}
-    <section id="session-messages" class="messages conversation-${escapeHtml(defaultMode)}" data-conversation-default="${escapeHtml(defaultMode)}" data-conversation-message-count="${normalizedMessageCount}">
-      ${threadMarkup}
-      ${detachedMarkup}
-    </section>`;
+    <div class="conversation-layout" data-conversation-layout>
+      <div class="conversation-thread-col">
+        <section id="session-messages" class="messages conversation-${escapeHtml(defaultMode)}" data-conversation-default="${escapeHtml(defaultMode)}" data-conversation-message-count="${normalizedMessageCount}">
+          ${threadMarkup}
+          ${detachedMarkup}
+          ${unplacedMarkup}
+        </section>
+      </div>
+      ${inspectorMarkup}
+    </div>`;
 }
 
 function renderTranscriptSearch() {
@@ -1089,8 +1483,9 @@ export function renderSessionPage({
   runtimeWorkbench = "",
   runtimeAvailable = false,
   navigationContext = null,
-  conversationCompactions = []
-}: { session: any; sessionTree?: any; sessionMetrics?: any; messages?: any[]; partsByMessage?: Map<any, any>; todos?: any[]; recentSessions?: any[]; meta?: any; provider?: string; providers?: any[]; manageable?: boolean; resumeCommand?: any; terminalLaunchAllowed?: boolean; runtimeWorkbench?: string; runtimeAvailable?: boolean; navigationContext?: SessionNavigationContext | null; conversationCompactions?: ConversationCompaction[] }) {
+  conversationCompactions = [],
+  conversationView = null
+}: { session: any; sessionTree?: any; sessionMetrics?: any; messages?: any[]; partsByMessage?: Map<any, any>; todos?: any[]; recentSessions?: any[]; meta?: any; provider?: string; providers?: any[]; manageable?: boolean; resumeCommand?: any; terminalLaunchAllowed?: boolean; runtimeWorkbench?: string; runtimeAvailable?: boolean; navigationContext?: SessionNavigationContext | null; conversationCompactions?: ConversationCompaction[]; conversationView?: ConversationViewModel | null }) {
   const title = session.title || session.slug || session.id;
   const starred = meta?.starred ? 1 : 0;
   const encodedProvider = encodeURIComponent(provider);
@@ -1195,8 +1590,11 @@ ${actions}
     </header>
   `;
 
+  // Exactly-once placement bookkeeping: cards bound to a real transcript part
+  // are consumed on the spine; the remainder renders in the unplaced section.
+  const placedCardIds = new Set<string>();
   const conversationEntries = sessionTree
-    ? renderSessionMessageEntries(sessionTree, 0, provider)
+    ? renderSessionMessageEntries(sessionTree, 0, provider, conversationView, placedCardIds)
     : renderRawMessageEntries(messages, partsByMessage, provider);
   // Canonical rendered top-level conversation entries: raw tool rows are
   // merged into their assistant entry, messages that render no visible
@@ -1208,7 +1606,7 @@ ${actions}
   const detachedMarkup = sessionTree
     ? (sessionTree.detachedChildren || []).map((child: SessionTree) => renderSessionTree(child, 1, provider, true)).filter(Boolean).join("\n")
     : "";
-  const conversationMarkup = renderConversationPanel(conversationEntries, conversationCompactions, provider, conversationDefault, detachedMarkup, renderedEntryCount);
+  const conversationMarkup = renderConversationPanel(conversationEntries, conversationCompactions, provider, conversationDefault, detachedMarkup, renderedEntryCount, conversationView, placedCardIds);
 
   const sessionMetadata = session.metadata && typeof session.metadata === "object"
     ? session.metadata as Record<string, unknown>

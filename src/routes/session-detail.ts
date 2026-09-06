@@ -38,6 +38,7 @@ import {
 } from "../protocol-runtime-v3.js";
 import type { ProjectionOptions, V3Projection } from "../protocol-runtime-v3.js";
 import type { SessionProtocolV3 } from "../providers/shared/session-protocol-v3.js";
+import { deriveConversationView } from "../conversation-view-model.js";
 
 export function registerSessionDetail(
   app: any,
@@ -159,6 +160,15 @@ export function registerSessionDetail(
         .list({ limit: 30, offset: 0 }).sessions;
       const resumeCommand = getResumeCommand(adapter, sessionId, document.session.directory, appConfig.resumeCommands);
       const runtime = runtimeRenderData(adapter, sessionId, document.session);
+      const conversationView = runtime.v3 && runtime.projections
+        ? deriveConversationView({
+            protocol: runtime.v3,
+            work: runtime.projections.work,
+            execution: runtime.projections.execution,
+            coordination: runtime.projections.coordination,
+            context: runtime.projections.context
+          })
+        : null;
       return {
         status: 200,
         body: renderSessionPage({
@@ -174,6 +184,7 @@ export function registerSessionDetail(
           runtimeWorkbench: renderRuntimeWorkbench(runtime, providerSegment, sessionId),
           runtimeAvailable: Boolean(runtime.protocol),
           conversationCompactions: collectConversationCompactions(runtime.protocol),
+          conversationView,
           terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),
           navigationContext,
           ...renderContext

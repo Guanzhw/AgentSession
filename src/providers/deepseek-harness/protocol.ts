@@ -532,6 +532,7 @@ function addTaskAndRun({
       agent: title,
       model: child ? childModel(child, descriptorOf(child.records)) : null,
       childSessionId: childId,
+      childSessionAvailable,
       timeStart: timeCreated,
       timeEnd: timeCompleted,
       provenance: { fidelity, sourceType, sourceId },
@@ -642,6 +643,7 @@ export function buildDshSessionProtocol(input: DshProtocolInput): SessionProtoco
       agent: member.name || member.id,
       model: child ? childModel(child, descriptorOf(child.records)) : member.provider,
       childSessionId: child ? member.id : null,
+      childSessionAvailable: child ? true : false,
       timeStart: asNumber(member.event.time),
       timeEnd: status === "running" || status === "queued" ? null : asNumber(child?.session.timeUpdated || member.event.time),
       provenance: {

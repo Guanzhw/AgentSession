@@ -235,6 +235,8 @@ export interface AgentRun {
   model: string | null;
   /** Canonical session id of a detached child session, when one exists. */
   childSessionId: string | null;
+  /** Provider-recorded availability of childSessionId; null means unknown. */
+  childSessionAvailable?: boolean | null;
   parentRunId?: string | null;
   triggerEventId?: string | null;
   scheduleId?: string | null;
@@ -509,6 +511,7 @@ export function agentRun(fields: AgentRun): AgentRun {
     ...fields,
     taskId: fields.taskId ?? null,
     childSessionId: fields.childSessionId ?? null,
+    childSessionAvailable: fields.childSessionAvailable ?? null,
     timeStart: numberOrNull(fields.timeStart),
     timeEnd: numberOrNull(fields.timeEnd),
     provenance: assertProvenance(fields.provenance)
@@ -895,6 +898,9 @@ export function validateSessionProtocol(
     if (run?.sessionId !== expectedSessionId) error("RUN_SESSION_MISMATCH", "AgentRun sessionId differs from canonical session", ref, run?.provenance);
     if (run?.taskId && !taskIds.has(run.taskId)) warning("RUN_TASK_DANGLING", "AgentRun references a task not present in this snapshot", ref, run.provenance);
     if (run?.triggerEventId && !eventIds.has(run.triggerEventId)) warning("RUN_EVENT_DANGLING", "AgentRun trigger event is not present in this snapshot", ref, run.provenance);
+    if (run?.childSessionAvailable != null && typeof run.childSessionAvailable !== "boolean") {
+      error("RUN_CHILD_AVAILABILITY_INVALID", "AgentRun childSessionAvailable must be boolean or null", ref, run.provenance);
+    }
     if (run?.attempt != null && (!Number.isInteger(run.attempt) || run.attempt < 1)) {
       error("RUN_ATTEMPT_INVALID", "AgentRun attempt must be a positive integer", ref, run.provenance);
     }

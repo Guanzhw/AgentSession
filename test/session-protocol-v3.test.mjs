@@ -323,6 +323,13 @@ test("v3 diagnostics remain bounded", () => {
   assert.equal(validateSessionProtocolV3(duplicateIds).errors.length, 100);
 });
 
+test("v3 validator rejects a non-boolean child-session availability fact", () => {
+  const value = upgradeSessionProtocolV2(v2Fixture(), { freeze: false });
+  value.agentRuns[0].childSessionAvailable = "missing";
+  const validation = validateSessionProtocolV3(value);
+  assert.ok(validation.errors.some((item) => item.code === "RUN_CHILD_AVAILABILITY_INVALID"));
+});
+
 test("v3 validator rejects context lineage cycles and dangling local references", () => {
   const base = upgradeSessionProtocolV2(v2Fixture(), { freeze: false });
   base.contextVersions = [

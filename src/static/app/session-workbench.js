@@ -244,6 +244,45 @@ if (sessionWorkbench) {
     });
   }
 
+  // ── Conversation disclosures and inspector (UI v2 P2b) ───────────────────
+  // Native <details> stays keyboard reachable; the sync below only reflects
+  // the expanded state into aria-expanded on the summary and an is-open class
+  // for styling, and keeps focus on the summary when the details toggles.
+  const disclosures = sessionWorkbench.querySelectorAll("details[data-disclosure]");
+  const syncDisclosure = (details) => {
+    const summary = details.querySelector(":scope > summary");
+    if (summary) {
+      summary.setAttribute("aria-expanded", details.open ? "true" : "false");
+    }
+    details.classList.toggle("is-open", details.open);
+  };
+  disclosures.forEach(syncDisclosure);
+  sessionWorkbench.addEventListener("toggle", (event) => {
+    const details = event.target;
+    if (!(details instanceof HTMLDetailsElement) || !details.matches("details[data-disclosure]")) return;
+    syncDisclosure(details);
+    details.querySelector(":scope > summary")?.focus({ preventScroll: true });
+  }, true);
+
+  // Inspector Work-tab links ("View all in Work / Coordination" and asset
+  // run-evidence links) activate the Work tab from Conversation, then bounce
+  // to the matching runtime evidence trigger when one exists.
+  sessionWorkbench.addEventListener("click", (event) => {
+    const evidenceLink = event.target.closest("[data-inspector-evidence-kind]");
+    const moreLink = event.target.closest("[data-relationships-more]");
+    if (!evidenceLink && !moreLink) return;
+    event.preventDefault();
+    const workTab = document.querySelector("[data-runtime-root]") && document.getElementById("tab-btn-work");
+    if (workTab) workTab.click();
+    if (!evidenceLink) return;
+    const kind = evidenceLink.getAttribute("data-inspector-evidence-kind");
+    const id = evidenceLink.getAttribute("data-inspector-evidence-id");
+    requestAnimationFrame(() => {
+      const trigger = document.querySelector(`[data-runtime-evidence-kind="${CSS.escape(kind)}"][data-runtime-evidence-id="${CSS.escape(id)}"]`);
+      trigger?.click();
+    });
+  });
+
   const tocGroups = [...document.querySelectorAll(".session-toc .toc-group")];
   const tocResizeHandle = document.querySelector(".toc-resize-handle");
   let lastManualNav = 0;

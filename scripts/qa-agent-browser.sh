@@ -474,6 +474,28 @@ if [[ "$toggle_back_to_thread" != *"ready=false"* ]]; then
   assert_contains "conversation toggle Thread" "$toggle_back_to_thread" "conversation-thread"
 fi
 
+# ── P2b: conversation inspector, references (guarded real-data assertions) ──
+inspector_state="$(read_ab "verify P2b inspector" eval "(() => { const inspector = document.querySelector('[data-conversation-inspector]'); if (!inspector) return { present: false }; const sessionId = inspector.querySelector('[data-inspector-session-id]')?.textContent || ''; const width = window.innerWidth; const pos = getComputedStyle(inspector).position; const relCount = inspector.querySelectorAll('[data-inspector-relationships] .inspector-relationship').length; const moreLink = !!inspector.querySelector('[data-relationships-more]'); return { present: true, sessionId: sessionId.trim().length > 0, usage: !!inspector.querySelector('[data-inspector-usage]'), coverage: !!inspector.querySelector('[data-inspector-coverage]'), relationships: relCount, moreLink, relationshipConsistent: (relCount === 5 && moreLink) || (relCount < 5 && !moreLink), scopeGroups: [...inspector.querySelectorAll('[data-asset-scope]')].map((g) => g.dataset.assetScope), scopesPopulated: [...inspector.querySelectorAll('[data-asset-scope]')].every((g) => g.querySelectorAll('.inspector-asset').length > 0), positionedPerWidth: width > 1100 ? pos === 'sticky' : pos === 'static' }; })()" | tr -d '[:space:]')"
+if [[ "$inspector_state" == *'"present":true'* ]]; then
+  assert_contains "P2b inspector canonical session id" "$inspector_state" '"sessionId":true'
+  assert_contains "P2b inspector usage" "$inspector_state" '"usage":true'
+  assert_contains "P2b inspector coverage" "$inspector_state" '"coverage":true'
+  assert_contains "P2b inspector responsive placement" "$inspector_state" '"positionedPerWidth":true'
+  if [[ "$inspector_state" != *'"relationships":0'* && "$inspector_state" != *'"relationships":0,'* ]]; then
+    assert_contains "P2b inspector relationship bound" "$inspector_state" '"relationshipConsistent":true'
+  fi
+  if [[ "$inspector_state" != *'"scopeGroups":[]'* ]]; then
+    assert_contains "P2b inspector scopes populated" "$inspector_state" '"scopesPopulated":true'
+  fi
+fi
+
+reference_state="$(read_ab "verify P2b references" eval "(() => { const rows = [...document.querySelectorAll('[data-agent-reference]')]; const ids = rows.map((el) => el.dataset.referenceId); return { count: rows.length, unique: new Set(ids).size === ids.length, knownKinds: rows.every((el) => ['dispatched', 'message', 'mailbox', 'result', 'acknowledgement'].includes(el.dataset.referenceKind)), tocContained: !document.querySelector('.session-toc [data-agent-reference], .session-toc [data-agent-card], .session-toc [data-agent-channel], .session-toc [data-channel-kind]') }; })()" | tr -d '[:space:]')"
+if [[ "$reference_state" != *'"count":0'* && "$reference_state" != *'"count":0,'* && "$reference_state" != *'"count":0}'* ]]; then
+  assert_contains "P2b reference uniqueness" "$reference_state" '"unique":true'
+  assert_contains "P2b reference kinds" "$reference_state" '"knownKinds":true'
+  assert_contains "P2b ToC coordination containment" "$reference_state" '"tocContained":true'
+fi
+
 toc_user_labels="$(read_ab "read user toc labels" get text ".session-toc .toc-user .toc-type")"
 assert_contains "user toc labels" "$toc_user_labels" "U"
 
@@ -550,13 +572,42 @@ fi
 subagent_export_count="$(read_ab "count subagent export buttons" get count ".subagent-export-btn")"
 assert_positive_count "subagent export buttons" "$subagent_export_count"
 
-subagent_summary_count="$(read_ab "count subagent headers" get count ".subagent-summary")"
-assert_positive_count "subagent headers" "$subagent_summary_count"
+# P2b: sessions with recorded Task/AgentRun evidence render compact agent
+# cards on the spine; sessions without a protocol binding keep the nested
+# subagent blocks. Assert the path that is actually present (guarded).
+agent_card_count="$(read_ab "count P2b agent cards" get count "details[data-agent-card]")"
+agent_card_count_n="$(printf '%s' "$agent_card_count" | tr -dc '0-9')"
+if [[ "$agent_card_count_n" != "0" ]]; then
+  agent_card_state="$(read_ab "verify P2b agent card props" eval "(async () => { const cards = [...document.querySelectorAll('details[data-agent-card]')]; const f = cards[0]; const s = f?.querySelector(':scope > summary'); const before = { open: f?.hasAttribute('open'), ariaExpanded: s?.getAttribute('aria-expanded') }; s?.click(); await new Promise((resolve) => setTimeout(resolve, 0)); const afterOpen = f?.hasAttribute('open'); const afterExpanded = s?.getAttribute('aria-expanded'); const channel = f?.querySelector('[data-agent-channel]'); const channelState = channel ? { present: true, collapsed: !channel.hasAttribute('open'), items: channel.querySelectorAll('.agent-channel-item').length, empty: !!channel.querySelector('.agent-channel-empty') } : { present: false }; const childLink = [...(f?.querySelectorAll('.subagent-export-btn') || [])].find((a) => a.getAttribute('href')?.includes('/session/')); s?.click(); await new Promise((resolve) => setTimeout(resolve, 0)); return { count: cards.length, defaultCollapsed: before.open === false, defaultAria: before.ariaExpanded === 'false', openedAfterToggle: afterOpen, expandedAfterToggle: afterExpanded === 'true', childLink: !!childLink, focusKept: document.activeElement === s, channelState, uniqueCards: new Set(cards.map((c) => c.dataset.agentCardId)).size === cards.length, named: cards.every((c) => (c.dataset.agentName || '').length > 0) }; })()" | tr -d '[:space:]')"
+  assert_contains "P2b agent cards default collapsed" "$agent_card_state" '"defaultCollapsed":true'
+  assert_contains "P2b agent cards toggle expanded" "$agent_card_state" '"openedAfterToggle":true'
+  assert_contains "P2b agent cards aria-expanded" "$agent_card_state" '"expandedAfterToggle":true'
+  assert_contains "P2b agent cards child link" "$agent_card_state" '"childLink":true'
+  assert_contains "P2b agent cards focus preserved" "$agent_card_state" '"focusKept":true'
+  assert_contains "P2b agent cards unique" "$agent_card_state" '"uniqueCards":true'
+  if [[ "$agent_card_state" == *'"channelState":{"present":true'* ]]; then
+    assert_contains "P2b channel default collapsed" "$agent_card_state" '"collapsed":true'
+  fi
+else
+  subagent_summary_count="$(read_ab "count subagent headers" get count ".subagent-summary")"
+  assert_positive_count "subagent headers" "$subagent_summary_count"
 
-subagent_token_count="$(read_ab "count subagent token groups" get count ".subagent-summary .subagent-tokens")"
-if [[ "$subagent_token_count" != "$subagent_summary_count" ]]; then
-  echo "Each subagent header should show token usage, got tokens $subagent_token_count headers $subagent_summary_count" >&2
-  exit 1
+  subagent_token_count="$(read_ab "count subagent token groups" get count ".subagent-summary .subagent-tokens")"
+  if [[ "$subagent_token_count" != "$subagent_summary_count" ]]; then
+    echo "Each subagent header should show token usage, got tokens $subagent_token_count headers $subagent_summary_count" >&2
+    exit 1
+  fi
+fi
+
+# P2b truthful fallback: view-model cards without a transcript/part binding
+# render exactly once in the explicit unplaced section (guarded; the section
+# is absent when every card binds a real part).
+unplaced_state="$(read_ab "verify P2b unplaced cards" eval "(() => { const section = document.querySelector('[data-agent-cards-unplaced]'); if (!section) return { present: false }; const ids = [...section.querySelectorAll('details[data-agent-card]')].map((el) => el.dataset.agentCardId); const pageIds = [...document.querySelectorAll('details[data-agent-card]')].map((el) => el.dataset.agentCardId); return { present: true, unique: new Set(ids).size === ids.length, exactlyOnce: ids.every((id) => pageIds.filter((x) => x === id).length === 1), allWithinMessages: !!section.closest('#session-messages'), tocFree: !document.querySelector('.session-toc [data-agent-card], .session-toc [data-agent-cards-unplaced], .session-toc [data-agent-channel]') }; })()" | tr -d '[:space:]')"
+if [[ "$unplaced_state" == *'"present":true'* ]]; then
+  assert_contains "P2b unplaced cards unique" "$unplaced_state" '"unique":true'
+  assert_contains "P2b unplaced cards exactly once" "$unplaced_state" '"exactlyOnce":true'
+  assert_contains "P2b unplaced cards on conversation surface" "$unplaced_state" '"allWithinMessages":true'
+  assert_contains "P2b unplaced cards ToC containment" "$unplaced_state" '"tocFree":true'
 fi
 
 subagent_task_title_count="$(read_ab "count generic subagent task titles" get count ".subagent-summary >> text=Subagent task")"

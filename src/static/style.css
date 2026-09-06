@@ -2131,6 +2131,552 @@ details[open] summary {
   }
 }
 
+/* ── Conversation agent cards, channels, references, inspector (UI v2 P2b) ── */
+
+/* Conversation layout: thread spine + sticky inspector. The inspector is
+   sticky only when the viewport leaves both usable; below the breakpoint it
+   becomes an in-flow section after the thread. */
+.conversation-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+  gap: 24px;
+  align-items: start;
+  min-width: 0;
+}
+
+.conversation-thread-col {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.session-workbench.session-conversation-tab-active .main-content {
+  max-width: 1460px;
+}
+
+.conversation-inspector {
+  position: sticky;
+  top: calc(var(--topbar-height) + 18px);
+  max-height: calc(100vh - var(--topbar-height) - 36px);
+  overflow-y: auto;
+  min-width: 0;
+  padding: 14px 16px 18px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-secondary) 55%, var(--bg-primary));
+  scroll-margin-top: var(--session-anchor-offset);
+}
+
+.inspector-header h2,
+.inspector-section h2 {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  margin: 0 0 10px;
+  color: var(--text-primary);
+}
+
+.inspector-header {
+  margin-bottom: 14px;
+}
+
+.inspector-section {
+  margin-top: 18px;
+  min-width: 0;
+}
+
+.inspector-section:first-of-type {
+  margin-top: 0;
+}
+
+.inspector-section h3 {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin: 0 0 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.inspector-session-dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.inspector-row {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.inspector-row dt {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.inspector-row dd {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.inspector-row code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.inspector-coverage-domains {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 4px;
+}
+
+.inspector-coverage-domain {
+  font-size: 11px;
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.inspector-usage-summary {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.inspector-origin-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.inspector-origin-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.inspector-origin-component {
+  color: var(--text-muted);
+}
+
+.inspector-usage-note {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+  line-height: 1.45;
+}
+
+.inspector-relationship-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.inspector-relationship {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.inspector-relationship-type {
+  font-size: 11px;
+  color: var(--accent-color);
+  border: 1px solid color-mix(in srgb, var(--accent-color) 40%, var(--border-color));
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.inspector-relationship-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.inspector-relationship-link:hover {
+  color: var(--accent-color);
+  text-decoration: underline;
+}
+
+.inspector-more-link {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--accent-color);
+  text-decoration: none;
+}
+
+.inspector-more-link:hover {
+  text-decoration: underline;
+}
+
+.inspector-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.inspector-asset-group {
+  margin-top: 12px;
+}
+
+.inspector-asset-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.inspector-asset {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: var(--bg-primary);
+}
+
+.inspector-asset-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.inspector-asset-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.inspector-asset-summary {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.inspector-asset-provenance {
+  font-size: 10px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.inspector-asset-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 2px;
+}
+
+.inspector-asset-source {
+  font-size: 11px;
+  color: var(--accent-color);
+  text-decoration: none;
+}
+
+.inspector-asset-source:hover {
+  text-decoration: underline;
+}
+
+/* Agent card: an indented disclosure row on the thread spine, not a
+   card wall. The channel opens inside it as a second-level disclosure. */
+.agent-card {
+  margin: 0;
+  border: 1px solid var(--border-color);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-secondary) 55%, var(--bg-primary));
+  scroll-margin-top: var(--session-anchor-offset);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Unplaced agent activity: view-model cards with no transcript/part binding
+   render exactly once here, explicitly outside the thread spine. */
+.agent-cards-unplaced {
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+}
+
+.agent-cards-unplaced-title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.agent-cards-unplaced-note {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.agent-cards-unplaced-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-card + .agent-card {
+  margin-top: 8px;
+}
+
+.agent-card-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  min-width: 0;
+  list-style-position: outside;
+}
+
+.agent-card-summary:focus-visible,
+.agent-channel-summary:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: -2px;
+}
+
+.agent-card-summary::-webkit-details-marker {
+  display: none;
+}
+
+.agent-card-kicker {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-color);
+}
+
+.agent-card-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.agent-card-state {
+  font-size: 11px;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.agent-card-state-completed,
+.agent-card-state-cancelled {
+  color: var(--text-muted);
+}
+
+.agent-card-state-interrupted {
+  color: var(--warning-color);
+  border-color: color-mix(in srgb, var(--warning-color) 50%, var(--border-color));
+}
+
+.agent-card-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 0;
+}
+
+.agent-card-result {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.agent-card-body {
+  padding: 2px 12px 12px;
+  min-width: 0;
+}
+
+.agent-channel {
+  margin: 2px 0 0;
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
+  padding-left: 12px;
+}
+
+.agent-channel-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 0 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.agent-channel-count {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.agent-channel-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 4px;
+  display: grid;
+  gap: 4px;
+}
+
+.agent-channel-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 4px 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 45%, transparent);
+  min-width: 0;
+}
+
+.agent-channel-item:last-child {
+  border-bottom: 0;
+}
+
+.agent-channel-kind {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.agent-channel-state {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.agent-channel-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-channel-direction {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.agent-channel-empty,
+.agent-channel-more {
+  margin: 0;
+  padding: 4px 0 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Lightweight main-thread reference row (secondary communication or result
+   anchors). It is not a message group and never enters the ToC. */
+.agent-reference-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 0;
+  padding: 6px 12px 6px 20px;
+  border-left: 2px solid var(--border-color);
+  font-size: 12px;
+  color: var(--text-secondary);
+  scroll-margin-top: var(--session-anchor-offset);
+}
+
+.agent-reference-target {
+  font-weight: 500;
+  color: var(--accent-color);
+  text-decoration: none;
+}
+
+.agent-reference-target:hover {
+  text-decoration: underline;
+}
+
+.agent-reference-kind {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.agent-reference-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1100px) {
+  .conversation-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .conversation-inspector {
+    position: static;
+    max-height: none;
+    margin-top: 18px;
+  }
+
+  .session-workbench.session-conversation-tab-active .main-content {
+    max-width: 980px;
+  }
+}
+
+@media (max-width: 768px) {
+  .conversation-inspector {
+    padding: 12px;
+    border-radius: 7px;
+  }
+
+  .inspector-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .inspector-origin-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 12px;
+    row-gap: 2px;
+  }
+
+  .agent-card-summary {
+    padding: 8px 10px;
+  }
+
+  .agent-card-body {
+    padding: 2px 10px 10px;
+  }
+
+  .agent-reference-row {
+    padding-left: 14px;
+  }
+}
+
 /* Todos */
 .todo-list-wrap {
   background-color: var(--bg-primary);

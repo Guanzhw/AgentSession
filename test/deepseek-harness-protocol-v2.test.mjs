@@ -120,6 +120,7 @@ test("DSH protocol preserves dangling workflow references without inventing a ch
   const session = extractDshMeta(recordsValue);
   const protocol = buildDshSessionProtocol({ session, records: recordsValue, messages: [], children: [] });
   const run = protocol.agentRuns.find((candidate) => candidate.childSessionId === "missing-child");
+  assert.equal(run?.childSessionAvailable, false);
   assert.equal(run?.metadata?.childSessionAvailable, false);
   assert.equal(run?.metadata?.danglingChildSessionId, "missing-child");
   assert.equal(protocol.relationships.find((relation) => relation.toSessionId === "missing-child")?.details?.includes("not present"), true);

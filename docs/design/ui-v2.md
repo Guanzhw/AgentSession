@@ -23,6 +23,28 @@ retained. Evidence-bounded decision record:
 visual contract remains proposed until the real browser screenshot and WCAG
 gates are complete.
 
+## P2 implementation status (2026-09-04)
+
+P2a (conversation thread skeleton) and P2b (agent cards, channels, and the
+conversation inspector) are implemented on the same canonical SSR spine.
+P2a: user-turn sectioned spine with a Thread/Linear toggle, bounded
+compaction checkpoints rendered once at their causal position, ToC
+containment. See `.agents/decisions/implemented/2026-09-04-ui-v2-p2a-conversation-thread-skeleton.md`.
+P2b: compact agent cards replace noisy nested subagent blocks where real
+Task/AgentRun/Actor evidence binds them (nested-session fallback kept when no
+binding exists), recorded Coordination observations render only inside the
+agent channel (main thread keeps dispatch/result anchors plus lightweight
+references for subsequent communication), and a 280–320 px sticky inspector
+(≤768 px in-flow) shows the canonical provider session id, bounded
+coverage/completeness, usage totals with the origin breakdown only when the
+existing origin aggregate is complete, up to five typed session
+relationships with a Work/Coordination overflow entry, and scoped context
+assets (metadata-first, empty groups hidden). Cards whose evidence names no
+transcript part (e.g. DSH run/task records without a session tree) render
+exactly once in an explicit unplaced "Agent activity" section instead of
+being dropped or re-anchored by guess. See
+`.agents/decisions/implemented/2026-09-04-ui-v2-p2b-conversation-agent-cards-inspector.md`.
+
 > 状态:`proposed` · 作者:UI planner · 日期:2026-09
 > 本文是**信息设计**:展示哪些信息、层级如何、什么默认隐藏、状态如何呈现。
 > P1-P4 的视觉语言、响应式规则与截图验收由
@@ -290,6 +312,32 @@ compact 因果检查点仍只在对话流出现一次,完整证据仍在事件�
 | 恢复命令、导出 | 会话适配器 resume/export 能力 |
 
 **绑定原则**:每个 UI 元素都有对应协议字段;UI 不发明协议没有的事实,协议字段不强制上屏。
+
+> **P2b delivery note (2026-09-04)**: the §4.3/§4.6 facts are bound as follows
+> in the Conversation surface — agent cards/channels consume only
+> `Task`/`AgentRun`/`Actor`/`CoordinationObservation` records through the
+> bounded Execution/Coordination projections via the provider-neutral
+> `conversation-view-model.ts` view model (no provider-id branches, no
+> protocol extension); the inspector's usage section shows the
+> direct/inherited/shared breakdown only when the Execution origin aggregate
+> reports `complete`, otherwise the recorded totals carry a truthful
+> incomplete label; relationship rows dedupe by other-session reference and
+> cap at five before the Work/Coordination overflow entry; scope-grouped
+> context assets show public metadata only (kind/title/summary/origin/content
+> access/provenance/source links) and empty groups stay absent. View-model
+> cards without a real transcript/part binding render exactly once in an
+> explicit unplaced section (bounded by the 50-card view-model cap, channels
+> inside cards, zero ToC entries) — never at an invented causal position; the
+> DSH `session-a9f5b448-9851-4872-a266-fdc3381a5061` records are the
+> regression evidence.
+> Replaced multi-child task parts preserve every recorded child-session ToC
+> anchor while card actions follow the card's recorded child ref. Explicit
+> `runId`/`taskId` identity takes precedence for channel/reference assignment;
+> actor fallback requires exactly one match, leaving ambiguous observations
+> unassigned. A valid task `toolCallId` can replace a task part without child
+> sessions. DSH's normalized tri-state `AgentRun.childSessionAvailable` gates
+> child and inspector links only when explicitly false; unknown availability is
+> left unknown.
 
 ## 8. 与现有 UI 的继承清单(实测 127.0.0.1:3456)
 
