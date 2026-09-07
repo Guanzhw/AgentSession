@@ -75,7 +75,7 @@ GET /api/:provider/session/:id/runtime/context?maxItems=
 | OpenClaw | active — current SQLite（含 legacy/archive JSONL 回退） | `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite`（agent schema 19，2026-09-03 验证）；legacy/archive `sessions/*.jsonl` | `partial/derived` branch/window 代数、reasoning、工具、session_nodes parent/spawn/fork lineage；无来源证据不创建 child。Task/Run 为 `none`：current 与 legacy 构建器恒返回空数组，无已验证映射。 |
 | Hermes Agent | active | `$HERMES_HOME/state.db` | `full/recorded` active-only SQLite transcript、异步 delegation handle/state；`partial/derived` 压缩延续/delegation lineage 与 metadata-only compaction，压缩不是 spawned。当前 freshness provenance：release peeled commit `29112bef…`（annotated tag object `6e8f8418…`），独立 HEAD `7b72fd12…`。 |
 | Pi | active | `~/.pi/agent/sessions/**/*.jsonl` | `full/recorded` branch/compaction 和 `partial/derived` parent lineage；不虚构 spawn。当前 upstream 为 `@earendil-works/pi-coding-agent`（npm 0.84.4 / repo `earendil-works/pi-mono`,HEAD `4e69b0c2…`,官方 session format **v3**,2026-09-03 验证）；v3 读到 custom 角色消息、记录 retainedTail/fromHook 证据、token 总量按 Pi billed session total（全部记录条目：assistant + toolResult + compaction/branch_summary 的已记录 totalTokens，含 abandoned/history 分支，retainedTail 副本不重复计）；嵌套 `run-N/session.jsonl` 为 pi-subagents 产物（无 parentSession，不作 lineage）。 |
-| DeepSeek Harness | active preview | `$DSH_HOME/sessions/**/session.jsonl[.zstd]` 或 `~/.dsh/sessions/**` | `full/recorded` v0 event/context；`partial/derived` workflow、team 和跨 session 关系。 |
+| DeepSeek Harness | active preview | `$DSH_HOME/sessions/**/{session.jsonl,session.v1.jsonl,session.v2.jsonl}[.zstd]` 或 `~/.dsh/sessions/**` | `full/recorded` v0/v1/v2 event/context；每个 session root 选择最高 generation，`partial/derived` workflow、team 和跨 session 关系。 |
 
 当前 Provider 也提供消息搜索、token 统计、导出和只修改 AgentSession 元数据的本地管理。Runtime Environment 与 system-prompt evidence 仍是独立的只读能力：只展示可解析的本地来源，不声称恢复隐藏 prompt。
 未检测到的安装会显示为 unavailable 并保留 Provider diagnostic，不会被报告为空的成功来源。
@@ -93,11 +93,19 @@ OpenClaw 自 2026.7.2-beta.1 起把 session/transcript 主存储迁入每 agent 
 
 ## DeepSeek Harness compatibility
 
-DSH 适配器当前兼容 **alpha.5 snapshot**；项目策略是跟随最近的 alpha/official HEAD（稳定 rc 不作为“最新预览”依据）。当前兼容快照为 tag `dsh-v0.1.2-alpha.5`、commit `db6bdc3576c2d4e7c965e8e3ed0c2a731eed87f5`、official HEAD `49a606bc5b5934603f22a26957a07dc799ab0291`、package `@deepseek-ai/dsh@0.1.2-alpha.5`，session format version `0`。Alpha.5 相对 alpha.3 未改变物理存储格式（同一 event catalog、`seedLength` 头部行、packed rows、range-encoded provenance），因此无需 parser/protocol 变更；官方 alpha.5 检查入库的 web snapshot（`snapshots/web/fresh-round-trip/session.jsonl`）已作为 fixture 入库并按 upstream `parseSessionLog` 规则在测试中合成 seq/time。本轮无新的官方 live session 证据（凭据 key 认证失败，live run 不可用），仅保留了 alpha.3 时代的本地 live 观察。
+DSH 适配器当前跟随官方 `dsh-v0.1.3-alpha.2`（commit
+`82a5fd61a7cf5c293cec4bdff68f455398d685e9`，package
+`@deepseek-ai/dsh@0.1.3-alpha.2`）并读取 session format v0、v1、v2。每个
+session root 只选择数值最高的 canonical generation：`session.jsonl`、
+`session.v1.jsonl` 或 `session.v2.jsonl`（均支持 raw 与 `.zstd`）；同一代双编码
+或 raw/zstd 混用会显式诊断，不回退到旧文件，也不迁移 provider 数据。
 
-JSONL 是当前主支持后端，支持 raw `.jsonl`、multi-frame `.jsonl.zstd` 和 packed `text-chunks`、`reasoning-chunks`、`tool-call-chunks`。range-encoded `sourceEventSeqs` 会在 Provider 边界统一解码（alpha.3 引入，alpha.5 沿用）。适配器保留 zero-based source sequence、`turn/start`、`turn/end`、`step/start`、`step/end`、`user/message`、`assistant/chunk`、`assistant/message`、`tool/call`、`tool/result`、`request/header` 与 `request/context`、surface/source-event citations、`session/end-seed`、fork `parentSession`/`seedLength`、compaction、cancellation/interruption、workflow/subagent、`agent/inbox/spliced` 和 Agent Teams `team/member`、`team/task`、`team/message/queued`、`team/message/delivered`。alpha.3 起还记录 `model/selection`、`subagent/model-selection-policy`、`session-log-deepseek/delivery-accepted`（alpha.5 相同）。这些属于 control/model/delivery facts，不会变成普通 conversation message。
-
-alpha.3 已移除 SQLite persistence backend，alpha.5 仍未恢复（现有 SQLite 包只是 storage-kv facet 与 FTS5 session-query 后端）。检测到遗留 schema 17 store 时仍会明确显示 **unsupported backend/schema diagnostic**；它不会静默消失，也不会被当作空 Provider。官方 headless CLI 没有声明默认 resume 参数，因此 AgentSession 不伪造 DSH resume 命令。
+JSONL 是当前只读主后端。v2 使用每个 event 一行；v0/v1 保留 released 的
+packed-row 解码。`user/message`、`assistant/message`、`tool/result` 的
+append-origin 事件生成普通 transcript；surface replacement 只保留为
+model/context evidence，`assistant/attempt` 及 control、workflow、team 事件
+不会伪造成普通 conversation message。官方 headless CLI 没有声明默认 resume
+参数，因此 AgentSession 不伪造 DSH resume 命令。
 
 ## Installation
 

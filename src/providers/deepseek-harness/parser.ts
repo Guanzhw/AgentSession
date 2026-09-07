@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import { zstdDecompressSync } from "node:zlib";
 import type { Message, RawSession, TokenUsage } from "../interface.js";
 
@@ -9,14 +10,14 @@ export type DshRecord = Record<string, any>;
  * compressed Zstandard frames.  This list is deliberately versioned with the
  * on-disk format: a required event outside it is unsafe to silently discard.
  */
-export const DSH_SESSION_FORMAT_VERSION = 0;
+export const DSH_SESSION_FORMAT_VERSION = 2;
 export const DSH_KNOWN_EVENT_TYPES = new Set([
   "agent-preset/selected",
   "agent/inbox/spliced",
   "approval/asked",
   "approval/decided",
   "approval/policy",
-  "assistant/chunk",
+  "assistant/attempt",
   "assistant/message",
   "command/done",
   "command/run",
@@ -25,6 +26,8 @@ export const DSH_KNOWN_EVENT_TYPES = new Set([
   "compaction/start",
   "compaction/summary",
   "feedback/record",
+  "feedback/message-put",
+  "feedback/message-delete",
   "goal/change",
   "hook/invoked",
   "hook/result",
@@ -63,6 +66,17 @@ export const DSH_KNOWN_EVENT_TYPES = new Set([
   "user/message",
   "web/deepseek-search-llm-request"
 ]);
+
+/** Physical generation names accepted by the released alpha.2 reader. */
+export type DshSessionGeneration = 0 | 1 | 2;
+
+export function dshGenerationFromPath(filePath: string): DshSessionGeneration | null {
+  const name = filePath.replaceAll("\\", "/").split("/").at(-1) || "";
+  if (name === "session.jsonl" || name === "session.jsonl.zstd") return 0;
+  if (name === "session.v1.jsonl" || name === "session.v1.jsonl.zstd") return 1;
+  if (name === "session.v2.jsonl" || name === "session.v2.jsonl.zstd") return 2;
+  return null;
+}
 
 const ZSTD_MAGIC = 0xfd2fb528;
 
@@ -104,6 +118,48 @@ function nonEmptyString(value: unknown, label: string): string {
 
 function hasExactKeys(value: object, keys: readonly string[]): boolean {
   return Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+}
+
+function isDeepEqualJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== typeof b || a === null || b === null) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((value, index) => isDeepEqualJson(value, b[index]));
+  }
+  if (typeof a !== "object" || typeof b !== "object") return false;
+  const aRecord = a as Record<string, unknown>;
+  const bRecord = b as Record<string, unknown>;
+  const aKeys = Object.keys(aRecord);
+  if (aKeys.length !== Object.keys(bRecord).length) return false;
+  return aKeys.every((key) => Object.hasOwn(bRecord, key) && isDeepEqualJson(aRecord[key], bRecord[key]));
+}
+
+/** Enforce the released v2 tool/result rewrite contract at the provider boundary. */
+function assertV2ToolResultContentOnly(original: DshRecord, replacement: DshRecord, filePath: string): void {
+  const originalData = isRecord(original.data) ? original.data : null;
+  const replacementData = isRecord(replacement.data) ? replacement.data : null;
+  const originalMessage = originalData && isRecord(originalData.message) ? originalData.message : null;
+  const replacementMessage = replacementData && isRecord(replacementData.message) ? replacementData.message : null;
+  const originalContent = originalMessage && Array.isArray(originalMessage.content) ? originalMessage.content : null;
+  const replacementContent = replacementMessage && Array.isArray(replacementMessage.content) ? replacementMessage.content : null;
+  const originalResult = originalContent?.[0];
+  const replacementResult = replacementContent?.[0];
+  if (!originalData || !replacementData || !originalMessage || !replacementMessage
+    || !isRecord(originalResult) || !isRecord(replacementResult)) {
+    throw new DshSessionParseError(`Invalid tool/result replacement content in ${filePath}`);
+  }
+  const originalRest = {
+    ...originalData,
+    message: { ...originalMessage, content: [{ ...originalResult, content: null }] }
+  };
+  const replacementRest = {
+    ...replacementData,
+    message: { ...replacementMessage, content: [{ ...replacementResult, content: null }] }
+  };
+  if (!isDeepEqualJson(originalRest, replacementRest)) {
+    throw new DshSessionParseError(`Invalid tool/result replacement: only message.content may change in ${filePath}`);
+  }
 }
 
 interface ZstdFrame {
@@ -273,7 +329,7 @@ function expandPackedChunkRow(value: DshRecord, tag: string): DshRecord[] {
 }
 
 /** Expand DSH's non-event packed chunk rows into lossless assistant/chunk events. */
-export function decodeDshStorageRecord(value: unknown): DshRecord[] {
+export function decodeDshStorageRecord(value: unknown, generation: DshSessionGeneration = 0): DshRecord[] {
   if (!isRecord(value)) return [value as DshRecord];
   const tag = value.type;
   if (tag !== "text-chunks" && tag !== "reasoning-chunks" && tag !== "tool-call-chunks") {
@@ -314,39 +370,63 @@ export function decodeDshStorageRecord(value: unknown): DshRecord[] {
     }
     return [{ ...value, sourceEventSeqs: decoded }];
   }
+  if (generation === 2) {
+    throw new DshSessionParseError(`Packed ${String(tag)} row is not valid in DeepSeek Harness format v2`);
+  }
   return expandPackedChunkRow(value, tag);
 }
 
-function validateDshHeader(header: DshRecord, filePath: string) {
+function validateDshHeader(header: DshRecord, filePath: string, generation: DshSessionGeneration) {
   if (header.type !== "session") {
     throw new DshSessionParseError(`DeepSeek Harness session is missing its header: ${filePath}`);
   }
-  if (header.version !== DSH_SESSION_FORMAT_VERSION) {
-    throw new DshSessionParseError(`Unsupported DeepSeek Harness session version ${String(header.version)} in ${filePath}; expected ${DSH_SESSION_FORMAT_VERSION}`);
+  if (header.version !== generation) {
+    throw new DshSessionParseError(`DeepSeek Harness session filename generation ${generation} disagrees with header version ${String(header.version)} in ${filePath}`);
   }
+  const allowed = new Set(generation === 2
+    ? ["type", "version", "id", "createdAt", "cwd", "parentSession", "isSeeded", "origin", "delegationDepth", "agentPreset"]
+    : ["type", "version", "id", "createdAt", "cwd", "parentSession", "seedLength", "origin", "delegationDepth", "agentPreset"]);
+  const unexpected = Object.keys(header).find((key) => !allowed.has(key));
+  if (unexpected) throw new DshSessionParseError(`Invalid DeepSeek Harness session header field ${unexpected} in ${filePath}`);
   nonEmptyString(header.id, "session.id");
   nonNegativeSafeInteger(header.createdAt, "session.createdAt");
   if (header.delegationDepth !== undefined) {
     nonNegativeSafeInteger(header.delegationDepth, "session.delegationDepth");
   }
-  if (header.cwd !== undefined && typeof header.cwd !== "string") {
+  if (header.cwd !== undefined && (typeof header.cwd !== "string" || !isAbsolute(header.cwd))) {
     throw new DshSessionParseError("Invalid session.cwd in DeepSeek Harness session storage");
   }
   if (header.parentSession !== undefined && typeof header.parentSession !== "string") {
     throw new DshSessionParseError("Invalid session.parentSession in DeepSeek Harness session storage");
   }
-  if (header.seedLength !== undefined) nonNegativeSafeInteger(header.seedLength, "session.seedLength");
+  if (generation > 0 && (!Number.isSafeInteger(header.delegationDepth) || Number(header.delegationDepth) < 0)) {
+    throw new DshSessionParseError(`Invalid session.delegationDepth in DeepSeek Harness format v${generation} storage`);
+  }
+  if (generation > 0 && header.origin !== undefined && header.origin !== "subagent") {
+    throw new DshSessionParseError(`Invalid session.origin in DeepSeek Harness format v${generation} storage`);
+  }
+  if (generation < 2 && header.seedLength !== undefined) nonNegativeSafeInteger(header.seedLength, "session.seedLength");
+  if (generation === 2) {
+    if (typeof header.isSeeded !== "boolean") throw new DshSessionParseError("Invalid session.isSeeded in DeepSeek Harness session storage");
+    if (!Number.isSafeInteger(header.delegationDepth) || Number(header.delegationDepth) < 0) throw new DshSessionParseError("Invalid session.delegationDepth in DeepSeek Harness session storage");
+    if (Object.hasOwn(header, "seedLength")) throw new DshSessionParseError("DeepSeek Harness format v2 header cannot carry seedLength");
+  } else if (Object.hasOwn(header, "isSeeded")) {
+    throw new DshSessionParseError(`DeepSeek Harness format v${generation} header cannot carry isSeeded`);
+  }
   if (header.agentPreset !== undefined && typeof header.agentPreset !== "string") {
     throw new DshSessionParseError("Invalid session.agentPreset in DeepSeek Harness session storage");
   }
 }
 
-function validateDshEvents(records: DshRecord[], filePath: string) {
+function validateDshEvents(records: DshRecord[], filePath: string, generation: DshSessionGeneration) {
   let expectedSeq = 0;
+  const surfaceNodes: number[] = [];
+  const surfaceTypes = new Map<number, string>();
   for (const event of records) {
     if (!isRecord(event)) throw new DshSessionParseError(`Invalid DeepSeek Harness event in ${filePath}`);
     const type = nonEmptyString(event.type, "event.type");
-    if (!DSH_KNOWN_EVENT_TYPES.has(type) && event.ignorable !== true) {
+    const known = DSH_KNOWN_EVENT_TYPES.has(type) || (generation < 2 && type === "assistant/chunk");
+    if (!known && (generation === 0 || event.ignorable !== true)) {
       throw new DshSessionParseError(`Unsupported required DeepSeek Harness event ${JSON.stringify(type)} in ${filePath}`);
     }
     const seq = nonNegativeSafeInteger(event.seq, `${type}.seq`);
@@ -357,24 +437,136 @@ function validateDshEvents(records: DshRecord[], filePath: string) {
     if (!isRecord(event.data)) {
       throw new DshSessionParseError(`Invalid DeepSeek Harness ${type}.data in ${filePath}`);
     }
+    const surfaceEligible = type === "user/message" || type === "assistant/message" || type === "tool/result";
+    if (generation < 2) {
+      const allowed = new Set(surfaceEligible
+        ? ["type", "seq", "time", "data", "ignorable", "sourceEventSeqs", "surfaceOp"]
+        : ["type", "seq", "time", "data", "ignorable"]);
+      const unexpected = Object.keys(event).find((key) => !allowed.has(key));
+      if (unexpected) throw new DshSessionParseError(`DeepSeek Harness format v${generation} event has unexpected field ${unexpected} in ${filePath}`);
+      if (event.ignorable !== undefined && event.ignorable !== true) throw new DshSessionParseError(`Invalid ${type}.ignorable in ${filePath}`);
+      if (!surfaceEligible && (event.surfaceOp !== undefined || event.sourceEventSeqs !== undefined)) {
+        throw new DshSessionParseError(`DeepSeek Harness format v${generation} ${type} event cannot carry surface metadata in ${filePath}`);
+      }
+      if (event.surfaceOp !== undefined && event.surfaceOp !== "append") {
+        const op = event.surfaceOp;
+        if (!isRecord(op) || op.op !== "replace" || !Number.isSafeInteger(op.start) || op.start < 0
+          || !Number.isSafeInteger(op.end) || op.end < op.start) {
+          throw new DshSessionParseError(`Invalid ${type}.surfaceOp in ${filePath}`);
+        }
+      }
+      if (event.sourceEventSeqs !== undefined) {
+        if (!Array.isArray(event.sourceEventSeqs)
+          || (event.sourceEventSeqs.length === 0 && type !== "assistant/message")) {
+          throw new DshSessionParseError(`Invalid ${type}.sourceEventSeqs in ${filePath}`);
+        }
+        const sources = event.sourceEventSeqs.map((source) => nonNegativeSafeInteger(source, `${type}.sourceEventSeqs entry`));
+        if (new Set(sources).size !== sources.length || sources.some((source) => source >= seq)) {
+          throw new DshSessionParseError(`Invalid ${type}.sourceEventSeqs provenance in ${filePath}`);
+        }
+      }
+    }
+    if (generation === 2) {
+      const allowed = new Set(["type", "seq", "time", "data", "ignorable", "sourceEventSeqs", "surfaceOp"]);
+      const unexpected = Object.keys(event).find((key) => !allowed.has(key));
+      if (unexpected) throw new DshSessionParseError(`DeepSeek Harness format v2 event has unexpected field ${unexpected} in ${filePath}`);
+      if (event.ignorable !== undefined && event.ignorable !== true) throw new DshSessionParseError(`Invalid ${type}.ignorable in ${filePath}`);
+      if (surfaceEligible && event.surfaceOp === undefined) {
+        throw new DshSessionParseError(`DeepSeek Harness v2 ${type} event requires surfaceOp in ${filePath}`);
+      }
+      if (!surfaceEligible && (event.surfaceOp !== undefined || event.sourceEventSeqs !== undefined)) {
+        throw new DshSessionParseError(`DeepSeek Harness v2 ${type} event cannot carry surface metadata in ${filePath}`);
+      }
+      if (event.surfaceOp !== undefined && event.surfaceOp !== "append") {
+        const op = event.surfaceOp;
+        if (!isRecord(op) || op.op !== "replace"
+          || !Number.isSafeInteger(op.start) || op.start < 0
+          || !Number.isSafeInteger(op.end) || op.end < op.start) {
+          throw new DshSessionParseError(`Invalid ${type}.surfaceOp in ${filePath}`);
+        }
+      }
+      if (type === "assistant/message" && event.sourceEventSeqs !== undefined) {
+        throw new DshSessionParseError(`DeepSeek Harness v2 assistant/message embeds its source stream and cannot carry sourceEventSeqs in ${filePath}`);
+      }
+      if (event.sourceEventSeqs !== undefined) {
+        if (!Array.isArray(event.sourceEventSeqs) || event.sourceEventSeqs.length === 0) {
+          throw new DshSessionParseError(`Invalid ${type}.sourceEventSeqs in ${filePath}`);
+        }
+        const sources = event.sourceEventSeqs.map((source) => nonNegativeSafeInteger(source, `${type}.sourceEventSeqs entry`));
+        if (new Set(sources).size !== sources.length || sources.some((source) => source >= seq)) {
+          throw new DshSessionParseError(`Invalid ${type}.sourceEventSeqs provenance in ${filePath}`);
+        }
+      }
+      if (surfaceEligible) {
+        const sources = Array.isArray(event.sourceEventSeqs) ? event.sourceEventSeqs : [];
+        if (event.surfaceOp === "append") {
+          surfaceNodes.push(seq);
+          surfaceTypes.set(seq, type);
+        } else {
+          const op = event.surfaceOp as DshRecord;
+          const startIndex = surfaceNodes.indexOf(Number(op.start));
+          const endIndex = surfaceNodes.indexOf(Number(op.end));
+          if (startIndex < 0 || endIndex < 0 || startIndex > endIndex) {
+            throw new DshSessionParseError(`Invalid ${type}.surfaceOp range in ${filePath}`);
+          }
+          const shadowed = surfaceNodes.slice(startIndex, endIndex + 1);
+          if (shadowed.some((source) => !sources.includes(source))) {
+            throw new DshSessionParseError(`Invalid ${type}.sourceEventSeqs replacement coverage in ${filePath}`);
+          }
+          if (type === "tool/result" && (shadowed.length !== 1 || surfaceTypes.get(shadowed[0]) !== "tool/result")) {
+            throw new DshSessionParseError(`Invalid tool/result replacement target in ${filePath}`);
+          }
+          if (type === "tool/result") {
+            const original = records.find((candidate) => candidate.seq === shadowed[0]);
+            if (!original) throw new DshSessionParseError(`Invalid tool/result replacement target in ${filePath}`);
+            assertV2ToolResultContentOnly(original, event, filePath);
+          }
+          surfaceNodes.splice(startIndex, shadowed.length, seq);
+          surfaceTypes.set(seq, type);
+        }
+      }
+      if (type === "session/end-seed" && Object.hasOwn(event.data, "inherited") && event.data.inherited !== true) {
+        throw new DshSessionParseError(`Invalid session/end-seed.inherited in ${filePath}`);
+      }
+    }
     expectedSeq += 1;
   }
 }
 
 /** Read one DSH raw JSONL or multi-frame Zstd session without mutating it. */
-export function parseDshSession(filePath: string): DshRecord[] {
+export function parseDshSession(filePath: string, requestedGeneration?: DshSessionGeneration): DshRecord[] {
   const source = readFileSync(filePath);
   const compressed = /\.zstd$/i.test(filePath);
   const content = compressed ? readDshZstdJsonl(source, filePath) : source.toString("utf8");
   const storageRows = parseJsonl(content, filePath, !compressed);
-  const records = storageRows.flatMap(decodeDshStorageRecord);
+  const headerCandidate = storageRows.find((value) => isRecord(value));
+  const headerVersion = isRecord(headerCandidate) && Number.isSafeInteger(headerCandidate.version)
+    ? headerCandidate.version : null;
+  const pathGeneration = dshGenerationFromPath(filePath);
+  if (requestedGeneration !== undefined && pathGeneration !== null && requestedGeneration !== pathGeneration) {
+    throw new DshSessionParseError(`Requested DeepSeek Harness generation ${requestedGeneration} disagrees with canonical filename generation ${pathGeneration} in ${filePath}`);
+  }
+  const generation = requestedGeneration ?? pathGeneration ?? 0;
+  if (pathGeneration === null && requestedGeneration === undefined && headerVersion !== null && headerVersion !== 0) {
+    throw new DshSessionParseError(`Unsupported DeepSeek Harness session version ${String(headerVersion)} in ${filePath}`);
+  }
+  if (generation !== 0 && generation !== 1 && generation !== 2) {
+    throw new DshSessionParseError(`Unsupported DeepSeek Harness session version ${String(headerVersion)} in ${filePath}`);
+  }
+  const records = storageRows.flatMap((value) => decodeDshStorageRecord(value, generation));
   if (!records.length) throw new DshSessionParseError(`Empty DeepSeek Harness session: ${filePath}`);
-  validateDshHeader(records[0], filePath);
+  validateDshHeader(records[0], filePath, generation);
   const seedLength = dshHeader(records)?.seedLength;
-  if (seedLength !== undefined && seedLength > records.length - 1) {
+  if (generation < 2 && seedLength !== undefined && seedLength > records.length - 1) {
     throw new DshSessionParseError(`Invalid session.seedLength ${String(seedLength)} in ${filePath}; exceeds stored event count`);
   }
-  validateDshEvents(records.slice(1), filePath);
+  validateDshEvents(records.slice(1), filePath, generation);
+  const inheritedMarkers = records.slice(1).filter((candidate) => candidate.type === "session/end-seed" && candidate.data?.inherited === true);
+  if (generation === 2) {
+    const seeded = dshHeader(records)?.isSeeded === true;
+    if (seeded && inheritedMarkers.length === 0) throw new DshSessionParseError(`Seeded DeepSeek Harness format v2 session lacks inherited end-seed marker in ${filePath}`);
+    if (!seeded && inheritedMarkers.length > 0) throw new DshSessionParseError(`Unseeded DeepSeek Harness format v2 session contains inherited end-seed marker in ${filePath}`);
+  }
   for (const event of records.slice(1).filter((candidate) => candidate.type === "session/end-seed")) {
     if (seedLength !== undefined && event.seq < seedLength) {
       throw new DshSessionParseError(`Invalid session/end-seed boundary at sequence ${String(event.seq)} in ${filePath}`);
@@ -388,6 +580,16 @@ export function dshHeader(records: DshRecord[]): DshRecord | null {
   return header?.type === "session" ? header : null;
 }
 
+export function dshInheritedEventCount(records: DshRecord[]): number {
+  const header = dshHeader(records) || {};
+  if (header.version === 2 || typeof header.isSeeded === "boolean") {
+    if (header.isSeeded !== true) return 0;
+    const marker = [...records].reverse().find((event) => event.type === "session/end-seed" && event.data?.inherited === true);
+    return marker ? nonNegativeSafeInteger(marker.seq, "session/end-seed.seq") : 0;
+  }
+  return numberOrZero(header.seedLength);
+}
+
 /**
  * Omit durable fork history copied into a child session's log.  DSH's
  * `session/end-seed` records an in-process construction/resume boundary and
@@ -395,7 +597,7 @@ export function dshHeader(records: DshRecord[]): DshRecord | null {
  * durable viewer lineage cutoff.
  */
 export function dshOwnedEvents(records: DshRecord[]): DshRecord[] {
-  const seedLength = numberOrZero(dshHeader(records)?.seedLength);
+  const seedLength = dshInheritedEventCount(records);
   return records.slice(1).filter((event) => numberOrZero(event.seq) >= seedLength);
 }
 
@@ -445,23 +647,45 @@ function dshToolInput(argumentsText: unknown): { input: unknown; raw: string | n
 export function dshUsageToTokens(usage: unknown): TokenUsage | null {
   const value = isRecord(usage) ? usage : null;
   if (!value) return null;
-  const input = numberOrZero(value.inputTokens);
-  const output = numberOrZero(value.outputTokens);
-  const reasoning = numberOrZero(value.reasoningTokens);
-  const cacheRead = numberOrZero(value.cacheReadTokens);
-  const cacheWrite = numberOrZero(value.cacheWriteTokens);
-  if (!input && !output && !reasoning && !cacheRead && !cacheWrite) return null;
+  const count = (candidate: unknown) => candidate === undefined
+    ? undefined
+    : Number.isSafeInteger(candidate) && Number(candidate) >= 0 ? Number(candidate) : null;
+  const input = count(value.inputTokens);
+  const output = count(value.outputTokens);
+  const reasoning = count(value.reasoningTokens);
+  const cacheRead = count(value.cacheReadTokens);
+  const cacheWrite = count(value.cacheWriteTokens);
+  if (input === null || output === null || reasoning === null || cacheRead === null || cacheWrite === null
+    || input === undefined || output === undefined || (reasoning !== undefined && reasoning > output)) return null;
+  const knownPrompt = input + (cacheRead || 0) + (cacheWrite || 0);
+  const knownTotal = knownPrompt + output;
+  if (!Number.isSafeInteger(knownPrompt) || !Number.isSafeInteger(knownTotal)) return null;
+  const reportedTotal = count(value.totalTokens);
+  if (reportedTotal === null) return null;
+  if (reportedTotal !== undefined) {
+    if (reportedTotal < knownTotal
+      || (cacheRead !== undefined && cacheWrite !== undefined && reportedTotal !== knownTotal)) return null;
+  }
+  const total = reportedTotal === undefined ? knownTotal : reportedTotal;
   return {
     input,
     // Upstream packages/llm/llm-deepseek/src/translate.ts maps
     // completion_tokens to outputTokens and keeps reasoningTokens as a
     // reported subset. Shared charts require exclusive components, so retain
     // visible output here and reasoning separately.
-    output: Math.max(0, output - reasoning),
-    reasoning,
-    total: input + output + cacheRead + cacheWrite,
-    cache: { read: cacheRead, write: cacheWrite }
+    output: Math.max(0, output - (reasoning || 0)),
+    reasoning: reasoning || 0,
+    total,
+    cache: { read: cacheRead || 0, write: cacheWrite || 0 }
   };
+}
+
+/** Locate the official usage sample for one assistant settlement or attempt. */
+export function dshUsageOf(event: DshRecord): unknown {
+  if (event.type !== "assistant/message" && event.type !== "assistant/attempt") return undefined;
+  if (event.type === "assistant/message" && event.data?.usage !== undefined) return event.data.usage;
+  const stream = Array.isArray(event.data?.stream) ? event.data.stream : [];
+  return [...stream].reverse().find((item) => isRecord(item) && item.type === "usage")?.usage;
 }
 
 function createToolMessage({
@@ -515,9 +739,11 @@ function createToolMessage({
  * out of the user chat surface; it remains available as recorded protocol and
  * stored system-prompt evidence instead.
  */
-export function dshRecordsToMessages(records: DshRecord[], sessionId: string): Message[] {
+function dshRecordsToMessagesLegacy(records: DshRecord[], sessionId: string): Message[] {
   const messages: Message[] = [];
   const calls = new Map<string, Message>();
+  const chunks = new Map<number, DshRecord>();
+  for (const event of records) if (event.type === "assistant/chunk") chunks.set(Number(event.seq), event);
 
   const ensureTool = (callId: string, fallbackId: string, name: string, input: unknown, rawInput: string | null, event: DshRecord) => {
     const existing = calls.get(callId);
@@ -576,18 +802,29 @@ export function dshRecordsToMessages(records: DshRecord[], sessionId: string): M
 
     if (event.type === "assistant/message" && !isReplacementSurfaceEvent(event)) {
       const source = isRecord(data.message) ? data.message : {};
+      let content = source.content;
+      if (!Array.isArray(content) && Array.isArray(event.sourceEventSeqs)) {
+        let text = ""; let reasoning = "";
+        for (const sourceSeq of event.sourceEventSeqs) {
+          const chunk = chunks.get(Number(sourceSeq));
+          const payload = chunk?.data?.chunk;
+          if (payload?.type === "text-delta" && typeof payload.text === "string") text += payload.text;
+          if (payload?.type === "reasoning-delta" && typeof payload.text === "string") reasoning += payload.text;
+        }
+        content = [...(reasoning ? [{ type: "reasoning", text: reasoning }] : []), ...(text ? [{ type: "text", text }] : [])];
+      }
       const id = typeof source.id === "string" && source.id ? source.id : `assistant:${event.seq}`;
       const assistant: Message = {
         id,
         sessionId,
         role: "assistant",
-        content: dshContentText(source.content),
-        thinking: dshContentThinking(source.content) || null,
+        content: dshContentText(content),
+        thinking: dshContentThinking(content) || null,
         toolName: null,
         toolInput: null,
         toolOutput: null,
         timestamp: numberOrZero(event.time),
-        tokens: dshUsageToTokens(data.usage),
+        tokens: dshUsageToTokens(dshUsageOf(event)),
         metadata: {
           provider: source.source?.provider || null,
           model: source.source?.model || null,
@@ -598,7 +835,7 @@ export function dshRecordsToMessages(records: DshRecord[], sessionId: string): M
         }
       };
       messages.push(assistant);
-      for (const [index, call] of dshToolCallBlocks(source.content).entries()) {
+      for (const [index, call] of dshToolCallBlocks(content).entries()) {
         const callId = String(call.id);
         const parsed = dshToolInput(call.arguments);
         ensureTool(callId, `${id}:tool:${index}`, String(call.name || "tool"), parsed.input, parsed.raw, event);
@@ -651,6 +888,85 @@ export function dshRecordsToMessages(records: DshRecord[], sessionId: string): M
   return messages;
 }
 
+function assistantMessageContent(source: DshRecord): DshRecord[] {
+  // The durable assistant message is authoritative. Its embedded stream is
+  // replay/usage evidence only and must not fabricate a transcript message.
+  return Array.isArray(source.content) ? source.content.filter(isRecord) : [];
+}
+
+/** Human transcript projection: replacement copies stay model-only. */
+function dshRecordsToMessagesV2AppendOrigin(records: DshRecord[], sessionId: string): Message[] {
+  const messages: Message[] = [];
+  const calls = new Map<string, Message>();
+  const rememberTool = (callId: string, tool: Message, append: boolean) => {
+    const existing = calls.get(callId);
+    if (existing) {
+      if (append && !messages.includes(existing)) messages.push(existing);
+      return existing;
+    }
+    calls.set(callId, tool);
+    if (append) messages.push(tool);
+    return tool;
+  };
+  for (const event of dshOwnedEvents(records)) {
+    const data = isRecord(event.data) ? event.data : {};
+    if (event.type === "user/message" && event.surfaceOp === "append") {
+      const source = isRecord(data.source) ? data.source : {};
+      const content = dshContentText(data.content);
+      if (source.kind !== "user" || !content) continue;
+      messages.push({ id: typeof data.id === "string" && data.id ? data.id : `user:${event.seq}`, sessionId, role: "user", content,
+        thinking: null, toolName: null, toolInput: null, toolOutput: null, timestamp: numberOrZero(event.time), tokens: null,
+        metadata: { sourceSequence: event.seq, provenance: "session" } });
+      continue;
+    }
+    if (event.type === "assistant/message" && event.surfaceOp === "append") {
+      const source = isRecord(data.message) ? data.message : {};
+      const content = assistantMessageContent(source);
+      const text = dshContentText(content);
+      const thinking = dshContentThinking(content);
+      const toolCalls = dshToolCallBlocks(content);
+      if (!text && !thinking && !toolCalls.length) continue;
+      const id = typeof source.id === "string" && source.id ? source.id : `assistant:${event.seq}`;
+      messages.push({ id, sessionId, role: "assistant", content: text, thinking: thinking || null, toolName: null, toolInput: null, toolOutput: null,
+        timestamp: numberOrZero(event.time), tokens: dshUsageToTokens(dshUsageOf(event)), metadata: {
+          provider: source.source?.provider || null, model: source.source?.model || null, sourceSequence: event.seq, provenance: "session"
+        } });
+      for (const [index, call] of toolCalls.entries()) {
+        const callId = String(call.id);
+        const parsed = dshToolInput(call.arguments);
+        rememberTool(callId, createToolMessage({ id: callId || `${id}:tool:${index}`, sessionId, callId, name: String(call.name || "tool"), input: parsed.input,
+          rawInput: parsed.raw, timestamp: numberOrZero(event.time), turn: data.turn, step: data.step, sourceSeq: event.seq }), true);
+      }
+      continue;
+    }
+    if (event.type === "tool/call") {
+      const callId = typeof data.callId === "string" ? data.callId : "";
+      const parsed = dshToolInput(data.arguments);
+      rememberTool(callId, createToolMessage({ id: callId || `tool-call:${event.seq}`, sessionId, callId, name: typeof data.name === "string" ? data.name : "tool",
+        input: parsed.input, rawInput: parsed.raw, timestamp: numberOrZero(event.time), turn: data.turn, step: data.step, sourceSeq: event.seq }), false);
+      continue;
+    }
+    if (event.type === "tool/result" && event.surfaceOp === "append") {
+      const source = isRecord(data.message) ? data.message : {};
+      const blocks = dshToolResultBlocks(source.content);
+      for (const [index, block] of (blocks.length ? blocks : [null]).entries()) {
+        const callId = typeof block?.toolCallId === "string" ? block.toolCallId : (typeof source.source?.callId === "string" ? source.source.callId : "");
+        const tool = rememberTool(callId, createToolMessage({ id: `tool-result:${event.seq}:${index}`, sessionId, callId, name: "tool", input: null, rawInput: null,
+          timestamp: numberOrZero(event.time), turn: data.turn, step: data.step, sourceSeq: event.seq }), true);
+        const output = dshContentText(block?.content);
+        tool.content = output; tool.toolOutput = output; tool.timestamp = numberOrZero(event.time);
+        tool.metadata = { ...tool.metadata, sourceSequence: event.seq, status: block?.isError === true || Boolean(data.error) ? "error" : "completed",
+          isError: block?.isError === true || Boolean(data.error), error: data.error || null, resultMeta: data.meta || null };
+      }
+    }
+  }
+  return messages;
+}
+
+export function dshRecordsToMessages(records: DshRecord[], sessionId: string): Message[] {
+  return dshHeader(records)?.version === 2 ? dshRecordsToMessagesV2AppendOrigin(records, sessionId) : dshRecordsToMessagesLegacy(records, sessionId);
+}
+
 function latestEvent(records: DshRecord[], type: string): DshRecord | null {
   return [...dshOwnedEvents(records)].reverse().find((event) => event.type === type) || null;
 }
@@ -678,7 +994,7 @@ export function extractDshMeta(records: DshRecord[], fallbackId = ""): RawSessio
     if (!fallbackCreatedAt || time < fallbackCreatedAt) fallbackCreatedAt = time;
     if (time > timeUpdated) timeUpdated = time;
   }
-  const tokenCount = messages.reduce((total, message) => total + (Number(message.tokens?.total) || 0), 0);
+  const tokenCount = dshUsageRecords(records).reduce((total, event) => total + (dshUsageToTokens(dshUsageOf(event))?.total || 0), 0);
   const latestContext = latestEvent(records, "request/context");
   return {
     id: sessionId,
@@ -692,8 +1008,9 @@ export function extractDshMeta(records: DshRecord[], fallbackId = ""): RawSessio
     tokenCount: tokenCount || null,
     metadata: {
       version: header.version,
-      seedLength: numberOrZero(header.seedLength),
-      inheritedEventCount: numberOrZero(header.seedLength),
+      isSeeded: header.isSeeded === true,
+      seedLength: header.version === 2 ? null : numberOrZero(header.seedLength),
+      inheritedEventCount: dshInheritedEventCount(records),
       origin: header.origin || null,
       delegationDepth: numberOrZero(header.delegationDepth),
       agentPreset: header.agentPreset || null,
@@ -705,10 +1022,35 @@ export function extractDshMeta(records: DshRecord[], fallbackId = ""): RawSessio
   };
 }
 
+export function dshUsageRecords(records: DshRecord[]) {
+  if (dshHeader(records)?.version !== 2) {
+    return dshOwnedEvents(records).filter((event) => event.type === "assistant/message" && (dshUsageToTokens(dshUsageOf(event))?.total || 0) > 0);
+  }
+  const selected: DshRecord[] = [];
+  const slots = new Map<string, number>();
+  for (const event of dshOwnedEvents(records)) {
+    if (event.type === "llm/retry-started") {
+      const key = `${String(event.data?.turn)}:${String(event.data?.step)}`;
+      slots.delete(key);
+      continue;
+    }
+    if (event.type !== "assistant/message" && event.type !== "assistant/attempt") continue;
+    if (dshUsageToTokens(dshUsageOf(event)) === null) continue;
+    const key = `${String(event.data?.turn)}:${String(event.data?.step)}`;
+    const previous = slots.get(key);
+    if (previous === undefined) {
+      slots.set(key, selected.length);
+      selected.push(event);
+    } else {
+      selected[previous] = event;
+    }
+  }
+  return selected;
+}
+
+/** Backward-compatible name for callers that consume the unified usage fold. */
 export function dshAssistantUsageRecords(records: DshRecord[]) {
-  return dshOwnedEvents(records).filter((event) => (
-    event.type === "assistant/message" && dshUsageToTokens(event.data?.usage) !== null
-  ));
+  return dshUsageRecords(records);
 }
 
 export function dshStoredSystemPrompt(records: DshRecord[]): { content: string; source: string; title: string } | null {

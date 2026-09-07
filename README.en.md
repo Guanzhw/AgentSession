@@ -106,7 +106,7 @@ fact was stored natively.
 | OpenClaw | active — current SQLite (with legacy/archive JSONL fallback) | `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite` (agent schema 19, verified 2026-09-03); legacy/archive `sessions/*.jsonl` | `partial/derived` branch/window generations, reasoning, tools, and recorded session_nodes parent/spawn/fork lineage; no child without source evidence. Tasks/AgentRuns are `none`: both current and legacy builders always emit empty arrays, with no verified mapping. |
 | Hermes Agent | active | `$HERMES_HOME/state.db` | `full/recorded` active-only SQLite transcript and async delegation handle/state; `partial/derived` compression continuation/delegation lineage and metadata-only compaction; compression is not spawned work. Current freshness provenance: release peeled commit `29112bef…` (annotated tag object `6e8f8418…`), separate HEAD `7b72fd12…`. |
 | Pi | active | `~/.pi/agent/sessions/**/*.jsonl` | `full/recorded` branch/compaction events and `partial/derived` parent lineage; never invented spawn. Current upstream is `@earendil-works/pi-coding-agent` (npm 0.84.4 / repo `earendil-works/pi-mono`, HEAD `4e69b0c2…`, official session format **v3**, verified 2026-09-03); the v3 reader maps custom-role messages, records retainedTail/fromHook evidence, and uses Pi's billed session total for token totals — all recorded entries (assistant + toolResult + compaction/branch_summary `totalTokens`, including abandoned/history branches, never retainedTail copies); nested `run-N/session.jsonl` files are pi-subagents run artifacts (no parentSession, no lineage). |
-| DeepSeek Harness | active preview | `$DSH_HOME/sessions/**/session.jsonl[.zstd]` or `~/.dsh/sessions/**` | `full/recorded` v0 event log/context and `partial/derived` workflow, team, and cross-session relationships. |
+| DeepSeek Harness | active preview | `$DSH_HOME/sessions/**/{session.jsonl,session.v1.jsonl,session.v2.jsonl}[.zstd]` or `~/.dsh/sessions/**` | `full/recorded` v0/v1/v2 events/context; each session root selects the highest generation, with `partial/derived` workflow, team, and cross-session relationships. |
 
 All providers also expose message search, token statistics, export, and local
 management that changes only AgentSession metadata. Runtime-environment and
@@ -155,45 +155,22 @@ current implementation (verified 2026-09-03):
 
 ## DeepSeek Harness compatibility
 
-The DSH adapter is currently an **alpha.5 compatibility snapshot**; the
-project policy is to track the newest alpha/official HEAD (the stable
-`latest` rc is not treated as the newest preview). Its current compatibility
-snapshot is tag `dsh-v0.1.2-alpha.5`, commit
-`db6bdc3576c2d4e7c965e8e3ed0c2a731eed87f5`, official HEAD
-`49a606bc5b5934603f22a26957a07dc799ab0291`, package
-`@deepseek-ai/dsh@0.1.2-alpha.5`, and session format version `0`. Alpha.5 does
-not change the physical storage format relative to alpha.3 (same event
-catalog, `seedLength`-based header line, packed rows, range-encoded
-provenance), so no parser/protocol change was needed; the official alpha.5
-checked-in web snapshot (`snapshots/web/fresh-round-trip/session.jsonl`) is
-adopted as a fixture whose `seq`/`time` are synthesised on read per upstream
-`parseSessionLog`. No new official live-session evidence exists for alpha.5
-(the credentialed live run was unavailable because the configured key failed
-authentication); the alpha.3-era local live observations remain the live
-record.
+The DSH adapter follows official `dsh-v0.1.3-alpha.2` (commit
+`82a5fd61a7cf5c293cec4bdff68f455398d685e9`, package
+`@deepseek-ai/dsh@0.1.3-alpha.2`) and reads session format v0, v1, and v2. For
+each session root it selects only the numerically highest canonical generation:
+`session.jsonl`, `session.v1.jsonl`, or `session.v2.jsonl` (each supports raw and
+`.zstd`). Same-generation dual encodings or raw/zstd mixing produce an explicit
+diagnostic; the adapter does not fall back to an older file or migrate provider
+data.
 
-JSONL is the supported primary backend. It accepts raw `.jsonl`, multi-frame
-`.jsonl.zstd`, and packed `text-chunks`, `reasoning-chunks`, and
-`tool-call-chunks`. Alpha.3 range-encoded `sourceEventSeqs` are decoded once at
-the provider boundary. The adapter preserves zero-based source sequence,
-core `turn/start`, `turn/end`, `step/start`, `step/end`, `user/message`,
-`assistant/chunk`, `assistant/message`, `tool/call`, `tool/result`,
-`request/header`, `request/context`, surface/source-event citations,
-`session/end-seed`, fork `parentSession`/`seedLength`, compaction,
-cancellation/interruption, workflow/subagent evidence,
-`agent/inbox/spliced` plus Agent Teams `team/member`, `team/task`,
-`team/message/queued`, and `team/message/delivered`. Alpha.3 also records
-`model/selection`, `subagent/model-selection-policy`, and
-`session-log-deepseek/delivery-accepted`. These are control/model/delivery facts,
-not ordinary conversation messages.
-
-Alpha.3 removed the SQLite persistence backend, and alpha.5 has not
-restored it (its SQLite packages are a storage-hub kv facet and an FTS5
-session-query backend, not session persistence). When a legacy schema 17 store
-is detected, it is still surfaced as an explicit **unsupported backend/schema
-diagnostic**; it never silently disappears or appears as an empty provider.
-The stock headless CLI has no declared default resume argument, so AgentSession
-does not invent a DSH resume command.
+JSONL is the supported read-only primary backend. v2 stores one event per row;
+v0/v1 retain released packed-row decoding. Append-origin `user/message`,
+`assistant/message`, and `tool/result` events generate the ordinary transcript;
+surface replacements remain model/context evidence, while `assistant/attempt`
+and control, workflow, and team events never become ordinary conversation
+messages. The stock headless CLI has no declared default resume argument, so
+AgentSession does not invent a DSH resume command.
 
 ## Installation
 

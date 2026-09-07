@@ -37,6 +37,19 @@ function records(header, specs) {
   }))];
 }
 
+function parseFixtureWithAbsoluteCwd(fixturePath, label) {
+  const lines = readFileSync(fixturePath, "utf8").split(/\r?\n/).filter(Boolean);
+  const header = JSON.parse(lines[0]);
+  if (typeof header.cwd !== "string" || !path.isAbsolute(header.cwd)) header.cwd = process.cwd();
+  const materialized = path.join(os.tmpdir(), `opensession-dsh-${label}-${process.pid}.jsonl`);
+  try {
+    writeFileSync(materialized, `${[header, ...lines.slice(1).map((line) => JSON.parse(line))].map((row) => JSON.stringify(row)).join("\n")}\n`);
+    return parseDshSession(materialized);
+  } finally {
+    rmSync(materialized, { force: true });
+  }
+}
+
 test("DSH rc.8 protocol v2 maps recorded control/team facts without message projection", () => {
   const parentId = "dsh-v2-parent";
   const childId = "dsh-v2-member";
@@ -57,7 +70,7 @@ test("DSH rc.8 protocol v2 maps recorded control/team facts without message proj
     { type: "team/message/queued", data: { version: 1, teamId: parentId, message: { id: "team-message-1", senderId: parentId, senderName: "lead", targetId: childId, delivery: "quiet", content: [{ type: "text", text: "do not project" }] } } },
     { type: "team/message/delivered", data: { version: 1, teamId: parentId, messageId: "team-message-1", targetId: childId } },
     { type: "step/end", data: { turn: 1, step: 1 } },
-    { type: "assistant/message", data: { turn: 1, step: 1, message: { id: "assistant-1", source: { provider: "deepseek", model: "deepseek-v4-pro" }, content: [{ type: "text", text: "done" }] }, usage: { inputTokens: 100, outputTokens: 30, reasoningTokens: 10, cacheReadTokens: 5 } } },
+    { type: "assistant/message", data: { turn: 1, step: 1, message: { id: "assistant-1", source: { provider: "deepseek", model: "deepseek-v4-pro" }, content: [{ type: "text", text: "done" }] }, usage: { inputTokens: 100, outputTokens: 30, reasoningTokens: 10, cacheReadTokens: 5, cacheWriteTokens: 0 } } },
     { type: "turn/end", data: { turn: 1, reason: { kind: "interrupted" } } }
   ]);
   const childRecords = records(sessionHeader(childId, { parentSession: parentId, origin: "subagent", delegationDepth: 3 }), [
@@ -128,7 +141,7 @@ test("DSH protocol preserves dangling workflow references without inventing a ch
 
 test("derived alpha.3 storage fixture normalizes provenance ranges and recorded facts into protocol v2", () => {
   const fixturePath = path.join(process.cwd(), DSH_COMPATIBILITY_SNAPSHOT.previousSnapshot.fixture.local);
-  const recordsValue = parseDshSession(fixturePath);
+  const recordsValue = parseFixtureWithAbsoluteCwd(fixturePath, "alpha3");
   const session = extractDshMeta(recordsValue, "alpha3-official-fixture");
   const messages = dshRecordsToMessages(recordsValue, session.id);
   const protocol = buildDshSessionProtocol({ session, records: recordsValue, messages, children: [] });
@@ -170,7 +183,7 @@ test("official alpha.5 checked-in snapshot projects into protocol v2 after envel
     const value = JSON.parse(line);
     if (!headerSkipped) {
       headerSkipped = true;
-      rows.push(value);
+      rows.push(typeof value.cwd === "string" && path.isAbsolute(value.cwd) ? value : { ...value, cwd: process.cwd() });
       continue;
     }
     const packed = value.type === "text-chunks" || value.type === "reasoning-chunks" || value.type === "tool-call-chunks";
@@ -205,7 +218,7 @@ test("official alpha.5 checked-in snapshot projects into protocol v2 after envel
 
 test("previous rc.8 fixture remains readable and expands packed rows", () => {
   const fixturePath = path.join(process.cwd(), DSH_COMPATIBILITY_SNAPSHOT.legacyFixture.local);
-  const recordsValue = parseDshSession(fixturePath);
+  const recordsValue = parseFixtureWithAbsoluteCwd(fixturePath, "rc8");
   const session = extractDshMeta(recordsValue, "rc8-official-fixture");
   const messages = dshRecordsToMessages(recordsValue, session.id);
   const protocol = buildDshSessionProtocol({ session, records: recordsValue, messages, children: [] });

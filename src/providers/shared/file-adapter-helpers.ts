@@ -30,6 +30,8 @@ interface SessionFileStoreOptions<TSession extends { id: string; parentId?: stri
   };
   refreshIntervalMs?: number;
   onError?: (filePath: string, error: unknown) => void;
+  /** Whether a failed refresh may retain a previously cached entry. */
+  retainCachedOnError?: boolean;
 }
 
 /**
@@ -77,7 +79,7 @@ export function createSessionFileStore<
       } catch (error) {
         options.onError?.(filePath, error);
         const cached = entriesByPath.get(filePath);
-        if (cached) nextByPath.set(filePath, cached);
+        if (cached && options.retainCachedOnError !== false) nextByPath.set(filePath, cached);
       }
     }
 

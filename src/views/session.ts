@@ -694,11 +694,11 @@ function attachReasoningToRenderedPart(renderedPart: any, reasoningMarkup: any) 
   }
 
   if (renderedPart.includes('class="message-group message-turn ')) {
-    return renderedPart.replace("</article>", `${renderTurnReasoning(reasoningMarkup)}</article>`);
+    return renderedPart.replace("</article>", () => `${renderTurnReasoning(reasoningMarkup)}</article>`);
   }
 
   if (renderedPart.includes('class="message message-')) {
-    return renderedPart.replace("</header>", `</header><div class="message-reasoning">${reasoningMarkup}</div>`);
+    return renderedPart.replace("</header>", () => `</header><div class="message-reasoning">${reasoningMarkup}</div>`);
   }
 
   if (renderedPart.includes('class="tool-call ')) {
@@ -706,7 +706,7 @@ function attachReasoningToRenderedPart(renderedPart: any, reasoningMarkup: any) 
   }
 
   if (renderedPart.includes('class="subagent-body"')) {
-    return renderedPart.replace('<div class="subagent-body">', `<div class="subagent-body"><div class="subagent-reasoning">${reasoningMarkup}</div>`);
+    return renderedPart.replace('<div class="subagent-body">', () => `<div class="subagent-body"><div class="subagent-reasoning">${reasoningMarkup}</div>`);
   }
 
   return null;

@@ -2,7 +2,9 @@ import type { Message, RawSession } from "../interface.js";
 import {
   dshContentText,
   dshHeader,
+  dshInheritedEventCount,
   dshOwnedEvents,
+  dshUsageOf,
   dshSessionStatus,
   dshUsageToTokens,
   type DshRecord
@@ -80,6 +82,7 @@ function eventKind(event: DshRecord): string {
     case "session-log-deepseek/delivery-accepted": return "control.delivery.accepted";
     case "user/message": return "message.user";
     case "assistant/message": return "message.assistant";
+    case "assistant/attempt": return "assistant.attempt";
     case "tool/call": return "tool.call";
     case "tool/result": return "tool.result";
     case "turn/start": return "turn.started";
@@ -106,6 +109,7 @@ function eventPhase(event: DshRecord): SessionEventEnvelope["phase"] | undefined
     return "started";
   }
   if (event.type === "assistant/chunk") return "updated";
+  if (event.type === "assistant/attempt") return "updated";
   if (event.type === "turn/end") {
     const reason = eventData(event).reason?.kind;
     return reason === "error" || reason === "blocked" || reason === "aborted" || reason === "interrupted"
@@ -147,11 +151,12 @@ function commonProviderData(event: DshRecord) {
     turn: asNumber(data.turn),
     step: asNumber(data.step),
     surfaceOp: event.surfaceOp || null,
+    sourceEventSeqs: Array.isArray(event.sourceEventSeqs) ? event.sourceEventSeqs.slice() : null,
     ignorable: event.ignorable === true
   };
   if (event.type === "session/end-seed") {
     providerData.seedBoundary = true;
-    providerData.seedLength = asNumber(data.seedLength);
+    providerData.inherited = data.inherited === true;
   } else if (event.type === "request/header") {
     const requestHeader = data.header && typeof data.header === "object" && !Array.isArray(data.header)
       ? data.header as DshRecord
@@ -184,7 +189,9 @@ function commonProviderData(event: DshRecord) {
     providerData.sessionId = firstString(data.sessionId);
     providerData.throughSeq = asNumber(data.throughSeq);
   } else if (event.type === "assistant/message") {
-    providerData.usage = dshUsageToTokens(data.usage);
+    providerData.usage = dshUsageToTokens(dshUsageOf(event));
+  } else if (event.type === "assistant/attempt") {
+    providerData.usage = dshUsageToTokens(dshUsageOf(event));
   } else if (event.type === "turn/end") {
     const reason = data.reason && typeof data.reason === "object" && !Array.isArray(data.reason) ? data.reason as DshRecord : {};
     providerData.reasonKind = firstString(reason.kind);
@@ -783,8 +790,9 @@ export function buildDshSessionProtocol(input: DshProtocolInput): SessionProtoco
   const turnEnd = [...owned].reverse().find((event) => event.type === "turn/end");
   const headerMetadata = {
     ...(input.session.metadata || {}),
-    seedLength: asNumber(header.seedLength),
-    inheritedEventCount: asNumber(header.seedLength),
+    isSeeded: header.isSeeded === true,
+    seedLength: header.version === 2 ? null : asNumber(header.seedLength),
+    inheritedEventCount: dshInheritedEventCount(input.records),
     delegationDepth: asNumber(header.delegationDepth),
     agentPreset: firstString(header.agentPreset)
   };
@@ -802,8 +810,8 @@ export function buildDshSessionProtocol(input: DshProtocolInput): SessionProtoco
     descriptor: {
       state: dshSessionStatus(input.records),
       origin: firstString(header.origin),
-      forkSeedBoundary: asNumber(header.seedLength),
-      inheritedEventCount: asNumber(header.seedLength),
+      forkSeedBoundary: dshInheritedEventCount(input.records),
+      inheritedEventCount: dshInheritedEventCount(input.records),
       harness: firstString(header.agentPreset),
       terminalOutcome: firstString(turnEnd ? eventData(turnEnd).reason?.kind : null)
     },

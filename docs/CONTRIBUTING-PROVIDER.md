@@ -317,27 +317,28 @@ tools to AgentSession-MCP.
 For DSH, keep compatibility metadata synchronized with the checked-in snapshot:
 
 - repository `deepseek-ai/deepseek-harness`;
-- alpha.5 tag commit `db6bdc3576c2d4e7c965e8e3ed0c2a731eed87f5` (official
-  HEAD `49a606bc5b5934603f22a26957a07dc799ab0291`);
-- tag `dsh-v0.1.2-alpha.5`;
-- package `@deepseek-ai/dsh@0.1.2-alpha.5`;
-- session format `0`; current SQLite schema `null`, legacy schema `17`
-  (alpha.5 has no session-persistence SQLite plugin; its SQLite packages are
-  a storage-kv facet and an FTS5 query backend).
+- alpha.2 tag commit `82a5fd61a7cf5c293cec4bdff68f455398d685e9`;
+- tag `dsh-v0.1.3-alpha.2`;
+- package `@deepseek-ai/dsh@0.1.3-alpha.2`;
+- session format `2` (with frozen readable v0/v1 historical generations);
+  current SQLite schema `null`, legacy schema `17`.
 
 JSONL is the primary backend. Test raw and multi-frame `.jsonl.zstd`, packed
 `text-chunks`/`reasoning-chunks`/`tool-call-chunks`, zero-based upstream
 sequence, range-encoded `sourceEventSeqs`, header identity, `request/header` and
 `request/context`,
-`session/end-seed`, fork seed length, source-event citations, surface
+`session/end-seed`, v2 inherited marker cut, v0/v1 fork seed length, source-event citations, surface
 replacement, compaction, cancellation/interruption, workflow/subagent facts,
 `agent/inbox/spliced`, Agent Teams member/task/mailbox events, `model/selection`,
 `subagent/model-selection-policy`, and `session-log-deepseek/delivery-accepted`.
 These records are control/model/delivery facts, not ordinary messages. Preserve
 dangling references as unresolved diagnostics; never invent a readable child
-session. Keep the alpha.3-derived and rc.8 fixtures as readability regressions
-and the official alpha.5 web snapshot (byte-for-byte) as the current fixture,
-synthesising its omitted `seq`/`time` per upstream `parseSessionLog`.
+session. Keep the rc.8 fixture as a v0 readability regression; use small
+source-derived v1/v2 fixtures for generation and surface behavior. Upstream web
+snapshots may omit `seq`/`time` in their presentation form, while persisted v2
+rows carry the complete event envelope. Validate the released envelope/storage
+codec and bounded payload facts consumed by AgentSession; do not copy the full
+provider payload schema into the adapter.
 
 If legacy SQLite persistence or another known backend is detected but unsupported,
 return an explicit storage diagnostic naming the detected and expected schema.

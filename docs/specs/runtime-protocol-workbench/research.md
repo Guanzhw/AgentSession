@@ -75,32 +75,26 @@ formats rather than promising migrations. The upstream snapshot used by this
 specification is:
 
 - repository: `deepseek-ai/deepseek-harness`;
-- tracked commit: `db6bdc3576c2d4e7c965e8e3ed0c2a731eed87f5`;
-- matching upstream tag: `dsh-v0.1.2-alpha.5`;
-- official HEAD: `49a606bc5b5934603f22a26957a07dc799ab0291`;
-- package at inspection: `@deepseek-ai/dsh@0.1.2-alpha.5`;
-- `SESSION_FORMAT_VERSION`: `0`, deliberately without compatibility promise.
+- tracked commit: `82a5fd61a7cf5c293cec4bdff68f455398d685e9`;
+- matching upstream tag: `dsh-v0.1.3-alpha.2`;
+- package at inspection: `@deepseek-ai/dsh@0.1.3-alpha.2`;
+- `SESSION_FORMAT_VERSION`: `2`, with frozen readable v0/v1 generations.
 
-Current upstream facts relevant to AgentSession (alpha.5 refresh 2026-09-03):
+Current upstream facts relevant to AgentSession (alpha.2 refresh 2026-09-08):
 
 - a session is an append-only typed event log; model messages are derived;
 - event sequence numbers are zero-based and contiguous upstream;
-- the core event vocabulary includes turn/step boundaries, user messages,
-  assistant chunks/messages, tool calls/results, request headers/context,
-  todo snapshots, and `session/end-seed`;
+- the current core event vocabulary includes turn/step boundaries, user and
+  assistant messages/attempts, tool calls/results, request headers/context,
+  feedback, team/workflow facts, and `session/end-seed`; `assistant/chunk`
+  remains a legacy v0/v1 decode shape only;
 - surface events can cite earlier event sequences and replace surface nodes;
-- fork lineage persists `parentSession` and (physically) `seedLength`;
-  `session/end-seed` identifies the inherited prefix boundary. Alpha.5 split
-  the in-memory `SessionHeader` into `isSeeded` plus a separately carried
-  inherited-event count, but `toHeaderLine`/`fromHeaderLine` still write/read
-  `seedLength`: the persisted line did not change;
-- JSONL persistence supports raw `.jsonl` and multi-frame `.jsonl.zstd`,
-  including packed chunk rows and range-encoded `sourceEventSeqs`. Alpha.5
-  keeps the same shapes (the diff is `SessionSeq` branding and `-0` checks);
-- the alpha.3→alpha.5 core-session diff (header field split, branded seq
-  types, added `eventAt`/range snapshot accessors) is upstream-internal; the
-  provider boundary format is unchanged;
-- alpha.3 removed the SQLite persistence backend; alpha.5 has not restored
+- fork lineage persists `parentSession`; v0/v1 use `seedLength`, while v2 uses
+  `isSeeded` and the last inherited `session/end-seed` marker;
+- JSONL persistence supports raw and multi-frame Zstandard files for all three
+  generations, with packed rows retained only for v0/v1 and lossless
+  range-encoded `sourceEventSeqs` in v2;
+- alpha.3 removed the SQLite persistence backend; the alpha.2 release has not restored
   it. Its SQLite packages (`@deepseek-ai/dsh-storage-sqlite` kv facet,
   `@deepseek-ai/dsh-session-query-sqlite` FTS5) are not session persistence.
   Schema 17 remains relevant only for explicit diagnostics on existing
@@ -110,17 +104,17 @@ Current upstream facts relevant to AgentSession (alpha.5 refresh 2026-09-03):
 - the event map is declaration-merge extensible, so unknown non-ignorable
   events must remain a truthful compatibility failure.
 
-The tracked event vocabulary includes `agent/inbox/spliced` plus Agent Teams
-events `team/member`, `team/task`, `team/message/queued`, and
-`team/message/delivered`, together with `model/selection`,
+The tracked current vocabulary includes `agent/inbox/spliced`, Agent Teams
+events (`team/member`, `team/task`, `team/message/queued`, and
+`team/message/delivered`), feedback put/delete, `model/selection`,
 `subagent/model-selection-policy`, and
-`session-log-deepseek/delivery-accepted` (recorded since alpha.3 and unchanged
-in alpha.5). They are log-only control/model/
+`session-log-deepseek/delivery-accepted`. They are log-only control/model/
 delivery facts, not ordinary conversation messages.
 
-The AgentSession DSH adapter understands the v0 JSONL/Zstd layout, packed rows,
-and provenance ranges (alpha.3 codec, unchanged in alpha.5). Its protocol
-normalization preserves request
+The AgentSession DSH adapter understands the v0/v1 JSONL/Zstd layouts and packed rows,
+plus the v2 one-event-per-row layout, range provenance, and surface/usage
+projections. The retained alpha.5 web snapshot is historical v0 evidence only;
+the current compatibility boundary is alpha.2. Its protocol normalization preserves request
 headers/context, `session/end-seed`, cited source events, surface replacement,
 exact cancellation reasons, and the distinction between inherited and
 child-owned events. Legacy SQLite stores remain explicitly detected rather than
@@ -128,12 +122,12 @@ being reported as an empty provider.
 
 Because DSH changes quickly, upstream commit/package/schema information is a
 tested compatibility input, not prose that can drift unnoticed. The official
-alpha.5 checked-in web snapshot is adopted byte-for-byte; its omitted event
-envelopes are synthesised on read per upstream `parseSessionLog`
-(`packages/test-support/llm-replay/src/index.ts`). The credentialed alpha.5
-live run was unavailable (key auth failure), so live observations remain the
-alpha.3-era records; no format difference was found that would invalidate
-that evidence.
+alpha.5 checked-in web snapshot is retained byte-for-byte as historical v0
+evidence; its omitted event envelopes are synthesised on read per upstream `parseSessionLog`
+(`packages/test-support/llm-replay/src/index.ts`). The credentialed alpha.2
+live run remains unavailable (key auth failure), so live observations
+remain the earlier records; the current adapter is verified against the local
+alpha.2 source clone and persisted source-derived fixtures.
 
 ## Independent review findings
 

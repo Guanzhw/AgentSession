@@ -16,7 +16,7 @@ import test from "node:test";
 
 import { initConfig } from "../dist/src/config.js";
 import { getAllProviders } from "../dist/src/providers/index.js";
-import dsh, { getDshStorageDiagnostic } from "../dist/src/providers/deepseek-harness/adapter.js";
+import dsh, { discoverSessionFiles, getDshStorageDiagnostic } from "../dist/src/providers/deepseek-harness/adapter.js";
 import { DSH_COMPATIBILITY_SNAPSHOT } from "../dist/src/providers/deepseek-harness/compatibility.js";
 import {
   DshSessionParseError,
@@ -24,8 +24,12 @@ import {
   decodeDshStorageRecord,
   dshAssistantUsageRecords,
   dshHeader,
+  dshInheritedEventCount,
   dshOwnedEvents,
+  dshUsageOf,
+  dshUsageToTokens,
   dshRecordsToMessages,
+  dshUsageRecords,
   extractDshMeta,
   parseDshSession
 } from "../dist/src/providers/deepseek-harness/parser.js";
@@ -100,7 +104,7 @@ function parentRecords(parentId, childId) {
               { type: "tool-call", id: "dsh-call", name: "read", arguments: "{\"path\":\"README.md\"}" }
             ]
           },
-          usage: { inputTokens: 10, outputTokens: 8, reasoningTokens: 3, cacheReadTokens: 2 }
+          usage: { inputTokens: 10, outputTokens: 8, reasoningTokens: 3, cacheReadTokens: 2, cacheWriteTokens: 0 }
         }
       },
       {
@@ -196,7 +200,7 @@ function childRecords(parentId, childId) {
       { type: "turn/start", data: { turn: 1 } },
       { type: "step/start", data: { turn: 1, step: 1 } },
       { type: "user/message", surfaceOp: "append", data: { id: "child-user", role: "user", source: { kind: "user" }, content: [{ type: "text", text: "DSH child marker" }] } },
-      { type: "assistant/message", surfaceOp: "append", sourceEventSeqs: [], data: { turn: 1, step: 1, message: { id: "child-assistant", role: "assistant", source: { kind: "model", provider: "deepseek-official", model: "deepseek-v4-pro" }, content: [{ type: "text", text: "DSH child result" }] }, usage: { inputTokens: 3, outputTokens: 4 } } },
+      { type: "assistant/message", surfaceOp: "append", sourceEventSeqs: [], data: { turn: 1, step: 1, message: { id: "child-assistant", role: "assistant", source: { kind: "model", provider: "deepseek-official", model: "deepseek-v4-pro" }, content: [{ type: "text", text: "DSH child result" }] }, usage: { inputTokens: 3, outputTokens: 4, cacheReadTokens: 0, cacheWriteTokens: 0 } } },
       { type: "step/end", data: { turn: 1, step: 1 } },
       { type: "turn/end", data: { turn: 1, reason: { kind: "completed" } } }
     ])
@@ -259,6 +263,14 @@ test("DeepSeek Harness provider reads current raw sessions, system evidence, wor
     const tokenStats = dsh.getTokenStats(30);
     assert.equal(tokenStats.reduce((total, day) => total + day.totalTokens, 0), 27);
     assert.equal(tokenStats.reduce((total, day) => total + day.messageCount, 0), 2);
+    // Once a newer canonical generation appears, a malformed winner must
+    // invalidate the cached v0 entry rather than resurrecting old content.
+    writeJsonl(path.join(path.dirname(parentFile), "session.v2.jsonl"), [
+      { type: "session", version: 2, id: parentId, createdAt: 1, isSeeded: false, delegationDepth: 0 },
+      { type: "future/malformed", seq: 0, time: 2, data: {} }
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    assert.equal(dsh.getSession(parentId), null);
     assert.equal(dsh.resumeCommand, undefined);
     assert.equal(dsh.capabilities.localManagement, true);
     assert.ok(getAllProviders().some((provider) => provider.id === "deepseek-harness"));
@@ -267,12 +279,12 @@ test("DeepSeek Harness provider reads current raw sessions, system evidence, wor
   }
 });
 
-test("DeepSeek Harness alpha.5 compatibility snapshot and SQLite diagnostic are explicit", () => {
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.commit, "db6bdc3576c2d4e7c965e8e3ed0c2a731eed87f5");
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.headCommit, "49a606bc5b5934603f22a26957a07dc799ab0291");
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.tag, "dsh-v0.1.2-alpha.5");
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.npm.current, "0.1.2-alpha.5");
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.sessionFormatVersion, 0);
+test("DeepSeek Harness alpha.2 compatibility snapshot and SQLite diagnostic are explicit", () => {
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.commit, "82a5fd61a7cf5c293cec4bdff68f455398d685e9");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.headCommit, "82a5fd61a7cf5c293cec4bdff68f455398d685e9");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.tag, "dsh-v0.1.3-alpha.2");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.npm.current, "0.1.3-alpha.2");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.sessionFormatVersion, 2);
   assert.equal(DSH_COMPATIBILITY_SNAPSHOT.sqliteSchemaVersion, null);
   assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousRelease.sqliteSchemaVersion, 17);
   assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousRelease.package, "@deepseek-ai/dsh");
@@ -291,7 +303,7 @@ test("DeepSeek Harness alpha.5 compatibility snapshot and SQLite diagnostic are 
     assert.ok(DSH_COMPATIBILITY_SNAPSHOT.requiredEventTypes.includes(type));
     assert.ok(DSH_KNOWN_EVENT_TYPES.has(type));
     assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousRelease.requiredEventTypes.includes(type), false);
-    // The alpha.3 snapshot already tracked these facts; alpha.5 keeps them.
+    // The alpha.3 snapshot already tracked these facts; alpha.2 retains them.
     assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousSnapshot.requiredEventTypes.includes(type), true);
   }
   assert.deepEqual(
@@ -334,7 +346,7 @@ test("official alpha.5 checked-in web snapshot validates after upstream envelope
       const value = JSON.parse(line);
       if (!headerSkipped) {
         headerSkipped = true;
-        rows.push(value);
+        rows.push(typeof value.cwd === "string" && path.isAbsolute(value.cwd) ? value : { ...value, cwd: process.cwd() });
         continue;
       }
       const packed = value.type === "text-chunks" || value.type === "reasoning-chunks" || value.type === "tool-call-chunks";
@@ -349,6 +361,11 @@ test("official alpha.5 checked-in web snapshot validates after upstream envelope
 
     const parsed = parseDshSession(materialized);
     assert.equal(parsed.length, 102);
+    assert.deepEqual(dshUsageToTokens({ inputTokens: 1, outputTokens: 1 }), {
+      input: 1, output: 1, reasoning: 0, total: 2, cache: { read: 0, write: 0 }
+    });
+    assert.equal(dshUsageToTokens({ inputTokens: 1, outputTokens: 2, totalTokens: 10 })?.total, 10);
+    assert.equal(dshUsageToTokens({ inputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 4, totalTokens: 11 }), null);
     const header = dshHeader(parsed);
     assert.equal(header?.version, 0);
     assert.equal(header?.agentPreset, "standard");
@@ -361,6 +378,7 @@ test("official alpha.5 checked-in web snapshot validates after upstream envelope
     const assistants = messages.filter((message) => message.role === "assistant");
     assert.equal(assistants.length, 2);
     assert.ok(assistants.every((message) => message.tokens?.total > 0));
+    assert.equal(assistants.length, 2);
     const tool = messages.find((message) => message.role === "tool" && message.metadata?.callId === "call_00_BYXlxjFaalMg95YVqEeF2495");
     assert.equal(tool?.toolName, "bash");
     assert.deepEqual(tool?.toolInput, { command: "echo WEB_E2E_OK", description: "Echo the test string" });
@@ -385,15 +403,20 @@ test("DeepSeek Harness rejects unknown required events and incompatible session 
     ]);
     assert.throws(() => parseDshSession(requiredPath), /Unsupported required DeepSeek Harness event/);
 
-    // Explicitly marked ignorable external events are tolerated rather than
-    // rejected: the persisted marker is the upstream compatibility mechanism.
+    // v0 has no ignorable-event escape hatch; that marker was introduced by
+    // the released v1/v2 envelope codecs.
     const ignorablePath = path.join(root, "ignorable.jsonl");
     writeJsonl(ignorablePath, [
       header("session-dsh-ignorable"),
-      { type: "future/plugin", seq: 0, time: Date.now(), data: {}, ignorable: true },
-      { type: "turn/end", seq: 1, time: Date.now(), data: { turn: 1, reason: { kind: "completed" } } }
+      { type: "future/plugin", seq: 0, time: Date.now(), data: {}, ignorable: true }
     ]);
-    assert.doesNotThrow(() => parseDshSession(ignorablePath));
+    assert.throws(() => parseDshSession(ignorablePath), /Unsupported required/);
+    const v2IgnorablePath = path.join(root, "v2-ignorable", "session.v2.jsonl");
+    writeJsonl(v2IgnorablePath, [
+      { type: "session", version: 2, id: "v2-ignorable", createdAt: 1, isSeeded: false, delegationDepth: 0 },
+      { type: "future/plugin", seq: 0, time: Date.now(), data: {}, ignorable: true }
+    ]);
+    assert.doesNotThrow(() => parseDshSession(v2IgnorablePath));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -528,7 +551,7 @@ test("DeepSeek Harness respects durable seed lineage, all tool result blocks, an
             source: { kind: "model", provider: "deepseek-official", model: "deepseek-v4-flash" },
             content: [{ type: "text", text: "inherited seed marker" }]
           },
-          usage: { inputTokens: 100, outputTokens: 100 }
+          usage: { inputTokens: 100, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 }
         }
       },
       { type: "turn/start", data: { turn: 1 } },
@@ -546,7 +569,7 @@ test("DeepSeek Harness respects durable seed lineage, all tool result blocks, an
             source: { kind: "model", provider: "deepseek-official", model: "deepseek-v4-flash" },
             content: [{ type: "text", text: "live result marker" }]
           },
-          usage: { inputTokens: 2, outputTokens: 3 }
+          usage: { inputTokens: 2, outputTokens: 3, cacheReadTokens: 0, cacheWriteTokens: 0 }
         }
       }
     ])
@@ -604,4 +627,116 @@ test("DeepSeek Harness respects durable seed lineage, all tool result blocks, an
     children: []
   });
   assert.equal(interruptedProtocol.events.at(-1)?.phase, "failed");
+});
+
+test("DeepSeek Harness selects the highest canonical generation and projects v2 surface/attempt semantics", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "opensession-dsh-v2-"));
+  try {
+    const selectedDir = path.join(root, "sessions", "project", "selected");
+    const v0 = header("old-id");
+    const v1 = header("canonical-id", { version: 1 });
+    writeJsonl(path.join(selectedDir, "session.jsonl"), [v0]);
+    writeJsonl(path.join(selectedDir, "session.v1.jsonl"), [v1]);
+    const mixedDir = path.join(root, "sessions", "project", "mixed");
+    writeJsonl(path.join(mixedDir, "session.v1.jsonl"), [header("mixed-v1", { version: 1 })]);
+    writeFileSync(path.join(mixedDir, "session.v2.jsonl.zstd"), zstdCompressSync(Buffer.from(`${JSON.stringify({ type: "session", version: 2, id: "mixed-v2", createdAt: 1, isSeeded: false, delegationDepth: 0 })}\n`)));
+
+    const selected = discoverSessionFiles(root);
+    assert.ok(selected.some((entry) => /session\.v1\.jsonl$/.test(entry.filePath)));
+    const v1Records = [v1, { type: "turn/start", seq: 0, time: 2, data: { turn: 1 } }];
+    const v1RawPath = path.join(root, "v1-raw", "session.v1.jsonl");
+    writeJsonl(v1RawPath, v1Records);
+    assert.equal(parseDshSession(v1RawPath)[0].version, 1);
+    const v1ZstdPath = path.join(root, "v1-zstd", "session.v1.jsonl.zstd");
+    mkdirSync(path.dirname(v1ZstdPath), { recursive: true });
+    writeFileSync(v1ZstdPath, zstdCompressSync(Buffer.from(`${v1Records.map((record) => JSON.stringify(record)).join("\n")}\n`)));
+    assert.equal(parseDshSession(v1ZstdPath)[0].version, 1);
+    const v1UnknownPath = path.join(root, "v1-unknown", "session.v1.jsonl");
+    writeJsonl(v1UnknownPath, [v1, { type: "future/ignorable", seq: 0, time: 2, data: {}, ignorable: true }]);
+    assert.doesNotThrow(() => parseDshSession(v1UnknownPath));
+    const v2UnknownPath = path.join(root, "v2-unknown", "session.v2.jsonl");
+    writeJsonl(v2UnknownPath, [{ type: "session", version: 2, id: "v2-unknown", createdAt: 1, isSeeded: false, delegationDepth: 0 }, { type: "future/ignorable", seq: 0, time: 2, data: {}, ignorable: true }]);
+    assert.doesNotThrow(() => parseDshSession(v2UnknownPath));
+
+    const file = path.join(root, "v2-session", "session.v2.jsonl");
+    const records = [
+      { type: "session", version: 2, id: "v2-session", createdAt: 1, isSeeded: false, delegationDepth: 0 },
+      { type: "user/message", seq: 0, time: 1, surfaceOp: "append", data: { id: "u", role: "user", source: { kind: "user" }, content: [{ type: "text", text: "old" }] } },
+      { type: "assistant/attempt", seq: 1, time: 2, data: { turn: 1, step: 1, stream: [{ type: "usage", usage: { inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 } }] } },
+      { type: "assistant/message", seq: 2, time: 3, surfaceOp: "append", data: { turn: 1, step: 1, stream: [{ type: "usage", usage: { inputTokens: 4, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 } }], message: { id: "a", role: "assistant", source: { kind: "model" }, content: [{ type: "text", text: "answer" }, { type: "tool-call", id: "call", name: "read", arguments: "{\"path\":\"x\"}" }] } } },
+      { type: "user/message", seq: 3, time: 4, surfaceOp: { op: "replace", start: 0, end: 2 }, sourceEventSeqs: [0, 2], data: { id: "replacement", role: "user", source: { kind: "user" }, content: [{ type: "text", text: "final" }] } },
+      { type: "tool/result", seq: 4, time: 5, surfaceOp: "append", data: { turn: 1, step: 1, message: { source: { kind: "tool", callId: "call" }, content: [{ type: "tool-result", toolCallId: "call", content: [{ type: "text", text: "ok" }] }] } } },
+      { type: "tool/result", seq: 5, time: 6, surfaceOp: { op: "replace", start: 4, end: 4 }, sourceEventSeqs: [4], data: { turn: 1, step: 1, message: { source: { kind: "tool", callId: "call" }, content: [{ type: "tool-result", toolCallId: "call", content: [{ type: "text", text: "rewritten" }] }] } } },
+      { type: "assistant/message", seq: 6, time: 7, surfaceOp: "append", data: { turn: 1, step: 2, message: { id: "empty", role: "assistant", source: { kind: "model" }, content: [] }, usage: { inputTokens: 6, outputTokens: 7, cacheReadTokens: 0, cacheWriteTokens: 0 } } }
+    ];
+    writeJsonl(file, records);
+    const parsed = parseDshSession(file);
+    const compressedFile = path.join(root, "v2-session-compressed", "session.v2.jsonl.zstd");
+    mkdirSync(path.dirname(compressedFile), { recursive: true });
+    writeFileSync(compressedFile, zstdCompressSync(Buffer.from(`${records.map((record) => JSON.stringify(record)).join("\n")}\n`)));
+    assert.equal(parseDshSession(compressedFile)[0].version, 2);
+    const messages = dshRecordsToMessages(parsed, "v2-session");
+    assert.deepEqual(messages.map((message) => message.content), ["old", "answer", "ok"]);
+    assert.deepEqual(dshAssistantUsageRecords(parsed).map((event) => dshUsageOf(event).inputTokens), [4, 6]);
+    const protocol = buildDshSessionProtocol({ session: extractDshMeta(parsed), records: parsed, messages, children: [] });
+    assert.ok(protocol.events.some((event) => event.kind === "assistant.attempt"));
+    assert.deepEqual(protocol.events.find((event) => event.kind === "assistant.attempt")?.providerData?.usage, { input: 1, output: 2, reasoning: 0, total: 3, cache: { read: 0, write: 0 } });
+    assert.equal(protocol.events.filter((event) => event.kind === "message.assistant").length, 2);
+    for (const [label, mutate] of [
+      ["call-id", (data) => ({
+        ...data,
+        message: { ...data.message, source: { ...data.message.source, callId: "mutated-call" } }
+      })],
+      ["is-error", (data) => ({
+        ...data,
+        message: {
+          ...data.message,
+          content: [{ ...data.message.content[0], isError: true }]
+        }
+      })]
+    ]) {
+      const invalidReplacementPath = path.join(root, `tool-result-replacement-${label}`, "session.v2.jsonl");
+      writeJsonl(invalidReplacementPath, [
+        ...records.slice(0, 6),
+        { ...records[6], data: mutate(records[6].data) }
+      ]);
+      assert.throws(() => parseDshSession(invalidReplacementPath), /only message\.content may change/);
+    }
+    const retryPath = path.join(root, "retry", "session.v2.jsonl");
+    writeJsonl(retryPath, [
+      { type: "session", version: 2, id: "retry", createdAt: 1, isSeeded: false, delegationDepth: 0 },
+      { type: "assistant/attempt", seq: 0, time: 1, data: { turn: 1, step: 1, stream: [{ type: "usage", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 } }] } },
+      { type: "assistant/message", seq: 1, time: 2, surfaceOp: "append", data: { turn: 1, step: 1, message: { source: { kind: "model" }, content: [{ type: "text", text: "settled" }] }, usage: { inputTokens: 2, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 } } },
+      { type: "llm/retry-started", seq: 2, time: 3, data: { turn: 1, step: 1 } },
+      { type: "assistant/attempt", seq: 3, time: 4, data: { turn: 1, step: 1, stream: [{ type: "usage", usage: { inputTokens: 3, outputTokens: 3, cacheReadTokens: 0, cacheWriteTokens: 0 } }] } }
+    ]);
+    const retryRecords = parseDshSession(retryPath);
+    assert.deepEqual(dshUsageRecords(retryRecords).map((event) => dshUsageOf(event).inputTokens), [2, 3]);
+
+    const seededPath = path.join(root, "seeded", "session.v2.jsonl");
+    const seededRecords = [
+      { type: "session", version: 2, id: "seeded", createdAt: 1, isSeeded: true, delegationDepth: 1 },
+      { type: "session/title", seq: 0, time: 1, data: { title: "inherited" } },
+      { type: "session/end-seed", seq: 1, time: 2, data: { inherited: true } },
+      { type: "user/message", seq: 2, time: 3, surfaceOp: "append", data: { source: { kind: "user" }, content: [{ type: "text", text: "own" }] } }
+    ];
+    writeJsonl(seededPath, seededRecords);
+    const seededParsed = parseDshSession(seededPath);
+    assert.equal(dshInheritedEventCount(seededParsed), 1);
+    assert.deepEqual(dshOwnedEvents(seededParsed).map((event) => event.type), ["session/end-seed", "user/message"]);
+    const seededProtocol = buildDshSessionProtocol({ session: extractDshMeta(seededParsed), records: seededParsed, messages: dshRecordsToMessages(seededParsed, "seeded"), children: [] });
+    assert.equal(seededProtocol.session?.forkSeedBoundary, 1);
+    assert.equal(seededProtocol.session?.inheritedEventCount, 1);
+    const missingMarkerPath = path.join(root, "seeded-missing", "session.v2.jsonl");
+    writeJsonl(missingMarkerPath, [{ ...seededRecords[0], id: "seeded-missing" }, { type: "turn/start", seq: 0, time: 1, data: { turn: 1 } }]);
+    assert.throws(() => parseDshSession(missingMarkerPath), /lacks inherited end-seed/);
+    const unseededMarkerPath = path.join(root, "unseeded-marker", "session.v2.jsonl");
+    writeJsonl(unseededMarkerPath, [{ ...seededRecords[0], id: "unseeded-marker", isSeeded: false }, { ...seededRecords[2], seq: 0 }]);
+    assert.throws(() => parseDshSession(unseededMarkerPath), /Unseeded/);
+    const illegalMarkerPath = path.join(root, "illegal-marker", "session.v2.jsonl");
+    writeJsonl(illegalMarkerPath, [{ ...seededRecords[0], id: "illegal-marker", isSeeded: false }, { ...seededRecords[2], seq: 0, data: { inherited: false } }]);
+    assert.throws(() => parseDshSession(illegalMarkerPath), /Invalid session\/end-seed\.inherited/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

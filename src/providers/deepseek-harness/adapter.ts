@@ -16,8 +16,10 @@ import {
 import {
   dshAssistantUsageRecords,
   dshUsageToTokens,
+  dshUsageOf,
   extractDshMeta,
   parseDshSession,
+  dshGenerationFromPath,
   dshRecordsToMessages,
   dshStoredSystemPrompt,
   type DshRecord
@@ -71,10 +73,23 @@ export function getDshStorageDiagnostic(root = getDshDir()): DshStorageDiagnosti
   return null;
 }
 
-function discoverSessionFiles() {
-  const sessionsDir = path.join(getDshDir(), "sessions");
-  if (!existsSync(sessionsDir)) return [];
-  const candidates = new Map<string, { sessionId: string; filePath: string }>();
+export interface DshSessionFileDiagnostic {
+  directory: string;
+  status: "mixed-encoding" | "duplicate-generation" | "parse-error";
+  generations: number[];
+  message: string;
+}
+
+let dshSessionFileDiagnostics: DshSessionFileDiagnostic[] = [];
+
+export function getDshSessionFileDiagnostics() {
+  return dshSessionFileDiagnostics.slice();
+}
+
+export function discoverSessionFiles(root = getDshDir()) {
+  const sessionsDir = path.join(root, "sessions");
+  if (!existsSync(sessionsDir)) { dshSessionFileDiagnostics = []; return []; }
+  const candidates = new Map<string, Map<number, string[]>>();
   const visited = new Set<string>();
 
   const walk = (directory: string) => {
@@ -93,17 +108,14 @@ function discoverSessionFiles() {
             walk(fullPath);
             continue;
           }
-          if (entry !== "session.jsonl" && entry !== "session.jsonl.zstd") continue;
+          const generation = dshGenerationFromPath(entry);
+          if (generation === null) continue;
           const keyPath = path.dirname(fullPath);
-          const existing = candidates.get(keyPath);
-          // DSH owns one encoding for a root. Prefer the default compressed
-          // artifact if a corrupted/mixed directory is encountered.
-          if (!existing || entry.endsWith(".zstd")) {
-            candidates.set(keyPath, {
-              sessionId: path.basename(keyPath),
-              filePath: fullPath
-            });
-          }
+          const byGeneration = candidates.get(keyPath) || new Map<number, string[]>();
+          const paths = byGeneration.get(generation) || [];
+          paths.push(fullPath);
+          byGeneration.set(generation, paths);
+          candidates.set(keyPath, byGeneration);
         } catch (error) {
           console.warn("Skipping unreadable DeepSeek Harness session entry:", fullPath, error);
         }
@@ -114,11 +126,34 @@ function discoverSessionFiles() {
   };
 
   walk(sessionsDir);
-  return [...candidates.values()];
+  const diagnostics: DshSessionFileDiagnostic[] = [];
+  const selected: Array<{ sessionId: string; filePath: string }> = [];
+  for (const [directory, byGeneration] of candidates) {
+    const generations = [...byGeneration.keys()].sort((a, b) => a - b);
+    const allPaths = [...byGeneration.values()].flat();
+    const encodings = new Set(allPaths.map((value) => value.endsWith(".zstd") ? "zstd" : "raw"));
+    if (encodings.size > 1) {
+      diagnostics.push({ directory, status: "mixed-encoding", generations,
+        message: `DeepSeek Harness session root has mixed raw/Zstandard generations; no older generation fallback is allowed: ${directory}` });
+      continue;
+    }
+    const generation = generations.at(-1)!;
+    const paths = byGeneration.get(generation)!;
+    if (paths.length !== 1) {
+      diagnostics.push({ directory, status: "duplicate-generation", generations,
+        message: `DeepSeek Harness session root has duplicate generation v${generation}; no file was selected: ${directory}` });
+      continue;
+    }
+    selected.push({ sessionId: path.basename(directory), filePath: paths[0] });
+  }
+  dshSessionFileDiagnostics = diagnostics;
+  for (const diagnostic of diagnostics) console.warn(diagnostic.message);
+  return selected;
 }
 
 const sessionFiles = createSessionFileStore<RawSession, DshRecord[], Message[]>({
   discoverFiles: discoverSessionFiles,
+  retainCachedOnError: false,
   readEntry(entry) {
     const records = parseDshSession(entry.filePath);
     const session = extractDshMeta(records, entry.sessionId);
@@ -127,6 +162,13 @@ const sessionFiles = createSessionFileStore<RawSession, DshRecord[], Message[]>(
   },
   onError(filePath, error) {
     console.warn("Skipping unparseable DeepSeek Harness session file:", filePath, error);
+    const generation = dshGenerationFromPath(path.basename(filePath));
+    dshSessionFileDiagnostics = [...dshSessionFileDiagnostics, {
+      directory: path.dirname(filePath),
+      status: "parse-error",
+      generations: generation === null ? [] : [generation],
+      message: `DeepSeek Harness canonical session generation is unreadable; no older generation fallback: ${filePath}`
+    }];
   }
 });
 
@@ -175,14 +217,14 @@ function generateDshViews(sessionId: string) {
 const getDshViews = createStructuredViewCache(generateDshViews);
 
 const dshTokenMapping: TokenFieldMapping = {
-  filterRecord: (event) => event.type === "assistant/message" && dshUsageToTokens(event.data?.usage) !== null,
+  filterRecord: (event) => dshUsageToTokens(dshUsageOf(event)) !== null,
   getTimestamp: (event) => Number(event.time) || 0,
-  inputTokens: (event) => dshUsageToTokens(event.data?.usage)?.input || 0,
-  outputTokens: (event) => dshUsageToTokens(event.data?.usage)?.output || 0,
-  totalTokens: (event) => dshUsageToTokens(event.data?.usage)?.total || 0,
-  reasoningTokens: (event) => dshUsageToTokens(event.data?.usage)?.reasoning || 0,
-  cacheReadTokens: (event) => dshUsageToTokens(event.data?.usage)?.cache?.read || 0,
-  cacheWriteTokens: (event) => dshUsageToTokens(event.data?.usage)?.cache?.write || 0
+  inputTokens: (event) => dshUsageToTokens(dshUsageOf(event))?.input || 0,
+  outputTokens: (event) => dshUsageToTokens(dshUsageOf(event))?.output || 0,
+  totalTokens: (event) => dshUsageToTokens(dshUsageOf(event))?.total || 0,
+  reasoningTokens: (event) => dshUsageToTokens(dshUsageOf(event))?.reasoning || 0,
+  cacheReadTokens: (event) => dshUsageToTokens(dshUsageOf(event))?.cache?.read || 0,
+  cacheWriteTokens: (event) => dshUsageToTokens(dshUsageOf(event))?.cache?.write || 0
 };
 
 const getDshTokenStats = createIncrementalTokenStats(
@@ -201,11 +243,11 @@ const deepseekHarness = {
     localManagement: true
   },
   protocolCapabilities: {
-    sessionEvents: { support: "full", provenance: "recorded", details: "DSH v0 append-only events, including expanded packed chunk storage rows" },
+    sessionEvents: { support: "full", provenance: "recorded", details: "DSH alpha.2 v0/v1 frozen events plus v2 one-event-per-row log; v0/v1 packed rows are expanded at the read boundary" },
     sessionRelationships: { support: "partial", provenance: "derived", details: "recorded header lineage and descriptors, with cross-session child edges resolved locally" },
     tasks: { support: "partial", provenance: "derived", details: "subagent descriptor and tool-workflow child evidence" },
     agentRuns: { support: "partial", provenance: "derived", details: "session-backed subagent and workflow child lifecycles" },
-    contextArtifacts: { support: "full", provenance: "recorded", details: "compaction summaries and prunes as metadata-only artifacts" }
+    contextArtifacts: { support: "full", provenance: "recorded", details: "compaction summaries and prunes as metadata-only artifacts; v2 replacement provenance remains available in recorded events" }
   },
 
   detect() {

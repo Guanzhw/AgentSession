@@ -249,6 +249,51 @@ test("Work is the unconditional default top-level tab", () => {
   assert.doesNotMatch(html, /id="tab-btn-flow"/);
 });
 
+test("session tabpanels stay balanced when reasoning contains replacement tokens", () => {
+  const tree = {
+    session: { id: "balanced", title: "Balanced" },
+    messages: [{
+      id: "message-1",
+      role: "assistant",
+      data: { role: "assistant", time: { created: 1 } },
+      parts: [
+        {
+          id: "reasoning-1",
+          type: "reasoning",
+          data: { type: "reasoning", text: `${"context ".repeat(730)}$\` ${"tail ".repeat(100)}` },
+          childSessions: []
+        },
+        {
+          id: "text-1",
+          type: "text",
+          data: { type: "text", text: "done" },
+          childSessions: []
+        }
+      ]
+    }],
+    detachedChildren: []
+  };
+  const html = renderSessionPage({
+    session: { id: "balanced", title: "Balanced", time_created: 1 },
+    sessionTree: tree,
+    provider: "fixture"
+  });
+  const mainStart = html.indexOf('<section id="session-balanced" class="main-content">');
+  const mainEnd = html.lastIndexOf("\n  </section>\n</div>");
+  assert.ok(mainStart >= 0 && mainEnd > mainStart, "main content must have a closing section");
+  const main = html.slice(mainStart, mainEnd);
+  const panelIds = [...main.matchAll(/<div role="tabpanel" id="(tab-(?:work|conversation|events))"/g)].map((match) => match[1]);
+  assert.deepEqual(panelIds, ["tab-work", "tab-conversation", "tab-events"]);
+  assert.equal((main.match(/<div role="tabpanel"/g) || []).length, 3);
+  const reasoningStart = main.indexOf('<div class="reasoning-body markdown">');
+  const reasoningEnd = main.indexOf("</details>", reasoningStart);
+  const messageBody = main.indexOf('<div class="message-body', reasoningStart);
+  assert.ok(reasoningStart >= 0 && reasoningEnd > reasoningStart && messageBody > reasoningEnd, "reasoning must close before the message body");
+  assert.match(main, /context context/);
+  assert.match(main, /id="tab-events"[\s\S]*\n    <\/div>$/);
+  assert.match(html.slice(mainEnd), /^\n  <\/section>\n<\/div>/);
+});
+
 test("top-level session tabs do not hide nested Runtime lens panels", () => {
   const enhancements = readFileSync(path.join(process.cwd(), "src", "static", "app", "enhancements.js"), "utf8");
   assert.match(enhancements, /tabBar\.parentElement\?\.querySelectorAll\(":scope > \[role='tabpanel'\]"\)/);
