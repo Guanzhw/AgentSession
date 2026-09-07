@@ -1,5 +1,15 @@
 # AgentSession UI v2 信息设计方案(草案)
 
+## P4b implementation status (2026-09-07)
+
+Statistics and Settings are aligned with the shared UI v2 visual system. The
+Statistics page keeps its existing data and capability semantics while using a
+header → filters/actions → summary → trend → supporting-views reading order;
+charts expose units and text summaries. Settings keeps configuration facts
+compact, uses a single labeled control column, and leaves advanced JSON
+progressively disclosed. Browser-facing selectors and localized copy remain
+under the existing ownership boundaries.
+
 ## P0 implementation status (2026-09-03)
 
 The information skeleton is implemented: the primary rail is Library / Statistics /

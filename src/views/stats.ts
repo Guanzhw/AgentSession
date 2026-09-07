@@ -314,7 +314,7 @@ function renderTokenTrend(
   if (!rows || rows.length === 0) {
     return `<section class="stats-chart-section">
       <div class="stats-chart-heading"><div><h2 class="stats-chart-title">${title}</h2>
-      <p class="stats-chart-help">${help}</p></div></div>
+      <p class="stats-chart-help">${help}</p><p class="stats-chart-unit">${escapeHtml(t("stats.trend_unit"))}</p></div></div>
       ${providerSelector}
       <div class="stats-chart-body"><p class="stats-empty">${t("stats.no_data")}</p></div>
     </section>`;
@@ -419,7 +419,7 @@ function renderTokenTrend(
   <section class="stats-chart-section">
     <div class="stats-chart-heading">
       <div><h2 class="stats-chart-title">${title}</h2>
-      <p class="stats-chart-help">${help}</p></div>
+      <p class="stats-chart-help">${help}</p><p class="stats-chart-unit">${escapeHtml(t("stats.trend_unit"))}</p></div>
       <span class="trend-scale-note${clippedScale ? "" : " hidden"}">${t("stats.peak_compressed")}</span>
     </div>
     ${providerSelector}
@@ -433,6 +433,7 @@ function renderTokenTrend(
         ${interactiveAreas}
         ${xLabels}
       </svg>
+      <p class="stats-chart-summary">${escapeHtml(t("stats.trend_summary", { days: String(rows.length), total: fmtExact(grandTotal) }))}</p>
       <div class="trend-tooltip" id="trend-tooltip" hidden></div>
     </div>
   </section>`;
@@ -890,12 +891,7 @@ export function renderStatsPage(data: TokenExplorerData & { dayDrill?: string | 
     <button class="stats-filter-btn stats-filter-apply" type="submit">${escapeHtml(t("stats.filter_apply"))}</button>
   </form>` : "";
 
-  const content = `
-    <div class="stats-page">
-      <h1 class="stats-title">${t("stats.title")}</h1>
-      <p class="stats-desc">${t("stats.desc")}</p>
-
-      ${isGlobal ? "" : `<div class="stats-provider-bar">
+  const providerBar = isGlobal ? "" : `<div class="stats-provider-bar">
         <span class="stats-provider-label">${t("stats.provider")}:</span>
         <div class="stats-provider-list">
           ${(providers || []).map((p: any) => {
@@ -907,16 +903,25 @@ export function renderStatsPage(data: TokenExplorerData & { dayDrill?: string | 
             return `<a href="/stats?provider=${encodeURIComponent(p.id)}&${rangeQuery}" class="${className}"${isCurrent ? ' aria-current="page"' : ""}>${escapeHtml(p.name || p.id)}</a>`;
           }).join("")}
         </div>
-      </div>`}
+      </div>`;
+  const content = `
+    <div class="stats-page">
+      <header class="page-header stats-page-header">
+        <div><h1 class="stats-title">${t("stats.title")}</h1><p class="stats-desc">${t("stats.desc")}</p></div>
+        ${isGlobal ? "" : `<span class="stats-page-provider">${escapeHtml(provider)}</span>`}
+      </header>
 
-      ${renderFilterBar(filters, modelPairs, provider, projects, capabilities, providers, pagePath, selectedProviders)}
-
-      <div class="stats-export-bar">
+      <section class="stats-section stats-filters-section" data-stats-section="filters" aria-labelledby="stats-filters-title">
+        <h2 id="stats-filters-title" class="stats-section-title">${escapeHtml(t("stats.filters_title"))}</h2>
+        ${providerBar}
+        ${renderFilterBar(filters, modelPairs, provider, projects, capabilities, providers, pagePath, selectedProviders)}
+        <div class="stats-actions-bar">
+          <div class="stats-export-bar">
         <a href="${isGlobal ? "/api/stats/export.json" : `/api/${encodeURIComponent(provider)}/stats/export.json`}?${isGlobal ? selectedProviders.map((id) => `provider=${encodeURIComponent(id)}`).join("&") + (exportQuery ? "&" : "") : ""}${exportQuery}" class="stats-export-link" download>${t("stats.export_json")}</a>
         ${isGlobal ? "" : `<a href="/api/${encodeURIComponent(provider)}/stats/export.csv?${exportQuery}" class="stats-export-link" download>${t("stats.export_csv")}</a>`}
-      </div>
+          </div>
 
-      <div class="stats-saved-views" data-provider="${escapeHtml(provider)}">
+          <div class="stats-saved-views" data-provider="${escapeHtml(provider)}">
         <div class="saved-views-header">
           <span class="saved-views-title">${t("stats.saved_views")}</span>
           <button type="button" class="saved-views-save-btn" id="save-view-btn" aria-label="${escapeHtml(t("stats.saved_views_save"))}">${t("stats.saved_views_save")}</button>
@@ -928,21 +933,28 @@ export function renderStatsPage(data: TokenExplorerData & { dayDrill?: string | 
             <button type="button" class="saved-view-delete" aria-label="${escapeHtml(t("stats.saved_views_delete"))}">&times;</button>
           </li>
         </template>
+          </div>
       </div>
+      </section>
 
-      ${renderKpiCards(safeOverview, capabilities, comparison)}
+      <section class="stats-section stats-summary-section" data-stats-section="summary" aria-labelledby="stats-summary-title">
+        <h2 id="stats-summary-title" class="stats-section-title">${escapeHtml(t("stats.summary_title"))}</h2>
+        ${renderKpiCards(safeOverview, capabilities, comparison)}
+      </section>
 
-      ${renderTokenTrend(safeTokenStats, filters, provider, safeCoverage?.missingDimensions ?? [], capabilities.dayDrill, capabilities.composition, dayDrill, providerSelector, isGlobal)}
+      <section class="stats-section stats-primary-section" data-stats-section="primary-trend" aria-labelledby="stats-primary-title">
+        <h2 id="stats-primary-title" class="visually-hidden">${escapeHtml(t("stats.total_token_trend"))}</h2>
+        ${renderTokenTrend(safeTokenStats, filters, provider, safeCoverage?.missingDimensions ?? [], capabilities.dayDrill, capabilities.composition, dayDrill, providerSelector, isGlobal)}
+      </section>
 
-      ${renderProviderBreakdown(data.providerBreakdown || [], safeOverview.totalTokens, filters, selectedProviders)}
-
-      ${dayDrill ? secondaryContent : ""}
-
-      ${capabilities.modelRanking ? renderModelRanking(safeModelRanking, safeOverview.totalTokens, filters, provider) : ""}
-
-      ${dayDrill ? "" : secondaryContent}
-
-      ${advancedSection}
+      <section class="stats-section stats-supporting-section" data-stats-section="supporting" aria-labelledby="stats-supporting-title">
+        <h2 id="stats-supporting-title" class="stats-section-title">${escapeHtml(t("stats.supporting_title"))}</h2>
+        ${renderProviderBreakdown(data.providerBreakdown || [], safeOverview.totalTokens, filters, selectedProviders)}
+        ${dayDrill ? secondaryContent : ""}
+        ${capabilities.modelRanking ? renderModelRanking(safeModelRanking, safeOverview.totalTokens, filters, provider) : ""}
+        ${dayDrill ? "" : secondaryContent}
+        ${advancedSection}
+      </section>
     </div>
   `;
 

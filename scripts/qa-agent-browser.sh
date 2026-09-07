@@ -249,6 +249,16 @@ assert_positive_count "dashboard sessions after dismissed delete" "$post_delete_
 
 ab "open stats" open "$BASE/opencode/stats" >/dev/null
 ab "wait for stats" wait --text "Statistics" >/dev/null
+stats_section_order="$(read_ab "verify Statistics section order" eval "JSON.stringify([...document.querySelectorAll('[data-stats-section]')].map((section) => section.dataset.statsSection))")"
+if [[ "$stats_section_order" != '["filters","summary","primary-trend","supporting"]' && "$stats_section_order" != '"[\"filters\",\"summary\",\"primary-trend\",\"supporting\"]"' ]]; then
+  echo "Statistics should read header, filters, summary, trend, and supporting sections in order, got $stats_section_order" >&2
+  exit 1
+fi
+stats_chart_explanation="$(read_ab "verify Statistics chart unit and summary" eval "Boolean(document.querySelector('.stats-chart-unit')?.textContent.trim()) && Boolean(document.querySelector('.stats-chart-summary')?.textContent.trim())")"
+if [[ "$stats_chart_explanation" != "true" && "$stats_chart_explanation" != '"true"' ]]; then
+  echo "Statistics trend should expose a unit and text summary, got $stats_chart_explanation" >&2
+  exit 1
+fi
 page_token_total="$(read_ab "read stats token total" get attr ".stats-summary-value[data-token-total]" data-token-total)"
 api_token_total="$(curl -fsS "$BASE/api/opencode/stats" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>process.stdout.write(String(JSON.parse(s).totalTokens)))")"
 if [[ "$page_token_total" != "$api_token_total" ]]; then
@@ -296,6 +306,11 @@ fi
 settings_switch_count="$(read_ab "count settings switches" get count ".settings-switch input[type='checkbox']")"
 if ! [[ "$settings_switch_count" =~ ^[0-9]+$ ]] || (( settings_switch_count < 1 )); then
   echo "Settings page should render at least one switch, got $settings_switch_count" >&2
+  exit 1
+fi
+settings_single_column="$(read_ab "verify single-column settings groups" eval "(() => { const grid = document.querySelector('.settings-fields-grid'); return Boolean(grid) && getComputedStyle(grid).gridTemplateColumns.split(' ').length === 1 && document.querySelectorAll('#settings-project-paths small').length === 1; })()")"
+if [[ "$settings_single_column" != "true" && "$settings_single_column" != '"true"' ]]; then
+  echo "Settings should use one labeled column with one owning project-path help, got $settings_single_column" >&2
   exit 1
 fi
 ab "open advanced settings JSON" click "[data-open-settings-advanced]" >/dev/null

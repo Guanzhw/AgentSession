@@ -661,6 +661,9 @@ export const en = {
   // Stats / Token Explorer
   "stats.title": "Statistics",
   "stats.desc": "Discover usage patterns, drill down to sessions, and understand token composition.",
+  "stats.filters_title": "Filters and actions",
+  "stats.summary_title": "Summary",
+  "stats.supporting_title": "Supporting views",
   "stats.kpi_total_tokens": "Total Tokens",
   "stats.kpi_sessions": "Sessions with usage",
   "stats.kpi_messages": "Usage records",
@@ -741,6 +744,8 @@ export const en = {
   "stats.peak_compressed": "Peak compressed · exact values on hover",
   "stats.trend_day_aria": "{day}, total: {total}",
   "stats.trend_aria": "Token usage trend chart",
+  "stats.trend_unit": "Unit: tokens",
+  "stats.trend_summary": "{days} days shown · {total} tokens in the selected range",
   "stats.trend_point_aria": "{day}, {series}: {value}; total: {total}",
   "stats.model_filter_title": "Filter by {model}",
   "stats.multiple_models": "Multiple models ({count})",

@@ -1,6 +1,6 @@
 # AgentSession UI v2 visual system
 
-> Status: proposed · Date: 2026-09-04 · Scope: P1-P4 visual implementation
+> Status: P4b implemented · Date: 2026-09-07 · Scope: P1-P4 visual implementation
 >
 > This document turns the information architecture in [`ui-v2.md`](ui-v2.md)
 > into an implementation and review contract. It does not add provider facts or
@@ -193,6 +193,14 @@ Statistics use the same section rhythm and surface colors as Work. Charts need
 labels, units, and textual summaries; color is secondary. Settings use one
 column of labeled groups with help text near the owning control. Neither page
 introduces a second visual system.
+
+> P4b delivery note (2026-09-07): Statistics now follows the shared reading
+> order of header/purpose, filters and actions, summary, primary trend, and
+> supporting views while preserving existing filters, capability gates, lazy
+> sections, exports, and drill-down hooks. Settings keeps configuration facts
+> compact and renders editable controls as one labeled column; advanced JSON
+> remains progressively disclosed and its help is associated with the owning
+> control.
 
 ## 5. State, interaction, and motion
 

@@ -660,6 +660,9 @@ export const zh = {
   // Stats / Token Explorer
   "stats.title": "统计",
   "stats.desc": "发现使用模式，深入查看会话，了解 Token 构成。",
+  "stats.filters_title": "筛选与操作",
+  "stats.summary_title": "汇总",
+  "stats.supporting_title": "辅助视图",
   "stats.kpi_total_tokens": "总 Token",
   "stats.kpi_sessions": "有用量的会话",
   "stats.kpi_messages": "用量记录",
@@ -740,6 +743,8 @@ export const zh = {
   "stats.peak_compressed": "已压缩异常峰值 · 悬停查看精确值",
   "stats.trend_day_aria": "{day}，总计：{total}",
   "stats.trend_aria": "Token 使用趋势图",
+  "stats.trend_unit": "单位：Token",
+  "stats.trend_summary": "显示 {days} 天 · 所选范围共 {total} Token",
   "stats.trend_point_aria": "{day}，{series}：{value}；总计：{total}",
   "stats.model_filter_title": "按 {model} 筛选",
   "stats.multiple_models": "多个模型（{count}）",

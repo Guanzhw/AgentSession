@@ -3114,6 +3114,36 @@ test("Token Explorer defers non-primary sections while retaining server-rendered
   assert.match(fragment, /Data Coverage/);
 });
 
+test("Statistics SSR keeps the UI v2 reading order and chart explanation", () => {
+  const html = renderStatsPage({
+    tokenStats: [{ day: "2026-07-10", input_tokens: 4, output_tokens: 2, total_tokens: 6 }],
+    modelRanking: [], topSessions: [], coverage: null,
+    overview: { totalSessions: 1, totalMessages: 1, totalTokens: 6, inputTokens: 4, outputTokens: 2, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, peakDay: "2026-07-10", peakDayTokens: 6, avgTokensPerSession: 6 },
+    filters: { days: 30, from: null, to: null, project: "", modelPair: null, scope: "all" },
+    provider: "opencode", providers: []
+  });
+
+  const sectionOrder = ["filters", "summary", "primary-trend", "supporting"].map((name) => html.indexOf(`data-stats-section="${name}"`));
+  assert.ok(sectionOrder.every((index) => index >= 0));
+  assert.deepEqual(sectionOrder, [...sectionOrder].sort((a, b) => a - b));
+  assert.match(html, /class="stats-chart-unit">Unit: tokens/);
+  assert.match(html, /class="stats-chart-summary">1 days shown · 6 tokens/);
+});
+
+test("Settings SSR keeps help next to controls in one form column", () => {
+  const html = renderSettingsPage({
+    configPath: "C:\\WorkSpace\\agentsession\\config.json",
+    configDocument: { config: { projectPaths: { opencode: {} }, resumeCommands: {}, resumeShell: {} } },
+    provider: "opencode", providerName: "OpenCode", providers: [], manageable: true,
+  });
+
+  assert.match(html, /class="settings-fields-grid"/);
+  assert.match(html, /id="settings-project-paths-input"[^>]*aria-describedby="settings-project-paths-input-help"/);
+  assert.equal((html.match(/settings-project-paths-input-help/g) || []).length, 2, "help id is referenced by the control and owned by one help node");
+  assert.match(html, /id="settings-resume-enabled"[^>]*aria-describedby="settings-resume-enabled-help"/);
+  assert.match(html, /id="settings-advanced"/);
+});
+
 test("Token Explorer JS interactivity hooks are present", () => {
   const appJs = readFileSync(path.join(process.cwd(), "dist", "src", "static", "app.js"), "utf8");
 
