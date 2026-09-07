@@ -429,7 +429,7 @@ export function sessionCard(s: any, active = false, { showCheckbox = false, prov
   const detailHref = `/${encodedProvider}/session/${encodeURIComponent(s.id)}${returnTo ? `?from=${encodeURIComponent(returnTo)}` : ""}`;
 
   const checkboxHtml = showCheckbox
-    ? `<input type="checkbox" class="card-checkbox" data-id="${escapeHtml(s.id)}" data-provider="${escapeHtml(sessionProvider)}">`
+    ? `<label class="card-checkbox-hit-area"><input type="checkbox" class="card-checkbox" data-id="${escapeHtml(s.id)}" data-provider="${escapeHtml(sessionProvider)}" aria-label="${escapeHtml(t("batch.select_session", { title: String(title) }))}"></label>`
     : "";
 
   const actionsHtml = manageable ? `

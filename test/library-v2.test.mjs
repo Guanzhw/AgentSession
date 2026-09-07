@@ -226,6 +226,7 @@ test("global sessions API cards carry per-provider batch controls", async () => 
   const readonlyCard = payload.sessions.find((session) => session.provider === "readonly");
   assert.ok(piCard);
   assert.ok(readonlyCard);
+  assert.match(piCard.html, /class="card-checkbox-hit-area"><input type="checkbox" class="card-checkbox"[^>]*aria-label="Select session: API card"/);
   assert.match(piCard.html, /class="card-checkbox" data-id="api-1" data-provider="pi"/);
   assert.match(piCard.html, /class="star-btn /);
   assert.match(piCard.html, /data-day="/);

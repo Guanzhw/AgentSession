@@ -2572,6 +2572,10 @@ test("primary rail keeps library, stats, and settings reachable on narrow screen
   assert.match(html, /data-nav-shortcut="3"/);
   assert.match(style, /\.app-rail \{[\s\S]*width: var\(--rail-width\);[\s\S]*height: 100vh;/);
   assert.match(style, /@media \(max-width: 768px\) \{[\s\S]*\.app-rail \{[\s\S]*width: 100%;[\s\S]*height: 56px;/);
+  assert.match(style, /\.card-checkbox-hit-area \{[\s\S]*width: 44px;[\s\S]*height: 44px;/);
+  assert.match(style, /\.card-checkbox \{[\s\S]*width: 18px;[\s\S]*height: 18px;/);
+  assert.match(style, /\.session-list-library\.batch-mode \.session-card-content \{ padding-left: 30px; \}/);
+  assert.match(style, /\.batch-select-all,[\s\S]*\.session-search-nav-btn,[\s\S]*\.runtime-drawer-close,[\s\S]*\.pagination-link,[\s\S]*min-height: 44px;[\s\S]*min-width: 44px;/);
 });
 
 

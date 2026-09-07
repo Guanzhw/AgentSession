@@ -124,6 +124,7 @@ export const zh = {
 
   // Batch operations
   "batch.select_all": "全选",
+  "batch.select_session": "选择会话：{title}",
   "batch.selected": "已选 <strong>{count}</strong> 个",
   "batch.star": "收藏",
   "batch.unstar": "取消收藏",

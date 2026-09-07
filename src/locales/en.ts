@@ -123,6 +123,7 @@ export const en = {
 
   // Batch operations
   "batch.select_all": "Select All",
+  "batch.select_session": "Select session: {title}",
   "batch.selected": "Selected <strong>{count}</strong>",
   "batch.star": "Star",
   "batch.unstar": "Unstar",

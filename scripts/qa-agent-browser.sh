@@ -738,6 +738,25 @@ md_export="$(curl -fsS "$BASE/api/opencode/session/$SAMPLE_SESSION_ID/export?for
 assert_contains "markdown export" "$md_export" "### Reasoning"
 assert_not_contains "markdown export" "$md_export" "System Prompts"
 
+ab "set narrow P4c viewport" set viewport 320 768 >/dev/null
+ab "set narrow P4c media" set media dark reduced-motion >/dev/null
+ab "open narrow Library" open "$BASE/sessions" >/dev/null
+ab "wait for narrow Library" wait --text "Library" >/dev/null
+narrow_batch_state="$(read_ab "verify narrow batch touch targets" eval "(() => { const list = document.querySelector('#session-list'); const manage = document.querySelector('#toggle-batch'); manage?.click(); const card = document.querySelector('.session-card'); const hit = card?.querySelector('.card-checkbox-hit-area'); const checkbox = card?.querySelector('.card-checkbox'); const title = card?.querySelector('.session-card-title-link'); const selectAll = document.querySelector('.batch-select-all'); const rect = (node) => { const r = node?.getBoundingClientRect(); return r ? { width: r.width, height: r.height, right: r.right } : null; }; return JSON.stringify({ batch: list?.classList.contains('batch-mode'), overflow: document.documentElement.scrollWidth <= document.documentElement.clientWidth, checkbox: rect(checkbox), checkboxName: checkbox?.getAttribute('aria-label') || '', hit: rect(hit), title: rect(title), selectAll: rect(selectAll), padding: getComputedStyle(card?.querySelector('.session-card-content')).paddingLeft }); })()")"
+if ! printf '%s' "$narrow_batch_state" | grep -Eq 'batch[^a-z]*true' || ! printf '%s' "$narrow_batch_state" | grep -Eq 'overflow[^a-z]*true' || ! printf '%s' "$narrow_batch_state" | grep -Eq 'checkbox[^}]*height[^0-9]*1[5-9]|checkbox[^}]*width[^0-9]*1[5-9]' || ! printf '%s' "$narrow_batch_state" | grep -Eq 'checkboxName[^:]*:[^,}]*[^" ]' || ! printf '%s' "$narrow_batch_state" | grep -Eq 'hit[^}]*width[^0-9]*(4[4-9]|[5-9][0-9])' || ! printf '%s' "$narrow_batch_state" | grep -Eq 'selectAll[^}]*height[^0-9]*(4[4-9]|[5-9][0-9])'; then
+  echo "Narrow Library batch mode should preserve the native checkbox and provide bounded 44px hit areas, got $narrow_batch_state" >&2
+  exit 1
+fi
+
+ab "open narrow detail" open "$BASE/opencode/session/$SAMPLE_SESSION_ID" >/dev/null
+ab "wait for narrow detail" wait --load networkidle >/dev/null
+ab "open narrow transcript search" click "[data-session-search-toggle]" >/dev/null
+narrow_search_state="$(read_ab "verify narrow transcript search containment" eval "(() => { const panel = document.querySelector('.session-search-panel'); const input = document.querySelector('[data-session-search-input]'); const navigation = document.querySelector('.session-search-navigation'); const buttons = [...document.querySelectorAll('.session-search-nav-btn')]; const rect = (node) => { const r = node?.getBoundingClientRect(); return r ? { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height } : null; }; const p = rect(panel); const inside = (r) => Boolean(p && r && r.left >= p.left && r.right <= p.right && r.top >= p.top && r.bottom <= p.bottom); return JSON.stringify({ panel: p, input: rect(input), navigation: rect(navigation), buttons: buttons.map(rect), contained: inside(rect(input)) && inside(rect(navigation)) && buttons.every((button) => inside(rect(button))), visible: Boolean(input && navigation && buttons.length === 3 && input.getBoundingClientRect().width > 0 && navigation.getBoundingClientRect().height > 0), documentOverflow: document.documentElement.scrollWidth <= document.documentElement.clientWidth }); })()")"
+if ! printf '%s' "$narrow_search_state" | grep -Eq 'contained[^a-z]*true' || ! printf '%s' "$narrow_search_state" | grep -Eq 'visible[^a-z]*true' || ! printf '%s' "$narrow_search_state" | grep -Eq 'documentOverflow[^a-z]*true'; then
+  echo "Narrow transcript search should keep its input and three navigation controls inside the fixed panel, got $narrow_search_state" >&2
+  exit 1
+fi
+
 browser_errors="$(read_ab "collect browser errors" errors)"
 ab "close session" close >/dev/null
 
