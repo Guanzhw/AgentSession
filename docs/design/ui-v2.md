@@ -1,6 +1,19 @@
 # AgentSession UI v2 信息设计方案(草案)
 
-## P4b implementation status (2026-09-07)
+## P4 implementation status (2026-09-07)
+
+UI v2 P1–P4 is implemented and validated against the shared rules in the
+[visual system](ui-v2-visual-system.md) and the implemented P1–P4 decision
+records. The current provider and protocol semantics remain unchanged.
+
+### P4c mobile interaction finish (2026-09-07)
+
+P4c closes the observed 320px touch-target, batch-selection, and transcript-
+search containment issues. The recorded live check covers the English UI in
+dark theme with reduced motion across Library, OpenCode detail Work/
+Conversation/Events, Statistics provider filters, and Events evidence/
+pagination; it does not claim the remaining locale, theme, or viewport
+combinations. See the [P4c decision record](../../.agents/decisions/implemented/2026-09-07-ui-v2-p4c-finish.md).
 
 Statistics and Settings are aligned with the shared UI v2 visual system. The
 Statistics page keeps its existing data and capability semantics while using a
@@ -31,8 +44,8 @@ provider-safe batch star/delete with delete confirmation, and distinct
 empty-library / no-results / source-unavailable states. Infinite loading is
 retained. Evidence-bounded decision record:
 `.agents/decisions/implemented/2026-09-04-ui-v2-p1-library.md`; the shared
-visual contract remains proposed until the real browser screenshot and WCAG
-gates are complete.
+visual contract is implemented and its P1–P4 browser and WCAG gates are
+recorded in the visual-system and phase decision records.
 
 ## P2 implementation status (2026-09-04)
 

@@ -1,6 +1,11 @@
 # AgentSession UI v2 visual system
 
-> Status: P4b implemented · Date: 2026-09-07 · Scope: P1-P4 visual implementation
+> Status: P4 implemented · Date: 2026-09-07 · Scope: P1-P4 visual implementation
+>
+> P4c mobile interaction finish is implemented and recorded in the
+> [P4c decision](../../.agents/decisions/implemented/2026-09-07-ui-v2-p4c-finish.md):
+> the verified 320px English dark/reduced-motion matrix covers touch targets,
+> batch selection, and transcript-search containment.
 >
 > This document turns the information architecture in [`ui-v2.md`](ui-v2.md)
 > into an implementation and review contract. It does not add provider facts or

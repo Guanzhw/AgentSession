@@ -1,6 +1,7 @@
 # Runtime Protocol Workbench implementation tasks
 
-Status values: `[ ]` pending, `[-]` active, `[x]` complete
+Status values: `[ ]` pending, `[-]` active, `[x]` complete, `[N/A]` retired or
+not applicable
 
 ## S0. Specification and baseline
 
@@ -22,7 +23,10 @@ Status values: `[ ]` pending, `[-]` active, `[x]` complete
 - [x] Change full protocol API to return validated v2 output and distinguish
   unknown, incomplete, invalid, and unavailable states.
 
-## S2. Complete provider coverage
+## S2. Continuing seven-provider scope
+
+The continuing provider set is Codex, Claude Code, Pi, Hermes Agent, OpenCode,
+OpenClaw, and DeepSeek Harness (refreshed in S3 below).
 
 - [x] Migrate Codex protocol and integration tests.
 - [x] Migrate Claude Code protocol and correct mixed recorded/derived
@@ -35,8 +39,12 @@ Status values: `[ ]` pending, `[-]` active, `[x]` complete
   2026-09-03): `session_nodes` canonical keys, `session_windows` generations,
   `transcript_events` raw events; legacy JSONL stays readable with exactly-once
   dedup (SQLite wins).
-- [x] Implement Copilot protocol with inline-agent task/run semantics.
-- [x] Implement truthful derived Gemini protocol.
+- [N/A] Retire the historical Copilot protocol experiment; Copilot is outside
+  the continuing provider scope. See
+  [the removal decision](../../../.agents/decisions/implemented/2026-09-02-remove-gemini-copilot-providers.md).
+- [N/A] Retire the historical derived Gemini protocol experiment; Gemini is
+  outside the continuing provider scope. See
+  [the removal decision](../../../.agents/decisions/implemented/2026-09-02-remove-gemini-copilot-providers.md).
 - [x] Add provider-wide contract tests for unknown/corrupt sessions and
   capability/validation consistency.
 
