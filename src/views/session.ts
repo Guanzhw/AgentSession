@@ -1481,11 +1481,11 @@ export function renderSessionPage({
   resumeCommand = null,
   terminalLaunchAllowed = false,
   runtimeWorkbench = "",
-  runtimeAvailable = false,
+  runtimeEvents = "",
   navigationContext = null,
   conversationCompactions = [],
   conversationView = null
-}: { session: any; sessionTree?: any; sessionMetrics?: any; messages?: any[]; partsByMessage?: Map<any, any>; todos?: any[]; recentSessions?: any[]; meta?: any; provider?: string; providers?: any[]; manageable?: boolean; resumeCommand?: any; terminalLaunchAllowed?: boolean; runtimeWorkbench?: string; runtimeAvailable?: boolean; navigationContext?: SessionNavigationContext | null; conversationCompactions?: ConversationCompaction[]; conversationView?: ConversationViewModel | null }) {
+}: { session: any; sessionTree?: any; sessionMetrics?: any; messages?: any[]; partsByMessage?: Map<any, any>; todos?: any[]; recentSessions?: any[]; meta?: any; provider?: string; providers?: any[]; manageable?: boolean; resumeCommand?: any; terminalLaunchAllowed?: boolean; runtimeWorkbench?: string; runtimeEvents?: string; navigationContext?: SessionNavigationContext | null; conversationCompactions?: ConversationCompaction[]; conversationView?: ConversationViewModel | null }) {
   const title = session.title || session.slug || session.id;
   const starred = meta?.starred ? 1 : 0;
   const encodedProvider = encodeURIComponent(provider);
@@ -1639,11 +1639,7 @@ ${actions}
       ${conversationMarkup}
     </div>
     <div role="tabpanel" id="tab-events" aria-labelledby="tab-btn-events">
-      <section id="detail-events-shell" class="detail-events-shell">
-        <h2>${escapeHtml(t("detail.events_shell_title"))}</h2>
-        <p>${escapeHtml(t("detail.events_shell_description"))}</p>
-        ${runtimeAvailable ? `<button type="button" class="action-btn" data-detail-focus="runtime-evidence">${escapeHtml(t("detail.events_shell_open"))}</button>` : `<p class="empty-state">${escapeHtml(t("runtime.unavailable"))}</p>`}
-      </section>
+      ${runtimeEvents || `<p class="empty-state">${t("runtime.unavailable")}</p>`}
     </div>
   </section>
 </div>

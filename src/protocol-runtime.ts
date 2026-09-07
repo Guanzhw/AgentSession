@@ -12,6 +12,7 @@ import {
   upgradeSessionProtocolV2,
   type SessionProtocolV3
 } from "./providers/shared/session-protocol-v3.js";
+import { summarizeEvent } from "./event-summary.js";
 
 const DEFAULT_EVENT_LIMIT = 100;
 const MAX_EVENT_LIMIT = 200;
@@ -300,6 +301,7 @@ export function publicEvent(event: SessionEventEnvelope) {
     parentEventId: event.parentEventId || null,
     correlationId: event.correlationId || null,
     compaction: event.compaction || null,
+    summary: summarizeEvent(event),
     provenance: event.provenance
   };
 }

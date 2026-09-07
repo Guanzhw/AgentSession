@@ -1,6 +1,7 @@
 import { initSessionWorkbench } from "./app/session-workbench.js";
 import { initEnhancements } from "./app/enhancements.js";
 import { initRuntimeWorkbench } from "./app/runtime-workbench.js";
+import { initRuntimeEvents } from "./app/runtime-events.js";
 import { initLibrary } from "./app/library.js";
 import { ft, formatText } from "./app/i18n.js";
 const PROVIDER = document.body.dataset.provider || "opencode";
@@ -756,4 +757,5 @@ if (scrollSentinel && sessionList) {
 initSessionWorkbench({ ft, formatText, showToast });
 initEnhancements({ ft, formatText, showToast, escapeHtmlClient });
 initRuntimeWorkbench({ ft, formatText });
+initRuntimeEvents({ ft, formatText });
 initLibrary({ ft });

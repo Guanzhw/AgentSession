@@ -2777,24 +2777,23 @@ test("session detail P0 header preserves evidence boundaries and local exports",
   assert.doesNotMatch(html, /tab-overview|tab-raw|tab-runtime/);
 });
 
-test("session detail Events shell follows typed runtime availability", () => {
+test("session detail Events surface follows typed runtime availability", () => {
   const unavailable = renderSessionPage({
     session: { id: "p0-events-missing", title: "Missing events" },
     provider: "fixture",
-    runtimeWorkbench: "<div>should not make Events available</div>",
-    runtimeAvailable: false
+    runtimeWorkbench: "<div>should not make Events available</div>"
   });
-  assert.match(unavailable, /id="detail-events-shell"/);
   assert.match(unavailable, /Runtime protocol is unavailable/);
+  assert.doesNotMatch(unavailable, /detail-events-shell/);
   assert.doesNotMatch(unavailable, /data-detail-focus="runtime-evidence"/);
 
   const available = renderSessionPage({
     session: { id: "p0-events-recorded", title: "Recorded events" },
     provider: "fixture",
-    runtimeWorkbench: "<div>recorded runtime</div>",
-    runtimeAvailable: true
+    runtimeEvents: "<section data-runtime-events-root>recorded events</section>"
   });
-  assert.match(available, /data-detail-focus="runtime-evidence"/);
+  assert.match(available, /data-runtime-events-root/);
+  assert.doesNotMatch(available, /detail-events-shell/);
 });
 
 test("highlight assets are repository-local and keyboard rail shortcuts protect editors", () => {

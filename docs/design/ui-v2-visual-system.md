@@ -182,7 +182,10 @@ Events is the diagnostic surface. Lead with a one-sentence purpose, then a type
 distribution/filter strip and a virtualized or paged event table. Use tabular
 numerals for sequence and time. Provenance (`recorded` or `derived`) is a text
 label. Event detail is a side panel on wide screens and an in-flow disclosure on
-narrow screens.
+narrow screens. P4a implements this as a separate explicit Events root so Work
+retains only the entity evidence required by its bounded task/graph surfaces;
+the server preserves source sequence and the responsive table stacks at narrow
+widths without hiding event rows.
 
 ### 4.5 Statistics and Settings
 

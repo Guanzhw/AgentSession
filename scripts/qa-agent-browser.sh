@@ -418,10 +418,12 @@ conversation_hash_state="$(read_ab "read Conversation deep link state" eval "JSO
 assert_contains "Conversation deep link" "$deep_link_state" "ready"
 assert_contains "Conversation deep link" "$conversation_hash_state" "\\\"selected\\\":\\\"true\\\""
 assert_contains "Conversation deep link" "$conversation_hash_state" "\\\"hidden\\\":false"
-ab "open Events deep link" open "$BASE/opencode/session/$SAMPLE_SESSION_ID?qa_deep_link=events#detail-events-shell" >/dev/null
+ab "open Events deep link" open "$BASE/opencode/session/$SAMPLE_SESSION_ID?qa_deep_link=events#tab-events" >/dev/null
 sleep 0.7
-events_hash_state="$(read_ab "read Events deep link state" eval "JSON.stringify({ hash: location.hash, selected: document.querySelector('#tab-btn-events')?.getAttribute('aria-selected'), hidden: document.querySelector('#tab-events')?.hidden })")"
-assert_contains "Events deep link" "$events_hash_state" "detail-events-shell"
+events_hash_state="$(read_ab "read Events deep link state" eval "JSON.stringify({ hash: location.hash, selected: document.querySelector('#tab-btn-events')?.getAttribute('aria-selected'), hidden: document.querySelector('#tab-events')?.hidden, direct: Boolean(document.querySelector('#tab-events [data-runtime-events-root]')), shell: Boolean(document.querySelector('#tab-events #detail-events-shell')), table: Boolean(document.querySelector('#tab-events [data-runtime-event]')) })")"
+assert_contains "Events deep link" "$events_hash_state" "\\\"direct\\\":true"
+assert_contains "Events deep link" "$events_hash_state" "\\\"shell\\\":false"
+assert_contains "Events deep link" "$events_hash_state" "\\\"table\\\":true"
 assert_contains "Events deep link" "$events_hash_state" "\\\"selected\\\":\\\"true\\\""
 assert_contains "Events deep link" "$events_hash_state" "\\\"hidden\\\":false"
 ab "restore Conversation after deep links" click "#tab-btn-conversation" >/dev/null
@@ -641,13 +643,13 @@ if [[ "$runtime_root_count" != "1" ]]; then
 fi
 
 runtime_lens_count="$(read_ab "count runtime lenses" get count "#tab-work [data-runtime-lens]")"
-if [[ "$runtime_lens_count" != "5" ]]; then
-  echo "Work Graph should expose four domains plus Evidence, got $runtime_lens_count" >&2
+if [[ "$runtime_lens_count" != "4" ]]; then
+  echo "Work Graph should expose its four domains, got $runtime_lens_count" >&2
   exit 1
 fi
 
 runtime_domain_ids="$(read_ab "read work graph lens ids" eval "[...document.querySelectorAll('#tab-work [data-runtime-lens]')].map((node) => node.dataset.runtimeLens).join(',')")"
-assert_contains "work graph domain order" "$runtime_domain_ids" "work,execution,coordination,context,evidence"
+assert_contains "work graph domain order" "$runtime_domain_ids" "work,execution,coordination,context"
 runtime_work_visible="$(read_ab "verify Work domain visibility" eval "(() => { const panel = document.querySelector('#tab-work [data-runtime-panel=work]'); return Boolean(panel && !panel.hidden && panel.getBoundingClientRect().height > 0); })()")"
 if [[ "$runtime_work_visible" != "true" ]]; then
   echo "Work should be the visibly selected Work Graph domain, got $runtime_work_visible" >&2
@@ -673,19 +675,30 @@ if [[ "$runtime_overview_count" == "1" ]]; then
   assert_contains "P3b legacy relations removed" "$p3a_overview_state" '"legacyRemoved":true'
 fi
 
-ab "open Evidence lens" click "#tab-work [data-runtime-lens='evidence']" >/dev/null
-runtime_event_count="$(read_ab "count runtime events" get count "#tab-work [data-runtime-event]")"
+ab "open Events tab" click "#tab-btn-events" >/dev/null
+runtime_event_count="$(read_ab "count runtime events" get count "#tab-events [data-runtime-event]")"
 assert_positive_count "runtime events" "$runtime_event_count"
 
-runtime_evidence_count="$(read_ab "count runtime evidence controls" get count "#tab-work [data-runtime-evidence-kind='event']")"
+runtime_evidence_count="$(read_ab "count runtime event evidence controls" get count "#tab-events [data-runtime-event-evidence-id]")"
 assert_positive_count "runtime event evidence controls" "$runtime_evidence_count"
-ab "open runtime event evidence" click "#tab-work [data-runtime-evidence-kind='event']" >/dev/null
-runtime_drawer_open="$(read_ab "verify runtime evidence drawer" eval "Boolean(document.querySelector('[data-runtime-drawer]')?.open)")"
+ab "open runtime event evidence" click "#tab-events [data-runtime-event-evidence-id]" >/dev/null
+runtime_drawer_open="$(read_ab "verify runtime event evidence drawer" eval "Boolean(document.querySelector('[data-runtime-events-drawer]')?.open)")"
 if [[ "$runtime_drawer_open" != "true" ]]; then
   echo "Runtime evidence control should open the provenance drawer, got $runtime_drawer_open" >&2
   exit 1
 fi
 ab "close runtime evidence drawer" press Escape >/dev/null
+
+ab "open Work tab" click "#tab-btn-work" >/dev/null
+runtime_task_evidence_count="$(read_ab "count Work task evidence controls" get count "#tab-work [data-runtime-evidence-kind='task']")"
+assert_positive_count "Work task evidence controls" "$runtime_task_evidence_count"
+ab "open Work task evidence" click "#tab-work [data-runtime-evidence-kind='task']" >/dev/null
+runtime_work_drawer_open="$(read_ab "verify Work evidence drawer" eval "Boolean(document.querySelector('#tab-work [data-runtime-drawer]')?.open)")"
+if [[ "$runtime_work_drawer_open" != "true" ]]; then
+  echo "Work task evidence control should open the provenance drawer, got $runtime_work_drawer_open" >&2
+  exit 1
+fi
+ab "close Work evidence drawer" press Escape >/dev/null
 
 ab "reveal runtime lens tabs" scrollintoview "#tab-work .runtime-lens-tabs" >/dev/null
 ab "open Coordination lens" click "#tab-work [data-runtime-lens='coordination']" >/dev/null

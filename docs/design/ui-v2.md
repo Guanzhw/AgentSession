@@ -4,9 +4,10 @@
 
 The information skeleton is implemented: the primary rail is Library / Statistics /
 Settings, session details are Work (default) / Conversation / Events, and the
-existing Work Graph lenses remain nested inside Work. Events currently provide a
-server-rendered shell that focuses the recorded Evidence lens; no event data is
-invented. Code highlighting is local and offline through the vendored,
+existing Work Graph lenses remain nested inside Work. Events now provide a
+server-rendered diagnostic surface that shows bounded source-ordered event
+records and protocol coverage; no event data is invented. Code highlighting is
+local and offline through the vendored,
 license-tracked bundle at `src/static/vendor/highlight.js`.
 
 ## P1 implementation status (2026-09-04)
@@ -76,9 +77,21 @@ from actor/team nodes; coordination edges aggregate recorded kinds and counts,
 and use dashed styling only when the observation's recorded run mode is
 `background` or `scheduled`. The P3a raw Work Graph disclosure is removed;
 each node and bounded relationship exposes Evidence actions into raw goal,
-task, actor, and coordination records. Execution, Coordination, Context, and
-Evidence remain available as evidence lenses. See
+task, actor, and coordination records. Execution, Coordination, and Context
+remain available as Work lenses; the separate Events diagnostic surface
+owns event evidence. See
 `.agents/decisions/implemented/2026-09-07-ui-v2-p3b-work-graphs.md`.
+
+## P4a implementation status (2026-09-07)
+
+Events is now a direct SSR diagnostic surface: it explains its purpose, reports
+protocol version/completeness/domain coverage, offers bounded type filtering, and
+shows the first source-ordered event page with recorded/derived provenance and
+per-event Evidence actions. Human summaries use bounded normalized phase,
+compaction and anchor-presence facts; density is explicitly limited and reports
+an observed lower bound when needed. Work no longer contains an Evidence lens
+or a duplicate event table; its bounded entity evidence drawer remains available.
+The P4b Statistics/Settings alignment is intentionally unchanged.
 
 > 状态:`proposed` · 作者:UI planner · 日期:2026-09
 > 本文是**信息设计**:展示哪些信息、层级如何、什么默认隐藏、状态如何呈现。

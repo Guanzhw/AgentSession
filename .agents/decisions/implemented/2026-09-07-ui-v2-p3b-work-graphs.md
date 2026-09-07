@@ -51,7 +51,8 @@ structural views specified by the UI v2 Work design.
   ids rather than claiming one synthetic provenance.
 - Remove `.runtime-legacy-work` and `renderWorkProjection()` so raw Work
   relation rows are no longer the primary Work evidence. Existing Execution,
-  Coordination, Context, and Evidence lenses remain available.
+  Coordination, and Context lenses remain available; the separate Events
+  diagnostic surface owns event evidence after P4a.
 
 ## Alternatives considered
 

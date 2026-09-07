@@ -1,5 +1,6 @@
 import { t } from "../i18n.js";
 import { escapeHtml } from "../markdown.js";
+import { summarizeEvent } from "../event-summary.js";
 import type { SessionProtocol } from "../providers/shared/session-protocol.js";
 import { publicEvent } from "../protocol-runtime.js";
 import type {
@@ -58,6 +59,10 @@ function evidenceButton(kind: string, id: string, label = "") {
   return `<button type="button" class="runtime-evidence-trigger" data-runtime-evidence-kind="${escapeHtml(kind)}" data-runtime-evidence-id="${escapeHtml(id)}" aria-label="${escapeHtml(label || t("runtime.evidence_open"))}">${escapeHtml(label || t("runtime.evidence"))}</button>`;
 }
 
+function eventEvidenceButton(id: string) {
+  return `<button type="button" class="runtime-evidence-trigger" data-runtime-event-evidence-id="${escapeHtml(id)}" aria-label="${escapeHtml(t("runtime.evidence_open"))}">${escapeHtml(t("runtime.evidence"))}</button>`;
+}
+
 function entityLabel(value: any, fallback: string) {
   // Goals record their objective in `description` (title is null); the
   // remaining fields are the entity-label chain for actors/runs/artifacts.
@@ -82,6 +87,7 @@ function durationLabel(value: number | null) {
 const GOAL_TITLE_LIMIT = 180;
 const GOAL_DESCRIPTION_LIMIT = 280;
 const CONTEXT_SUMMARY_LIMIT = 280;
+const EVENT_DENSITY_LIMIT = 1000;
 
 function narrativeExcerpt(value: string, maxLength: number) {
   const text = value.trim();
@@ -96,29 +102,41 @@ function narrativeExcerpt(value: string, maxLength: number) {
 
 function renderEvent(event: any) {
   const label = event.normalizedKind || event.kind || t("runtime.unknown");
-  return `<article class="runtime-event" data-runtime-event data-runtime-event-category="${escapeHtml(event.category || "unknown")}" data-runtime-event-kind="${escapeHtml(label)}" data-runtime-event-search="${escapeHtml(`${label} ${event.phase || ""} ${event.correlationId || ""}`.toLocaleLowerCase())}">
-    <div class="runtime-event-sequence">#${escapeHtml(String(event.sequence ?? ""))}</div><div class="runtime-event-body"><div class="runtime-event-heading"><strong>${escapeHtml(label)}</strong><span class="runtime-event-category">${escapeHtml(event.category || "unknown")}</span>${event.phase ? `<span class="runtime-event-phase">${escapeHtml(event.phase)}</span>` : ""}</div><div class="runtime-event-meta"><time datetime="${escapeHtml(dateTime(event.timestamp))}">${escapeHtml(timeLabel(event.timestamp))}</time>${event.correlationId ? `<code>${escapeHtml(event.correlationId)}</code>` : ""}<span>${escapeHtml(provenanceLabel(event.provenance))}</span></div></div>${evidenceButton("event", event.id)}</article>`;
+  const fidelity = event.provenance?.fidelity === "recorded" || event.provenance?.fidelity === "derived" ? event.provenance.fidelity : "unknown";
+  const facts = event.summary || summarizeEvent(event);
+  const phaseKey = facts.phase ? `runtime.phase_${facts.phase}` : "";
+  const phase = phaseKey && t(phaseKey) !== phaseKey ? t(phaseKey) : facts.phase || "";
+  const summary = narrativeExcerpt([
+    phase,
+    facts.compactionSummary ? `${t("runtime.compaction_summary")}: ${facts.compactionSummary}` : "",
+    facts.hasTask ? t("runtime.task_anchor_recorded") : "",
+    facts.hasRun ? t("runtime.run_anchor_recorded") : "",
+    facts.hasTurn ? t("runtime.turn_anchor_recorded") : ""
+  ].filter(Boolean).join(" · "), 240).text || t("runtime.not_recorded");
+  return `<tr data-runtime-event data-runtime-event-category="${escapeHtml(event.category || "unknown")}" data-runtime-event-kind="${escapeHtml(label)}" data-runtime-event-search="${escapeHtml(`${label} ${summary}`.toLocaleLowerCase())}"><td class="runtime-event-sequence" data-label="${escapeHtml(t("runtime.event_sequence"))}">${escapeHtml(String(event.sequence ?? ""))}</td><td data-label="${escapeHtml(t("runtime.event_time"))}"><time datetime="${escapeHtml(dateTime(event.timestamp))}">${escapeHtml(timeLabel(event.timestamp))}</time></td><th scope="row" data-label="${escapeHtml(t("runtime.event_type_summary"))}"><strong>${escapeHtml(label)}</strong><small>${escapeHtml(summary)}</small></th><td data-label="${escapeHtml(t("runtime.event_origin"))}"><span class="runtime-event-fidelity runtime-event-fidelity-${escapeHtml(statusClass(fidelity))}">${escapeHtml(t(`runtime.event_${fidelity}`))}</span></td><td data-label="${escapeHtml(t("runtime.evidence"))}">${eventEvidenceButton(event.id)}</td></tr>`;
 }
 
-function renderEventDensity(events: any[]) {
+function renderEventDensity(events: any[], totalCount = events.length) {
+  const boundedEvents = events.slice(0, EVENT_DENSITY_LIMIT);
+  const limited = totalCount > boundedEvents.length;
   const counts = new Map<string, number>();
-  events.forEach((event) => counts.set(event.category || "unknown", (counts.get(event.category || "unknown") || 0) + 1));
+  boundedEvents.forEach((event) => counts.set(event.category || "unknown", (counts.get(event.category || "unknown") || 0) + 1));
   const rows = [...counts.entries()].sort((left, right) => right[1] - left[1]);
   const max = Math.max(1, ...rows.map(([, value]) => value));
   return rows.length
-    ? `<div class="runtime-event-density" aria-label="${escapeHtml(t("runtime.event_density"))}">${rows.map(([category, value]) => `<button type="button" class="runtime-event-density-row" data-runtime-density-category="${escapeHtml(category)}"><span>${escapeHtml(category)}</span><i><b style="width:${Math.max(4, (value / max) * 100)}%"></b></i><strong>${escapeHtml(count(value))}</strong></button>`).join("")}</div>`
+    ? `<div class="runtime-event-density" aria-label="${escapeHtml(t("runtime.event_density"))}">${rows.map(([category, value]) => `<button type="button" class="runtime-event-density-row" data-runtime-density-category="${escapeHtml(category)}"><span>${escapeHtml(category)}</span><i><b style="width:${Math.max(4, (value / max) * 100)}%"></b></i><strong>${escapeHtml(count(value))}</strong></button>`).join("")}</div>${limited ? `<p class="runtime-notice">${escapeHtml(t("runtime.event_density_limited", { count: String(EVENT_DENSITY_LIMIT) }))}</p>` : ""}`
     : `<p class="runtime-notice">${escapeHtml(t("runtime.not_recorded"))}</p>`;
 }
 
 function renderEvents(data: RuntimeData) {
   const protocol = data.protocol;
   const events = (protocol?.events || []).slice(0, 50).map(publicEvent);
-  return `<section class="runtime-lens runtime-events-lens" aria-labelledby="runtime-events-title" data-runtime-events-panel>
-    <div class="runtime-section-heading"><div><h2 id="runtime-events-title">${t("runtime.events_title")}</h2><p>${t("runtime.events_description")}</p></div><span class="runtime-bounded-label">${t("runtime.bounded_label")}</span></div>
-    <div class="runtime-events-structure"><h3>${t("runtime.event_density")}</h3>${renderEventDensity((protocol?.events || []).map(publicEvent))}<p>${t("runtime.events_structure_hint")}</p></div>
+  return `<section class="runtime-lens runtime-events-lens" aria-label="${escapeHtml(t("runtime.events_title"))}" data-runtime-events-panel>
+    <div class="runtime-section-heading"><div><h2>${t("runtime.events_title")}</h2><p>${t("runtime.events_description")}</p></div><span class="runtime-bounded-label">${t("runtime.bounded_label")}</span></div>
+    <div class="runtime-events-structure"><h3>${t("runtime.event_density")}</h3>${renderEventDensity((protocol?.events || []).slice(0, EVENT_DENSITY_LIMIT), protocol?.events?.length || 0)}<p>${t("runtime.events_structure_hint")}</p></div>
     <form class="runtime-event-filters" data-runtime-event-filters><label>${t("runtime.filter_category")}<select data-runtime-event-category><option value="">${t("runtime.all_categories")}</option>${["session", "message", "model", "reasoning", "tool", "task", "run", "context", "control", "team", "unknown"].map((category) => `<option value="${category}">${category}</option>`).join("")}</select></label><label class="runtime-filter-search">${t("runtime.filter_text")}<input type="search" data-runtime-event-search placeholder="${escapeHtml(t("runtime.filter_text_placeholder"))}"></label><button type="submit" class="btn">${t("runtime.apply_filter")}</button></form>
     <p class="runtime-results-status" data-runtime-events-status aria-live="polite">${escapeHtml(t("runtime.events_loaded", { count: String(events.length) }))}</p>
-    <div class="runtime-event-list" data-runtime-event-list>${events.length ? events.map(renderEvent).join("") : `<p class="runtime-empty">${t("runtime.no_events")}</p>`}</div>
+    <div class="runtime-event-table-wrap"><table class="runtime-events-table"><thead><tr><th scope="col">${t("runtime.event_sequence")}</th><th scope="col">${t("runtime.event_time")}</th><th scope="col">${t("runtime.event_type_summary")}</th><th scope="col">${t("runtime.event_origin")}</th><th scope="col">${t("runtime.evidence")}</th></tr></thead><tbody data-runtime-event-list>${events.length ? events.map(renderEvent).join("") : `<tr><td colspan="5" class="runtime-empty">${t("runtime.no_events")}</td></tr>`}</tbody></table></div>
     <div class="runtime-pagination"><button type="button" class="btn" data-runtime-events-previous disabled>${t("runtime.previous")}</button><button type="button" class="btn" data-runtime-events-next data-runtime-next-cursor="${escapeHtml(data.eventNextCursor || "")}" ${data.eventNextCursor ? "" : "disabled"}>${t("runtime.next")}</button></div>
   </section>`;
 }
@@ -405,20 +423,8 @@ function renderContextProjection(data: RuntimeData) {
   </section>`;
 }
 
-function renderEvidence(data: RuntimeData) {
-  const summary = data.summary || {};
-  return `<section class="runtime-lens runtime-evidence-lens" aria-labelledby="runtime-evidence-lens-title"><div class="runtime-section-heading"><div><h2 id="runtime-evidence-lens-title">${t("runtime.evidence_lens_title")}</h2><p>${t("runtime.evidence_lens_description")}</p></div><span class="runtime-completeness">${escapeHtml(summary.completeness || t("runtime.unknown"))}</span></div><div class="runtime-evidence-status"><span>${escapeHtml(`${t("runtime.protocol_status")}: ${summary.completeness || t("runtime.unknown")}`)}</span><span>${escapeHtml(`${t("runtime.count_events")}: ${count(summary.counts?.events)}`)}</span></div>${renderEvents(data)}</section>`;
-}
-
 function renderEvidenceData(protocol: SessionProtocol | null, v3: SessionProtocolV3 | null = null) {
-  const initialEvents = (protocol?.events || []).slice(0, 50).map(publicEvent);
-  const contextEvents = (protocol?.events || [])
-    .filter((event) => event.category === "context" || String(event.normalizedKind || event.kind).startsWith("context.") || String(event.normalizedKind || event.kind).startsWith("memory."))
-    .slice(0, 50)
-    .map(publicEvent);
-  const events = [...new Map([...initialEvents, ...contextEvents].map((event) => [event.id, event])).values()].slice(0, 100);
   return {
-    events,
     goals: (v3?.goals || []).slice(0, 100),
     tasks: (protocol?.tasks || []).slice(0, 100),
     actors: (v3?.actors || []).slice(0, 100),
@@ -427,6 +433,10 @@ function renderEvidenceData(protocol: SessionProtocol | null, v3: SessionProtoco
     artifacts: (protocol?.contextArtifacts || []).slice(0, 100),
     relationships: (protocol?.relationships || []).slice(0, 100)
   };
+}
+
+function renderEventEvidenceData(protocol: SessionProtocol | null) {
+  return { events: (protocol?.events || []).slice(0, 100).map(publicEvent) };
 }
 
 export function renderRuntimeWorkbench(data: RuntimeData, provider: string, sessionId: string) {
@@ -439,13 +449,26 @@ export function renderRuntimeWorkbench(data: RuntimeData, provider: string, sess
   return `<section class="runtime-workbench" data-runtime-root data-runtime-provider="${escapeHtml(provider)}" data-runtime-session-id="${escapeHtml(sessionId)}" data-runtime-available="${protocol ? "true" : "false"}">
     <header class="runtime-header"><div><h2>${t("runtime.title")}</h2><p>${t("runtime.description")}</p></div><span class="runtime-version">v${escapeHtml(String(data.v3?.version || protocol?.version || summary.version || 2))}</span></header>
     ${notices}
-    <div class="runtime-lens-tabs" role="tablist" aria-label="${escapeHtml(t("runtime.lenses_label"))}">${[ ["work", t("runtime.lens_work")], ["execution", t("runtime.lens_execution")], ["coordination", t("runtime.lens_coordination")], ["context", t("runtime.lens_context")], ["evidence", t("runtime.lens_evidence")] ].map(([id, label], index) => `<button id="runtime-lens-tab-${id}" type="button" role="tab" data-runtime-lens="${id}" aria-controls="runtime-lens-${id}" aria-selected="${index === 0 ? "true" : "false"}" tabindex="${index === 0 ? "0" : "-1"}">${label}</button>`).join("")}</div>
+    <div class="runtime-lens-tabs" role="tablist" aria-label="${escapeHtml(t("runtime.lenses_label"))}">${[ ["work", t("runtime.lens_work")], ["execution", t("runtime.lens_execution")], ["coordination", t("runtime.lens_coordination")], ["context", t("runtime.lens_context")] ].map(([id, label], index) => `<button id="runtime-lens-tab-${id}" type="button" role="tab" data-runtime-lens="${id}" aria-controls="runtime-lens-${id}" aria-selected="${index === 0 ? "true" : "false"}" tabindex="${index === 0 ? "0" : "-1"}">${label}</button>`).join("")}</div>
     <div id="runtime-lens-work" class="runtime-lens-panel" role="tabpanel" aria-labelledby="runtime-lens-tab-work" data-runtime-panel="work" tabindex="0">${renderWorkOverview(data)}</div>
     <div id="runtime-lens-execution" class="runtime-lens-panel" role="tabpanel" aria-labelledby="runtime-lens-tab-execution" data-runtime-panel="execution" tabindex="0" hidden>${renderExecutionProjection(data)}</div>
     <div id="runtime-lens-coordination" class="runtime-lens-panel" role="tabpanel" aria-labelledby="runtime-lens-tab-coordination" data-runtime-panel="coordination" tabindex="0" hidden>${renderCoordinationProjection(data)}</div>
     <div id="runtime-lens-context" class="runtime-lens-panel" role="tabpanel" aria-labelledby="runtime-lens-tab-context" data-runtime-panel="context" tabindex="0" hidden>${renderContextProjection(data)}</div>
-    <div id="runtime-lens-evidence" class="runtime-lens-panel" role="tabpanel" aria-labelledby="runtime-lens-tab-evidence" data-runtime-panel="evidence" tabindex="0" hidden>${renderEvidence(data)}</div>
     <script type="application/json" data-runtime-evidence>${jsonScript(renderEvidenceData(protocol, data.v3 || null))}</script>
     <dialog class="runtime-evidence-drawer" data-runtime-drawer aria-labelledby="runtime-drawer-title"><form method="dialog"><button type="submit" class="runtime-drawer-close" aria-label="${escapeHtml(t("runtime.evidence_close"))}">×</button></form><h2 id="runtime-drawer-title">${t("runtime.evidence_title")}</h2><p data-runtime-drawer-summary></p><dl data-runtime-drawer-details></dl></dialog>
   </section>`;
+}
+
+export function renderRuntimeEvents(data: RuntimeData, provider: string, sessionId: string) {
+  const protocol = data.protocol;
+  const v3 = data.v3;
+  const summary = data.summary || {};
+  const domains: (keyof SessionProtocolV3["coverage"])[] = ["work", "execution", "coordination", "context", "usage"];
+  const completenessKey = `runtime.completeness_${String(summary.completeness || "unknown")}`;
+  const completeness = t(completenessKey) === completenessKey ? t("runtime.unknown") : t(completenessKey);
+  const coverage = domains.map((domain) => {
+    const state = v3?.coverage?.[domain]?.state || "unknown";
+    return `<li><span>${escapeHtml(t(`runtime.domain_${domain}`))}</span><strong>${escapeHtml(t(`runtime.coverage_${String(state).replace(/-/g, "_")}`))}</strong></li>`;
+  }).join("");
+  return `<section class="runtime-events-surface" data-runtime-events-root data-runtime-events-provider="${escapeHtml(provider)}" data-runtime-events-session-id="${escapeHtml(sessionId)}" data-runtime-events-available="${protocol ? "true" : "false"}"><header class="runtime-events-header"><h2>${t("runtime.events_title")}</h2><p>${t("runtime.events_usage")}</p></header><section class="runtime-events-diagnostics" aria-label="${escapeHtml(t("runtime.events_diagnostics_title"))}"><h3>${t("runtime.events_diagnostics_title")}</h3><div class="runtime-events-diagnostic-summary"><span>${escapeHtml(`${t("runtime.protocol_version")}: ${v3?.version || protocol?.version || t("runtime.not_recorded")}`)}</span><span>${escapeHtml(`${t("runtime.completeness")}: ${completeness}`)}</span></div><ul>${coverage}</ul></section>${protocol ? renderEvents(data) : `<p class="runtime-empty">${escapeHtml(t("runtime.unavailable"))}</p>`}<script type="application/json" data-runtime-events-evidence>${jsonScript(renderEventEvidenceData(protocol))}</script><dialog class="runtime-evidence-drawer" data-runtime-events-drawer aria-label="${escapeHtml(t("runtime.evidence_title"))}"><form method="dialog"><button type="submit" class="runtime-drawer-close" aria-label="${escapeHtml(t("runtime.evidence_close"))}">×</button></form><h2>${t("runtime.evidence_title")}</h2><p data-runtime-events-drawer-summary></p><dl data-runtime-events-drawer-details></dl></dialog></section>`;
 }

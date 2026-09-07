@@ -16,7 +16,7 @@ import {
 import { getResumeCommand } from "../resume.js";
 import { renderSessionPage } from "../views/session.js";
 import type { SessionProtocol } from "../providers/shared/session-protocol.js";
-import { renderRuntimeWorkbench } from "../views/runtime-workbench.js";
+import { renderRuntimeEvents, renderRuntimeWorkbench } from "../views/runtime-workbench.js";
 import { renderProgressiveContent } from "../views/components.js";
 import { providerRenderContext } from "./provider-context.js";
 import { parseSessionNavigationContext } from "../navigation-context.js";
@@ -182,7 +182,7 @@ export function registerSessionDetail(
           meta: document.meta,
           resumeCommand,
           runtimeWorkbench: renderRuntimeWorkbench(runtime, providerSegment, sessionId),
-          runtimeAvailable: Boolean(runtime.protocol),
+          runtimeEvents: renderRuntimeEvents(runtime, providerSegment, sessionId),
           conversationCompactions: collectConversationCompactions(runtime.protocol),
           conversationView,
           terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),

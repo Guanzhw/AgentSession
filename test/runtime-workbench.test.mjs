@@ -2,10 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { renderRuntimeWorkbench } from "../dist/src/views/runtime-workbench.js";
+import { renderRuntimeEvents, renderRuntimeWorkbench } from "../dist/src/views/runtime-workbench.js";
 import { renderSessionPage } from "../dist/src/views/session.js";
 import { finalizeSessionProtocolV3, upgradeSessionProtocolV2 } from "../dist/src/providers/shared/session-protocol-v3.js";
 import { projectContext, projectCoordination, projectExecution, projectWork } from "../dist/src/protocol-runtime-v3.js";
+import { summarizeEvent } from "../dist/src/event-summary.js";
 
 const provenance = { fidelity: "recorded", sourceType: "fixture.event", sourceId: "source-1" };
 
@@ -80,12 +81,14 @@ function refreshProjections(runtime) {
   return runtime;
 }
 
-test("Work Graph renders four domains plus Evidence with Work selected", () => {
+test("Work Graph renders four domains with Work selected and keeps event evidence separate", () => {
   const html = renderRuntimeWorkbench(fixtureRuntime(), "fixture", "runtime-1");
-  for (const lens of ["work", "execution", "coordination", "context", "evidence"]) {
+  for (const lens of ["work", "execution", "coordination", "context"]) {
     assert.match(html, new RegExp(`data-runtime-lens="${lens}"`));
     assert.match(html, new RegExp(`data-runtime-panel="${lens}"`));
   }
+  assert.doesNotMatch(html, /data-runtime-lens="evidence"/);
+  assert.doesNotMatch(html, /data-runtime-events-panel/);
   assert.match(html, /data-runtime-lens="work"[^>]*aria-selected="true"/);
   assert.doesNotMatch(html, /data-runtime-lens="summary"/);
   assert.match(html, /Build &lt;fixture&gt;/);
@@ -94,14 +97,94 @@ test("Work Graph renders four domains plus Evidence with Work selected", () => {
   assert.match(html, /input · direct · 35 tokens/);
   assert.match(html, /input · inherited · 45 tokens/);
   assert.match(html, /input · shared · 20 tokens/);
-  assert.match(html, /data-runtime-evidence-kind="event"/);
+  assert.doesNotMatch(html, /data-runtime-evidence-kind="event"/);
+  assert.match(html, /data-runtime-evidence-kind="task"/);
   assert.match(html, /Evidence and provenance/);
   assert.match(html, /metadata-only/);
   assert.match(html, /Tokens before.*Not recorded/);
   assert.match(html, /Context after compaction/);
   assert.match(html, /Retain &lt;the result&gt; and discard copied history/);
   assert.doesNotMatch(html, /Retain <the result>/);
-  assert.match(html, /data-runtime-next-cursor="cursor-next"/);
+});
+
+test("Events surface renders diagnostics and source-order table without the Work evidence lens", () => {
+  const runtime = fixtureRuntime();
+  runtime.protocol.events = [
+    { ...runtime.protocol.events[0], id: "event-source-first", sequence: 1, timestamp: 9000, normalizedKind: "model.response", category: "model", compaction: { summary: "Recorded compaction " + "detail ".repeat(60) } },
+    { ...runtime.protocol.events[1], id: "event-source-second", sequence: 2, timestamp: 1000, normalizedKind: "context.started", category: "context", provenance: { ...provenance, fidelity: "derived" } }
+  ];
+  const html = renderRuntimeEvents(runtime, "fixture", "runtime-1");
+  assert.match(html, /data-runtime-events-root/);
+  assert.match(html, /Each recorded event is shown in source order/);
+  assert.match(html, /Protocol diagnostics/);
+  assert.match(html, /Protocol version/);
+  assert.match(html, /Work/);
+  assert.match(html, /Execution/);
+  assert.match(html, /Coordination/);
+  assert.doesNotMatch(html, /runtime\.domain_(work|execution|coordination)/);
+  assert.match(html, /data-runtime-density-category="model"/);
+  assert.match(html, /data-runtime-density-category="context"/);
+  assert.match(html, /<td[^>]*>1<\/td>[\s\S]*<td[^>]*>2<\/td>/);
+  assert.match(html, /Recorded/);
+  assert.match(html, /Derived/);
+  const table = html.match(/<tbody data-runtime-event-list>[\s\S]*?<\/tbody>/)?.[0] || "";
+  assert.match(table, /task recorded/);
+  assert.match(table, /…/);
+  assert.doesNotMatch(table, /task-1|run-1|compact-1|fixture\.event|source-1/);
+  assert.match(html, /data-runtime-events-evidence/);
+  assert.doesNotMatch(html, /detail-events-shell/);
+  assert.doesNotMatch(html, /providerData/);
+});
+
+test("Events density is explicitly bounded and reports a lower bound", () => {
+  const runtime = fixtureRuntime();
+  runtime.protocol.events = Array.from({ length: 1005 }, (_, index) => ({
+    ...runtime.protocol.events[0], id: `event-${index + 1}`, sequence: index + 1, timestamp: index + 1,
+    category: index % 2 ? "model" : "tool"
+  }));
+  const html = renderRuntimeEvents(runtime, "fixture", "runtime-1");
+  assert.match(html, /Density is calculated from the first 1000 source events/);
+  assert.match(html, /data-runtime-density-category="model"[\s\S]*<strong>500<\/strong>/);
+  assert.match(html, /data-runtime-density-category="tool"[\s\S]*<strong>500<\/strong>/);
+});
+
+test("Unavailable Events SSR and client initialization keep missing controls inert", () => {
+  const html = renderRuntimeEvents({ protocol: null, summary: { completeness: "unknown" } }, "fixture", "missing");
+  assert.match(html, /data-runtime-events-root/);
+  assert.doesNotMatch(html, /data-runtime-event-list/);
+  const source = readFileSync(path.join(process.cwd(), "src", "static", "app", "runtime-events.js"), "utf8");
+  assert.match(source, /if \(!eventList\) return/);
+  assert.match(source, /if \(previousButton\)/);
+  assert.match(source, /if \(nextButton\)/);
+});
+
+test("Events pagination replaces the bounded current-page evidence map", () => {
+  const source = readFileSync(path.join(process.cwd(), "src", "static", "app", "runtime-events.js"), "utf8");
+  assert.match(source, /currentPageEvidence\.get\(String\(id\)\)/);
+  assert.match(source, /currentPageEvidence = new Map\(currentEvents\.map/);
+  assert.match(source, /item\.summary\?\.compactionSummary/);
+  assert.match(source, /key !== "providerData"/);
+});
+
+test("Events client hook initializes each explicit root and preserves bounded cursor API", () => {
+  const source = readFileSync(path.join(process.cwd(), "src", "static", "app", "runtime-events.js"), "utf8");
+  assert.match(source, /querySelectorAll\("\[data-runtime-events-root\]"\)/);
+  assert.match(source, /runtime\/events\?\$\{params\}/);
+  assert.match(source, /data-runtime-event-evidence-id/);
+  assert.match(source, /runtime_event_sequence/);
+  assert.match(source, /runtime-event-sequence/);
+  assert.match(source, /runtime-event-fidelity-/);
+});
+
+test("Provider-neutral event summary facts are bounded and ID-free", () => {
+  const facts = summarizeEvent({ phase: "completed", taskId: "task-1", runId: "run-1", turnId: "turn-1", compaction: { summary: "x".repeat(300) } });
+  assert.equal(facts.phase, "completed");
+  assert.equal(facts.hasTask, true);
+  assert.equal(facts.hasRun, true);
+  assert.equal(facts.hasTurn, true);
+  assert.ok(facts.compactionSummary.length <= 180);
+  assert.match(facts.compactionSummary, /…$/);
+  assert.doesNotMatch(JSON.stringify(facts), /task-1|run-1|turn-1/);
 });
 
 test("Context keeps the compacted result before lifecycle evidence and scoped artifacts", () => {
