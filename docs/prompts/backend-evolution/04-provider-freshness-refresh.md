@@ -95,27 +95,27 @@ verified-at、版本/commit、官方来源链接与样本格式。
    `state(title/metadata/output)` 的 bounded keys，文件为
    `test/fixtures/opencode-current-v1.18.27-synthetic.jsonl`，非 live capture；
    当前 native-v3 focused 回归为 7/7，完整 `npm test` 为 467/467。
-7. **Hermes Agent v0.21.0 / v2026.8.31** — ✅ **已完成（2026-09-03）**。
+7. **Hermes Agent v0.21.1 / v2026.9.7** — ✅ **已完成（2026-09-08）**。
    本机安装/本地源码为 v0.19.1 (`840fb55a8aaeb69bfcd6f34a80e57f9a5bcd44ce`)；
-   官方 annotated release tag object 为
-   `6e8f8418e6378eb2617e4de074e13dedd091b8af`，peeled source commit 为
-   `29112bef099274229cadff79cdff7bf7b99c4b77`；另行核验的官方源码 HEAD
-   为 `7b72fd12476aedc06a993d92c4337e2ceb214bc7`，两类 provenance 已分开，
-   并在本次交付前立即复核。
+   官方 release source commit 为
+   `2237be355906fbe6065ce1815711eee52b2d646e`，另行核验的官方源码 HEAD
+   为 `6e2b8e070d28b1a3381a3fb290b6b8d6cce13cef`，两类 provenance 已分开。
+   官方 `hermes_state_common.py`/`tools/async_delegation.py` 当前 schema marker
+   为 30；async registry 的 `parent_session_id` 是持久化 spawner，当前
+   `origin_session_id` 是 API completion wake target，`origin_session` 是旧 CLI
+   session-key fallback。后两者不得混同为同一种 canonical owner。
    当前 source/state schema 证据含 `messages.active`/`compacted` 与
    `async_delegations` handle/state/delivery 字段；adapter 在 store 边界只读
    active transcript，压缩只生成 metadata-only context evidence，并将有记录的
    async delegation 映射为 background Task；若另有 persisted child，则单独映射
-   为无 taskId 的 AgentRun。未知状态、
-   无 child session、memory/experience/team/handoff/continuing interaction
-   均保留 unknown；adapter 消费 session 聚合 token，已观察到的
-   `session_model_usage` 行与其一致但不重复相加，也不推断 inherited/shared
-   ownership。新增
-   `test/fixtures/hermes-current-v0210-synthetic.json`（source-derived bounded
-   synthetic fixture，非 live capture）与 focused 回归。async registry Task
-   与 persisted child AgentRun 不做无证据绑定；跨表事件只保留各自表内顺序，
-   tool event 使用 assistant row anchor；决策记录见
-   `.agents/decisions/implemented/2026-09-03-hermes-current-compatibility.md`。
+   为无 taskId 的 AgentRun。native Session Protocol v3 在同一 finalized v2
+   snapshot 上分离 dispatch/lifecycle/delivery observations；聚合 token 保持
+   `unknown` usage coverage，不伪造 request usage。未知状态、缺 owner、无 child
+   session、memory/experience/team/handoff/continuing interaction 均保留 unknown；
+   不推断 inherited/shared ownership 或 handle→child correlation。新增
+   `test/fixtures/hermes-current-v0210-synthetic.json`（schema 30、source-derived
+   bounded synthetic，非 live capture）与 focused 回归；决策记录见
+   `.agents/decisions/implemented/2026-09-08-hermes-native-v3.md`。
 
 纪律:
 - 每个 provider 独立决策记录、独立 fixtures、独立真实数据验证、独立提交;

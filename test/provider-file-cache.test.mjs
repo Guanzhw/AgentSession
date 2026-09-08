@@ -775,6 +775,40 @@ test("Hermes partial async registry does not hide readable sessions", () => {
   }
 });
 
+test("Hermes async registry uses canonical parent or legacy session key, never the API wake target", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "agentsession-hermes-async-owner-alias-"));
+  try {
+    const db = new DatabaseSync(path.join(root, "state.db"));
+    db.exec(`
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, source TEXT, started_at REAL, title TEXT);
+      CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, role TEXT, content TEXT, timestamp REAL);
+      CREATE TABLE async_delegations (
+        delegation_id TEXT PRIMARY KEY, origin_session TEXT, origin_session_id TEXT,
+        parent_session_id TEXT, state TEXT, dispatched_at REAL, updated_at REAL, task_json TEXT
+      );
+      INSERT INTO sessions (id, source, started_at, title) VALUES ('owner-root', 'cli', 1788000000, 'Owner root');
+      INSERT INTO sessions (id, source, started_at, title) VALUES ('wake-target', 'api', 1788000000, 'Wake target collision');
+      INSERT INTO async_delegations (delegation_id, origin_session, origin_session_id, parent_session_id, state, dispatched_at, updated_at, task_json)
+        VALUES ('owner-current', 'stale-routing-key', 'wake-target', 'owner-root', 'completed', 1788000001, 1788000002, '{}');
+      INSERT INTO async_delegations (delegation_id, origin_session, origin_session_id, parent_session_id, state, dispatched_at, updated_at, task_json)
+        VALUES ('owner-legacy', 'owner-root', NULL, NULL, 'completed', 1788000003, 1788000004, '{}');
+      INSERT INTO async_delegations (delegation_id, origin_session, origin_session_id, parent_session_id, state, dispatched_at, updated_at, task_json)
+        VALUES ('owner-missing', NULL, NULL, NULL, 'completed', 1788000005, 1788000006, '{}');
+      INSERT INTO async_delegations (delegation_id, origin_session, origin_session_id, parent_session_id, state, dispatched_at, updated_at, task_json)
+        VALUES ('owner-invisible', 'not-a-session', NULL, NULL, 'completed', 1788000007, 1788000008, '{}');
+      INSERT INTO async_delegations (delegation_id, origin_session, origin_session_id, parent_session_id, state, dispatched_at, updated_at, task_json)
+        VALUES ('wake-only', NULL, 'wake-target', NULL, 'completed', 1788000009, 1788000010, '{}');
+    `);
+    db.close();
+    initConfig(["--hermes-dir", root]);
+    const protocol = hermes.getSessionProtocol("owner-root");
+    assert.deepEqual(protocol?.tasks.map((task) => task.id), ["owner-current", "owner-legacy"]);
+    assert.deepEqual(hermes.getSessionProtocol("wake-target")?.tasks, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("Hermes store filters compacted rows when active is absent", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "agentsession-hermes-legacy-"));
   try {

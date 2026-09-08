@@ -2,7 +2,7 @@
 {"kind":"todo","session_id":"oc-v3-root","position":0,"content":"mutable content","status":"in_progress","priority":"high","time_created":110,"time_updated":120}
 {"kind":"message","id":"m-usage","role":"assistant","time_created":200,"modelID":"model-v3","tokens":{"input":10,"output":5,"reasoning":2,"cache":{"read":8,"write":3},"total":28},"parts":[]}
 {"kind":"message","id":"m-mismatch","role":"assistant","time_created":210,"modelID":"model-v3","tokens":{"input":10,"output":5,"reasoning":2,"cache":{"read":8,"write":3},"total":20},"parts":[]}
-{"kind":"message","id":"m-zero-error","role":"assistant","time_created":220,"modelID":"model-v3","tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0},"total":100},"parts":[]}
+{"kind":"message","id":"m-zero-error","role":"assistant","time_created":220,"modelID":"model-v3","finish":"error","error":{"name":"MessageAbortedError","message":"Provider stream aborted"},"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0},"total":0},"parts":[]}
 {"kind":"message","id":"m-tools","role":"assistant","time_created":300,"modelID":"model-v3","tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0},"total":0},"parts":[]}
 {"kind":"part","message_id":"m-tools","id":"p-exact","type":"tool","tool":"task","callID":"call-exact","state":{"status":"completed","metadata":{"sessionId":"oc-v3-child","parentSessionId":"oc-v3-root"},"output":"<task id=\"oc-v3-child\" state=\"running\">started</task>","time":{"start":301,"end":302}}}
 {"kind":"part","message_id":"m-tools","id":"p-missing","type":"tool","tool":"task","callID":"call-missing","state":{"status":"completed","metadata":{"parentSessionId":"oc-v3-root"},"output":"finished","time":{"start":303,"end":304}}}

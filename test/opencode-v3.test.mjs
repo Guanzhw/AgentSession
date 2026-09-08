@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { buildOpenCodeSessionTree } from "../dist/src/providers/opencode/session-tree.js";
+import { closeDb } from "../dist/src/db.js";
 import { buildOpenCodeSessionProtocol, buildOpenCodeSessionProtocolV3 } from "../dist/src/providers/opencode/protocol.js";
 import { finalizeSessionProtocolV3 } from "../dist/src/providers/shared/session-protocol-v3.js";
 
@@ -24,7 +29,7 @@ function treeFromSource({ includeChildren = true, compaction = false } = {}) {
   ]);
   const messageNodes = messageRows.map((row) => ({
     id: row.id, sessionId: session.id, role: row.role,
-    data: { role: row.role, modelID: row.modelID, tokens: row.tokens }, timeCreated: row.time_created,
+    data: { ...row, role: row.role, modelID: row.modelID, tokens: row.tokens }, timeCreated: row.time_created,
     parts: [...(row.parts || []), ...partRows.filter((part) => part.message_id === row.id), ...(row.id === "m-tools" ? extraParts : [])].map((data) => ({
       id: data.id, messageId: row.id, sessionId: session.id, type: data.type, tool: data.tool || null,
       data, timeStart: data.state?.time?.start || row.time_created, timeEnd: data.state?.time?.end || 0,
@@ -117,7 +122,79 @@ test("OpenCode usage is one record per nonzero assistant message with coherent t
   const mismatch = v3.usageRecords.find((record) => record.eventId === "message:m-mismatch");
   assert.equal(mismatch.tokens.total, null);
   assert.equal(v3.usageRecords.some((record) => record.eventId === "message:m-zero-error"), false);
+  const aborted = treeFromSource().messages.find((message) => message.id === "m-zero-error");
+  assert.equal(aborted.data.finish, "error");
+  assert.equal(aborted.data.error.name, "MessageAbortedError");
+  assert.deepEqual(aborted.data.tokens, {
+    input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 }, total: 0
+  });
   assert.equal(v3.validation?.ok, true);
+});
+
+test("OpenCode tree/store boundary does not bind missing or mismatched claimed children and deduplicates canonical child", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "agentsession-opencode-v3-store-"));
+  const dbPath = path.join(root, "sessions.db");
+  try {
+    const db = new DatabaseSync(dbPath);
+    db.exec(`
+      CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT, project_id TEXT, title TEXT, slug TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER, time_archived INTEGER);
+      CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT);
+      CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, data TEXT);
+    `);
+    const addSession = db.prepare("INSERT INTO session (id, parent_id, title, time_created, time_updated) VALUES (?, ?, ?, ?, ?)");
+    addSession.run("store-root", null, "root", 100, 200);
+    addSession.run("store-child", "store-root", "child", 110, 210);
+    // This row exists but belongs to another parent, so it is not a child in
+    // the root's canonical tree even when a tool claims its id.
+    addSession.run("store-mismatch", "other-parent", "mismatch", 120, 220);
+    addSession.run("other-parent", null, "other", 90, 190);
+    const addMessage = db.prepare("INSERT INTO message (id, session_id, data) VALUES (?, ?, ?)");
+    addMessage.run("store-message", "store-root", JSON.stringify({ role: "assistant", time: { created: 100 } }));
+    addMessage.run("store-zero-error", "store-root", JSON.stringify({
+      role: "assistant", time: { created: 103 }, finish: "error",
+      error: { name: "MessageAbortedError", message: "Provider stream aborted" },
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 }, total: 0 }
+    }));
+    const addPart = db.prepare("INSERT INTO part (id, message_id, session_id, data) VALUES (?, ?, ?, ?)");
+    const taskPart = (id, claimed) => addPart.run(id, "store-message", "store-root", JSON.stringify({
+      type: "tool", tool: "task", callID: `call-${id}`,
+      state: { status: "completed", metadata: claimed ? { sessionId: claimed } : {}, output: "finished", time: { start: 101, end: 102 } }
+    }));
+    taskPart("part-exact", "store-child");
+    taskPart("part-exact-again", "store-child");
+    taskPart("part-missing", "store-missing");
+    taskPart("part-mismatch", "store-mismatch");
+    db.close();
+
+    const tree = buildOpenCodeSessionTree("store-root", dbPath);
+    const toolMessage = tree.messages.find((message) => message.id === "store-message");
+    assert.deepEqual(toolMessage.parts[0].childSessions.map((child) => child.session.id), ["store-child"]);
+    assert.deepEqual(toolMessage.parts[1].childSessions.map((child) => child.session.id), ["store-child"]);
+    assert.deepEqual(toolMessage.parts[2].childSessions, []);
+    assert.deepEqual(toolMessage.parts[3].childSessions, []);
+    const zeroError = tree.messages.find((message) => message.id === "store-zero-error");
+    assert.equal(zeroError.data.finish, "error");
+    assert.equal(zeroError.data.error.name, "MessageAbortedError");
+    assert.deepEqual(zeroError.data.tokens, {
+      input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 }, total: 0
+    });
+    assert.deepEqual(tree.detachedChildren.map((child) => child.session.id), []);
+    assert.equal(buildOpenCodeSessionTree("store-mismatch", dbPath).session.parent_id, "other-parent");
+    const base = buildOpenCodeSessionProtocol(tree, "store-revision");
+    assert.deepEqual(
+      base.relationships.filter((relationship) => relationship.type === "spawned" && relationship.toSessionId === "store-child").length,
+      1,
+      "one canonical child yields one relationship"
+    );
+    const v3 = finalizeSessionProtocolV3(buildOpenCodeSessionProtocolV3(tree, base));
+    assert.equal(v3.usageRecords.some((record) => record.eventId === "message:store-zero-error"), false);
+    assert.equal(v3.coordination.find((item) => item.taskId === "task:part-missing").toSessionRef, null);
+    assert.equal(v3.coordination.find((item) => item.taskId === "task:part-mismatch").toSessionRef, null);
+    assert.equal(v3.validation.ok, true);
+  } finally {
+    closeDb(dbPath);
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("OpenCode focused child exposes one incoming parent lineage", () => {

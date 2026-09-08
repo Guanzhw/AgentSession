@@ -12,6 +12,13 @@ import {
   sessionTask,
   type SessionProtocol
 } from "../shared/session-protocol.js";
+import {
+  coordinationObservation,
+  protocolCoverage,
+  protocolDomainCoverage,
+  type CoordinationObservation,
+  type SessionProtocolV3
+} from "../shared/session-protocol-v3.js";
 
 type Row = Record<string, any>;
 
@@ -359,5 +366,136 @@ export function buildHermesSessionProtocol(input: HermesProtocolInput): SessionP
     tasks,
     agentRuns: runs,
     contextArtifacts: artifacts
+  };
+}
+
+function asyncDeliveryState(value: unknown): "requested" | "delivered" | "failed" | "cancelled" | null {
+  const state = String(value || "").toLowerCase();
+  if (state === "pending" || state === "queued") return "requested";
+  if (state === "delivered" || state === "success") return "delivered";
+  if (state === "failed" || state === "error" || state === "dropped") return "failed";
+  if (state === "cancelled") return "cancelled";
+  return null;
+}
+
+function asyncLifecycleState(value: unknown): "started" | "completed" | "failed" | "cancelled" | null {
+  const state = asyncDelegationStatus(value);
+  if (state === "running") return "started";
+  if (state === "completed") return "completed";
+  if (state === "failed") return "failed";
+  if (state === "cancelled") return "cancelled";
+  return null;
+}
+
+function hasHermesAggregateEvidence(rawSession: Row): boolean {
+  return [
+    "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens",
+    "reasoning_tokens", "total_tokens"
+  ].some((field) => Object.prototype.hasOwnProperty.call(rawSession, field));
+}
+
+/**
+ * Build Hermes-native v3 facts over one finalized v2 snapshot. The async
+ * registry is intentionally projected as three independent observations:
+ * dispatch, task lifecycle, and result delivery. Registry rows have no
+ * stable handle-to-child key, so no observation binds a child run.
+ */
+export function buildHermesSessionProtocolV3(
+  input: HermesProtocolInput,
+  base: SessionProtocol
+): SessionProtocolV3 {
+  const sessionId = String(input.session.id);
+  const ownRef = { provider: "hermes", sessionId };
+  const coordination: CoordinationObservation[] = [];
+  const tasksById = new Map(base.tasks.map((task) => [task.id, task]));
+  const eventIdFor = (delegationId: string) => `event:async-delegation:${delegationId}`;
+  const rows = (input.asyncDelegations || []).filter((row) => row && row.delegation_id);
+
+  for (const row of rows) {
+    const delegationId = String(row.delegation_id);
+    const task = tasksById.get(delegationId) || null;
+    const source = { fidelity: "recorded" as const, sourceType: "hermes.async_delegations", sourceId: delegationId };
+
+    coordination.push(coordinationObservation({
+      id: `coord:hermes:delegation:${delegationId}:dispatch`,
+      sessionId,
+      kind: "delegate",
+      state: "requested",
+      timestamp: epochMilliseconds(row.dispatched_at),
+      fromSessionRef: ownRef,
+      toSessionRef: null,
+      taskId: task?.id || null,
+      eventId: eventIdFor(delegationId),
+      correlationId: delegationId,
+      provenance: { ...source, sourceType: "hermes.async_delegations.dispatch" }
+    }));
+
+    const lifecycle = asyncLifecycleState(row.state);
+    if (lifecycle) {
+      const terminal = lifecycle === "completed" || lifecycle === "failed" || lifecycle === "cancelled";
+      coordination.push(coordinationObservation({
+        id: `coord:hermes:delegation:${delegationId}:lifecycle`,
+        sessionId,
+        kind: "delegate",
+        state: lifecycle,
+        timestamp: terminal
+          ? epochMilliseconds(row.completed_at) ?? epochMilliseconds(row.updated_at)
+          : epochMilliseconds(row.updated_at),
+        fromSessionRef: ownRef,
+        toSessionRef: null,
+        taskId: task?.id || null,
+        eventId: eventIdFor(delegationId),
+        correlationId: delegationId,
+        provenance: { ...source, sourceType: "hermes.async_delegations.lifecycle" }
+      }));
+    }
+
+    const delivery = asyncDeliveryState(row.delivery_state);
+    if (delivery) {
+      coordination.push(coordinationObservation({
+        id: `coord:hermes:delegation:${delegationId}:delivery`,
+        sessionId,
+        kind: "result-delivery",
+        state: delivery,
+        timestamp: delivery === "delivered"
+          ? epochMilliseconds(row.delivered_at)
+          : epochMilliseconds(row.updated_at),
+        fromSessionRef: null,
+        toSessionRef: ownRef,
+        taskId: task?.id || null,
+        eventId: eventIdFor(delegationId),
+        correlationId: delegationId,
+        provenance: { ...source, sourceType: "hermes.async_delegations.delivery" }
+      }));
+    }
+  }
+
+  const hasCompaction = base.events.some((event) => event.kind === "context.compaction")
+    || base.contextArtifacts.length > 0;
+  const hasAggregate = hasHermesAggregateEvidence(input.rawSession);
+  return {
+    sessionId,
+    version: 3,
+    session: base.session,
+    events: base.events,
+    relationships: base.relationships,
+    tasks: base.tasks,
+    agentRuns: base.agentRuns,
+    contextArtifacts: base.contextArtifacts,
+    branches: base.branches,
+    revision: base.revision,
+    goals: [],
+    actors: [],
+    coordination,
+    contextVersions: [],
+    contextTransformations: [],
+    usageRecords: [],
+    coverage: protocolCoverage({
+      work: protocolDomainCoverage(base.tasks.length > 0 ? "observed" : "not-observed", "recorded Hermes tasks and async delegation handles"),
+      execution: protocolDomainCoverage(base.agentRuns.length > 0 ? "observed" : "not-observed", "persisted Hermes delegate session runs"),
+      coordination: protocolDomainCoverage(coordination.length > 0 ? "observed" : "not-observed", "async delegation dispatch, lifecycle, and delivery registry rows"),
+      context: protocolDomainCoverage(hasCompaction ? "unknown" : "not-observed", hasCompaction ? "compression operation has no result context version" : "no Hermes context result evidence"),
+      usage: protocolDomainCoverage(hasAggregate ? "unknown" : "not-observed", hasAggregate ? "Hermes stores session aggregates, not request-scoped usage" : "no Hermes aggregate token evidence")
+    })
   };
 }

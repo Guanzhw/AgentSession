@@ -2,13 +2,12 @@
   "provenance": {
     "kind": "source-derived-bounded-synthetic",
     "source": "NousResearch/hermes-agent",
-    "releaseTag": "v2026.8.31",
-    "releaseTagObject": "6e8f8418e6378eb2617e4de074e13dedd091b8af",
-    "releaseCommit": "29112bef099274229cadff79cdff7bf7b99c4b77",
-    "sourceHead": "7b72fd12476aedc06a993d92c4337e2ceb214bc7",
-    "fixtureNote": "No live transcript or provider message body"
+    "releaseTag": "v2026.9.7",
+    "releaseCommit": "2237be355906fbe6065ce1815711eee52b2d646e",
+    "sourceHead": "6e2b8e070d28b1a3381a3fb290b6b8d6cce13cef",
+    "fixtureNote": "No live transcript or provider message body; schema 30 source-derived shape"
   },
-  "schemaVersion": 29,
+  "schemaVersion": 30,
   "sessions": [
     {
       "id": "fixture-hermes-root",

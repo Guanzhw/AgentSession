@@ -17,8 +17,9 @@ import {
   hermesDailyTokenStats,
   type HermesSessionEntry
 } from "./session-store.js";
-import { buildHermesSessionProtocol } from "./protocol.js";
+import { buildHermesSessionProtocol, buildHermesSessionProtocolV3 } from "./protocol.js";
 import { finalizeSessionProtocol, protocolRevision } from "../shared/session-protocol.js";
+import { finalizeSessionProtocolV3 } from "../shared/session-protocol-v3.js";
 
 function getHermesDir() {
   return getConfig().hermesDir;
@@ -205,6 +206,33 @@ function buildHermesSessionProtocolFor(sessionId: string) {
   });
 }
 
+function buildHermesSessionProtocolV3For(sessionId: string) {
+  const entry = sessions.get(sessionId);
+  if (!entry) return null;
+  const family = sessions.getFamily(sessionId).map((candidate) => ({
+    session: candidate.session,
+    messages: candidate.messages,
+    rawSession: candidate.rawSession,
+    asyncDelegations: candidate.asyncDelegations
+  }));
+  const input = {
+    session: entry.session,
+    messages: entry.messages,
+    rawSession: entry.rawSession,
+    asyncDelegations: entry.asyncDelegations,
+    family
+  };
+  // Construct v2 and v3 from the same cached store snapshot. v3 is additive:
+  // its provider-native facts are layered over this finalized v2 base.
+  const base = finalizeSessionProtocol(buildHermesSessionProtocol(input), {
+    provider: "hermes",
+    session: entry.session,
+    capabilities: hermesProtocolCapabilities,
+    revision: protocolRevision(sessions.getRevision())
+  });
+  return finalizeSessionProtocolV3(buildHermesSessionProtocolV3(input, base));
+}
+
 function runtimeFor(sessionId: string) {
   const entry = sessions.get(sessionId);
   return entry?.session.directory
@@ -242,6 +270,9 @@ const hermes = {
   getMessages(sessionId) { return sessions.get(sessionId)?.messages || []; },
   getSessionProtocol(sessionId) {
     return buildHermesSessionProtocolFor(sessionId);
+  },
+  getSessionProtocolV3(sessionId) {
+    return buildHermesSessionProtocolV3For(sessionId);
   },
   getRuntimeEnvironment: runtimeFor,
   getSystemPrompts(sessionId) {

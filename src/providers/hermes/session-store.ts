@@ -102,10 +102,14 @@ export function createHermesSessionStore(getDbPath: () => string, refreshInterva
             const asyncRows = db.prepare(`SELECT ${selectable.join(", ")} FROM async_delegations ORDER BY ${orderBy}`).all() as HermesRow[];
             const sessionIds = new Set(sessions.map(session => String(session.id)));
             for (const row of asyncRows) {
+              // parent_session_id is the canonical persisted spawner. Older
+              // CLI ledgers used origin_session as their session key and local
+              // session owner. origin_session_id is only an API wake target;
+              // it must never claim ownership of a provider session.
               const owner = row.parent_session_id || row.origin_session;
               if (!owner || !sessionIds.has(String(owner))) continue;
               const list = asyncDelegationsBySession.get(String(owner)) || [];
-              list.push(row);
+              list.push({ ...row, owner_session_id: String(owner) });
               asyncDelegationsBySession.set(String(owner), list);
             }
           }

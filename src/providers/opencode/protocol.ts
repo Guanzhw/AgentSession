@@ -114,6 +114,7 @@ export function buildOpenCodeSessionProtocol(tree: OpenCodeSessionTree, revision
   const tasks: ReturnType<typeof sessionTask>[] = [];
   const runs: ReturnType<typeof agentRun>[] = [];
   const relationships: ReturnType<typeof sessionRelationship>[] = [];
+  const spawnedChildIds = new Set<string>();
   const messageIds = new Set(tree.messages.map((message) => message.id));
 
   for (const todo of tree.todos || []) {
@@ -221,11 +222,14 @@ export function buildOpenCodeSessionProtocol(tree: OpenCodeSessionTree, revision
         provenance: { fidelity: "derived", sourceType: "opencode.part", sourceId: part.id }
       }));
       for (const childTree of children) {
+        const childSessionId = String(childTree.session.id);
+        if (spawnedChildIds.has(childSessionId)) continue;
+        spawnedChildIds.add(childSessionId);
         relationships.push(sessionRelationship({
-          type: "spawned", fromSessionId: sessionId, toSessionId: String(childTree.session.id),
+          type: "spawned", fromSessionId: sessionId, toSessionId: childSessionId,
           correlationId: callId, triggerEventId: `part:${part.id}`, taskId, runId,
           timestamp: partTimestamp(part),
-          provenance: { fidelity: "recorded", sourceType: "opencode.session.parent_id", sourceId: String(childTree.session.id) }
+          provenance: { fidelity: "recorded", sourceType: "opencode.session.parent_id", sourceId: childSessionId }
         }));
       }
     }
