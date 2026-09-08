@@ -95,7 +95,7 @@ function textFromContent(content: any) {
     .join("");
 }
 
-function taskNotificationFromText(content: any) {
+export function taskNotificationFromText(content: any) {
   if (typeof content !== "string") return null;
   const text = content.trim();
   if (!text.startsWith("<task-notification>") || !text.endsWith("</task-notification>")) return null;
@@ -106,7 +106,7 @@ function taskNotificationFromText(content: any) {
   };
   const taskId = field("task-id");
   const toolUseId = field("tool-use-id");
-  if (!taskId || !toolUseId) return null;
+  if (!taskId) return null;
 
   return {
     taskId,
@@ -252,7 +252,7 @@ export function recordsToMessages(records: any, sessionId: any): Message[] {
             taskId: taskNotification.taskId,
             toolUseId: taskNotification.toolUseId,
             status: taskNotification.status,
-            isError: ["error", "failed", "cancelled"].includes(status)
+            isError: ["error", "failed", "cancelled", "stopped"].includes(status)
           }
         });
       } else if (text) {
@@ -276,7 +276,9 @@ export function recordsToMessages(records: any, sessionId: any): Message[] {
       for (const block of blocks.filter((item) => item?.type === "tool_result")) {
         const rawContent = block.content ?? block.tool_output ?? "";
         messages.push({
-          id: block.tool_use_id || `tool-result-${msgIndex++}`,
+          // A tool result correlates to the call through toolUseId, but is a
+          // distinct normalized message and therefore needs its own event id.
+          id: block.tool_use_id ? `tool-result:${block.tool_use_id}` : `tool-result-${msgIndex++}`,
           sessionId,
           role: "tool",
           content: typeof rawContent === "string" ? rawContent : JSON.stringify(rawContent),

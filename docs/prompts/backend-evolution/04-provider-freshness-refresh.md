@@ -60,9 +60,9 @@ verified-at、版本/commit、官方来源链接与样本格式。
    `.agents/decisions/implemented/2026-09-03-codex-current-compatibility.md`。
    限制：本机尚未安装 0.153.0，真实 0.153 rollout 仅由官方 source 与
    有界 fixture 覆盖；本机最新 0.152.1 样本已做只读 parser/protocol smoke。
-5. **Claude Code 2.1.259** — 本机安装 2.1.207；npm `latest`/`next` 为
-   2.1.259，`stable` 为 2.1.236。官方仓库 `HEAD` 与 release tag `v2.1.259`
-   均为 `f173a697aa6486945f1b9c4aa9ce5383d2c87db6`（2026-09-03）；已区分
+5. **Claude Code 2.1.263** — 本机安装 2.1.207；npm `latest`/`next` 为
+   2.1.263，`stable` 为 2.1.236。官方仓库 `HEAD` 与 release tag `v2.1.263`
+   均为 `ab9b2cf7bb9e4f98ff264c07a22e46d83c29c558`（2026-09-08）；已区分
    npm dist-tag、release tag 与源码 HEAD。官方文档确认 project-scoped
    JSONL、subagent `system`/`compact_boundary` 与
    `compactMetadata.preTokens`；adapter/protocol 已补齐该有界 compaction
@@ -72,10 +72,12 @@ verified-at、版本/commit、官方来源链接与样本格式。
    metadata-only，不污染线性 transcript。真实本机快照 11 个 project
    transcript / 132 records，无
    sidechain、task-notification 或 compaction；已做只读 adapter/protocol
-   smoke。当前 2.1.259 结论为 docs/upstream-verified；本机没有 live
-   2.1.259 transcript。测试新增 4 个 focused 回归；fixture 为
-   source-derived bounded synthetic fixture，非 live capture。决策记录见
-   `.agents/decisions/implemented/2026-09-03-claude-code-current-compatibility.md`。
+   smoke。测试新增 4 个 focused 回归；fixture 为
+   source-derived bounded synthetic fixture，非 live capture。native v3 以同一 finalized
+   v2 snapshot 为基底，按 canonical assistant response id 去重 request Usage，保留
+   缺失 tool-use-id 的 task notification，并将 stopped 映射为 cancelled；决策记录见
+   `.agents/decisions/implemented/2026-09-08-claude-code-native-v3.md`。当前 2.1.263
+   结论为 docs/upstream-verified；本机没有 live 2.1.263 transcript。
 6. **OpenCode 1.18.29** — npm `opencode-ai` latest 1.18.29；本机安装
    1.17.11(Windows)。官方 release tag `v1.18.29` 为
    `16747470f976aca3d362ad730bcd3fe82ecc2c9a`，官方源码 HEAD 为

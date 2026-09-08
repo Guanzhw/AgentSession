@@ -28,7 +28,7 @@ worker 与 reviewer 使用内部子代理，不新建用户可见会话；每个
 5. `backend-evolution/04-provider-freshness-refresh.md` — **下一阶段 bounded spec
    (不立即实现)**:按证据时效逐 provider 刷新 parser/schema/protocol 映射——DSH
    alpha.5、OpenClaw current SQLite、Pi v3/0.84.4、Codex 0.153.0 与 Claude
-   Code 2.1.259 已刷新完成(2026-09-03)，OpenCode 1.18.29 已刷新完成
+   Code 2.1.263 已刷新完成(2026-09-08)，OpenCode 1.18.29 已刷新完成
    (2026-09-08);剩余 Hermes
    remote HEAD;每个 provider 单独决策/fixture/真实数据/提交,保持核心
    Work Graph provider-native v3 mapping 优先级。

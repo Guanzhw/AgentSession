@@ -1,4 +1,5 @@
 import type { Message, RawSession } from "../interface.js";
+import { claudeUsageToTokens, taskNotificationFromText, uniqueClaudeAssistantUsageRecords } from "./parser.js";
 import {
   agentRun,
   compactionEnvelope,
@@ -12,6 +13,13 @@ import {
   sessionTask,
   type SessionProtocol
 } from "../shared/session-protocol.js";
+import {
+  protocolCoverage,
+  protocolDomainCoverage,
+  usageRecord,
+  type SessionProtocolV3,
+  type UsageRecord
+} from "../shared/session-protocol-v3.js";
 
 type Row = Record<string, any>;
 
@@ -114,20 +122,7 @@ function taskNotificationOf(record: Row) {
     .map((block: any) => block.text || "")
     .join("")
     .trim();
-  if (!text.startsWith("<task-notification>") || !text.endsWith("</task-notification>")) return null;
-  const field = (name: string) => {
-    const match = text.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`));
-    return match?.[1]?.trim() || null;
-  };
-  const taskId = field("task-id");
-  const toolUseId = field("tool-use-id");
-  if (!taskId || !toolUseId) return null;
-  return {
-    taskId,
-    toolUseId,
-    status: field("status"),
-    summary: field("summary")
-  };
+  return taskNotificationFromText(text);
 }
 
 function taskStatusFromNotification(status: string | null): {
@@ -135,13 +130,13 @@ function taskStatusFromNotification(status: string | null): {
   phase: "started" | "completed" | "failed";
 } {
   const normalized = String(status || "").toLowerCase();
-  if (["completed", "done", "success"].includes(normalized)) {
+  if (normalized === "completed") {
     return { status: "completed", phase: "completed" };
   }
-  if (["failed", "error"].includes(normalized)) {
+  if (normalized === "failed") {
     return { status: "failed", phase: "failed" };
   }
-  if (["cancelled", "canceled", "aborted"].includes(normalized)) {
+  if (normalized === "stopped") {
     return { status: "cancelled", phase: "failed" };
   }
   return { status: "running", phase: "started" };
@@ -236,7 +231,10 @@ export function buildClaudeSessionProtocol(input: ClaudeProtocolInput): SessionP
 
   // Recorded compaction events (compact boundary / PreCompact / PostCompact)
   // and task notifications, each anchored at its record's position.
-  const taskNotifications: Array<NonNullable<ReturnType<typeof taskNotificationOf>>> = [];
+  const taskNotifications: Array<{
+    notification: NonNullable<ReturnType<typeof taskNotificationOf>>;
+    timestamp: number | null;
+  }> = [];
   input.records.forEach((record, index) => {
     const compaction = claudeCompactionRecord(record);
     if (compaction) {
@@ -265,7 +263,7 @@ export function buildClaudeSessionProtocol(input: ClaudeProtocolInput): SessionP
 
     const notification = taskNotificationOf(record);
     if (notification) {
-      taskNotifications.push(notification);
+      taskNotifications.push({ notification, timestamp: recordTimestamp(record) });
       const mapping = taskStatusFromNotification(notification.status);
       pushAnchored(sessionEvent({
         id: `event:task:${notification.taskId}:${notification.toolUseId}`,
@@ -321,10 +319,9 @@ export function buildClaudeSessionProtocol(input: ClaudeProtocolInput): SessionP
   const tasks: ReturnType<typeof sessionTask>[] = [];
   const runs: ReturnType<typeof agentRun>[] = [];
   const seenTaskIds = new Set<string>();
-  for (const notification of taskNotifications) {
+  for (const { notification, timestamp } of taskNotifications) {
     const mapping = taskStatusFromNotification(notification.status);
     const child = resolveChildByTaskId(input.children, notification.taskId);
-    const timestamp = recordTimestamp(input.records.find((record) => taskNotificationOf(record) === notification) || {});
     if (!seenTaskIds.has(notification.taskId)) {
       seenTaskIds.add(notification.taskId);
       tasks.push(sessionTask({
@@ -415,9 +412,9 @@ export function buildClaudeSessionProtocol(input: ClaudeProtocolInput): SessionP
     if (childSidechain.length === 0) continue;
     const childId = String(child.session.id);
     const childAgentId = firstString(childSidechain[0].agentId, child.session.metadata?.agentId);
-    const notification = taskNotifications.find((candidate) => (
+    const notification = taskNotifications.find(({ notification: candidate }) => (
       childAgentId && (candidate.taskId === childAgentId || candidate.taskId === `agent-${childAgentId}`)
-    ));
+    ))?.notification;
     relationships.push(sessionRelationship({
       type: "spawned",
       fromSessionId: sessionId,
@@ -462,5 +459,108 @@ export function buildClaudeSessionProtocol(input: ClaudeProtocolInput): SessionP
     tasks,
     agentRuns: runs,
     contextArtifacts: artifacts
+  };
+}
+
+function canonicalAssistantEvent(base: SessionProtocol, record: Row) {
+  const responseId = firstString(record.message?.id);
+  const recordId = firstString(record.uuid, record.id);
+  return base.events.find((event) => {
+    if (event.kind !== "message.assistant") return false;
+    if (responseId && event.turnId === responseId) return true;
+    if (recordId && event.turnId === recordId) return true;
+    const sourceId = event.provenance.sourceId;
+    return Boolean(recordId && sourceId && (sourceId === recordId || sourceId.startsWith(`${recordId}:`)));
+  }) || null;
+}
+
+function explicitClaudeTotal(usage: Row, normalizedTotal: number): number | null {
+  const raw = usage?.total_tokens;
+  const explicit = typeof raw === "number" && Number.isFinite(raw)
+    ? raw
+    : typeof raw === "string" && raw.trim() !== "" && Number.isFinite(Number(raw))
+      ? Number(raw)
+      : null;
+  return explicit !== null && explicit === normalizedTotal ? explicit : null;
+}
+
+/** Build Claude Code native v3 facts over the same finalized v2 snapshot. */
+export function buildClaudeSessionProtocolV3(
+  input: ClaudeProtocolInput,
+  base: SessionProtocol
+): SessionProtocolV3 {
+  const sessionId = String(input.session.id);
+  const ownRef = { provider: "claude-code" as const, sessionId };
+  const usageRecords: UsageRecord[] = [];
+  const fallbackOccurrences = new Map<string, number>();
+
+  for (const record of uniqueClaudeAssistantUsageRecords(input.records)) {
+    const usage = record.message?.usage ?? record.usage;
+    const tokens = claudeUsageToTokens(usage);
+    if (!tokens) continue;
+    if (tokens.input === 0 && tokens.cache.read === 0 && tokens.cache.write === 0
+      && tokens.output === 0 && tokens.reasoning === 0) continue;
+
+    const responseId = firstString(record.message?.id);
+    const fallbackBase = responseId || firstString(record.uuid, record.id)
+      || `tokens:${JSON.stringify(tokens)}`;
+    const occurrence = fallbackOccurrences.get(fallbackBase) || 0;
+    fallbackOccurrences.set(fallbackBase, occurrence + 1);
+    const responseIdentity = occurrence === 0 ? fallbackBase : `${fallbackBase}:${occurrence}`;
+    const event = canonicalAssistantEvent(base, record);
+    const rawUsage = usage && typeof usage === "object" ? usage as Row : {};
+
+    usageRecords.push(usageRecord({
+      id: `usage:${sessionId}:response:${responseIdentity}`,
+      scope: "request",
+      sessionRef: ownRef,
+      timestamp: recordTimestamp(record),
+      model: firstString(record.message?.model, record.model),
+      runId: null,
+      eventId: event?.id || null,
+      turnId: event?.turnId || null,
+      tokens: {
+        input: tokens.input,
+        cacheRead: tokens.cache.read,
+        cacheWrite: tokens.cache.write,
+        output: tokens.output,
+        reasoning: tokens.reasoning,
+        total: explicitClaudeTotal(rawUsage, tokens.input + tokens.cache.read + tokens.cache.write + tokens.output + tokens.reasoning)
+      },
+      contextOriginSlices: [],
+      provenance: {
+        fidelity: "recorded",
+        sourceType: "claude.transcript:assistant.usage",
+        sourceId: responseId || firstString(record.uuid, record.id) || responseIdentity
+      }
+    }));
+  }
+
+  const hasCompaction = base.events.some((event) => event.kind === "context.compaction")
+    || base.contextArtifacts.length > 0;
+  return {
+    sessionId,
+    version: 3,
+    session: base.session,
+    events: base.events,
+    relationships: base.relationships,
+    tasks: base.tasks,
+    agentRuns: base.agentRuns,
+    contextArtifacts: base.contextArtifacts,
+    branches: base.branches,
+    revision: base.revision,
+    goals: [],
+    actors: [],
+    coordination: [],
+    contextVersions: [],
+    contextTransformations: [],
+    usageRecords,
+    coverage: protocolCoverage({
+      work: protocolDomainCoverage(base.tasks.length > 0 ? "observed" : "not-observed", "Claude task-notification Tasks in finalized v2"),
+      execution: protocolDomainCoverage(base.agentRuns.length > 0 ? "observed" : "not-observed", "Claude sidechain AgentRuns in finalized v2"),
+      coordination: protocolDomainCoverage("not-observed", "Claude sidechain relationships are lineage, not coordination observations"),
+      context: protocolDomainCoverage(hasCompaction ? "unknown" : "not-observed", hasCompaction ? "Claude compaction operation has no recorded result context version" : "no Claude compaction result evidence"),
+      usage: protocolDomainCoverage(usageRecords.length > 0 ? "observed" : "not-observed", "one request record per canonical Claude assistant response")
+    })
   };
 }

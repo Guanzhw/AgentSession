@@ -16,8 +16,9 @@ import {
   buildLinkedClaudeCodeSessionViews,
   buildClaudeCodeSystemPrompts
 } from "./views.js";
-import { buildClaudeSessionProtocol } from "./protocol.js";
+import { buildClaudeSessionProtocol, buildClaudeSessionProtocolV3 } from "./protocol.js";
 import { finalizeSessionProtocol, protocolRevision } from "../shared/session-protocol.js";
+import { finalizeSessionProtocolV3 } from "../shared/session-protocol-v3.js";
 import {
   createSessionFileStore,
   searchNormalizedMessages,
@@ -152,7 +153,7 @@ const claudeProtocolCapabilities = {
   branches: { support: "none" as const, provenance: "derived" as const, details: "Claude sidechains are session relationships, not in-file branches" }
 };
 
-function buildClaudeSessionProtocolFor(sessionId: string) {
+function claudeProtocolInputFor(sessionId: string) {
   const entry = sessionFiles.get(sessionId);
   if (!entry) return null;
   const canonicalId = String(entry.session.id);
@@ -160,22 +161,41 @@ function buildClaudeSessionProtocolFor(sessionId: string) {
   const children = family.filter((candidate) => (
     candidate.session.parentId && String(candidate.session.parentId) === canonicalId
   ));
-  const protocol = buildClaudeSessionProtocol({
-    session: entry.session,
-    messages: entry.messages,
-    records: entry.records,
-    children: children.map((child) => ({
-      session: child.session,
-      messages: child.messages,
-      records: child.records
-    }))
-  });
+  return {
+    entry,
+    input: {
+      session: entry.session,
+      messages: entry.messages,
+      records: entry.records,
+      children: children.map((child) => ({
+        session: child.session,
+        messages: child.messages,
+        records: child.records
+      }))
+    }
+  };
+}
+
+function finalizeClaudeV2(input: ReturnType<typeof claudeProtocolInputFor>) {
+  if (!input) return null;
+  const protocol = buildClaudeSessionProtocol(input.input);
   return finalizeSessionProtocol(protocol, {
     provider: "claude-code",
-    session: entry.session,
+    session: input.entry.session,
     capabilities: claudeProtocolCapabilities,
     revision: protocolRevision(sessionFiles.getStatsRevision())
   });
+}
+
+function buildClaudeSessionProtocolFor(sessionId: string) {
+  return finalizeClaudeV2(claudeProtocolInputFor(sessionId));
+}
+
+function buildClaudeSessionProtocolV3For(sessionId: string) {
+  const loaded = claudeProtocolInputFor(sessionId);
+  if (!loaded) return null;
+  const base = finalizeClaudeV2(loaded);
+  return finalizeSessionProtocolV3(buildClaudeSessionProtocolV3(loaded.input, base!));
 }
 
 const getClaudeViews = createStructuredViewCache(generateClaudeViews);
@@ -244,6 +264,10 @@ const claudeCode = {
 
   getSessionProtocol(sessionId) {
     return buildClaudeSessionProtocolFor(sessionId);
+  },
+
+  getSessionProtocolV3(sessionId) {
+    return buildClaudeSessionProtocolV3For(sessionId);
   },
 
   getTokenStats(days = 30) {
