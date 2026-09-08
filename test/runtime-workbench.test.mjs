@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { renderRuntimeEvents, renderRuntimeWorkbench } from "../dist/src/views/runtime-workbench.js";
+import { getLocale, setLocale } from "../dist/src/i18n.js";
 import { renderSessionPage } from "../dist/src/views/session.js";
 import { finalizeSessionProtocolV3, upgradeSessionProtocolV2 } from "../dist/src/providers/shared/session-protocol-v3.js";
 import { projectContext, projectCoordination, projectExecution, projectWork } from "../dist/src/protocol-runtime-v3.js";
@@ -58,7 +59,7 @@ function refreshProjections(runtime) {
     model: "fixture-model",
     runId: "run-1",
     eventId: "event-1",
-    tokens: { input: 100, output: 20, total: 120 },
+    tokens: { input: 100, cacheRead: 0, cacheWrite: 0, output: 20, reasoning: 0, total: 120 },
     contextOriginSlices: [
       { component: "input", origin: "direct", tokens: 35 },
       { component: "input", origin: "inherited", tokens: 45, sourceSessionRefs: [{ provider: "fixture", sessionId: "parent-1" }] },
@@ -105,6 +106,71 @@ test("Work Graph renders four domains with Work selected and keeps event evidenc
   assert.match(html, /Context after compaction/);
   assert.match(html, /Retain &lt;the result&gt; and discard copied history/);
   assert.doesNotMatch(html, /Retain <the result>/);
+});
+
+test("Execution usage keeps complete values authoritative and exposes stable hooks", () => {
+  const html = renderRuntimeWorkbench(fixtureRuntime(), "fixture", "runtime-1");
+  const usage = html.match(/<section class="runtime-usage-summary"[\s\S]*?<\/section>/)?.[0] || "";
+  assert.match(usage, /data-runtime-usage-summary/);
+  assert.match(usage, /data-runtime-usage-complete="true"/);
+  assert.match(usage, /data-runtime-usage-truncated="false"/);
+  assert.match(usage, /data-runtime-usage-request-count="1"/);
+  assert.match(usage, /data-runtime-usage-total="120"/);
+  assert.match(usage, /Requests: 1/);
+  assert.match(usage, /Total tokens: 120/);
+  assert.match(usage, /Input: 100 · Output: 20 · Reasoning: 0 · Cache read: 0 · Cache write: 0 · complete/);
+  assert.doesNotMatch(usage, /≥/);
+});
+
+test("Execution usage labels bounded values as visible lower bounds", () => {
+  const runtime = fixtureRuntime();
+  runtime.projections.execution = {
+    ...runtime.projections.execution,
+    truncated: true,
+    usage: {
+      ...runtime.projections.execution.usage,
+      requestCount: 96,
+      complete: false,
+      input: 9000000,
+      cacheRead: 1000000,
+      cacheWrite: 0,
+      output: 500000,
+      reasoning: 134337,
+      total: 10634337
+    }
+  };
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  const usage = html.match(/<section class="runtime-usage-summary"[\s\S]*?<\/section>/)?.[0] || "";
+  assert.match(usage, /data-runtime-usage-complete="false"/);
+  assert.match(usage, /data-runtime-usage-truncated="true"/);
+  assert.match(usage, /data-runtime-usage-request-count="96"/);
+  assert.match(usage, /data-runtime-usage-total="10634337"/);
+  assert.match(usage, /Visible requests: 96/);
+  assert.match(usage, /Token lower bound: ≥ 10,634,337/);
+  assert.match(usage, /Input: ≥ 9,000,000 · Output: ≥ 500,000 · Reasoning: ≥ 134,337 · Cache read: ≥ 1,000,000 · Cache write: ≥ 0 · incomplete/);
+  assert.match(usage, /Only the visible requests in this bounded projection are shown; token values are lower bounds\./);
+  assert.doesNotMatch(usage, /Requests: 96 · Total tokens:/);
+});
+
+test("Execution usage keeps incomplete evidence explicit without bounded projection claim", () => {
+  const runtime = fixtureRuntime();
+  runtime.projections.execution = {
+    ...runtime.projections.execution,
+    usage: { ...runtime.projections.execution.usage, complete: false, total: 120 }
+  };
+  const previousLocale = getLocale();
+  setLocale("zh");
+  try {
+    const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+    const usage = html.match(/<section class="runtime-usage-summary"[\s\S]*?<\/section>/)?.[0] || "";
+    assert.match(usage, /可见请求: 1/);
+    assert.match(usage, /Token 下限: ≥ 120/);
+    assert.match(usage, /请求用量证据不完整；Token 数值为下限。/);
+    assert.match(usage, /data-runtime-usage-complete="false"/);
+    assert.match(usage, /data-runtime-usage-truncated="false"/);
+  } finally {
+    setLocale(previousLocale);
+  }
 });
 
 test("Events surface renders diagnostics and source-order table without the Work evidence lens", () => {

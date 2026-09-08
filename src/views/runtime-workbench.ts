@@ -354,13 +354,28 @@ function renderExecutionProjection(data: RuntimeData) {
   const actors = projection.actors || [];
   const runs = projection.runs || [];
   const usage = projection.usage || { requestCount: 0, complete: false, input: null, output: null, total: null };
-  const usageValue = (value: number | null) => value == null ? t("runtime.not_recorded") : count(value);
+  const usageComplete = usage.complete === true;
+  const usageValue = (value: number | null) => value == null
+    ? t("runtime.not_recorded")
+    : usageComplete ? count(value) : t("runtime.at_least_value", { count: count(value) });
+  const requestLabel = usageComplete ? t("runtime.requests") : t("runtime.visible_requests");
+  const totalLabel = usageComplete ? t("runtime.total_tokens") : t("runtime.token_lower_bound");
+  const componentValues = [
+    [t("runtime.input_tokens"), usage.input],
+    [t("runtime.output_tokens"), usage.output],
+    [t("runtime.reasoning_tokens"), usage.reasoning],
+    [t("runtime.cache_read_tokens"), usage.cacheRead],
+    [t("runtime.cache_write_tokens"), usage.cacheWrite]
+  ];
+  const usageNotice = usageComplete
+    ? ""
+    : `<p class="runtime-notice runtime-usage-bound-note" data-runtime-usage-note>${escapeHtml(projection.truncated ? t("runtime.usage_projection_bounded") : t("runtime.usage_evidence_incomplete"))}</p>`;
   return `<section class="runtime-lens runtime-execution-lens" aria-labelledby="runtime-execution-title">
     <div class="runtime-section-heading"><div><h2 id="runtime-execution-title">${t("runtime.execution_title")}</h2><p>${t("runtime.execution_description")}</p></div>${renderProjectionCoverage(projection)}</div>
     <div class="runtime-projection-overview"><span>${escapeHtml(`${count(actors.length)} ${t("runtime.actors")}`)}</span><span>${escapeHtml(`${count(runs.length)} ${t("runtime.runs")}`)}</span><span>${escapeHtml(`${count(usage.requestCount)} ${t("runtime.usage_records")}`)}</span></div>
     <section class="runtime-projection-group"><h3>${t("runtime.actors")}</h3>${actors.length ? `<ul>${actors.map((entry) => `<li class="runtime-card"><strong>${escapeHtml(entityLabel(entry.actor, entry.actor.id))}</strong><span>${escapeHtml(entry.actor.kind || t("runtime.unknown"))}</span></li>`).join("")}</ul>` : `<p class="runtime-empty">${t("runtime.not_recorded")}</p>`}</section>
     <section class="runtime-projection-group"><h3>${t("runtime.runs")}</h3>${runs.length ? `<ul>${runs.map((entry) => `<li class="runtime-card runtime-run"><strong>${escapeHtml(entityLabel(entry.run, entry.run.id))}</strong><span>${escapeHtml(entry.run.status || t("runtime.unknown"))}</span>${entry.childSession ? `<a href="${escapeHtml(sessionHref(entry.childSession))}">${escapeHtml(entry.childSession.sessionId)}</a>` : ""}${evidenceButton("run", entry.run.id)}</li>`).join("")}</ul>` : `<p class="runtime-empty">${t("runtime.not_recorded")}</p>`}</section>
-    <section class="runtime-usage-summary"><h3>${t("runtime.usage")}</h3><p>${escapeHtml(`${t("runtime.requests")}: ${count(usage.requestCount)} · ${t("runtime.total_tokens")}: ${usageValue(usage.total)}`)}</p><small>${escapeHtml(`${t("runtime.input_tokens")}: ${usageValue(usage.input)} · ${t("runtime.output_tokens")}: ${usageValue(usage.output)} · ${usage.complete ? t("runtime.complete") : t("runtime.incomplete")}`)}</small></section>
+    <section class="runtime-usage-summary" data-runtime-usage-summary data-runtime-usage-complete="${usageComplete ? "true" : "false"}" data-runtime-usage-truncated="${projection.truncated ? "true" : "false"}"><h3>${t("runtime.usage")}</h3><p><span data-runtime-usage-request-count="${escapeHtml(String(usage.requestCount))}">${escapeHtml(`${requestLabel}: ${count(usage.requestCount)}`)}</span> · <span data-runtime-usage-total="${escapeHtml(usage.total == null ? "" : String(usage.total))}">${escapeHtml(`${totalLabel}: ${usageValue(usage.total)}`)}</span></p><small>${escapeHtml(componentValues.map(([label, value]) => `${label}: ${usageValue(value as number | null)}`).join(" · "))} · ${escapeHtml(usageComplete ? t("runtime.complete") : t("runtime.incomplete"))}</small>${usageNotice}</section>
   </section>`;
 }
 

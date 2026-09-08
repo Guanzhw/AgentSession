@@ -2819,6 +2819,10 @@ test("highlight assets are repository-local and keyboard rail shortcuts protect 
   assert.match(enhancements, /data-session-search-toggle/);
   assert.match(style, /\.tab-bar\[hidden\] \{\s*display: none;/);
   assert.match(style, /\.session-workbench:not\(.session-conversation-tab-active\) \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\);/);
+  assert.match(style, /\.runtime-status-completed \{ color: var\(--success-text\); \}/);
+  assert.match(style, /\.stats-provider-item\.current \{[\s\S]*?color: var\(--v2-accent-foreground\);/);
+  assert.match(style, /\.stats-provider-selector \.stats-provider-item:has\(input:checked\) \{[\s\S]*?color: var\(--v2-accent-foreground\);/);
+  assert.match(style, /\.stats-provider-capability\.filter \{[\s\S]*?color: var\(--text-secondary\) !important;/);
 });
 
 test("session management uses in-page dialogs", () => {
