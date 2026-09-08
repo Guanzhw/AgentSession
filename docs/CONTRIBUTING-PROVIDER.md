@@ -145,14 +145,18 @@ match those totals but are not separately added. No request ownership or
 inherited/shared split is invented. The checked-in fixture is
 source-derived bounded synthetic data, not a live transcript.
 
-### OpenCode evidence snapshot (2026-09-03)
+### OpenCode evidence snapshot (2026-09-08)
 
 The installed CLI is `1.17.11` (`opencode --version`). npm `opencode-ai`
-currently publishes `1.18.27` as the newest release. The official repository
+currently publishes `1.18.29` as the newest release. The official repository
 is <https://github.com/anomalyco/opencode> (the historical `sst/opencode` URL
-redirects there): release tag `v1.18.27` is
-`4b7e19e315cca414121ba1d61523fef74bb3ae8b`, while the separately checked
-repository HEAD is `b578b7261fc9ec4917fe272df5cc4bd8a056cd5d`.
+redirects there): release tag `v1.18.29` is
+`16747470f976aca3d362ad730bcd3fe82ecc2c9a`, comparison tag `v1.18.27` is
+`4b7e19e315cca414121ba1d61523fef74bb3ae8b`, and separately checked repository
+HEAD is `ecbc6ccac85b3e8087b6445e584318419b9e2b34`. The official source diff
+for the session SQL, todo, v1 session schema, and OpenCode session/tool files
+is empty between those tags; v1.18.29 is a Codex OAuth model-filtering bugfix,
+not a session-storage schema change.
 The release schema keeps `message`/`part` as the read projection and defines
 `todo`, `subtask`, and `compaction` records. The current task tool records
 `background`, `jobId`, child `sessionId`, and bounded task-state result
@@ -163,13 +167,17 @@ read-only snapshot contained 131 sessions (73 with a parent), 182 todos,
 2,968 messages, and 13,091 parts; no context epoch/input rows were populated,
 and no background task envelope appeared. The regression shape is bounded
 synthetic data derived from official source, not a live capture, and contains
-no local transcript body. Because the current todo table has no row id, Task
-identity uses a bounded fingerprint of stable recorded fields rather than
-position alone; compaction tail anchors are emitted only when the referenced
-message is present. The official Todo status contract documents `pending`,
-`in_progress`, `completed`, and `cancelled`; an unrecognized status is skipped
-with no invented lifecycle state. The synthetic fixture preserves the exact
-source keys `CompactionPart.type/auto/overflow/tail_start_id`,
+no local transcript body. Because the current todo table primary key is
+`(session_id, position)`, Task identity uses that snapshot-local source key;
+continuity after row reordering across snapshots is unknown. Tool correlation
+uses recorded `callID`, while `part.id` remains the source identity for the
+event/task/run. Background mode is terminal only with an explicit task result
+envelope. Native v3 preserves finalized v2 facts, emits evidence-backed
+launch/result observations and one request UsageRecord per canonical assistant
+message, and leaves Goal/Actor/Context result domains empty or unknown. The
+official Todo status contract documents `pending`, `in_progress`, `completed`,
+and `cancelled`; an unrecognized status is skipped with no invented lifecycle
+state. The synthetic fixture preserves the exact source keys `CompactionPart.type/auto/overflow/tail_start_id`,
 `SubtaskPart.type/prompt/description/agent/model/command`, and task metadata
 `parentSessionId/sessionId/background/jobId` plus state `title` and the task
 output `id/state` envelope.

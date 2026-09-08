@@ -53,5 +53,5 @@ Codex 明确不记录 request context origin 切片(见
    usage.origins(当前预期:recordsTruncated/slicesTruncated=false、classified 零下界、
    complete=false,不显示伪三分)。
 
-完成动作:交独立 pi_review 只读审查(范围/证据有界);主 agent 汇总验收。
+完成动作:交独立 Luna reviewer 只读审查(范围/证据有界);主 agent 汇总验收。
 ```

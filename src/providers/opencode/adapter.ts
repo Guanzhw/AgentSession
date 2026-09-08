@@ -8,7 +8,8 @@ import { buildOpenCodeSessionMetrics } from "./session-metrics.js";
 import { buildOpenCodeSessionTree } from "./session-tree.js";
 import { buildOpenCodeSystemPrompts } from "./system-prompts.js";
 import { buildOpenCodeRuntimeEnvironment } from "./runtime-environment.js";
-import { buildOpenCodeSessionProtocol, openCodeProtocolCapabilities } from "./protocol.js";
+import { buildOpenCodeSessionProtocol, buildOpenCodeSessionProtocolV3, openCodeProtocolCapabilities } from "./protocol.js";
+import { finalizeSessionProtocolV3 } from "../shared/session-protocol-v3.js";
 import { createStructuredViewCache } from "../shared/file-adapter-helpers.js";
 
 function defaultDataPath() {
@@ -62,6 +63,14 @@ const opencode = {
     const tree = getOpenCodeTree(sessionId);
     if (!tree) return null;
     return buildOpenCodeSessionProtocol(tree, this.getStatsRevision());
+  },
+  getSessionProtocolV3(sessionId: string) {
+    if (!baseAdapter.detect()) return null;
+    const tree = getOpenCodeTree(sessionId);
+    if (!tree) return null;
+    const revision = this.getStatsRevision();
+    const base = buildOpenCodeSessionProtocol(tree, revision);
+    return finalizeSessionProtocolV3(buildOpenCodeSessionProtocolV3(tree, base));
   },
   getStatsRevision() {
     const dbPath = baseAdapter.getDataPath();

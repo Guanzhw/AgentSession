@@ -8,7 +8,7 @@ backlog 如实标注 waiting-evidence,不落代码、不建 UI 单点。
 任务:回答两个问题——"会话启用了什么(skill/plugin/hook)"与"会话中何时重载了
 harness 环境"。二者都是环境域证据,一起做证据调研,产出 spec 决策。
 
-工作流:主 agent 提供本 spec;由 pi-wsl `pi_task` 执行;独立 `pi_review` 只读审查。
+工作流:主 agent 提供本 spec;由独立 Luna worker 执行;另一个 Luna reviewer 只读审查。
 
 步骤:
 1. 证据调研(先看证据再定方案):逐个检查已安装 provider 的真实数据与 parser,
@@ -27,5 +27,5 @@ harness 环境"。二者都是环境域证据,一起做证据调研,产出 spec 
    非平凡决策建决策记录;同步 docs/design/ui-v2.md §4.6/§7 相关行;
 5. 验证:npm run build && npm test && npm run check:governance。
 
-完成动作:交独立 pi_review 只读审查;主 agent 汇总验收。
+完成动作:交独立 Luna reviewer 只读审查;主 agent 汇总验收。
 ```

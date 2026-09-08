@@ -15,7 +15,7 @@ provider-native v3 映射)之后。当前只做**评审**,不实现。
 无 git 仓库或无可疑匹配时不显示;不得新增 opt-in 配置项或 API/安全面,除非有
 真实消费者(当前没有;**“用户问题真实”不等于“已有实现消费者”**)。
 
-工作流:主 agent 提供本 spec;由 pi-wsl `pi_task` 执行;独立 `pi_review` 只读审查。
+工作流:主 agent 提供本 spec;由独立 Luna worker 执行;另一个 Luna reviewer 只读审查。
 
 任务:
 1. 读决策记录与 docs/design/ui-v2.md §11 第 11 条、§7(信息设计对"文件改动"的展示);
@@ -28,5 +28,5 @@ provider-native v3 映射)之后。当前只做**评审**,不实现。
 4. 不实现:不写 server 端 git 模块、不动 API/SSR/UI、不新增配置面;
 5. 验证:npm run check:governance(记录格式与链接)。
 
-完成动作:交独立 pi_review 只读审查(评审意见本身有界,不扩散);主 agent 汇总验收。
+完成动作:交独立 Luna reviewer 只读审查(评审意见本身有界,不扩散);主 agent 汇总验收。
 ```

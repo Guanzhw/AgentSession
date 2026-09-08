@@ -1,0 +1,14 @@
+{"kind":"session","id":"oc-v3-root","parent_id":null,"time_created":100,"time_updated":500,"title":"fixture"}
+{"kind":"todo","session_id":"oc-v3-root","position":0,"content":"mutable content","status":"in_progress","priority":"high","time_created":110,"time_updated":120}
+{"kind":"message","id":"m-usage","role":"assistant","time_created":200,"modelID":"model-v3","tokens":{"input":10,"output":5,"reasoning":2,"cache":{"read":8,"write":3},"total":28},"parts":[]}
+{"kind":"message","id":"m-mismatch","role":"assistant","time_created":210,"modelID":"model-v3","tokens":{"input":10,"output":5,"reasoning":2,"cache":{"read":8,"write":3},"total":20},"parts":[]}
+{"kind":"message","id":"m-zero-error","role":"assistant","time_created":220,"modelID":"model-v3","tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0},"total":100},"parts":[]}
+{"kind":"message","id":"m-tools","role":"assistant","time_created":300,"modelID":"model-v3","tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0},"total":0},"parts":[]}
+{"kind":"part","message_id":"m-tools","id":"p-exact","type":"tool","tool":"task","callID":"call-exact","state":{"status":"completed","metadata":{"sessionId":"oc-v3-child","parentSessionId":"oc-v3-root"},"output":"<task id=\"oc-v3-child\" state=\"running\">started</task>","time":{"start":301,"end":302}}}
+{"kind":"part","message_id":"m-tools","id":"p-missing","type":"tool","tool":"task","callID":"call-missing","state":{"status":"completed","metadata":{"parentSessionId":"oc-v3-root"},"output":"finished","time":{"start":303,"end":304}}}
+{"kind":"part","message_id":"m-tools","id":"p-mismatch","type":"tool","tool":"task","callID":"call-mismatch","state":{"status":"completed","metadata":{"sessionId":"oc-v3-other","parentSessionId":"oc-v3-root"},"output":"finished","time":{"start":305,"end":306}}}
+{"kind":"part","message_id":"m-tools","id":"p-bg","type":"tool","tool":"task","callID":"call-bg","state":{"status":"completed","metadata":{"background":true},"output":"finished","time":{"start":307,"end":308}}}
+{"kind":"part","message_id":"m-tools","id":"p-result-ok","type":"tool","tool":"task","callID":"call-result-ok","state":{"status":"completed","metadata":{"sessionId":"oc-v3-child-result"},"output":"<task id=\"oc-v3-child-result\" state=\"completed\">done</task>","time":{"start":309,"end":310}}}
+{"kind":"part","message_id":"m-tools","id":"p-result-error","type":"tool","tool":"task","callID":"call-result-error","state":{"status":"completed","metadata":{"sessionId":"oc-v3-child-error"},"output":"<task id=\"oc-v3-child-error\" state=\"error\">failed</task>","time":{"start":311,"end":312}}}
+{"kind":"part","message_id":"m-tools","id":"p-foreground","type":"tool","tool":"task","callID":"call-foreground","state":{"status":"completed","output":"finished","time":{"start":313,"end":314}}}
+{"kind":"part","message_id":"m-tools","id":"p-subtask","type":"subtask","agent":"worker","description":"delegated"}

@@ -2,11 +2,11 @@
 
 这些 spec 是**有界任务分界与验收标准**,不是"粘贴进新会话"的文本。工作流:
 
-主 agent 提供有界 spec → pi-wsl 的 `pi_task` 按 spec 实现 → 独立 `pi_review`
-只读审查(范围有界、证据有界、无越界修改)→ 主 agent 汇总验收。
+主 agent 提供有界 spec → 独立 Luna worker 按 spec 实现 → 独立 Luna reviewer
+只读审查（范围有界、证据有界、无越界修改）→ 主 agent 汇总验收。
 
-不需要启动 Codex 子代理,也不需要新建会话;每个 spec 自包含仓库事实与必读文件,
-执行者无需额外上下文。
+worker 与 reviewer 使用内部子代理，不新建用户可见会话；每个 spec 自包含仓库事实与
+必读文件，执行者无需额外上下文。
 
 ## 后端演进(核心先做,协议优先)
 
@@ -28,7 +28,8 @@
 5. `backend-evolution/04-provider-freshness-refresh.md` — **下一阶段 bounded spec
    (不立即实现)**:按证据时效逐 provider 刷新 parser/schema/protocol 映射——DSH
    alpha.5、OpenClaw current SQLite、Pi v3/0.84.4、Codex 0.153.0 与 Claude
-   Code 2.1.259 与 OpenCode 1.18.27 已刷新完成(2026-09-03);剩余 Hermes
+   Code 2.1.259 已刷新完成(2026-09-03)，OpenCode 1.18.29 已刷新完成
+   (2026-09-08);剩余 Hermes
    remote HEAD;每个 provider 单独决策/fixture/真实数据/提交,保持核心
    Work Graph provider-native v3 mapping 优先级。
 

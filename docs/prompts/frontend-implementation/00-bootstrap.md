@@ -4,8 +4,8 @@
 仓库:AgentSession——本地优先、跨 7 个 provider 的 AI 编码会话查看器。Node ESM、
 零运行时依赖、SSR + 原生 JS;服务器 127.0.0.1:3456。
 
-工作流(主 agent 分派):主 agent 提供本有界 spec;由 pi-wsl `pi_task` 实现;
-完成后由独立 `pi_review` 只读审查;主 agent 汇总验收。不需要新开会话或在其他会话粘贴。
+工作流(主 agent 分派):主 agent 提供本有界 spec;由独立 Luna worker 实现;
+完成后由另一个 Luna reviewer 只读审查;主 agent 汇总验收。不新建用户可见会话。
 执行前先读 AGENTS.md 与对应阶段 prompt。
 
 信息设计蓝图:docs/design/ui-v2.md(逐节读透;§4.1–§4.9 是页面信息与层级,

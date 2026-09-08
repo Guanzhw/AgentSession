@@ -269,6 +269,7 @@ test("SQLite session documents preserve parsed parts, todos, and viewer metadata
         time_archived INTEGER
       );
       CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT);
+      CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT);
       CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, data TEXT);
       CREATE TABLE todo (
         session_id TEXT, content TEXT, status TEXT, priority TEXT,
@@ -279,6 +280,8 @@ test("SQLite session documents preserve parsed parts, todos, and viewer metadata
       .run("sqlite-document", "sqlite-document", "SQLite source title", documentTemp, 1000, 2000);
     db.prepare("INSERT INTO message VALUES (?, ?, ?)")
       .run("sqlite-message", "sqlite-document", JSON.stringify({ role: "assistant", time: { created: 1500 } }));
+    db.prepare("INSERT INTO session_message VALUES (?, ?, ?)")
+      .run("sqlite-message-update", "sqlite-document", JSON.stringify({ type: "message.updated.1", messageId: "sqlite-message" }));
     db.prepare("INSERT INTO part VALUES (?, ?, ?, ?)")
       .run("sqlite-part", "sqlite-message", "sqlite-document", JSON.stringify({ type: "text", text: "SQLite body" }));
     db.prepare("INSERT INTO part VALUES (?, ?, ?, ?)")
@@ -299,6 +302,7 @@ test("SQLite session documents preserve parsed parts, todos, and viewer metadata
     assert.equal(document.apiSession.title, "Viewer SQLite title");
     assert.equal(document.exportSession.title, "Viewer SQLite title");
     assert.equal(document.messages[0].data.role, "assistant");
+    assert.equal(document.messages.length, 1, "session_message updates are not canonical request messages");
     assert.equal(document.partsByMessage.get("sqlite-message")[0].data.text, "SQLite body");
     assert.equal(document.apiMessages[0].parts[0].text, "SQLite body");
     assert.equal(document.exportMessages[0].parts[0].text, "SQLite body");

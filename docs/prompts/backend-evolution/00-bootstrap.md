@@ -5,9 +5,9 @@
 OpenClaw/Hermes/Pi/DeepSeek Harness)的 AI 编码会话查看器。Node ESM、零运行时依赖、
 SSR + 原生 JS;服务器在 127.0.0.1:3456。
 
-工作流(主 agent 分派):主 agent 提供本有界 spec;由 pi-wsl `pi_task` 实现;
-完成后由独立 `pi_review` 只读审查(范围有界、证据有界、无越界修改);主 agent 汇总验收。
-执行者不需要新建会话或把文本粘贴到其他会话。
+工作流(主 agent 分派):主 agent 提供本有界 spec;由独立 Luna worker 实现;
+完成后由另一个 Luna reviewer 只读审查(范围有界、证据有界、无越界修改);主 agent
+汇总验收。内部子代理不需要新建用户可见会话或把文本粘贴到其他会话。
 
 执行前先读:
 1. AGENTS.md —— 不变量(provider 数据只读、证据有界、决策生命周期)与验证矩阵,全部遵守;

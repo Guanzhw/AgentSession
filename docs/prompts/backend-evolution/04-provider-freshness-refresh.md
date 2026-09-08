@@ -76,24 +76,25 @@ verified-at、版本/commit、官方来源链接与样本格式。
    2.1.259 transcript。测试新增 4 个 focused 回归；fixture 为
    source-derived bounded synthetic fixture，非 live capture。决策记录见
    `.agents/decisions/implemented/2026-09-03-claude-code-current-compatibility.md`。
-6. **OpenCode 1.18.27** — npm `opencode-ai` latest 1.18.27；本机安装
-   1.17.11(Windows)。官方 release tag `v1.18.27` 为
-   `4b7e19e315cca414121ba1d61523fef74bb3ae8b`，官方源码 HEAD 为
-   `b578b7261fc9ec4917fe272df5cc4bd8a056cd5d`，二者证据分开记录。官方
+6. **OpenCode 1.18.29** — npm `opencode-ai` latest 1.18.29；本机安装
+   1.17.11(Windows)。官方 release tag `v1.18.29` 为
+   `16747470f976aca3d362ad730bcd3fe82ecc2c9a`，官方源码 HEAD 为
+   `ecbc6ccac85b3e8087b6445e584318419b9e2b34`；1.18.27→1.18.29 的相关
+   session/tool schema 无变化。官方
    schema 保留 `message`/`part` 投影，并记录 `todo`、task subtask/compaction
    part 与 task 工具的 background/job 状态；适配器已补 todo Task、
    subtask/compaction 事件和 background 状态。真实本机库只读快照为 131
    sessions/73 parent links/182 todos/2,968 messages/13,091 parts，context
    epoch/input 均为 0；回归使用 bounded synthetic shape，不复制真实 body。
-   todo 没有独立 row id，Task identity 使用稳定字段 fingerprint，不把可重排
-   position 当作唯一身份；compaction tail 仅在对应 message 存在时建立 anchor。
+   todo source key 为 `(session_id, position)`，Task identity 保持 snapshot-local，
+   不从可变内容推导跨重排连续性；compaction tail 仅在对应 message存在时建立 anchor。
    官方 Todo status 文档值为 pending/in_progress/completed/cancelled，未知值
    显式跳过，不伪造状态。synthetic fixture 使用官方
    `CompactionPart(type/auto/overflow/tail_start_id)`、
    `SubtaskPart(type/prompt/description/agent/model/command)` 与 task
    `state(title/metadata/output)` 的 bounded keys，文件为
    `test/fixtures/opencode-current-v1.18.27-synthetic.jsonl`，非 live capture；
-   最终 focused OpenCode/SQLite 回归为 3/3，完整 `npm test` 为 369/369。
+   当前 native-v3 focused 回归为 7/7，完整 `npm test` 为 467/467。
 7. **Hermes Agent v0.21.0 / v2026.8.31** — ✅ **已完成（2026-09-03）**。
    本机安装/本地源码为 v0.19.1 (`840fb55a8aaeb69bfcd6f34a80e57f9a5bcd44ce`)；
    官方 annotated release tag object 为
@@ -129,6 +130,6 @@ verified-at、版本/commit、官方来源链接与样本格式。
   (verified-at/版本/来源/样本),同步 README.md 与 README.en.md 的
   provider 表与兼容段。
 
-完成动作:每个 provider 完成后独立 pi_review 只读审查(范围/证据有界);
+完成动作:每个 provider 完成后由独立 Luna reviewer 只读审查(范围/证据有界);
 主 agent 汇总验收;git diff --check + npm run check:governance。
 ```
