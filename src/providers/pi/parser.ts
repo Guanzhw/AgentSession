@@ -144,9 +144,26 @@ export function piRecordsToMessages(records: Row[], sessionId: string): Message[
           tokens: piUsageToTokens(source.usage),
           metadata: {
             model: source.model || null,
+            responseId: typeof source.responseId === "string" && source.responseId.trim() ? source.responseId.trim() : null,
+            responseModel: typeof source.responseModel === "string" && source.responseModel.trim() ? source.responseModel.trim() : null,
+            providerThinkingLevel: typeof source.providerThinkingLevel === "string" && source.providerThinkingLevel.trim()
+              ? source.providerThinkingLevel.trim()
+              : null,
             provider: source.provider || null,
             api: source.api || null,
             stopReason: source.stopReason || null,
+            // Preserve only the bounded presence/terminal facts. A provider
+            // deferred handle, when present, is intentionally not exposed.
+            deferred: source.deferred === false
+              ? false
+              : source.deferred === true
+                || (source.deferred !== undefined && source.deferred !== null)
+                || source.stopReason === "deferred"
+                ? true
+                : null,
+            deferredTerminal: source.stopReason === "deferred"
+              ? true
+              : null,
             errorMessage: source.errorMessage || null,
             turnId,
             provenance: "session"

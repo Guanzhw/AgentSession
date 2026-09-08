@@ -22,8 +22,9 @@ import {
   piUsageToTokens,
   piRecordsToMessages
 } from "./parser.js";
-import { buildPiSessionProtocol } from "./protocol.js";
+import { buildPiSessionProtocol, buildPiSessionProtocolV3 } from "./protocol.js";
 import { finalizeSessionProtocol, protocolRevision, type SessionBranch } from "../shared/session-protocol.js";
+import { finalizeSessionProtocolV3 } from "../shared/session-protocol-v3.js";
 import { buildPiRuntimeEnvironment } from "./runtime-environment.js";
 
 function getPiDir() {
@@ -89,14 +90,20 @@ const piProtocolCapabilities = {
   branches: { support: "partial" as const, provenance: "derived" as const, details: "active in-file branch and optional parentSession lineage" }
 };
 
-function piBranchTopology(session: any, records: Array<Record<string, any>>): SessionBranch[] {
-  const head = [...records].reverse().find((record) => typeof record.id === "string" && record.id)?.id || null;
+function piBranchTopology(session: any, records: Array<Record<string, any>>, events: Array<Record<string, any>>): SessionBranch[] {
+  const head = [...records].reverse().find((record) => typeof record.id === "string" && record.id) || null;
+  const sourceId = head?.type === "message" && head.message?.role === "toolResult"
+    ? head.message.toolCallId
+    : head?.id;
+  const headEventId = typeof sourceId === "string" && sourceId
+    ? events.find((event) => event?.provenance?.sourceId === sourceId)?.id || null
+    : null;
   const parentId = typeof session.parentId === "string" && session.parentId ? session.parentId : null;
   return [{
     id: `branch:${String(session.id)}`,
     parentBranchId: parentId ? `branch:${parentId}` : null,
     forkEventId: null,
-    headEventId: head,
+    headEventId,
     selected: true,
     provenance: {
       fidelity: "derived",
@@ -106,8 +113,7 @@ function piBranchTopology(session: any, records: Array<Record<string, any>>): Se
   }];
 }
 
-function buildPiSessionProtocolFor(sessionId: string) {
-  const entry = sessionFiles.get(sessionId);
+function finalizedPiV2(entry: ReturnType<typeof sessionFiles.get>) {
   if (!entry) return null;
   const protocol = buildPiSessionProtocol({
     session: entry.session,
@@ -116,13 +122,29 @@ function buildPiSessionProtocolFor(sessionId: string) {
   });
   return finalizeSessionProtocol({
     ...protocol,
-    branches: piBranchTopology(entry.session, entry.records)
+    branches: piBranchTopology(entry.session, entry.records, protocol.events)
   }, {
     provider: "pi",
     session: entry.session,
     capabilities: piProtocolCapabilities,
     revision: protocolRevision(sessionFiles.getStatsRevision())
   });
+}
+
+function buildPiSessionProtocolFor(sessionId: string) {
+  return finalizedPiV2(sessionFiles.get(sessionId));
+}
+
+function buildPiSessionProtocolV3For(sessionId: string) {
+  const entry = sessionFiles.get(sessionId);
+  if (!entry) return null;
+  const base = finalizedPiV2(entry);
+  if (!base) return null;
+  return finalizeSessionProtocolV3(buildPiSessionProtocolV3({
+    session: entry.session,
+    records: entry.records,
+    messages: entry.messages
+  }, base));
 }
 
 function generatePiViews(sessionId: string) {
@@ -201,6 +223,10 @@ const pi = {
 
   getSessionProtocol(sessionId) {
     return buildPiSessionProtocolFor(sessionId);
+  },
+
+  getSessionProtocolV3(sessionId) {
+    return buildPiSessionProtocolV3For(sessionId);
   },
 
   getRuntimeEnvironment(sessionId) {

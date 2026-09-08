@@ -46,6 +46,16 @@ test("Pi v3 current format: custom-role messages, recorded retainedTail/fromHook
   assert.equal(custom2.metadata.legacyRole, null);
   assert.equal(messages.some((m) => m.id === "hidden0001"), false);
   assert.equal(messages.some((m) => m.id === "hidden0002"), false);
+  const recordedAssistant = messages.find((m) => m.id === "asst0002");
+  assert.equal(recordedAssistant.metadata.responseId, "resp_2");
+  assert.equal(recordedAssistant.metadata.responseModel, null);
+  assert.equal(recordedAssistant.metadata.providerThinkingLevel, null);
+  assert.equal(recordedAssistant.metadata.deferred, null);
+  const assistant = messages.find((m) => m.id === "asst0003");
+  assert.equal(assistant.metadata.responseId, null);
+  assert.equal(assistant.metadata.responseModel, null);
+  assert.equal(assistant.metadata.providerThinkingLevel, null);
+  assert.equal(assistant.metadata.deferred, null);
 
   // Compaction evidence: retainedTail recorded, summary view kept.
   const compact = messages.find((m) => m.id === "compact1");

@@ -25,25 +25,18 @@ verified-at、版本/commit、官方来源链接与样本格式。
    与 alpha.5 官方快照 fixture/回归。限制：credentialed live run 不可用
    （key auth 失败），未产生新的 live 证据（已显式记录，不当作成功）。
 2. **OpenClaw current SQLite** — ✅ **已完成（2026-09-03）**。官方 HEAD `f92a12c5…` 与 release `v2026.8.2` 的 agent schema SQL 字节一致（sha256 `54fa65dc…`，agent schema 19；最新 main `2d9796d6…` 仅 package.json 元数据差异）。实现：`src/providers/openclaw/sqlite-store.ts` 只读快照读取 `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite`（`session_nodes` canonical key、`session_windows` 代数、`transcript_events` 原始事件），复用现有 JSONL record parser；legacy JSONL 保留可读并按 canonical session 与 SQLite 去重（SQLite 恰好一次）；诊断区分 current/legacy-only/unsupported/unreadable。决策记录：`.agents/decisions/implemented/2026-09-03-openclaw-current-sqlite-coexistence.md`。限制：本机安装 2026.7.1-2 为 pre-flip、无当前格式数据目录，真实本地数据验证未完成（显式记录）。
-3. **Pi current v3 / 0.84.4** — ✅ **已完成（2026-09-03）**。官方当前包/源为
-   @earendil-works/pi-coding-agent → npm 0.84.4（2026-08-28 发布，tag
-   `b79e4cc8…`）与 https://github.com/earendil-works/pi-mono（官方
-   `docs/session-format.md` 引用；`earendil-works/pi` 原仓库 URL 可解析到同一
-   HEAD），HEAD `4e69b0c28060f0f02fbe38bfa7c21a2e2eb25057`（2026-09-02）。
-   当前安装 0.82.1（本机 547 个真实文件全部 version 3）。v3 = v2 + `message.role
-   "hookMessage"` → `"custom"` 重命名；其余 entry 类型（custom/custom_message/
-   model_change/thinking_level_change/compaction/branch_summary/label/
-   session_info）与 v2 相同。实现：reader 映射 custom 角色 message 条目
-   （display 门控，与 custom_message 一致）、protocol 记录 retainedTail/
-   fromHook 证据（不展开 retainedTail 为独立消息）、token 总量纳入已记录
-   toolResult/compaction/branch_summary usage（对齐官方 billed session total
-   `getSessionStats`/`usage-totals.js`：全部记录条目，含 abandoned/history
-   分支，retainedTail 副本不重复计）。
-   旧 @mariozechner/badlogic 信息只能标 legacy，不得作为最新源。限制：本机
-   数据无 role custom/retainedTail/toolResult-usage 记录，官方源码/文档 + 新
-   fixture 覆盖（显式记录）；49 个嵌套 run-N/session.jsonl 为 pi-subagents
-   产物（parentSession null，不虚构 lineage）。决策记录：
-   `.agents/decisions/implemented/2026-09-03-pi-v3-current-compatibility.md`。
+3. **Pi current v3 / 0.85.1** — ✅ **已完成（2026-09-08）**。官方当前包为
+   @earendil-works/pi-coding-agent npm 0.85.1，package tag/gitHead
+   `d981de12…`；独立官方源码 HEAD 为 `f53ac113…`。当前安装 0.80.10，暂无
+   live 0.85.1 transcript。官方 session format 仍为 v3；reader 保留 finalized
+   v2 facts，并按 canonical assistant request 发出 bounded Usage，按可读的
+   `branch_summary`/compaction summary 发出 Context version/transformation。
+   当前官方 context 边界是 `firstKeptEntryId`；`retainedTail` 降为
+   historical/harness extension evidence，不作为当前标准字段。provider
+   metadata 仅把 `stopReason=deferred` 标为 terminal，官方 `pending` 保持
+   非终态。旧 0.84.4 证据保留在独立历史决策记录中；49 个嵌套
+   `run-N/session.jsonl` 为 pi-subagents 产物（`parentSession` null，不虚构
+   lineage）。决策记录：`.agents/decisions/implemented/2026-09-08-pi-native-v3.md`。
 4. **Codex CLI 0.152.1 → 0.153.0** — ✅ **已完成（2026-09-03）**。本机
    `codex --version` 为 0.152.1；官方 `openai/codex` release
    `rust-v0.153.0`（release tag peeled commit `41e22fee981a63b3698df7ed36bad393cda24715`）与

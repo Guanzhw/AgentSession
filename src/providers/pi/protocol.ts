@@ -1,4 +1,5 @@
 import type { Message, RawSession } from "../interface.js";
+import { activePiEntries } from "./parser.js";
 import {
   compactionEnvelope,
   compactionSummaryArtifact,
@@ -9,6 +10,17 @@ import {
   sessionRelationship,
   type SessionProtocol
 } from "../shared/session-protocol.js";
+import {
+  contextTransformation,
+  contextVersion,
+  protocolCoverage,
+  protocolDomainCoverage,
+  usageRecord,
+  type ContextTransformation,
+  type ContextVersion,
+  type SessionProtocolV3,
+  type UsageRecord
+} from "../shared/session-protocol-v3.js";
 
 type Row = Record<string, any>;
 
@@ -27,6 +39,62 @@ function entryTimestamp(entry: Row): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   const parsed = typeof value === "string" ? new Date(value).getTime() : NaN;
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function nonNegativeInteger(value: unknown): number {
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(number) && number >= 0 ? number : 0;
+}
+
+function optionalNonNegativeInteger(value: unknown): number | null {
+  if (value === undefined || value === null || value === "") return null;
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(number) && number >= 0 ? number : null;
+}
+
+function piRequestTokens(usage: unknown) {
+  if (!usage || typeof usage !== "object") return null;
+  const value = usage as Row;
+  const input = nonNegativeInteger(value.input);
+  const cacheRead = nonNegativeInteger(value.cacheRead);
+  const cacheWrite = nonNegativeInteger(value.cacheWrite);
+  const rawOutput = nonNegativeInteger(value.output);
+  const reasoning = Math.min(rawOutput, nonNegativeInteger(value.reasoning));
+  const output = rawOutput - reasoning;
+  const normalizedTotal = input + cacheRead + cacheWrite + output + reasoning;
+  const explicitTotal = optionalNonNegativeInteger(value.totalTokens);
+  return {
+    input,
+    cacheRead,
+    cacheWrite,
+    output,
+    reasoning,
+    total: explicitTotal === null
+      ? (value.totalTokens === undefined || value.totalTokens === null || value.totalTokens === ""
+        ? normalizedTotal
+        : null)
+      : explicitTotal === normalizedTotal ? explicitTotal : null
+  };
+}
+
+function isDeferredAssistant(source: Row): boolean {
+  return source.stopReason === "deferred"
+    || source.stopReason === "pending"
+    || source.deferred === true
+    || (source.deferred !== undefined && source.deferred !== null && source.deferred !== false);
+}
+
+function isZeroRequest(tokens: ReturnType<typeof piRequestTokens>): boolean {
+  return Boolean(tokens
+    && tokens.input === 0
+    && tokens.cacheRead === 0
+    && tokens.cacheWrite === 0
+    && tokens.output === 0
+    && tokens.reasoning === 0);
 }
 
 /**
@@ -197,5 +265,164 @@ export function buildPiSessionProtocol(input: PiProtocolInput): SessionProtocol 
     tasks: [],
     agentRuns: [],
     contextArtifacts: artifacts
+  };
+}
+
+/** Build Pi-native v3 facts over the same finalized v2 snapshot. */
+export function buildPiSessionProtocolV3(
+  input: PiProtocolInput,
+  base: SessionProtocol
+): SessionProtocolV3 {
+  const sessionId = String(input.session.id);
+  const ownRef = { provider: "pi" as const, sessionId };
+  const eventsBySourceId = new Map(
+    base.events
+      .filter((event) => event.kind === "message.assistant")
+      .map((event) => [event.provenance.sourceId, event])
+  );
+  const usageRecords: UsageRecord[] = [];
+  const requestIndexByIdentity = new Map<string, number>();
+
+  // Pi stores one assistant message entry per provider request, including
+  // entries on abandoned/history branches. Embedded retainedTail messages are
+  // not session entries and therefore never reach this loop.
+  for (const entry of input.records) {
+    if (entry.type !== "message" || entry.message?.role !== "assistant") continue;
+    const source = entry.message as Row;
+    const tokens = piRequestTokens(source.usage);
+    if (!tokens) continue;
+    if (isZeroRequest(tokens) && isDeferredAssistant(source)) continue;
+
+    const responseId = nonEmptyString(source.responseId);
+    const entryId = nonEmptyString(entry.id);
+    const requestIdentity = responseId ? `response:${responseId}` : entryId ? `entry:${entryId}` : null;
+    if (!requestIdentity) continue;
+    const event = eventsBySourceId.get(String(entry.id)) || null;
+    const record = usageRecord({
+      id: `usage:${sessionId}:request:${requestIdentity}`,
+      scope: "request",
+      sessionRef: ownRef,
+      timestamp: entryTimestamp(entry),
+      model: nonEmptyString(source.responseModel) || nonEmptyString(source.model),
+      runId: null,
+      eventId: event?.id || null,
+      turnId: event?.turnId || null,
+      tokens: {
+        input: tokens.input,
+        cacheRead: tokens.cacheRead,
+        cacheWrite: tokens.cacheWrite,
+        output: tokens.output,
+        reasoning: tokens.reasoning,
+        total: tokens.total
+      },
+      contextOriginSlices: [],
+      provenance: {
+        fidelity: "recorded",
+        sourceType: "pi.entry:message.assistant.usage",
+        sourceId: String(entry.id)
+      }
+    });
+    const existingIndex = requestIndexByIdentity.get(requestIdentity);
+    if (existingIndex !== undefined) {
+      // A response may appear on more than one stored branch. Prefer the
+      // occurrence that belongs to the finalized active conversation, since
+      // only that occurrence has a canonical event/turn anchor.
+      if (!usageRecords[existingIndex].eventId && record.eventId) usageRecords[existingIndex] = record;
+      continue;
+    }
+    requestIndexByIdentity.set(requestIdentity, usageRecords.length);
+    usageRecords.push(record);
+  }
+
+  // Only active-branch summaries with readable text prove a result context.
+  // The v2 artifacts remain the metadata-only source of the result; no entry
+  // id is treated as a parent context version and retainedTail is count-only.
+  const activeSummaryEntries = activePiEntries(input.records)
+    .filter((entry) => (entry.type === "compaction" || entry.type === "branch_summary")
+      && typeof entry.summary === "string" && entry.summary.trim());
+  const artifactBySourceId = new Map(
+    base.contextArtifacts
+      .map((artifact) => [artifact.provenance.sourceId, artifact])
+  );
+  const contextVersions: ContextVersion[] = [];
+  const contextTransformations: ContextTransformation[] = [];
+  for (const entry of activeSummaryEntries) {
+    const sourceId = String(entry.id);
+    const artifact = artifactBySourceId.get(sourceId) || null;
+    const event = base.events.find((candidate) => (
+      candidate.kind === "context.compaction" && candidate.provenance.sourceId === sourceId
+    )) || null;
+    if (!artifact || !event) continue;
+    const versionId = `context-version:pi:${sourceId}`;
+    contextVersions.push(contextVersion({
+      id: versionId,
+      sessionId,
+      sequence: event.sequence,
+      parentVersionIds: [],
+      artifactIds: [artifact.id],
+      createdAt: entryTimestamp(entry),
+      provenance: {
+        fidelity: "recorded",
+        sourceType: `pi.entry:${String(entry.type)}`,
+        sourceId
+      }
+    }));
+    contextTransformations.push(contextTransformation({
+      id: `context-transformation:pi:${sourceId}`,
+      sessionId,
+      kind: "compaction",
+      sourceVersionIds: [],
+      resultVersionId: versionId,
+      sourceArtifactIds: [],
+      resultArtifactIds: [artifact.id],
+      eventId: event.id,
+      runId: null,
+      turnId: null,
+      timestamp: entryTimestamp(entry),
+      provenance: {
+        fidelity: "recorded",
+        sourceType: `pi.entry:${String(entry.type)}`,
+        sourceId
+      }
+    }));
+  }
+
+  const hasCompactionOperation = input.records.some((entry) => (
+    entry.type === "compaction" || entry.type === "branch_summary"
+  ));
+  const contextState = contextVersions.length > 0
+    ? "observed" as const
+    : hasCompactionOperation
+      ? "unknown" as const
+      : "not-observed" as const;
+
+  return {
+    sessionId,
+    version: 3,
+    session: base.session,
+    events: base.events,
+    relationships: base.relationships,
+    tasks: base.tasks,
+    agentRuns: base.agentRuns,
+    contextArtifacts: base.contextArtifacts,
+    branches: base.branches,
+    revision: base.revision,
+    goals: [],
+    actors: [],
+    coordination: [],
+    contextVersions,
+    contextTransformations,
+    usageRecords,
+    coverage: protocolCoverage({
+      work: protocolDomainCoverage("not-observed", "Pi session entries do not record goals or tasks"),
+      execution: protocolDomainCoverage("not-observed", "Pi session entries do not record agent runs"),
+      coordination: protocolDomainCoverage("not-observed", "Pi session entries do not record coordination"),
+      context: protocolDomainCoverage(contextState, contextState === "observed"
+        ? "active Pi compaction and branch_summary summaries produce context results"
+        : hasCompactionOperation
+          ? "Pi compaction operation exists without an active readable summary result"
+          : "no Pi compaction or branch_summary evidence"),
+      usage: protocolDomainCoverage(usageRecords.length > 0 ? "observed" : "not-observed", "one request record per distinct Pi assistant response")
+    })
   };
 }

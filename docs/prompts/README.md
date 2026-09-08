@@ -12,14 +12,13 @@ worker 与 reviewer 使用内部子代理，不新建用户可见会话；每个
 
 1. `backend-evolution/00-bootstrap.md` — 引导与执行边界(必读)
 2. `backend-evolution/01-usage-origin-slices.md` — 任务 A(核心):bounded usage-origin 记账。
-   当前 HEAD 事实(2026-09-03):**投影侧已完成**——Execution `usage.origins` 有界聚合
+   当前 HEAD 事实:**投影侧已完成**——Execution `usage.origins` 有界聚合
    (每组件 total/classified/unclassified/complete + inspectedRecords/
    recordsTruncated/slicesTruncated)与 coverage 语义已落地,决策记录
    `implemented/2026-09-03-bounded-usage-origin-accounting.md`;对 2026-09-03
-   snapshot(当下适配器/fixtures/本地已验证快照)的七 provider 审计未发现精确来源
-   切片;DSH alpha.5、OpenClaw 最新 SQLite、Pi 0.84.4 已于 2026-09-03 完成
-   refresh(官方 snapshot/源码/真实数据确认无 origin-slice 记录,credentialed live
-   run 仍不可用),其余上游新版本尚未 refresh,其 slice 状态为 pending/unknown;
+   snapshot(当时适配器/fixtures/本地已验证快照)的七 provider 审计未发现精确来源
+   切片;其后各 provider freshness 已持续更新,Pi 0.85.1 于 2026-09-08 再验证仍无
+   origin-slice 记录;provider 新版本只在各自 freshness 证据覆盖后更新结论;
    provider-native origin 映射保持 evidence-pending(不发明三分)
 3. `backend-evolution/02-harness-environment-evidence.md` — 任务 B(后续可选增强):
    环境清单 + 环境重载。排在核心 provider/ownership 工作之后,证据优先,无证据不落代码
@@ -27,11 +26,13 @@ worker 与 reviewer 使用内部子代理，不新建用户可见会话；每个
    会话 ↔ git commit 关联。当前只评审、不实现;决策记录保持 proposed
 5. `backend-evolution/04-provider-freshness-refresh.md` — **下一阶段 bounded spec
    (不立即实现)**:按证据时效逐 provider 刷新 parser/schema/protocol 映射——DSH
-   alpha.5、OpenClaw current SQLite、Pi v3/0.84.4、Codex 0.153.0 与 Claude
-   Code 2.1.263 已刷新完成(2026-09-08)，OpenCode 1.18.29 已刷新完成
-   (2026-09-08);剩余 Hermes
-   remote HEAD;每个 provider 单独决策/fixture/真实数据/提交,保持核心
+   alpha.5、OpenClaw current SQLite、Pi v3/0.85.1、Codex 0.153.0、Claude
+   Code 2.1.263、OpenCode 1.18.29 与 Hermes remote HEAD 均已刷新完成
+   (2026-09-08);每个 provider 单独决策/fixture/真实数据/提交,保持核心
    Work Graph provider-native v3 mapping 优先级。
+6. `backend-evolution/08-pi-native-v3.md` — ✅ **已完成（2026-09-08）**：Pi
+   native Session Protocol v3；request-scoped Usage、context result
+   mappings、branch-head canonicalization 与 `pending` 非 terminal 语义。
 
 建议顺序:A 的投影部分已落地;剩余的 provider-native origin 映射等待真实证据;B 与 C
 相互独立,均在核心工作(usage-origin 记账 + provider-native v3 映射)落地后再评估。

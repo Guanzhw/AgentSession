@@ -291,11 +291,27 @@ test("Pi file cache preserves active-branch sessions and the last good transcrip
     assert.ok(pi.getSessionMetrics("019f7b00-0000-7000-8000-000000000001")?.totals.steps);
     assert.equal(pi.getSystemPrompts("019f7b00-0000-7000-8000-000000000001")?.mode, "pi-resolved");
 
-    writeFileSync(sessionFile, `${fixture}{"type":"message","id":`);
+    const toolTail = [
+      { type: "message", id: "asst-head", parentId: "asst0003", timestamp: recentFixtureTime(10), message: { role: "assistant", content: [{ type: "toolCall", id: "call-head", name: "read", arguments: {} }], usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 } } },
+      { type: "message", id: "result-head", parentId: "asst-head", timestamp: recentFixtureTime(11), message: { role: "toolResult", toolCallId: "call-head", toolName: "read", content: "ok", isError: false } }
+    ];
+    const fixtureWithToolTail = `${fixture.trimEnd()}\n${toolTail.map((record) => JSON.stringify(record)).join("\n")}\n`;
+    writeFileSync(sessionFile, fixtureWithToolTail);
+    await sleep(1050);
+    await collect(pi.scan());
+    const v2 = pi.getSessionProtocol("019f7b00-0000-7000-8000-000000000001");
+    const v3 = pi.getSessionProtocolV3("019f7b00-0000-7000-8000-000000000001");
+    assert.equal(v2?.branches?.[0]?.headEventId, "event:call-head");
+    assert.equal(v2?.events.some((event) => event.id === "event:call-head"), true);
+    assert.equal(v2?.validation?.ok, true);
+    assert.equal(v3?.branches?.[0]?.headEventId, "event:call-head");
+    assert.equal(v3?.validation?.ok, true);
+
+    writeFileSync(sessionFile, `${fixtureWithToolTail}{"type":"message","id":`);
     await sleep(1050);
     assert.equal(pi.getSession("019f7b00-0000-7000-8000-000000000001")?.title, "Pi provider fixture");
 
-    writeFileSync(sessionFile, fixture.replace(
+    writeFileSync(sessionFile, fixtureWithToolTail.replace(
       '"name":"Pi provider fixture"',
       '"name":"Pi provider refreshed fixture"'
     ));
