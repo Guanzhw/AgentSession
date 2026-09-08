@@ -868,10 +868,9 @@ function dshEventId(event: DshRecord): string {
 function dshGoalStatus(phase: unknown): Goal["status"] {
   switch (phase) {
     case "active": return "active";
+    case "paused": return "paused";
     case "blocked": return "blocked";
     case "complete": return "completed";
-    // A paused goal has no equivalent shared status. Its exact phase remains
-    // in the recorded v2 event rather than being presented as queued.
     default: return "unknown";
   }
 }

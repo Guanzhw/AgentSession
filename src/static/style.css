@@ -5373,6 +5373,7 @@ pre code.hljs {
 .runtime-session-facts dd { margin: 4px 0 0; overflow-wrap: anywhere; }
 .runtime-status { font-weight: 600; }
 .runtime-status-running { color: var(--accent-color); }
+.runtime-status-paused { color: var(--text-muted); }
 .runtime-status-completed { color: var(--success-text); }
 .runtime-status-failed,
 .runtime-status-cancelled,
@@ -5583,6 +5584,7 @@ pre code.hljs {
 .runtime-origin-list a { overflow-wrap: anywhere; }
 .runtime-task { border-left: 3px solid var(--border-color); }
 .runtime-status-border-running { border-left-color: var(--accent-color); }
+.runtime-status-border-paused { border-left-color: var(--text-muted); }
 .runtime-status-border-completed { border-left-color: var(--success-border); }
 .runtime-status-border-failed,
 .runtime-status-border-blocked { border-left-color: var(--danger-color, #ef4444); }

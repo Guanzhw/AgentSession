@@ -511,6 +511,7 @@ export const en = {
   "runtime.status_unknown": "unknown",
   "runtime.status_queued": "queued",
   "runtime.status_running": "running",
+  "runtime.status_paused": "paused",
   "runtime.status_waiting_input": "waiting for input",
   "runtime.status_blocked": "blocked",
   "runtime.status_completed": "completed",

@@ -114,6 +114,26 @@ test("DSH native v3 folds recorded goals, team facts, mailbox lifecycle, and wor
   ]);
 });
 
+test("DSH native v3 preserves a recorded paused goal phase", () => {
+  const sessionId = "dsh-v3-paused";
+  const records = [
+    header(sessionId),
+    event("goal/change", 1, {
+      kind: "goal/change", version: 1, operation: "create",
+      goal: { id: "goal-paused", revision: 1, objective: "Pause this", phase: "active", maxGoalRounds: 3 },
+      roundsStarted: 0, createdAt: 1001, updatedAt: 1001
+    }),
+    event("goal/change", 2, {
+      kind: "goal/change", version: 1, operation: "pause",
+      goal: { id: "goal-paused", revision: 2, objective: "Pause this", phase: "paused", maxGoalRounds: 3 },
+      roundsStarted: 0, createdAt: 1001, updatedAt: 1002
+    })
+  ];
+  const input = { session: extractDshMeta(records, sessionId), records, messages: [], children: [] };
+  const v3 = finalizeSessionProtocolV3(buildDshSessionProtocolV3(input, buildDshSessionProtocol(input)));
+  assert.equal(v3.goals.find((value) => value.id === "goal:goal-paused")?.status, "paused");
+});
+
 test("DSH native v3 emits compaction transformations only for readable summaries and preserves seed evidence", () => {
   const { input, v3 } = finalizedFixture();
   assert.equal(v3.session?.inheritedEventCount, 0);

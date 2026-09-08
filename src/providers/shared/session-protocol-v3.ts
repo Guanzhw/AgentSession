@@ -30,7 +30,7 @@ export interface ProtocolCoverage {
   usage: ProtocolDomainCoverage;
 }
 
-export type GoalStatus = "unknown" | "queued" | "active" | "blocked" | "completed" | "failed" | "cancelled";
+export type GoalStatus = "unknown" | "queued" | "active" | "paused" | "blocked" | "completed" | "failed" | "cancelled";
 
 export interface Goal {
   id: string;
@@ -184,7 +184,7 @@ export interface FinalizeSessionProtocolV3Options {
   freeze?: boolean;
 }
 
-const GOAL_STATUSES = new Set<GoalStatus>(["unknown", "queued", "active", "blocked", "completed", "failed", "cancelled"]);
+const GOAL_STATUSES = new Set<GoalStatus>(["unknown", "queued", "active", "paused", "blocked", "completed", "failed", "cancelled"]);
 const ACTOR_KINDS = new Set<ActorKind>(["human", "agent", "team", "system", "unknown"]);
 const COORDINATION_KINDS = new Set<CoordinationKind>([
   "spawn", "delegate", "follow-up", "message", "mailbox-delivery", "wait", "interrupt",

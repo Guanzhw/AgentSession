@@ -510,6 +510,7 @@ export const zh = {
   "runtime.status_unknown": "未知",
   "runtime.status_queued": "排队中",
   "runtime.status_running": "运行中",
+  "runtime.status_paused": "已暂停",
   "runtime.status_waiting_input": "等待输入",
   "runtime.status_blocked": "已阻塞",
   "runtime.status_completed": "已完成",

@@ -226,6 +226,19 @@ test("v3 factories normalize optional domains and preserve multi-origin input/ca
   }
 });
 
+test("GoalStatus accepts recorded paused state and rejects undeclared states", () => {
+  const paused = goal({ id: "paused", sessionId: "s", title: null, status: "paused", taskIds: [], timeCreated: null, timeUpdated: 1, provenance: recorded("fixture.goal", "paused") });
+  assert.equal(paused.status, "paused");
+
+  const invalid = v3Fixture();
+  invalid.goals = [paused];
+  invalid.coverage = { ...invalid.coverage, work: protocolDomainCoverage("observed") };
+  invalid.goals[0].status = "suspended";
+  const validation = validateSessionProtocolV3(invalid);
+  assert.ok(validation.errors.some((item) => item.code === "GOAL_STATUS_INVALID"));
+  assert.throws(() => goal({ id: "bad", sessionId: "s", title: null, status: "suspended", taskIds: [], timeCreated: null, timeUpdated: null, provenance: recorded("fixture.goal") }), /Invalid goal status/);
+});
+
 test("v3 validator enforces canonical usage ownership, slice bounds, lineage, and coverage", () => {
   const base = upgradeSessionProtocolV2(v2Fixture(), { freeze: false });
   base.usageRecords = [usageRecord({

@@ -50,8 +50,10 @@ session descriptor and revision) plus native v3 facts:
 
 - **Goals**: one Goal per recorded thread goal (`threadId`), description =
   recorded objective, status mapped `active → active`,
-  `completed/failed/cancelled → same`, `paused → unknown` (no protocol status
-  means "user-suspended" and semantics must not be invented); recorded
+  `completed/failed/cancelled → same`, `paused → unknown`. Codex records this
+  value as user suspension, so it remains a provider-owned semantic exception
+  even after the shared protocol added `paused` for providers that record a
+  goal lifecycle state; recorded
   timestamps in ms. No goal/task link is recorded; `taskIds` stays empty.
 - **Actors**: one agent actor per recorded agent path — the session's own path
   (recorded `session_meta.agent_path` first, then the agent-message recipient
@@ -118,10 +120,11 @@ session descriptor and revision) plus native v3 facts:
 
 Codex Work Graph domains switch from `unknown` to observed typed facts for goals,
 coordination, context lineage, and request usage while all v2 facts and the v2
-Runtime API remain unchanged. `paused` goals display as unknown status until a
-protocol status exists. Unmapped evidence (`list_agents`, encrypted task bodies,
-request context origins) stays explicit and uninvented. Other providers keep the
-truthful v2 upgrade path unchanged.
+Runtime API remain unchanged. Codex user-suspended goals display as unknown;
+the later shared goal-lifecycle `paused` decision does not change that mapping
+(see `2026-09-09-goal-paused-status.md`). Unmapped evidence (`list_agents`,
+encrypted task bodies, request context origins) stays explicit and uninvented.
+Other providers keep the truthful v2 upgrade path unchanged.
 
 ## Verification
 
@@ -210,4 +213,3 @@ The focused test passes 1/1 on the current WSL/POSIX environment.
 - The shared native v3 cache revision fix is recorded separately in
   `.agents/decisions/implemented/2026-09-03-session-protocol-v3-cache-revision.md`;
   the Codex provider-owned mapping in this record is unchanged by it.
-

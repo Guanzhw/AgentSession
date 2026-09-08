@@ -140,6 +140,14 @@ session-local identity, status, parent goal, owner actor, task membership,
 timestamps, and provenance. Goal parents must be acyclic and every referenced
 task/actor must exist locally.
 
+The shared `GoalStatus` includes `paused` alongside the existing queued,
+active, blocked, terminal, and unknown states. `paused` is a recorded
+non-terminal provider state: it does not imply blocked work, completion, or a
+new task/run transition. The addition is supported by independent DeepSeek
+Harness goal phases and OpenClaw `SessionGoal.status` evidence; other provider
+states remain provider-owned until a second source establishes shared
+semantics.
+
 Task and AgentRun retain the v2 separation:
 
 - Task is requested work and owns dependency/status/outcome semantics.

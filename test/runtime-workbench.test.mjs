@@ -173,6 +173,27 @@ test("Execution usage keeps incomplete evidence explicit without bounded project
   }
 });
 
+test("Work goal status renders the paused localization and neutral static state", () => {
+  const runtime = fixtureRuntime();
+  runtime.v3.goals = [{
+    id: "goal-paused", sessionId: "runtime-1", title: null, description: "Paused goal", status: "paused", taskIds: [],
+    parentGoalId: null, ownerActorId: null, timeCreated: 1000, timeUpdated: 1100, timeCompleted: null, provenance
+  }];
+  runtime.projections.work = projectWork(runtime.v3, { maxItems: 100 });
+  const previousLocale = getLocale();
+  try {
+    setLocale("en");
+    assert.match(renderRuntimeWorkbench(runtime, "fixture", "runtime-1"), /runtime-status-paused[^>]*>paused</);
+    setLocale("zh");
+    assert.match(renderRuntimeWorkbench(runtime, "fixture", "runtime-1"), /runtime-status-paused[^>]*>已暂停</);
+  } finally {
+    setLocale(previousLocale);
+  }
+  const style = readFileSync(path.join(process.cwd(), "src", "static", "style.css"), "utf8");
+  assert.match(style, /\.runtime-status-paused \{ color: var\(--text-muted\); \}/);
+  assert.match(style, /\.runtime-status-border-paused \{ border-left-color: var\(--text-muted\); \}/);
+});
+
 test("Events surface renders diagnostics and source-order table without the Work evidence lens", () => {
   const runtime = fixtureRuntime();
   runtime.protocol.events = [
