@@ -340,6 +340,19 @@ rows carry the complete event envelope. Validate the released envelope/storage
 codec and bounded payload facts consumed by AgentSession; do not copy the full
 provider payload schema into the adapter.
 
+The DSH adapter also exposes native Session Protocol v3 facts at the provider
+boundary. Keep goal revisions/tombstones, team membership/tasks/mailbox
+lifecycle, exact workflow run/child bindings, readable compaction results, and
+per-request usage provenance recorded-only. Leave context-origin slices and
+memory/experience/user-info/async domains empty or unknown unless a future
+released DSH event proves them. The v3 projection is additive over the
+finalized v2 snapshot; it must not replace the human append-origin transcript
+with model-surface replacement state. Replay `goal/change` transitions using
+the released alpha.2 rules; an invalid replay yields no normalized goal and a
+bounded Work diagnostic while preserving every raw event. Native v3 retains
+valid zero-token legacy assistant settlements even though existing aggregate
+token-stat selection keeps its historical behavior.
+
 If legacy SQLite persistence or another known backend is detected but unsupported,
 return an explicit storage diagnostic naming the detected and expected schema.
 Never silently treat durable data as an empty provider.

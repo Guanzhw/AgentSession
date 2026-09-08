@@ -3,7 +3,9 @@ import {
   dshContentText,
   dshHeader,
   dshInheritedEventCount,
+  dshNativeUsageRecords,
   dshOwnedEvents,
+  dshUsageRecords,
   dshUsageOf,
   dshSessionStatus,
   dshUsageToTokens,
@@ -26,6 +28,21 @@ import {
   type Task,
   type TaskStatus
 } from "../shared/session-protocol.js";
+import {
+  actor,
+  contextTransformation,
+  contextVersion,
+  coordinationObservation,
+  goal,
+  protocolCoverage,
+  protocolDomainCoverage,
+  usageRecord,
+  type Actor,
+  type CoordinationObservation,
+  type Goal,
+  type SessionProtocolV3,
+  type UsageRecord
+} from "../shared/session-protocol-v3.js";
 import { DSH_COMPATIBILITY_SNAPSHOT } from "./compatibility.js";
 
 export interface DshProtocolChild {
@@ -234,6 +251,20 @@ function commonProviderData(event: DshRecord) {
     providerData.teamId = firstString(data.teamId);
     providerData.messageId = firstString(data.messageId);
     providerData.targetId = firstString(data.targetId);
+  } else if (event.type === "goal/change") {
+    const operation = firstString(data.operation);
+    const snapshot = data.goal && typeof data.goal === "object" && !Array.isArray(data.goal) ? data.goal as DshRecord : {};
+    const cleared = data.cleared && typeof data.cleared === "object" && !Array.isArray(data.cleared) ? data.cleared as DshRecord : {};
+    providerData.version = asNumber(data.version);
+    providerData.operation = operation;
+    providerData.goalId = firstString(snapshot.id, cleared.id);
+    providerData.revision = asNumber(snapshot.revision ?? cleared.revision);
+    providerData.objective = firstString(snapshot.objective);
+    providerData.phase = firstString(snapshot.phase);
+    providerData.blockedReason = snapshot.blockedReason ?? null;
+    providerData.createdAt = asNumber(data.createdAt);
+    providerData.updatedAt = asNumber(data.updatedAt);
+    providerData.clearedAt = asNumber(data.clearedAt);
   }
   return providerData;
 }
@@ -818,4 +849,564 @@ export function buildDshSessionProtocol(input: DshProtocolInput): SessionProtoco
     revision: DSH_COMPATIBILITY_SNAPSHOT.tag,
     freeze: true
   });
+}
+
+type DshSessionRef = { provider: string; sessionId: string };
+
+function dshV3Provenance(event: DshRecord, sourceType = `dsh.session-event:${String(event.type)}`) {
+  return {
+    fidelity: "recorded" as const,
+    sourceType,
+    sourceId: String(event.seq)
+  };
+}
+
+function dshEventId(event: DshRecord): string {
+  return `event:dsh:${event.seq}`;
+}
+
+function dshGoalStatus(phase: unknown): Goal["status"] {
+  switch (phase) {
+    case "active": return "active";
+    case "blocked": return "blocked";
+    case "complete": return "completed";
+    // A paused goal has no equivalent shared status. Its exact phase remains
+    // in the recorded v2 event rather than being presented as queued.
+    default: return "unknown";
+  }
+}
+
+function dshWorkflowCoordinationState(outcome: unknown): CoordinationObservation["state"] {
+  switch (outcome) {
+    case "completed": return "completed";
+    case "failed": return "failed";
+    case "cancelled": return "cancelled";
+    default: return "unknown";
+  }
+}
+
+function dshMessageSource(event: DshRecord): DshRecord | null {
+  const data = eventData(event);
+  const message = isRecord(data.message) ? data.message : null;
+  return message && isRecord(message.source) ? message.source : null;
+}
+
+type DshGoalPhase = "active" | "paused" | "blocked" | "complete";
+type DshGoalSnapshot = {
+  id: string;
+  revision: number;
+  objective: string;
+  phase: DshGoalPhase;
+  maxGoalRounds: number;
+  blockedReason?: { code: string; message: string };
+};
+type DshGoalChange =
+  | { operation: "clear"; cleared: { id: string; revision: number }; clearedAt: number }
+  | { operation: Exclude<GoalChangeOperation, "clear">; goal: DshGoalSnapshot; roundsStarted: number; createdAt: number; updatedAt: number };
+type GoalChangeOperation = "create" | "edit" | "pause" | "resume" | "complete" | "block" | "clear";
+
+function dshExactKeys(value: DshRecord, required: string[], optional: string[] = []): boolean {
+  const allowed = new Set([...required, ...optional]);
+  const keys = Object.keys(value);
+  return keys.every((key) => allowed.has(key))
+    && required.every((key) => Object.prototype.hasOwnProperty.call(value, key));
+}
+
+function dshPositiveInteger(value: unknown, field: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1) throw new Error(`${field} must be a positive safe integer`);
+  return value as number;
+}
+
+function dshNonNegativeInteger(value: unknown, field: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) throw new Error(`${field} must be a non-negative safe integer`);
+  return value as number;
+}
+
+function dshGoalSnapshot(value: unknown): DshGoalSnapshot {
+  if (!isRecord(value)) throw new Error("goal must be a record");
+  const phase = value.phase;
+  if (typeof value.id !== "string" || value.id.length === 0) throw new Error("goal.id must be non-empty");
+  if (typeof value.objective !== "string" || value.objective.length === 0 || value.objective !== value.objective.trim()) {
+    throw new Error("goal.objective must be non-empty and normalized");
+  }
+  if (phase !== "active" && phase !== "paused" && phase !== "blocked" && phase !== "complete") throw new Error("goal.phase is invalid");
+  const keys = phase === "blocked"
+    ? ["blockedReason", "id", "maxGoalRounds", "objective", "phase", "revision"]
+    : ["id", "maxGoalRounds", "objective", "phase", "revision"];
+  if (!dshExactKeys(value, keys)) throw new Error(`goal fields are invalid for phase ${phase}`);
+  const snapshot: DshGoalSnapshot = {
+    id: value.id,
+    revision: dshPositiveInteger(value.revision, "goal.revision"),
+    objective: value.objective,
+    phase,
+    maxGoalRounds: dshPositiveInteger(value.maxGoalRounds, "goal.maxGoalRounds")
+  };
+  if (phase === "blocked") {
+    const reason = value.blockedReason;
+    if (!isRecord(reason) || !dshExactKeys(reason, ["code", "message"])
+      || typeof reason.code !== "string" || !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(reason.code)
+      || typeof reason.message !== "string" || reason.message.length === 0 || reason.message !== reason.message.trim()) {
+      throw new Error("goal.blockedReason is invalid");
+    }
+    snapshot.blockedReason = { code: reason.code, message: reason.message };
+  }
+  return snapshot;
+}
+
+function dshDecodeGoalChange(value: unknown): DshGoalChange {
+  if (!isRecord(value) || value.kind !== "goal/change") throw new Error("goal change kind is invalid");
+  if (value.version !== 1) throw new Error(`goal change version ${String(value.version)} is unsupported`);
+  if (value.operation === "clear") {
+    if (!dshExactKeys(value, ["cleared", "clearedAt", "kind", "operation", "version"])) throw new Error("goal clear fields are invalid");
+    const cleared = value.cleared;
+    if (!isRecord(cleared) || !dshExactKeys(cleared, ["id", "revision"])
+      || typeof cleared.id !== "string" || cleared.id.length === 0) throw new Error("goal clear ref is invalid");
+    return { operation: "clear", cleared: { id: cleared.id, revision: dshPositiveInteger(cleared.revision, "cleared.revision") }, clearedAt: dshNonNegativeInteger(value.clearedAt, "clearedAt") };
+  }
+  const operations = new Set<Exclude<GoalChangeOperation, "clear">>(["create", "edit", "pause", "resume", "complete", "block"]);
+  if (typeof value.operation !== "string" || !operations.has(value.operation as Exclude<GoalChangeOperation, "clear">)) throw new Error("goal change operation is invalid");
+  if (!dshExactKeys(value, ["createdAt", "goal", "kind", "operation", "roundsStarted", "updatedAt", "version"])) throw new Error("goal snapshot fields are invalid");
+  const createdAt = dshNonNegativeInteger(value.createdAt, "createdAt");
+  const updatedAt = dshNonNegativeInteger(value.updatedAt, "updatedAt");
+  if (updatedAt < createdAt) throw new Error("updatedAt cannot precede createdAt");
+  return {
+    operation: value.operation as Exclude<GoalChangeOperation, "clear">,
+    goal: dshGoalSnapshot(value.goal),
+    roundsStarted: dshNonNegativeInteger(value.roundsStarted, "roundsStarted"),
+    createdAt,
+    updatedAt
+  };
+}
+
+function dshSameGoalDefinition(left: DshGoalSnapshot, right: DshGoalSnapshot): boolean {
+  return left.objective === right.objective && left.maxGoalRounds === right.maxGoalRounds;
+}
+
+function dshSameBlockedReason(left: DshGoalSnapshot, right: DshGoalSnapshot): boolean {
+  return JSON.stringify(left.blockedReason) === JSON.stringify(right.blockedReason);
+}
+
+function dshApplyGoalChange(state: {
+  goal: DshGoalSnapshot | null;
+  roundsStarted: number;
+  createdAt: number | null;
+  updatedAt: number | null;
+  seenGoalIds: Set<string>;
+}, change: DshGoalChange): void {
+  if (change.operation === "clear") {
+    if (!state.goal || change.cleared.id !== state.goal.id || change.cleared.revision !== state.goal.revision + 1) throw new Error("goal clear does not match the current next revision");
+    if (state.updatedAt === null || change.clearedAt < state.updatedAt) throw new Error("goal clear timestamp precedes the current update");
+    state.goal = null;
+    state.roundsStarted = 0;
+    state.createdAt = null;
+    state.updatedAt = null;
+    return;
+  }
+  if (change.operation === "create") {
+    if (change.goal.revision !== 1 || change.goal.phase !== "active" || change.roundsStarted !== 0
+      || (state.goal !== null && state.goal.phase !== "complete") || state.seenGoalIds.has(change.goal.id)) {
+      throw new Error("goal create requires a fresh active revision-one goal with zero rounds");
+    }
+    state.seenGoalIds.add(change.goal.id);
+  } else {
+    const current = state.goal;
+    if (!current) throw new Error(`goal ${change.operation} requires a current goal`);
+    if (change.goal.id !== current.id || change.goal.revision !== current.revision + 1) throw new Error(`goal ${change.operation} must advance the current goal by one revision`);
+    if (state.createdAt === null || state.updatedAt === null || change.createdAt !== state.createdAt || change.updatedAt < state.updatedAt || change.roundsStarted !== state.roundsStarted) {
+      throw new Error(`goal ${change.operation} does not preserve counters and timestamps`);
+    }
+    switch (change.operation) {
+      case "edit":
+        if (change.goal.phase !== current.phase || !dshSameBlockedReason(change.goal, current)) throw new Error("goal edit has an invalid phase or blocked reason");
+        break;
+      case "pause":
+        if (!dshSameGoalDefinition(current, change.goal) || current.phase !== "active" || change.goal.phase !== "paused") throw new Error("goal pause transition is invalid");
+        break;
+      case "resume":
+        if (!dshSameGoalDefinition(current, change.goal) || !new Set<DshGoalPhase>(["active", "paused", "blocked"]).has(current.phase) || change.goal.phase !== "active" || state.roundsStarted >= change.goal.maxGoalRounds) throw new Error("goal resume transition is invalid");
+        break;
+      case "complete":
+        if (!dshSameGoalDefinition(current, change.goal) || current.phase === "complete" || change.goal.phase !== "complete") throw new Error("goal complete transition is invalid");
+        break;
+      case "block":
+        if (!dshSameGoalDefinition(current, change.goal) || current.phase !== "active" || change.goal.phase !== "blocked") throw new Error("goal block transition is invalid");
+        break;
+    }
+  }
+  state.goal = change.goal;
+  state.roundsStarted = change.roundsStarted;
+  state.createdAt = change.createdAt;
+  state.updatedAt = change.updatedAt;
+}
+
+function dshReplayGoals(records: DshRecord[]): { goal: DshGoalSnapshot | null; event: DshRecord | null; createdAt: number | null; updatedAt: number | null; error: string | null } {
+  const state = { goal: null as DshGoalSnapshot | null, event: null as DshRecord | null, roundsStarted: 0, createdAt: null as number | null, updatedAt: null as number | null, seenGoalIds: new Set<string>() };
+  for (const event of dshOwnedEvents(records)) {
+    try {
+      if (event.type === "goal/change") {
+        dshApplyGoalChange(state, dshDecodeGoalChange(event.data));
+        state.event = state.goal ? event : null;
+      } else if (event.type === "user/message") {
+        const data = eventData(event);
+        const source = isRecord(data.source) ? data.source : null;
+        if (!source || source.kind !== "goal") continue;
+        if (!dshExactKeys(source, ["kind", "goalId", "revision", "round"]) || typeof source.goalId !== "string" || source.goalId.length === 0) throw new Error("goal message source is invalid");
+        const current = state.goal;
+        const revision = dshPositiveInteger(source.revision, "goal source revision");
+        const round = dshPositiveInteger(source.round, "goal source round");
+        if (!current || current.phase !== "active" || source.goalId !== current.id || revision !== current.revision || round !== state.roundsStarted + 1 || round > current.maxGoalRounds) throw new Error("goal message source is not the next admitted round");
+        state.roundsStarted = round;
+      }
+    } catch (error) {
+      return { goal: null, event: null, createdAt: null, updatedAt: null, error: `goal replay invalid at source seq ${String(event.seq)}: ${error instanceof Error ? error.message : String(error)}` };
+    }
+  }
+  return { goal: state.goal, event: state.event, createdAt: state.createdAt, updatedAt: state.updatedAt, error: null };
+}
+
+/**
+ * Build DSH's native v3 additive facts over the provider's finalized v2
+ * snapshot. This function deliberately never turns a count or a relationship
+ * into a stronger provider claim: every new entity below is anchored to one
+ * released alpha.2 event or an exact child session identity.
+ */
+export function buildDshSessionProtocolV3(
+  input: DshProtocolInput,
+  base: SessionProtocol = buildDshSessionProtocol(input)
+): SessionProtocolV3 {
+  const sessionId = String(input.session.id);
+  const ownRef: DshSessionRef = { provider: "deepseek-harness", sessionId };
+  const owned = dshOwnedEvents(input.records);
+  const childById = new Map(input.children.map((child) => [String(child.session.id), child]));
+  const baseRunByChildId = new Map(base.agentRuns
+    .filter((run) => run.childSessionId)
+    .map((run) => [String(run.childSessionId), run]));
+  const baseEventBySourceSeq = new Map(base.events.map((event) => [event.providerData?.sourceSequence, event]));
+  const eventFor = (event: DshRecord) => baseEventBySourceSeq.get(sourceSequence(Number(event.seq) || 0)) || null;
+
+  // --- Explicit actors ----------------------------------------------------
+  const actors: Actor[] = [];
+  const actorByProviderId = new Map<string, Actor>();
+  const addActor = (value: Actor) => {
+    if (!actorByProviderId.has(value.providerActorId || value.id)) {
+      actorByProviderId.set(value.providerActorId || value.id, value);
+      actors.push(value);
+    }
+    return actorByProviderId.get(value.providerActorId || value.id)!;
+  };
+  const ensureActor = ({
+    providerActorId,
+    kind,
+    name,
+    sessionRef,
+    event,
+    sourceType
+  }: {
+    providerActorId: string;
+    kind: Actor["kind"];
+    name?: string | null;
+    sessionRef?: DshSessionRef | null;
+    event: DshRecord;
+    sourceType?: string;
+  }) => {
+    const existing = actorByProviderId.get(providerActorId);
+    if (existing) return existing;
+    return addActor(actor({
+      id: `actor:dsh:${providerActorId}`,
+      kind,
+      name: name || providerActorId,
+      providerActorId,
+      sessionRef: sessionRef || null,
+      runIds: sessionRef?.sessionId ? (baseRunByChildId.get(sessionRef.sessionId)?.id ? [baseRunByChildId.get(sessionRef.sessionId)!.id] : []) : [],
+      provenance: dshV3Provenance(event, sourceType || `dsh.session-event:${String(event.type)}`)
+    }));
+  };
+  const parentHeader = dshHeader(input.records) || {};
+  const parent = addActor(actor({
+    id: `actor:dsh:session:${sessionId}`,
+    kind: "agent",
+    name: firstString(parentHeader.agentPreset, sessionId),
+    providerActorId: sessionId,
+    sessionRef: ownRef,
+    runIds: [],
+    provenance: {
+      fidelity: "recorded",
+      sourceType: "dsh.session.header",
+      sourceId: sessionId
+    }
+  }));
+  const actorForId = (providerActorId: unknown, event: DshRecord, kind: Actor["kind"] = "unknown") => {
+    const id = firstString(providerActorId);
+    if (!id) return null;
+    if (id === sessionId) return parent;
+    const team = teamActorById.get(id);
+    if (team) return team;
+    const child = childById.get(id);
+    return ensureActor({
+      providerActorId: id,
+      kind: child ? "agent" : kind,
+      name: child ? firstString(child.session.metadata?.agentPreset, id) : id,
+      sessionRef: child ? { provider: "deepseek-harness", sessionId: id } : null,
+      event
+    });
+  };
+
+  const teamActorById = new Map<string, Actor>();
+  for (const event of owned) {
+    if (event.type !== "team/member" && event.type !== "team/task" && event.type !== "team/message/queued" && event.type !== "team/message/delivered") continue;
+    const data = eventData(event);
+    const teamId = firstString(data.teamId);
+    if (!teamId || teamActorById.has(teamId)) continue;
+    // A team may use the root session id as its provider id. Keep the
+    // explicit team actor distinct from the root agent actor in that case.
+    const team = actor({
+      id: `actor:dsh:team:${teamId}`,
+      kind: "team",
+      name: teamId,
+      providerActorId: teamId,
+      sessionRef: null,
+      runIds: [],
+      memberActorIds: [],
+      provenance: dshV3Provenance(event, "dsh.session-event:team")
+    });
+    actors.push(team);
+    teamActorById.set(teamId, team);
+  }
+  for (const member of teamMembers(input.records)) {
+    const memberId = member.id;
+    const teamId = member.teamId;
+    const memberActor = actorForId(memberId, member.event, "agent") || ensureActor({ providerActorId: memberId, kind: "agent", event: member.event });
+    const existingTeam = teamId ? teamActorById.get(teamId) : null;
+    if (existingTeam && !existingTeam.memberActorIds?.includes(memberActor.id)) {
+      existingTeam.memberActorIds = [...(existingTeam.memberActorIds || []), memberActor.id];
+      memberActor.teamId = existingTeam.id;
+    }
+    memberActor.name = firstString(member.name, memberId);
+  }
+
+  // --- Durable goals ------------------------------------------------------
+  const goalReplay = dshReplayGoals(input.records);
+  const currentGoal = goalReplay.goal;
+  const goals: Goal[] = currentGoal && goalReplay.event ? [goal({
+    id: `goal:${currentGoal.id}`,
+    sessionId,
+    title: null,
+    description: currentGoal.objective,
+    status: dshGoalStatus(currentGoal.phase),
+    taskIds: [],
+    parentGoalId: null,
+    ownerActorId: null,
+    timeCreated: goalReplay.createdAt,
+    timeUpdated: goalReplay.updatedAt,
+    timeCompleted: currentGoal.phase === "complete" ? goalReplay.updatedAt : null,
+    provenance: dshV3Provenance(goalReplay.event)
+  })] : [];
+
+  // --- Coordination: team mailbox and workflow lifecycle -----------------
+  const coordination: CoordinationObservation[] = [];
+  const teamMessageSender = new Map<string, Actor>();
+  for (const event of owned) {
+    if (event.type !== "team/message/queued") continue;
+    const data = eventData(event);
+    const message = isRecord(data.message) ? data.message : {};
+    const messageId = firstString(message.id);
+    if (!messageId) continue;
+    const sender = actorForId(message.senderId, event);
+    const recipient = actorForId(message.targetId, event);
+    if (sender) teamMessageSender.set(messageId, sender);
+    coordination.push(coordinationObservation({
+      id: `coord:dsh:team-message:${messageId}:queued`,
+      sessionId,
+      kind: "message",
+      state: "requested",
+      timestamp: asNumber(event.time),
+      senderActorId: sender?.id || null,
+      recipientActorId: recipient?.id || null,
+      fromSessionRef: sender?.sessionRef || null,
+      toSessionRef: recipient?.sessionRef || null,
+      taskId: null,
+      runId: null,
+      eventId: eventFor(event)?.id || dshEventId(event),
+      turnId: asNumber(data.turn) == null ? null : String(data.turn),
+      correlationId: messageId,
+      provenance: dshV3Provenance(event)
+    }));
+  }
+  for (const event of owned) {
+    if (event.type !== "team/message/delivered") continue;
+    const data = eventData(event);
+    const messageId = firstString(data.messageId);
+    if (!messageId) continue;
+    const sender = teamMessageSender.get(messageId) || null;
+    const recipient = actorForId(data.targetId, event);
+    coordination.push(coordinationObservation({
+      id: `coord:dsh:team-message:${messageId}:delivered`,
+      sessionId,
+      kind: "mailbox-delivery",
+      state: "delivered",
+      timestamp: asNumber(event.time),
+      senderActorId: sender?.id || null,
+      recipientActorId: recipient?.id || null,
+      fromSessionRef: sender?.sessionRef || null,
+      toSessionRef: recipient?.sessionRef || null,
+      taskId: null,
+      runId: null,
+      eventId: eventFor(event)?.id || dshEventId(event),
+      turnId: asNumber(data.turn) == null ? null : String(data.turn),
+      correlationId: messageId,
+      provenance: dshV3Provenance(event)
+    }));
+  }
+
+  const workflowStarts = new Map<string, DshRecord>();
+  const workflowTaskByCorrelation = new Map(base.tasks
+    .filter((task) => task.correlationId)
+    .map((task) => [String(task.correlationId), task]));
+  for (const event of owned) {
+    if (event.type === "tool-workflow/agent-start") {
+      const data = eventData(event);
+      const runId = firstString(data.runId);
+      const sequence = asNumber(data.seq);
+      if (runId && sequence != null) workflowStarts.set(`${runId}:${sequence}`, event);
+    }
+  }
+  for (const event of owned) {
+    if (event.type !== "tool-workflow/agent-start" && event.type !== "tool-workflow/agent-end") continue;
+    const data = eventData(event);
+    const runId = firstString(data.runId);
+    const sequence = asNumber(data.seq);
+    if (!runId || sequence == null) continue;
+    const start = event.type === "tool-workflow/agent-start" ? event : workflowStarts.get(`${runId}:${sequence}`);
+    const childId = firstString((start && eventData(start).childId) || data.childId);
+    const child = childId ? childById.get(childId) : null;
+    const workflowCorrelationId = `${runId}:${sequence}`;
+    const workflowTask = workflowTaskByCorrelation.get(workflowCorrelationId) || null;
+    const run = child && workflowTask
+      ? base.agentRuns.find((candidate) => candidate.taskId === workflowTask.id && candidate.childSessionId === childId) || null
+      : null;
+    const recipient = childId
+      ? actorForId(childId, start || event, "agent")
+      : null;
+    const isWorkflowStart = event.type === "tool-workflow/agent-start";
+    const endState = isWorkflowStart ? "started" as const : dshWorkflowCoordinationState(data.outcome);
+    coordination.push(coordinationObservation({
+      id: `coord:dsh:workflow:${runId}:${sequence}:${event.type.endsWith("start") ? "start" : "end"}`,
+      sessionId,
+      kind: "spawn",
+      state: endState,
+      timestamp: asNumber(event.time),
+      senderActorId: parent.id,
+      recipientActorId: recipient?.id || null,
+      fromSessionRef: ownRef,
+      toSessionRef: child ? { provider: "deepseek-harness", sessionId: childId! } : null,
+      taskId: workflowTask?.id || null,
+      runId: child ? (run?.id || null) : null,
+      eventId: eventFor(event)?.id || dshEventId(event),
+      turnId: asNumber(data.turn) == null ? null : String(data.turn),
+      correlationId: workflowCorrelationId,
+      provenance: dshV3Provenance(event)
+    }));
+  }
+
+  // --- Context transformations -------------------------------------------
+  const contextVersions = [] as ReturnType<typeof contextVersion>[];
+  const contextTransformations = [] as ReturnType<typeof contextTransformation>[];
+  const summaryArtifacts = new Map<string, string>();
+  for (const artifact of base.contextArtifacts) {
+    const sourceId = artifact.provenance?.sourceId;
+    if (sourceId) summaryArtifacts.set(sourceId, artifact.id);
+  }
+  for (const event of owned) {
+    if (event.type !== "compaction/summary") continue;
+    const data = eventData(event);
+    const summary = dshContentText(data.summary).trim();
+    if (!summary) continue;
+    const artifactId = summaryArtifacts.get(String(event.seq)) || `artifact:dsh:${event.seq}`;
+    const versionId = `context-version:dsh:${event.seq}`;
+    const provenance = dshV3Provenance(event);
+    contextVersions.push(contextVersion({
+      id: versionId,
+      sessionId,
+      sequence: Number(event.seq),
+      parentVersionIds: [],
+      artifactIds: [artifactId],
+      createdAt: asNumber(event.time),
+      provenance
+    }));
+    contextTransformations.push(contextTransformation({
+      id: `context-transformation:dsh:${event.seq}`,
+      sessionId,
+      kind: "compaction",
+      sourceVersionIds: [],
+      resultVersionId: versionId,
+      sourceArtifactIds: [],
+      resultArtifactIds: [artifactId],
+      eventId: eventFor(event)?.id || dshEventId(event),
+      runId: null,
+      turnId: asNumber(data.turn) == null ? null : String(data.turn),
+      timestamp: asNumber(event.time),
+      provenance
+    }));
+  }
+
+  // --- Exactly-once provider request usage --------------------------------
+  const usageRecords: UsageRecord[] = dshNativeUsageRecords(input.records).flatMap((event) => {
+    const tokens = dshUsageToTokens(dshUsageOf(event));
+    if (!tokens) return [];
+    const source = dshMessageSource(event);
+    const data = eventData(event);
+    return [usageRecord({
+      id: `usage:dsh:${sessionId}:${event.seq}`,
+      scope: "request",
+      sessionRef: ownRef,
+      timestamp: asNumber(event.time),
+      model: firstString(source?.model),
+      runId: null,
+      eventId: eventFor(event)?.id || dshEventId(event),
+      turnId: asNumber(data.turn) == null ? null : String(data.turn),
+      tokens: {
+        input: tokens.input,
+        cacheRead: tokens.cache?.read,
+        cacheWrite: tokens.cache?.write,
+        output: tokens.output,
+        reasoning: tokens.reasoning,
+        total: tokens.total
+      },
+      contextOriginSlices: [],
+      provenance: dshV3Provenance(event, `dsh.session-event:${String(event.type)}:usage`)
+    })];
+  });
+
+  const nativeWorkflow = owned.some((event) => event.type === "tool-workflow/agent-start" || event.type === "tool-workflow/agent-end");
+  const nativeMailbox = coordination.some((entry) => entry.kind === "message" || entry.kind === "mailbox-delivery");
+  const hasTaskEvidence = base.tasks.length > 0;
+  const workDetails = goalReplay.error
+    ? `${goalReplay.error}; ${hasTaskEvidence ? "task evidence remains observed" : "no valid task evidence"}`
+    : "strict goal replay and recorded task evidence";
+  const revision = DSH_COMPATIBILITY_SNAPSHOT.tag;
+  return {
+    sessionId,
+    version: 3,
+    session: base.session,
+    events: base.events,
+    relationships: base.relationships,
+    tasks: base.tasks,
+    agentRuns: base.agentRuns,
+    contextArtifacts: base.contextArtifacts,
+    branches: base.branches,
+    revision: base.revision || { value: revision, source: "provider" },
+    goals,
+    actors,
+    coordination,
+    contextVersions,
+    contextTransformations,
+    usageRecords,
+    coverage: protocolCoverage({
+      work: protocolDomainCoverage(goalReplay.error ? (hasTaskEvidence ? "observed" : "unknown") : (goals.length > 0 || hasTaskEvidence ? "observed" : "not-observed"), workDetails),
+      execution: protocolDomainCoverage(actors.length > 0 || nativeWorkflow ? "observed" : "not-observed", "recorded actors plus explicit workflow lifecycle or session-backed child runs"),
+      coordination: protocolDomainCoverage(nativeMailbox || nativeWorkflow ? "observed" : "not-observed", "team mailbox and workflow lifecycle records only"),
+      context: protocolDomainCoverage(contextTransformations.length > 0 || base.contextArtifacts.length > 0 ? "observed" : "not-observed", "recorded context artifacts and readable compaction summaries"),
+      usage: protocolDomainCoverage(usageRecords.length > 0 ? "observed" : "not-observed", "assistant settlement usage folded once per turn/step slot")
+    })
+  };
 }

@@ -1048,6 +1048,12 @@ export function dshUsageRecords(records: DshRecord[]) {
   return selected;
 }
 
+/** Native v3 keeps zero-token legacy assistant settlements as recorded requests. */
+export function dshNativeUsageRecords(records: DshRecord[]) {
+  if (dshHeader(records)?.version === 2) return dshUsageRecords(records);
+  return dshOwnedEvents(records).filter((event) => event.type === "assistant/message" && dshUsageToTokens(dshUsageOf(event)) !== null);
+}
+
 /** Backward-compatible name for callers that consume the unified usage fold. */
 export function dshAssistantUsageRecords(records: DshRecord[]) {
   return dshUsageRecords(records);

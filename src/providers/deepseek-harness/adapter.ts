@@ -24,7 +24,8 @@ import {
   dshStoredSystemPrompt,
   type DshRecord
 } from "./parser.js";
-import { buildDshSessionProtocol, type DshProtocolChild } from "./protocol.js";
+import { buildDshSessionProtocol, buildDshSessionProtocolV3, type DshProtocolChild } from "./protocol.js";
+import { finalizeSessionProtocolV3 } from "../shared/session-protocol-v3.js";
 import { buildDshRuntimeEnvironment } from "./runtime-environment.js";
 
 function getDshDir() {
@@ -196,6 +197,29 @@ function buildProtocolFor(sessionId: string) {
   });
 }
 
+function buildProtocolV3For(sessionId: string) {
+  const root = sessionFiles.get(sessionId);
+  if (!root) return null;
+  const canonicalId = String(root.session.id);
+  const family = familyFor(canonicalId);
+  if (!family) return null;
+  const children: DshProtocolChild[] = family
+    .filter((entry) => String(entry.session.parentId || "") === canonicalId)
+    .map((entry) => ({ session: entry.session, records: entry.records, messages: entry.messages }));
+  const base = buildDshSessionProtocol({
+    session: root.session,
+    records: root.records,
+    messages: root.messages,
+    children
+  });
+  return finalizeSessionProtocolV3(buildDshSessionProtocolV3({
+    session: root.session,
+    records: root.records,
+    messages: root.messages,
+    children
+  }, base));
+}
+
 function generateDshViews(sessionId: string) {
   const root = sessionFiles.get(sessionId);
   if (!root) return null;
@@ -244,10 +268,10 @@ const deepseekHarness = {
   },
   protocolCapabilities: {
     sessionEvents: { support: "full", provenance: "recorded", details: "DSH alpha.2 v0/v1 frozen events plus v2 one-event-per-row log; v0/v1 packed rows are expanded at the read boundary" },
-    sessionRelationships: { support: "partial", provenance: "derived", details: "recorded header lineage and descriptors, with cross-session child edges resolved locally" },
-    tasks: { support: "partial", provenance: "derived", details: "subagent descriptor and tool-workflow child evidence" },
-    agentRuns: { support: "partial", provenance: "derived", details: "session-backed subagent and workflow child lifecycles" },
-    contextArtifacts: { support: "full", provenance: "recorded", details: "compaction summaries and prunes as metadata-only artifacts; v2 replacement provenance remains available in recorded events" }
+    sessionRelationships: { support: "partial", provenance: "derived", details: "recorded header lineage and descriptors, with cross-session child edges resolved locally; native v3 keeps unbound children explicit" },
+    tasks: { support: "partial", provenance: "derived", details: "native v3 goal/team task facts plus subagent descriptor and tool-workflow child evidence" },
+    agentRuns: { support: "partial", provenance: "derived", details: "session-backed subagent and native v3 workflow child lifecycles when exact ids are available" },
+    contextArtifacts: { support: "full", provenance: "recorded", details: "compaction summaries and prunes as metadata-only artifacts; native v3 transforms only readable summaries and v2 replacement provenance remains available in recorded events" }
   },
 
   detect() {
@@ -280,6 +304,10 @@ const deepseekHarness = {
 
   getSessionProtocol(sessionId) {
     return buildProtocolFor(sessionId);
+  },
+
+  getSessionProtocolV3(sessionId) {
+    return buildProtocolV3For(sessionId);
   },
 
   getRuntimeEnvironment(sessionId) {

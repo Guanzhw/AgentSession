@@ -169,7 +169,10 @@ v0/v1 retain released packed-row decoding. Append-origin `user/message`,
 `assistant/message`, and `tool/result` events generate the ordinary transcript;
 surface replacements remain model/context evidence, while `assistant/attempt`
 and control, workflow, and team events never become ordinary conversation
-messages. The stock headless CLI has no declared default resume argument, so
+messages. Runtime Protocol v3 additionally projects recorded goals,
+team/task/mailbox, workflow, readable compaction, and per-request usage; token
+origins, memory/experience/user-info, and async semantics remain unknown without
+evidence. The stock headless CLI has no declared default resume argument, so
 AgentSession does not invent a DSH resume command.
 
 ## Installation

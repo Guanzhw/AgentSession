@@ -104,7 +104,9 @@ JSONL 是当前只读主后端。v2 使用每个 event 一行；v0/v1 保留 rel
 packed-row 解码。`user/message`、`assistant/message`、`tool/result` 的
 append-origin 事件生成普通 transcript；surface replacement 只保留为
 model/context evidence，`assistant/attempt` 及 control、workflow、team 事件
-不会伪造成普通 conversation message。官方 headless CLI 没有声明默认 resume
+不会伪造成普通 conversation message。Runtime Protocol v3 另外投影官方记录的
+goal、team/task/mailbox、workflow、可读 compaction 与每请求 usage；未有证据的
+token origin、memory/experience/user-info 和 async 语义保持 unknown。官方 headless CLI 没有声明默认 resume
 参数，因此 AgentSession 不伪造 DSH resume 命令。
 
 ## Installation
