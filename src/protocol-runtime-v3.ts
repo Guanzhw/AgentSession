@@ -359,6 +359,34 @@ function collect<T>(values: readonly T[], maxItems: number, state: Collectable, 
   }
 }
 
+/**
+ * Visit source collections in deterministic round-robin order while charging
+ * every projected entity to the same global budget.  The collection order is
+ * part of the provider-neutral projection contract: it gives each non-empty
+ * primary collection a turn before a long collection can consume the bound.
+ */
+function collectFairly(
+  lengths: readonly number[],
+  maxItems: number,
+  state: Collectable,
+  visit: (collection: number, index: number) => void
+): void {
+  const offsets = lengths.map(() => 0);
+  while (state.count < maxItems) {
+    let progressed = false;
+    for (let collection = 0; collection < lengths.length && state.count < maxItems; collection += 1) {
+      if (offsets[collection] >= lengths[collection]) continue;
+      const index = offsets[collection];
+      offsets[collection] += 1;
+      state.count += 1;
+      visit(collection, index);
+      progressed = true;
+    }
+    if (!progressed) return;
+  }
+  state.truncated = offsets.some((offset, collection) => offset < lengths[collection]);
+}
+
 function taskRef(task: Task): ProtocolEntityRef {
   return entityRef("task", task.id);
 }
@@ -552,13 +580,29 @@ export function projectExecution(protocol: SessionProtocolV3, options: Projectio
   // totals are computed from (public entities omit contextOriginSlices).
   const usageRaw: UsageRecord[] = [];
   const state = { count: 0, truncated: false };
-  collect(protocol.actors, maxItems, state, (actor) => result.actors.push({ actor: publicActor(actor), ref: entityRef("actor", actor.id) }));
-  collect(protocol.agentRuns, maxItems, state, (run) => result.runs.push({
-    run: publicRun(run),
-    ref: runRef(run),
-    task: run.taskId ? entityRef("task", run.taskId) : null,
-    childSession: run.childSessionId ? { provider: focus.provider, sessionId: run.childSessionId } : null
-  }));
+  collectFairly(
+    [protocol.actors.length, protocol.agentRuns.length, protocol.usageRecords.length],
+    maxItems,
+    state,
+    (collection, index) => {
+      if (collection === 0) {
+        const actor = protocol.actors[index];
+        result.actors.push({ actor: publicActor(actor), ref: entityRef("actor", actor.id) });
+      } else if (collection === 1) {
+        const run = protocol.agentRuns[index];
+        result.runs.push({
+          run: publicRun(run),
+          ref: runRef(run),
+          task: run.taskId ? entityRef("task", run.taskId) : null,
+          childSession: run.childSessionId ? { provider: focus.provider, sessionId: run.childSessionId } : null
+        });
+      } else {
+        const usage = protocol.usageRecords[index];
+        usageRaw.push(usage);
+        result.usageRecords.push({ usage: publicUsage(usage), ref: entityRef("usage", usage.id) });
+      }
+    }
+  );
   for (let index = 0; index < result.actors.length && !state.truncated; index += 1) {
     const actor = protocol.actors[index];
     for (const memberId of actor.memberActorIds || []) {
@@ -572,10 +616,6 @@ export function projectExecution(protocol: SessionProtocolV3, options: Projectio
       result.actorRuns.push({ actor: result.actors[index].ref, run: entityRef("run", runId), provenance: actor.provenance });
     }
   }
-  collect(protocol.usageRecords, maxItems, state, (usage) => {
-    usageRaw.push(usage);
-    result.usageRecords.push({ usage: publicUsage(usage), ref: entityRef("usage", usage.id) });
-  });
   const projectedUsage = sumUsage(
     result.usageRecords.map((value) => value.usage),
     result.usageRecords.length === protocol.usageRecords.length,

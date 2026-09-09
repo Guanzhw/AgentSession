@@ -54,6 +54,11 @@ export function initEnhancements({ ft, formatText, showToast, escapeHtmlClient }
     tabButton.setAttribute("tabindex", "0");
     tabButton.focus();
     const targetPanelId = tabButton.getAttribute("aria-controls");
+    // Top-level detail tabs are shareable entry points. Replace only the hash
+    // so switching tabs never reloads the page or changes nested Runtime lens state.
+    if (targetPanelId) {
+      history.replaceState(null, "", `#${encodeURIComponent(targetPanelId)}`);
+    }
     document.querySelector(".session-workbench")?.classList.toggle("session-conversation-tab-active", targetPanelId === "tab-conversation");
     // Show/hide panels
     tabPanels.forEach(function (panel) {

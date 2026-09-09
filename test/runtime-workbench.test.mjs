@@ -399,6 +399,14 @@ test("top-level session tabs do not hide nested Runtime lens panels", () => {
   assert.match(enhancements, /data-detail-tab/);
 });
 
+test("top-level detail tab switches replace the URL hash without reloading or touching Runtime lenses", () => {
+  const enhancements = readFileSync(path.join(process.cwd(), "src", "static", "app", "enhancements.js"), "utf8");
+  const switchTab = enhancements.match(/function switchTab\(tabButton\) \{([\s\S]*?)\n  \}/)?.[1] || "";
+  assert.match(switchTab, /history\.replaceState\(null, "", `#\$\{encodeURIComponent\(targetPanelId\)\}`\)/);
+  assert.doesNotMatch(switchTab, /location\.(assign|reload|replace)\s*\(/);
+  assert.doesNotMatch(switchTab, /data-runtime-lens|runtime-lens/);
+});
+
 test("Runtime work cards allow long canonical task and agent ids to wrap on narrow screens", () => {
   const style = readFileSync(path.join(process.cwd(), "src", "static", "style.css"), "utf8");
   assert.match(style, /\.runtime-card-heading > strong \{[\s\S]*?min-width: 0;[\s\S]*?overflow-wrap: anywhere;/);
@@ -555,6 +563,27 @@ test("Work overflow task table repeats header and scope semantics", () => {
   const overflow = html.match(/<details class="runtime-task-overflow">[\s\S]*?<\/details>/)?.[0] || "";
   assert.match(overflow, /<thead>[\s\S]*?<th scope="col">Task<\/th>/);
   assert.match(overflow, /data-label="Owner"/);
+});
+
+test("Work task rows deduplicate repeated task/run states while retaining distinct states", () => {
+  const runtime = fixtureRuntime();
+  runtime.v3.agentRuns.push({
+    ...runtime.v3.agentRuns[0], id: "run-2", status: "completed", timeStart: 1300, timeEnd: 2600
+  });
+  runtime.v3.tasks[0].runIds = ["run-1", "run-2"];
+  runtime.projections.work = projectWork(runtime.v3, { maxItems: 100 });
+  runtime.projections.execution = projectExecution(runtime.v3, { maxItems: 100 });
+  let html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  let row = html.match(/data-runtime-overview-task="task-1"[\s\S]*?<\/tr>/)?.[0] || "";
+  assert.doesNotMatch(row, /completed · completed/);
+  assert.match(row, />completed<\/span>/);
+
+  runtime.v3.agentRuns[1].status = "running";
+  runtime.projections.execution = projectExecution(runtime.v3, { maxItems: 100 });
+  html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  row = html.match(/data-runtime-overview-task="task-1"[\s\S]*?<\/tr>/)?.[0] || "";
+  assert.match(row, /completed · running/);
+  assert.equal(row.match(/runtime-status[^>]*>([^<]*)<\/span>/)?.[1], "completed · running");
 });
 
 test("Work opening renders separate goal-task and collaboration views", () => {

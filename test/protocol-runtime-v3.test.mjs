@@ -160,6 +160,76 @@ test("execution usage remains explicitly incomplete when totals or records are o
   });
 });
 
+test("execution uses one deterministic fair budget across actors, runs, and usage records", () => {
+  const protocol = structuredClone(v3Fixture());
+  protocol.actors = Array.from({ length: 50 }, (_, index) => ({
+    id: `actor-${index}`, kind: "agent", name: `actor ${index}`, memberActorIds: [], runIds: [], provenance
+  }));
+  protocol.agentRuns = Array.from({ length: 49 }, (_, index) => ({
+    id: `run-${index}`, sessionId: "root", taskId: null, status: "completed", mode: "foreground",
+    agent: `agent ${index}`, model: "model", childSessionId: null, timeStart: index + 1, timeEnd: index + 2,
+    metadata: {}, provenance
+  }));
+  protocol.usageRecords = Array.from({ length: 152 }, (_, index) => ({
+    id: `request-${index}`, scope: "request", sessionRef: protocol.session.ref, runId: null,
+    timestamp: index + 1, model: "model",
+    tokens: { input: 2, cacheRead: 0, cacheWrite: 0, output: 1, reasoning: 0, total: 3 },
+    contextOriginSlices: [{ component: "input", origin: "direct", tokens: 2 }], provenance
+  }));
+
+  const first = projectExecution(protocol);
+  const second = projectExecution(protocol);
+  assert.ok(first.actors.length > 0);
+  assert.ok(first.runs.length > 0);
+  assert.ok(first.usageRecords.length > 0);
+  assert.ok(first.truncated);
+  assert.ok(first.actors.length + first.runs.length + first.usageRecords.length
+    + first.actorMembers.length + first.actorRuns.length <= 100);
+  assert.equal(first.usage.requestCount, first.usageRecords.length);
+  assert.equal(first.usage.input, first.usage.requestCount * 2);
+  assert.equal(first.usage.origins.inspectedRecords, first.usage.requestCount);
+  assert.equal(first.usage.origins.recordsTruncated, true);
+  assert.equal(first.usage.origins.input.total, first.usage.input);
+  assert.equal(first.usage.origins.input.classified.direct, first.usage.input);
+  assert.equal(first.usage.origins.input.unclassified, null);
+  assert.equal(first.usage.complete, false);
+  assert.deepEqual(first.actors.map(({ ref }) => ref.id), second.actors.map(({ ref }) => ref.id));
+  assert.deepEqual(first.runs.map(({ ref }) => ref.id), second.runs.map(({ ref }) => ref.id));
+  assert.deepEqual(first.usageRecords.map(({ ref }) => ref.id), second.usageRecords.map(({ ref }) => ref.id));
+});
+
+test("execution keeps sparse and tiny fair-budget projections deterministic", () => {
+  const protocol = structuredClone(v3Fixture());
+  protocol.actors = Array.from({ length: 2 }, (_, index) => ({ id: `actor-${index}`, kind: "agent", name: `a${index}`, provenance }));
+  protocol.agentRuns = Array.from({ length: 2 }, (_, index) => ({
+    id: `run-${index}`, sessionId: "root", taskId: null, status: "running", mode: "foreground", agent: null,
+    model: "model", childSessionId: null, timeStart: null, timeEnd: null, metadata: {}, provenance
+  }));
+  protocol.usageRecords = Array.from({ length: 2 }, (_, index) => ({
+    id: `request-${index}`, scope: "request", sessionRef: protocol.session.ref, runId: null,
+    tokens: { input: 1, cacheRead: 0, cacheWrite: 0, output: 0, reasoning: 0, total: 1 }, contextOriginSlices: [], provenance
+  }));
+  const one = projectExecution(protocol, { maxItems: 1 });
+  const two = projectExecution(protocol, { maxItems: 2 });
+  assert.deepEqual(one.actors.map(({ ref }) => ref.id), ["actor-0"]);
+  assert.equal(one.runs.length, 0);
+  assert.equal(one.usageRecords.length, 0);
+  assert.deepEqual(two.actors.map(({ ref }) => ref.id), ["actor-0"]);
+  assert.deepEqual(two.runs.map(({ ref }) => ref.id), ["run-0"]);
+  assert.equal(two.usageRecords.length, 0);
+  assert.ok(one.truncated);
+  assert.ok(two.truncated);
+  assert.ok(two.actors.length + two.runs.length + two.usageRecords.length <= 2);
+
+  const usageOnly = structuredClone(protocol);
+  usageOnly.actors = [];
+  usageOnly.agentRuns = [];
+  const sparse = projectExecution(usageOnly, { maxItems: 2 });
+  assert.equal(sparse.usageRecords.length, 2);
+  assert.equal(sparse.usage.requestCount, 2);
+  assert.equal(sparse.truncated, false);
+});
+
 test("execution origin accounting partitions exact full slices across records and origins", () => {
   const protocol = structuredClone(v3Fixture());
   protocol.actors = [];
@@ -266,31 +336,24 @@ test("execution origin accounting reflects requests omitted by the global maxIte
   const protocol = structuredClone(v3Fixture());
   protocol.actors = Array.from({ length: 100 }, (_, index) => ({ id: `actor-${index}`, kind: "agent", name: `a${index}`, provenance }));
   protocol.agentRuns = [];
-  protocol.usageRecords = [
-    {
-      id: "request-hidden", scope: "request", sessionRef: protocol.session.ref, runId: null,
-      tokens: { input: 5, output: 1, total: 6 },
-      contextOriginSlices: [{ component: "input", origin: "direct", tokens: 5 }], provenance
-    }
-  ];
+  protocol.usageRecords = Array.from({ length: 152 }, (_, index) => ({
+    id: `request-${index}`, scope: "request", sessionRef: protocol.session.ref, runId: null,
+    tokens: { input: 5, cacheRead: 0, cacheWrite: 0, output: 1, reasoning: 0, total: 6 },
+    contextOriginSlices: [{ component: "input", origin: "direct", tokens: 5 }], provenance
+  }));
   const allConsumed = projectExecution(protocol, { maxItems: 100 });
-  assert.equal(allConsumed.usage.requestCount, 0);
+  assert.equal(allConsumed.usage.requestCount, 50);
   assert.equal(allConsumed.usage.origins.recordsTruncated, true);
-  assert.equal(allConsumed.usage.origins.input.total, null);
+  assert.equal(allConsumed.usage.origins.input.total, 250);
   assert.equal(allConsumed.usage.origins.input.unclassified, null);
   assert.equal(allConsumed.usage.origins.complete, false);
   assert.equal(allConsumed.truncated, true);
 
   const partiallyConsumed = structuredClone(protocol);
-  partiallyConsumed.usageRecords.push({
-    id: "request-hidden-2", scope: "request", sessionRef: protocol.session.ref, runId: null,
-    tokens: { input: 3, output: 0, total: 3 },
-    contextOriginSlices: [{ component: "input", origin: "shared", tokens: 3 }], provenance
-  });
   const projected = projectExecution(partiallyConsumed, { maxItems: 101 });
-  assert.equal(projected.usage.requestCount, 1);
+  assert.equal(projected.usage.requestCount, 50);
   assert.equal(projected.usage.origins.recordsTruncated, true);
-  assert.equal(projected.usage.origins.input.total, 5);
+  assert.equal(projected.usage.origins.input.total, 250);
   assert.equal(projected.usage.origins.input.unclassified, null);
   assert.equal(projected.usage.origins.input.complete, false);
   assert.equal(projected.usage.origins.complete, false);

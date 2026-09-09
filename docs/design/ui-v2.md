@@ -23,6 +23,21 @@ compact, uses a single labeled control column, and leaves advanced JSON
 progressively disclosed. Browser-facing selectors and localized copy remain
 under the existing ownership boundaries.
 
+### P5 Execution correctness (2026-09-09)
+
+P5 keeps Execution's single global `maxItems` construction bound while visiting
+actors, runs, and request usage records in deterministic round-robin order.
+When the bound can cover each non-empty primary collection, each receives a
+visible item before the remaining budget is distributed; flattened actor
+relationships continue to charge that same bound. Usage totals and origin
+aggregates inspect the identical projected request records, so a bounded
+long-session result reports a non-zero request lower bound instead of a false
+zero. Work task rows deduplicate repeated normalized task/run status labels
+while retaining every distinct recorded state. User-triggered top-level Work,
+Conversation, and Events switches replace the URL hash without reloading, while
+nested Runtime lenses remain hash-neutral, so copied and refreshed links reopen
+the visible detail panel. See the [P5 decision record](../../.agents/decisions/implemented/2026-09-09-ui-v2-p5-runtime-correctness.md).
+
 ## P0 implementation status (2026-09-03)
 
 The information skeleton is implemented: the primary rail is Library / Statistics /

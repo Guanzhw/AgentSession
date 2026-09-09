@@ -171,8 +171,9 @@ function taskTitle(task: any) {
 }
 
 function renderOverviewTask(task: WorkOverviewTask) {
-  const runStates = task.runs.map((run) => statusLabel(run.status));
-  const states = [statusLabel(task.task.status), ...runStates];
+  // A task/run pair can repeat the same recorded state; keep the first
+  // normalized label and retain every distinct state in recorded order.
+  const states = [...new Set([task.task.status, ...task.runs.map((run) => run.status)].map(statusLabel))];
   const activity = task.latestActivity == null
     ? t("runtime.not_recorded")
     : `${t("runtime.last_activity")}: ${timeLabel(task.latestActivity)}`;

@@ -51,6 +51,8 @@ worker 与 reviewer 使用内部子代理，不新建用户可见会话；每个
 4. `frontend-implementation/03-p2-conversation-threading.md` — P2 对话线程化
 5. `frontend-implementation/04-p3-work-narrative.md` — P3 工作叙事化
 6. `frontend-implementation/05-p4-events-and-wrapup.md` — P4 事件标签 + 收尾
+7. `frontend-implementation/06-p5-runtime-correctness.md` — P5 Execution 有界公平 +
+   Work 任务状态去重；基于 2026-09-09 真实 Codex 长会话复现，OpenClaw provider 冻结
 
 P0 做完先给用户看信息骨架再继续;P2 风险最高,拆两个提交。
 注意:详情页默认标签是**工作**(已实现决策 2026-09-02 Work Graph-first);
