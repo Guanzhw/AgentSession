@@ -25,7 +25,8 @@ import {
   sessionEvent,
   sessionRelationship,
   sessionTask,
-  sourceSequence
+  sourceSequence,
+  validateSessionProtocol
 } from "../dist/src/providers/shared/session-protocol.js";
 import { buildCodexSessionProtocol, codexCompactionRecord } from "../dist/src/providers/codex/protocol.js";
 import { buildClaudeSessionProtocol, claudeCompactionRecord } from "../dist/src/providers/claude-code/protocol.js";
@@ -120,6 +121,21 @@ test("sourceSequence anchors and sequenceEventsBySource produce dense source-ord
   assert.deepEqual(sequenced.map((event) => event.sequence), [1, 2, 3, 4, 5], "gap-free dense 1..n");
   assert.equal(sourceSequence(0, 0), 0);
   assert.equal(sourceSequence(2, 1), 2001);
+});
+
+test("event parent cycles fail the shared protocol validator", () => {
+  const descriptor = {
+    ref: { provider: "fixture", sessionId: "s1" }, state: "active", title: "s1",
+    directory: null, timeCreated: 1, timeUpdated: 2, messageCount: 0, tokenCount: null,
+    metadata: null
+  };
+  const events = [
+    sessionEvent({ id: "a", sessionId: "s1", sequence: 1, timestamp: 1, kind: "message.user", parentEventId: "b", provenance: recorded("fixture", "a") }),
+    sessionEvent({ id: "b", sessionId: "s1", sequence: 2, timestamp: 2, kind: "message.assistant", parentEventId: "a", provenance: recorded("fixture", "b") })
+  ];
+  const result = validateSessionProtocol({ sessionId: "s1", version: 2, session: descriptor, events, relationships: [], tasks: [], agentRuns: [], contextArtifacts: [], branches: [], revision: "fixture" });
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === "EVENT_PARENT_CYCLE"), true);
 });
 
 test("event and relationship factories validate enums and provenance", () => {

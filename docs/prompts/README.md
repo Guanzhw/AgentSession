@@ -36,6 +36,9 @@ worker 与 reviewer 使用内部子代理，不新建用户可见会话；每个
 7. `backend-evolution/09-goal-paused-status.md` — ✅ **已完成（2026-09-09）**：
    为共享 `GoalStatus` 增加已记录的 `paused` 状态，并保持 DSH 原义映射；
    OpenClaw native v3 仍是后续阶段。
+8. `backend-evolution/10-openclaw-native-v3-core.md` — ✅ **已完成（2026-09-09）**：OpenClaw
+   2026.9.3 native v3 core、canonical branch refs、request Usage 与 compact result；
+   高级 SQLite evidence tables 后续独立实施。
 
 建议顺序:A 的投影部分已落地;剩余的 provider-native origin 映射等待真实证据;B 与 C
 相互独立,均在核心工作(usage-origin 记账 + provider-native v3 映射)落地后再评估。

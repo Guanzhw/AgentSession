@@ -864,6 +864,28 @@ export function validateSessionProtocol(
   for (const event of protocol.events || []) {
     if (event.parentEventId && !eventIds.has(event.parentEventId)) warning("EVENT_PARENT_DANGLING", "Event parent is not present in this snapshot", entityRef("event", event.id), event.provenance);
   }
+  // Parent references form a directed event graph. A cycle is invalid even
+  // when every individual parent id resolves; otherwise a provider can appear
+  // complete while no causal root exists.
+  const parentByEvent = new Map<string, string | null>(
+    (protocol.events || []).filter((event) => eventIds.has(event.id)).map((event) => [event.id, event.parentEventId || null])
+  );
+  const eventVisiting = new Set<string>();
+  const eventVisited = new Set<string>();
+  const visitEvent = (id: string) => {
+    if (eventVisited.has(id)) return;
+    if (eventVisiting.has(id)) {
+      const event = (protocol.events || []).find((candidate) => candidate.id === id);
+      error("EVENT_PARENT_CYCLE", "Event parent references contain a cycle", entityRef("event", id), event?.provenance);
+      return;
+    }
+    eventVisiting.add(id);
+    const parent = parentByEvent.get(id);
+    if (parent && parentByEvent.has(parent)) visitEvent(parent);
+    eventVisiting.delete(id);
+    eventVisited.add(id);
+  };
+  for (const id of parentByEvent.keys()) visitEvent(id);
 
   const taskIds = new Set<string>();
   for (const task of protocol.tasks || []) {

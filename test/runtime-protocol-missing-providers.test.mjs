@@ -88,6 +88,8 @@ test("OpenClaw protocol keeps active path and recorded branch heads", () => {
   const protocol = buildOpenClawSessionProtocol(session("oclaw", "openclaw"), records, [], 1);
   assert.equal(protocol.validation.ok, true);
   assert.equal(protocol.events.some((event) => event.id === "record:c"), true);
-  assert.equal(protocol.events.some((event) => event.id === "record:branch"), false);
+  // Every stored non-header record has a canonical event anchor, including
+  // the abandoned branch head; only the message projection stays active-path.
+  assert.equal(protocol.events.some((event) => event.id === "record:branch"), true);
   assert.equal(protocol.branches.length, 2);
 });

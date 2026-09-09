@@ -10,14 +10,15 @@ import {
   openClawUsageToTokens,
   type OpenClawRecord
 } from "./parser.js";
+import type { OpenClawActorFact, OpenClawSqliteSessionFacts } from "./protocol.js";
 
 /**
  * OpenClaw current-format per-agent SQLite reader (read-only).
  *
- * Canonical storage (official agent schema 19, verified 2026-09-03 at HEAD
- * f92a12c5813fb880ed6a05c4a728fd5f4ccc5473, release v2026.8.2, newest main
- * 2d9796d66c4358d7175761b581077fbd8fe16116 — identical schema SQL, sha256
- * 54fa65dc23576fcb20bc77f714d10598a7240ad28b7edd4fe4c39995dc96f61e):
+ * Canonical storage (official agent schema 19, verified against release
+ * v2026.9.3 commit 1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7 and separately
+ * audited upstream HEAD 0140d656b1012a3059fd8f769952485a58b8a4e5; schema SQL
+ * sha256 fe93217454642e911608f81afc53c9fb3bb7c20cc32bc73f8f6eeaaf232b91b8):
  *
  *   ~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite
  *
@@ -65,6 +66,8 @@ export interface OpenClawSqliteSessionEntry {
   messages: Message[];
   /** Current transcript window id (session_windows.session_id). */
   currentSessionId: string;
+  /** Boundary-normalized native v3 facts from this logical session entry. */
+  facts: OpenClawSqliteSessionFacts;
   truncated: boolean;
 }
 
@@ -81,11 +84,12 @@ const NODE_COLUMNS = [
   "fork_source_entry_id", "label", "display_name", "pinned_at", "archived_at",
   "last_read_at", "last_interaction_at", "last_activity_at"
 ] as const;
+const MAX_ENTRY_JSON_BYTES = 512 * 1024;
 
 const WINDOW_COLUMNS = [
   "session_id", "session_key", "previous_session_id", "reason", "created_at",
   "updated_at", "transcript_updated_at", "status", "chat_type", "channel",
-  "account_id", "model_provider", "model", "session_scope"
+  "account_id", "model_provider", "model", "session_scope", "started_at", "ended_at"
 ] as const;
 
 function projectColumns(discovered: Set<string>, consumed: readonly string[]): Set<string> {
@@ -182,7 +186,7 @@ function parseEntryJson(entryJson: unknown): Record<string, unknown> | null {
   if (typeof entryJson !== "string" || !entryJson || entryJson === "{}") return null;
   // SessionEntry blobs can carry plugin state; only parse bounded shapes and
   // never fail a session because its metadata blob is unusual.
-  if (entryJson.length > 512 * 1024) return null;
+  if (entryJson.length > MAX_ENTRY_JSON_BYTES) return null;
   try {
     const parsed = JSON.parse(entryJson) as unknown;
     return parsed && typeof parsed === "object" && !Array.isArray(parsed)
@@ -222,12 +226,14 @@ interface WindowRow {
   model_provider: string | null;
   model: string | null;
   session_scope: string | null;
+  started_at: number | null;
+  ended_at: number | null;
 }
 
 interface NodeRow {
   session_key: string;
   current_session_id: string;
-  entry_json: string;
+  entry_json: string | null;
   entry_valid: number;
   updated_at: number | null;
   status: string | null;
@@ -248,6 +254,87 @@ interface NodeRow {
   last_activity_at: number | null;
 }
 
+const MAX_FACT_TEXT = 512;
+const MAX_FACT_IDS = 64;
+
+function boundedText(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim().slice(0, MAX_FACT_TEXT) : null;
+}
+
+function boundedFinite(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function boundedInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function boundedIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map(boundedText).filter((id): id is string => Boolean(id)))].slice(0, MAX_FACT_IDS);
+}
+
+function normalizeActorFact(value: unknown): OpenClawActorFact | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const actor = value as Record<string, unknown>;
+  const type: OpenClawActorFact["type"] | null = actor.type === "human" || actor.type === "agent" || actor.type === "system" ? actor.type : null;
+  if (!type) return null;
+  return { type, id: boundedText(actor.id), label: boundedText(actor.label) };
+}
+
+function normalizeGoalFact(value: unknown): OpenClawSqliteSessionFacts["goal"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const goal = value as Record<string, unknown>;
+  const id = boundedText(goal.id);
+  if (!id) return null;
+  return {
+    id,
+    objective: boundedText(goal.objective) || "",
+    status: boundedText(goal.status),
+    createdAt: boundedFinite(goal.createdAt),
+    updatedAt: boundedFinite(goal.updatedAt),
+    tokenBudget: boundedFinite(goal.tokenBudget)
+  };
+}
+
+/** Normalize only documented native-v3 fields at the untrusted JSON boundary. */
+function normalizeSessionFacts(
+  entryJson: Record<string, unknown> | null,
+  node: NodeRow,
+  window: WindowRow | null,
+  agentId: string
+): OpenClawSqliteSessionFacts {
+  const entry = entryJson || {};
+  const ownerValue = entry.owner;
+  const owner = ownerValue && typeof ownerValue === "object" && !Array.isArray(ownerValue)
+    ? ownerValue as Record<string, unknown>
+    : null;
+  return {
+    agentId: boundedText(agentId) || agentId.slice(0, MAX_FACT_TEXT),
+    goal: normalizeGoalFact(entry.goal),
+    createdActor: normalizeActorFact(entry.createdActor),
+    owner: owner ? {
+      actor: normalizeActorFact(owner.actor),
+      assignedBy: normalizeActorFact(owner.assignedBy),
+      assignedAt: boundedFinite(owner.assignedAt)
+    } : null,
+    createdVia: boundedText(entry.createdVia) || boundedText(node.created_via),
+    spawnDepth: boundedInteger(entry.spawnDepth),
+    subagentRole: entry.subagentRole === "orchestrator" || entry.subagentRole === "leaf" ? entry.subagentRole : null,
+    startedAt: boundedFinite(entry.startedAt) ?? boundedFinite(window?.started_at),
+    endedAt: boundedFinite(entry.endedAt) ?? boundedFinite(window?.ended_at),
+    runtimeMs: boundedFinite(entry.runtimeMs),
+    status: boundedText(entry.status) || boundedText(node.status) || boundedText(window?.status),
+    lastRunError: boundedText(entry.lastRunError),
+    swarmGroupId: boundedText(entry.swarmGroupId),
+    swarmCollector: typeof entry.swarmCollector === "boolean" ? entry.swarmCollector : null,
+    completionOwnerSessionKey: boundedText(entry.completionOwnerSessionKey),
+    usageFamilyKey: boundedText(entry.usageFamilyKey),
+    usageFamilySessionIds: boundedIds(entry.usageFamilySessionIds),
+    windowReason: boundedText(window?.reason)
+  };
+}
+
 function openReadOnly(dbPath: string): DatabaseSync {
   // Provider data is strictly read-only: no migration, no WAL recovery
   // writes, no side effects.
@@ -264,7 +351,10 @@ function openReadOnly(dbPath: string): DatabaseSync {
 function readSqliteRows(db: DatabaseSync, table: string, columns: Set<string>): unknown[] {
   const names = [...columns];
   if (!names.length) return [];
-  const statement = db.prepare(`SELECT ${names.map(name => `"${name}"`).join(", ")} FROM "${table}"`);
+  const projection = names.map(name => name === "entry_json"
+    ? `CASE WHEN length(CAST("entry_json" AS BLOB)) <= ${MAX_ENTRY_JSON_BYTES} THEN "entry_json" ELSE NULL END AS "entry_json"`
+    : `"${name}"`);
+  const statement = db.prepare(`SELECT ${projection.join(", ")} FROM "${table}"`);
   return statement.all() as unknown[];
 }
 
@@ -467,6 +557,7 @@ export function createOpenClawSqliteSessionStore(
     const active = activeOpenClawRecords(records);
     const window = windows.find(row => row.session_id === node.current_session_id) || null;
     const entryJson = parseEntryJson(node.entry_json);
+    const facts = normalizeSessionFacts(entryJson, node, window, agentId);
     const directory =
       readWindowHeaderCwd(records) ||
       stringValue(entryJson?.sessionRoot) ||
@@ -571,6 +662,7 @@ export function createOpenClawSqliteSessionStore(
       records,
       messages,
       currentSessionId: node.current_session_id,
+      facts,
       truncated
     };
   };

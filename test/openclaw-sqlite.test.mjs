@@ -69,7 +69,8 @@ function createAgentDatabase(
     key = "agent:main:main",
     windowId = "win-main-1",
     previousWindowId = "win-main-0",
-    agentId = "main"
+    agentId = "main",
+    entryJson = {}
   } = {}
 ) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -87,7 +88,7 @@ function createAgentDatabase(
       fork_source_session_id, fork_source_entry_id, label, display_name, archived_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    key, windowId, JSON.stringify({ sessionKey: key, sessionId: windowId, displayName }), entryValid,
+    key, windowId, JSON.stringify({ sessionKey: key, sessionId: windowId, displayName, ...entryJson }), entryValid,
     now + 60_000, status, now, parentSessionKey, spawnedBy,
     forkSource?.sessionKey ?? null, forkSource?.sessionId ?? null, forkSource?.entryId ?? null,
     label, displayName, archivedAt
@@ -158,7 +159,7 @@ function createAgentDatabase(
   db.close();
 }
 
-function createChildAgentDatabase(dbPath, key, parentKey, workspace) {
+function createChildAgentDatabase(dbPath, key, parentKey, workspace, entryJson = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new DatabaseSync(dbPath);
   db.exec(schemaSql);
@@ -173,7 +174,7 @@ function createChildAgentDatabase(dbPath, key, parentKey, workspace) {
       session_key, current_session_id, entry_json, entry_valid, updated_at, status, created_at,
       parent_session_key, spawned_by, display_name
     ) VALUES (?, ?, ?, 1, ?, 'done', ?, ?, ?, ?)
-  `).run(key, windowId, JSON.stringify({ sessionKey: key, sessionId: windowId }), now + 60_000, now, parentKey, parentKey, "Child session");
+  `).run(key, windowId, JSON.stringify({ sessionKey: key, sessionId: windowId, ...entryJson }), now + 60_000, now, parentKey, parentKey, "Child session");
   db.prepare(`
     INSERT INTO session_windows (
       session_id, session_key, previous_session_id, reason, session_scope, created_at,
@@ -449,6 +450,56 @@ test("OpenClaw current SQLite: read-only open never mutates provider storage", a
     const probe = new DatabaseSync(dbPath, { readOnly: true });
     assert.throws(() => probe.exec("DELETE FROM session_nodes"));
     probe.close();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("OpenClaw current SQLite: entry_json facts reach native v3 through the real adapter", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "agentsession-openclaw-v3-sqlite-"));
+  try {
+    const mainDb = path.join(root, "agents", "main", "agent", "openclaw-agent.sqlite");
+    createAgentDatabase(mainDb, {
+      entryJson: {
+        goal: { id: "goal-sqlite", objective: "Finish the bounded migration", status: "usage_limited", createdAt: 100, updatedAt: 200, tokenBudget: 900 },
+        createdActor: { type: "human", id: "operator-1", label: "Operator" },
+        owner: { actor: { type: "agent", id: "owner-1", label: "Owner" }, assignedBy: { type: "system", id: "scheduler" }, assignedAt: 110 }
+      }
+    });
+    createChildAgentDatabase(
+      path.join(root, "agents", "worker", "agent", "openclaw-agent.sqlite"),
+      "agent:worker:child", "agent:main:main", "/workspace/worker",
+      { createdVia: "spawn", spawnDepth: 1, swarmGroupId: "swarm-sqlite", status: "killed", startedAt: 300, endedAt: 350, lastRunError: "cancelled by operator" }
+    );
+    initConfig(["--openclaw-dir", root]);
+
+    const protocol = openclaw.getSessionProtocolV3("agent:main:main");
+    assert.ok(protocol);
+    assert.equal(protocol.goals[0]?.id, "goal:goal-sqlite");
+    assert.equal(protocol.goals[0]?.status, "blocked");
+    assert.match(protocol.goals[0]?.provenance.sourceType || "", /goal\.status:usage_limited$/);
+    assert.ok(protocol.actors.some(actor => actor.providerActorId === "operator-1"));
+    assert.ok(protocol.actors.some(actor => actor.providerActorId === "owner-1"));
+    assert.equal(protocol.agentRuns.length, 1);
+    assert.equal(protocol.agentRuns[0].mode, "team");
+    assert.equal(protocol.agentRuns[0].status, "cancelled");
+    assert.equal(protocol.coordination[0]?.state, "started");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("OpenClaw current SQLite: oversized entry_json is NULLed before JS materialization", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "agentsession-openclaw-v3-oversized-"));
+  try {
+    createAgentDatabase(path.join(root, "agents", "main", "agent", "openclaw-agent.sqlite"), {
+      entryJson: { goal: { id: "should-not-read", objective: "oversized", status: "active" }, padding: "x".repeat(600_000) }
+    });
+    initConfig(["--openclaw-dir", root]);
+    const protocol = openclaw.getSessionProtocolV3("agent:main:main");
+    assert.ok(protocol);
+    assert.deepEqual(protocol.goals, []);
+    assert.equal(protocol.validation.ok, true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

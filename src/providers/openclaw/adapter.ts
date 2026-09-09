@@ -23,10 +23,13 @@ import {
 } from "./parser.js";
 import {
   buildOpenClawSessionProtocol,
+  buildOpenClawSessionProtocolV3,
   buildOpenClawSqliteSessionProtocol,
+  buildOpenClawSqliteSessionProtocolV3,
   openClawProtocolCapabilities,
   type OpenClawSqliteLineageFacts
 } from "./protocol.js";
+import { finalizeSessionProtocolV3 } from "../shared/session-protocol-v3.js";
 import { buildOpenClawRuntimeEnvironment } from "./runtime-environment.js";
 import {
   createOpenClawSqliteSessionStore,
@@ -309,7 +312,8 @@ function sqliteLineageFacts(entry: OpenClawSqliteSessionEntry | null): OpenClawS
   return {
     forkedFromSessionKey: metadata.forkSource && typeof metadata.forkSource === "object"
       ? String((metadata.forkSource as any).sessionKey || "")
-      : null
+      : null,
+    facts: entry.facts
   };
 }
 
@@ -345,6 +349,33 @@ function sessionProtocolFor(sessionId: string) {
     family.filter((child: any) => String(child.session.id) !== String(fileEntry.session.id)),
     sessionFiles.getStatsRevision()
   );
+}
+
+function sessionProtocolV3For(sessionId: string) {
+  const entry = sqliteStore.get(sessionId);
+  if (entry) {
+    const children = sqliteStore.list().filter(child => child.id !== entry.id && (
+      child.session.metadata?.parentSessionKey === entry.id || child.session.metadata?.spawnedBy === entry.id
+    ));
+    const base = buildOpenClawSqliteSessionProtocol(entry.session, entry.records, children, sqliteStore.getRevision(), sqliteLineageFacts(entry));
+    return finalizeSessionProtocolV3(buildOpenClawSqliteSessionProtocolV3({
+      session: entry.session,
+      records: entry.records,
+      children,
+      agentId: entry.agentId
+    }, base, entry.facts));
+  }
+  ensureDiscoveryDir();
+  const fileEntry = sessionFiles.get(sessionId);
+  if (!fileEntry) return null;
+  const family = sessionFiles.getFamily(sessionId);
+  const base = buildOpenClawSessionProtocol(fileEntry.session, fileEntry.records, family.filter((child: any) => String(child.session.id) !== String(fileEntry.session.id)), sessionFiles.getStatsRevision());
+  return finalizeSessionProtocolV3(buildOpenClawSessionProtocolV3({
+    session: fileEntry.session,
+    records: fileEntry.records,
+    children: family.filter((child: any) => String(child.session.id) !== String(fileEntry.session.id)),
+    agentId: String(fileEntry.session.metadata?.agentId || "")
+  }, base));
 }
 
 const openclaw = {
@@ -461,6 +492,7 @@ const openclaw = {
     return `${sqliteStore.getRevision()}|${sessionFiles.getStatsRevision()}`;
   },
   getSessionProtocol: sessionProtocolFor,
+  getSessionProtocolV3: sessionProtocolV3For,
   searchMessages(query, limit = 20) {
     ensureDiscoveryDir();
     return searchNormalizedMessages(allEntries(), query, limit);

@@ -108,6 +108,15 @@ test("Work Graph renders four domains with Work selected and keeps event evidenc
   assert.doesNotMatch(html, /Retain <the result>/);
 });
 
+test("Work Graph omits healthy structured storage diagnostics instead of stringifying them", () => {
+  const runtime = fixtureRuntime();
+  runtime.storageDiagnostic = { currentSqliteAgents: 1, states: [] };
+  assert.doesNotMatch(renderRuntimeWorkbench(runtime, "fixture", "runtime-1"), /\[object Object\]/);
+
+  runtime.storageDiagnostic = { note: "One provider store is unreadable." };
+  assert.match(renderRuntimeWorkbench(runtime, "fixture", "runtime-1"), /One provider store is unreadable\./);
+});
+
 test("Execution usage keeps complete values authoritative and exposes stable hooks", () => {
   const html = renderRuntimeWorkbench(fixtureRuntime(), "fixture", "runtime-1");
   const usage = html.match(/<section class="runtime-usage-summary"[\s\S]*?<\/section>/)?.[0] || "";

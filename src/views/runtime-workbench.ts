@@ -459,7 +459,14 @@ export function renderRuntimeWorkbench(data: RuntimeData, provider: string, sess
   const summary = data.summary || { counts: {}, completeness: "partial", capabilities: {} };
   const notices = [data.runtimeError, data.storageDiagnostic]
     .filter(Boolean)
-    .map((notice) => `<p class="runtime-notice runtime-notice-warning"${notice?.code ? ` data-runtime-error="${escapeHtml(String(notice.code))}"` : ""}>${escapeHtml(String(notice?.message || notice?.code || notice))}</p>`)
+    .map((notice) => ({
+      code: typeof notice === "object" ? notice?.code : null,
+      message: typeof notice === "string"
+        ? notice
+        : notice?.message || notice?.note || notice?.code || null
+    }))
+    .filter((notice) => notice.message)
+    .map((notice) => `<p class="runtime-notice runtime-notice-warning"${notice.code ? ` data-runtime-error="${escapeHtml(String(notice.code))}"` : ""}>${escapeHtml(String(notice.message))}</p>`)
     .join("");
   return `<section class="runtime-workbench" data-runtime-root data-runtime-provider="${escapeHtml(provider)}" data-runtime-session-id="${escapeHtml(sessionId)}" data-runtime-available="${protocol ? "true" : "false"}">
     <header class="runtime-header"><div><h2>${t("runtime.title")}</h2><p>${t("runtime.description")}</p></div><span class="runtime-version">v${escapeHtml(String(data.v3?.version || protocol?.version || summary.version || 2))}</span></header>

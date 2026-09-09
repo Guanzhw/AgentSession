@@ -103,7 +103,7 @@ fact was stored natively.
 | OpenCode | active | `$XDG_DATA_HOME/opencode/opencode.db` or `~/.local/share/opencode/opencode.db` | `partial/derived` message/part events; native v3 preserves v2 facts and adds evidence-backed todo/task-result Work, Execution, Coordination, and request Usage while Goals, Actors, and Context results remain empty or unknown (official 1.18.27/1.18.29 schema unchanged; installed 1.17.11). |
 | Claude Code | active | `~/.claude/transcripts/`, `~/.claude/projects/` | `partial/derived` transcript, recorded `system/compact_boundary` (`compactMetadata`), and sidechain/task-notification evidence; native v3 preserves the finalized v2 snapshot and adds deduplicated request Usage from canonical assistant response ids. npm latest/next 2.1.263 and official upstream are verified, installed CLI is 2.1.207, and no live 2.1.263 transcript was available. |
 | Codex CLI | active | `~/.codex/sessions/**/*.jsonl`, cold `*.jsonl.zst` rollouts | `full/recorded` response/item, tool, compaction, and current `token_usage_record`; `inter_agent_communication` is exposed only in Runtime v3 actors/coordination and does not alter the linear transcript; `partial/derived` NEW_TASK relationships, Tasks, and AgentRuns. `close_agent` normalizes to `interrupt`; the installed 0.152.1 still mainly writes legacy `token_count`/collaboration shapes, while the official 0.153.0 release and current source HEAD cover the new shapes. |
-| OpenClaw | active — current SQLite (with legacy/archive JSONL fallback) | `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite` (agent schema 19, verified 2026-09-03); legacy/archive `sessions/*.jsonl` | `partial/derived` branch/window generations, reasoning, tools, and recorded session_nodes parent/spawn/fork lineage; no child without source evidence. Tasks/AgentRuns are `none`: both current and legacy builders always emit empty arrays, with no verified mapping. |
+| OpenClaw | active — current SQLite (with legacy/archive JSONL fallback) | `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite` (agent schema 19; v2026.9.3 release commit `1391f7cd…`, separately audited HEAD `0140d656…`, schema SQL sha256 `fe932174…`); legacy/archive `sessions/*.jsonl` | v2 canonical events/branches plus v3 recorded Goal, agent identity, spawn Run, compaction context, and request usage; limited goal states map to shared `blocked` while retaining raw status in bounded provenance. Advanced task/run/delivery tables are deferred. |
 | Hermes Agent | active | `$HERMES_HOME/state.db` | `full/recorded` active-only SQLite transcript and async delegation handle/state; native v3 preserves v2 facts and projects dispatch/lifecycle/delivery as separate Coordination observations; `partial/derived` compression continuation/delegation lineage and metadata-only compaction; compression is not spawned work. Current freshness: v0.21.1 / `v2026.9.7`, schema 30, release commit `2237be35…`, separate HEAD `6e2b8e07…`; local install remains v0.19.1, schema 23. |
 | Pi | active | `~/.pi/agent/sessions/**/*.jsonl` | `full/recorded` branch/compaction events and `partial/derived` parent lineage; never invented spawn. Current upstream is `@earendil-works/pi-coding-agent` (npm 0.85.1, package tag/gitHead `d981de12…`; separate upstream HEAD `f53ac113…`, official session format **v3**, verified 2026-09-08); the v3 reader preserves v2 facts, emits assistant-request Usage, and maps readable branch/compaction summaries to Context results. The current official boundary is `firstKeptEntryId`; `retainedTail` is historical/harness extension evidence only, not a current standard field. The local Pi install is 0.80.10, with no live 0.85.1 transcript available; nested `run-N/session.jsonl` files are pi-subagents run artifacts (no parentSession, no lineage). |
 | DeepSeek Harness | active preview | `$DSH_HOME/sessions/**/{session.jsonl,session.v1.jsonl,session.v2.jsonl}[.zstd]` or `~/.dsh/sessions/**` | `full/recorded` v0/v1/v2 events/context; each session root selects the highest generation, with `partial/derived` workflow, team, and cross-session relationships. |
@@ -118,9 +118,10 @@ it is never reported as an empty successful source.
 ## OpenClaw current SQLite compatibility
 
 OpenClaw moved sessions/transcripts into the per-agent SQLite store starting
-with 2026.7.2-beta.1 (agent schema 19 today); `sessions/*.jsonl` and
+with 2026.7.2-beta.1 (agent schema 19); `sessions/*.jsonl` and
 `sessions.json` are legacy/archive (doctor migration inputs). AgentSession's
-current implementation (verified 2026-09-03):
+current implementation targets the v2026.9.3 release commit `1391f7cd…` and
+records the separately audited upstream HEAD `0140d656…`:
 
 - Primary store: `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite`
   (opened read-only; WAL-aware snapshot signatures). Canonical session id =
@@ -147,11 +148,15 @@ current implementation (verified 2026-09-03):
   unsupported schema (version >19 or missing shape) / unreadable (corrupt or
   permission) / unavailable (no agents dir); one corrupt agent store never
   hides another agent's usable data.
-- Verification baseline: official HEAD `f92a12c5…` and release `v2026.8.2`
-  (byte-identical schema SQL, sha256 `54fa65dc…`, agent schema 19). The local
-  install 2026.7.1-2 is pre-flip and no current-format data directory exists
-  on this machine, so live local validation was not completed (recorded
-  explicitly, not claimed as success).
+- v3 normalizes only the bounded `entry_json` goal, createdActor/owner,
+  spawn/runtime/status, swarm, completion-owner, and usage-lineage facts at the
+  provider boundary. `usage_limited` and `budget_limited` map to shared
+  `blocked`, with the raw value retained in bounded provenance. Request usage never
+  invents shared/inherited origin or promotes aggregate tokens to requests.
+- Verification baseline: agent schema 19, schema SQL sha256 `fe932174…`. The
+  local install 2026.7.1-2 is pre-flip with one legacy JSONL
+  (`agentsession-openclaw-smoke-20260802`) and no current SQLite sample; real
+  local SQLite v3 validation was not completed (recorded explicitly).
 
 ## DeepSeek Harness compatibility
 

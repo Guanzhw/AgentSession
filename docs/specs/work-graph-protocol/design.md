@@ -1,7 +1,8 @@
 # Session Protocol v3 Work Graph design
 
-Status: v3 foundation and bounded projections implemented; Codex current-format
-refresh implemented (installed 0.152.1, official 0.153.0 source)
+Status: v3 foundation and bounded projections implemented; Codex and OpenClaw
+current-format native core refreshes implemented (installed snapshots remain
+older than the audited provider releases)
 
 Date: 2026-09-02
 
@@ -39,6 +40,27 @@ were verified against the official `openai/codex` release tag `rust-v0.153.0`
 `36984da4424cb91b6bc88c6af8d73207930ac729`, plus a source-derived bounded
 synthetic fixture (not a live capture); installed 0.152.1 local rollouts were
 smoke-tested read-only.
+
+## OpenClaw current-format evidence
+
+The OpenClaw adapter reads the v2026.9.3 SQLite shape read-only. The audited
+release commit is `1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`, the audited moving
+checkout is `0140d656b1012a3059fd8f769952485a58b8a4e5`, and agent schema 19 has
+SQL SHA-256
+`fe93217454642e911608f81afc53c9fb3bb7c20cc32bc73f8f6eeaaf232b91b8`.
+Documented `session_nodes.entry_json` fields are normalized once at the
+provider boundary into bounded facts for goals, actors/owners, spawn and
+swarm metadata, lifecycle, completion ownership, and request usage. The v3
+snapshot reuses the finalized v2 event/lineage base: every non-header record
+has a canonical event anchor, branch refs use a common ancestor, and linear
+fork anchors remain null. Recorded goals, explicit child runs, one spawn
+coordination observation per child, additive request usage (including
+abandoned branches), and readable compact/branch summaries are projected with
+recorded/derived provenance. Delivery and completion are not inferred from
+launch acknowledgements; operations without a readable result remain events.
+The local installation is OpenClaw 2026.7.1-2 and has no current SQLite
+transcript, so current-format evidence is release/source audited plus bounded
+synthetic regression coverage; the implementation does not upgrade it.
 
 ## Bounded projection API
 
