@@ -11,6 +11,7 @@ import type {
 } from "../protocol-runtime-v3.js";
 import { deriveWorkOverview, type WorkOverviewTask } from "../work-view-model.js";
 import type { SessionProtocolV3 } from "../providers/shared/session-protocol-v3.js";
+import { formatLocalizedDurationMs } from "./components.js";
 
 type RuntimeData = {
   protocol: SessionProtocol | null;
@@ -77,11 +78,9 @@ function statusLabel(value: unknown) {
 
 function durationLabel(value: number | null) {
   if (value == null) return t("runtime.not_recorded");
-  const seconds = Math.round(value / 1000);
-  if (seconds < 60) return `${seconds}${t("runtime.seconds_short")}`;
-  const minutes = Math.floor(seconds / 60);
-  const remainder = seconds % 60;
-  return remainder ? `${minutes}${t("runtime.minutes_short")} ${remainder}${t("runtime.seconds_short")}` : `${minutes}${t("runtime.minutes_short")}`;
+  const duration = formatLocalizedDurationMs(value);
+  if (!duration) return `0${t("runtime.seconds_short")}`;
+  return duration;
 }
 
 const GOAL_TITLE_LIMIT = 180;

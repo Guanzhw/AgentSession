@@ -262,28 +262,60 @@ export function formatDuration(startMs: any, endMs: any) {
     return "";
   }
 
-  const totalSeconds = Math.round((end - start) / 1000);
-  if (totalSeconds < 60) {
-    return `${totalSeconds}s`;
-  }
-
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  return formatDurationMs(end - start) || "0s";
 }
 
 /** Compact duration label from a millisecond span (no start/end pair needed). */
-export function formatDurationMs(ms: any) {
+type DurationUnitLabels = {
+  days: string;
+  hours: string;
+  minutes: string;
+  seconds: string;
+};
+
+const ASCII_DURATION_UNITS: DurationUnitLabels = {
+  days: "d",
+  hours: "h",
+  minutes: "m",
+  seconds: "s"
+};
+
+function formatDurationWithUnits(ms: any, unitLabels: DurationUnitLabels) {
   const totalSeconds = Math.round(Number(ms) / 1000);
   if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) {
     return "";
   }
-  if (totalSeconds < 60) {
-    return `${totalSeconds}s`;
+  const units = [
+    [unitLabels.days, 86_400],
+    [unitLabels.hours, 3_600],
+    [unitLabels.minutes, 60],
+    [unitLabels.seconds, 1]
+  ] as const;
+  let remaining = totalSeconds;
+  const parts: string[] = [];
+  for (const [label, secondsPerUnit] of units) {
+    const amount = Math.floor(remaining / secondsPerUnit);
+    if (amount > 0) {
+      parts.push(`${amount}${label}`);
+      remaining %= secondsPerUnit;
+    }
+    if (parts.length === 2) break;
   }
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  return parts.join(" ");
+}
+
+export function formatDurationMs(ms: any) {
+  return formatDurationWithUnits(ms, ASCII_DURATION_UNITS);
+}
+
+/** Compact duration label using the active locale's short unit labels. */
+export function formatLocalizedDurationMs(ms: any) {
+  return formatDurationWithUnits(ms, {
+    days: t("runtime.days_short"),
+    hours: t("runtime.hours_short"),
+    minutes: t("runtime.minutes_short"),
+    seconds: t("runtime.seconds_short")
+  });
 }
 
 const STATUS_LABEL_KEYS: Record<string, string> = {

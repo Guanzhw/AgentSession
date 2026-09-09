@@ -8,6 +8,7 @@ import { renderSessionPage } from "../dist/src/views/session.js";
 import { finalizeSessionProtocolV3, upgradeSessionProtocolV2 } from "../dist/src/providers/shared/session-protocol-v3.js";
 import { projectContext, projectCoordination, projectExecution, projectWork } from "../dist/src/protocol-runtime-v3.js";
 import { summarizeEvent } from "../dist/src/event-summary.js";
+import { formatLocalizedDurationMs } from "../dist/src/views/components.js";
 
 const provenance = { fidelity: "recorded", sourceType: "fixture.event", sourceId: "source-1" };
 
@@ -106,6 +107,53 @@ test("Work Graph renders four domains with Work selected and keeps event evidenc
   assert.match(html, /Context after compaction/);
   assert.match(html, /Retain &lt;the result&gt; and discard copied history/);
   assert.doesNotMatch(html, /Retain <the result>/);
+});
+
+test("P6 keeps rail search and Work overview readable at desktop and medium widths", () => {
+  const style = readFileSync(path.join(process.cwd(), "src", "static", "style.css"), "utf8");
+  assert.match(style, /\.app-rail \.search-form \{[\s\S]*?width: 100%;[\s\S]*?min-width: 0;/);
+  assert.match(style, /\.app-rail \.search-input \{[\s\S]*?width: 100%;[\s\S]*?max-width: 100%;/);
+  assert.match(style, /\.app-rail \.search-visible-label \{[\s\S]*?white-space: normal;/);
+  assert.match(style, /\.app-rail \.search-input:focus-visible \{[\s\S]*?outline: 2px solid var\(--accent-color\);/);
+  assert.match(style, /\.runtime-work-overview-grid \{ display: grid; grid-template-columns: minmax\(280px, \.8fr\) minmax\(560px, 1\.6fr\);/);
+  assert.match(style, /@media \(max-width: 1240px\) \{[\s\S]*?\.runtime-work-overview-grid \{ grid-template-columns: 1fr; \}/);
+  assert.match(style, /\.runtime-overview-task-table th:nth-child\(3\),[\s\S]*?\.runtime-overview-task-table td:nth-child\(5\) \{ white-space: nowrap;/);
+  assert.match(style, /@media \(max-width: 768px\) \{[\s\S]*?\.rail-utility \.search-form \{\s*display: none;/);
+});
+
+test("P6 session metrics use localized hierarchy, recorded span, and token details", () => {
+  const previousLocale = getLocale();
+  const metrics = {
+    totals: {
+      messages: 2155, steps: 200, toolCalls: 18, branches: 13, runtimeMs: 6 * 3_600_000 + 35 * 60_000,
+      cost: 1.25, directInputTokens: 100, directOutputTokens: 20, directReasoningTokens: 3,
+      directCacheReadTokens: 4, directCacheWriteTokens: 2, directTotalTokens: 129, totalTokens: 129
+    },
+    tools: [{ name: "apply_patch", count: 4 }]
+  };
+  try {
+    setLocale("en");
+    const en = renderSessionPage({ session: { id: "metrics", title: "Metrics" }, provider: "fixture", sessionMetrics: metrics });
+    assert.match(en, /class="session-stat-label">Messages/);
+    assert.match(en, /class="session-stat-value">2,155/);
+    assert.match(en, /Recorded span/);
+    assert.match(en, /6h 35m/);
+    assert.match(en, /Top tools:/);
+    assert.match(en, /cache read/);
+    assert.doesNotMatch(en, />runtime</);
+
+    setLocale("zh");
+    assert.equal(formatLocalizedDurationMs(9 * 86_400_000 + 5 * 3_600_000), "9天 5时");
+    const zh = renderSessionPage({ session: { id: "metrics", title: "Metrics" }, provider: "fixture", sessionMetrics: metrics });
+    assert.match(zh, /class="session-stat-label">消息/);
+    assert.match(zh, /记录跨度/);
+    assert.match(zh, /6时 35分/);
+    assert.match(zh, /常用工具：/);
+    assert.match(zh, /缓存读取/);
+    assert.match(renderRuntimeWorkbench(fixtureRuntime(), "fixture", "runtime-1"), /耗时: 2秒/);
+  } finally {
+    setLocale(previousLocale);
+  }
 });
 
 test("Work Graph omits healthy structured storage diagnostics instead of stringifying them", () => {

@@ -2,7 +2,7 @@ import { t } from "../i18n.js";
 import { escapeHtml } from "../markdown.js";
 import type { SessionPartNode, SessionTree } from "../providers/opencode/session-tree.js";
 import { isSubagentTool, mergeToolMetadata } from "../providers/shared/subagent-tools.js";
-import { formatDuration, formatTime, formatTokens, messageBubble, messageHeader, reasoningBlock, todoList, toolCallBlock } from "./components.js";
+import { formatDuration, formatLocalizedDurationMs, formatTime, formatTokens, messageBubble, messageHeader, reasoningBlock, todoList, toolCallBlock } from "./components.js";
 import { layout } from "./layout.js";
 import type { SessionNavigationContext } from "../navigation-context.js";
 import type { ConversationCompaction } from "../protocol-runtime.js";
@@ -98,16 +98,6 @@ function annotateCacheWarning(message: any, previousUsage: any) {
 
 function formatCount(value: any) {
   return (Number(value) || 0).toLocaleString();
-}
-
-function formatMilliseconds(ms: any) {
-  const totalSeconds = Math.round((Number(ms) || 0) / 1000);
-  if (totalSeconds < 60) {
-    return `${totalSeconds}s`;
-  }
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
 function anchorId(prefix: any, id: any) {
@@ -227,7 +217,7 @@ function isVisiblePartNode(part: any) {
 }
 
 function renderMetric(label: any, value: any) {
-  return `<span class="session-stat"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></span>`;
+  return `<span class="session-stat"><span class="session-stat-label">${escapeHtml(label)}</span><strong class="session-stat-value">${escapeHtml(String(value))}</strong></span>`;
 }
 
 function renderSubsessionHeader(tree: SessionTree, inferred = false) {
@@ -562,25 +552,25 @@ function renderSessionMetricsPanel(sessionMetrics: any) {
     ? sessionMetrics.tools.slice(0, 5).map((tool: any) => `${tool.name} ${tool.count}`).join(" · ")
     : "";
   const directTokenPieces = [
-    `${formatCount(totals.directInputTokens)} in`,
-    `${formatCount((Number(totals.directOutputTokens) || 0) + (Number(totals.directReasoningTokens) || 0))} out`,
-    totals.directCacheReadTokens ? `${formatCount(totals.directCacheReadTokens)} cache read` : "",
-    totals.directCacheWriteTokens ? `${formatCount(totals.directCacheWriteTokens)} cache write` : ""
+    `${formatCount(totals.directInputTokens)} ${t("detail.metric_input")}`,
+    `${formatCount((Number(totals.directOutputTokens) || 0) + (Number(totals.directReasoningTokens) || 0))} ${t("detail.metric_output")}`,
+    totals.directCacheReadTokens ? `${formatCount(totals.directCacheReadTokens)} ${t("detail.metric_cache_read")}` : "",
+    totals.directCacheWriteTokens ? `${formatCount(totals.directCacheWriteTokens)} ${t("detail.metric_cache_write")}` : ""
   ].filter(Boolean).join(" · ");
   const hasFamilyUsage = Number(totals.totalTokens) !== Number(totals.directTotalTokens);
   const tokenPieces = `${t("detail.tokens_direct", { count: formatCount(totals.directTotalTokens) })}${directTokenPieces ? ` · ${directTokenPieces}` : ""}${hasFamilyUsage ? ` · ${t("detail.tokens_inclusive", { count: formatCount(totals.totalTokens) })}` : ""}`;
 
   return `<section class="session-metrics-panel">
     <div class="metrics-grid">
-      ${renderMetric("messages", formatCount(totals.messages))}
-      ${renderMetric("steps", formatCount(totals.steps))}
-      ${renderMetric("tools", formatCount(totals.toolCalls))}
-      ${renderMetric("branches", formatCount(totals.branches))}
-      ${renderMetric("runtime", formatMilliseconds(totals.runtimeMs))}
-      ${renderMetric("cost", totals.cost ? `$${Number(totals.cost).toFixed(4)}` : "$0")}
+      ${renderMetric(t("detail.metric_messages"), formatCount(totals.messages))}
+      ${renderMetric(t("detail.metric_steps"), formatCount(totals.steps))}
+      ${renderMetric(t("detail.metric_tools"), formatCount(totals.toolCalls))}
+      ${renderMetric(t("detail.metric_branches"), formatCount(totals.branches))}
+      ${renderMetric(t("detail.metric_recorded_span"), formatLocalizedDurationMs(totals.runtimeMs) || `0${t("runtime.seconds_short")}`)}
+      ${renderMetric(t("detail.metric_cost"), totals.cost ? `$${Number(totals.cost).toFixed(4)}` : "$0")}
     </div>
     <p class="metrics-detail">${escapeHtml(tokenPieces)}</p>
-    ${topTools ? `<p class="metrics-detail">${escapeHtml(`top tools: ${topTools}`)}</p>` : ""}
+    ${topTools ? `<p class="metrics-detail"><span class="metrics-detail-label">${escapeHtml(t("detail.metric_top_tools"))}</span> ${escapeHtml(topTools)}</p>` : ""}
   </section>`;
 }
 

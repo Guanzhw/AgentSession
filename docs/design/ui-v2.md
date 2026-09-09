@@ -1,5 +1,17 @@
 # AgentSession UI v2 信息设计方案(草案)
 
+## P6 visual readability status (2026-09-09)
+
+P6 closes the observed long-session readability issues at the shared UI
+boundary. The desktop rail search is a bounded labelled control; Work context
+and the recorded task table stack when the available width cannot keep five
+columns readable, while status and Evidence remain intact tokens. Session
+metrics now separate labels from values, call the timestamp-derived span
+“Recorded span / 记录跨度”, and use compact two-unit day/hour/minute/second
+formatting. Metrics, token detail labels, and top-tools copy use the existing
+English/Chinese locale tables. Values, protocol fields, provider semantics, and
+narrow-screen rail hiding remain unchanged. See the [P6 decision record](../../.agents/decisions/implemented/2026-09-09-ui-v2-p6-visual-readability.md).
+
 ## P4 implementation status (2026-09-07)
 
 UI v2 P1–P4 is implemented and validated against the shared rules in the

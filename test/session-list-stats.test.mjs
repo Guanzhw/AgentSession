@@ -462,7 +462,7 @@ test("sessionCard renders bounded statistic chips with titles", () => {
   const html = sessionCard({ id: "p-1", provider: "codex-fake", title: "Fixture", time_updated: Date.now(), stats });
   assert.match(html, /8 messages/);
   assert.match(html, /1\.2k tokens/);
-  assert.match(html, /60m/);
+  assert.match(html, /1h/);
   assert.match(html, /title="Observed session duration/);
   assert.match(html, /2× compacted/);
   assert.match(html, /last at /);

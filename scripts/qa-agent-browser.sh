@@ -528,8 +528,8 @@ if [[ "$toc_task_count" != "0" ]]; then
   assert_contains "task toc labels" "$toc_task_labels" "T"
 fi
 
-deep_toc_target="$(read_ab "activate deep toc entry" eval "(() => { const link = [...document.querySelectorAll('.session-toc .toc-link')].find((candidate) => candidate.closest('.toc-children .toc-children')); if (!link) return ''; link.click(); return link.getAttribute('href') || ''; })()")"
-if [[ -n "$deep_toc_target" ]]; then
+has_deep_toc_target="$(read_ab "activate deep toc entry" eval "(() => { const link = [...document.querySelectorAll('.session-toc .toc-link')].find((candidate) => candidate.closest('.toc-children .toc-children')); if (!link) return false; link.click(); return true; })()")"
+if [[ "$has_deep_toc_target" == "true" ]]; then
   toc_parent_count="$(read_ab "count active toc parents" get count ".session-toc .toc-link.active-parent")"
   assert_positive_count "active toc parents" "$toc_parent_count"
   closed_toc_parent_count="$(read_ab "count hidden active toc parents" get count ".session-toc .toc-group:not([open]) .toc-link.active-parent")"

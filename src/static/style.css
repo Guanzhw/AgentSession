@@ -1636,8 +1636,37 @@ details[open] summary {
 
 .metrics-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
   gap: 8px;
+}
+
+.session-stat {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+}
+
+.session-stat-label,
+.session-stat-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.session-stat-label {
+  color: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.session-stat-value {
+  color: var(--text-primary);
+  font-size: 16px;
+  line-height: 1.25;
 }
 
 .metrics-detail {
@@ -1787,6 +1816,11 @@ details[open] summary {
   margin: 10px 0;
   overflow: hidden;
   scroll-margin-top: var(--session-anchor-offset);
+}
+
+.metrics-detail-label {
+  color: var(--text-secondary);
+  font-weight: 600;
 }
 
 .subagent-branch-inferred {
@@ -5075,6 +5109,8 @@ pre code.hljs {
   margin-top: auto;
   display: grid;
   gap: 10px;
+  width: 100%;
+  min-width: 0;
 }
 
 .app-rail .provider-context {
@@ -5085,6 +5121,30 @@ pre code.hljs {
 
 .app-rail .search-input {
   width: 100%;
+  max-width: 100%;
+}
+
+.app-rail .search-input:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+/* Desktop rail search stays a complete, labelled control inside the rail. */
+.app-rail .search-form {
+  display: grid;
+  gap: 6px;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+}
+
+.app-rail .search-visible-label {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.app-rail .theme-toggle {
+  justify-self: start;
 }
 
 .content {
@@ -5542,7 +5602,7 @@ pre code.hljs {
 .runtime-graph-view-all { display: inline-block; margin-top: 10px; color: var(--accent-color); font-size: 12px; }
 .runtime-graph-view-all[type="button"] { border: 0; padding: 0; background: transparent; cursor: pointer; font: inherit; }
 .runtime-graph-view-all:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
-.runtime-work-overview-grid { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.5fr); gap: 18px; align-items: start; }
+.runtime-work-overview-grid { display: grid; grid-template-columns: minmax(280px, .8fr) minmax(560px, 1.6fr); gap: 18px; align-items: start; }
 .runtime-work-context { padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); }
 .runtime-work-context .runtime-overview-section-heading { display: block; }
 .runtime-work-context .runtime-overview-section-heading > .runtime-completeness { margin-top: 8px; }
@@ -5560,6 +5620,10 @@ pre code.hljs {
 .runtime-overview-task-table { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 12px; }
 .runtime-overview-task-table th,
 .runtime-overview-task-table td { padding: 9px 7px; border-bottom: 1px solid var(--border-color); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.runtime-overview-task-table th:nth-child(3),
+.runtime-overview-task-table td:nth-child(3),
+.runtime-overview-task-table th:nth-child(5),
+.runtime-overview-task-table td:nth-child(5) { white-space: nowrap; overflow-wrap: normal; }
 .runtime-overview-task-table thead th { color: var(--text-muted); font-size: 10px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
 .runtime-overview-task-table tbody th { font-weight: 600; }
 .runtime-overview-task-table tbody th small,
@@ -5652,12 +5716,15 @@ pre code.hljs {
 .runtime-evidence-drawer dt { color: var(--text-muted); }
 .runtime-evidence-drawer dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 
-@media (max-width: 820px) {
+@media (max-width: 1240px) {
+  .runtime-work-overview-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 1100px) {
   .runtime-stat-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .runtime-session-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .runtime-capabilities ul { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .runtime-map-columns { grid-template-columns: 1fr; }
-  .runtime-work-overview-grid { grid-template-columns: 1fr; }
   .runtime-graph-node-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .runtime-graph-canvas { display: grid; }
   .runtime-graph-edge-list { display: none; }

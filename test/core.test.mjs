@@ -32,7 +32,7 @@ import { buildPiRuntimeEnvironment } from "../dist/src/providers/pi/runtime-envi
 import { renderSessionPage } from "../dist/src/views/session.js";
 import { renderSettingsPage } from "../dist/src/views/settings.js";
 import { renderStatsDeferredSection, renderStatsPage } from "../dist/src/views/stats.js";
-import { sessionCard } from "../dist/src/views/components.js";
+import { formatDuration, formatDurationMs, sessionCard } from "../dist/src/views/components.js";
 import { renderSessionsPage } from "../dist/src/views/sessions.js";
 import { EMPTY_PROJECT_FILTER, normalizeCrossProviderProjectPath } from "../dist/src/project-filter.js";
 import { parseSessionNavigationContext } from "../dist/src/navigation-context.js";
@@ -124,6 +124,19 @@ import {
 
 const fixture = (name) => path.join(process.cwd(), "test", "fixtures", name);
 const regexEscape = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+test("shared duration formatting keeps zero, invalid, and two-unit spans bounded", () => {
+  assert.equal(formatDurationMs(0), "");
+  assert.equal(formatDurationMs("invalid"), "");
+  assert.equal(formatDurationMs(59_000), "59s");
+  assert.equal(formatDurationMs(12 * 60_000 + 18_000), "12m 18s");
+  assert.equal(formatDurationMs(6 * 3_600_000 + 35 * 60_000), "6h 35m");
+  assert.equal(formatDurationMs(9 * 86_400_000 + 4 * 3_600_000), "9d 4h");
+  assert.equal(formatDuration(1_000, 1_000 + 2 * 86_400_000 + 3 * 3_600_000), "2d 3h");
+  assert.equal(formatDuration(1_000, 1_000), "0s");
+  assert.equal(formatDuration(0, 1_000), "");
+  assert.equal(formatDuration(2_000, 1_000), "");
+});
 
 test("Claude current transcripts preserve tools, thinking, titles, and cache tokens", () => {
   const records = parseTranscript(fixture("claude-current.jsonl"));
