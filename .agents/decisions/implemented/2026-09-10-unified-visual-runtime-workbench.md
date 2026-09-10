@@ -55,3 +55,11 @@ Page-scoped marker/checkpoint/artifact evidence is selected before bounding
 and retains the initial scope evidence across replacement. Independent review
 identified and verified corrections to scope preservation and linked selection.
 See the acceptance notes for remaining work and positive-fixture limitations.
+
+The orientation/disclosure follow-up keeps nine primary goal/current-work
+nodes and up to nine explicitly expanded completed tasks, with separate counts
+and exact edge omission accounting. Recorded session state/update time remain
+distinct from goal state. Execution now follows the work graph before context
+and inventory. The main agent verified real DSH collapsed-task selection and
+mobile focus plus synthetic connector redraw, and the full suite passed 548
+tests. Final multi-provider browser evidence is tracked in the acceptance note.

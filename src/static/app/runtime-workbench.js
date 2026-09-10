@@ -39,6 +39,15 @@ export function initRuntimeWorkbench({ ft, formatText }) {
       ...(Array.isArray(scoped) ? scoped : [])
     ];
   };
+  const revealCompletedTask = (taskId) => {
+    if (!taskId) return false;
+    const taskNode = root.querySelector(`[data-runtime-completed-task="true"][data-runtime-entity-kind="task"][data-runtime-entity-id="${CSS.escape(taskId)}"]`);
+    const disclosure = taskNode?.closest("details[data-runtime-completed-work]");
+    if (!taskNode || !(disclosure instanceof HTMLDetailsElement)) return false;
+    disclosure.open = true;
+    requestAnimationFrame(() => drawGraphLinks());
+    return true;
+  };
   const setSelected = (kind, id, focus = false) => {
     if (!kind || !id) return;
     selectedKey = entityKey(kind, id);
@@ -55,6 +64,7 @@ export function initRuntimeWorkbench({ ft, formatText }) {
       || "";
     const linkedTransformationId = selectedEntity?.dataset.runtimeArtifactContextTransformationId
       || (kind === "context-transformation" ? id : "");
+    revealCompletedTask(kind === "task" ? id : linkedTaskId);
     root.querySelectorAll("[data-runtime-entity-kind][data-runtime-entity-id]").forEach((item) => {
       const itemKey = entityKey(item.dataset.runtimeEntityKind, item.dataset.runtimeEntityId);
       const isExact = itemKey === selectedKey;
@@ -181,7 +191,9 @@ export function initRuntimeWorkbench({ ft, formatText }) {
     const inspector = root.querySelector("[data-runtime-inspector]");
     if (!inspector || inspector.hidden) return false;
     inspector.hidden = true;
-    if (inspectorTrigger?.isConnected && !inspectorTrigger.closest("[hidden]") && inspectorTrigger.getClientRects().length) inspectorTrigger.focus();
+    const triggerDisclosure = inspectorTrigger?.closest("details:not([open])");
+    if (triggerDisclosure instanceof HTMLDetailsElement) triggerDisclosure.open = true;
+    if (inspectorTrigger?.isConnected && inspectorTrigger.getClientRects().length) inspectorTrigger.focus();
     inspectorTrigger = null;
     return true;
   };
@@ -215,7 +227,8 @@ export function initRuntimeWorkbench({ ft, formatText }) {
       canvas.querySelectorAll("[data-runtime-graph-edge]").forEach((edge) => {
         const from = canvas.querySelector(`[data-runtime-entity-kind="${CSS.escape(edge.dataset.runtimeEdgeFromKind || "")}"][data-runtime-entity-id="${CSS.escape(edge.dataset.runtimeEdgeFrom || "")}"]`);
         const to = canvas.querySelector(`[data-runtime-entity-kind="${CSS.escape(edge.dataset.runtimeEdgeToKind || "")}"][data-runtime-entity-id="${CSS.escape(edge.dataset.runtimeEdgeTo || "")}"]`);
-        if (!from || !to) return;
+        const rendered = (node) => node && !node.closest("details:not([open])") && node.getClientRects().length;
+        if (!rendered(from) || !rendered(to)) return;
         const fromRect = from.getBoundingClientRect();
         const toRect = to.getBoundingClientRect();
         const fromCenter = { x: fromRect.left + fromRect.width / 2, y: fromRect.top + fromRect.height / 2 };
@@ -273,6 +286,9 @@ export function initRuntimeWorkbench({ ft, formatText }) {
       event.stopPropagation();
     }
   });
+  root.addEventListener("toggle", (event) => {
+    if (event.target instanceof HTMLDetailsElement && event.target.matches("[data-runtime-completed-work]")) requestAnimationFrame(drawGraphLinks);
+  }, true);
 
   const provenance = (value) => {
     if (!value || typeof value !== "object") return ft("runtime_provenance_unknown");

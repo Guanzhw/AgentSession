@@ -1,6 +1,6 @@
 # Work orientation and completed-work disclosure
 
-Status: implementation pending; follows the linked-lane acceptance in spec 14.
+Status: implemented and locally verified, 2026-09-11.
 
 ## Evidence and outcome
 
@@ -18,9 +18,12 @@ failure, cancellation and unknown state must remain distinct and visible.
 - Condense the orientation region around recorded goal/title, session state
   and update time. Preserve the recorded goal versus session distinction and
   existing honest task counts. A request/run count is not goal progress.
-- Prioritize non-completed work within the existing graph bound. Provide a
+- Prioritize non-completed work within the existing nine-node primary bound. Provide a
   labelled completed-work disclosure with its recorded count and explicit
-  expansion. Do not call unlinked tasks a branch or invent a summary task ID.
+  expansion of at most nine additional completed task nodes. Keep separate
+  visible/omitted counts for the two groups; remaining work stays reachable
+  through the existing inventory. Do not call unlinked tasks a branch or invent
+  a summary task ID.
 - Preserve recorded membership/dependency edges when their endpoints are
   visible. Expanding completed work restores its original identities and
   relationships; hiding it must not imply those edges never existed.

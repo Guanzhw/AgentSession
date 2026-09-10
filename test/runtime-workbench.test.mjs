@@ -9,6 +9,7 @@ import { finalizeSessionProtocolV3, upgradeSessionProtocolV2 } from "../dist/src
 import { projectContext, projectCoordination, projectExecution, projectRunActorBindings, projectWork, queryRunPage } from "../dist/src/protocol-runtime-v3.js";
 import { summarizeEvent } from "../dist/src/event-summary.js";
 import { formatLocalizedDurationMs } from "../dist/src/views/components.js";
+import { deriveWorkOverview } from "../dist/src/work-view-model.js";
 
 const provenance = { fidelity: "recorded", sourceType: "fixture.event", sourceId: "source-1" };
 
@@ -985,7 +986,11 @@ test("Work graph views bound nodes and expose incomplete projection plus narrow-
   const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
   const goalPanel = html.match(/data-runtime-graph-panel="goal"[\s\S]*?data-runtime-graph-panel="collaboration"/)?.[0] || "";
   const collaborationPanel = html.match(/data-runtime-graph-panel="collaboration"[\s\S]*?data-runtime-overview-end/)?.[0] || "";
-  assert.equal((goalPanel.match(/data-runtime-graph-node/g) || []).length, 9);
+  const goalPrimaryCanvas = goalPanel.match(/data-runtime-graph-canvas="goal"[\s\S]*?<details class="runtime-completed-work"/)?.[0] || "";
+  assert.equal((goalPrimaryCanvas.match(/data-runtime-graph-node/g) || []).length, 2);
+  assert.match(goalPrimaryCanvas, /Task 12/);
+  assert.match(goalPanel, /Completed work \(9 of 11\)/);
+  assert.match(goalPanel, /2 additional completed tasks remain/);
   assert.equal((collaborationPanel.match(/data-runtime-graph-node/g) || []).length, 9);
   assert.match(html, /more nodes omitted by the nine-node bound/);
   assert.match(html, /Projection is incomplete or truncated/);
@@ -1010,6 +1015,67 @@ test("Work graph views bound nodes and expose incomplete projection plus narrow-
   assert.match(runtimeJs, /const closeInspector = \(\) =>/);
   assert.match(runtimeJs, /event\.key === "Escape"/);
   assert.match(runtimeJs, /inspectorTrigger\.focus\(\)/);
+});
+
+test("Work graph leads with current states and discloses bounded completed identities and edges", () => {
+  const runtime = fixtureRuntime();
+  const statuses = [
+    ...Array.from({ length: 10 }, () => "completed"),
+    "running",
+    "failed",
+    "cancelled",
+    "unknown"
+  ];
+  runtime.v3.tasks = statuses.map((status, index) => ({
+    ...runtime.v3.tasks[0],
+    id: `task-${index + 1}`,
+    title: `Task ${index + 1}`,
+    status,
+    timeCompleted: status === "completed" ? 2000 : null,
+    dependencies: index === 10 ? ["task-1"] : []
+  }));
+  runtime.v3.goals = [{
+    id: "goal-orientation", sessionId: "runtime-1", title: "Orientation goal", description: null, status: "active",
+    taskIds: runtime.v3.tasks.map((task) => task.id), parentGoalId: null, ownerActorId: null,
+    timeCreated: 900, timeUpdated: 3100, timeCompleted: null, provenance
+  }];
+  runtime.v3.session = { ...runtime.v3.session, state: "waiting_input", timeUpdated: 7777 };
+  runtime.projections.work = projectWork(runtime.v3, { maxItems: 100 });
+  const model = deriveWorkOverview({
+    protocol: runtime.v3,
+    work: runtime.projections.work,
+    execution: runtime.projections.execution,
+    coordination: runtime.projections.coordination,
+    context: runtime.projections.context
+  });
+  assert.deepEqual(model.goalTaskGraph.nodes.map((node) => node.id), [
+    "goal-orientation", "task-11", "task-12", "task-13", "task-14"
+  ]);
+  assert.deepEqual(model.goalTaskGraph.completedNodes.map((node) => node.id), Array.from({ length: 9 }, (_, index) => `task-${index + 1}`));
+  assert.equal(model.goalTaskGraph.completedKnownTotal, 10);
+  assert.equal(model.goalTaskGraph.completedOmitted, 1);
+  assert.equal(model.goalTaskGraph.completedEdges.length, 10);
+  assert.equal(model.goalTaskGraph.omittedEdges, 1);
+  assert.equal(model.sessionState, "waiting_input");
+  assert.equal(model.sessionUpdatedAt, 7777);
+  assert.ok(model.goalTaskGraph.completedEdges.some((edge) => edge.from === "goal-orientation" && edge.to === "task-1" && edge.kind === "membership"));
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  const goalPrimary = html.match(/data-runtime-graph-canvas="goal"[\s\S]*?<details class="runtime-completed-work"/)?.[0] || "";
+  assert.match(html, /data-runtime-completed-work/);
+  assert.match(html, /data-runtime-session-state>waiting for input/);
+  assert.match(html, /Completed work \(9 of 10\)/);
+  assert.match(html, /1 additional completed tasks remain/);
+  assert.match(html, /data-runtime-completed-graph-relationships="goal"/);
+  assert.match(html, /data-runtime-edge-from="goal-orientation" data-runtime-edge-to="task-1"/);
+  assert.match(goalPrimary, /Task 11/);
+  assert.match(goalPrimary, /Task 12/);
+  assert.match(goalPrimary, /Task 13/);
+  assert.match(goalPrimary, /Task 14/);
+  assert.doesNotMatch(goalPrimary, /Task 1<\/button>/);
+  const structurePosition = html.indexOf('class="runtime-work-structure"');
+  const runsPosition = html.indexOf('data-runtime-section="runs"');
+  const scopePosition = html.indexOf('class="runtime-work-overview-grid"');
+  assert.ok(structurePosition >= 0 && runsPosition > structurePosition && scopePosition > runsPosition);
 });
 
 test("Work graph SSR keeps both named regions readable and JavaScript owns tab semantics", () => {
@@ -1040,7 +1106,8 @@ test("Goal graph includes multiple recorded goals and applies membership across 
   const goalPanel = html.match(/data-runtime-graph-panel="goal"[\s\S]*?data-runtime-graph-panel="collaboration"/)?.[0] || "";
   assert.match(goalPanel, /Root goal/);
   assert.match(goalPanel, /Child goal/);
-  assert.match(goalPanel, /4 nodes recorded; 4 shown/);
+  assert.match(goalPanel, /3 nodes recorded; 3 shown/);
+  assert.match(goalPanel, /Completed work \(1 of 1\)/);
   assert.equal((goalPanel.match(/data-runtime-graph-edge data-runtime-edge-kind="membership"/g) || []).length, 2);
   assert.match(goalPanel, /1 recorded tasks have no recorded membership/);
 });

@@ -28,6 +28,12 @@ export interface WorkGraphEdge {
 export interface GoalTaskGraph {
   nodes: WorkGraphNode[];
   edges: WorkGraphEdge[];
+  /** Successful completed task nodes omitted from the primary graph for disclosure. */
+  completedNodes: WorkGraphNode[];
+  /** Recorded edges touching a disclosed completed task, retained for expansion. */
+  completedEdges: WorkGraphEdge[];
+  completedKnownTotal: number;
+  completedOmitted: number;
   knownTotal: number;
   omitted: number;
   omittedEdges: number;
@@ -87,6 +93,8 @@ export interface WorkOverviewModel {
   completedTasks: number;
   taskTotal: number;
   evidenceIncomplete: boolean;
+  sessionState: NonNullable<SessionProtocolV3["session"]>["state"];
+  sessionUpdatedAt: NonNullable<SessionProtocolV3["session"]>["timeUpdated"];
   context: WorkOverviewContext;
   goalTaskGraph: GoalTaskGraph;
   collaborationGraph: CollaborationGraph;
@@ -150,15 +158,34 @@ function goalTaskGraph(work: WorkProjection): GoalTaskGraph {
       allEdges.push({ from, to, kind: "dependency", count: 1, async: false, evidence: [{ kind: "task", id: from }, { kind: "task", id: to }] });
     }
   }
-  const visibleNodes = nodes.slice(0, VISIBLE_GRAPH_NODE_LIMIT);
+  // Keep source order, but reserve the primary bound for goals and current
+  // work. Successful completion is a separate bounded disclosure.
+  const currentNodes = [
+    ...nodes.filter((node) => node.kind === "goal"),
+    ...nodes.filter((node) => node.kind === "task" && node.state !== "completed")
+  ];
+  const visibleNodes = currentNodes.slice(0, VISIBLE_GRAPH_NODE_LIMIT);
   const visibleIds = new Set(visibleNodes.map((node) => node.id));
   const edges = allEdges.filter((edge) => visibleIds.has(edge.from) && visibleIds.has(edge.to));
+  const completedCandidates = nodes.filter((node) => node.kind === "task" && node.state === "completed");
+  const completedNodes = completedCandidates.slice(0, VISIBLE_GRAPH_NODE_LIMIT);
+  const completedIds = new Set(completedNodes.map((node) => node.id));
+  const disclosedIds = new Set([...visibleIds, ...completedIds]);
+  const completedEdges = allEdges.filter((edge) => (
+    (completedIds.has(edge.from) || completedIds.has(edge.to))
+    && disclosedIds.has(edge.from)
+    && disclosedIds.has(edge.to)
+  ));
   return {
     nodes: visibleNodes,
     edges,
-    knownTotal: nodes.length,
-    omitted: Math.max(0, nodes.length - visibleNodes.length),
-    omittedEdges: allEdges.length - edges.length,
+    completedNodes,
+    completedEdges,
+    completedKnownTotal: completedCandidates.length,
+    completedOmitted: Math.max(0, completedCandidates.length - completedNodes.length),
+    knownTotal: currentNodes.length,
+    omitted: Math.max(0, currentNodes.length - visibleNodes.length),
+    omittedEdges: allEdges.length - edges.length - completedEdges.length,
     unlinkedTasks: taskEntries.filter(({ task }) => !allEdges.some((edge) => edge.kind === "membership" && edge.to === task.id)).length,
     incomplete: work.truncated || work.completeness !== "complete"
   };
@@ -398,7 +425,7 @@ export function deriveWorkOverview(input: {
       ? Number(transformationEvent.compaction.tokensAfter)
       : null;
   const contextArtifacts = context.artifacts.map((entry) => entry.artifact);
-
+  const session = protocol.session as NonNullable<SessionProtocolV3["session"]>;
   return {
     goal,
     tasks,
@@ -407,6 +434,8 @@ export function deriveWorkOverview(input: {
     completedTasks: tasks.filter(({ task }) => task.status === "completed").length,
     taskTotal: tasks.length,
     evidenceIncomplete: work.truncated || work.completeness !== "complete",
+    sessionState: session.state,
+    sessionUpdatedAt: session.timeUpdated,
     goalTaskGraph: goalTaskGraph(work),
     collaborationGraph: collaborationGraph(execution, coordination),
     context: {

@@ -41,6 +41,41 @@ final reply. Providers without this evidence retain their communication.
 
 ## Production gates
 
+### Orientation and completed-work disclosure, 2026-09-11
+
+The primary graph now prioritizes goals and non-completed tasks (up to nine
+nodes); a separate closed disclosure exposes up to nine completed tasks with
+shown/total and omitted counts. Rendered edges retain their original endpoints
+and are excluded from omitted-edge counts. The orientation distinguishes goal
+state from recorded session state and session update time.
+
+Main-agent `npm test` passed 548/548. The real DSH page retained its cancelled
+task while folding two completed tasks. Selecting a run expanded its exact
+completed task; on 320px the inspector remained visible below the fixed header
+and Escape restored run focus. A controlled, synthetic browser edge verified
+that expansion/collapse redraws the existing SVG as 1/0/1 lines; DSH's absent
+goal memberships were not fabricated as live evidence.
+
+The MCP stdio test initially failed during the modern negotiation probe because
+it scanned ambient real provider directories before serving MCP. A read-only
+diagnostic measured roughly 6.5 seconds of real startup indexing; an isolated
+empty-provider probe negotiated in 182ms. The test now explicitly isolates all
+provider paths without changing its protocol assertions or timeout. Production
+startup still indexes before serving: latency under large real histories remains
+a separate recorded follow-up, not a claim that this UI change fixed it.
+
+The final layout passed the DSH EN/ZH × light/dark × 1280/768/320px
+matrix: default disclosure, keyboard run selection, automatic expansion,
+inspector visibility, Escape focus return and no horizontal overflow. One
+browser-session interruption was retried successfully after the parallel E2E
+finished. Representative desktop and narrow screenshots were inspected.
+The real Codex page showed one goal and five running tasks before the closed
+completed group (9 shown of 70), without overflow at 1280px or 320px.
+Execution precedes context/inventory in both the source-order regression and
+the live DOM. Final OpenCode `npm run qa:e2e` passed with no browser errors;
+both server error logs were empty. `npm run pre-push` passed governance and
+typechecking. Child-return navigation remains the next slice in spec 16.
+
 ### Linked execution evidence, 2026-09-11
 
 The lane slice adds bounded recorded/task labels, recorded intervals, exact

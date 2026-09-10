@@ -372,9 +372,18 @@ test("compiled stdio executable serves legacy and 2026-07-28 MCP without polluti
   const configPath = path.join(temp, "mcp-config.json");
   writeFileSync(configPath, JSON.stringify({ mcp: { searchLimit: 10, timelineLimit: 10, eventMaxChars: 1000, contextWindow: 2 } }));
   const executable = path.join(process.cwd(), "packages", "agentsession-mcp", "dist", "cli.js");
+  const emptyProviderRoot = path.join(temp, "empty-providers");
+  mkdirSync(emptyProviderRoot);
   const createTransport = () => new StdioClientTransport({
     command: process.execPath,
-    args: [executable, "--config", configPath],
+    args: [executable, "--config", configPath,
+      "--opencode-db", path.join(emptyProviderRoot, "opencode.db"),
+      "--claude-dir", path.join(emptyProviderRoot, "claude"),
+      "--codex-dir", path.join(emptyProviderRoot, "codex"),
+      "--pi-dir", path.join(emptyProviderRoot, "pi"),
+      "--dsh-dir", path.join(emptyProviderRoot, "dsh"),
+      "--openclaw-dir", path.join(emptyProviderRoot, "openclaw"),
+      "--hermes-dir", path.join(emptyProviderRoot, "hermes")],
     stderr: "pipe"
   });
 

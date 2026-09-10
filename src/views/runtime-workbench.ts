@@ -383,7 +383,9 @@ function graphNodeLabel(node: { label: string | null; kind: string }, index: num
 
 function graphNodeDisplayLabel(node: { label: string | null; kind: string }, index: number) {
   const fullLabel = graphNodeLabel(node, index);
-  const excerpt = narrativeExcerpt(fullLabel, node.kind === "goal" ? GOAL_TITLE_LIMIT : 140);
+  // The orientation owns the full recorded goal narrative; keep its graph
+  // node a compact anchor so the same long text is not repeated in the graph.
+  const excerpt = narrativeExcerpt(fullLabel, node.kind === "goal" ? 48 : 140);
   return { fullLabel, excerpt };
 }
 
@@ -404,39 +406,54 @@ function renderGraphEvidence(edge: { evidence: { kind: string; id: string }[] })
 function renderGoalTaskGraph(model: ReturnType<typeof deriveWorkOverview>) {
   const graph = model.goalTaskGraph;
   const tasksById = new Map(model.tasks.map((task) => [task.id, task]));
-  const nodeIndex = new Map(graph.nodes.map((node, index) => [node.id, index]));
+  const allNodes = [...graph.nodes, ...graph.completedNodes];
+  const nodeIndex = new Map(allNodes.map((node, index) => [node.id, index]));
   const nodeFor = (id: string) => {
     const index = nodeIndex.get(id);
-    return { node: index === undefined ? { label: null, kind: "task" } : graph.nodes[index], index: index ?? 0 };
+    return index === undefined ? null : { node: allNodes[index], index };
   };
-  const nodeMarkup = graph.nodes.map((node, index) => {
+  const renderNode = (node: (typeof allNodes)[number], index: number, completed = false) => {
     const { fullLabel, excerpt } = graphNodeDisplayLabel(node, index);
     const taskRuns = node.kind === "task" ? tasksById.get(node.id)?.runs || [] : [];
     const linkedRuns = taskRuns.length
       ? `<small class="runtime-graph-node-runs"><span>${escapeHtml(t("runtime.runs"))}:</span>${taskRuns.slice(0, 3).map((run) => runtimeSelectButton("run", run.id, runtimeRunLabel(run))).join(" ")}${taskRuns.length > 3 ? ` <span>+${count(taskRuns.length - 3)}</span>` : ""}</small>`
       : "";
-    const completeGoal = node.kind === "goal" && excerpt.truncated
+    const completeGoal = !completed && node.kind === "goal" && excerpt.truncated
       ? `<details class="runtime-graph-node-details"><summary>${escapeHtml(t("runtime.show_complete_goal"))}</summary><p>${escapeHtml(fullLabel)}</p></details>`
       : "";
-    return `<article class="runtime-graph-node runtime-graph-node-${escapeHtml(node.kind)}" data-runtime-graph-node data-runtime-node-kind="${escapeHtml(node.kind)}" data-runtime-node-id="${escapeHtml(node.id)}" ${runtimeEntityAttributes(node.kind, node.id)} aria-label="${escapeHtml(`${fullLabel} · ${statusLabel(node.state)}`)}"><strong>${runtimeSelectButton(node.kind, node.id, excerpt.text)}</strong>${completeGoal}<span class="runtime-status runtime-status-${escapeHtml(statusClass(node.state))}">${escapeHtml(statusLabel(node.state))}</span>${linkedRuns}${evidenceButton(node.kind, node.id, t("runtime.evidence"))}</article>`;
-  }).join("");
+    const attrs = completed
+      ? runtimeEntityAttributes(node.kind, node.id, { "data-runtime-completed-task": "true" })
+      : runtimeEntityAttributes(node.kind, node.id);
+    return `<article class="runtime-graph-node runtime-graph-node-${escapeHtml(node.kind)}${completed ? " runtime-completed-work-node" : ""}" data-runtime-graph-node data-runtime-node-kind="${escapeHtml(node.kind)}" data-runtime-node-id="${escapeHtml(node.id)}" ${attrs} aria-label="${escapeHtml(`${fullLabel} · ${statusLabel(node.state)}`)}"><strong>${runtimeSelectButton(node.kind, node.id, excerpt.text)}</strong>${completeGoal}<span class="runtime-status runtime-status-${escapeHtml(statusClass(node.state))}">${escapeHtml(statusLabel(node.state))}</span>${linkedRuns}${evidenceButton(node.kind, node.id, t("runtime.evidence"))}</article>`;
+  };
+  const nodeMarkup = graph.nodes.map((node) => renderNode(node, nodeIndex.get(node.id) || 0)).join("");
   const edgeMarkup = graph.edges.map((edge) => {
     const from = nodeFor(edge.from);
     const to = nodeFor(edge.to);
+    if (!from || !to) return "";
     return `<li class="runtime-graph-edge" data-runtime-graph-edge data-runtime-edge-kind="${escapeHtml(edge.kind)}" data-runtime-edge-from-kind="${escapeHtml(from.node.kind)}" data-runtime-edge-to-kind="${escapeHtml(to.node.kind)}" data-runtime-edge-from="${escapeHtml(edge.from)}" data-runtime-edge-to="${escapeHtml(edge.to)}"><span>${escapeHtml(graphNodeLabel(from.node, from.index))}</span><span class="runtime-graph-connector" aria-hidden="true">→</span><span>${escapeHtml(graphNodeLabel(to.node, to.index))}</span><small>${escapeHtml(t(edge.kind === "membership" ? "runtime.graph_membership" : "runtime.graph_dependency"))}</small>${renderGraphEvidence(edge)}</li>`;
   }).join("");
+  const completedEdgeMarkup = graph.completedEdges.map((edge) => {
+    const from = nodeFor(edge.from);
+    const to = nodeFor(edge.to);
+    if (!from || !to) return "";
+    return `<li class="runtime-graph-edge runtime-completed-work-edge" data-runtime-graph-edge data-runtime-edge-kind="${escapeHtml(edge.kind)}" data-runtime-edge-from-kind="${escapeHtml(from.node.kind)}" data-runtime-edge-to-kind="${escapeHtml(to.node.kind)}" data-runtime-edge-from="${escapeHtml(edge.from)}" data-runtime-edge-to="${escapeHtml(edge.to)}"><span>${escapeHtml(graphNodeLabel(from.node, from.index))}</span><span class="runtime-graph-connector" aria-hidden="true">→</span><span>${escapeHtml(graphNodeLabel(to.node, to.index))}</span><small>${escapeHtml(t(edge.kind === "membership" ? "runtime.graph_membership" : "runtime.graph_dependency"))}</small>${renderGraphEvidence(edge)}</li>`;
+  }).join("");
+  const completedDisclosure = graph.completedNodes.length
+    ? `<details class="runtime-completed-work" data-runtime-completed-work><summary>${escapeHtml(t("runtime.graph_completed_summary", { shown: count(graph.completedNodes.length), total: count(graph.completedKnownTotal) }))}</summary><p class="runtime-graph-description">${escapeHtml(t("runtime.graph_completed_description"))}</p>${graph.completedOmitted ? `<p class="runtime-notice runtime-completed-work-omitted">${escapeHtml(t("runtime.graph_completed_omitted", { count: count(graph.completedOmitted) }))}</p>` : ""}<div class="runtime-completed-work-nodes">${graph.completedNodes.map((node) => renderNode(node, nodeIndex.get(node.id) || 0, true)).join("")}</div><details class="runtime-graph-edge-details runtime-completed-work-edges"><summary>${escapeHtml(t("runtime.graph_completed_edges", { count: count(graph.completedEdges.length) }))}</summary><ul class="runtime-graph-edge-list" data-runtime-completed-graph-relationships="goal">${completedEdgeMarkup || `<li class="runtime-empty">${escapeHtml(t("runtime.graph_no_edges"))}</li>`}</ul></details></details>`
+    : "";
   const noGoal = !model.goal;
-  const empty = !graph.nodes.length
+  const empty = !graph.nodes.length && !graph.completedNodes.length
     ? `<p class="runtime-empty">${escapeHtml(t(noGoal ? "runtime.graph_no_goal_or_tasks" : "runtime.graph_no_goal_tasks"))}</p>`
     : noGoal
       ? `<p class="runtime-notice">${escapeHtml(t("runtime.graph_tasks_without_goal"))}</p>`
       : graph.unlinkedTasks
         ? `<p class="runtime-notice">${escapeHtml(t("runtime.graph_unlinked_tasks", { count: count(graph.unlinkedTasks) }))}</p>`
         : "";
-  const viewAll = graph.omitted
+  const viewAll = graph.omitted > 0 || graph.completedOmitted > 0 || graph.incomplete
     ? `<button type="button" class="runtime-graph-view-all" data-runtime-goal-view-all>${escapeHtml(t("runtime.graph_view_all_tasks"))}</button>`
     : "";
-  return `<div id="runtime-graph-panel-goal" class="runtime-graph-panel" role="region" aria-label="${escapeHtml(t("runtime.goal_task_graph_title"))}" data-runtime-graph-panel="goal"><h4>${t("runtime.goal_task_graph_title")}</h4><p class="runtime-graph-description">${t("runtime.goal_task_graph_description")}</p>${empty}<div class="runtime-graph-canvas" role="group" data-runtime-graph-canvas="goal" aria-label="${escapeHtml(t("runtime.goal_task_graph_label"))}"><svg class="runtime-graph-links" data-runtime-graph-links aria-hidden="true"></svg><div class="runtime-graph-node-list">${nodeMarkup}</div><details class="runtime-graph-edge-details"><summary>${escapeHtml(t("runtime.graph_evidence_count", { count: count(graph.edges.length) }))}</summary><ul class="runtime-graph-edge-list" data-runtime-graph-relationships="goal">${edgeMarkup || `<li class="runtime-empty">${escapeHtml(t("runtime.graph_no_edges"))}</li>`}</ul></details></div>${renderGraphBoundNotice(graph, "goal")}${viewAll}</div>`;
+  return `<div id="runtime-graph-panel-goal" class="runtime-graph-panel" role="region" aria-label="${escapeHtml(t("runtime.goal_task_graph_title"))}" data-runtime-graph-panel="goal"><h4>${t("runtime.goal_task_graph_title")}</h4>${empty}<div class="runtime-graph-canvas" role="group" data-runtime-graph-canvas="goal" aria-label="${escapeHtml(t("runtime.goal_task_graph_label"))}"><svg class="runtime-graph-links" data-runtime-graph-links aria-hidden="true"></svg><div class="runtime-graph-node-list">${nodeMarkup}</div><details class="runtime-graph-edge-details"><summary>${escapeHtml(t("runtime.graph_evidence_count", { count: count(graph.edges.length) }))}</summary><ul class="runtime-graph-edge-list" data-runtime-graph-relationships="goal">${edgeMarkup || `<li class="runtime-empty">${escapeHtml(t("runtime.graph_no_edges"))}</li>`}</ul></details>${completedDisclosure}</div>${renderGraphBoundNotice(graph, "goal")}${viewAll}</div>`;
 }
 
 function collaborationNodeLabel(node: { label: string | null; kind: string }, index: number) {
@@ -468,17 +485,17 @@ function renderCollaborationGraph(model: ReturnType<typeof deriveWorkOverview>) 
   const empty = !graph.nodes.length ? `<p class="runtime-empty">${escapeHtml(t("runtime.graph_no_actors"))}</p>` : !graph.edges.length ? `<p class="runtime-notice">${escapeHtml(t("runtime.graph_no_edges"))}</p>` : "";
   const unplaced = graph.unplacedObservations ? `<p class="runtime-notice" data-runtime-unplaced-observations>${escapeHtml(t("runtime.graph_unplaced_observations", { count: count(graph.unplacedObservations) }))}</p>` : "";
   const viewAll = graph.omitted ? `<a class="runtime-graph-view-all" data-runtime-agent-view-all data-detail-tab="tab-conversation" href="#tab-conversation">${escapeHtml(t("runtime.graph_view_all_agents"))}</a>` : "";
-  return `<div id="runtime-graph-panel-collaboration" class="runtime-graph-panel" role="region" aria-label="${escapeHtml(t("runtime.collaboration_graph_title"))}" data-runtime-graph-panel="collaboration"><h4>${t("runtime.collaboration_graph_title")}</h4><p class="runtime-graph-description">${t("runtime.collaboration_graph_description")}</p>${empty}${unplaced}<div class="runtime-graph-canvas" role="group" data-runtime-graph-canvas="collaboration" aria-label="${escapeHtml(t("runtime.collaboration_graph_label"))}"><svg class="runtime-graph-links" data-runtime-graph-links aria-hidden="true"></svg><div class="runtime-graph-node-list">${nodeMarkup}</div><details class="runtime-graph-edge-details"><summary>${escapeHtml(t("runtime.graph_evidence_count", { count: count(graph.edges.length) }))}</summary><ul class="runtime-graph-edge-list" data-runtime-graph-relationships="collaboration">${edgeMarkup || `<li class="runtime-empty">${escapeHtml(t("runtime.graph_no_edges"))}</li>`}</ul></details></div>${renderGraphBoundNotice(graph, "agent")}${viewAll}</div>`;
+  return `<div id="runtime-graph-panel-collaboration" class="runtime-graph-panel" role="region" aria-label="${escapeHtml(t("runtime.collaboration_graph_title"))}" data-runtime-graph-panel="collaboration"><h4>${t("runtime.collaboration_graph_title")}</h4>${empty}${unplaced}<div class="runtime-graph-canvas" role="group" data-runtime-graph-canvas="collaboration" aria-label="${escapeHtml(t("runtime.collaboration_graph_label"))}"><svg class="runtime-graph-links" data-runtime-graph-links aria-hidden="true"></svg><div class="runtime-graph-node-list">${nodeMarkup}</div><details class="runtime-graph-edge-details"><summary>${escapeHtml(t("runtime.graph_evidence_count", { count: count(graph.edges.length) }))}</summary><ul class="runtime-graph-edge-list" data-runtime-graph-relationships="collaboration">${edgeMarkup || `<li class="runtime-empty">${escapeHtml(t("runtime.graph_no_edges"))}</li>`}</ul></details></div>${renderGraphBoundNotice(graph, "agent")}${viewAll}</div>`;
 }
 
 function renderWorkStructure(model: ReturnType<typeof deriveWorkOverview>) {
-  return `<section class="runtime-work-structure" aria-labelledby="runtime-work-structure-title"><div class="runtime-overview-section-heading"><div><h3 id="runtime-work-structure-title">${t("runtime.work_structure_title")}</h3><p>${t("runtime.work_structure_description")}</p></div></div><div class="runtime-graph-panels">${renderGoalTaskGraph(model)}${renderCollaborationGraph(model)}</div></section>`;
+  return `<section class="runtime-work-structure" aria-labelledby="runtime-work-structure-title"><div class="runtime-overview-section-heading"><div><h3 id="runtime-work-structure-title">${t("runtime.work_structure_title")}</h3></div></div><div class="runtime-graph-panels">${renderGoalTaskGraph(model)}${renderCollaborationGraph(model)}</div></section>`;
 }
 
-function renderWorkOverview(data: RuntimeData) {
+function renderWorkOverview(data: RuntimeData, executionLanes: string) {
   const projections = data.projections;
   const protocol = data.v3;
-  if (!protocol || !projections) return `<section class="runtime-work-overview" data-runtime-work-overview><p class="runtime-empty">${escapeHtml(t("runtime.work_overview_unavailable"))}</p></section>`;
+  if (!protocol || !projections) return `<section class="runtime-work-overview" data-runtime-work-overview><p class="runtime-empty">${escapeHtml(t("runtime.work_overview_unavailable"))}</p>${executionLanes}</section>`;
   const model = deriveWorkOverview({ protocol, work: projections.work, execution: projections.execution, coordination: projections.coordination, context: projections.context });
   const goal = model.goal;
   const recordedGoalTitle = goal?.title || goal?.description || t("runtime.goal_not_recorded");
@@ -502,7 +519,11 @@ function renderWorkOverview(data: RuntimeData) {
           : t("runtime.progress_all_visible_no_goal", { total: count(model.taskTotal) })
         : t("runtime.progress_incomplete", { completed: count(model.completedTasks), total: count(model.taskTotal) });
   const boundedNote = model.evidenceIncomplete ? `<p class="runtime-notice runtime-progress-note">${escapeHtml(t("runtime.progress_evidence_incomplete"))}</p>` : "";
-  return `<section class="runtime-work-overview" data-runtime-work-overview aria-labelledby="runtime-work-overview-title"><div class="runtime-work-goal"><div class="runtime-overview-section-heading"><div><h3 id="runtime-work-overview-title">${t("runtime.goal_title")}</h3><p>${t("runtime.goal_description")}</p></div>${goal ? `<span class="runtime-status runtime-status-${escapeHtml(statusClass(goal.status))}">${escapeHtml(statusLabel(goal.status))}</span>` : ""}</div><h4>${escapeHtml(goalTitle.text)}</h4>${goalDescription ? `<p>${escapeHtml(goalDescription.text)}</p>` : ""}${fullGoalNarrative}${!goal ? `<p class="runtime-notice">${escapeHtml(t("runtime.goal_not_recorded_detail"))}</p>` : ""}</div><div class="runtime-work-progress"><div class="runtime-overview-section-heading"><div><h3>${t("runtime.progress_title")}</h3><p>${escapeHtml(progressSentence)}</p></div><strong class="runtime-progress-ratio">${escapeHtml(`${count(model.completedTasks)} / ${count(model.taskTotal)}`)}</strong></div><div class="runtime-progress-track" role="progressbar" aria-label="${escapeHtml(t("runtime.progress_title"))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${ratio}"><span style="width:${ratio}%"></span></div>${boundedNote}</div>${renderWorkStructure(model)}<div class="runtime-work-overview-grid">${renderContextResult(data, model)}${renderOverviewTaskTable(model)}</div><span data-runtime-overview-end aria-hidden="true"></span></section>`;
+  const goalState = goal ? statusLabel(goal.status) : statusLabel("unknown");
+  const sessionState = statusLabel(model.sessionState);
+  const orientationUpdated = model.sessionUpdatedAt == null ? t("runtime.unknown_time") : timeLabel(model.sessionUpdatedAt);
+  const orientation = `<div class="runtime-orientation-strip" data-runtime-orientation><div class="runtime-orientation-goal"><span class="runtime-orientation-label">${escapeHtml(t("runtime.goal_title"))}</span><h4>${escapeHtml(goalTitle.text)}</h4>${goalDescription ? `<span class="runtime-orientation-goal-description">${escapeHtml(goalDescription.text)}</span>` : ""}${fullGoalNarrative}${!goal ? `<span class="runtime-notice">${escapeHtml(t("runtime.goal_not_recorded_detail"))}</span>` : ""}</div><div class="runtime-orientation-meta" aria-label="${escapeHtml(t("runtime.orientation_summary"))}"><span><b>${escapeHtml(t("runtime.goal_state"))}</b> <span class="runtime-status runtime-status-${escapeHtml(statusClass(goalStatus))}" data-runtime-goal-state>${escapeHtml(goalState)}</span></span><span><b>${escapeHtml(t("runtime.session_state"))}</b> <span class="runtime-status runtime-status-${escapeHtml(statusClass(model.sessionState))}" data-runtime-session-state>${escapeHtml(sessionState)}</span></span><span><b>${escapeHtml(t("detail.updated"))}</b> ${escapeHtml(orientationUpdated)}</span><span><b>${escapeHtml(t("runtime.tasks"))}</b> ${escapeHtml(`${count(model.completedTasks)} / ${count(model.taskTotal)}`)}</span><span class="runtime-orientation-progress"><b>${escapeHtml(t("runtime.progress_title"))}</b> ${escapeHtml(progressSentence)}</span></div></div>`;
+  return `<section class="runtime-work-overview" data-runtime-work-overview aria-labelledby="runtime-work-overview-title"><h3 id="runtime-work-overview-title" class="visually-hidden">${escapeHtml(t("runtime.goal_title"))}</h3>${orientation}<div class="runtime-work-progress" data-runtime-progress><div class="runtime-progress-track" role="progressbar" aria-label="${escapeHtml(t("runtime.progress_title"))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${ratio}"><span style="width:${ratio}%"></span></div>${boundedNote}</div>${renderWorkStructure(model)}${executionLanes}<div class="runtime-work-overview-grid">${renderContextResult(data, model)}${renderOverviewTaskTable(model)}</div><span data-runtime-overview-end aria-hidden="true"></span></section>`;
 }
 
 /** Build the lane evidence from the requested page first, then apply bounds. */
@@ -764,7 +785,7 @@ export function renderRuntimeWorkbench(data: RuntimeData, provider: string, sess
   return `<section class="runtime-workbench" data-runtime-root data-runtime-provider="${escapeHtml(provider)}" data-runtime-session-id="${escapeHtml(sessionId)}" data-runtime-available="${protocol ? "true" : "false"}">
     <header class="runtime-header"><div><h2>${t("runtime.title")}</h2><p>${t("runtime.description")}</p></div><span class="runtime-version">v${escapeHtml(String(data.v3?.version || protocol?.version || summary.version || 2))}</span></header>
     ${notices}
-    <div class="runtime-workbench-body"><div class="runtime-workbench-main" data-runtime-workbench-main>${renderWorkOverview(data)}${renderRuntimeLanes(data, provider, sessionId)}${renderRuntimeSecondaryDisclosure(data)}</div><aside class="runtime-selection-inspector" data-runtime-inspector hidden aria-live="polite"><button type="button" class="runtime-inspector-close" data-runtime-inspector-close aria-label="${escapeHtml(t("runtime.evidence_close"))}">×</button><h3>${escapeHtml(t("runtime.inspector_title"))}</h3><div data-runtime-inspector-content></div></aside></div>
+    <div class="runtime-workbench-body"><div class="runtime-workbench-main" data-runtime-workbench-main>${renderWorkOverview(data, renderRuntimeLanes(data, provider, sessionId))}${renderRuntimeSecondaryDisclosure(data)}</div><aside class="runtime-selection-inspector" data-runtime-inspector hidden aria-live="polite"><button type="button" class="runtime-inspector-close" data-runtime-inspector-close aria-label="${escapeHtml(t("runtime.evidence_close"))}">×</button><h3>${escapeHtml(t("runtime.inspector_title"))}</h3><div data-runtime-inspector-content></div></aside></div>
     <script type="application/json" data-runtime-evidence>${jsonScript(renderEvidenceData(protocol, data.v3 || null, data.runPage || null))}</script>
     <dialog class="runtime-evidence-drawer" data-runtime-drawer aria-labelledby="runtime-drawer-title"><form method="dialog"><button type="submit" class="runtime-drawer-close" aria-label="${escapeHtml(t("runtime.evidence_close"))}">×</button></form><h2 id="runtime-drawer-title">${t("runtime.evidence_title")}</h2><p data-runtime-drawer-summary></p><dl data-runtime-drawer-details></dl></dialog>
   </section>`;
