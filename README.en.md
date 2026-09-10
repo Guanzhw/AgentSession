@@ -52,6 +52,13 @@ work projection, and current run page. Select a task or run to inspect its
 recorded outcome, failure reason, or cancellation reason. Historical failures
 and cancellations alone do not imply that action is still required.
 
+Goals and actors link to their explicitly associated tasks, runs, and context
+checkpoints. Selecting a checkpoint exposes its result version, retained summary,
+and recorded before/after context size; later run pages carry their own result
+evidence. Current DSH approval requests show the tool and reason and link to
+matching events. Full reasons expand on demand; approvals are handled in the
+owning harness.
+
 ### Session Protocol v2 and v3
 
 Every registered provider implements `getSessionProtocol()` for every readable

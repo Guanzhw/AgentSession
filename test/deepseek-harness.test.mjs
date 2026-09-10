@@ -26,6 +26,8 @@ import {
   dshHeader,
   dshInheritedEventCount,
   dshOwnedEvents,
+  dshApprovalLifecycle,
+  dshPendingApprovalEventIdsFromLifecycle,
   dshUsageOf,
   dshUsageToTokens,
   dshRecordsToMessages,
@@ -306,6 +308,7 @@ test("DeepSeek Harness status waits only on an unmatched approval in the current
     ])
   ];
   assert.equal(dshSessionStatus(currentAsk), "waiting_input");
+  assert.deepEqual(dshPendingApprovalEventIdsFromLifecycle(dshApprovalLifecycle(currentAsk)), ["event:dsh:5"]);
 
   const currentResolved = [
     header("session-dsh-resolved-approval"),
@@ -318,6 +321,40 @@ test("DeepSeek Harness status waits only on an unmatched approval in the current
     ])
   ];
   assert.equal(dshSessionStatus(currentResolved), "running");
+  assert.deepEqual(dshPendingApprovalEventIdsFromLifecycle(dshApprovalLifecycle(currentResolved)), []);
+});
+
+test("DeepSeek Harness protocol retains approval audit detail and current canonical refs", () => {
+  const records = [
+    header("session-dsh-approval-protocol"),
+    ...events([
+      { type: "turn/start", data: { turn: 1 } },
+      { type: "approval/asked", data: { id: "ask-1", toolName: "bash", callId: "call-1", reason: "Need permission" } },
+      { type: "approval/decided", data: { id: "ask-1", outcome: "cancelled" } },
+      { type: "turn/end", data: { turn: 1, reason: { kind: "completed" } } },
+      { type: "turn/start", data: { turn: 2 } },
+      { type: "approval/asked", data: { id: "ask-2", toolName: "write" } }
+    ])
+  ];
+  const protocol = buildDshSessionProtocol({
+    session: extractDshMeta(records),
+    records,
+    messages: dshRecordsToMessages(records, "session-dsh-approval-protocol"),
+    children: []
+  });
+  assert.equal(protocol.session.state, "waiting_input");
+  assert.deepEqual(protocol.session.pendingApprovalEventIds, ["event:dsh:5"]);
+  assert.deepEqual(protocol.events[1].approval, {
+    state: "asked", toolName: "bash", callId: "call-1", reason: "Need permission", outcome: null
+  });
+  assert.equal(protocol.events[1].correlationId, "ask-1");
+  assert.deepEqual(protocol.events[2].approval, {
+    state: "decided", toolName: null, callId: null, reason: null, outcome: "cancelled"
+  });
+  assert.equal(protocol.events[2].correlationId, "ask-1");
+  assert.deepEqual(protocol.events[5].approval, {
+    state: "asked", toolName: "write", callId: null, reason: null, outcome: null
+  });
 });
 
 test("DeepSeek Harness alpha.2 compatibility snapshot and SQLite diagnostic are explicit", () => {

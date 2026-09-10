@@ -24,6 +24,7 @@ export function initRuntimeWorkbench({ ft, formatText }) {
     run: "runs",
     coordination: "coordinations",
     "context-transformation": "transformations",
+    "context-version": "versions",
     artifact: "artifacts"
   };
   const evidenceForKind = (kind) => {
@@ -32,6 +33,7 @@ export function initRuntimeWorkbench({ ft, formatText }) {
     const pageCollection = {
       coordination: evidence.pageCoordination,
       "context-transformation": evidence.pageTransformations,
+      "context-version": evidence.pageVersions,
       artifact: evidence.pageArtifacts
     }[kind];
     return [
@@ -87,19 +89,47 @@ export function initRuntimeWorkbench({ ft, formatText }) {
     if (kind === "run") {
       updateRefreshLinks(id);
     }
-    const selectedRun = kind === "run"
-      ? root.querySelector(`[data-runtime-entity-kind="run"][data-runtime-entity-id="${CSS.escape(id)}"]`)
-      : null;
     const selectedEntity = root.querySelector(`[data-runtime-entity-kind="${CSS.escape(kind)}"][data-runtime-entity-id="${CSS.escape(id)}"]`);
-    const linkedTaskId = selectedRun?.dataset.runtimeTaskId || selectedEntity?.dataset.runtimeCoordinationTaskId || "";
-    const linkedActorId = selectedRun?.dataset.runtimeActorId || "";
-    const linkedRunId = selectedRun?.dataset.runtimeEntityId
+    const selectedEvidence = evidenceForKind(kind).find((entry) => String(entry.id) === String(id));
+    const linkedTransformation = kind === "context-version"
+      ? evidenceForKind("context-transformation").find((entry) => entry.resultVersionId === id)
+      : kind === "artifact"
+        ? evidenceForKind("context-transformation").find((entry) => (entry.resultArtifactIds || []).includes(id))
+        : null;
+    const linkedRunId = (kind === "run" ? selectedEntity?.dataset.runtimeEntityId : "")
       || selectedEntity?.dataset.runtimeCoordinationRunId
       || selectedEntity?.dataset.runtimeContextRunId
       || selectedEntity?.dataset.runtimeArtifactRunId
+      || selectedEvidence?.runId
+      || selectedEvidence?.producerRunId
+      || linkedTransformation?.runId
       || "";
+    const selectedRun = linkedRunId
+      ? root.querySelector(`[data-runtime-entity-kind="run"][data-runtime-entity-id="${CSS.escape(linkedRunId)}"]`)
+      : null;
+    const linkedTaskId = selectedRun?.dataset.runtimeTaskId || selectedEntity?.dataset.runtimeCoordinationTaskId || selectedEvidence?.taskId || "";
+    const linkedActorId = selectedRun?.dataset.runtimeActorId || "";
     const linkedTransformationId = selectedEntity?.dataset.runtimeArtifactContextTransformationId
-      || (kind === "context-transformation" ? id : "");
+      || (kind === "context-transformation" ? id : "")
+      || (linkedTransformation?.id || "");
+    const selectedGoal = kind === "goal" ? selectedEvidence : null;
+    const goalTaskIds = new Set(selectedGoal?.taskIds || []);
+    const goalRunIds = new Set([...root.querySelectorAll('[data-runtime-entity-kind="run"][data-runtime-entity-id]')]
+      .filter((run) => goalTaskIds.has(run.dataset.runtimeTaskId || ""))
+      .map((run) => run.dataset.runtimeEntityId));
+    evidenceForKind("run").filter((run) => goalTaskIds.has(run.taskId)).forEach((run) => goalRunIds.add(run.id));
+    const actorRunIds = new Set(kind === "actor" ? (selectedEvidence?.runIds || []) : []);
+    if (kind === "actor") {
+      root.querySelectorAll(`[data-runtime-entity-kind="run"][data-runtime-actor-id="${CSS.escape(id)}"]`).forEach((run) => actorRunIds.add(run.dataset.runtimeEntityId));
+    }
+    const actorTaskIds = new Set(kind === "actor"
+      ? evidenceForKind("run").filter((run) => actorRunIds.has(run.id)).map((run) => run.taskId).filter(Boolean)
+      : []);
+    if (kind === "actor") {
+      root.querySelectorAll(`[data-runtime-entity-kind="run"][data-runtime-actor-id="${CSS.escape(id)}"]`).forEach((run) => {
+        if (run.dataset.runtimeTaskId) actorTaskIds.add(run.dataset.runtimeTaskId);
+      });
+    }
     revealCompletedTask(kind === "task" ? id : linkedTaskId);
     root.querySelectorAll("[data-runtime-entity-kind][data-runtime-entity-id]").forEach((item) => {
       const itemKey = entityKey(item.dataset.runtimeEntityKind, item.dataset.runtimeEntityId);
@@ -108,15 +138,25 @@ export function initRuntimeWorkbench({ ft, formatText }) {
         ? item.dataset.runtimeTaskId === id
           || item.closest('[data-runtime-entity-kind="run"]')?.dataset.runtimeTaskId === id
           || (item.dataset.runtimeEntityKind === "coordination" && item.dataset.runtimeCoordinationTaskId === id)
+        : kind === "goal"
+          ? (item.dataset.runtimeEntityKind === "task" && goalTaskIds.has(item.dataset.runtimeEntityId))
+            || (item.dataset.runtimeEntityKind === "run" && goalRunIds.has(item.dataset.runtimeEntityId))
+            || (item.dataset.runtimeEntityKind === "coordination" && (goalRunIds.has(item.dataset.runtimeCoordinationRunId || "") || goalTaskIds.has(item.dataset.runtimeCoordinationTaskId || "")))
+            || (item.dataset.runtimeEntityKind === "context-transformation" && goalRunIds.has(item.dataset.runtimeContextRunId || ""))
+            || (item.dataset.runtimeEntityKind === "artifact" && goalRunIds.has(item.dataset.runtimeArtifactRunId || ""))
         : kind === "actor"
-          ? item.dataset.runtimeActorId === id
+          ? (item.dataset.runtimeEntityKind === "run" && actorRunIds.has(item.dataset.runtimeEntityId))
+            || (item.dataset.runtimeEntityKind === "task" && actorTaskIds.has(item.dataset.runtimeEntityId))
+            || (item.dataset.runtimeEntityKind === "coordination" && actorRunIds.has(item.dataset.runtimeCoordinationRunId || ""))
+            || (item.dataset.runtimeEntityKind === "context-transformation" && actorRunIds.has(item.dataset.runtimeContextRunId || ""))
+            || (item.dataset.runtimeEntityKind === "artifact" && actorRunIds.has(item.dataset.runtimeArtifactRunId || ""))
           : kind === "run" && ((item.dataset.runtimeEntityKind === "task" && item.dataset.runtimeEntityId === linkedTaskId)
             || (item.dataset.runtimeEntityKind === "actor" && item.dataset.runtimeEntityId === linkedActorId)
             || (item.dataset.runtimeEntityKind === "coordination" && (item.dataset.runtimeCoordinationRunId === id
               || (!item.dataset.runtimeCoordinationRunId && item.dataset.runtimeCoordinationTaskId === linkedTaskId)))
             || (item.dataset.runtimeEntityKind === "context-transformation" && item.dataset.runtimeContextRunId === id)
             || (item.dataset.runtimeEntityKind === "artifact" && item.dataset.runtimeArtifactRunId === id));
-      const linkedEvidence = (kind === "coordination" || kind === "context-transformation" || kind === "artifact")
+      const linkedEvidence = (kind === "coordination" || kind === "context-transformation" || kind === "context-version" || kind === "artifact")
         && ((linkedRunId && item.dataset.runtimeEntityKind === "run" && item.dataset.runtimeEntityId === linkedRunId)
           || (linkedTaskId && item.dataset.runtimeEntityKind === "task" && item.dataset.runtimeEntityId === linkedTaskId)
           || (linkedTransformationId && ((item.dataset.runtimeEntityKind === "context-transformation" && item.dataset.runtimeEntityId === linkedTransformationId)
@@ -138,10 +178,12 @@ export function initRuntimeWorkbench({ ft, formatText }) {
       const candidates = evidenceForKind(kind);
       const item = candidates.find((entry) => String(entry.id) === String(id));
       content.replaceChildren();
-      const labels = { goal: ft("runtime_goal_title"), task: ft("runtime_task"), actor: ft("runtime_agent"), run: ft("runtime_run"), coordination: ft("runtime_coordination_marker"), "context-transformation": ft("runtime_context_checkpoint"), artifact: ft("runtime_artifact") };
-      const name = item?.title || item?.name || item?.label || item?.agentPath || item?.agent || item?.model
-        || ((kind === "coordination" || kind === "context-transformation") ? item?.kind : null)
-        || (kind === "run" && item?.kind === "session-turn" ? ft("runtime_session_turn") : ft("runtime_recorded_run"));
+      const labels = { goal: ft("runtime_goal_title"), task: ft("runtime_task"), actor: ft("runtime_agent"), run: ft("runtime_run"), coordination: ft("runtime_coordination_marker"), "context-transformation": ft("runtime_context_checkpoint"), "context-version": ft("runtime_result_version"), artifact: ft("runtime_artifact") };
+      const name = kind === "context-version"
+        ? `${ft("runtime_result_version")}${item?.sequence == null ? "" : ` #${item.sequence}`}`
+        : item?.title || item?.name || item?.label || item?.agentPath || item?.agent || item?.model
+          || ((kind === "coordination" || kind === "context-transformation") ? item?.kind : null)
+          || (kind === "run" && item?.kind === "session-turn" ? ft("runtime_session_turn") : ft("runtime_recorded_run"));
       const heading = document.createElement("p");
       heading.className = "runtime-inspector-selection";
       heading.textContent = `${labels[kind] || kind} · ${name}`;
@@ -165,22 +207,36 @@ export function initRuntimeWorkbench({ ft, formatText }) {
       if (item?.timeStart != null) fact(ft("runtime_start"), new Date(item.timeStart).toLocaleString(document.documentElement.lang));
       if (item?.timeEnd != null) fact(ft("runtime_end"), new Date(item.timeEnd).toLocaleString(document.documentElement.lang));
       if (item?.timestamp != null) fact(ft("runtime_event_time"), new Date(item.timestamp).toLocaleString(document.documentElement.lang));
+      if (kind === "context-version") {
+        fact(ft("runtime_event_sequence"), item?.sequence);
+        if (item?.createdAt != null) fact(ft("runtime_created"), new Date(item.createdAt).toLocaleString(document.documentElement.lang));
+      }
       if (item?.contentAccess) fact(ft("runtime_context_asset_access"), item.contentAccess);
       if (item?.summary) fact(ft("runtime_context_description"), item.summary);
+      if (kind === "context-transformation") {
+        fact(ft("runtime_tokens_before"), item?.tokensBefore);
+        fact(ft("runtime_tokens_after"), item?.tokensAfter);
+        fact(ft("runtime_retained_content"), item?.retainedSummary);
+        (item?.resultArtifactIds || []).slice(0, 20).forEach((artifactId) => {
+          const artifact = evidenceForKind("artifact").find((entry) => String(entry.id) === String(artifactId));
+          if (artifact?.contentAccess) fact(ft("runtime_context_asset_access"), `${artifactId} · ${artifact.contentAccess}`);
+          if (artifact?.summary && artifact.summary !== item?.retainedSummary) fact(ft("runtime_retained_content"), `${artifactId} · ${artifact.summary}`);
+        });
+      }
       if (item?.sourcePath) fact(ft("runtime_context_asset_source_path"), item.sourcePath);
       if (item?.provenance) fact(ft("runtime_provenance"), provenance(item.provenance));
       if (kind === "artifact") {
         const accessRecorded = item?.contentAccess === "full" || item?.contentAccess === "summary";
         fact(ft("runtime_context_content_state"), ft(accessRecorded ? "runtime_context_content_recorded" : "runtime_context_content_unavailable"));
       }
-      const relatedButton = (relatedKind, relatedId) => {
+      const relatedButton = (relatedKind, relatedId, relatedLabel = "") => {
         if (!relatedId) return;
         const button = document.createElement("button");
         button.type = "button";
         button.className = "runtime-inspector-related";
         button.dataset.runtimeSelectKind = relatedKind;
         button.dataset.runtimeSelectId = relatedId;
-        button.textContent = `${labels[relatedKind] || relatedKind}: ${relatedId}`;
+        button.textContent = `${relatedLabel || labels[relatedKind] || relatedKind}: ${relatedId}`;
         content.append(button);
       };
       const relatedTaskId = selectedRun?.dataset.runtimeTaskId || item?.taskId || selectedEntity?.dataset.runtimeCoordinationTaskId || "";
@@ -199,7 +255,11 @@ export function initRuntimeWorkbench({ ft, formatText }) {
         relatedButton("task", relatedTaskId);
       } else if (kind === "context-transformation") {
         relatedButton("run", item?.runId || selectedEntity?.dataset.runtimeContextRunId || "");
-        (item?.resultArtifactIds || []).slice(0, 20).forEach((artifactId) => relatedButton("artifact", artifactId));
+        relatedButton("context-version", item?.resultVersionId || "");
+        (item?.resultArtifactIds || []).slice(0, 20).forEach((artifactId) => {
+          const artifact = evidenceForKind("artifact").find((entry) => String(entry.id) === String(artifactId));
+          relatedButton("artifact", artifactId, artifact?.title || artifact?.name || artifact?.label || ft("runtime_result_artifact"));
+        });
       } else if (kind === "artifact") {
         relatedButton("run", item?.producerRunId || selectedEntity?.dataset.runtimeArtifactRunId || "");
         relatedButton("context-transformation", selectedEntity?.dataset.runtimeArtifactContextTransformationId || "");
@@ -210,6 +270,10 @@ export function initRuntimeWorkbench({ ft, formatText }) {
           sessionLink.textContent = `${ft("runtime_context_asset_source_session")} ${sourceSessionId}`;
           content.append(sessionLink);
         });
+      } else if (kind === "context-version") {
+        const transformation = evidenceForKind("context-transformation").find((entry) => entry.resultVersionId === id);
+        relatedButton("context-transformation", transformation?.id || "");
+        (transformation?.resultArtifactIds || item?.artifactIds || []).slice(0, 20).forEach((artifactId) => relatedButton("artifact", artifactId, ft("runtime_result_artifact")));
       }
       const events = document.createElement("a");
       events.href = "#tab-events";
@@ -389,6 +453,7 @@ export function initRuntimeWorkbench({ ft, formatText }) {
       if (Array.isArray(data.evidenceRuns)) evidence.runPageRuns = data.evidenceRuns;
       if (Array.isArray(data.pageCoordination)) evidence.pageCoordination = data.pageCoordination;
       if (Array.isArray(data.pageTransformations)) evidence.pageTransformations = data.pageTransformations;
+      if (Array.isArray(data.pageVersions)) evidence.pageVersions = data.pageVersions;
       if (Array.isArray(data.pageArtifacts)) evidence.pageArtifacts = data.pageArtifacts;
       if (selectedKey) {
         const separator = selectedKey.indexOf(":");

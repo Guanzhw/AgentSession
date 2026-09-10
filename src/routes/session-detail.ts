@@ -16,7 +16,7 @@ import {
 import { getResumeCommand } from "../resume.js";
 import { renderSessionPage } from "../views/session.js";
 import type { SessionProtocol } from "../providers/shared/session-protocol.js";
-import { projectRuntimeLanePresentation, renderRuntimeEvents, renderRuntimeRunPage, renderRuntimeWorkbench } from "../views/runtime-workbench.js";
+import { decorateRuntimeTransformationEvidence, projectRuntimeLanePresentation, renderRuntimeEvents, renderRuntimeRunPage, renderRuntimeWorkbench } from "../views/runtime-workbench.js";
 import { renderProgressiveContent } from "../views/components.js";
 import { providerRenderContext } from "./provider-context.js";
 import { parseSessionNavigationContext } from "../navigation-context.js";
@@ -563,7 +563,8 @@ export function registerSessionDetail(
         html: renderRuntimeRunPage(page, actorBindings.actorByRun, actorLabels, lanePresentation, { runCursor: params.get("cursor") }),
         evidenceRuns: page.runs.map((entry) => entry.run),
         pageCoordination: lanePresentation.coordination,
-        pageTransformations: lanePresentation.transformations,
+        pageTransformations: (lanePresentation.transformations || []).map((transformation) => decorateRuntimeTransformationEvidence(protocolV3, transformation)),
+        pageVersions: lanePresentation.versions,
         pageArtifacts: lanePresentation.artifacts
       });
     } catch (error) {

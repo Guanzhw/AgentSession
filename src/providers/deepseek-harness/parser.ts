@@ -1282,35 +1282,54 @@ export function dshStoredSystemPrompt(records: DshRecord[]): { content: string; 
   };
 }
 
-/** Map owned DSH turn and approval events to the shared task status vocabulary. */
-export function dshSessionStatus(records: DshRecord[]): "running" | "waiting_input" | "completed" | "failed" | "blocked" | "cancelled" {
+export interface DshApprovalLifecycle {
+  openTurn: boolean;
+  pendingApprovals: DshRecord[];
+  latestTurnEnd: DshRecord | null;
+}
+
+/** Fold only the current owned turn; completed-turn approvals are historical. */
+export function dshApprovalLifecycle(records: DshRecord[]): DshApprovalLifecycle {
   let openTurn = false;
-  let pendingApprovals = new Set<string>();
-  let end: DshRecord | null = null;
+  let pending = new Map<string, DshRecord>();
+  let latestTurnEnd: DshRecord | null = null;
   for (const event of dshOwnedEvents(records)) {
     if (event.type === "turn/start") {
       openTurn = true;
-      pendingApprovals = new Set();
+      pending = new Map();
       continue;
     }
     if (event.type === "turn/end") {
       openTurn = false;
-      pendingApprovals = new Set();
-      end = event;
+      pending = new Map();
+      latestTurnEnd = event;
       continue;
     }
     if (!openTurn || !isRecord(event.data)) continue;
     const id = event.data.id;
     if (typeof id !== "string" || !id) continue;
-    if (event.type === "approval/asked") pendingApprovals.add(id);
-    else if (event.type === "approval/decided") pendingApprovals.delete(id);
+    if (event.type === "approval/asked") pending.set(id, event);
+    else if (event.type === "approval/decided") pending.delete(id);
   }
-  if (openTurn && pendingApprovals.size > 0) return "waiting_input";
-  if (openTurn) return "running";
-  const kind = end?.data?.reason?.kind;
+  return { openTurn, pendingApprovals: [...pending.values()], latestTurnEnd };
+}
+
+export function dshSessionStatusFromApprovalLifecycle(lifecycle: DshApprovalLifecycle): "running" | "waiting_input" | "completed" | "failed" | "blocked" | "cancelled" {
+  if (lifecycle.openTurn && lifecycle.pendingApprovals.length > 0) return "waiting_input";
+  if (lifecycle.openTurn) return "running";
+  const kind = lifecycle.latestTurnEnd?.data?.reason?.kind;
   if (kind === "completed") return "completed";
   if (kind === "error") return "failed";
   if (kind === "blocked") return "blocked";
   if (kind === "aborted" || kind === "interrupted") return "cancelled";
   return "running";
+}
+
+export function dshPendingApprovalEventIdsFromLifecycle(lifecycle: DshApprovalLifecycle): string[] {
+  return lifecycle.pendingApprovals.map((event) => `event:dsh:${event.seq}`);
+}
+
+/** Map owned DSH turn and approval events to the shared task status vocabulary. */
+export function dshSessionStatus(records: DshRecord[]): "running" | "waiting_input" | "completed" | "failed" | "blocked" | "cancelled" {
+  return dshSessionStatusFromApprovalLifecycle(dshApprovalLifecycle(records));
 }

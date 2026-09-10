@@ -92,6 +92,8 @@ export interface SessionDescriptor {
   terminalOutcome: string | null;
   forkSeedBoundary: number | null;
   inheritedEventCount: number | null;
+  /** Provider-derived current approval asks; omitted when unsupported. */
+  pendingApprovalEventIds?: string[];
   provenance: EventProvenance;
 }
 
@@ -124,7 +126,20 @@ export interface SessionEventEnvelope {
   provenance: EventProvenance;
   /** Present on events whose kind is "context.compaction". */
   compaction?: ContextCompactionEvent | null;
+  /** Provider-recorded approval audit detail; approvals are not surface messages. */
+  approval?: ApprovalEventDetail | null;
   providerData?: Record<string, unknown> | null;
+}
+
+export type ApprovalEventState = "asked" | "decided";
+export type ApprovalOutcome = "allowed-once" | "rejected" | "cancelled" | "unavailable";
+
+export interface ApprovalEventDetail {
+  state: ApprovalEventState;
+  toolName: string | null;
+  callId: string | null;
+  reason: string | null;
+  outcome: ApprovalOutcome | null;
 }
 
 export type SessionRelationshipType =
@@ -392,6 +407,8 @@ const ARTIFACT_ORIGINS = new Set<ContextArtifactOrigin>([
 const CONTENT_ACCESSES = new Set<ContentAccess>([
   "full", "summary", "metadata-only", "unavailable"
 ]);
+const APPROVAL_EVENT_STATES = new Set<ApprovalEventState>(["asked", "decided"]);
+const APPROVAL_OUTCOMES = new Set<ApprovalOutcome>(["allowed-once", "rejected", "cancelled", "unavailable"]);
 
 function assertProvenance(provenance: EventProvenance): EventProvenance {
   if (!provenance || !PROVENANCE_FIDELITIES.has(provenance.fidelity)) {
@@ -405,6 +422,34 @@ function assertProvenance(provenance: EventProvenance): EventProvenance {
 
 function numberOrNull(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function normalizeApprovalDetail(value: unknown): ApprovalEventDetail | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Approval detail must be an object or null");
+  }
+  const candidate = value as Record<string, unknown>;
+  if (!APPROVAL_EVENT_STATES.has(candidate.state as ApprovalEventState)) {
+    throw new TypeError(`Invalid approval event state: ${String(candidate.state)}`);
+  }
+  const stringOrNull = (field: string) => {
+    const fieldValue = candidate[field];
+    if (fieldValue === undefined || fieldValue === null) return null;
+    if (typeof fieldValue !== "string") throw new TypeError(`Approval ${field} must be a string or null`);
+    return fieldValue;
+  };
+  const detail: ApprovalEventDetail = {
+    state: candidate.state as ApprovalEventState,
+    toolName: stringOrNull("toolName"),
+    callId: stringOrNull("callId"),
+    reason: stringOrNull("reason"),
+    outcome: stringOrNull("outcome") as ApprovalOutcome | null
+  };
+  if (detail.state === "asked" && !detail.toolName) throw new TypeError("Asked approval detail requires toolName");
+  if (detail.state === "decided" && (!detail.outcome || !APPROVAL_OUTCOMES.has(detail.outcome))) throw new TypeError("Decided approval detail requires a known outcome");
+  return detail;
 }
 
 export function defaultCapabilityDescriptor(): CapabilityDescriptor {
@@ -791,6 +836,9 @@ function descriptorFor(
       ?? finiteOrNull(metadataValue(session, "forkSeedBoundary", "seedLength")),
     inheritedEventCount: options.descriptor?.inheritedEventCount
       ?? finiteOrNull(metadataValue(session, "inheritedEventCount", "seedLength")),
+    ...(options.descriptor?.pendingApprovalEventIds === undefined ? {} : {
+      pendingApprovalEventIds: [...options.descriptor.pendingApprovalEventIds]
+    }),
     provenance
   };
 }
@@ -861,6 +909,33 @@ export function validateSessionProtocol(
       error("SESSION_ID_MISMATCH", "Session descriptor and protocol sessionId differ", { kind: "session", ref: descriptor.ref });
     }
     if (!SESSION_STATES.has(descriptor.state)) error("SESSION_STATE_INVALID", "Session descriptor has an invalid state", { kind: "session", ref: descriptor.ref });
+    if (descriptor.pendingApprovalEventIds !== undefined) {
+      if (!Array.isArray(descriptor.pendingApprovalEventIds)) {
+        error("APPROVAL_PENDING_REFS_INVALID", "Pending approval event refs must be an array", { kind: "session", ref: descriptor.ref });
+      } else {
+        if (descriptor.pendingApprovalEventIds.length > 0 && descriptor.state !== "waiting_input") {
+          error("APPROVAL_PENDING_STATE_MISMATCH", "A non-empty pending approval set requires waiting_input session state", { kind: "session", ref: descriptor.ref });
+        }
+        const pendingIds = new Set<string>();
+        for (const id of descriptor.pendingApprovalEventIds) {
+          if (typeof id !== "string" || !id) {
+            error("APPROVAL_PENDING_REF_INVALID", "Pending approval event refs must be non-empty strings", { kind: "session", ref: descriptor.ref });
+            continue;
+          }
+          if (pendingIds.has(id)) {
+            error("APPROVAL_PENDING_REF_DUPLICATE", "Pending approval event refs must be unique", { kind: "event", id });
+            continue;
+          }
+          pendingIds.add(id);
+          const event = (protocol.events || []).find((candidate) => candidate.id === id);
+          if (!event || event.approval?.state !== "asked") {
+            error("APPROVAL_PENDING_REF_DANGLING", "Pending approval ref must identify a recorded approval ask", { kind: "event", id });
+          } else if (!event.correlationId) {
+            error("APPROVAL_PENDING_CORRELATION_MISSING", "Pending approval ref must identify an ask with a non-empty correlation ID", { kind: "event", id }, event.provenance);
+          }
+        }
+      }
+    }
   }
 
   const eventIds = new Set<string>();
@@ -874,6 +949,12 @@ export function validateSessionProtocol(
     if (event?.sequence !== index + 1) error("EVENT_SEQUENCE_NOT_DENSE", "Event sequence must be dense and start at 1", ref, event?.provenance);
     if (event?.sessionId !== expectedSessionId) error("EVENT_SESSION_MISMATCH", "Event sessionId differs from canonical session", ref, event?.provenance);
     if (event?.category && !EVENT_CATEGORIES.has(event.category)) error("EVENT_CATEGORY_INVALID", "Event category is not in the v2 vocabulary", ref, event.provenance);
+    if (event?.approval) {
+      const approval = event.approval;
+      if (!APPROVAL_EVENT_STATES.has(approval.state)) error("APPROVAL_STATE_INVALID", "Approval detail state is invalid", ref, event.provenance);
+      if (approval.state === "asked" && (!approval.toolName || approval.outcome !== null)) error("APPROVAL_ASK_INVALID", "Approval ask must carry a tool name and no outcome", ref, event.provenance);
+      if (approval.state === "decided" && (!approval.outcome || !APPROVAL_OUTCOMES.has(approval.outcome) || approval.toolName !== null || approval.callId !== null || approval.reason !== null)) error("APPROVAL_DECISION_INVALID", "Approval decision must carry a known outcome and no ask-only fields", ref, event.provenance);
+    }
   }
   for (const event of protocol.events || []) {
     if (event.parentEventId && !eventIds.has(event.parentEventId)) warning("EVENT_PARENT_DANGLING", "Event parent is not present in this snapshot", entityRef("event", event.id), event.provenance);
@@ -1118,7 +1199,8 @@ export function finalizeSessionProtocol(
     category: event.category && EVENT_CATEGORIES.has(event.category)
       ? event.category
       : normalizeEventCategory(event.kind),
-    normalizedKind: event.normalizedKind || normalizeEventKind(event.kind)
+    normalizedKind: event.normalizedKind || normalizeEventKind(event.kind),
+    ...(event.approval === undefined ? {} : { approval: normalizeApprovalDetail(event.approval) })
   }));
   const relationships = (protocol.relationships || []).map((relation) => ({
     ...relation,

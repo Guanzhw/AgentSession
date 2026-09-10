@@ -5625,6 +5625,17 @@ pre code.hljs {
 .runtime-attention-signal .runtime-entity-select { color: var(--accent-color); }
 .runtime-attention-signal[data-runtime-attention-state="blocked"] .runtime-entity-select { color: var(--error-text); }
 .runtime-attention-signal[data-runtime-attention-state="waiting_input"] .runtime-entity-select { color: var(--warning-color); }
+.runtime-approval-scope { align-items: start; }
+.runtime-approval-list { display: grid; gap: 4px; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.runtime-approval-entry { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 8px; min-width: 0; align-items: baseline; }
+.runtime-approval-link { display: inline-flex; flex-wrap: wrap; gap: 4px; color: var(--accent-color); overflow-wrap: anywhere; }
+.runtime-approval-link small, .runtime-approval-reason { min-width: 0; overflow-wrap: anywhere; }
+.runtime-approval-link small { color: var(--text-muted); }
+.runtime-approval-reason { color: var(--text-secondary); }
+.runtime-approval-reason details { display: inline; }
+.runtime-approval-reason details summary { display: inline; color: var(--accent-color); cursor: pointer; }
+.runtime-approval-reason details p { margin: 4px 0 0; white-space: pre-wrap; }
+.runtime-approval-reason-missing { color: var(--text-muted); }
 .runtime-work-goal,
 .runtime-work-progress,
 .runtime-work-context,

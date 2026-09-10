@@ -34,6 +34,8 @@ AgentSession 是本地优先、只读的 harness runtime inspector。它从 Open
 
 已记录的等待和阻塞分别按会话、有界工作投影、当前运行页高亮。选中任务或运行可查看已记录的结果、失败原因和取消原因；历史失败或取消本身不会被当作仍需处理的事项。
 
+目标与参与者可联动到明确关联的任务、运行和上下文检查点。选中检查点可查看结果版本、保留摘要及记录的前后上下文大小；后续运行页携带本页结果证据。DSH 当前未决审批展示工具和原因，并精确跳转到关联事件；完整原因可展开，审批仍在原 harness 中处理。
+
 ### Session Protocol v2 与 v3
 
 每个注册 Provider 都为每个可读 session 提供 `getSessionProtocol()`。协议边界使用 canonical composite `SessionRef`：`{ provider, sessionId }`；Provider 自己的 session ID 始终保留。

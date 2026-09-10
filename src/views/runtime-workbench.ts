@@ -39,6 +39,7 @@ type RuntimeLanePresentation = {
   taskLabels?: Map<string, string>;
   coordination?: SessionProtocolV3["coordination"];
   transformations?: SessionProtocolV3["contextTransformations"];
+  versions?: SessionProtocolV3["contextVersions"];
   artifacts?: SessionProtocolV3["contextArtifacts"];
   truncated?: boolean;
 };
@@ -132,7 +133,42 @@ function renderAttentionSignal(signal: RecordedAttentionSignal, entityLabel = ""
   return `<span class="runtime-attention-signal" data-runtime-attention-signal data-runtime-attention-scope="${escapeHtml(signal.scope)}" data-runtime-attention-kind="${escapeHtml(signal.kind)}" data-runtime-attention-id="${escapeHtml(signal.id)}" data-runtime-attention-state="${escapeHtml(signal.status)}">${target}</span>`;
 }
 
-function renderWorkAttention(model: ReturnType<typeof deriveWorkOverview>) {
+function currentApprovalEvents(data: RuntimeData) {
+  const protocol = data.v3;
+  const ids = protocol?.session?.pendingApprovalEventIds;
+  if (!protocol || protocol.validation?.ok !== true || !Array.isArray(ids)) return [];
+  const events = new Map(protocol.events.map((event) => [event.id, event]));
+  return ids.map((id) => events.get(id)!);
+}
+
+function renderApprovalShortcut(event: SessionProtocolV3["events"][number]) {
+  const approval = event.approval!;
+  const reason = approval.reason?.trim() || "";
+  const reasonExcerpt = reason ? narrativeExcerpt(reason, 180) : null;
+  const reasonMarkup = reasonExcerpt
+    ? `<div class="runtime-approval-reason">${escapeHtml(reasonExcerpt.text)}${reasonExcerpt.truncated ? `<details><summary>${escapeHtml(t("runtime.approval_show_reason"))}</summary><p>${escapeHtml(reason)}</p></details>` : ""}</div>`
+    : `<div class="runtime-approval-reason runtime-approval-reason-missing">${escapeHtml(t("runtime.approval_no_reason"))}</div>`;
+  const eventAttrs = [
+    `data-runtime-open-events="true"`,
+    `data-runtime-approval-event-id="${escapeHtml(event.id)}"`,
+    `data-runtime-event-task-id="${escapeHtml(event.taskId || "")}"`,
+    `data-runtime-event-run-id="${escapeHtml(event.runId || "")}"`,
+    `data-runtime-event-correlation-id="${escapeHtml(event.correlationId || "")}"`
+  ].join(" ");
+  return `<li class="runtime-approval-entry"><a href="#tab-events" class="runtime-approval-link" ${eventAttrs}><strong>${escapeHtml(approval.toolName)}</strong>${approval.callId ? `<small>${escapeHtml(`${t("runtime.approval_call")}: ${approval.callId}`)}</small>` : ""}</a>${reasonMarkup}</li>`;
+}
+
+function renderPendingApprovals(data: RuntimeData) {
+  const current = currentApprovalEvents(data);
+  const events = current.slice(0, ATTENTION_ENTRY_LIMIT);
+  if (!events.length) return "";
+  const more = current.length > events.length
+    ? `<span class="runtime-attention-more" data-runtime-approval-truncated>${escapeHtml(t("runtime.attention_more"))}</span>`
+    : "";
+  return `<div class="runtime-attention-scope runtime-approval-scope" data-runtime-attention-scope="approval"><span class="runtime-attention-scope-label">${escapeHtml(t("runtime.approval_title"))}</span><ul class="runtime-approval-list">${events.map(renderApprovalShortcut).join("")}</ul>${more}</div>`;
+}
+
+function renderWorkAttention(model: ReturnType<typeof deriveWorkOverview>, data: RuntimeData) {
   const session = model.attention.session.map((signal) => renderAttentionSignal(signal)).join("");
   const workSignals = model.attention.work.slice(0, ATTENTION_ENTRY_LIMIT);
   const work = workSignals.map((signal) => {
@@ -144,9 +180,10 @@ function renderWorkAttention(model: ReturnType<typeof deriveWorkOverview>) {
     return renderAttentionSignal(signal, entityLabel(entity, signal.id));
   }).join("");
   const workTruncated = model.attention.work.length > workSignals.length;
-  if (!session && !model.attention.work.length) return "";
+  const approvals = renderPendingApprovals(data);
+  if (!session && !model.attention.work.length && !approvals) return "";
   const more = workTruncated ? `<span class="runtime-attention-more" data-runtime-attention-truncated>${escapeHtml(t("runtime.attention_more"))}</span>` : "";
-  return `<section class="runtime-attention-strip" data-runtime-attention aria-label="${escapeHtml(t("runtime.attention_title"))}"><strong>${escapeHtml(t("runtime.attention_title"))}</strong>${session ? `<div class="runtime-attention-scope" data-runtime-attention-scope="session"><span class="runtime-attention-scope-label">${escapeHtml(t("runtime.session_state"))}</span>${session}</div>` : ""}${model.attention.work.length ? `<div class="runtime-attention-scope" data-runtime-attention-scope="work"><span class="runtime-attention-scope-label">${escapeHtml(t("runtime.work_title"))}</span>${work}${more}</div>` : ""}</section>`;
+  return `<section class="runtime-attention-strip" data-runtime-attention aria-label="${escapeHtml(t("runtime.attention_title"))}"><strong>${escapeHtml(t("runtime.attention_title"))}</strong>${session ? `<div class="runtime-attention-scope" data-runtime-attention-scope="session"><span class="runtime-attention-scope-label">${escapeHtml(t("runtime.session_state"))}</span>${session}</div>` : ""}${model.attention.work.length ? `<div class="runtime-attention-scope" data-runtime-attention-scope="work"><span class="runtime-attention-scope-label">${escapeHtml(t("runtime.work_title"))}</span>${work}${more}</div>` : ""}${approvals}</section>`;
 }
 
 function runtimeRunLabel(run: any, taskLabel = "") {
@@ -571,7 +608,7 @@ function renderWorkOverview(data: RuntimeData, executionLanes: string) {
   const goalState = goal ? statusLabel(goal.status) : statusLabel("unknown");
   const sessionState = statusLabel(model.sessionState);
   const orientationUpdated = model.sessionUpdatedAt == null ? t("runtime.unknown_time") : timeLabel(model.sessionUpdatedAt);
-  const orientation = `<div class="runtime-orientation-strip" data-runtime-orientation><div class="runtime-orientation-goal"><span class="runtime-orientation-label">${escapeHtml(t("runtime.goal_title"))}</span><h4>${escapeHtml(goalTitle.text)}</h4>${goalDescription ? `<span class="runtime-orientation-goal-description">${escapeHtml(goalDescription.text)}</span>` : ""}${fullGoalNarrative}${!goal ? `<span class="runtime-notice">${escapeHtml(t("runtime.goal_not_recorded_detail"))}</span>` : ""}</div><div class="runtime-orientation-meta" aria-label="${escapeHtml(t("runtime.orientation_summary"))}"><span><b>${escapeHtml(t("runtime.goal_state"))}</b> <span class="runtime-status runtime-status-${escapeHtml(statusClass(goalStatus))}" data-runtime-goal-state>${escapeHtml(goalState)}</span></span><span><b>${escapeHtml(t("runtime.session_state"))}</b> <span class="runtime-status runtime-status-${escapeHtml(statusClass(model.sessionState))}" data-runtime-session-state>${escapeHtml(sessionState)}</span></span><span><b>${escapeHtml(t("detail.updated"))}</b> ${escapeHtml(orientationUpdated)}</span><span><b>${escapeHtml(t("runtime.tasks"))}</b> ${escapeHtml(`${count(model.completedTasks)} / ${count(model.taskTotal)}`)}</span><span class="runtime-orientation-progress"><b>${escapeHtml(t("runtime.progress_title"))}</b> ${escapeHtml(progressSentence)}</span></div>${renderWorkAttention(model)}</div>`;
+  const orientation = `<div class="runtime-orientation-strip" data-runtime-orientation><div class="runtime-orientation-goal"><span class="runtime-orientation-label">${escapeHtml(t("runtime.goal_title"))}</span><h4>${escapeHtml(goalTitle.text)}</h4>${goalDescription ? `<span class="runtime-orientation-goal-description">${escapeHtml(goalDescription.text)}</span>` : ""}${fullGoalNarrative}${!goal ? `<span class="runtime-notice">${escapeHtml(t("runtime.goal_not_recorded_detail"))}</span>` : ""}</div><div class="runtime-orientation-meta" aria-label="${escapeHtml(t("runtime.orientation_summary"))}"><span><b>${escapeHtml(t("runtime.goal_state"))}</b> <span class="runtime-status runtime-status-${escapeHtml(statusClass(goalStatus))}" data-runtime-goal-state>${escapeHtml(goalState)}</span></span><span><b>${escapeHtml(t("runtime.session_state"))}</b> <span class="runtime-status runtime-status-${escapeHtml(statusClass(model.sessionState))}" data-runtime-session-state>${escapeHtml(sessionState)}</span></span><span><b>${escapeHtml(t("detail.updated"))}</b> ${escapeHtml(orientationUpdated)}</span><span><b>${escapeHtml(t("runtime.tasks"))}</b> ${escapeHtml(`${count(model.completedTasks)} / ${count(model.taskTotal)}`)}</span><span class="runtime-orientation-progress"><b>${escapeHtml(t("runtime.progress_title"))}</b> ${escapeHtml(progressSentence)}</span></div>${renderWorkAttention(model, data)}</div>`;
   return `<section class="runtime-work-overview" data-runtime-work-overview aria-labelledby="runtime-work-overview-title"><h3 id="runtime-work-overview-title" class="visually-hidden">${escapeHtml(t("runtime.goal_title"))}</h3>${orientation}<div class="runtime-work-progress" data-runtime-progress><div class="runtime-progress-track" role="progressbar" aria-label="${escapeHtml(t("runtime.progress_title"))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${ratio}"><span style="width:${ratio}%"></span></div>${boundedNote}</div>${renderWorkStructure(model)}${executionLanes}<div class="runtime-work-overview-grid">${renderContextResult(data, model)}${renderOverviewTaskTable(model)}</div><span data-runtime-overview-end aria-hidden="true"></span></section>`;
 }
 
@@ -590,6 +627,9 @@ export function projectRuntimeLanePresentation(protocol: SessionProtocolV3, runE
   const eligibleTransformations = protocol.contextTransformations.filter((transformation) => transformation.runId && runIds.has(transformation.runId));
   const coordination = eligibleCoordination.slice(0, 100);
   const transformations = eligibleTransformations.slice(0, 100);
+  const versionIds = new Set(transformations.flatMap((transformation) => transformation.resultVersionId || []));
+  const eligibleVersions = protocol.contextVersions.filter((version) => versionIds.has(version.id));
+  const versions = eligibleVersions.slice(0, 100);
   const resultIds = new Set(transformations.flatMap((transformation) => transformation.resultArtifactIds || []));
   const eligibleArtifacts = protocol.contextArtifacts.filter((artifact) => resultIds.has(artifact.id));
   const artifacts = eligibleArtifacts.slice(0, 100);
@@ -597,9 +637,11 @@ export function projectRuntimeLanePresentation(protocol: SessionProtocolV3, runE
     taskLabels,
     coordination,
     transformations,
+    versions,
     artifacts,
     truncated: coordination.length < eligibleCoordination.length
       || transformations.length < eligibleTransformations.length
+      || versions.length < eligibleVersions.length
       || artifacts.length < eligibleArtifacts.length
   };
 }
@@ -814,6 +856,16 @@ function renderContextProjection(data: RuntimeData) {
   </section>`;
 }
 
+export function decorateRuntimeTransformationEvidence(protocol: Pick<SessionProtocol, "events"> | Pick<SessionProtocolV3, "events"> | null, transformation: SessionProtocolV3["contextTransformations"][number]) {
+  const event = transformation.eventId ? protocol?.events.find((candidate) => candidate.id === transformation.eventId) : null;
+  return {
+    ...transformation,
+    tokensBefore: event?.compaction?.tokensBefore ?? null,
+    tokensAfter: event?.compaction?.tokensAfter ?? null,
+    retainedSummary: event?.compaction?.summary ?? null
+  };
+}
+
 function renderEvidenceData(protocol: SessionProtocol | null, v3: SessionProtocolV3 | null = null, runPage: RunPage | null = null) {
   const pagePresentation = v3 && runPage ? projectRuntimeLanePresentation(v3, runPage.runs) : {};
   return {
@@ -823,11 +875,13 @@ function renderEvidenceData(protocol: SessionProtocol | null, v3: SessionProtoco
     runs: (protocol?.agentRuns || []).slice(0, 100),
     runPageRuns: runPage ? runPage.runs.map((entry) => entry.run) : [],
     coordinations: (v3?.coordination || []).slice(0, 100),
-    transformations: (v3?.contextTransformations || []).slice(0, 100),
+    transformations: (v3?.contextTransformations || []).slice(0, 100).map((transformation) => decorateRuntimeTransformationEvidence(protocol, transformation)),
+    versions: (v3?.contextVersions || []).slice(0, 100),
     artifacts: (protocol?.contextArtifacts || []).slice(0, 100),
     relationships: (protocol?.relationships || []).slice(0, 100),
     pageCoordination: pagePresentation.coordination || [],
-    pageTransformations: pagePresentation.transformations || [],
+    pageTransformations: (pagePresentation.transformations || []).map((transformation) => decorateRuntimeTransformationEvidence(protocol, transformation)),
+    pageVersions: pagePresentation.versions || [],
     pageArtifacts: pagePresentation.artifacts || []
   };
 }

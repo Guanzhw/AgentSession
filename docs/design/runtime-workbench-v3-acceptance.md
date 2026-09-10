@@ -41,6 +41,45 @@ final reply. Providers without this evidence retain their communication.
 
 ## Production gates
 
+### Approval destination and combined validation, 2026-09-11
+
+Spec 18/19 combined `npm test` passed 559/559 and `npm run review` passed.
+Real Codex, OpenCode and DSH protocol/API checks validated; real OpenCode E2E
+passed with empty browser errors. DSH's completed session has an empty pending
+approval set; providers without that evidence omit the field.
+
+The source-shaped, explicitly illustrative DSH approval page used the actual
+provider builder, v3 finalizer, renderer and event query. Two current asks after
+more than 100 events reached their distinct events (sequences 124 and 125),
+including the complete escaped reason in the evidence drawer. All 12
+EN/ZH × light/dark × 1280/768/320 combinations kept two distinct shortcuts,
+folded long reasons and page containment. Keyboard disclosure/activation and
+Escape focus return passed; attention axe audits passed in both themes.
+Positive pending evidence is fixture-backed, not a live pending request.
+
+The final combined build also confirmed a single retained summary and correctly
+labelled result version/sequence/creation facts in the checkpoint inspector.
+Actual browser Next/Previous interaction over 121 illustrative runs reached
+checkpoints 101/102 on page three with distinct 42/43-token facts, summaries
+and version links. Returning to page two removed old checkpoint nodes; browser
+errors were empty. Scoped publication remains pending.
+
+### Linked-selection positive slice, 2026-09-11
+
+The illustrative spec 18 browser fixture established the pre-change failures:
+goal selection had no linked entities, and the checkpoint inspector had only
+identity/time/provenance and run/artifact links. With the implementation build,
+all 12 EN/ZH × light/dark × 1280/768/320 combinations passed exact goal and
+actor linkage, unrelated-run exclusion, checkpoint result-version/42-token
+visibility and page containment. Reverse checkpoint and version selection
+reached the recorded run/task. Main-agent desktop and narrow screenshot review
+confirmed readable details; browser errors were empty. Duplicate retained text
+and a version title incorrectly called a run were identified for correction.
+
+This is a positive fixture-backed interaction slice. Final combined tests,
+later-page result/API checks, real-provider regression checks, approval UI and
+independent review still remain before the next publication.
+
 ### Recorded attention and outcome details, 2026-09-11
 
 Spec 17 adds scoped session/work/current-page waiting and blocked signals,

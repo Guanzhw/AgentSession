@@ -8,10 +8,11 @@ import {
   getRuntimeProtocol,
   getRuntimeProtocolV3,
   ProtocolRuntimeError,
+  publicEvent,
   queryRuntimeEvents,
   summarizeRuntimeProtocol
 } from "../dist/src/protocol-runtime.js";
-import { capabilityDescriptor } from "../dist/src/providers/shared/session-protocol.js";
+import { capabilityDescriptor, sessionEvent } from "../dist/src/providers/shared/session-protocol.js";
 import { finalizeSessionProtocolV3, upgradeSessionProtocolV2 } from "../dist/src/providers/shared/session-protocol-v3.js";
 
 const provenance = { fidelity: "recorded", sourceType: "fixture" };
@@ -174,6 +175,22 @@ test("runtime event queries are bounded, filterable, cursor-bound, and omit prov
   assert.equal(queryRuntimeEvents(protocol, { runId: "run-1" }).events[0].id, "e2");
   assert.throws(() => queryRuntimeEvents(protocol, { limit: 1, categories: ["context"], cursor: first.nextCursor }), /cursor/);
   assert.throws(() => queryRuntimeEvents(protocol, { taskId: "task-1", cursor: first.nextCursor }), /cursor/);
+});
+
+test("public events retain typed recorded approval detail without provider payload", () => {
+  const event = sessionEvent({
+    id: "approval-ask",
+    sessionId: "s1",
+    sequence: 1,
+    timestamp: 1,
+    kind: "approval.requested",
+    approval: { state: "asked", toolName: "bash", callId: "call-1", reason: "Need access", outcome: null },
+    provenance
+  });
+  assert.deepEqual(publicEvent(event).approval, {
+    state: "asked", toolName: "bash", callId: "call-1", reason: "Need access", outcome: null
+  });
+  assert.equal("providerData" in publicEvent(event), false);
 });
 
 test("runtime summary and graph expose protocol facts without inventing missing sessions", () => {

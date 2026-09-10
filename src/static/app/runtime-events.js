@@ -91,6 +91,23 @@ export function initRuntimeEvents({ ft, formatText }) {
           summaryValue.textContent = compactionSummary;
           details.append(summaryNode, summaryValue);
         }
+        if (item.approval && typeof item.approval === "object") {
+          const approval = item.approval;
+          const approvalState = approval.state === "asked"
+            ? ft("runtime_approval_state_asked")
+            : approval.state === "decided"
+              ? ft("runtime_approval_state_decided")
+              : approval.state;
+          [[ft("runtime_approval_state"), approvalState], [ft("runtime_approval_tool"), approval.toolName], [ft("runtime_approval_call"), approval.callId], [ft("runtime_approval_reason"), approval.reason], [ft("runtime_approval_outcome"), approval.outcome]]
+            .filter(([, value]) => value !== null && value !== undefined && value !== "")
+            .forEach(([label, value]) => {
+              const keyNode = document.createElement("dt");
+              keyNode.textContent = label;
+              const valueNode = document.createElement("dd");
+              valueNode.textContent = String(value);
+              details.append(keyNode, valueNode);
+            });
+        }
         const provenanceNode = document.createElement("dt");
         provenanceNode.textContent = "provenance";
         const provenanceValue = document.createElement("dd");

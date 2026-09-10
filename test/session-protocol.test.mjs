@@ -16,6 +16,7 @@ import {
   contextArtifact,
   contextCompactionEvent,
   defaultCapabilityDescriptor,
+  finalizeSessionProtocol,
   isContextLifecycleEventKind,
   messageSessionEvents,
   normalizeCompactionStrategy,
@@ -167,6 +168,57 @@ test("event and relationship factories validate enums and provenance", () => {
   }), TypeError);
   assert.throws(() => capabilityDescriptor("maybe", "recorded"), TypeError);
   assert.throws(() => capabilityDescriptor("full", "invented"), TypeError);
+});
+
+test("recorded approval details and current refs are validated at the protocol boundary", () => {
+  const descriptor = {
+    ref: { provider: "fixture", sessionId: "s" }, state: "waiting_input", title: "s",
+    directory: null, timeCreated: 1, timeUpdated: 2, messageCount: 0, tokenCount: null,
+    metadata: null, pendingApprovalEventIds: ["ask"]
+  };
+  const ask = sessionEvent({
+    id: "ask", sessionId: "s", sequence: 1, timestamp: 1, kind: "approval.requested",
+    correlationId: "approval-ask",
+    approval: { state: "asked", toolName: "bash", callId: null, reason: null, outcome: null },
+    provenance: recorded("fixture", "ask")
+  });
+  const decided = sessionEvent({
+    id: "decided", sessionId: "s", sequence: 2, timestamp: 2, kind: "approval.decided",
+    approval: { state: "decided", toolName: null, callId: null, reason: null, outcome: "cancelled" },
+    provenance: recorded("fixture", "decided")
+  });
+  const protocol = { sessionId: "s", version: 2, session: descriptor, events: [ask, decided], relationships: [], tasks: [], agentRuns: [], contextArtifacts: [], branches: [], revision: "fixture" };
+  assert.equal(validateSessionProtocol(protocol).ok, true);
+  const malformed = validateSessionProtocol({
+    ...protocol,
+    events: [{ ...ask, approval: { state: "asked", toolName: null, callId: null, reason: null, outcome: null } }, decided]
+  });
+  assert.equal(malformed.errors.some((error) => error.code === "APPROVAL_ASK_INVALID"), true);
+  const dangling = validateSessionProtocol({ ...protocol, session: { ...descriptor, pendingApprovalEventIds: ["decided"] } });
+  assert.equal(dangling.errors.some((error) => error.code === "APPROVAL_PENDING_REF_DANGLING"), true);
+  const missingCorrelation = validateSessionProtocol({
+    ...protocol,
+    events: [{ ...ask, correlationId: null }, decided]
+  });
+  assert.equal(missingCorrelation.errors.some((error) => error.code === "APPROVAL_PENDING_CORRELATION_MISSING"), true);
+  const mismatchedState = validateSessionProtocol({
+    ...protocol,
+    session: { ...descriptor, state: "running" }
+  });
+  assert.equal(mismatchedState.errors.some((error) => error.code === "APPROVAL_PENDING_STATE_MISMATCH"), true);
+  const emptyRunning = validateSessionProtocol({
+    ...protocol,
+    session: { ...descriptor, state: "running", pendingApprovalEventIds: [] }
+  });
+  assert.equal(emptyRunning.ok, true, "empty approval evidence does not force a status");
+  const providerKind = validateSessionProtocol({ ...protocol, events: [{ ...ask, kind: "dsh.approval.audit" }, decided] });
+  assert.equal(providerKind.ok, true, "shared validation does not couple typed approval detail to provider event vocabulary");
+  const finalizedNull = finalizeSessionProtocol({
+    sessionId: "s",
+    events: [sessionEvent({ ...ask, approval: null })],
+    relationships: [], tasks: [], agentRuns: [], contextArtifacts: [], branches: [], revision: "fixture"
+  }, { provider: "fixture", session: session("s"), revision: "fixture" });
+  assert.equal(finalizedNull.events[0].approval, null);
 });
 
 test("AgentRun supports explicitly unknown session-turn execution evidence", () => {

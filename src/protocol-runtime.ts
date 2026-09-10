@@ -301,6 +301,7 @@ export function publicEvent(event: SessionEventEnvelope) {
     parentEventId: event.parentEventId || null,
     correlationId: event.correlationId || null,
     compaction: event.compaction || null,
+    approval: event.approval || null,
     summary: summarizeEvent(event),
     provenance: event.provenance
   };

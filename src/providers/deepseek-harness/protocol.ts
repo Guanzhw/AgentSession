@@ -7,6 +7,9 @@ import {
   dshOwnedEvents,
   dshUsageRecords,
   dshUsageOf,
+  dshApprovalLifecycle,
+  dshPendingApprovalEventIdsFromLifecycle,
+  dshSessionStatusFromApprovalLifecycle,
   dshSessionStatus,
   dshUsageToTokens,
   type DshRecord
@@ -23,6 +26,8 @@ import {
   sessionTask,
   sourceSequence,
   type AgentRun,
+  type ApprovalEventDetail,
+  type ApprovalOutcome,
   type SessionEventEnvelope,
   type SessionProtocol,
   type Task,
@@ -164,6 +169,39 @@ function eventCorrelation(event: DshRecord): string | null {
   if (event.type.startsWith("compaction/")) return firstString(data.compactionId);
   if (event.type.startsWith("approval/")) return firstString(data.id);
   if (event.type.startsWith("command/")) return firstString(data.commandId);
+  return null;
+}
+
+function approvalOutcome(value: unknown): ApprovalOutcome | null {
+  switch (firstString(value)) {
+    case "allowed-once": return "allowed-once";
+    case "rejected": return "rejected";
+    case "cancelled": return "cancelled";
+    case "unavailable": return "unavailable";
+    default: return null;
+  }
+}
+
+function approvalDetail(event: DshRecord): ApprovalEventDetail | null {
+  const data = eventData(event);
+  if (event.type === "approval/asked") {
+    return {
+      state: "asked",
+      toolName: firstString(data.toolName),
+      callId: firstString(data.callId),
+      reason: firstString(data.reason),
+      outcome: null
+    };
+  }
+  if (event.type === "approval/decided") {
+    return {
+      state: "decided",
+      toolName: null,
+      callId: null,
+      reason: null,
+      outcome: approvalOutcome(data.outcome)
+    };
+  }
   return null;
 }
 
@@ -343,6 +381,7 @@ function recordedEvent(
   sessionMetadata: { delegationDepth: number | null; agentPreset: string | null }
 ): SessionEventEnvelope {
   const compaction = dshCompactionRecord(event);
+  const approval = approvalDetail(event);
   const fields = {
     id: `event:dsh:${event.seq}`,
     sessionId,
@@ -371,7 +410,11 @@ function recordedEvent(
       retainedFromEventId: null
     }));
   }
-  return sessionEvent({ ...fields, kind: eventKind(event) });
+  return sessionEvent({
+    ...fields,
+    kind: eventKind(event),
+    ...(approval ? { approval } : {})
+  });
 }
 
 function workflowStatus(outcome: unknown, fallback: TaskStatus): TaskStatus {
@@ -632,6 +675,7 @@ function addTaskAndRun({
 export function buildDshSessionProtocol(input: DshProtocolInput): SessionProtocol {
   const sessionId = String(input.session.id);
   const owned = dshOwnedEvents(input.records);
+  const approvalLifecycle = dshApprovalLifecycle(input.records);
   const events = owned.map((event) => recordedEvent(sessionId, event, {
     delegationDepth: asNumber((dshHeader(input.records) || {}).delegationDepth),
     agentPreset: firstString((dshHeader(input.records) || {}).agentPreset)
@@ -848,7 +892,7 @@ export function buildDshSessionProtocol(input: DshProtocolInput): SessionProtoco
     });
   }
 
-  const turnEnd = [...owned].reverse().find((event) => event.type === "turn/end");
+  const turnEnd = approvalLifecycle.latestTurnEnd;
   const headerMetadata = {
     ...(input.session.metadata || {}),
     isSeeded: header.isSeeded === true,
@@ -869,7 +913,8 @@ export function buildDshSessionProtocol(input: DshProtocolInput): SessionProtoco
     provider: "deepseek-harness",
     session: { ...input.session, metadata: headerMetadata },
     descriptor: {
-      state: dshSessionStatus(input.records),
+      state: dshSessionStatusFromApprovalLifecycle(approvalLifecycle),
+      pendingApprovalEventIds: dshPendingApprovalEventIdsFromLifecycle(approvalLifecycle),
       origin: firstString(header.origin),
       forkSeedBoundary: dshInheritedEventCount(input.records),
       inheritedEventCount: dshInheritedEventCount(input.records),

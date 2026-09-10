@@ -207,6 +207,35 @@ test("Run-page attention is limited to the current page while historical outcome
   assert.match(source, /fact\(ft\("runtime_failure_reason"\), item\?\.failureReason\)/);
 });
 
+test("Current approval shortcuts use validated refs beyond bounded event history", () => {
+  const runtime = fixtureRuntime();
+  const historical = Array.from({ length: 101 }, (_, index) => ({
+    ...runtime.v3.events[0], id: `historical-event-${index + 1}`, sequence: index + 10, approval: { state: "decided", toolName: null, callId: null, reason: null, outcome: "allowed-once" }
+  }));
+  const pending = [
+    { ...runtime.v3.events[0], id: "approval-current-one", sequence: 120, normalizedKind: "approval.requested", category: "control", correlationId: "approval-correlation-one", approval: { state: "asked", toolName: "shell.exec", callId: "call-one", reason: "Run the release check" } },
+    { ...runtime.v3.events[0], id: "approval-current-two", sequence: 121, normalizedKind: "approval.requested", category: "control", correlationId: "approval-correlation-two", approval: { state: "asked", toolName: "fs.write", callId: "call-two", reason: "Write the generated report and preserve the full recorded output for the release audit. This explanation is deliberately long enough to verify that the compact approval shortcut keeps its complete reason behind an accessible disclosure." } }
+  ];
+  runtime.v3.events = [...runtime.v3.events, ...historical, ...pending];
+  runtime.v3.session = { ...runtime.v3.session, state: "waiting_input", pendingApprovalEventIds: pending.map((event) => event.id) };
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  const attention = html.match(/<section class="runtime-attention-strip"[\s\S]*?<\/section>/)?.[0] || "";
+  assert.match(attention, /data-runtime-attention-scope="approval"/);
+  assert.match(attention, /shell\.exec/);
+  assert.match(attention, /fs\.write/);
+  assert.match(attention, /approval-correlation-one/);
+  assert.match(attention, /approval-current-one/);
+  assert.doesNotMatch(attention, /historical-event-101/);
+  assert.equal((attention.match(/data-runtime-approval-event-id=/g) || []).length, 2);
+  assert.match(attention, /data-runtime-open-events="true"/);
+  assert.match(attention, /data-runtime-event-correlation-id="approval-correlation-two"/);
+  assert.match(attention, /<div class="runtime-approval-reason">[^<]*…<details><summary>Show full reason<\/summary><p>Write the generated report/);
+  const source = readFileSync(path.join(process.cwd(), "src", "static", "app", "runtime-events.js"), "utf8");
+  assert.match(source, /item\.approval/);
+  assert.match(source, /runtime_approval_tool/);
+  assert.match(source, /runtime_approval_outcome/);
+});
+
 test("Workbench lanes render localized session-turn identity without raw inventory", () => {
   const runtime = fixtureRuntime();
   runtime.v3.agentRuns.push({
@@ -360,6 +389,71 @@ test("Lane evidence filters exact page bindings before applying the bound", () =
   const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
   assert.match(html, /"pageCoordination":\[\{[^\]]*late-bound-marker/);
   assert.match(html, /"pageTransformations":\[\{[^\]]*late-bound-checkpoint/);
+});
+
+test("Checkpoint evidence exposes recorded result facts and reverse links", () => {
+  const runtime = fixtureRuntime();
+  runtime.protocol.events.find((event) => event.id === "event-context").compaction.tokensBefore = 123;
+  runtime.v3.contextVersions = [{
+    id: "version-result", sessionId: "runtime-1", sequence: 5, parentVersionIds: [], artifactIds: ["artifact-result"], createdAt: 11002, provenance
+  }];
+  runtime.v3.contextArtifacts = [{
+    ...runtime.v3.contextArtifacts[0], id: "artifact-result", title: "Retained result", summary: "Recorded result summary", contentAccess: "summary", producerRunId: "run-1"
+  }];
+  runtime.v3.contextTransformations = [{
+    id: "checkpoint-result", sessionId: "runtime-1", kind: "compaction", sourceVersionIds: [], resultVersionId: "version-result", sourceArtifactIds: [], resultArtifactIds: ["artifact-result"], runId: "run-1", turnId: null, eventId: "event-context", timestamp: 11000, provenance
+  }];
+  runtime.projections.context = projectContext(runtime.v3, { maxItems: 100 });
+  runtime.runPage = queryRunPage(runtime.v3);
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  const evidenceScript = html.match(/<script type="application\/json" data-runtime-evidence>([\s\S]*?)<\/script>/);
+  assert.ok(evidenceScript, "bounded evidence payload is present");
+  const evidence = JSON.parse(evidenceScript[1]);
+  assert.equal(evidence.pageTransformations[0].resultVersionId, "version-result");
+  assert.equal(evidence.pageTransformations[0].tokensBefore, 123);
+  assert.equal(evidence.pageTransformations[0].tokensAfter, 42);
+  assert.equal(evidence.pageTransformations[0].retainedSummary, "Retain <the result> and discard copied history.");
+  assert.equal(evidence.pageVersions[0].id, "version-result");
+  assert.match(html, /data-runtime-entity-kind="context-transformation" data-runtime-entity-id="checkpoint-result"/);
+  assert.match(html, /data-runtime-entity-kind="artifact" data-runtime-entity-id="artifact-result"/);
+  const source = readFileSync(path.join(process.cwd(), "src", "static", "app", "runtime-workbench.js"), "utf8");
+  assert.match(source, /"context-version": "versions"/);
+  assert.match(source, /goalTaskIds/);
+  assert.match(source, /actorRunIds/);
+  assert.match(source, /runtime_tokens_before/);
+  assert.match(source, /runtime_retained_content/);
+  assert.match(source, /artifact\.summary !== item\?\.retainedSummary/);
+  assert.match(source, /kind === "context-version"/);
+});
+
+test("Current run page carries result evidence beyond the initial bounded inventory", () => {
+  const runtime = fixtureRuntime();
+  runtime.protocol.events.push({
+    id: "event-later-result", sessionId: "runtime-1", sequence: 200, timestamp: 2000, kind: "context.compaction", normalizedKind: "context.compaction", category: "context", provenance,
+    compaction: { trigger: "automatic", strategy: "summary", tokensBefore: 999, tokensAfter: 111, summary: "Later page retained summary" }
+  });
+  runtime.v3.agentRuns = Array.from({ length: 120 }, (_, index) => ({
+    ...runtime.v3.agentRuns[0], id: `run-${index + 1}`, timeStart: index + 1, timeEnd: index + 2
+  }));
+  runtime.v3.contextTransformations = Array.from({ length: 120 }, (_, index) => ({
+    id: `checkpoint-${index + 1}`, sessionId: "runtime-1", kind: "compaction", sourceVersionIds: [], resultVersionId: `version-${index + 1}`, sourceArtifactIds: [], resultArtifactIds: [], runId: `run-${index + 1}`, turnId: null, eventId: index === 100 ? "event-later-result" : null, timestamp: index + 1, provenance
+  }));
+  runtime.v3.contextVersions = runtime.v3.contextTransformations.map((transformation, index) => ({
+    id: `version-${index + 1}`, sessionId: "runtime-1", sequence: index + 1, parentVersionIds: [], artifactIds: [], createdAt: index + 1, provenance
+  }));
+  runtime.runPage = queryRunPage(runtime.v3);
+  runtime.runPage = queryRunPage(runtime.v3, { cursor: runtime.runPage.nextCursor });
+  runtime.runPage = queryRunPage(runtime.v3, { cursor: runtime.runPage.nextCursor });
+  runtime.projections.context = projectContext(runtime.v3, { maxItems: 100 });
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  const evidenceScript = html.match(/<script type="application\/json" data-runtime-evidence>([\s\S]*?)<\/script>/);
+  assert.ok(evidenceScript);
+  const evidence = JSON.parse(evidenceScript[1]);
+  assert.equal(evidence.transformations.length, 100, "global transformation inventory remains bounded");
+  assert.equal(evidence.pageTransformations[0].id, "checkpoint-101", "later current-page checkpoint is available");
+  assert.equal(evidence.pageTransformations[0].tokensBefore, 999, "later page retains event-backed token facts");
+  assert.equal(evidence.pageTransformations[0].retainedSummary, "Later page retained summary", "later page retains its summary fact");
+  assert.equal(evidence.pageVersions[0].id, "version-101", "later current-page result version is available");
 });
 
 test("stale run-page rendering preserves the other Runtime lenses and offers an Execution refresh", () => {
