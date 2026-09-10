@@ -55,6 +55,8 @@ worker 与 reviewer 使用内部子代理，不新建用户可见会话；每个
    Work 任务状态去重；基于 2026-09-09 真实 Codex 长会话复现，OpenClaw provider 冻结
 8. `frontend-implementation/07-p6-visual-readability.md` — P6 长会话视觉可读性：rail 搜索、
    Work 表格可用宽度、metrics 层级／本地化与诚实的记录跨度
+9. `frontend-implementation/08-p7-scoped-context-assets.md` — P7 可选长期上下文资产：
+   memory / experience / user-info 按 scope 分组、metadata-first 展示与有界缺失语义
 
 P0 做完先给用户看信息骨架再继续;P2 风险最高,拆两个提交。
 注意:详情页默认标签是**工作**(已实现决策 2026-09-02 Work Graph-first);

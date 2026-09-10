@@ -87,6 +87,8 @@ const GOAL_TITLE_LIMIT = 180;
 const GOAL_DESCRIPTION_LIMIT = 280;
 const CONTEXT_SUMMARY_LIMIT = 280;
 const EVENT_DENSITY_LIMIT = 1000;
+const LONG_LIVED_CONTEXT_KINDS = new Set(["memory", "experience", "user-info"]);
+const CONTEXT_ASSET_SCOPE_ORDER = ["session", "agent", "project", "user", "organization"];
 
 function narrativeExcerpt(value: string, maxLength: number) {
   const text = value.trim();
@@ -143,6 +145,91 @@ function renderEvents(data: RuntimeData) {
 function sessionHref(ref: any) {
   if (!ref?.provider || !ref?.sessionId) return "";
   return `/${encodeURIComponent(ref.provider)}/session/${encodeURIComponent(ref.sessionId)}`;
+}
+
+function localizedRuntimeValue(prefix: string, value: unknown) {
+  const raw = String(value || "");
+  const key = `${prefix}_${raw}`;
+  return t(key) === key ? raw : t(key);
+}
+
+function renderContextAssetRelations(asset: any, id: string, projection: any) {
+  const relations: string[] = [evidenceButton("artifact", id)];
+  const sessions = (projection.artifactSessions || []).filter((entry: any) => projectionRefLabel(entry.artifact) === id);
+  for (const relation of sessions) {
+    const source = relation.sourceSession;
+    const href = sessionHref(source);
+    if (!href) continue;
+    relations.push(`<span class="runtime-context-asset-relation"><span>${escapeHtml(t("runtime.context_asset_source_session"))}</span> <a href="${escapeHtml(href)}">${escapeHtml(`${source.provider}/${source.sessionId}`)}</a></span>`);
+  }
+  const runs = (projection.artifactRuns || []).filter((entry: any) => projectionRefLabel(entry.artifact) === id);
+  const runIds = new Set<string>();
+  if (asset.producerRunId) runIds.add(String(asset.producerRunId));
+  for (const relation of runs) {
+    const runId = projectionRefLabel(relation.run);
+    if (!runId || runId === t("runtime.not_recorded")) continue;
+    if (runIds.has(runId)) continue;
+    runIds.add(runId);
+  }
+  for (const runId of runIds) {
+    const relation = runs.find((entry: any) => projectionRefLabel(entry.run) === runId);
+    const label = String(asset.producerRunId || "") === runId || relation?.role !== "consumer"
+      ? t("runtime.context_asset_source_run")
+      : t("runtime.context_asset_consumer_run");
+    relations.push(`<span class="runtime-context-asset-relation">${evidenceButton("run", runId, label)}</span>`);
+  }
+  const events = (projection.artifactEvents || []).filter((entry: any) => projectionRefLabel(entry.artifact) === id);
+  const eventIds = new Set<string>();
+  if (asset.producerEventId) eventIds.add(String(asset.producerEventId));
+  for (const relation of events) {
+    const eventId = projectionRefLabel(relation.event);
+    if (!eventId || eventId === t("runtime.not_recorded")) continue;
+    if (eventIds.has(eventId)) continue;
+    eventIds.add(eventId);
+  }
+  for (const eventId of eventIds) {
+    const relation = events.find((entry: any) => projectionRefLabel(entry.event) === eventId);
+    const label = String(asset.producerEventId || "") === eventId || relation?.role !== "citation"
+      ? t("runtime.context_asset_source_event")
+      : t("runtime.context_asset_citation_event");
+    relations.push(`<span class="runtime-context-asset-relation">${evidenceButton("event", eventId, label)}</span>`);
+  }
+  const inherited = (projection.artifactInheritance || []).filter((entry: any) => projectionRefLabel(entry.artifact) === id);
+  for (const relation of inherited) {
+    const parentId = projectionRefLabel(relation.parentArtifact);
+    if (!parentId || parentId === t("runtime.not_recorded")) continue;
+    relations.push(`<span class="runtime-context-asset-relation">${evidenceButton("artifact", parentId, t("runtime.context_asset_inherited"))}</span>`);
+  }
+  return relations.length ? `<div class="runtime-context-asset-relations">${relations.join(" ")}</div>` : "";
+}
+
+function renderContextAssets(projection: any) {
+  const entries = (projection.artifacts || []).filter((entry: any) => LONG_LIVED_CONTEXT_KINDS.has(entry.artifact?.kind));
+  const groups = CONTEXT_ASSET_SCOPE_ORDER
+    .map((scope) => ({ scope, items: entries.filter((entry: any) => entry.artifact.scope === scope) }))
+    .filter((group) => group.items.length);
+  const boundedNote = projection.truncated && entries.length
+    ? t("runtime.context_assets_bounded", { count: count(entries.length) })
+    : "";
+  const empty = entries.length
+    ? ""
+    : `<p class="runtime-empty runtime-context-assets-empty" data-runtime-context-assets-empty>${escapeHtml(t(projection.truncated ? "runtime.context_assets_empty_bounded" : "runtime.context_assets_empty"))}</p>`;
+  const groupsMarkup = groups.map((group) => `<section class="runtime-context-asset-scope" data-runtime-context-asset-scope="${escapeHtml(group.scope)}"><h4>${escapeHtml(localizedRuntimeValue("runtime.context_asset_scope", group.scope))}</h4><ul>${group.items.map((entry: any) => {
+    const id = projectionRefLabel(entry.ref);
+    const asset = entry.artifact || {};
+    const kind = localizedRuntimeValue("runtime.context_asset_kind", asset.kind);
+    const title = typeof asset.title === "string" && asset.title.trim() ? asset.title.trim() : kind;
+    const origin = localizedRuntimeValue("runtime.context_asset_origin", asset.origin);
+    const access = localizedRuntimeValue("runtime.context_asset_access", asset.contentAccess);
+    const created = asset.timeCreated == null ? t("runtime.unknown_time") : timeLabel(asset.timeCreated);
+    const summary = typeof asset.summary === "string" && asset.summary.trim() ? `<p class="runtime-context-asset-summary">${escapeHtml(asset.summary.trim())}</p>` : "";
+    const time = asset.timeCreated == null ? escapeHtml(created) : `<time datetime="${escapeHtml(dateTime(asset.timeCreated))}">${escapeHtml(created)}</time>`;
+    const sourcePath = typeof asset.sourcePath === "string" && asset.sourcePath.trim()
+      ? `<span>${escapeHtml(`${t("runtime.context_asset_source_path")}: `)}${escapeHtml(asset.sourcePath.trim())}</span>`
+      : "";
+    return `<li class="runtime-card runtime-context-asset" data-runtime-context-asset data-asset-kind="${escapeHtml(asset.kind)}" data-asset-scope="${escapeHtml(asset.scope)}" data-asset-id="${escapeHtml(id)}"><div class="runtime-context-asset-heading"><strong>${escapeHtml(title)}</strong><span class="runtime-context-asset-kind">${escapeHtml(kind)}</span></div><div class="runtime-context-asset-meta"><span>${escapeHtml(origin)}</span><span>${escapeHtml(access)}</span><span>${escapeHtml(`${t("runtime.context_asset_created")}: `)}${time}</span>${sourcePath}</div>${summary}${renderContextAssetRelations(asset, id, projection)}</li>`;
+  }).join("")}</ul></section>`).join("");
+  return `<details class="runtime-context-assets" data-runtime-context-assets><summary><span>${escapeHtml(t("runtime.context_assets_title"))}</span><small>${escapeHtml(t("runtime.context_assets_description"))}</small></summary><div class="runtime-context-assets-body">${groupsMarkup}${empty}${boundedNote ? `<p class="runtime-notice runtime-context-assets-bounded" data-runtime-context-assets-bounded>${escapeHtml(boundedNote)}</p>` : ""}</div></details>`;
 }
 
 function renderProjectionCoverage(projection: { coverage?: any; completeness?: string; truncated?: boolean; maxItems?: number } | null | undefined) {
@@ -406,6 +493,7 @@ function renderContextProjection(data: RuntimeData) {
   const originCount = origins.length;
   const versionById = new Map(versions.map((entry) => [projectionRefLabel(entry.ref), entry.version]));
   const artifactById = new Map(artifacts.map((entry) => [projectionRefLabel(entry.ref), entry.artifact]));
+  const generalArtifacts = artifacts.filter((entry) => !LONG_LIVED_CONTEXT_KINDS.has(entry.artifact?.kind));
   const resultLabel = (entry: any) => {
     const id = entry.transformation.resultVersionId;
     if (id && versionById.has(id)) return `${t("runtime.result_version")}: ${entityLabel(versionById.get(id), id)}`;
@@ -430,9 +518,10 @@ function renderContextProjection(data: RuntimeData) {
   return `<section class="runtime-lens runtime-context-lens" aria-labelledby="runtime-context-title">
     <div class="runtime-section-heading"><div><h2 id="runtime-context-title">${t("runtime.context_title")}</h2><p>${t("runtime.context_description")}</p></div>${renderProjectionCoverage(projection)}</div>
     <div class="runtime-projection-overview"><span>${escapeHtml(`${count(transformations.length)} ${t("runtime.transformations")}`)}</span><span>${escapeHtml(`${count(versions.length)} ${t("runtime.versions")}`)}</span><span>${escapeHtml(`${count(artifacts.length)} ${t("runtime.artifacts")}`)}</span><span>${escapeHtml(`${count(originCount)} ${t("runtime.origins")}`)}</span></div>
+    ${renderContextAssets(projection)}
     ${transformations.length ? `<section class="runtime-projection-group"><h3>${t("runtime.transformations")}</h3><ul>${transformations.map((entry) => { const event = entry.transformation.eventId ? data.protocol?.events.find((candidate) => candidate.id === entry.transformation.eventId) : null; const compaction = event?.compaction; return `<li class="runtime-card runtime-transformation"><strong>${escapeHtml(entry.transformation.kind || projectionRefLabel(entry.ref))}</strong><span>${escapeHtml(resultLabel(entry))}</span><details><summary>${t("runtime.evidence")}</summary><small>${escapeHtml([`${t("runtime.tokens_before")}: ${compaction?.tokensBefore == null ? t("runtime.not_recorded") : count(compaction.tokensBefore)}`, `${t("runtime.tokens_after")}: ${compaction?.tokensAfter == null ? t("runtime.not_recorded") : count(compaction.tokensAfter)}`, provenanceLabel(entry.transformation.provenance)].join(" · "))}</small></details></li>`; }).join("")}</ul></section>` : ""}
     ${legacyCompactions.length ? `<section class="runtime-projection-group runtime-result-context"><h3>${t("runtime.compacted_context")}</h3><ul>${legacyCompactions.map((event) => { const compaction = event.compaction!; return `<li class="runtime-card"><strong>${escapeHtml(t("runtime.compacted_context"))}</strong><span>${escapeHtml(compaction.summary || "")}</span><details><summary>${t("runtime.evidence")}</summary><small>${escapeHtml([`${t("runtime.tokens_before")}: ${compaction.tokensBefore == null ? t("runtime.not_recorded") : count(compaction.tokensBefore)}`, `${t("runtime.tokens_after")}: ${compaction.tokensAfter == null ? t("runtime.not_recorded") : count(compaction.tokensAfter)}`, provenanceLabel(event.provenance)].join(" · "))}</small></details></li>`; }).join("")}</ul>${legacyCompactionsTruncated ? `<p class="runtime-notice">${escapeHtml(t("runtime.compaction_results_bounded", { count: count(legacyCompactions.length) }))}</p>` : ""}</section>` : ""}
-    ${artifacts.length ? `<section class="runtime-projection-group"><h3>${t("runtime.artifacts")}</h3><ul>${artifacts.map((entry) => { const id = projectionRefLabel(entry.ref); return `<li class="runtime-card"><strong>${escapeHtml(entityLabel(entry.artifact, id))}</strong><span>${escapeHtml([entry.artifact.kind, entry.artifact.scope].filter(Boolean).join(" · ") || t("runtime.not_recorded"))}</span>${evidenceButton("artifact", id)}</li>`; }).join("")}</ul></section>` : ""}
+    ${generalArtifacts.length ? `<section class="runtime-projection-group"><h3>${t("runtime.artifacts")}</h3><ul>${generalArtifacts.map((entry) => { const id = projectionRefLabel(entry.ref); return `<li class="runtime-card"><strong>${escapeHtml(entityLabel(entry.artifact, id))}</strong><span>${escapeHtml([entry.artifact.kind, entry.artifact.scope].filter(Boolean).join(" · ") || t("runtime.not_recorded"))}</span>${evidenceButton("artifact", id)}</li>`; }).join("")}</ul></section>` : ""}
     <section class="runtime-projection-group"><h3>${t("runtime.origins")}</h3>${originCount ? `<ul class="runtime-origin-list">${origins.map(renderOrigin).join("")}</ul>` : `<p class="runtime-empty">${t("runtime.not_recorded")}</p>`}</section>
     ${!transformations.length && !versions.length && !artifacts.length ? `<p class="runtime-empty">${t("runtime.not_recorded")}</p>` : ""}
   </section>`;

@@ -5616,6 +5616,30 @@ pre code.hljs {
 .runtime-context-counts li { display: flex; gap: 7px; align-items: baseline; padding: 6px 8px; border-left: 2px solid var(--accent-color); background: var(--bg-primary); font-size: 11px; }
 .runtime-context-counts span { color: var(--text-muted); }
 .runtime-context-inspector-link { display: inline-block; margin-top: 14px; color: var(--accent-color); font-size: 12px; }
+.runtime-context-assets { margin-top: 16px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); }
+.runtime-context-assets > summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; padding: 11px 12px; cursor: pointer; list-style: none; }
+.runtime-context-assets > summary::-webkit-details-marker { display: none; }
+.runtime-context-assets > summary::before { content: "▸"; color: var(--accent-color); }
+.runtime-context-assets[open] > summary::before { content: "▾"; }
+.runtime-context-assets > summary > span { flex: 0 0 auto; font-weight: 600; }
+.runtime-context-assets > summary > small { min-width: 0; color: var(--text-muted); font-size: 11px; overflow-wrap: anywhere; }
+.runtime-context-assets-body { display: grid; gap: 12px; padding: 0 12px 12px; }
+.runtime-context-asset-scope { min-width: 0; }
+.runtime-context-asset-scope h4 { margin: 7px 0; color: var(--text-secondary); font-size: 12px; }
+.runtime-context-asset-scope ul { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.runtime-context-asset { display: grid; gap: 6px; min-width: 0; }
+.runtime-context-asset-heading { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 7px; min-width: 0; }
+.runtime-context-asset-heading strong { min-width: 0; overflow-wrap: anywhere; }
+.runtime-context-asset-kind { flex: 0 0 auto; padding: 2px 6px; border: 1px solid var(--border-color); border-radius: 999px; color: var(--text-muted); font-size: 10px; white-space: nowrap; }
+.runtime-context-asset-meta,
+.runtime-context-asset-relations { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 10px; min-width: 0; color: var(--text-muted); font-size: 11px; }
+.runtime-context-asset-meta span { overflow-wrap: anywhere; }
+.runtime-context-asset-summary { margin: 0; color: var(--text-secondary); font-size: 12px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.runtime-context-asset-relation { display: inline-flex; align-items: center; min-width: 0; }
+.runtime-context-asset-relation a { min-width: 0; overflow-wrap: anywhere; }
+.runtime-context-asset-relations .runtime-evidence-trigger { padding: 3px 6px; }
+.runtime-context-assets-empty { margin: 0; }
+.runtime-context-assets-bounded { margin: 0; }
 .runtime-work-tasks { min-width: 0; }
 .runtime-overview-task-table { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 12px; }
 .runtime-overview-task-table th,

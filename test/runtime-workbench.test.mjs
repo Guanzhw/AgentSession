@@ -109,6 +109,65 @@ test("Work Graph renders four domains with Work selected and keeps event evidenc
   assert.doesNotMatch(html, /Retain <the result>/);
 });
 
+test("P7 renders long-lived context assets once in recorded scope order", () => {
+  const runtime = fixtureRuntime();
+  const assets = [
+    { id: "asset-org", sessionId: "runtime-1", kind: "memory", scope: "organization", origin: "provider-generated", contentAccess: "unavailable", title: "Org memory", summary: "Org <note>", sourcePath: "C:/context/<org>.md", producerRunId: "run-1", producerEventId: "event-1", sourceSessionIds: ["source-org"], consumerRunIds: ["run-1"], citationEventIds: ["event-1"], inheritedFromArtifactIds: ["artifact-parent"], hash: null, redacted: false, timeCreated: 1000, provenance },
+    { id: "asset-session", sessionId: "runtime-1", kind: "experience", scope: "session", origin: "agent-generated", contentAccess: "summary", title: "Session experience", summary: "Recorded experience", sourcePath: null, producerRunId: null, sourceSessionIds: [], hash: null, redacted: false, timeCreated: 2000, provenance },
+    { id: "asset-user", sessionId: "runtime-1", kind: "user-info", scope: "user", origin: "user-authored", contentAccess: "full", title: null, summary: "User & preference", sourcePath: null, producerRunId: null, sourceSessionIds: [], hash: null, redacted: false, timeCreated: 3000, provenance },
+    { id: "asset-agent", sessionId: "runtime-1", kind: "memory", scope: "agent", origin: "agent-generated", contentAccess: "metadata-only", title: "Agent memory", summary: null, sourcePath: null, producerRunId: null, sourceSessionIds: [], hash: null, redacted: false, timeCreated: 4000, provenance },
+    { id: "asset-project", sessionId: "runtime-1", kind: "experience", scope: "project", origin: "provider-generated", contentAccess: "metadata-only", title: "Project experience", summary: null, sourcePath: null, producerRunId: null, sourceSessionIds: [], hash: null, redacted: false, timeCreated: 5000, provenance },
+    { id: "asset-instruction", sessionId: "runtime-1", kind: "instruction", scope: "project", origin: "provider-generated", contentAccess: "summary", title: "Keep instruction general", summary: null, sourcePath: null, producerRunId: null, sourceSessionIds: [], hash: null, redacted: false, timeCreated: 6000, provenance }
+  ];
+  runtime.protocol.contextArtifacts = [...runtime.protocol.contextArtifacts, ...assets];
+  runtime.v3.contextArtifacts = runtime.protocol.contextArtifacts;
+  runtime.projections.context = projectContext(runtime.v3, { maxItems: 100 });
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  const inspector = html.match(/<details class="runtime-context-assets"[\s\S]*?<\/details>/)?.[0] || "";
+  assert.match(inspector, /<details class="runtime-context-assets" data-runtime-context-assets>/);
+  assert.doesNotMatch(inspector, /data-runtime-context-assets" open/);
+  const scopes = [...inspector.matchAll(/data-runtime-context-asset-scope="([^"]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(scopes, ["session", "agent", "project", "user", "organization"]);
+  assert.equal((inspector.match(/data-runtime-context-asset data-asset-kind=/g) || []).length, 5);
+  assert.match(inspector, /Org &lt;note&gt;/);
+  assert.doesNotMatch(inspector, /Org <note>/);
+  assert.match(inspector, /Source path: C:\/context\/&lt;org&gt;\.md/);
+  assert.doesNotMatch(inspector, /Source path: C:\/context\/<org>\.md/);
+  assert.match(inspector, /<strong>User info<\/strong>/); // fallback title is localized kind
+  assert.match(inspector, /Source session:.*href="\/fixture\/session\/source-org"/);
+  assert.match(inspector, /data-runtime-evidence-kind="run" data-runtime-evidence-id="run-1"/);
+  assert.match(inspector, />Producer run<\/button>/);
+  assert.match(inspector, /data-runtime-evidence-kind="event" data-runtime-evidence-id="event-1"/);
+  assert.match(inspector, />Producer event<\/button>/);
+  assert.match(inspector, /data-runtime-evidence-kind="artifact" data-runtime-evidence-id="artifact-parent"/);
+  assert.match(inspector, /data-runtime-evidence-kind="artifact" data-runtime-evidence-id="asset-user"/);
+  assert.match(html, /Keep instruction general/);
+  assert.equal((html.match(/data-asset-id="asset-org"/g) || []).length, 1);
+  assert.equal((html.match(/data-asset-id="asset-session"/g) || []).length, 1);
+  const style = readFileSync(path.join(process.cwd(), "src", "static", "style.css"), "utf8");
+  assert.match(style, /\.runtime-context-assets > summary \{[\s\S]*?flex-wrap: wrap/);
+  assert.match(style, /\.runtime-context-asset-kind \{[\s\S]*?white-space: nowrap/);
+  assert.match(style, /\.runtime-context-asset-summary \{[\s\S]*?overflow-wrap: anywhere/);
+});
+
+test("P7 empty and truncated context assets stay honest and localized", () => {
+  const runtime = fixtureRuntime();
+  runtime.projections.context.truncated = true;
+  let html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  const inspector = html.match(/<details class="runtime-context-assets"[\s\S]*?<\/details>/)?.[0] || "";
+  assert.equal((inspector.match(/No long-lived context assets are recorded/g) || []).length, 1);
+  assert.match(inspector, /No long-lived context assets are recorded in this bounded view; additional assets may be omitted\./);
+
+  const previousLocale = getLocale();
+  setLocale("zh");
+  try {
+    html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+    assert.match(html, /当前有界视图未记录长期上下文资产；可能还有资产未显示。/);
+  } finally {
+    setLocale(previousLocale);
+  }
+});
+
 test("P6 keeps rail search and Work overview readable at desktop and medium widths", () => {
   const style = readFileSync(path.join(process.cwd(), "src", "static", "style.css"), "utf8");
   assert.match(style, /\.app-rail \.search-form \{[\s\S]*?width: 100%;[\s\S]*?min-width: 0;/);
@@ -331,7 +390,7 @@ test("Provider-neutral event summary facts are bounded and ID-free", () => {
   assert.doesNotMatch(JSON.stringify(facts), /task-1|run-1|turn-1/);
 });
 
-test("Context keeps the compacted result before lifecycle evidence and scoped artifacts", () => {
+test("Context keeps the scoped asset inspector before compacted results and general artifacts", () => {
   const runtime = fixtureRuntime();
   runtime.protocol.contextArtifacts.push({ id: "memory-1", sessionId: "runtime-1", kind: "memory", scope: "user", origin: "agent-generated", contentAccess: "metadata-only", title: "User memory", summary: null, sourcePath: null, producerRunId: null, sourceSessionIds: [], hash: null, redacted: false, timeCreated: 12000, metadata: {}, provenance });
   refreshProjections(runtime);
@@ -340,8 +399,9 @@ test("Context keeps the compacted result before lifecycle evidence and scoped ar
   const evidenceIndex = html.indexOf("<details>", resultIndex);
   const artifactIndex = html.indexOf("User memory");
   assert.ok(resultIndex >= 0 && evidenceIndex > resultIndex);
-  assert.ok(artifactIndex > resultIndex);
-  assert.match(html, /memory · user/);
+  assert.ok(artifactIndex >= 0 && artifactIndex < resultIndex);
+  assert.match(html, /data-runtime-context-asset data-asset-kind="memory"/);
+  assert.match(html, /data-runtime-context-asset-scope="user"/);
 });
 
 test("Context bounds legacy compaction result fallback", () => {

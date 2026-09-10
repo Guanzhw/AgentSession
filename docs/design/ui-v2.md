@@ -1,5 +1,17 @@
 # AgentSession UI v2 信息设计方案(草案)
 
+## P7 scoped context assets status (2026-09-10)
+
+P7 adds one default-collapsed Memory & experience inspector to the shared
+Context lens. It renders only recorded `memory`, `experience`, and `user-info`
+artifacts, grouped by their protocol scope, while summaries, instructions,
+skills, and rules remain in the general artifact list. Recorded metadata and
+relationships remain bounded and evidence-linked; an empty truncated view says
+only that no long-lived assets are present in the current bound. Current live
+Codex and DSH samples contain summary artifacts rather than long-lived assets,
+so this phase changes presentation only and does not add or infer provider
+mappings. See the [P7 decision record](../../.agents/decisions/implemented/2026-09-10-ui-v2-p7-scoped-context-assets.md).
+
 ## P6 visual readability status (2026-09-09)
 
 P6 closes the observed long-session readability issues at the shared UI
