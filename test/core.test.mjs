@@ -2784,7 +2784,7 @@ test("session detail P0 header preserves evidence boundaries and local exports",
   });
   assert.match(html, /id="tab-btn-work"[^>]*>Work<\/button>/);
   assert.match(html, /id="tab-btn-conversation"[^>]*>Conversation<\/button>/);
-  assert.match(html, /id="tab-btn-events"[^>]*>Events<\/button>/);
+  assert.match(html, /id="tab-btn-events"[^>]*>Events<\/a>/);
   assert.match(html, /Project path not recorded/);
   assert.match(html, /Started<\/span> Not recorded/);
   assert.doesNotMatch(html, /1970/);

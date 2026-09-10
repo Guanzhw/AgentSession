@@ -15,6 +15,9 @@ export function initRuntimeEvents({ ft, formatText }) {
     const searchInput = root.querySelector("[data-runtime-event-search]");
     const previousButton = root.querySelector("[data-runtime-events-previous]");
     const nextButton = root.querySelector("[data-runtime-events-next]");
+    const focusFilter = root.querySelector("[data-runtime-events-focus-filter]");
+    const focusFilterLabel = root.querySelector("[data-runtime-events-focus-filter-label]");
+    const clearFilterButton = root.querySelector("[data-runtime-events-clear-filter]");
     const evidenceScript = root.querySelector("[data-runtime-events-evidence]");
     const drawer = root.querySelector("[data-runtime-events-drawer]");
     let evidence = {};
@@ -23,6 +26,16 @@ export function initRuntimeEvents({ ft, formatText }) {
     let currentPageEvidence = new Map(currentEvents.map((event) => [String(event.id), event]));
     let currentCursor = null;
     const cursors = [];
+    let focusedFilters = {};
+
+    const renderFocusedFilter = () => {
+      const entries = Object.entries(focusedFilters).filter(([, value]) => value);
+      if (!focusFilter || !focusFilterLabel) return;
+      focusFilter.hidden = entries.length === 0;
+      const labels = { taskId: ft("runtime_task"), runId: ft("runtime_run"), correlationId: ft("runtime_correlation") };
+      focusFilterLabel.textContent = formatText(ft("runtime_events_linked_filter"), { filters: entries.map(([key, value]) => `${labels[key] || key}: ${value}`).join(" · ") });
+      if (clearFilterButton) clearFilterButton.hidden = entries.length === 0;
+    };
 
     const eventLabel = (event) => event.normalizedKind || event.kind || ft("runtime_unknown");
     const eventSummary = (event) => {
@@ -144,6 +157,7 @@ export function initRuntimeEvents({ ft, formatText }) {
       if (!eventsPanel || !eventList) return;
       const params = new URLSearchParams({ limit: "50" });
       if (categoryInput?.value) params.set("category", categoryInput.value);
+      ["taskId", "runId", "correlationId"].forEach((key) => { if (focusedFilters[key]) params.set(key, focusedFilters[key]); });
       if (cursor) params.set("cursor", cursor);
       try {
         const response = await fetch(`/api/${encodeURIComponent(provider)}/session/${encodeURIComponent(sessionId)}/runtime/events?${params}`);
@@ -155,6 +169,7 @@ export function initRuntimeEvents({ ft, formatText }) {
         currentEvents = data.events || [];
         currentPageEvidence = new Map(currentEvents.map((event) => [String(event.id), event]));
         renderEvents();
+        renderFocusedFilter();
         previousButton.disabled = cursors.length === 0;
         nextButton.disabled = !data.nextCursor;
         nextButton.dataset.runtimeNextCursor = data.nextCursor || "";
@@ -164,6 +179,7 @@ export function initRuntimeEvents({ ft, formatText }) {
     };
 
     renderEvents();
+    renderFocusedFilter();
     if (previousButton) previousButton.disabled = true;
     if (nextButton) nextButton.disabled = !nextButton.dataset.runtimeNextCursor;
     root.addEventListener("click", (event) => {
@@ -186,5 +202,19 @@ export function initRuntimeEvents({ ft, formatText }) {
     searchInput?.addEventListener("input", renderEvents);
     nextButton?.addEventListener("click", () => { if (nextButton.dataset.runtimeNextCursor) void loadEvents(nextButton.dataset.runtimeNextCursor, true); });
     previousButton?.addEventListener("click", () => void loadEvents(cursors.at(-1) || null, false, true));
+    clearFilterButton?.addEventListener("click", () => {
+      focusedFilters = {};
+      cursors.length = 0;
+      currentCursor = null;
+      renderFocusedFilter();
+      void loadEvents();
+    });
+    window.addEventListener("runtime:filter-events", (event) => {
+      focusedFilters = event.detail || {};
+      cursors.length = 0;
+      currentCursor = null;
+      renderFocusedFilter();
+      void loadEvents();
+    });
   });
 }

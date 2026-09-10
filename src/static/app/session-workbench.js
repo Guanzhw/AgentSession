@@ -124,7 +124,16 @@ if (sessionWorkbench) {
       });
   };
 
+  const revealAncestorDetails = (target) => {
+    let detail = target?.closest("details");
+    while (detail) {
+      detail.open = true;
+      detail = detail.parentElement?.closest("details") || null;
+    }
+  };
+
   const revealTranscriptMatch = (turn, query) => {
+    revealAncestorDetails(turn);
     turn.querySelectorAll("details:not([open])").forEach((detail) => {
       if (detail.textContent.toLocaleLowerCase().includes(query)) {
         detail.open = true;
@@ -436,6 +445,7 @@ if (sessionWorkbench) {
     event.preventDefault();
     lastManualNav = Date.now();
     history.pushState(null, "", link.getAttribute("href"));
+    revealAncestorDetails(target);
     target.scrollIntoView({ block: "start", behavior: "auto" });
     target.classList.add("anchor-flash");
     setActiveTarget(target.id);
@@ -451,8 +461,13 @@ if (sessionWorkbench) {
       requestAnimationFrame(updateActiveFromScroll);
     }, { passive: true });
 
-    if (location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)))) {
-      setActiveTarget(decodeURIComponent(location.hash.slice(1)));
+    const initialHashTarget = location.hash
+      ? document.getElementById(decodeURIComponent(location.hash.slice(1)))
+      : null;
+    if (initialHashTarget) {
+      revealAncestorDetails(initialHashTarget);
+      setActiveTarget(initialHashTarget.id);
+      requestAnimationFrame(() => initialHashTarget.scrollIntoView({ block: "start", behavior: "auto" }));
     } else {
       updateActiveFromScroll();
     }

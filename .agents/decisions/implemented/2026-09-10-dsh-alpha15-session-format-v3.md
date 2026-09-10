@@ -76,4 +76,6 @@ fixtures, so validation now accepts either absolute-path syntax at this boundary
   byte-identical during verification.
 - The source-host cwd regression and focused DSH/OpenClaw fixture checks pass
   29/29 on local Node 26.5.1 and the declared minimum Node 22.15.0. The official
-  v3 fixture still parses as 200 records. Remote Linux CI rerun remains pending.
+  v3 fixture still parses as 200 records. Remote Linux Quality run
+  [34496587172](https://github.com/Guanzhw/AgentSession/actions/runs/34496587172)
+  passed on both Node 22.15.0 and 26.5.0 for commit `67d0949`.

@@ -18,19 +18,23 @@ AgentSession metadata.
 
 ## Work Graph
 
-The UI v2 information skeleton uses `Library | Statistics | Settings` in the primary
-rail. Session detail navigation is `Work | Conversation | Events`, with Work
-selected by default; the existing Work Graph five-lens surface remains inside
-Work. The Events tab is a truthful shell that links to recorded evidence when
-available. It appears for every readable session and degrades by protocol evidence;
-unsupported, unavailable, missing, and invalid states are explicit rather than
-rendered as observed zeroes.
+The primary rail uses `Library | Statistics | Settings`. Session detail has two
+primary modes, `Work | Conversation`, with the unified Workbench selected by
+default. Work structure, execution lanes, and selection details are linked on
+one surface. Events is a secondary evidence entry with paging, filters, and
+existing `#tab-events` links preserved.
+Conversation folds completed process using provider-recorded response phases;
+final replies, unclassified communication, and unfinished tail updates remain
+visible. Expansion, search, and anchors retain access to process content.
+Unsupported, unavailable, missing, and invalid evidence stays explicit rather
+than being rendered as observed zeroes.
 
 Browser code highlighting is served from the repository's vendored
 `@highlightjs/cdn-assets` 11.12.0 bundle under `src/static/vendor/highlight.js`,
 with its license and provenance recorded beside the assets for offline use.
 
-Work Graph has five server-derived lenses:
+The Workbench consumes the following server-derived evidence without requiring
+navigation between five separate lenses:
 
 - **Work**: goals, Tasks, dependencies, and explicit links from a Task to each AgentRun attempt.
 - **Execution**: actors, run attempts, and request usage for the selected session; inherited or shared input/cache still belongs to the real request where it occurred and is counted once there — the same shared context's cacheRead across distinct requests is not deduplicated, and inherited stored history is never a new request.

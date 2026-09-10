@@ -5049,6 +5049,18 @@ pre code.hljs {
   border-radius: 4px;
 }
 
+.tab-bar .detail-secondary-tab {
+  flex-shrink: 0;
+  align-self: center;
+  margin-left: auto;
+  padding: 7px 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.tab-bar .detail-secondary-tab:hover,
+.tab-bar .detail-secondary-tab.is-active { color: var(--accent-color); }
+
 [role="tabpanel"][hidden] {
   display: none;
 }
@@ -5122,6 +5134,24 @@ pre code.hljs {
 .app-rail .search-input {
   width: 100%;
   max-width: 100%;
+}
+
+.conversation-process-summary {
+  padding: 8px 0;
+  cursor: pointer;
+}
+
+.conversation-process-count {
+  margin-inline-start: 8px;
+  font-size: 12px;
+  opacity: .7;
+}
+
+.conversation-process-body {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding-block: 8px;
 }
 
 .app-rail .search-input:focus-visible {
@@ -5309,7 +5339,6 @@ pre code.hljs {
   }
 }
 
-
 /* ── Runtime Workbench ───────────────────────────────────────── */
 
 .runtime-workbench {
@@ -5371,31 +5400,37 @@ pre code.hljs {
 .runtime-completeness-complete { color: var(--success-border); border-color: var(--success-border); }
 .runtime-completeness-invalid { color: var(--danger-color, #ef4444); border-color: var(--danger-color, #ef4444); }
 
-.runtime-lens-tabs {
-  display: flex;
-  gap: 2px;
-  overflow-x: auto;
-  margin: 18px 0;
-  border-bottom: 1px solid var(--border-color);
-}
+/* Unified Workbench: the inspector owns a real desktop grid column, so it
+   cannot cover graph nodes or run controls. */
+.runtime-workbench-body { display: block; }
+.runtime-workbench-main { min-width: 0; max-width: 100%; }
+.runtime-workbench-body:has([data-runtime-inspector]:not([hidden])) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 320px); gap: 18px; align-items: start; }
+.runtime-selection-inspector { position: sticky; top: 16px; grid-column: 2; min-width: 0; max-width: 100%; max-height: min(70vh, 520px); box-sizing: border-box; border: 1px solid var(--border-color); border-radius: 10px; padding: 14px; background: var(--bg-secondary); overflow: auto; overflow-wrap: anywhere; }
+.runtime-selection-inspector[hidden] { display: none; }
+.runtime-inspector-close { float: right; min-width: 36px; min-height: 36px; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 20px; }
+.runtime-inspector-close:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
+.runtime-inspector-selection { margin: 0 0 12px; font-weight: 600; }
+.runtime-inspector-fact { margin: 7px 0; color: var(--text-muted); font-size: 12px; }
+.runtime-inspector-events-link { display: inline-block; margin-top: 10px; color: var(--accent-color); }
+.runtime-inspector-related { display: block; margin: 7px 0 0; padding: 0; border: 0; background: transparent; color: var(--accent-color); cursor: pointer; font: inherit; font-size: 12px; text-align: left; overflow-wrap: anywhere; }
+.runtime-inspector-related:hover, .runtime-inspector-related:focus-visible { text-decoration: underline; }
+.runtime-entity-select { min-width: 0; max-width: 100%; border: 0; padding: 0; background: transparent; color: inherit; font: inherit; font-weight: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; white-space: normal; }
+.runtime-entity-select:hover, .runtime-entity-select:focus-visible { color: var(--accent-color); text-decoration: underline; }
+.runtime-graph-node.runtime-selected, .runtime-graph-edge.runtime-selected, .runtime-run.runtime-selected, .runtime-task-runs .runtime-entity-select[aria-pressed="true"] { outline: 2px solid var(--accent-color); outline-offset: 2px; }
+.runtime-graph-node.runtime-linked, .runtime-run.runtime-linked { background: color-mix(in srgb, var(--accent-color) 10%, var(--bg-primary)); }
+.runtime-graph-edge [data-runtime-select-kind], .runtime-graph-edge .runtime-graph-connector { display: inline-block; }
+.runtime-work-lanes { margin-top: 18px; }
+.runtime-run-lanes { display: grid; gap: 12px; }
+.runtime-run-lane { border-left: 3px solid var(--border-color); padding-left: 12px; }
+.runtime-run-lane > h4 { margin: 0 0 8px; color: var(--text-muted); font-size: 12px; }
+.runtime-run-lane .runtime-run-segment { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--border-color); }
+.runtime-run-segment strong { min-width: 0; flex: 1 1 180px; overflow-wrap: anywhere; }
+.runtime-run-segment .runtime-evidence-trigger { margin-left: auto; }
+.runtime-run-order-note { color: var(--text-muted); }
+.runtime-secondary-disclosure { margin-top: 14px; border-top: 1px solid var(--border-color); padding-top: 10px; }
+.runtime-secondary-disclosure > summary { cursor: pointer; font-weight: 600; }
+.runtime-secondary-disclosure > .runtime-lens { margin-top: 12px; }
 
-.runtime-lens-tabs [role="tab"] {
-  flex: 0 0 auto;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  padding: 9px 13px;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.runtime-lens-tabs [role="tab"]:hover,
-.runtime-lens-tabs [role="tab"][aria-selected="true"] {
-  color: var(--accent-color);
-}
-
-.runtime-lens-tabs [role="tab"][aria-selected="true"] { border-bottom-color: var(--accent-color); }
-.runtime-lens-tabs [role="tab"]:focus-visible,
 .runtime-evidence-trigger:focus-visible,
 .runtime-drawer-close:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
 
@@ -5464,7 +5499,7 @@ pre code.hljs {
 .runtime-map-overview span, .runtime-map-overview small { color: var(--text-muted); font-size: 11px; }
 .runtime-map-overview strong { display: flex; align-items: baseline; gap: 7px; font-size: 19px; }
 .runtime-map-columns { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(180px, 0.8fr); gap: 18px; }
-.runtime-map-columns h3, .runtime-events-structure h3 { margin: 0 0 9px; font-size: 13px; }
+.runtime-map-columns h3 { margin: 0 0 9px; font-size: 13px; }
 .runtime-map-axis { display: flex; justify-content: space-between; margin: 0 0 4px 92px; color: var(--text-muted); font-size: 10px; }
 .runtime-map-lanes { display: grid; gap: 9px; }
 .runtime-map-lane { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 10px; align-items: center; min-height: 45px; }
@@ -5488,6 +5523,8 @@ pre code.hljs {
 .runtime-map-legend { margin: 12px 0 0; color: var(--text-muted); font-size: 11px; }
 
 .runtime-events-structure { margin: 15px 0; padding: 11px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); }
+.runtime-events-structure > summary { cursor: pointer; color: var(--accent-color); font-size: 13px; font-weight: 600; }
+.runtime-events-structure > summary::marker { color: var(--accent-color); }
 .runtime-events-structure > p { margin: 10px 0 0; color: var(--text-muted); font-size: 11px; }
 .runtime-event-density { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 7px; }
 .runtime-event-density-row { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; gap: 6px; align-items: center; border: 0; padding: 4px; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; font-size: 11px; }
@@ -5528,6 +5565,9 @@ pre code.hljs {
 .runtime-events-diagnostics li strong { color: var(--text-secondary); font-weight: 500; }
 .runtime-event-table-wrap { min-width: 0; overflow-x: auto; border: 1px solid var(--border-color); }
 .runtime-events-table { width: 100%; min-width: 680px; border-collapse: collapse; background: var(--bg-secondary); }
+.runtime-events-focus-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; color: var(--text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+.runtime-events-focus-filter[hidden] { display: none; }
+.runtime-events-focus-filter .btn { min-height: 32px; padding: 5px 8px; }
 .runtime-events-table th, .runtime-events-table td { padding: 9px 10px; border-bottom: 1px solid var(--border-color); text-align: left; vertical-align: top; }
 .runtime-events-table thead th { color: var(--text-muted); font-size: 11px; font-weight: 600; letter-spacing: .02em; }
 .runtime-events-table tbody tr:last-child th, .runtime-events-table tbody tr:last-child td { border-bottom: 0; }
@@ -5552,7 +5592,7 @@ pre code.hljs {
 .runtime-pagination { justify-content: flex-end; margin-top: 12px; }
 .runtime-work-list,
 .runtime-context-grid { display: grid; gap: 9px; margin-top: 16px; }
-.runtime-work-overview { display: grid; gap: 18px; }
+.runtime-work-overview { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
 .runtime-work-goal,
 .runtime-work-progress,
 .runtime-work-context,
@@ -5570,39 +5610,43 @@ pre code.hljs {
 .runtime-progress-track span { display: block; height: 100%; border-radius: inherit; background: var(--accent-color); }
 .runtime-progress-note { margin: 8px 0 0; }
 .runtime-work-structure { min-width: 0; }
-.runtime-graph-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; border-bottom: 1px solid var(--border-color); }
-.runtime-graph-tabs [role="tab"] { min-height: 34px; padding: 7px 10px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-muted); cursor: pointer; font: inherit; font-size: 12px; }
-.runtime-graph-tabs [role="tab"][aria-selected="true"] { border-bottom-color: var(--accent-color); color: var(--accent-color); }
-.runtime-graph-tabs [role="tab"]:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
 .runtime-graph-panels { min-width: 0; }
 .runtime-graph-panel { min-width: 0; padding-top: 14px; }
 .runtime-graph-panel[hidden] { display: none; }
 .runtime-graph-panel h4 { margin: 0; font-size: 15px; }
 .runtime-graph-description { margin: 5px 0 0; color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
-.runtime-graph-canvas { display: grid; gap: 12px; margin-top: 12px; padding: 12px; border: 1px solid var(--border-color); background: var(--bg-secondary); }
-.runtime-graph-node-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.runtime-graph-node { display: grid; gap: 5px; min-width: 0; padding: 9px; border: 1px solid var(--border-color); border-left: 3px solid var(--accent-color); background: var(--bg-primary); }
+.runtime-graph-canvas { position: relative; display: grid; gap: 12px; min-width: 0; margin-top: 12px; padding: 12px; border: 1px solid var(--border-color); background: var(--bg-secondary); }
+.runtime-graph-links { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.runtime-graph-link { stroke: var(--accent-color); stroke-width: 2; opacity: .65; }
+.runtime-graph-links path { fill: var(--accent-color); }
+.runtime-graph-link.runtime-selected { stroke-width: 3; opacity: 1; }
+.runtime-graph-link-async { stroke-dasharray: 5 4; }
+.runtime-graph-node-list { position: relative; z-index: 1; }
+.runtime-graph-node-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; min-width: 0; align-items: start; }
+.runtime-graph-node { display: grid; align-self: start; gap: 5px; min-width: 0; padding: 9px; border: 1px solid var(--border-color); border-left: 3px solid var(--accent-color); background: var(--bg-primary); }
 .runtime-graph-node-goal { border-left-color: var(--warm-color, #9b673d); }
 .runtime-graph-node-team { border-left-color: var(--warm-color, #9b673d); }
-.runtime-graph-node strong { min-width: 0; overflow-wrap: anywhere; }
+.runtime-graph-node strong { display: block; min-width: 0; overflow-wrap: anywhere; }
 .runtime-graph-node > span { color: var(--text-muted); font-size: 11px; }
-.runtime-graph-edge-list,
-.runtime-graph-relationship-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.runtime-graph-node-details { margin-top: 2px; }
+.runtime-graph-node-details > summary { cursor: pointer; color: var(--accent-color); font-size: 11px; }
+.runtime-graph-node-details > p { margin: 6px 0 0; color: var(--text-secondary); font-size: 11px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.runtime-graph-node-runs { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px; color: var(--text-muted); font-size: 10px; overflow-wrap: anywhere; }
+.runtime-graph-node-runs .runtime-entity-select { color: var(--accent-color); font-size: 10px; }
 .runtime-graph-edge { display: grid; grid-template-columns: minmax(0, 1fr) max-content minmax(0, 1fr) minmax(0, 1.1fr); gap: 8px; align-items: center; min-width: 0; padding: 7px 8px; border-left: 2px solid var(--accent-color); background: var(--bg-primary); font-size: 11px; }
 .runtime-graph-edge > span { min-width: 0; overflow-wrap: anywhere; }
 .runtime-graph-edge small { min-width: 0; color: var(--text-muted); overflow-wrap: anywhere; }
 .runtime-graph-edge-async { border-left-style: dashed; }
-.runtime-graph-relationship-list { display: none; }
+.runtime-graph-edge-details { margin-top: 2px; border-top: 1px solid var(--border-color); padding-top: 8px; }
+.runtime-graph-edge-details > summary { cursor: pointer; color: var(--accent-color); font-size: 11px; }
+.runtime-graph-edge-list { display: grid; gap: 7px; margin: 8px 0 0; padding: 0; list-style: none; }
 .runtime-graph-edge > .runtime-graph-evidence,
-.runtime-graph-relationship-list .runtime-graph-evidence { grid-column: 1 / -1; }
-.runtime-graph-relationship-list li { display: grid; grid-template-columns: minmax(0, 1fr) max-content minmax(0, 1fr); gap: 8px; align-items: center; min-width: 0; padding: 9px; border: 1px solid var(--border-color); background: var(--bg-secondary); font-size: 12px; }
-.runtime-graph-relationship-list strong { min-width: 0; overflow-wrap: anywhere; }
-.runtime-graph-relationship-list small { grid-column: 1 / -1; color: var(--text-muted); overflow-wrap: anywhere; }
+.runtime-graph-edge-list .runtime-graph-evidence { grid-column: 1 / -1; }
 .runtime-graph-bound { margin: 10px 0 0; }
 .runtime-graph-view-all { display: inline-block; margin-top: 10px; color: var(--accent-color); font-size: 12px; }
 .runtime-graph-view-all[type="button"] { border: 0; padding: 0; background: transparent; cursor: pointer; font: inherit; }
 .runtime-graph-view-all:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
-.runtime-work-overview-grid { display: grid; grid-template-columns: minmax(280px, .8fr) minmax(560px, 1.6fr); gap: 18px; align-items: start; }
+.runtime-work-overview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 18px; align-items: start; min-width: 0; }
 .runtime-work-context { padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); }
 .runtime-work-context .runtime-overview-section-heading { display: block; }
 .runtime-work-context .runtime-overview-section-heading > .runtime-completeness { margin-top: 8px; }
@@ -5641,6 +5685,10 @@ pre code.hljs {
 .runtime-context-assets-empty { margin: 0; }
 .runtime-context-assets-bounded { margin: 0; }
 .runtime-work-tasks { min-width: 0; }
+.runtime-task-inventory { margin-top: 12px; border-top: 1px solid var(--border-color); }
+.runtime-task-inventory > summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 9px 0; cursor: pointer; color: var(--accent-color); }
+.runtime-task-inventory > summary span { color: var(--text-muted); font-size: 11px; }
+.runtime-task-inventory > p { margin: 0 0 8px; color: var(--text-muted); font-size: 12px; }
 .runtime-overview-task-table { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 12px; }
 .runtime-overview-task-table th,
 .runtime-overview-task-table td { padding: 9px 7px; border-bottom: 1px solid var(--border-color); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
@@ -5687,9 +5735,6 @@ pre code.hljs {
 .runtime-card-meta { flex-wrap: wrap; color: var(--text-muted); font-size: 11px; }
 .runtime-card-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; color: var(--text-muted); font-size: 11px; }
 .runtime-task-children { display: grid; gap: 8px; margin: 9px 0 0 13px; }
-.runtime-run { margin-top: 8px; padding: 9px; }
-.runtime-run p { margin: 4px 0; }
-.runtime-run-times { display: grid; gap: 4px; width: 100%; font-size: 12px; }
 .runtime-run-page { display: grid; gap: 8px; }
 .runtime-run-page-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
 .runtime-run-page-heading h3 { margin: 0; }
@@ -5709,11 +5754,6 @@ pre code.hljs {
 .runtime-tree-node-model, .runtime-tree-node-id { color: var(--text-muted); overflow-wrap: anywhere; }
 .runtime-tree-node-id { width: 100%; padding-left: 49px; font: 10px ui-monospace, SFMono-Regular, Consolas, monospace; }
 .runtime-tree-node .runtime-status, .runtime-tree-node .runtime-not-recorded { margin-left: auto; }
-.runtime-graph-edge { display: grid; grid-template-columns: minmax(0, 1fr) max-content minmax(0, 1fr) max-content; gap: 8px; align-items: center; font-size: 11px; }
-.runtime-graph-node { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 5px 7px; border: 1px solid var(--border-color); border-radius: 5px; }
-.runtime-graph-node-missing { border-style: dashed; color: var(--text-muted); }
-.runtime-graph-node-unavailable { opacity: .7; }
-.runtime-graph-edge small { color: var(--text-muted); }
 .runtime-session-edge { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content minmax(0, 1fr); gap: 7px; align-items: center; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; overflow-wrap: anywhere; }
 .runtime-session-edge small,
 .runtime-session-edge p { grid-column: 1 / -1; color: var(--text-muted); }
@@ -5758,8 +5798,6 @@ pre code.hljs {
   .runtime-map-columns { grid-template-columns: 1fr; }
   .runtime-graph-node-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .runtime-graph-canvas { display: grid; }
-  .runtime-graph-edge-list { display: none; }
-  .runtime-graph-relationship-list { display: grid; margin-top: 12px; }
   .runtime-swimlane-scale { margin-left: 140px; }
 }
 
@@ -5803,8 +5841,6 @@ pre code.hljs {
   .runtime-event-density-row,
   .runtime-pagination .btn { min-height: 44px; }
   .runtime-overview-section-heading { display: block; }
-  .runtime-graph-tabs { display: grid; grid-template-columns: 1fr 1fr; }
-  .runtime-graph-tabs [role="tab"] { min-height: 44px; }
   .runtime-graph-node-list { grid-template-columns: 1fr; }
   .runtime-progress-ratio { display: block; margin-top: 8px; }
   .runtime-overview-task-table,
@@ -7042,8 +7078,6 @@ pre code.hljs {
   .session-search-nav-btn,
   .session-search-field input,
   .tab-bar [role="tab"],
-  .runtime-lens-tabs [role="tab"],
-  .runtime-graph-tabs [role="tab"],
   .conversation-view-btn,
   .library-view-toggle button,
   .filter-chip,
@@ -7118,8 +7152,6 @@ pre code.hljs {
   .library-view-toggle button,
   .conversation-view-btn,
   .tab-bar [role="tab"],
-  .runtime-lens-tabs [role="tab"],
-  .runtime-graph-tabs [role="tab"],
   .stats-provider-selector .stats-provider-item {
     min-height: 44px;
     min-width: 44px;
@@ -7158,4 +7190,19 @@ pre code.hljs {
   .session-search-nav-btn {
     width: auto;
   }
+}
+
+/* Unified graph remains connected on narrow screens; it does not fall back to
+   the legacy relationship-list presentation. */
+@media (max-width: 820px) {
+  .runtime-workbench-body:has([data-runtime-inspector]:not([hidden])) { display: grid; grid-template-columns: 1fr; gap: 14px; }
+  .runtime-selection-inspector { position: static; grid-column: 1; grid-row: 2; width: 100%; margin: 0; }
+}
+
+@media (max-width: 520px) {
+  .runtime-graph-node-list { grid-template-columns: 1fr; }
+  .runtime-graph-edge { grid-template-columns: 1fr; gap: 5px; border-left: 0; border-top: 2px solid var(--accent-color); }
+  .runtime-graph-edge .runtime-graph-connector { transform: rotate(90deg); justify-self: start; }
+  .runtime-graph-edge small, .runtime-graph-edge > .runtime-graph-evidence { grid-column: 1; }
+  .runtime-entity-select { min-height: 36px; }
 }

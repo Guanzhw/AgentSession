@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { registerSessionDetail } from "../dist/src/routes/session-detail.js";
 import { clearProtocolRuntimeCache } from "../dist/src/protocol-runtime.js";
+import { finalizeSessionProtocolV3 } from "../dist/src/providers/shared/session-protocol-v3.js";
 
 function captureGetRoutes(deps) {
   const routes = [];
@@ -120,6 +121,51 @@ test("run-only route continues from a live anchor after the session revision cha
   await route.handler({ url: `/api/fixture/session/root/runtime/execution/runs?cursor=${encodeURIComponent(first.nextCursor)}&limit=2` }, conflict, ["", "fixture", "root"]);
   assert.equal(conflict.statusCode, 400);
   assert.match(JSON.parse(conflict.body).error, /conflicts with the cursor page size/);
+});
+
+test("run-only route keeps recorded actor bindings on pages beyond the overview bound", async () => {
+  clearProtocolRuntimeCache();
+  const provenance = { fidelity: "recorded", sourceType: "fixture" };
+  const provider = {
+    ...fixtureProvider(),
+    getSessionProtocolV3(id) {
+      if (id !== "root") return null;
+      const session = {
+        ref: { provider: "fixture", sessionId: id }, state: "completed", origin: "fixture",
+        timeCreated: 1, timeUpdated: 2, cwd: null, harness: "fixture", terminalOutcome: "completed",
+        forkSeedBoundary: null, inheritedEventCount: null, provenance
+      };
+      const agentRuns = Array.from({ length: 123 }, (_, index) => ({
+        id: `run-${index + 1}`, sessionId: id, taskId: null, status: "completed", mode: "unknown",
+        agent: null, model: null, childSessionId: null, timeStart: index, timeEnd: index + 1, provenance
+      }));
+      return finalizeSessionProtocolV3({
+        sessionId: id, session, events: [], relationships: [], tasks: [], agentRuns, contextArtifacts: [], branches: [],
+        goals: [], actors: [{ id: "actor-late", sessionId: id, kind: "agent", name: "Late actor", runIds: ["run-123"], provenance }],
+        coordination: [], contextVersions: [], contextTransformations: [], usageRecords: [],
+        coverage: { work: { state: "not-observed" }, execution: { state: "observed" }, coordination: { state: "not-observed" }, context: { state: "not-observed" }, usage: { state: "not-observed" } }
+      });
+    }
+  };
+  const routes = captureGetRoutes({
+    appConfig: { port: 3456 }, providerMap: new Map([["fixture", provider]]), providerInfo: []
+  });
+  const route = routes.find(({ pattern }) => pattern instanceof RegExp && pattern.source.includes("/runtime\\/execution\\/runs$"));
+  assert.ok(route);
+  const firstResponse = response();
+  await route.handler({ url: "/api/fixture/session/root/runtime/execution/runs" }, firstResponse, ["", "fixture", "root"]);
+  const first = JSON.parse(firstResponse.body);
+  const secondResponse = response();
+  await route.handler({ url: `/api/fixture/session/root/runtime/execution/runs?cursor=${encodeURIComponent(first.nextCursor)}` }, secondResponse, ["", "fixture", "root"]);
+  const second = JSON.parse(secondResponse.body);
+  const thirdResponse = response();
+  await route.handler({ url: `/api/fixture/session/root/runtime/execution/runs?cursor=${encodeURIComponent(second.nextCursor)}` }, thirdResponse, ["", "fixture", "root"]);
+  const third = JSON.parse(thirdResponse.body);
+  assert.equal(thirdResponse.statusCode, 200);
+  assert.equal(third.ok, true);
+  assert.equal(third.runs[22].run.id, "run-123");
+  assert.match(third.html, /data-runtime-entity-id="run-123"[^>]*data-runtime-actor-id="actor-late"/);
+  assert.match(third.html, /Late actor/);
 });
 
 test("v3 runtime routes expose a stable protocol-invalid response for invalid v2 snapshots", async () => {

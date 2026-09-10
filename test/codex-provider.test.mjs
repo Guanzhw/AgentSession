@@ -231,6 +231,63 @@ test("Codex emits a hybrid-format turn once, preferring the user.text row", () =
   assert.equal(users[0].content, "pi-wsl mcp 现在还会返回一个事无巨细的 json 吗？");
 });
 
+test("Codex preserves recorded assistant presentation phases", () => {
+  const records = [
+    { type: "session_meta", payload: { id: "root" }, timestamp: "2026-09-10T10:00:00.000Z" },
+    {
+      type: "response_item",
+      payload: {
+        type: "message", role: "assistant", id: "commentary-1", phase: "commentary",
+        content: [{ type: "output_text", text: "Inspecting the recorded evidence." }]
+      }
+    },
+    {
+      type: "response_item",
+      payload: {
+        type: "message", role: "assistant", id: "final-1", phase: "final_answer",
+        content: [{ type: "output_text", text: "The recorded answer is ready." }]
+      }
+    },
+    {
+      type: "response_item",
+      payload: {
+        type: "message", role: "assistant", id: "unknown-1", phase: "other",
+        content: [{ type: "output_text", text: "A phase the adapter does not classify." }]
+      }
+    }
+  ];
+  const assistants = recordsToMessages(records, "root").filter((message) => message.role === "assistant");
+  assert.deepEqual(assistants.map((message) => message.presentationPhase), ["commentary", "final", undefined]);
+});
+
+test("Codex paired agent_message deduplication keeps final phase and usage singular", () => {
+  const records = [
+    { type: "session_meta", payload: { id: "root" }, timestamp: "2026-09-10T10:00:00.000Z" },
+    {
+      type: "event_msg",
+      timestamp: "2026-09-10T10:00:01.000Z",
+      payload: { type: "agent_message", message: "Paired final response." }
+    },
+    {
+      type: "response_item",
+      timestamp: "2026-09-10T10:00:02.000Z",
+      payload: {
+        type: "message", role: "assistant", id: "paired-final", phase: "final_answer",
+        content: [{ type: "output_text", text: "Paired final response." }]
+      }
+    },
+    {
+      type: "event_msg",
+      timestamp: "2026-09-10T10:00:03.000Z",
+      payload: { type: "token_count", info: { last_token_usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } } }
+    }
+  ];
+  const assistants = recordsToMessages(records, "root").filter((message) => message.role === "assistant");
+  assert.equal(assistants.length, 1);
+  assert.equal(assistants[0].presentationPhase, "final");
+  assert.equal(assistants[0].tokens.total, 12);
+});
+
 test("Codex keeps the legacy user_message row when the response_item row is untagged injection", () => {
   const records = [
     { type: "session_meta", payload: { id: "root" }, timestamp: "2026-08-31T10:43:18.959Z" },

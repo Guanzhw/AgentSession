@@ -70,6 +70,7 @@ function messageData(message: Message): Row {
     tokenRequestCount: tokenRequests.length,
     tokenRequests,
     ...messageMetadata,
+    presentationPhase: message.presentationPhase,
     model: typeof model === "string"
       ? { modelID: model, providerID: metadata.provider || null }
       : model || null
@@ -137,6 +138,21 @@ function responseGroupId(message: Message) {
   return typeof value === "string" && value ? value : null;
 }
 
+function hasAssistantText(turn: AgentLoopTurn): boolean {
+  return turn.events.some((event) => event.kind === "text" && Boolean(event.text));
+}
+
+function hasPresentationPhaseBoundary(turn: AgentLoopTurn | null, message: Message): boolean {
+  return Boolean(
+    turn
+      && turn.role === "assistant"
+      && message.role === "assistant"
+      && Boolean(message.content)
+      && hasAssistantText(turn)
+      && turn.data.presentationPhase !== message.presentationPhase
+  );
+}
+
 function mergeTurnData(target: Row, message: Message) {
   const incoming = messageData(message);
   const incomingRequests = Array.isArray(incoming.tokenRequests)
@@ -202,7 +218,10 @@ export function buildAgentLoop(messages: Message[]): AgentLoop {
 
     const groupId = responseGroupId(message);
     const groupable = Boolean(groupId) && ["assistant", "tool"].includes(role);
-    const groupedWithPrevious = groupable && previousGroupTurn && previousGroupId === groupId;
+    const groupedWithPrevious = groupable
+      && previousGroupTurn
+      && previousGroupId === groupId
+      && !hasPresentationPhaseBoundary(previousGroupTurn, message);
     const implicitContinuation = Boolean(activeAgentTurn) && role === "tool";
     const continuationTarget = groupedWithPrevious
       ? previousGroupTurn
@@ -211,6 +230,14 @@ export function buildAgentLoop(messages: Message[]): AgentLoop {
         : null;
 
     if (continuationTarget) {
+      if (
+        continuationTarget.role === "assistant"
+        && role === "assistant"
+        && Boolean(message.content)
+        && !hasAssistantText(continuationTarget)
+      ) {
+        continuationTarget.data.presentationPhase = message.presentationPhase;
+      }
       continuationTarget.events.push(...events);
       continuationTarget.timeCreated = Math.min(
         continuationTarget.timeCreated || message.timestamp,

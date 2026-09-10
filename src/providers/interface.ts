@@ -40,6 +40,12 @@ export interface RawSession {
 
 export type MessageRole = "user" | "assistant" | "system" | "tool";
 
+/**
+ * Provider-recorded response presentation boundary. Missing values stay
+ * undefined because an adapter must not infer a final response.
+ */
+export type MessagePresentationPhase = "commentary" | "final";
+
 export interface Message {
   id: string;
   sessionId: string;
@@ -52,6 +58,7 @@ export interface Message {
   timestamp: number;
   tokens: TokenUsage | null;
   metadata: Record<string, unknown> | null;
+  presentationPhase?: MessagePresentationPhase;
 }
 
 export interface DailyTokenStat {

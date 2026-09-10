@@ -8,8 +8,8 @@ export function initEnhancements({ ft, formatText, showToast, escapeHtmlClient }
   // Enable tabs: show tab bar, hide inactive panels
   tabBar.removeAttribute("hidden");
   const tabButtons = tabBar.querySelectorAll("[role='tab']");
-  // Only manage the session workbench's top-level panels. Runtime lenses are
-  // nested tabpanels with their own controller and must retain their state.
+  // Only manage the session workbench's two primary panels. Events is a
+  // secondary evidence surface and remains a deep-linkable disclosure.
   const tabPanels = tabBar.parentElement?.querySelectorAll(":scope > [role='tabpanel']") || [];
 
   let hashTarget = null;
@@ -21,6 +21,7 @@ export function initEnhancements({ ft, formatText, showToast, escapeHtmlClient }
   const hashPanel = hashTarget?.matches("[role='tabpanel']")
     ? hashTarget
     : hashTarget?.closest("[role='tabpanel']");
+  const hashEvents = hashPanel?.id === "tab-events";
   const hashTab = hashPanel
     ? Array.from(tabButtons).find((tab) => tab.getAttribute("aria-controls") === hashPanel.id)
     : null;
@@ -29,14 +30,14 @@ export function initEnhancements({ ft, formatText, showToast, escapeHtmlClient }
   // Server-rendered markup defaults to Work. Apply the deep-link selection to
   // the tab semantics as well as the panel visibility before the first paint.
   tabButtons.forEach((tab) => {
-    const selected = tab === initiallySelected;
+    const selected = !hashEvents && tab === initiallySelected;
     tab.setAttribute("aria-selected", selected ? "true" : "false");
-    tab.setAttribute("tabindex", selected ? "0" : "-1");
+    tab.setAttribute("tabindex", selected || (hashEvents && tab === tabButtons[0]) ? "0" : "-1");
   });
 
   // JavaScript progressively enhances the no-JS stacked content into tabs.
   tabPanels.forEach(function (panel) {
-    if (panel.id === initiallySelected?.getAttribute("aria-controls")) {
+    if (hashEvents ? panel.id === "tab-events" : panel.id === initiallySelected?.getAttribute("aria-controls")) {
       panel.removeAttribute("hidden");
     } else {
       panel.setAttribute("hidden", "");
@@ -60,6 +61,7 @@ export function initEnhancements({ ft, formatText, showToast, escapeHtmlClient }
       history.replaceState(null, "", `#${encodeURIComponent(targetPanelId)}`);
     }
     document.querySelector(".session-workbench")?.classList.toggle("session-conversation-tab-active", targetPanelId === "tab-conversation");
+    tabBar.querySelector("[data-detail-tab='tab-events']")?.classList.remove("is-active");
     // Show/hide panels
     tabPanels.forEach(function (panel) {
       if (panel.id === targetPanelId) {
@@ -115,6 +117,7 @@ export function initEnhancements({ ft, formatText, showToast, escapeHtmlClient }
   });
 
   document.querySelector(".session-workbench")?.classList.toggle("session-conversation-tab-active", initiallySelected?.getAttribute("aria-controls") === "tab-conversation");
+  tabBar.querySelector("[data-detail-tab='tab-events']")?.classList.toggle("is-active", hashEvents);
 
   document.addEventListener("click", function (e) {
     const detailTabLink = e.target.closest("[data-detail-tab]");
@@ -127,7 +130,30 @@ export function initEnhancements({ ft, formatText, showToast, escapeHtmlClient }
         e.preventDefault();
         targetTab.click();
         requestAnimationFrame(() => document.getElementById(targetPanelId)?.scrollIntoView({ block: "start", behavior: "instant" }));
+      } else if (targetPanelId === "tab-events") {
+        e.preventDefault();
+        tabButtons.forEach((tab) => {
+          tab.setAttribute("aria-selected", "false");
+          tab.setAttribute("tabindex", tab === tabButtons[0] ? "0" : "-1");
+        });
+        tabPanels.forEach((panel) => panel.toggleAttribute("hidden", panel.id !== targetPanelId));
+        history.replaceState(null, "", `#${encodeURIComponent(targetPanelId)}`);
+        detailTabLink.classList.add("is-active");
+        document.querySelector(".session-workbench")?.classList.remove("session-conversation-tab-active");
+        requestAnimationFrame(() => document.getElementById(targetPanelId)?.scrollIntoView({ block: "start", behavior: "instant" }));
       }
+      return;
+    }
+    const openEvents = e.target.closest("[data-runtime-open-events]");
+    if (openEvents) {
+      e.preventDefault();
+      const eventsLink = tabBar.querySelector("[data-detail-tab='tab-events']");
+      eventsLink?.click();
+      window.dispatchEvent(new CustomEvent("runtime:filter-events", { detail: {
+        taskId: openEvents.dataset.runtimeEventTaskId || "",
+        runId: openEvents.dataset.runtimeEventRunId || "",
+        correlationId: openEvents.dataset.runtimeEventCorrelationId || ""
+      } }));
       return;
     }
     const searchToggle = e.target.closest("[data-session-search-toggle]");
@@ -144,79 +170,15 @@ export function initEnhancements({ ft, formatText, showToast, escapeHtmlClient }
     }
     const focusLink = e.target.closest("[data-detail-focus='runtime-evidence']");
     if (!focusLink) return;
-    const workTab = tabBar.querySelector("[aria-controls='tab-work']");
-    if (!workTab) return;
+    const eventsLink = tabBar.querySelector("[data-detail-tab='tab-events']");
+    if (!eventsLink) return;
     e.preventDefault();
-    switchTab(workTab);
-    requestAnimationFrame(() => {
-      const evidenceTab = document.querySelector("[data-runtime-lens='evidence']");
-      evidenceTab?.click();
-    });
+    eventsLink.click();
   });
 })();
 
-// ── Runtime Work graph views ─────────────────────────────────────────
-
-(function initRuntimeGraphTabs() {
-  document.querySelectorAll("[data-runtime-graph-tabs]").forEach(function (graphTabs) {
-    const buttons = Array.from(graphTabs.querySelectorAll("[data-runtime-graph-tab]"));
-    const root = graphTabs.closest("[data-runtime-root]");
-    const panels = Array.from(root?.querySelectorAll("[data-runtime-graph-panel]") || []);
-    if (!buttons.length || !panels.length) return;
-
-    graphTabs.removeAttribute("hidden");
-    graphTabs.setAttribute("role", "tablist");
-    graphTabs.setAttribute("aria-label", graphTabs.dataset.runtimeGraphLabel || "");
-    buttons.forEach((button, index) => {
-      button.setAttribute("role", "tab");
-      button.setAttribute("aria-controls", button.dataset.runtimeGraphPanelId || "");
-      button.setAttribute("aria-selected", index === 0 ? "true" : "false");
-      button.setAttribute("tabindex", index === 0 ? "0" : "-1");
-    });
-    panels.forEach((panel) => {
-      const button = buttons.find((candidate) => candidate.getAttribute("aria-controls") === panel.id);
-      panel.setAttribute("role", "tabpanel");
-      if (button) panel.setAttribute("aria-labelledby", button.id);
-    });
-
-    function select(button, focus) {
-      const targetId = button.getAttribute("aria-controls");
-      buttons.forEach((candidate) => {
-        const selected = candidate === button;
-        candidate.setAttribute("aria-selected", selected ? "true" : "false");
-        candidate.setAttribute("tabindex", selected ? "0" : "-1");
-      });
-      panels.forEach((panel) => {
-        if (panel.id === targetId) panel.removeAttribute("hidden");
-        else panel.setAttribute("hidden", "");
-      });
-      if (focus) button.focus();
-    }
-
-    const initiallySelected = buttons.find((button) => button.getAttribute("aria-selected") === "true") || buttons[0];
-    panels.forEach((panel) => {
-      if (panel.id !== initiallySelected.getAttribute("aria-controls")) panel.setAttribute("hidden", "");
-    });
-    graphTabs.addEventListener("click", function (event) {
-      const button = event.target.closest("[data-runtime-graph-tab]");
-      if (!button) return;
-      event.preventDefault();
-      select(button, true);
-    });
-    graphTabs.addEventListener("keydown", function (event) {
-      const current = buttons.indexOf(document.activeElement);
-      if (current < 0) return;
-      let next = current;
-      if (event.key === "ArrowRight" || event.key === "ArrowDown") next = (current + 1) % buttons.length;
-      else if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = (current - 1 + buttons.length) % buttons.length;
-      else if (event.key === "Home") next = 0;
-      else if (event.key === "End") next = buttons.length - 1;
-      else return;
-      event.preventDefault();
-      select(buttons[next], true);
-    });
-  });
-
+// ── Runtime Workbench overflow ────────────────────────────────────────
+(function initRuntimeWorkbenchOverflow() {
   document.addEventListener("click", function (event) {
     const viewAll = event.target.closest("[data-runtime-goal-view-all]");
     if (!viewAll) return;

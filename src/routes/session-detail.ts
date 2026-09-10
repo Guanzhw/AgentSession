@@ -20,6 +20,7 @@ import { renderRuntimeEvents, renderRuntimeRunPage, renderRuntimeWorkbench } fro
 import { renderProgressiveContent } from "../views/components.js";
 import { providerRenderContext } from "./provider-context.js";
 import { parseSessionNavigationContext } from "../navigation-context.js";
+import { t } from "../i18n.js";
 import {
   buildRuntimeGraph,
   collectConversationCompactions,
@@ -33,6 +34,7 @@ import {
   projectContext,
   projectCoordination,
   projectExecution,
+  projectRunActorBindings,
   projectWork,
   ProtocolProjectionError,
   queryRunPage
@@ -75,11 +77,15 @@ export function registerSessionDetail(
           throw error;
         }
       }
+      const runActorBindings = runPage
+        ? projectRunActorBindings(v3, runPage.runs.map(({ run }) => run.id))
+        : null;
       return {
         protocol: protocol as SessionProtocol,
         v3,
         runPage,
         runPageError,
+        runActorBindings,
         projections: {
           work: projectWork(v3, projectionOptions),
           execution: projectExecution(v3, projectionOptions),
@@ -96,6 +102,7 @@ export function registerSessionDetail(
         v3: null,
         runPage: null,
         runPageError: null,
+        runActorBindings: null,
         projections: null,
         summary: {
           version: 2,
@@ -536,14 +543,21 @@ export function registerSessionDetail(
     if (!sessionId) return json(res, { ok: false, error: "Invalid session id" }, 404);
     try {
       const params = new URL(req.url || "/", `http://localhost:${appConfig.port}`).searchParams;
-      const page = queryRunPage(getRuntimeProtocolV3(adapter, sessionId), {
+      const protocolV3 = getRuntimeProtocolV3(adapter, sessionId);
+      const page = queryRunPage(protocolV3, {
         cursor: params.get("cursor"),
         limit: params.get("limit")
+      });
+      const actorBindings = projectRunActorBindings(protocolV3, page.runs.map(({ run }) => run.id));
+      const actorLabels = new Map<string, string>();
+      actorBindings.actors.forEach((entry) => {
+        const actorId = (entry.ref as { id?: string }).id;
+        if (actorId) actorLabels.set(actorId, entry.actor.name || (entry.actor.kind === "team" ? t("runtime.team") : t("runtime.agent")));
       });
       return json(res, {
         ok: true,
         ...page,
-        html: renderRuntimeRunPage(page),
+        html: renderRuntimeRunPage(page, actorBindings.actorByRun, actorLabels),
         evidenceRuns: page.runs.map((entry) => entry.run)
       });
     } catch (error) {

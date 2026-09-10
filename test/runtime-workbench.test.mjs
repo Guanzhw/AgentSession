@@ -6,7 +6,7 @@ import { renderRuntimeEvents, renderRuntimeWorkbench } from "../dist/src/views/r
 import { getLocale, setLocale } from "../dist/src/i18n.js";
 import { renderSessionPage } from "../dist/src/views/session.js";
 import { finalizeSessionProtocolV3, upgradeSessionProtocolV2 } from "../dist/src/providers/shared/session-protocol-v3.js";
-import { projectContext, projectCoordination, projectExecution, projectWork, queryRunPage } from "../dist/src/protocol-runtime-v3.js";
+import { projectContext, projectCoordination, projectExecution, projectRunActorBindings, projectWork, queryRunPage } from "../dist/src/protocol-runtime-v3.js";
 import { summarizeEvent } from "../dist/src/event-summary.js";
 import { formatLocalizedDurationMs } from "../dist/src/views/components.js";
 
@@ -83,16 +83,15 @@ function refreshProjections(runtime) {
   return runtime;
 }
 
-test("Work Graph renders four domains with Work selected and keeps event evidence separate", () => {
+test("Workbench combines recorded graph, lanes, context, and evidence without nested lenses", () => {
   const html = renderRuntimeWorkbench(fixtureRuntime(), "fixture", "runtime-1");
-  for (const lens of ["work", "execution", "coordination", "context"]) {
-    assert.match(html, new RegExp(`data-runtime-lens="${lens}"`));
-    assert.match(html, new RegExp(`data-runtime-panel="${lens}"`));
-  }
-  assert.doesNotMatch(html, /data-runtime-lens="evidence"/);
+  assert.doesNotMatch(html, /data-runtime-lens=/);
+  assert.match(html, /data-runtime-workbench-main/);
+  assert.match(html, /data-runtime-section="runs"/);
+  assert.match(html, /data-runtime-section="coordination"/);
+  assert.match(html, /data-runtime-section="context"/);
   assert.doesNotMatch(html, /data-runtime-events-panel/);
-  assert.match(html, /data-runtime-lens="work"[^>]*aria-selected="true"/);
-  assert.doesNotMatch(html, /data-runtime-lens="summary"/);
+  assert.match(html, /data-runtime-inspector/);
   assert.match(html, /Build &lt;fixture&gt;/);
   assert.match(html, /\/fixture\/session\/child-1/);
   assert.match(html, /\/fixture\/session\/parent-1/);
@@ -101,7 +100,7 @@ test("Work Graph renders four domains with Work selected and keeps event evidenc
   assert.match(html, /input · shared · 20 tokens/);
   assert.doesNotMatch(html, /data-runtime-evidence-kind="event"/);
   assert.match(html, /data-runtime-evidence-kind="task"/);
-  assert.match(html, /Evidence and provenance/);
+  assert.match(html, /Selected evidence/);
   assert.match(html, /metadata-only/);
   assert.match(html, /Tokens before.*Not recorded/);
   assert.match(html, /Context after compaction/);
@@ -109,7 +108,7 @@ test("Work Graph renders four domains with Work selected and keeps event evidenc
   assert.doesNotMatch(html, /Retain <the result>/);
 });
 
-test("Execution SSR renders localized session-turn identity, lifecycle, times, and evidence", () => {
+test("Workbench lanes render localized session-turn identity without raw inventory", () => {
   const runtime = fixtureRuntime();
   runtime.v3.agentRuns.push({
     id: "turn-run", sessionId: "runtime-1", taskId: null, status: "unknown", mode: "unknown",
@@ -121,21 +120,18 @@ test("Execution SSR renders localized session-turn identity, lifecycle, times, a
   assert.match(html, /data-runtime-run-kind="session-turn"/);
   assert.match(html, /data-runtime-turn-id="turn-42"/);
   assert.match(html, /Session turn/);
-  assert.match(html, /Turn: turn-42/);
   assert.match(html, /Status: unknown/);
   assert.match(html, /Mode: unknown/);
-  assert.match(html, /Start:/);
-  assert.match(html, /End:<\/strong> Not recorded/);
-  assert.match(html, /data-runtime-run-evidence/);
+  assert.doesNotMatch(html, /Turn: turn-42/);
+  assert.doesNotMatch(html, /Start:<\/strong>/);
+  assert.doesNotMatch(html, /data-runtime-run-evidence/);
   const previousLocale = getLocale();
   setLocale("zh");
   try {
     html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
     assert.match(html, /会话轮次/);
-    assert.match(html, /轮次: turn-42/);
     assert.match(html, /状态: 未知/);
     assert.match(html, /模式: 未知/);
-    assert.match(html, /结束:<\/strong> 未记录/);
   } finally {
     setLocale(previousLocale);
   }
@@ -169,9 +165,31 @@ test("Execution run browsing renders a complete page range, stable cursor hooks,
   assert.match(source, /runPageRuns/);
   assert.match(source, /runPageRuns\) \? evidence\.runPageRuns : \[\]\),[\s\S]*evidence\[kind \+ "s"\]/);
   assert.match(source, /runtimeLens=execution/);
+  assert.match(source, /data-runtime-task-id/);
+  assert.match(source, /data-runtime-actor-id/);
+  assert.match(source, /runtime-graph-arrow/);
   const style = readFileSync(path.join(process.cwd(), "src", "static", "style.css"), "utf8");
   assert.match(style, /\.runtime-run-page-heading/);
   assert.match(style, /\.runtime-run-pagination/);
+});
+
+test("Initial SSR run page keeps a recorded actor binding omitted from the bounded overview", () => {
+  const runtime = fixtureRuntime();
+  runtime.v3.agentRuns = Array.from({ length: 123 }, (_, index) => ({
+    ...runtime.v3.agentRuns[0], id: `run-${index + 1}`, timeStart: index + 1, timeEnd: index + 2
+  }));
+  runtime.v3.actors = [{
+    id: "actor-first-page", sessionId: "runtime-1", kind: "agent", name: "First-page actor",
+    providerActorId: null, teamId: null, memberActorIds: [], runIds: ["run-1"], sessionRef: null, provenance
+  }];
+  runtime.projections.execution = projectExecution(runtime.v3, { maxItems: 100 });
+  runtime.runPage = queryRunPage(runtime.v3);
+  runtime.runActorBindings = projectRunActorBindings(runtime.v3, runtime.runPage.runs.map(({ run }) => run.id));
+  assert.equal(runtime.projections.execution.actorRuns.length, 0, "overview budget must omit the actor relation");
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  assert.match(html, /Runs 1–50 of 123/);
+  assert.match(html, /data-runtime-entity-id="run-1"[^>]*data-runtime-actor-id="actor-first-page"/);
+  assert.match(html, /<h4>First-page actor<\/h4>/);
 });
 
 test("stale run-page rendering preserves the other Runtime lenses and offers an Execution refresh", () => {
@@ -248,7 +266,8 @@ test("P6 keeps rail search and Work overview readable at desktop and medium widt
   assert.match(style, /\.app-rail \.search-input \{[\s\S]*?width: 100%;[\s\S]*?max-width: 100%;/);
   assert.match(style, /\.app-rail \.search-visible-label \{[\s\S]*?white-space: normal;/);
   assert.match(style, /\.app-rail \.search-input:focus-visible \{[\s\S]*?outline: 2px solid var\(--accent-color\);/);
-  assert.match(style, /\.runtime-work-overview-grid \{ display: grid; grid-template-columns: minmax\(280px, \.8fr\) minmax\(560px, 1\.6fr\);/);
+  assert.match(style, /\.runtime-work-overview-grid \{ display: grid; grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, 280px\), 1fr\)\);/);
+  assert.match(style, /\.runtime-work-overview \{ display: grid; grid-template-columns: minmax\(0, 1fr\);/);
   assert.match(style, /@media \(max-width: 1240px\) \{[\s\S]*?\.runtime-work-overview-grid \{ grid-template-columns: 1fr; \}/);
   assert.match(style, /\.runtime-overview-task-table th:nth-child\(3\),[\s\S]*?\.runtime-overview-task-table td:nth-child\(5\) \{ white-space: nowrap;/);
   assert.match(style, /@media \(max-width: 768px\) \{[\s\S]*?\.rail-utility \.search-form \{\s*display: none;/);
@@ -420,6 +439,7 @@ test("Events density is explicitly bounded and reports a lower bound", () => {
     category: index % 2 ? "model" : "tool"
   }));
   const html = renderRuntimeEvents(runtime, "fixture", "runtime-1");
+  assert.match(html, /<details class="runtime-events-structure"><summary>[^<]+<\/summary>/);
   assert.match(html, /Density is calculated from the first 1000 source events/);
   assert.match(html, /data-runtime-density-category="model"[\s\S]*<strong>500<\/strong>/);
   assert.match(html, /data-runtime-density-category="tool"[\s\S]*<strong>500<\/strong>/);
@@ -451,6 +471,10 @@ test("Events client hook initializes each explicit root and preserves bounded cu
   assert.match(source, /runtime_event_sequence/);
   assert.match(source, /runtime-event-sequence/);
   assert.match(source, /runtime-event-fidelity-/);
+  assert.match(source, /runtime:filter-events/);
+  assert.match(source, /data-runtime-events-clear-filter/);
+  const html = renderRuntimeEvents(fixtureRuntime(), "fixture", "runtime-1");
+  assert.match(html, /data-runtime-events-focus-filter/);
 });
 
 test("Provider-neutral event summary facts are bounded and ID-free", () => {
@@ -507,7 +531,7 @@ test("child session lineage renders the focused session once under its recorded 
   }];
   refreshProjections(runtime);
   const html = renderRuntimeWorkbench(runtime, "fixture", "child-1");
-  const coordination = html.match(/data-runtime-panel="coordination"[\s\S]*?data-runtime-panel="context"/)?.[0] || "";
+  const coordination = html.match(/data-runtime-section="coordination"[\s\S]*?data-runtime-section="context"/)?.[0] || "";
   assert.equal((coordination.match(/href="\/fixture\/session\/child-1"/g) || []).length, 1);
   assert.equal((coordination.match(/href="\/fixture\/session\/parent-1"/g) || []).length, 1);
 });
@@ -523,7 +547,7 @@ test("Work is the unconditional default top-level tab", () => {
   assert.match(html, /aria-selected="true" aria-controls="tab-work"/);
   assert.match(html, /id="tab-btn-work"[^>]*>Work<\/button>/);
   assert.match(html, /id="tab-btn-conversation"[^>]*>Conversation<\/button>/);
-  assert.match(html, /id="tab-btn-events"[^>]*>Events<\/button>/);
+  assert.match(html, /id="tab-btn-events"[^>]*>Events<\/a>/);
   assert.doesNotMatch(html, /id="tab-btn-flow"/);
 });
 
@@ -572,21 +596,23 @@ test("session tabpanels stay balanced when reasoning contains replacement tokens
   assert.match(html.slice(mainEnd), /^\n  <\/section>\n<\/div>/);
 });
 
-test("top-level session tabs do not hide nested Runtime lens panels", () => {
+test("top-level session tabs manage only the two primary modes", () => {
   const enhancements = readFileSync(path.join(process.cwd(), "src", "static", "app", "enhancements.js"), "utf8");
   assert.match(enhancements, /tabBar\.parentElement\?\.querySelectorAll\(":scope > \[role='tabpanel'\]"\)/);
   assert.doesNotMatch(enhancements, /document\.querySelectorAll\("\[role='tabpanel'\]"\)/);
   assert.match(enhancements, /targetPanelId === "tab-work"/);
   assert.match(enhancements, /data-runtime-root.*scrollIntoView|data-runtime-root\]\?\.scrollIntoView/);
   assert.match(enhancements, /data-detail-tab/);
+  assert.match(enhancements, /hashEvents && tab === tabButtons\[0\]/);
+  assert.match(enhancements, /tab === tabButtons\[0\] \? "0" : "-1"/);
 });
 
-test("top-level detail tab switches replace the URL hash without reloading or touching Runtime lenses", () => {
+test("top-level detail tab switches preserve Workbench as one surface", () => {
   const enhancements = readFileSync(path.join(process.cwd(), "src", "static", "app", "enhancements.js"), "utf8");
   const switchTab = enhancements.match(/function switchTab\(tabButton\) \{([\s\S]*?)\n  \}/)?.[1] || "";
   assert.match(switchTab, /history\.replaceState\(null, "", `#\$\{encodeURIComponent\(targetPanelId\)\}`\)/);
   assert.doesNotMatch(switchTab, /location\.(assign|reload|replace)\s*\(/);
-  assert.doesNotMatch(switchTab, /data-runtime-lens|runtime-lens/);
+  assert.doesNotMatch(switchTab, /data-runtime-lens/);
 });
 
 test("Runtime work cards allow long canonical task and agent ids to wrap on narrow screens", () => {
@@ -789,9 +815,8 @@ test("Work opening renders separate goal-task and collaboration views", () => {
   runtime.projections.execution = projectExecution(runtime.v3, { maxItems: 100 });
   runtime.projections.coordination = projectCoordination(runtime.v3, { maxItems: 100 });
   const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
-  assert.match(html, /data-runtime-graph-tabs/);
-  assert.match(html, /data-runtime-graph-tab="goal"/);
-  assert.match(html, /data-runtime-graph-tab="collaboration"/);
+  assert.doesNotMatch(html, /data-runtime-graph-tabs/);
+  assert.doesNotMatch(html, /data-runtime-graph-tab=/);
   assert.match(html, /data-runtime-graph-panel="goal"/);
   assert.match(html, /recorded membership/);
   assert.match(html, /recorded dependency/);
@@ -846,6 +871,32 @@ test("Collaboration graph aggregates kinds and gates async edges on recorded run
   assert.match(html, /"coordinations"/);
 });
 
+test("Workbench links only exact task/run/actor bindings and keeps unbound runs explicit", () => {
+  const runtime = fixtureRuntime();
+  runtime.v3.goals = [{
+    id: "goal-exact", sessionId: "runtime-1", title: "Exact links", description: null, status: "active", taskIds: ["task-1"],
+    parentGoalId: null, ownerActorId: null, timeCreated: 900, timeUpdated: 3000, timeCompleted: null, provenance
+  }];
+  runtime.v3.agentRuns.push({
+    ...runtime.v3.agentRuns[0], id: "child-run", taskId: "task-1", childSessionId: "child-1", timeStart: null, timeEnd: null
+  });
+  runtime.v3.actors = [{
+    id: "agent-unbound", sessionId: "runtime-1", kind: "agent", name: "Unbound", providerActorId: null, teamId: null, memberActorIds: [], runIds: [], sessionRef: null, provenance
+  }];
+  runtime.projections = {
+    work: projectWork(runtime.v3, { maxItems: 100 }),
+    execution: projectExecution(runtime.v3, { maxItems: 100 }),
+    coordination: projectCoordination(runtime.v3, { maxItems: 100 }),
+    context: projectContext(runtime.v3, { maxItems: 100 })
+  };
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  assert.match(html, /data-runtime-edge-kind="membership"/);
+  assert.match(html, /data-runtime-entity-kind="run" data-runtime-entity-id="child-run" data-runtime-task-id="task-1"/);
+  assert.match(html, /data-runtime-run-lane-section="unassigned"/);
+  assert.doesNotMatch(html, /data-runtime-run-lane-section="session"/);
+  assert.match(html, /Executor not recorded/);
+});
+
 test("Work graph views bound nodes and expose incomplete projection plus narrow-screen hooks", () => {
   const runtime = fixtureRuntime();
   runtime.v3.tasks = Array.from({ length: 12 }, (_, index) => ({
@@ -879,20 +930,26 @@ test("Work graph views bound nodes and expose incomplete projection plus narrow-
   const style = readFileSync(path.join(process.cwd(), "src", "static", "style.css"), "utf8");
   const enhancements = readFileSync(path.join(process.cwd(), "src", "static", "app", "enhancements.js"), "utf8");
   assert.match(style, /\.runtime-graph-canvas \{ display: grid; \}/);
-  assert.match(style, /\.runtime-graph-edge-list \{ display: none; \}/);
-  assert.match(style, /\.runtime-graph-relationship-list \{ display: grid; margin-top: 12px; \}/);
-  assert.match(enhancements, /data-runtime-graph-tabs/);
-  assert.match(enhancements, /setAttribute\("role", "tablist"\)/);
-  assert.match(enhancements, /setAttribute\("role", "tabpanel"\)/);
-  assert.match(enhancements, /ArrowDown|ArrowRight/);
+  assert.match(style, /\.runtime-graph-links \{ position: absolute;/);
+  assert.match(style, /\.runtime-graph-node-list \{ display: grid;[\s\S]*?align-items: start;/);
+  assert.match(style, /\.runtime-graph-edge-details > summary \{ cursor: pointer;/);
+  assert.match(style, /\.runtime-workbench-body:has\(\[data-runtime-inspector\]:not\(\[hidden\]\)\) \{ display: grid;[\s\S]*?grid-template-columns: minmax\(0, 1fr\) minmax\(260px, 320px\)/);
+  assert.match(style, /\.runtime-selection-inspector \{ position: sticky;[\s\S]*?grid-column: 2;/);
+  assert.match(style, /@media \(max-width: 820px\) \{[\s\S]*?\.runtime-selection-inspector \{ position: static;[\s\S]*?grid-column: 1;[\s\S]*?grid-row: 2;/);
+  assert.doesNotMatch(style, /runtime-graph-relationship-list|runtime-graph-tabs|runtime-lens-tabs/);
+  assert.doesNotMatch(enhancements, /data-runtime-graph-tabs/);
+  const runtimeJs = readFileSync(path.join(process.cwd(), "src", "static", "app", "runtime-workbench.js"), "utf8");
+  assert.match(runtimeJs, /let inspectorTrigger = null/);
+  assert.match(runtimeJs, /const closeInspector = \(\) =>/);
+  assert.match(runtimeJs, /event\.key === "Escape"/);
+  assert.match(runtimeJs, /inspectorTrigger\.focus\(\)/);
 });
 
 test("Work graph SSR keeps both named regions readable and JavaScript owns tab semantics", () => {
   const runtime = fixtureRuntime();
   const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
   const structure = html.match(/<section class="runtime-work-structure"[\s\S]*?<\/section>/)?.[0] || "";
-  assert.match(structure, /class="runtime-graph-tabs" hidden/);
-  assert.doesNotMatch(structure, /class="runtime-graph-tabs"[^>]*role="tablist"/);
+  assert.doesNotMatch(structure, /class="runtime-graph-tabs"/);
   assert.doesNotMatch(structure, /data-runtime-graph-panel="goal"[^>]*role="tabpanel"/);
   assert.doesNotMatch(structure, /data-runtime-graph-panel="collaboration"[^>]*role="tabpanel"/);
   assert.match(structure, /role="region"[^>]*data-runtime-graph-panel="goal"/);
@@ -934,6 +991,25 @@ test("Narrow graph rendering retains task nodes when there are no relationships"
   assert.match(goalPanel, /data-runtime-node-kind="task"/);
   assert.match(goalPanel, /No recorded relationships connect the visible nodes/);
   assert.match(goalPanel, /data-runtime-graph-relationships="goal"/);
+  assert.match(goalPanel, /data-runtime-graph-links/);
+  assert.match(goalPanel, /<details class="runtime-graph-edge-details"><summary>Evidence \(0\)<\/summary>/);
   const style = readFileSync(path.join(process.cwd(), "src", "static", "style.css"), "utf8");
-  assert.match(style, /@media \(max-width: 820px\) \{[\s\S]*?\.runtime-graph-canvas \{ display: grid; \}[\s\S]*?\.runtime-graph-edge-list \{ display: none; \}/);
+  assert.match(style, /@media \(max-width: 520px\) \{[\s\S]*?\.runtime-graph-node-list \{ grid-template-columns: 1fr; \}/);
+  assert.doesNotMatch(style, /runtime-graph-relationship-list/);
+});
+
+test("Long recorded goal stays compact in the graph with an explicit expansion", () => {
+  const runtime = fixtureRuntime();
+  const longGoal = `Recorded graph goal ${"with bounded node text ".repeat(18)}`;
+  runtime.v3.goals = [{
+    id: "goal-long-graph", sessionId: "runtime-1", title: null, description: longGoal, status: "active", taskIds: [],
+    parentGoalId: null, ownerActorId: null, timeCreated: 900, timeUpdated: 3000, timeCompleted: null, provenance
+  }];
+  runtime.projections.work = projectWork(runtime.v3, { maxItems: 100 });
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  const graphGoal = html.match(/class="runtime-graph-node runtime-graph-node-goal"[\s\S]*?<\/article>/)?.[0] || "";
+  assert.match(graphGoal, /runtime-graph-node-details/);
+  assert.match(graphGoal, /Show complete recorded goal/);
+  assert.match(graphGoal, new RegExp(longGoal));
+  assert.match(html, /<details class="runtime-graph-edge-details"><summary>Evidence \(/);
 });

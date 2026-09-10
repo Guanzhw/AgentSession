@@ -124,3 +124,15 @@ switching hides the work surface, and internal-call disclosure expands.
 The prototype uses sample data and is the composition reference, not a live
 acceptance fixture. Production must use normalized relationships, retain
 bounded browsing and unavailable evidence, and pass the real-data matrix above.
+
+### Production slice progress, 2026-09-10
+
+The first production slice now composes the default Workbench from the existing
+normalized work, execution, coordination and context projections. It keeps
+Workbench and Conversation as the two primary modes, with Events as a
+secondary evidence/history disclosure while preserving `#tab-events` and the
+legacy `runtimeLens` migration hook. Exact recorded task/run/actor bindings
+drive bounded work nodes, grouped run lanes and one Workbench-scoped
+inspector; missing bindings, timestamps and projection scope remain explicit.
+Run paging retains the 50/100 exact-anchor contract and latest-page evidence
+precedence. Browser acceptance and the full real-data matrix remain pending.

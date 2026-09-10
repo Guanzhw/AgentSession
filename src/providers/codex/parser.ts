@@ -31,6 +31,12 @@ function responseText(payload: any) {
     .join("");
 }
 
+function codexPresentationPhase(payload: any): Message["presentationPhase"] {
+  if (payload?.phase === "commentary") return "commentary";
+  if (payload?.phase === "final_answer") return "final";
+  return undefined;
+}
+
 type CodexMessageProvenance = "session" | "inherited-parent-context";
 type CodexRecordProvenance = "session" | "inherited-parent-context" | "duplicate-token-usage";
 
@@ -685,6 +691,7 @@ export function recordsToMessages(records: any, sessionId: any, parentRecords: a
         const duplicate = previous?.role === "assistant"
           && previous.metadata?.source === "codex_agent_message"
           && previous.content === content;
+        const presentationPhase = codexPresentationPhase(r.payload);
         const message = duplicate ? previous : {
           id: `agent-message-${idx++}`,
           sessionId,
@@ -702,8 +709,10 @@ export function recordsToMessages(records: any, sessionId: any, parentRecords: a
             provenance: "session",
             source: "codex_agent_message",
             turnId: currentResponseGroup()
-          }
+          },
+          presentationPhase
         };
+        if (duplicate && presentationPhase) previous.presentationPhase = presentationPhase;
         if (!duplicate) messages.push(message);
         pendingUsageTarget = message;
         lastUsageTarget = message;
@@ -784,6 +793,7 @@ export function recordsToMessages(records: any, sessionId: any, parentRecords: a
         const duplicate = previous?.role === "assistant"
           && previous.metadata?.source === "codex_agent_message"
           && previous.content === text;
+        const presentationPhase = codexPresentationPhase(r.payload);
         const message = duplicate ? previous : {
           id: r.payload.id || `msg-${idx++}`,
           sessionId,
@@ -795,8 +805,10 @@ export function recordsToMessages(records: any, sessionId: any, parentRecords: a
           toolOutput: null,
           timestamp: ts,
           tokens: null,
-          metadata: { model, provider: "openai", provenance: "session", turnId: currentResponseGroup() }
+          metadata: { model, provider: "openai", provenance: "session", turnId: currentResponseGroup() },
+          presentationPhase
         };
+        if (duplicate && presentationPhase) previous.presentationPhase = presentationPhase;
         if (!duplicate) messages.push(message);
         pendingUsageTarget = message;
         lastUsageTarget = message;

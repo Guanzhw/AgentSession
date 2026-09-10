@@ -6,6 +6,7 @@ import { formatDuration, formatLocalizedDurationMs, formatTime, formatTokens, me
 import { layout } from "./layout.js";
 import type { SessionNavigationContext } from "../navigation-context.js";
 import type { ConversationCompaction } from "../protocol-runtime.js";
+import type { MessagePresentationPhase } from "../providers/interface.js";
 import type {
   ConversationAgentCard,
   ConversationChannelItem,
@@ -303,7 +304,7 @@ function renderSubagentBranch(part: SessionPartNode, childMarkup: string, provid
   ].filter(Boolean).join(" · ");
 
   const kind = inferred ? t("detail.linked_session") : "subagent";
-  return `<details class="subagent-branch${inferred ? " subagent-branch-inferred" : ""}" data-subsession-container="task" data-subagent-relationship="${inferred ? "inferred" : "explicit"}" data-parent-part-id="${escapeHtml(part.id)}" open>
+  return `<details class="subagent-branch${inferred ? " subagent-branch-inferred" : ""}" data-subsession-container="task" data-subagent-relationship="${inferred ? "inferred" : "explicit"}" data-parent-part-id="${escapeHtml(part.id)}">
     <summary class="subagent-summary" aria-label="${escapeHtml(`Toggle ${kind} ${title || "task"}`)}">
       <span class="subsession-kicker">${escapeHtml(kind)}</span>
       ${title ? `<span class="subsession-title">${escapeHtml(title)}</span>` : ""}
@@ -427,17 +428,44 @@ function collectMessageTaskTocNodes(message: any, parentAgentDepth: any): any[] 
   return nodes;
 }
 
+function isRecordedFinalMessage(message: any) {
+  return messageTurnRole(message.role) === "assistant"
+    && hasOwnMessageBubble(message)
+    && message.data?.presentationPhase === "final";
+}
+
+function foldedCommentaryMessageIds(messages: any[]) {
+  const folded = new Set<string>();
+  let hasLaterFinal = false;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    const role = String(message.role || "").toLowerCase();
+    if (role === "user") {
+      hasLaterFinal = false;
+    } else {
+      if (message.data?.presentationPhase === "commentary" && hasLaterFinal) {
+        folded.add(String(message.id || ""));
+      }
+      if (isRecordedFinalMessage(message)) {
+        hasLaterFinal = true;
+      }
+    }
+  }
+  return folded;
+}
+
 function collectTocNodes(tree: SessionTree, userDepth = 0): any[] {
   const nodes: any[] = [];
-  let currentUserNode = null;
+  let currentUserNode: any = null;
+  const foldedCommentary = foldedCommentaryMessageIds(tree.messages);
 
-  for (const message of tree.messages) {
+  tree.messages.forEach((message) => {
     const role = String(message.role || "").toLowerCase();
     if (!isNavigableMessageRole(role)) {
-      continue;
+      return;
     }
 
-    const label = tocMessageText(message);
+    const label = foldedCommentary.has(String(message.id || "")) ? "" : tocMessageText(message);
     const agentDepth = userDepth + 1;
     const taskNodes: any = collectMessageTaskTocNodes(message, label ? agentDepth : userDepth);
     if (!label) {
@@ -448,7 +476,7 @@ function collectTocNodes(tree: SessionTree, userDepth = 0): any[] {
           nodes.push(...taskNodes);
         }
       }
-      continue;
+      return;
     }
 
     if (role === "user") {
@@ -460,7 +488,7 @@ function collectTocNodes(tree: SessionTree, userDepth = 0): any[] {
         userDepth
       );
       nodes.push(currentUserNode);
-      continue;
+      return;
     }
 
     const node = makeTocNode(
@@ -477,7 +505,7 @@ function collectTocNodes(tree: SessionTree, userDepth = 0): any[] {
     } else {
       nodes.push(node);
     }
-  }
+  });
 
   for (const child of tree.detachedChildren) {
     nodes.push(makeTocNode(
@@ -773,6 +801,8 @@ interface ConversationEntry {
   role: string;
   markup: string;
   timeCreated: number;
+  presentationPhase?: MessagePresentationPhase;
+  processOnly: boolean;
 }
 
 /**
@@ -811,7 +841,9 @@ function renderSessionMessageEntries(tree: SessionTree, depth = 0, provider = "o
       messageId: String(message.id || ""),
       role: messageTurnRole(message.role),
       markup,
-      timeCreated: Number(message.timeCreated) || 0
+      timeCreated: Number(message.timeCreated) || 0,
+      presentationPhase: message.data?.presentationPhase,
+      processOnly: messageTurnRole(message.role) === "assistant" && !hasOwnMessageBubble(message)
     });
   }
 
@@ -908,7 +940,8 @@ function renderRawMessageEntries(messages: any, partsByMessage: any, provider: a
         data: messageData,
         parts: parts.map((part: any) => ({ id: part.id, data: safeParse(part.data), type: safeParse(part.data)?.type }))
       }, renderedParts, provider),
-      timeCreated: Number(parsedData.time?.created) || Number(message.time_created) || 0
+      timeCreated: Number(parsedData.time?.created) || Number(message.time_created) || 0,
+      processOnly: role === "assistant" && !parts.some((part: any) => safeParse(part.data)?.type === "text" && Boolean(safeParse(part.data)?.text))
     });
   }
 
@@ -1294,6 +1327,65 @@ function renderCompactionCheckpoint(compaction: any, provider: string, placement
   </section>`;
 }
 
+function renderConversationProcessDisclosure(items: ConversationItem[]) {
+  const count = String(items.length);
+  return `<details class="conversation-process-disclosure" data-conversation-process data-conversation-process-count="${escapeHtml(count)}">
+    <summary class="conversation-process-summary"><span class="conversation-process-kicker">${escapeHtml(t("conversation.process_kicker"))}</span><span class="conversation-process-count">${escapeHtml(t("conversation.process_items", { count }))}</span></summary>
+    <div class="conversation-process-body">${items.map((item) => item.html).join("\n")}</div>
+  </details>`;
+}
+
+interface ConversationItem {
+  kind: "block" | "checkpoint" | "reference";
+  role?: string;
+  html: string;
+  presentationPhase?: MessagePresentationPhase;
+  processOnly?: boolean;
+}
+
+function isRecordedFinalItem(item: ConversationItem) {
+  return item.kind === "block"
+    && item.role === "assistant"
+    && item.processOnly !== true
+    && item.presentationPhase === "final";
+}
+
+function renderConversationSegmentItems(items: ConversationItem[]) {
+  const rendered: string[] = [];
+  let processItems: ConversationItem[] = [];
+  const hasLaterFinal = new Array<boolean>(items.length).fill(false);
+  let foundFinal = false;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    hasLaterFinal[index] = foundFinal;
+    if (isRecordedFinalItem(items[index])) {
+      foundFinal = true;
+    }
+  }
+  const flushProcessItems = () => {
+    if (!processItems.length) {
+      return;
+    }
+    rendered.push(renderConversationProcessDisclosure(processItems));
+    processItems = [];
+  };
+
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    const foldable = hasLaterFinal[index]
+      && item.kind === "block"
+      && item.role === "assistant"
+      && (item.processOnly === true || item.presentationPhase === "commentary");
+    if (foldable) {
+      processItems.push(item);
+      continue;
+    }
+    flushProcessItems();
+    rendered.push(item.html);
+  }
+  flushProcessItems();
+  return rendered.join("\n");
+}
+
 /**
  * Group the canonical message spine by user turn and interleave compaction
  * checkpoints at their causal position. Checkpoints are placed after the
@@ -1347,7 +1439,7 @@ function renderConversationThread(entries: ConversationEntry[], compactions: any
     referencesByEntryIndex.set(position, list);
   }
 
-  const items: Array<{ kind: "block" | "checkpoint" | "reference"; role?: string; html: string }> = [];
+  const items: ConversationItem[] = [];
   const pushCheckpoints = (position: number) => {
     for (const placed of byEntryIndex.get(position) || []) {
       items.push({ kind: "checkpoint", html: renderCompactionCheckpoint(placed.compaction, provider, placed.placement) });
@@ -1361,7 +1453,13 @@ function renderConversationThread(entries: ConversationEntry[], compactions: any
   pushCheckpoints(-1);
   entries.forEach((entry, index) => {
     if (entry.markup) {
-      items.push({ kind: "block", role: entry.role, html: entry.markup });
+      items.push({
+        kind: "block",
+        role: entry.role,
+        html: entry.markup,
+        presentationPhase: entry.presentationPhase,
+        processOnly: entry.processOnly
+      });
     }
     if (referencesByEntryIndex.has(index)) {
       pushReferences(index);
@@ -1371,19 +1469,19 @@ function renderConversationThread(entries: ConversationEntry[], compactions: any
     }
   });
 
-  const segments: Array<{ userTurn: boolean; userTurnIndex: number; blocks: string[] }> = [];
-  let current = null as { userTurn: boolean; userTurnIndex: number; blocks: string[] } | null;
+  const segments: Array<{ userTurn: boolean; userTurnIndex: number; items: ConversationItem[] }> = [];
+  let current = null as { userTurn: boolean; userTurnIndex: number; items: ConversationItem[] } | null;
   let userTurnIndex = 0;
   for (const item of items) {
     if (item.kind === "block" && item.role === "user") {
       userTurnIndex += 1;
-      current = { userTurn: true, userTurnIndex, blocks: [] };
+      current = { userTurn: true, userTurnIndex, items: [] };
       segments.push(current);
     } else if (!current) {
-      current = { userTurn: false, userTurnIndex: 0, blocks: [] };
+      current = { userTurn: false, userTurnIndex: 0, items: [] };
       segments.push(current);
     }
-    current.blocks.push(item.html);
+    current.items.push(item);
   }
 
   const thread = segments.map((segment) => {
@@ -1391,7 +1489,7 @@ function renderConversationThread(entries: ConversationEntry[], compactions: any
       ? `<header class="thread-turn-header"><span class="thread-turn-kicker">${escapeHtml(t("conversation.thread_turn"))} ${segment.userTurnIndex}</span></header>`
       : "";
     const turnClass = segment.userTurn ? " thread-turn-user" : " thread-turn-prelude";
-    return `<section class="thread-turn${turnClass}">${header}<div class="thread-turn-content">${segment.blocks.join("\n")}</div></section>`;
+    return `<section class="thread-turn${turnClass}">${header}<div class="thread-turn-content">${renderConversationSegmentItems(segment.items)}</div></section>`;
   }).join("\n");
 
   const trailing = byEntryIndex.get(entries.length) || [];
@@ -1614,10 +1712,12 @@ ${actions}
   <section id="${escapeHtml(anchorId("session", session.id))}" class="main-content">
     ${breadcrumb}
     ${header}
-    <div class="tab-bar" role="tablist" aria-label="${escapeHtml(t("detail.tab_bar_label"))}" hidden>
-      <button role="tab" aria-selected="true" aria-controls="tab-work" id="tab-btn-work" tabindex="0">${t("detail.tab_work")}</button>
-      <button role="tab" aria-selected="false" aria-controls="tab-conversation" id="tab-btn-conversation" tabindex="-1">${t("detail.tab_conversation")}</button>
-      <button role="tab" aria-selected="false" aria-controls="tab-events" id="tab-btn-events" tabindex="-1">${t("detail.tab_events")}</button>
+    <div class="tab-bar" hidden>
+      <div role="tablist" aria-label="${escapeHtml(t("detail.tab_bar_label"))}">
+        <button role="tab" aria-selected="true" aria-controls="tab-work" id="tab-btn-work" tabindex="0">${t("detail.tab_work")}</button>
+        <button role="tab" aria-selected="false" aria-controls="tab-conversation" id="tab-btn-conversation" tabindex="-1">${t("detail.tab_conversation")}</button>
+      </div>
+      <a class="detail-secondary-tab" data-detail-tab="tab-events" id="tab-btn-events" href="#tab-events">${t("detail.tab_events")}</a>
     </div>
     <div role="tabpanel" id="tab-work" aria-labelledby="tab-btn-work">
       ${runtimeWorkbench || `<p class="empty-state">${t("runtime.unavailable")}</p>`}

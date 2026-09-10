@@ -121,6 +121,16 @@ export interface RunPage {
   nextCursor: string | null;
 }
 
+/**
+ * Actor bindings needed to render one run page. Unlike the bounded execution
+ * overview, this projection starts from the page's canonical run ids and only
+ * retains actors that actually reference one of those runs.
+ */
+export interface RunActorBindings {
+  actorByRun: Map<string, string>;
+  actors: ExecutionActor[];
+}
+
 /** Known-lower-bound classification of recorded origin slices; never an authoritative partition by itself. */
 export interface UsageOriginClassification {
   direct: number;
@@ -554,6 +564,24 @@ export function queryRunPage(protocol: SessionProtocolV3, options: RunPageOption
       ? encodeRunPageCursor(focus, { direction: "after", runId: lastRun.id, pageSize })
       : null
   };
+}
+
+export function projectRunActorBindings(
+  protocol: SessionProtocolV3,
+  runIds: readonly string[]
+): RunActorBindings {
+  const requestedRunIds = new Set(runIds);
+  const actorByRun = new Map<string, string>();
+  for (const actor of protocol.actors) {
+    for (const runId of actor.runIds || []) {
+      if (requestedRunIds.has(runId)) actorByRun.set(runId, actor.id);
+    }
+  }
+  const actorIds = new Set(actorByRun.values());
+  const actors = protocol.actors
+    .filter((actor) => actorIds.has(actor.id))
+    .map((actor) => ({ actor: publicActor(actor), ref: entityRef("actor", actor.id) }));
+  return { actorByRun, actors };
 }
 
 function publicActor(actor: Actor): PublicActor {
