@@ -183,7 +183,9 @@ export type TaskStatus =
   | "failed"
   | "cancelled";
 
-export type ExecutionMode = "foreground" | "background" | "subagent" | "scheduled" | "team";
+export type RunStatus = TaskStatus | "unknown";
+
+export type ExecutionMode = "foreground" | "background" | "subagent" | "scheduled" | "team" | "unknown";
 
 /**
  * A unit of work. Tasks are session-local and never carry run state or
@@ -229,8 +231,12 @@ export interface AgentRun {
   id: string;
   sessionId: string;
   taskId: string | null;
-  status: TaskStatus;
+  status: RunStatus;
   mode: ExecutionMode;
+  /** Explicit classification for a session-owned turn; omitted for legacy runs. */
+  kind?: "session-turn";
+  /** Provider-recorded turn identity; null means the identity was unavailable. */
+  turnId?: string | null;
   agent: string | null;
   model: string | null;
   /** Canonical session id of a detached child session, when one exists. */
@@ -370,8 +376,9 @@ const RELATIONSHIP_TYPES = new Set<SessionRelationshipType>([
 const TASK_STATUSES = new Set<TaskStatus>([
   "queued", "running", "waiting_input", "blocked", "completed", "failed", "cancelled"
 ]);
+const RUN_STATUSES = new Set<RunStatus>([...TASK_STATUSES, "unknown"]);
 const EXECUTION_MODES = new Set<ExecutionMode>([
-  "foreground", "background", "subagent", "scheduled", "team"
+  "foreground", "background", "subagent", "scheduled", "team", "unknown"
 ]);
 const ARTIFACT_KINDS = new Set<ContextArtifactKind>([
   "memory", "instruction", "skill", "rule", "summary", "experience", "user-info"
@@ -501,17 +508,24 @@ export function sessionTask(fields: Task): Task {
 }
 
 export function agentRun(fields: AgentRun): AgentRun {
-  if (!TASK_STATUSES.has(fields.status)) {
+  if (!RUN_STATUSES.has(fields.status)) {
     throw new TypeError(`Invalid agent run status: ${String(fields.status)}`);
   }
   if (!EXECUTION_MODES.has(fields.mode)) {
     throw new TypeError(`Invalid execution mode: ${String(fields.mode)}`);
+  }
+  if (fields.kind !== undefined && fields.kind !== "session-turn") {
+    throw new TypeError(`Invalid agent run kind: ${String(fields.kind)}`);
+  }
+  if (fields.turnId !== undefined && fields.turnId !== null && typeof fields.turnId !== "string") {
+    throw new TypeError("AgentRun turnId must be a string or null when present");
   }
   return {
     ...fields,
     taskId: fields.taskId ?? null,
     childSessionId: fields.childSessionId ?? null,
     childSessionAvailable: fields.childSessionAvailable ?? null,
+    ...(fields.kind === "session-turn" ? { turnId: fields.turnId ?? null } : {}),
     timeStart: numberOrNull(fields.timeStart),
     timeEnd: numberOrNull(fields.timeEnd),
     provenance: assertProvenance(fields.provenance)
@@ -922,6 +936,18 @@ export function validateSessionProtocol(
     if (run?.triggerEventId && !eventIds.has(run.triggerEventId)) warning("RUN_EVENT_DANGLING", "AgentRun trigger event is not present in this snapshot", ref, run.provenance);
     if (run?.childSessionAvailable != null && typeof run.childSessionAvailable !== "boolean") {
       error("RUN_CHILD_AVAILABILITY_INVALID", "AgentRun childSessionAvailable must be boolean or null", ref, run.provenance);
+    }
+    if (!RUN_STATUSES.has(run?.status as RunStatus)) {
+      error("RUN_STATUS_INVALID", "AgentRun status is invalid", ref, run.provenance);
+    }
+    if (!EXECUTION_MODES.has(run?.mode as ExecutionMode)) {
+      error("RUN_MODE_INVALID", "AgentRun execution mode is invalid", ref, run.provenance);
+    }
+    if (run?.kind !== undefined && run.kind !== "session-turn") {
+      error("RUN_KIND_INVALID", "AgentRun kind is invalid", ref, run.provenance);
+    }
+    if (run?.turnId !== undefined && run.turnId !== null && typeof run.turnId !== "string") {
+      error("RUN_TURN_ID_INVALID", "AgentRun turnId must be a string or null when present", ref, run.provenance);
     }
     if (run?.attempt != null && (!Number.isInteger(run.attempt) || run.attempt < 1)) {
       error("RUN_ATTEMPT_INVALID", "AgentRun attempt must be a positive integer", ref, run.provenance);

@@ -7,8 +7,10 @@ import type {
   ContextProjection,
   CoordinationProjection,
   ExecutionProjection,
+  RunPage,
   WorkProjection
 } from "../protocol-runtime-v3.js";
+import { DEFAULT_RUN_PAGE_SIZE } from "../protocol-runtime-v3.js";
 import { deriveWorkOverview, type WorkOverviewTask } from "../work-view-model.js";
 import type { SessionProtocolV3 } from "../providers/shared/session-protocol-v3.js";
 import { formatLocalizedDurationMs } from "./components.js";
@@ -22,6 +24,8 @@ type RuntimeData = {
     coordination: CoordinationProjection;
     context: ContextProjection;
   } | null;
+  runPage?: RunPage | null;
+  runPageError?: { code?: string; message: string } | null;
   summary: any;
   eventNextCursor?: string | null;
   storageDiagnostic?: any;
@@ -74,6 +78,17 @@ function statusLabel(value: unknown) {
   const status = String(value || "unknown");
   const key = `runtime.status_${status}`;
   return t(key) === key ? status : t(key);
+}
+
+function executionModeLabel(value: unknown) {
+  const mode = String(value || "unknown");
+  const key = `runtime.mode_${mode}`;
+  return t(key) === key ? mode : t(key);
+}
+
+function recordedRunTime(label: string, value: number | null) {
+  const rendered = value == null ? t("runtime.not_recorded") : timeLabel(value);
+  return `<span data-runtime-run-time="${escapeHtml(label)}"><strong>${escapeHtml(label)}:</strong> ${value == null ? escapeHtml(rendered) : `<time datetime="${escapeHtml(dateTime(value))}">${escapeHtml(rendered)}</time>`}</span>`;
 }
 
 function durationLabel(value: number | null) {
@@ -435,7 +450,31 @@ function renderWorkOverview(data: RuntimeData) {
   return `<section class="runtime-work-overview" data-runtime-work-overview aria-labelledby="runtime-work-overview-title"><div class="runtime-work-goal"><div class="runtime-overview-section-heading"><div><h3 id="runtime-work-overview-title">${t("runtime.goal_title")}</h3><p>${t("runtime.goal_description")}</p></div>${goal ? `<span class="runtime-status runtime-status-${escapeHtml(statusClass(goal.status))}">${escapeHtml(statusLabel(goal.status))}</span>` : ""}</div><h4>${escapeHtml(goalTitle.text)}</h4>${goalDescription ? `<p>${escapeHtml(goalDescription.text)}</p>` : ""}${fullGoalNarrative}${!goal ? `<p class="runtime-notice">${escapeHtml(t("runtime.goal_not_recorded_detail"))}</p>` : ""}</div><div class="runtime-work-progress"><div class="runtime-overview-section-heading"><div><h3>${t("runtime.progress_title")}</h3><p>${escapeHtml(progressSentence)}</p></div><strong class="runtime-progress-ratio">${escapeHtml(`${count(model.completedTasks)} / ${count(model.taskTotal)}`)}</strong></div><div class="runtime-progress-track" role="progressbar" aria-label="${escapeHtml(t("runtime.progress_title"))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${ratio}"><span style="width:${ratio}%"></span></div>${boundedNote}</div>${renderWorkStructure(model)}<div class="runtime-work-overview-grid">${renderContextResult(data, model)}${renderOverviewTaskTable(model)}</div><span data-runtime-overview-end aria-hidden="true"></span></section>`;
 }
 
-function renderExecutionProjection(data: RuntimeData) {
+function renderExecutionRun(entry: any) {
+  const run = entry.run;
+  if (run.kind !== "session-turn") {
+    return `<li class="runtime-card runtime-run"><strong>${escapeHtml(entityLabel(run, run.id))}</strong><span>${escapeHtml(run.status || t("runtime.unknown"))}</span>${entry.childSession ? `<a href="${escapeHtml(sessionHref(entry.childSession))}">${escapeHtml(entry.childSession.sessionId)}</a>` : ""}${evidenceButton("run", run.id)}</li>`;
+  }
+  const turnIdentity = run.turnId || t("runtime.not_recorded");
+  const evidence = provenanceLabel(run.provenance);
+  return `<li class="runtime-card runtime-run runtime-session-turn" data-runtime-run-kind="session-turn" data-runtime-turn-id="${escapeHtml(run.turnId || "")}"><strong>${escapeHtml(t("runtime.session_turn"))}</strong><span data-runtime-run-status="${escapeHtml(String(run.status || "unknown"))}">${escapeHtml(`${t("runtime.execution_status")}: ${statusLabel(run.status)}`)}</span><span data-runtime-run-mode="${escapeHtml(String(run.mode || "unknown"))}">${escapeHtml(`${t("runtime.execution_mode")}: ${executionModeLabel(run.mode)}`)}</span><span data-runtime-turn-identity>${escapeHtml(`${t("runtime.turn_identity")}: ${turnIdentity}`)}</span><div class="runtime-run-times">${recordedRunTime(t("runtime.turn_start"), run.timeStart)}${recordedRunTime(t("runtime.turn_end"), run.timeEnd)}</div><small data-runtime-run-evidence>${escapeHtml(`${t("runtime.evidence")}: ${evidence}`)}</small>${evidenceButton("run", run.id)}</li>`;
+}
+
+export function renderRuntimeRunPage(page: RunPage) {
+  const revision = page.revision?.value || t("runtime.not_recorded");
+  const range = page.total
+    ? t("runtime.run_range", { start: count(page.range.start), end: count(page.range.end), total: count(page.total) })
+    : t("runtime.no_runs");
+  const refreshHref = `/${encodeURIComponent(page.focus.provider)}/session/${encodeURIComponent(page.focus.sessionId)}?runtimeLens=execution`;
+  return `<section class="runtime-projection-group runtime-run-page" data-runtime-run-page data-runtime-run-page-provider="${escapeHtml(page.focus.provider)}" data-runtime-run-page-session-id="${escapeHtml(page.focus.sessionId)}" data-runtime-run-page-revision="${escapeHtml(revision)}" data-runtime-run-page-limit="${page.pageSize || DEFAULT_RUN_PAGE_SIZE}"><div class="runtime-run-page-heading"><div><h3>${t("runtime.runs")}</h3><span class="runtime-run-page-range" data-runtime-run-range>${escapeHtml(range)}</span></div><a class="btn" data-runtime-runs-refresh href="${escapeHtml(refreshHref)}">${escapeHtml(t("runtime.refresh_runs"))}</a></div><p class="runtime-run-page-note" data-runtime-run-page-note>${escapeHtml(t("runtime.run_page_latest_note"))}</p><small class="runtime-run-page-revision" data-runtime-run-revision>${escapeHtml(`${t("runtime.snapshot_label")}: ${revision}`)}</small>${page.runs.length ? `<ul data-runtime-run-list>${page.runs.map(renderExecutionRun).join("")}</ul>` : `<p class="runtime-empty">${escapeHtml(t("runtime.no_runs"))}</p>`}<nav class="runtime-pagination runtime-run-pagination" aria-label="${escapeHtml(t("runtime.run_pagination"))}"><button type="button" class="btn" data-runtime-runs-previous data-runtime-runs-cursor="${escapeHtml(page.previousCursor || "")}" ${page.previousCursor ? "" : "disabled"}>${t("runtime.previous")}</button><button type="button" class="btn" data-runtime-runs-next data-runtime-runs-cursor="${escapeHtml(page.nextCursor || "")}" ${page.nextCursor ? "" : "disabled"}>${t("runtime.next")}</button></nav></section>`;
+}
+
+function renderRuntimeRunPageError(error: { message: string }, provider: string, sessionId: string) {
+  const refreshHref = `/${encodeURIComponent(provider)}/session/${encodeURIComponent(sessionId)}?runtimeLens=execution`;
+  return `<section class="runtime-projection-group runtime-run-page" data-runtime-run-page-error><div class="runtime-run-page-heading"><h3>${t("runtime.runs")}</h3></div><p class="runtime-notice" data-runtime-run-page-error-message>${escapeHtml(error.message)}</p><a class="btn" href="${escapeHtml(refreshHref)}">${escapeHtml(t("runtime.refresh_runs"))}</a></section>`;
+}
+
+function renderExecutionProjection(data: RuntimeData, provider: string, sessionId: string) {
   const projection = data.projections?.execution;
   if (!projection) return `<section class="runtime-lens"><p class="runtime-empty">${t("runtime.not_recorded")}</p></section>`;
   const actors = projection.actors || [];
@@ -461,7 +500,7 @@ function renderExecutionProjection(data: RuntimeData) {
     <div class="runtime-section-heading"><div><h2 id="runtime-execution-title">${t("runtime.execution_title")}</h2><p>${t("runtime.execution_description")}</p></div>${renderProjectionCoverage(projection)}</div>
     <div class="runtime-projection-overview"><span>${escapeHtml(`${count(actors.length)} ${t("runtime.actors")}`)}</span><span>${escapeHtml(`${count(runs.length)} ${t("runtime.runs")}`)}</span><span>${escapeHtml(`${count(usage.requestCount)} ${t("runtime.usage_records")}`)}</span></div>
     <section class="runtime-projection-group"><h3>${t("runtime.actors")}</h3>${actors.length ? `<ul>${actors.map((entry) => `<li class="runtime-card"><strong>${escapeHtml(entityLabel(entry.actor, entry.actor.id))}</strong><span>${escapeHtml(entry.actor.kind || t("runtime.unknown"))}</span></li>`).join("")}</ul>` : `<p class="runtime-empty">${t("runtime.not_recorded")}</p>`}</section>
-    <section class="runtime-projection-group"><h3>${t("runtime.runs")}</h3>${runs.length ? `<ul>${runs.map((entry) => `<li class="runtime-card runtime-run"><strong>${escapeHtml(entityLabel(entry.run, entry.run.id))}</strong><span>${escapeHtml(entry.run.status || t("runtime.unknown"))}</span>${entry.childSession ? `<a href="${escapeHtml(sessionHref(entry.childSession))}">${escapeHtml(entry.childSession.sessionId)}</a>` : ""}${evidenceButton("run", entry.run.id)}</li>`).join("")}</ul>` : `<p class="runtime-empty">${t("runtime.not_recorded")}</p>`}</section>
+    ${data.runPage ? renderRuntimeRunPage(data.runPage) : data.runPageError ? renderRuntimeRunPageError(data.runPageError, provider, sessionId) : `<section class="runtime-projection-group"><h3>${t("runtime.runs")}</h3>${runs.length ? `<ul>${runs.map(renderExecutionRun).join("")}</ul>` : `<p class="runtime-empty">${t("runtime.not_recorded")}</p>`}</section>`}
     <section class="runtime-usage-summary" data-runtime-usage-summary data-runtime-usage-complete="${usageComplete ? "true" : "false"}" data-runtime-usage-truncated="${projection.truncated ? "true" : "false"}"><h3>${t("runtime.usage")}</h3><p><span data-runtime-usage-request-count="${escapeHtml(String(usage.requestCount))}">${escapeHtml(`${requestLabel}: ${count(usage.requestCount)}`)}</span> · <span data-runtime-usage-total="${escapeHtml(usage.total == null ? "" : String(usage.total))}">${escapeHtml(`${totalLabel}: ${usageValue(usage.total)}`)}</span></p><small>${escapeHtml(componentValues.map(([label, value]) => `${label}: ${usageValue(value as number | null)}`).join(" · "))} · ${escapeHtml(usageComplete ? t("runtime.complete") : t("runtime.incomplete"))}</small>${usageNotice}</section>
   </section>`;
 }
@@ -527,12 +566,13 @@ function renderContextProjection(data: RuntimeData) {
   </section>`;
 }
 
-function renderEvidenceData(protocol: SessionProtocol | null, v3: SessionProtocolV3 | null = null) {
+function renderEvidenceData(protocol: SessionProtocol | null, v3: SessionProtocolV3 | null = null, runPage: RunPage | null = null) {
   return {
     goals: (v3?.goals || []).slice(0, 100),
     tasks: (protocol?.tasks || []).slice(0, 100),
     actors: (v3?.actors || []).slice(0, 100),
     runs: (protocol?.agentRuns || []).slice(0, 100),
+    runPageRuns: runPage ? runPage.runs.map((entry) => entry.run) : [],
     coordinations: (v3?.coordination || []).slice(0, 100),
     artifacts: (protocol?.contextArtifacts || []).slice(0, 100),
     relationships: (protocol?.relationships || []).slice(0, 100)
@@ -562,10 +602,10 @@ export function renderRuntimeWorkbench(data: RuntimeData, provider: string, sess
     ${notices}
     <div class="runtime-lens-tabs" role="tablist" aria-label="${escapeHtml(t("runtime.lenses_label"))}">${[ ["work", t("runtime.lens_work")], ["execution", t("runtime.lens_execution")], ["coordination", t("runtime.lens_coordination")], ["context", t("runtime.lens_context")] ].map(([id, label], index) => `<button id="runtime-lens-tab-${id}" type="button" role="tab" data-runtime-lens="${id}" aria-controls="runtime-lens-${id}" aria-selected="${index === 0 ? "true" : "false"}" tabindex="${index === 0 ? "0" : "-1"}">${label}</button>`).join("")}</div>
     <div id="runtime-lens-work" class="runtime-lens-panel" role="tabpanel" aria-labelledby="runtime-lens-tab-work" data-runtime-panel="work" tabindex="0">${renderWorkOverview(data)}</div>
-    <div id="runtime-lens-execution" class="runtime-lens-panel" role="tabpanel" aria-labelledby="runtime-lens-tab-execution" data-runtime-panel="execution" tabindex="0" hidden>${renderExecutionProjection(data)}</div>
+    <div id="runtime-lens-execution" class="runtime-lens-panel" role="tabpanel" aria-labelledby="runtime-lens-tab-execution" data-runtime-panel="execution" tabindex="0" hidden>${renderExecutionProjection(data, provider, sessionId)}</div>
     <div id="runtime-lens-coordination" class="runtime-lens-panel" role="tabpanel" aria-labelledby="runtime-lens-tab-coordination" data-runtime-panel="coordination" tabindex="0" hidden>${renderCoordinationProjection(data)}</div>
     <div id="runtime-lens-context" class="runtime-lens-panel" role="tabpanel" aria-labelledby="runtime-lens-tab-context" data-runtime-panel="context" tabindex="0" hidden>${renderContextProjection(data)}</div>
-    <script type="application/json" data-runtime-evidence>${jsonScript(renderEvidenceData(protocol, data.v3 || null))}</script>
+    <script type="application/json" data-runtime-evidence>${jsonScript(renderEvidenceData(protocol, data.v3 || null, data.runPage || null))}</script>
     <dialog class="runtime-evidence-drawer" data-runtime-drawer aria-labelledby="runtime-drawer-title"><form method="dialog"><button type="submit" class="runtime-drawer-close" aria-label="${escapeHtml(t("runtime.evidence_close"))}">×</button></form><h2 id="runtime-drawer-title">${t("runtime.evidence_title")}</h2><p data-runtime-drawer-summary></p><dl data-runtime-drawer-details></dl></dialog>
   </section>`;
 }

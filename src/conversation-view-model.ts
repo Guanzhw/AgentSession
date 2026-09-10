@@ -315,7 +315,7 @@ export function deriveConversationView(input: ConversationViewInput): Conversati
   const runIdsWithTask = new Set<string>();
   for (const entry of execution.runs || []) {
     runsById.set(entry.run.id, entry.run);
-    if (entry.run.taskId) runIdsWithTask.add(entry.run.taskId);
+    if (entry.run.kind !== "session-turn" && entry.run.taskId) runIdsWithTask.add(entry.run.taskId);
   }
 
   // One card per run, plus one per task that has no run, in deterministic
@@ -332,6 +332,7 @@ export function deriveConversationView(input: ConversationViewInput): Conversati
   };
   for (const entry of execution.runs || []) {
     const run = entry.run;
+    if (run.kind === "session-turn") continue;
     const task = run.taskId ? tasksById.get(run.taskId) : null;
     const linkedActors = [...(actorRunsByRun.get(run.id) || [])].map((actorId) => actorsById.get(actorId)).filter(Boolean);
     const name = linkedActors[0]?.name ?? run.agent ?? (task ? assigneeOf(task) || null : null) ?? null;

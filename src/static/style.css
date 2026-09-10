@@ -5689,6 +5689,13 @@ pre code.hljs {
 .runtime-task-children { display: grid; gap: 8px; margin: 9px 0 0 13px; }
 .runtime-run { margin-top: 8px; padding: 9px; }
 .runtime-run p { margin: 4px 0; }
+.runtime-run-times { display: grid; gap: 4px; width: 100%; font-size: 12px; }
+.runtime-run-page { display: grid; gap: 8px; }
+.runtime-run-page-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+.runtime-run-page-heading h3 { margin: 0; }
+.runtime-run-page-range,
+.runtime-run-page-revision { color: var(--text-muted); font-size: 11px; }
+.runtime-run-pagination { justify-content: flex-start; margin-top: 4px; }
 .runtime-session-edge-list { display: grid; gap: 8px; margin: 14px 0 0; padding: 0; list-style: none; }
 .runtime-session-graph { display: grid; gap: 7px; max-height: 320px; overflow: auto; margin-top: 14px; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: color-mix(in srgb, var(--bg-secondary) 84%, var(--bg-primary)); }
 .runtime-session-tree, .runtime-session-tree ul { margin: 0; padding-left: 18px; list-style: none; }

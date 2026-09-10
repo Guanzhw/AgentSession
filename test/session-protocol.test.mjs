@@ -169,6 +169,41 @@ test("event and relationship factories validate enums and provenance", () => {
   assert.throws(() => capabilityDescriptor("full", "invented"), TypeError);
 });
 
+test("AgentRun supports explicitly unknown session-turn execution evidence", () => {
+  const run = agentRun({
+    id: "turn-run", sessionId: "s", taskId: null, status: "unknown", mode: "unknown",
+    kind: "session-turn", turnId: "turn-42", agent: null, model: null, childSessionId: null,
+    timeStart: 100, timeEnd: null, provenance: recorded("turn")
+  });
+  assert.equal(run.kind, "session-turn");
+  assert.equal(run.turnId, "turn-42");
+  assert.throws(() => agentRun({ ...run, kind: "other" }), TypeError);
+  assert.throws(() => agentRun({ ...run, turnId: 42 }), TypeError);
+  assert.throws(() => agentRun({ ...run, status: "maybe" }), TypeError);
+  assert.throws(() => agentRun({ ...run, mode: "maybe" }), TypeError);
+});
+
+test("shared validator preserves unknown run state while rejecting malformed turn fields", () => {
+  const descriptor = {
+    ref: { provider: "fixture", sessionId: "s" }, state: "running", title: "s",
+    directory: null, timeCreated: 1, timeUpdated: 2, messageCount: 0, tokenCount: null,
+    metadata: null
+  };
+  const validRun = {
+    id: "turn-run", sessionId: "s", taskId: null, status: "unknown", mode: "unknown",
+    kind: "session-turn", turnId: null, agent: null, model: null, childSessionId: null,
+    timeStart: 1, timeEnd: null, provenance: recorded("turn")
+  };
+  const valid = validateSessionProtocol({ sessionId: "s", version: 2, session: descriptor,
+    events: [], relationships: [], tasks: [], agentRuns: [validRun], contextArtifacts: [], branches: [], revision: "fixture" });
+  assert.equal(valid.ok, true);
+  const invalid = validateSessionProtocol({ sessionId: "s", version: 2, session: descriptor,
+    events: [], relationships: [], tasks: [], agentRuns: [{ ...validRun, kind: "other", turnId: 42 }], contextArtifacts: [], branches: [], revision: "fixture" });
+  assert.equal(invalid.ok, false);
+  assert.ok(invalid.errors.some((error) => error.code === "RUN_KIND_INVALID"));
+  assert.ok(invalid.errors.some((error) => error.code === "RUN_TURN_ID_INVALID"));
+});
+
 test("lifecycle observations are event kinds, never artifact fields or plain-compaction events", () => {
   assert.equal(isContextLifecycleEventKind("memory.generated"), true);
   assert.equal(isContextLifecycleEventKind("memory.consolidated"), true);

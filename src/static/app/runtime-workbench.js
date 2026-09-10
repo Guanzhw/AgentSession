@@ -25,7 +25,10 @@ export function initRuntimeWorkbench({ ft, formatText }) {
     if (focus) tab.focus();
   };
 
-  selectLens(tabs.find((tab) => tab.getAttribute("aria-selected") === "true") || tabs[0]);
+  const requestedLens = new URLSearchParams(window.location.search).get("runtimeLens");
+  selectLens(tabs.find((tab) => tab.dataset.runtimeLens === requestedLens)
+    || tabs.find((tab) => tab.getAttribute("aria-selected") === "true")
+    || tabs[0]);
   root.querySelector("[role='tablist']")?.addEventListener("click", (event) => {
     const tab = event.target.closest("[data-runtime-lens]");
     if (tab) selectLens(tab);
@@ -50,11 +53,65 @@ export function initRuntimeWorkbench({ ft, formatText }) {
     return [value.fidelity, value.sourceType, value.sourceId].filter(Boolean).join(" · ") || ft("runtime_provenance_unknown");
   };
 
+  const showRunPageError = (page, message) => {
+    page.replaceChildren();
+    const heading = document.createElement("div");
+    heading.className = "runtime-run-page-heading";
+    const title = document.createElement("h3");
+    title.textContent = ft("runtime_runs");
+    heading.append(title);
+    const notice = document.createElement("p");
+    notice.className = "runtime-notice";
+    notice.dataset.runtimeRunPageErrorMessage = "true";
+    notice.textContent = message || ft("runtime_run_page_stale");
+    const refresh = document.createElement("a");
+    refresh.className = "btn";
+    refresh.href = `/${encodeURIComponent(page.dataset.runtimeRunPageProvider || "")}/session/${encodeURIComponent(page.dataset.runtimeRunPageSessionId || "")}?runtimeLens=execution`;
+    refresh.textContent = ft("runtime_refresh_runs");
+    page.append(heading, notice, refresh);
+  };
+
+  root.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-runtime-runs-previous],[data-runtime-runs-next]");
+    if (!button || button.disabled) return;
+    const page = button.closest("[data-runtime-run-page]");
+    if (!page) return;
+    const cursor = button.dataset.runtimeRunsCursor || "";
+    const provider = page.dataset.runtimeRunPageProvider || root.dataset.runtimeProvider || "";
+    const sessionId = page.dataset.runtimeRunPageSessionId || root.dataset.runtimeSessionId || "";
+    const limit = page.dataset.runtimeRunPageLimit || "50";
+    if (!provider || !sessionId || !cursor || page.dataset.runtimeRunPageBusy === "true") return;
+    page.dataset.runtimeRunPageBusy = "true";
+    page.querySelectorAll("[data-runtime-runs-previous],[data-runtime-runs-next]").forEach((item) => { item.disabled = true; });
+    try {
+      const params = new URLSearchParams({ cursor, limit });
+      const response = await fetch(`/api/${encodeURIComponent(provider)}/session/${encodeURIComponent(sessionId)}/runtime/execution/runs?${params}`);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data?.ok !== true || typeof data.html !== "string") {
+        showRunPageError(page, data?.error || ft("runtime_run_page_stale"));
+        return;
+      }
+      const holder = document.createElement("div");
+      holder.innerHTML = data.html;
+      const replacement = holder.firstElementChild;
+      if (!replacement) throw new Error("run page response is empty");
+      page.replaceWith(replacement);
+      if (Array.isArray(data.evidenceRuns)) evidence.runPageRuns = data.evidenceRuns;
+    } catch (error) {
+      console.error("Unable to load recorded run page:", error);
+      showRunPageError(page, ft("runtime_run_page_stale"));
+    }
+  });
+
   const openEvidence = (kind, id) => {
     const drawer = root.querySelector("[data-runtime-drawer]");
     if (!drawer) return;
-    const item = Array.isArray(evidence[kind + "s"])
-      ? evidence[kind + "s"].find((entry) => String(entry.id) === String(id))
+    const candidates = [
+      ...(kind === "run" && Array.isArray(evidence.runPageRuns) ? evidence.runPageRuns : []),
+      ...(Array.isArray(evidence[kind + "s"]) ? evidence[kind + "s"] : [])
+    ];
+    const item = candidates.length
+      ? candidates.find((entry) => String(entry.id) === String(id))
       : null;
     const title = drawer.querySelector("#runtime-drawer-title");
     const summary = drawer.querySelector("[data-runtime-drawer-summary]");

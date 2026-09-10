@@ -144,9 +144,11 @@ function protocolSummary(protocol: SessionProtocol) {
   const statuses = new Set<TaskStatus>();
   for (const run of runs) {
     agentRunCount += 1;
-    if (run.mode === "subagent") subagentRunCount += 1;
-    else if (BACKGROUND_MODES.has(run.mode)) backgroundRunCount += 1;
-    statuses.add(run.status);
+    if (run.kind !== "session-turn") {
+      if (run.mode === "subagent") subagentRunCount += 1;
+      else if (BACKGROUND_MODES.has(run.mode)) backgroundRunCount += 1;
+    }
+    if (run.status !== "unknown") statuses.add(run.status);
   }
   for (const task of protocol.tasks || []) {
     statuses.add(task.status);

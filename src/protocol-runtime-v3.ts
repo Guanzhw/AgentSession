@@ -2,6 +2,7 @@ import type {
   AgentRun,
   ContextArtifact,
   ProtocolEntityRef,
+  ProtocolRevision,
   SessionProtocol,
   SessionRef,
   SessionRelationship,
@@ -103,6 +104,21 @@ export interface ExecutionRun extends EntityRef {
   run: PublicRun;
   task: ProtocolEntityRef | null;
   childSession: SessionRef | null;
+}
+
+export const DEFAULT_RUN_PAGE_SIZE = 50;
+export const MAX_RUN_PAGE_SIZE = 100;
+
+export interface RunPage {
+  version: 3;
+  focus: SessionRef;
+  revision: ProtocolRevision | null;
+  pageSize: number;
+  runs: ExecutionRun[];
+  total: number;
+  range: { start: number; end: number };
+  previousCursor: string | null;
+  nextCursor: string | null;
 }
 
 /** Known-lower-bound classification of recorded origin slices; never an authoritative partition by itself. */
@@ -412,6 +428,132 @@ function publicTask(task: Task): PublicTask {
 function publicRun(run: AgentRun): PublicRun {
   const { metadata: _metadata, ...value } = run;
   return value;
+}
+
+type RunPageCursor = {
+  direction: "after" | "before";
+  runId: string;
+  pageSize: number;
+};
+
+function encodeRunPageCursor(focus: SessionRef, cursor: RunPageCursor): string {
+  return Buffer.from(JSON.stringify({
+    provider: focus.provider,
+    sessionId: focus.sessionId,
+    direction: cursor.direction,
+    runId: cursor.runId,
+    pageSize: cursor.pageSize
+  }), "utf8").toString("base64url");
+}
+
+function decodeRunPageCursor(cursor: string | null | undefined, focus: SessionRef): RunPageCursor | null {
+  if (!cursor) return null;
+  try {
+    const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+    if (value?.provider !== focus.provider
+      || value?.sessionId !== focus.sessionId
+      || (value?.direction !== "after" && value?.direction !== "before")
+      || typeof value?.runId !== "string"
+      || !value.runId
+      || !Number.isSafeInteger(value?.pageSize)
+      || value.pageSize < 1
+      || value.pageSize > MAX_RUN_PAGE_SIZE) {
+      throw new Error("mismatch");
+    }
+    return { direction: value.direction, runId: value.runId, pageSize: value.pageSize };
+  } catch {
+    throw new ProtocolProjectionError("run cursor is invalid, stale, or belongs to another session; refresh to browse the current runs.");
+  }
+}
+
+function runPageLimit(value: unknown): number {
+  if (value === undefined || value === null || value === "") return DEFAULT_RUN_PAGE_SIZE;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > MAX_RUN_PAGE_SIZE) {
+    throw new ProtocolProjectionError(`run limit must be an integer between 1 and ${MAX_RUN_PAGE_SIZE}.`);
+  }
+  return parsed;
+}
+
+export interface RunPageOptions {
+  cursor?: string | null;
+  limit?: number | string | null;
+}
+
+// Finalized protocol snapshots are immutable. Keep only a weakly-held index
+// for each snapshot so cursor resolution is O(1) without retaining history.
+const runPageIndexes = new WeakMap<object, Map<string, number>>();
+
+function runPageIndex(protocol: SessionProtocolV3): Map<string, number> {
+  const existing = runPageIndexes.get(protocol);
+  if (existing) return existing;
+  const index = new Map<string, number>();
+  protocol.agentRuns.forEach((run, position) => index.set(run.id, position));
+  runPageIndexes.set(protocol, index);
+  return index;
+}
+
+/**
+ * Browse only the finalized run collection. This intentionally bypasses the
+ * shared execution projection budget: actors and request usage stay owned by
+ * the overview while every recorded run remains reachable by direct slicing.
+ */
+export function queryRunPage(protocol: SessionProtocolV3, options: RunPageOptions = {}): RunPage {
+  const focus = focusOf(protocol);
+  const cursor = decodeRunPageCursor(options.cursor, focus);
+  const suppliedLimit = options.limit !== undefined && options.limit !== null && options.limit !== "";
+  const requestedPageSize = suppliedLimit ? runPageLimit(options.limit) : null;
+  if (cursor && requestedPageSize !== null && requestedPageSize !== cursor.pageSize) {
+    throw new ProtocolProjectionError("run limit conflicts with the cursor page size; use the cursor page size or refresh to start a new page.");
+  }
+  const pageSize = cursor?.pageSize || requestedPageSize || DEFAULT_RUN_PAGE_SIZE;
+  const total = protocol.agentRuns.length;
+  let start = 0;
+  let end = Math.min(pageSize, total);
+  if (cursor) {
+    const index = runPageIndex(protocol);
+    const anchor = index.get(cursor.runId);
+    if (anchor === undefined) {
+      throw new ProtocolProjectionError("run cursor anchor is no longer present; refresh to browse the current runs.");
+    }
+    if (cursor.direction === "after") {
+      start = anchor + 1;
+      end = Math.min(start + pageSize, total);
+      if (start >= total && total > 0) {
+        throw new ProtocolProjectionError("run cursor reached the end of the current recorded runs; refresh to browse the current runs.");
+      }
+    } else {
+      end = anchor;
+      if (end <= 0) {
+        throw new ProtocolProjectionError("run cursor reached the beginning of the current recorded runs; refresh to browse the current runs.");
+      }
+      start = Math.max(0, end - pageSize);
+    }
+  }
+  const runs = protocol.agentRuns.slice(start, end).map((run) => ({
+    run: publicRun(run),
+    ref: runRef(run),
+    task: run.taskId ? entityRef("task", run.taskId) : null,
+    childSession: run.childSessionId ? { provider: focus.provider, sessionId: run.childSessionId } : null
+  }));
+  const nextOffset = start + runs.length;
+  const firstRun = runs[0]?.run;
+  const lastRun = runs[runs.length - 1]?.run;
+  return {
+    version: 3,
+    focus,
+    revision: protocol.revision ?? null,
+    pageSize,
+    runs,
+    total,
+    range: { start: runs.length ? start + 1 : 0, end: start + runs.length },
+    previousCursor: firstRun && start > 0
+      ? encodeRunPageCursor(focus, { direction: "before", runId: firstRun.id, pageSize })
+      : null,
+    nextCursor: lastRun && nextOffset < total
+      ? encodeRunPageCursor(focus, { direction: "after", runId: lastRun.id, pageSize })
+      : null
+  };
 }
 
 function publicActor(actor: Actor): PublicActor {

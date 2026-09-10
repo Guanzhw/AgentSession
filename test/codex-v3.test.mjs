@@ -3,7 +3,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { buildCodexSessionProtocol, buildCodexSessionProtocolV3 } from "../dist/src/providers/codex/protocol.js";
-import { extractMeta, parseSession, recordsToMessages } from "../dist/src/providers/codex/parser.js";
+import { classifyCodexRecordProvenance, extractMeta, parseSession, recordsToMessages } from "../dist/src/providers/codex/parser.js";
 import { finalizeSessionProtocol, protocolRevision } from "../dist/src/providers/shared/session-protocol.js";
 import { finalizeSessionProtocolV3 } from "../dist/src/providers/shared/session-protocol-v3.js";
 import { clearProtocolRuntimeCache, getRuntimeProtocolV3 } from "../dist/src/protocol-runtime.js";
@@ -356,6 +356,157 @@ test("Codex close_agent preserves requested, unknown, completed, and failed stat
     const v3 = finalizeSessionProtocolV3(buildCodexSessionProtocolV3({ session, messages, records, children: [] }, base));
     assert.equal(v3.coordination.find((value) => value.correlationId === `close-${label}`)?.state, expected, label);
   }
+});
+
+function turnLifecycleFixture(extraRecords = []) {
+  const records = [
+    { type: "session_meta", ordinal: 0, timestamp: ts("09:59:00"), payload: { id: "turn-root" } },
+    { type: "event_msg", ordinal: 1, timestamp: ts("10:00:00"), payload: { type: "task_started", turn_id: "turn-success", started_at: 100, model_context_window: 32000, collaboration_mode_kind: "default" } },
+    { type: "event_msg", ordinal: 2, timestamp: ts("10:00:01"), payload: { type: "task_complete", turn_id: "turn-success", started_at: 100, completed_at: 101 } },
+    { type: "event_msg", ordinal: 3, timestamp: ts("10:01:00"), payload: { type: "task_started", turn_id: "turn-failed", started_at: 200, collaboration_mode_kind: "default" } },
+    { type: "event_msg", ordinal: 4, timestamp: ts("10:01:01"), payload: { type: "task_complete", turn_id: "turn-failed", started_at: 200, completed_at: 202, error: { message: "secret error body", codex_error_info: "usage_limit_exceeded" } } },
+    { type: "event_msg", ordinal: 5, timestamp: ts("10:02:00"), payload: { type: "task_started", turn_id: "turn-aborted", started_at: 300, collaboration_mode_kind: "default" } },
+    { type: "event_msg", ordinal: 6, timestamp: ts("10:02:01"), payload: { type: "turn_aborted", turn_id: "turn-aborted", started_at: 300, completed_at: 303, reason: "interrupted" } },
+    { type: "event_msg", ordinal: 7, timestamp: ts("10:03:00"), payload: { type: "task_started", turn_id: "turn-open", started_at: 400, collaboration_mode_kind: "default" } },
+    { type: "response_item", ordinal: 8, timestamp: ts("10:03:01"), payload: { type: "message", role: "user", id: "turn-user", content: [{ type: "input_text", text: "turn prompt" }], internal_chat_message_metadata_passthrough: { turn_id: "turn-open", content_item_kinds: ["user.text"] } } },
+    { type: "token_usage_record", ordinal: 9, timestamp: ts("10:03:02"), payload: { response_id: "response-success", turn_id: "turn-success", usage: { input_tokens: 10, output_tokens: 4, total_tokens: 14 } } },
+    { type: "token_usage_record", ordinal: 10, timestamp: ts("10:03:03"), payload: { response_id: "response-open", turn_id: "turn-open", usage: { input_tokens: 20, output_tokens: 5, total_tokens: 25 } } },
+    ...extraRecords
+  ];
+  const session = rawSession("turn-root", null, null, 1000, 5000);
+  const input = { session, messages: recordsToMessages(records, "turn-root"), records, children: [] };
+  const base = finalizeSessionProtocol(buildCodexSessionProtocol(input), {
+    provider: "codex", session, revision: protocolRevision("turn-fixture")
+  });
+  return { input, base, v3: finalizeSessionProtocolV3(buildCodexSessionProtocolV3(input, base)) };
+}
+
+test("Codex v3 maps successful, failed, aborted, and open owned turn runs", () => {
+  const { v3 } = turnLifecycleFixture();
+  assert.equal(v3.validation?.ok, true);
+  const runs = new Map(v3.agentRuns.filter((run) => run.kind === "session-turn").map((run) => [run.turnId, run]));
+  assert.deepEqual([...runs].map(([turnId, run]) => [turnId, run.status]), [
+    ["turn-success", "completed"],
+    ["turn-failed", "failed"],
+    ["turn-aborted", "cancelled"],
+    ["turn-open", "unknown"]
+  ]);
+  assert.equal(runs.get("turn-success")?.timeStart, 100000);
+  assert.equal(runs.get("turn-success")?.timeEnd, 101000);
+  assert.equal(runs.get("turn-success")?.mode, "unknown");
+  assert.equal(runs.get("turn-success")?.taskId, null);
+  assert.equal(runs.get("turn-success")?.childSessionId, null);
+  assert.equal(runs.get("turn-failed")?.failureReason, "usage_limit_exceeded");
+  assert.equal(runs.get("turn-aborted")?.cancellationReason, "interrupted");
+  assert.equal(runs.get("turn-open")?.timeEnd, null);
+  assert.equal(JSON.stringify(runs.get("turn-failed")).includes("secret error body"), false, "error message must not be copied");
+});
+
+test("Codex v3 lifecycle events retain native kinds, run anchors, and source order", () => {
+  const { base, v3, input } = turnLifecycleFixture();
+  const lifecycle = v3.events.filter((event) => ["task_started", "task_complete", "turn_aborted"].includes(event.kind));
+  assert.deepEqual(lifecycle.map((event) => event.kind), ["task_started", "task_complete", "task_started", "task_complete", "task_started", "turn_aborted", "task_started"]);
+  assert.deepEqual(lifecycle.map((event) => event.providerData.sourceSequence), [1000, 2000, 3000, 4000, 5000, 6000, 7000]);
+  assert.deepEqual(lifecycle.map((event) => event.sequence), lifecycle.map((event) => v3.events.indexOf(event) + 1));
+  assert.equal(lifecycle[0].normalizedKind, "run.started");
+  assert.equal(lifecycle[1].normalizedKind, "run.completed");
+  assert.equal(lifecycle[3].normalizedKind, "run.failed");
+  assert.equal(lifecycle[5].normalizedKind, "run.cancelled");
+  assert.ok(lifecycle.every((event) => event.kind !== "session.end" && event.kind !== "session.completed"));
+  assert.equal(lifecycle[0].runId, v3.agentRuns.find((run) => run.turnId === "turn-success")?.id);
+  assert.equal(lifecycle[1].runId, lifecycle[0].runId);
+  assert.equal(lifecycle[5].runId, v3.agentRuns.find((run) => run.turnId === "turn-aborted")?.id);
+  assert.equal(lifecycle[3].providerData.errorCategory, "usage_limit_exceeded");
+  assert.equal(lifecycle[3].providerData.reason, null);
+  assert.equal(JSON.stringify(lifecycle[3].providerData).includes("secret error body"), false);
+  assert.deepEqual(
+    v3.events.filter((event) => !event.kind.startsWith("task_") && event.kind !== "turn_aborted").map(({ id, kind, timestamp }) => ({ id, kind, timestamp })),
+    base.events.map(({ id, kind, timestamp }) => ({ id, kind, timestamp }))
+  );
+  assert.equal(v3.events.length, base.events.length + lifecycle.length);
+  assert.equal(v3.events.every((event) => event.sessionId === input.session.id), true);
+});
+
+test("Codex v3 binds request usage only to an unambiguous turn run", () => {
+  const ambiguous = [
+    { type: "event_msg", ordinal: 11, timestamp: ts("10:04:00"), payload: { type: "task_started", turn_id: "turn-ambiguous", started_at: 500, collaboration_mode_kind: "default" } },
+    { type: "event_msg", ordinal: 12, timestamp: ts("10:04:01"), payload: { type: "task_started", turn_id: "turn-ambiguous", started_at: 501, collaboration_mode_kind: "default" } },
+    { type: "token_usage_record", ordinal: 13, timestamp: ts("10:04:02"), payload: { response_id: "response-ambiguous", turn_id: "turn-ambiguous", usage: { input_tokens: 30, output_tokens: 6, total_tokens: 36 } } }
+  ];
+  const { v3 } = turnLifecycleFixture(ambiguous);
+  assert.equal(v3.validation?.ok, true);
+  const usage = v3.usageRecords.find((record) => record.id.endsWith(":response-success"));
+  const openUsage = v3.usageRecords.find((record) => record.id.endsWith(":response-open"));
+  const ambiguousUsage = v3.usageRecords.find((record) => record.id.endsWith(":response-ambiguous"));
+  assert.ok(usage?.runId);
+  assert.ok(openUsage?.runId);
+  assert.equal(ambiguousUsage?.runId, null);
+  assert.equal(v3.usageRecords.length, 3);
+  assert.deepEqual(v3.usageRecords.map((record) => record.id), [
+    "usage:turn-root:response-success", "usage:turn-root:response-open", "usage:turn-root:response-ambiguous"
+  ]);
+  assert.deepEqual(v3.usageRecords.map((record) => record.tokens.total), [14, 25, 36]);
+  const ambiguousRuns = v3.agentRuns.filter((run) => run.turnId === "turn-ambiguous");
+  assert.equal(ambiguousRuns.length, 2);
+  assert.ok(ambiguousRuns.every((run) => run.status === "unknown"));
+});
+
+test("Codex v3 keeps conflicting and orphan terminals as unknown evidence", () => {
+  const { v3 } = turnLifecycleFixture([
+    { type: "event_msg", ordinal: 11, timestamp: ts("10:04:00"), payload: { type: "task_started", turn_id: "turn-conflict", started_at: 800 } },
+    { type: "event_msg", ordinal: 12, timestamp: ts("10:04:01"), payload: { type: "task_complete", turn_id: "turn-conflict", started_at: 800, completed_at: 801 } },
+    { type: "event_msg", ordinal: 13, timestamp: ts("10:04:02"), payload: { type: "turn_aborted", turn_id: "turn-conflict", started_at: 800, completed_at: 802, reason: "interrupted" } },
+    { type: "event_msg", ordinal: 14, timestamp: ts("10:04:03"), payload: { type: "task_complete", turn_id: "turn-orphan", started_at: 900, completed_at: 901 } }
+  ]);
+  const conflictRun = v3.agentRuns.find((run) => run.turnId === "turn-conflict");
+  assert.ok(conflictRun);
+  assert.equal(conflictRun.status, "unknown");
+  assert.equal(conflictRun.timeEnd, null);
+  assert.equal(conflictRun.metadata.pairing, "ambiguous-terminal");
+  const conflictEvents = v3.events.filter((event) => event.turnId === "turn-conflict");
+  assert.equal(conflictEvents.length, 3);
+  assert.equal(conflictEvents[1].runId, null);
+  assert.equal(conflictEvents[2].runId, null);
+  assert.equal(conflictEvents[1].providerData.pairing, "ambiguous-terminal");
+  assert.equal(v3.agentRuns.some((run) => run.turnId === "turn-orphan"), false);
+  const orphan = v3.events.find((event) => event.turnId === "turn-orphan");
+  assert.equal(orphan?.runId, null);
+  assert.equal(orphan?.providerData.pairing, "orphan-terminal");
+});
+
+test("Codex v3 turn run identity remains stable when the transcript only grows", () => {
+  const first = turnLifecycleFixture();
+  const second = turnLifecycleFixture([{ type: "event_msg", ordinal: 14, timestamp: ts("10:05:00"), payload: { type: "task_complete", turn_id: "turn-open", started_at: 400, completed_at: 405 } }]);
+  const firstRuns = first.v3.agentRuns.filter((run) => run.kind === "session-turn").map((run) => ({ id: run.id, turnId: run.turnId, timeStart: run.timeStart }));
+  const secondRuns = second.v3.agentRuns.filter((run) => run.kind === "session-turn").map((run) => ({ id: run.id, turnId: run.turnId, timeStart: run.timeStart }));
+  assert.deepEqual(secondRuns.slice(0, firstRuns.length), firstRuns);
+  assert.equal(second.v3.agentRuns.find((run) => run.turnId === "turn-open")?.status, "completed");
+});
+
+test("Codex v3 turn mapping consumes only records owned after the inherited parent boundary", () => {
+  const parentRecords = [
+    { type: "session_meta", ordinal: 0, payload: { id: "parent" } },
+    { type: "event_msg", ordinal: 1, payload: { type: "task_started", turn_id: "turn-inherited", started_at: 600 } }
+  ];
+  const childRecords = [
+    { type: "session_meta", ordinal: 0, payload: { id: "child", parent_thread_id: "parent" } },
+    { type: "session_meta", ordinal: 1, payload: { id: "parent" } },
+    { type: "event_msg", ordinal: 2, payload: { type: "task_started", turn_id: "turn-inherited", started_at: 600 } },
+    { type: "response_item", ordinal: 3, payload: { type: "agent_message", id: "new-task", content: [{ type: "input_text", text: "Message Type: NEW_TASK\nTask name: child-task" }] } },
+    { type: "event_msg", ordinal: 4, payload: { type: "task_started", turn_id: "turn-owned", started_at: 700, collaboration_mode_kind: "default" } },
+    { type: "event_msg", ordinal: 5, payload: { type: "task_complete", turn_id: "turn-owned", started_at: 700, completed_at: 701 } }
+  ];
+  const provenance = classifyCodexRecordProvenance(childRecords, parentRecords);
+  assert.equal(provenance.get(childRecords[2]), "inherited-parent-context");
+  const ownedRecords = childRecords.filter((record) => provenance.get(record) === "session");
+  const session = rawSession("child", "parent", null, 1000, 2000);
+  const base = finalizeSessionProtocol(buildCodexSessionProtocol({ session, messages: [], records: ownedRecords, children: [] }), {
+    provider: "codex", session, revision: protocolRevision("owned-turns")
+  });
+  const v3 = finalizeSessionProtocolV3(buildCodexSessionProtocolV3({ session, messages: [], records: ownedRecords, children: [] }, base));
+  assert.equal(v3.validation?.ok, true);
+  assert.deepEqual(v3.agentRuns.filter((run) => run.kind === "session-turn").map((run) => run.turnId), ["turn-owned"]);
+  assert.ok(!v3.events.some((event) => event.turnId === "turn-inherited"));
 });
 
 test("Codex v3 excludes self-authored FINAL_ANSWER envelopes regardless of parent path", () => {

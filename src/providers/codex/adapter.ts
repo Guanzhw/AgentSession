@@ -154,10 +154,10 @@ function generateCodexViews(sessionId: string) {
 }
 
 const codexProtocolCapabilities = {
-  sessionEvents: { support: "partial" as const, provenance: "derived" as const, details: "derived message envelopes plus recorded compaction and NEW_TASK lifecycle events" },
+  sessionEvents: { support: "partial" as const, provenance: "derived" as const, details: "derived message envelopes plus recorded compaction, NEW_TASK, and session-turn lifecycle events" },
   sessionRelationships: { support: "partial" as const, provenance: "derived" as const, details: "recorded incoming thread spawns plus derived outgoing edges and forks" },
   tasks: { support: "partial" as const, provenance: "derived" as const, details: "recorded NEW_TASK envelopes plus spawn tool-call derivations bound via sub_agent_activity and call-output evidence" },
-  agentRuns: { support: "partial" as const, provenance: "derived" as const, details: "child rollout sessions bound to spawn calls through recorded activity/call-output evidence" },
+  agentRuns: { support: "partial" as const, provenance: "derived" as const, details: "recorded session-owned turn runs plus child rollout sessions bound to spawn calls through recorded activity/call-output evidence" },
   contextArtifacts: { support: "full" as const, provenance: "recorded" as const, details: "compaction records, metadata-only summaries" },
   branches: { support: "none" as const, provenance: "derived" as const, details: "Codex fork lineage remains a session relationship" }
 };

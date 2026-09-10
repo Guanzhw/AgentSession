@@ -202,6 +202,25 @@ test("protocol stats never double-count Task and AgentRun", () => {
   assert.equal(stats.taskCount + stats.agentRunCount, 5, "kept as separate dimensions");
 });
 
+test("session turns stay out of delegated-run counts and active status chips", () => {
+  const adapter = protocolAdapter("codex-turn", []);
+  const getSessionProtocol = adapter.getSessionProtocol;
+  adapter.getSessionProtocol = (sessionId) => {
+    const protocol = getSessionProtocol.call(adapter, sessionId);
+    protocol.agentRuns.push({
+      id: "turn-run", sessionId, taskId: null, status: "unknown", mode: "unknown",
+      kind: "session-turn", turnId: "turn-1", agent: null, model: null, childSessionId: null,
+      timeStart: 1, timeEnd: null, provenance: { fidelity: "recorded", sourceType: "fixture" }
+    });
+    return protocol;
+  };
+  const stats = deriveSessionListStats(adapter, { id: "p-turn", provider: "codex-turn" });
+  assert.equal(stats.agentRunCount, 4, "session turns remain executions");
+  assert.equal(stats.subagentRunCount, 2);
+  assert.equal(stats.backgroundRunCount, 1);
+  assert.deepEqual(stats.activeStatuses, ["running", "blocked"]);
+});
+
 test("unsupported adapters and unknown sessions degrade to base stats", () => {
   const base = deriveSessionListStats(plainAdapter("pi"), { id: "g1", provider: "pi", message_count: 3, token_count: 10, time_created: 1000, time_updated: 2000 });
   assert.equal(base.protocol, false);

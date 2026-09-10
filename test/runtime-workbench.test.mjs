@@ -6,7 +6,7 @@ import { renderRuntimeEvents, renderRuntimeWorkbench } from "../dist/src/views/r
 import { getLocale, setLocale } from "../dist/src/i18n.js";
 import { renderSessionPage } from "../dist/src/views/session.js";
 import { finalizeSessionProtocolV3, upgradeSessionProtocolV2 } from "../dist/src/providers/shared/session-protocol-v3.js";
-import { projectContext, projectCoordination, projectExecution, projectWork } from "../dist/src/protocol-runtime-v3.js";
+import { projectContext, projectCoordination, projectExecution, projectWork, queryRunPage } from "../dist/src/protocol-runtime-v3.js";
 import { summarizeEvent } from "../dist/src/event-summary.js";
 import { formatLocalizedDurationMs } from "../dist/src/views/components.js";
 
@@ -107,6 +107,80 @@ test("Work Graph renders four domains with Work selected and keeps event evidenc
   assert.match(html, /Context after compaction/);
   assert.match(html, /Retain &lt;the result&gt; and discard copied history/);
   assert.doesNotMatch(html, /Retain <the result>/);
+});
+
+test("Execution SSR renders localized session-turn identity, lifecycle, times, and evidence", () => {
+  const runtime = fixtureRuntime();
+  runtime.v3.agentRuns.push({
+    id: "turn-run", sessionId: "runtime-1", taskId: null, status: "unknown", mode: "unknown",
+    kind: "session-turn", turnId: "turn-42", agent: null, model: null, childSessionId: null,
+    timeStart: 4000, timeEnd: null, provenance
+  });
+  runtime.projections.execution = projectExecution(runtime.v3, { maxItems: 100 });
+  let html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  assert.match(html, /data-runtime-run-kind="session-turn"/);
+  assert.match(html, /data-runtime-turn-id="turn-42"/);
+  assert.match(html, /Session turn/);
+  assert.match(html, /Turn: turn-42/);
+  assert.match(html, /Status: unknown/);
+  assert.match(html, /Mode: unknown/);
+  assert.match(html, /Start:/);
+  assert.match(html, /End:<\/strong> Not recorded/);
+  assert.match(html, /data-runtime-run-evidence/);
+  const previousLocale = getLocale();
+  setLocale("zh");
+  try {
+    html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+    assert.match(html, /会话轮次/);
+    assert.match(html, /轮次: turn-42/);
+    assert.match(html, /状态: 未知/);
+    assert.match(html, /模式: 未知/);
+    assert.match(html, /结束:<\/strong> 未记录/);
+  } finally {
+    setLocale(previousLocale);
+  }
+});
+
+test("Execution run browsing renders a complete page range, stable cursor hooks, and current-page evidence", () => {
+  const runtime = fixtureRuntime();
+  runtime.v3.agentRuns = Array.from({ length: 53 }, (_, index) => ({
+    ...runtime.v3.agentRuns[0], id: `run-${index + 1}`, timeStart: index + 1, timeEnd: index + 2
+  }));
+  runtime.projections.execution = projectExecution(runtime.v3, { maxItems: 100 });
+  runtime.runPage = queryRunPage(runtime.v3);
+  let html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  assert.match(html, /Runs 1–50 of 53/);
+  assert.match(html, /data-runtime-run-page-limit="50"/);
+  assert.match(html, /data-runtime-runs-next data-runtime-runs-cursor="[^"]+"/);
+  assert.match(html, /data-runtime-runs-previous[^>]*disabled/);
+  assert.match(html, /data-runtime-run-page-revision/);
+  assert.match(html, /"runPageRuns":\[/);
+  const third = queryRunPage(runtime.v3, { cursor: runtime.runPage.nextCursor });
+  runtime.runPage = third;
+  html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  assert.match(html, /Runs 51–53 of 53/);
+  assert.match(html, /data-runtime-runs-next[^>]*disabled/);
+  assert.match(html, /data-runtime-runs-previous data-runtime-runs-cursor="[^"]+"/);
+
+  const source = readFileSync(path.join(process.cwd(), "src", "static", "app", "runtime-workbench.js"), "utf8");
+  assert.match(source, /runtime\/execution\/runs/);
+  assert.match(source, /runtimeRunPageBusy/);
+  assert.match(source, /replaceWith\(replacement\)/);
+  assert.match(source, /runPageRuns/);
+  assert.match(source, /runPageRuns\) \? evidence\.runPageRuns : \[\]\),[\s\S]*evidence\[kind \+ "s"\]/);
+  assert.match(source, /runtimeLens=execution/);
+  const style = readFileSync(path.join(process.cwd(), "src", "static", "style.css"), "utf8");
+  assert.match(style, /\.runtime-run-page-heading/);
+  assert.match(style, /\.runtime-run-pagination/);
+});
+
+test("stale run-page rendering preserves the other Runtime lenses and offers an Execution refresh", () => {
+  const runtime = fixtureRuntime();
+  runtime.runPageError = { code: "invalid_input", message: "run cursor is stale; refresh to browse the current runs." };
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  assert.match(html, /data-runtime-work-overview/);
+  assert.match(html, /data-runtime-run-page-error-message/);
+  assert.match(html, /href="\/fixture\/session\/runtime-1\?runtimeLens=execution"/);
 });
 
 test("P7 renders long-lived context assets once in recorded scope order", () => {

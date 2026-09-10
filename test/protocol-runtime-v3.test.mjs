@@ -6,7 +6,8 @@ import {
   projectCoordination,
   projectExecution,
   projectWork,
-  ProtocolProjectionError
+  ProtocolProjectionError,
+  queryRunPage
 } from "../dist/src/protocol-runtime-v3.js";
 import { upgradeSessionProtocolV2 } from "../dist/src/providers/shared/session-protocol-v3.js";
 
@@ -74,6 +75,91 @@ test("v3 projections are typed, canonical, and bounded", () => {
   assert.deepEqual(context.origins[0].usage, { kind: "usage", id: "request-1" });
   assert.deepEqual(context.originSources[0].sourceSession, { provider: "fixture", sessionId: "parent" });
   assert.deepEqual(context.usageCoverage, protocol.coverage.usage);
+});
+
+test("Execution projection preserves session-turn classification and unknown fields", () => {
+  const protocol = v3Fixture();
+  protocol.agentRuns.push({
+    id: "turn-run", sessionId: "root", taskId: null, status: "unknown", mode: "unknown",
+    kind: "session-turn", turnId: "turn-42", agent: null, model: "model", childSessionId: null,
+    timeStart: 3, timeEnd: null, provenance
+  });
+  const execution = projectExecution(protocol, { maxItems: 100 });
+  const turn = execution.runs.find(({ run }) => run.id === "turn-run")?.run;
+  assert.deepEqual({ kind: turn.kind, turnId: turn.turnId, status: turn.status, mode: turn.mode }, {
+    kind: "session-turn", turnId: "turn-42", status: "unknown", mode: "unknown"
+  });
+});
+
+test("run-only browsing slices the deterministic run order and traverses the final short page", () => {
+  const protocol = v3Fixture();
+  protocol.revision = { value: "fixture-revision", source: "provider" };
+  protocol.agentRuns = Array.from({ length: 123 }, (_, index) => ({
+    ...protocol.agentRuns[0], id: `run-${index + 1}`, timeStart: index + 1, timeEnd: index + 2
+  }));
+  const first = queryRunPage(protocol);
+  assert.deepEqual(first.range, { start: 1, end: 50 });
+  assert.equal(first.total, 123);
+  assert.equal(first.pageSize, 50);
+  assert.equal(first.focus.sessionId, "root");
+  assert.equal(first.revision?.value, "fixture-revision");
+  assert.equal(first.previousCursor, null);
+  assert.ok(first.nextCursor);
+
+  const second = queryRunPage(protocol, { cursor: first.nextCursor });
+  const third = queryRunPage(protocol, { cursor: second.nextCursor });
+  assert.deepEqual(second.range, { start: 51, end: 100 });
+  assert.deepEqual(third.range, { start: 101, end: 123 });
+  assert.equal(third.runs.length, 23);
+  assert.equal(third.nextCursor, null);
+  assert.deepEqual(queryRunPage(protocol, { cursor: third.previousCursor }).range, { start: 51, end: 100 });
+  assert.deepEqual(queryRunPage(protocol, { cursor: second.previousCursor }).range, { start: 1, end: 50 });
+  assert.deepEqual([...first.runs, ...second.runs, ...third.runs].map(({ run }) => run.id), protocol.agentRuns.map((run) => run.id));
+  assert.throws(() => queryRunPage(protocol, { limit: 101 }), /between 1 and 100/);
+  assert.throws(() => queryRunPage(protocol, { cursor: "not-a-cursor" }), /invalid, stale/);
+  const empty = queryRunPage({ ...protocol, agentRuns: [] });
+  assert.deepEqual(empty.range, { start: 0, end: 0 });
+  assert.equal(empty.previousCursor, null);
+  assert.equal(empty.nextCursor, null);
+});
+
+test("run-only browsing follows anchors across insertion and status changes", () => {
+  const protocol = v3Fixture();
+  protocol.revision = { value: "revision-a", source: "provider" };
+  protocol.agentRuns = Array.from({ length: 4 }, (_, index) => ({ ...protocol.agentRuns[0], id: `run-${index + 1}` }));
+  const page = queryRunPage(protocol, { limit: 2 });
+  const changed = {
+    ...protocol,
+    revision: { value: "revision-b", source: "provider" },
+    agentRuns: [{ ...protocol.agentRuns[0], id: "new-child" }, ...protocol.agentRuns.map((run, index) => index === 2 ? { ...run, status: "failed" } : run)]
+  };
+  const continued = queryRunPage(changed, { cursor: page.nextCursor });
+  assert.deepEqual(continued.runs.map(({ run }) => run.id), ["run-3", "run-4"]);
+  assert.equal(continued.runs[0].run.status, "failed");
+  assert.equal(continued.revision?.value, "revision-b");
+  assert.deepEqual(queryRunPage(changed, { cursor: continued.previousCursor }).runs.map(({ run }) => run.id), ["run-1", "run-2"]);
+
+  assert.throws(() => queryRunPage(changed, { cursor: page.nextCursor, limit: 1 }), /conflicts with the cursor page size/);
+  const otherSession = { ...changed, session: { ...changed.session, ref: { provider: "fixture", sessionId: "other" } }, sessionId: "other" };
+  assert.throws(() => queryRunPage(otherSession, { cursor: page.nextCursor }), /another session/);
+});
+
+test("run-only browsing reports a missing anchor and does not fall back to an offset", () => {
+  const protocol = v3Fixture();
+  protocol.agentRuns = Array.from({ length: 3 }, (_, index) => ({ ...protocol.agentRuns[0], id: `run-${index + 1}` }));
+  const page = queryRunPage(protocol, { limit: 2 });
+  const changed = { ...protocol, agentRuns: [protocol.agentRuns[0], protocol.agentRuns[2]] };
+  assert.throws(() => queryRunPage(changed, { cursor: page.nextCursor }), /anchor is no longer present/);
+});
+
+test("run-only browsing sees an append after an existing anchor", () => {
+  const protocol = v3Fixture();
+  protocol.agentRuns = Array.from({ length: 2 }, (_, index) => ({ ...protocol.agentRuns[0], id: `run-${index + 1}` }));
+  const page = queryRunPage(protocol, { limit: 1 });
+  const changed = { ...protocol, agentRuns: [...protocol.agentRuns, { ...protocol.agentRuns[0], id: "run-3" }] };
+  const next = queryRunPage(changed, { cursor: page.nextCursor });
+  assert.deepEqual(next.runs.map(({ run }) => run.id), ["run-2"]);
+  assert.deepEqual(queryRunPage(changed, { cursor: next.nextCursor }).runs.map(({ run }) => run.id), ["run-3"]);
 });
 
 test("v2 upgrade keeps new projection domains explicit and does not invent facts", () => {

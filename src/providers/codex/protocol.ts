@@ -924,6 +924,61 @@ function recordTimestamp(record: Row): number | null {
   return Number.isFinite(ts) ? ts : null;
 }
 
+function codexEpochMillis(value: unknown): number | null {
+  const seconds = asNumber(value);
+  return seconds === null ? null : seconds * 1000;
+}
+
+function normalizedCategory(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const category = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return category || null;
+}
+
+function codexErrorCategory(error: unknown): string | null {
+  if (!error || typeof error !== "object" || Array.isArray(error)) return null;
+  const value = error as Row;
+  return normalizedCategory(firstString(value.codex_error_info));
+}
+
+function codexTurnReason(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+type CodexTurnLifecycleType = "task_started" | "task_complete" | "turn_aborted";
+
+interface CodexTurnLifecycle {
+  record: Row;
+  recordIndex: number;
+  type: CodexTurnLifecycleType;
+  turnId: string | null;
+  startedAt: number | null;
+  completedAt: number | null;
+  hasError: boolean;
+  errorCategory: string | null;
+  reason: string | null;
+}
+
+function codexTurnLifecycle(record: Row, recordIndex: number): CodexTurnLifecycle | null {
+  if (record.type !== "event_msg") return null;
+  const type = record.payload?.type;
+  if (type !== "task_started" && type !== "task_complete" && type !== "turn_aborted") return null;
+  const error = record.payload?.error;
+  const hasError = type === "task_complete"
+    && Boolean(error && typeof error === "object" && !Array.isArray(error));
+  return {
+    record,
+    recordIndex,
+    type,
+    turnId: firstString(record.payload?.turn_id),
+    startedAt: codexEpochMillis(record.payload?.started_at),
+    completedAt: codexEpochMillis(record.payload?.completed_at),
+    hasError,
+    errorCategory: hasError ? codexErrorCategory(error) : null,
+    reason: type === "turn_aborted" ? codexTurnReason(record.payload?.reason) : null
+  };
+}
+
 /**
  * Build native Session Protocol v3 facts over a finalized v2 snapshot for one
  * Codex session. `base` must be the finalized v2 snapshot built from the same
@@ -1257,6 +1312,149 @@ export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: Ses
     });
   });
 
+  // --- Session-owned turn lifecycle ----------------------------------------
+  // A turn run is identified only by the provider-recorded pair
+  // (turn_id, started_at). This identity survives appended records and keeps
+  // repeated turn ids from being joined by timestamp proximity. A duplicate
+  // start or terminal remains an explicit ambiguity: its evidence is emitted,
+  // but no terminal is attached to the run.
+  const turnLifecycle = input.records
+    .map((record, recordIndex) => codexTurnLifecycle(record, recordIndex))
+    .filter((value): value is CodexTurnLifecycle => value !== null);
+  const turnKey = (value: Pick<CodexTurnLifecycle, "turnId" | "startedAt">): string | null => (
+    value.turnId && value.startedAt !== null ? `${value.turnId}\u0000${value.startedAt}` : null
+  );
+  const startsByKey = new Map<string, CodexTurnLifecycle[]>();
+  const terminalsByKey = new Map<string, CodexTurnLifecycle[]>();
+  for (const lifecycle of turnLifecycle) {
+    const key = turnKey(lifecycle);
+    if (!key) continue;
+    const target = lifecycle.type === "task_started" ? startsByKey : terminalsByKey;
+    const values = target.get(key) ?? [];
+    values.push(lifecycle);
+    target.set(key, values);
+  }
+
+  const turnRunIdByKey = new Map<string, string>();
+  const uniqueTurnRunIdByTurn = new Map<string, string | null>();
+  const turnRuns: ReturnType<typeof agentRun>[] = [];
+  for (const [key, starts] of startsByKey) {
+    const start = starts[0];
+    const terminals = terminalsByKey.get(key) ?? [];
+    const terminal = starts.length === 1 && terminals.length === 1 ? terminals[0] : null;
+    const runId = `run:turn:${start.turnId}:${start.startedAt}`;
+    const pairing = starts.length !== 1
+      ? "ambiguous-start"
+      : terminals.length > 1
+        ? "ambiguous-terminal"
+        : terminal
+          ? "matched"
+          : "open";
+    const status = terminal?.type === "task_complete"
+      ? (terminal.hasError ? "failed" : "completed")
+      : terminal?.type === "turn_aborted"
+        ? "cancelled"
+        : "unknown";
+    const errorCategory = terminal?.hasError
+      ? terminal.errorCategory ?? "unknown"
+      : null;
+    const cancellationReason = terminal?.type === "turn_aborted"
+      ? terminal.reason ?? "unknown"
+      : null;
+    const timeEnd = terminal ? terminal.completedAt : null;
+    turnRunIdByKey.set(key, runId);
+    const priorTurnRun = uniqueTurnRunIdByTurn.get(start.turnId!);
+    uniqueTurnRunIdByTurn.set(
+      start.turnId!,
+      priorTurnRun === undefined ? (starts.length === 1 ? runId : null) : null
+    );
+    turnRuns.push(agentRun({
+      id: runId,
+      sessionId,
+      taskId: null,
+      status,
+      mode: "unknown",
+      kind: "session-turn",
+      turnId: start.turnId,
+      agent: null,
+      model: null,
+      childSessionId: null,
+      childSessionAvailable: null,
+      outcome: status === "unknown" ? null : status,
+      failureReason: errorCategory,
+      cancellationReason,
+      timeStart: start.startedAt,
+      timeEnd,
+      provenance: {
+        fidelity: "recorded",
+        sourceType: "codex.event_msg:task_started",
+        sourceId: String(start.record.ordinal ?? start.recordIndex)
+      },
+      metadata: {
+        pairing,
+        collaborationModeKind: firstString(start.record.payload?.collaboration_mode_kind),
+        modelContextWindow: asNumber(start.record.payload?.model_context_window),
+        terminalType: terminal?.type ?? null,
+        errorCategory,
+        cancellationReason
+      }
+    }));
+  }
+
+  const turnEvents: ReturnType<typeof sessionEvent>[] = turnLifecycle.map((lifecycle) => {
+    const key = turnKey(lifecycle);
+    const starts = key ? startsByKey.get(key) ?? [] : [];
+    const terminals = key ? terminalsByKey.get(key) ?? [] : [];
+    const uniqueStart = lifecycle.type === "task_started" && starts.length === 1;
+    const uniqueTerminal = lifecycle.type !== "task_started" && starts.length === 1 && terminals.length === 1;
+    const runId = key && (uniqueStart || uniqueTerminal) ? turnRunIdByKey.get(key) ?? null : null;
+    const sourceId = String(lifecycle.record.ordinal ?? lifecycle.recordIndex);
+    const errorCategory = lifecycle.hasError
+      ? lifecycle.errorCategory ?? "unknown"
+      : null;
+    const phase = lifecycle.type === "task_started"
+      ? "started" as const
+      : lifecycle.type === "task_complete"
+        ? errorCategory ? "failed" as const : "completed" as const
+        : undefined;
+    return sessionEvent({
+      id: `event:turn:${lifecycle.type}:${sourceId}`,
+      sessionId,
+      timestamp: lifecycle.type === "task_started"
+        ? lifecycle.startedAt ?? recordTimestamp(lifecycle.record)
+        : lifecycle.completedAt ?? recordTimestamp(lifecycle.record),
+      kind: lifecycle.type,
+      category: "run",
+      normalizedKind: lifecycle.type === "task_started"
+        ? "run.started"
+        : lifecycle.type === "task_complete"
+          ? lifecycle.hasError ? "run.failed" : "run.completed"
+          : "run.cancelled",
+      phase,
+      turnId: lifecycle.turnId,
+      runId,
+      correlationId: lifecycle.turnId,
+      provenance: {
+        fidelity: "recorded",
+        sourceType: `codex.event_msg:${lifecycle.type}`,
+        sourceId
+      },
+      providerData: {
+        sourceSequence: sourceSequence(lifecycle.recordIndex, 0),
+        lifecycle: lifecycle.type,
+        pairing: !key
+          ? "unidentifiable"
+          : lifecycle.type === "task_started"
+            ? starts.length === 1 ? "unique-start" : "ambiguous-start"
+            : uniqueTerminal ? "matched" : starts.length === 0 ? "orphan-terminal" : "ambiguous-terminal",
+        startedAt: lifecycle.startedAt,
+        completedAt: lifecycle.completedAt,
+        errorCategory,
+        reason: lifecycle.reason
+      }
+    });
+  });
+
   // --- Request usage --------------------------------------------------------
   const usageRecords: UsageRecord[] = [];
   const ownedUsageRecords = new Set(codexOwnedTokenUsageRecords(input.records));
@@ -1286,13 +1484,15 @@ export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: Ses
     const total = firstNumber(usage.total_tokens, usage.total) ?? input + (cacheRead ?? 0) + (cacheWrite ?? 0) + output + reasoning;
     const sourceId = firstString(record.payload?.response_id, record.payload?.turn_id)
       ?? String(record.ordinal ?? index);
+    const usageTurnId = firstString(record.payload?.turn_id);
+    const usageRunId = usageTurnId ? uniqueTurnRunIdByTurn.get(usageTurnId) ?? null : null;
     usageRecords.push(usageRecord({
       id: `usage:${sessionId}:${sourceId}`,
       scope: "request",
       sessionRef: ownRef,
       timestamp: recordTimestamp(record),
       model: activeModel,
-      runId: null,
+      runId: usageRunId,
       eventId: null,
       turnId: firstString(record.payload?.turn_id),
       tokens: { input, cacheRead, cacheWrite, output, reasoning, total },
@@ -1320,10 +1520,10 @@ export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: Ses
     sessionId,
     version: 3,
     session: base.session,
-    events: base.events,
+    events: sequenceEventsBySource([...base.events, ...turnEvents]),
     relationships: base.relationships,
     tasks: base.tasks,
-    agentRuns: base.agentRuns,
+    agentRuns: [...base.agentRuns, ...turnRuns],
     contextArtifacts: base.contextArtifacts,
     branches: base.branches,
     revision: base.revision,

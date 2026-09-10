@@ -339,7 +339,9 @@ export function deriveWorkOverview(input: {
   const taskRuns = new Map<string, ExecutionProjection["runs"][number]["run"][]>();
   for (const relation of work.taskRuns) {
     const run = execution.runs.find((entry) => entityId(entry.ref) === entityId(relation.run))?.run;
-    if (!run) continue;
+    // Session-owned turns remain visible in Execution, but are not task
+    // executions and therefore must not affect task progress or elapsed time.
+    if (!run || run.kind === "session-turn") continue;
     const taskId = entityId(relation.task);
     if (!taskId) continue;
     const runs = taskRuns.get(taskId) || [];

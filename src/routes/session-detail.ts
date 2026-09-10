@@ -16,7 +16,7 @@ import {
 import { getResumeCommand } from "../resume.js";
 import { renderSessionPage } from "../views/session.js";
 import type { SessionProtocol } from "../providers/shared/session-protocol.js";
-import { renderRuntimeEvents, renderRuntimeWorkbench } from "../views/runtime-workbench.js";
+import { renderRuntimeEvents, renderRuntimeRunPage, renderRuntimeWorkbench } from "../views/runtime-workbench.js";
 import { renderProgressiveContent } from "../views/components.js";
 import { providerRenderContext } from "./provider-context.js";
 import { parseSessionNavigationContext } from "../navigation-context.js";
@@ -34,9 +34,10 @@ import {
   projectCoordination,
   projectExecution,
   projectWork,
-  ProtocolProjectionError
+  ProtocolProjectionError,
+  queryRunPage
 } from "../protocol-runtime-v3.js";
-import type { ProjectionOptions, V3Projection } from "../protocol-runtime-v3.js";
+import type { ProjectionOptions, RunPage, V3Projection } from "../protocol-runtime-v3.js";
 import type { SessionProtocolV3 } from "../providers/shared/session-protocol-v3.js";
 import { deriveConversationView } from "../conversation-view-model.js";
 
@@ -50,7 +51,7 @@ export function registerSessionDetail(
 ) {
   const { appConfig, providerMap, providerInfo } = deps;
 
-  const runtimeRenderData = (adapter: any, sessionId: string, session: Record<string, unknown>) => {
+  const runtimeRenderData = (adapter: any, sessionId: string, session: Record<string, unknown>, runPageOptions: { cursor?: string | null; limit?: string | null } = {}) => {
     try {
       const protocol = getRuntimeProtocol(adapter, sessionId, session);
       let v3: SessionProtocolV3;
@@ -63,9 +64,22 @@ export function registerSessionDetail(
         throw error;
       }
       const projectionOptions = { maxItems: 100 };
+      let runPage: RunPage | null = null;
+      let runPageError: { code: string; message: string } | null = null;
+      try {
+        runPage = queryRunPage(v3, runPageOptions);
+      } catch (error) {
+        if (error instanceof ProtocolProjectionError) {
+          runPageError = { code: error.code, message: error.message };
+        } else {
+          throw error;
+        }
+      }
       return {
         protocol: protocol as SessionProtocol,
         v3,
+        runPage,
+        runPageError,
         projections: {
           work: projectWork(v3, projectionOptions),
           execution: projectExecution(v3, projectionOptions),
@@ -80,6 +94,8 @@ export function registerSessionDetail(
       return {
         protocol: null,
         v3: null,
+        runPage: null,
+        runPageError: null,
         projections: null,
         summary: {
           version: 2,
@@ -91,9 +107,13 @@ export function registerSessionDetail(
         runtimeError: {
           code: error instanceof ProtocolRuntimeError
             ? error.code
+            : error instanceof ProtocolProjectionError
+              ? error.code
             : "runtime_unavailable",
           message: error instanceof ProtocolRuntimeError
             ? "Runtime protocol is unavailable for this session."
+            : error instanceof ProtocolProjectionError
+              ? error.message
             : "Runtime protocol could not be loaded."
         }
       };
@@ -148,7 +168,8 @@ export function registerSessionDetail(
     }
 
     const renderContext = providerRenderContext(providerSegment, providerInfo, adapter);
-    const navigationContext = parseSessionNavigationContext(new URL(req.url || "/", `http://localhost:${appConfig.port}`).searchParams.get("from"));
+    const pageUrl = new URL(req.url || "/", `http://localhost:${appConfig.port}`);
+    const navigationContext = parseSessionNavigationContext(pageUrl.searchParams.get("from"));
 
     try {
       const document = getSessionDocument(adapter, providerSegment, sessionId);
@@ -159,7 +180,10 @@ export function registerSessionDetail(
       const recentSessions = createSessionCatalog(adapter, providerSegment)
         .list({ limit: 30, offset: 0 }).sessions;
       const resumeCommand = getResumeCommand(adapter, sessionId, document.session.directory, appConfig.resumeCommands);
-      const runtime = runtimeRenderData(adapter, sessionId, document.session);
+      const runtime = runtimeRenderData(adapter, sessionId, document.session, {
+        cursor: pageUrl.searchParams.get("runCursor"),
+        limit: pageUrl.searchParams.get("runLimit")
+      });
       const conversationView = runtime.v3 && runtime.projections
         ? deriveConversationView({
             protocol: runtime.v3,
@@ -496,6 +520,37 @@ export function registerSessionDetail(
       }));
     } catch (error) {
       return runtimeError(res, error);
+    }
+  });
+
+  // Run-only browsing uses the finalized run collection and its own bound;
+  // actor, usage, and conversation projections remain unchanged.
+  app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/runtime\/execution\/runs$/, async (req: any, res: any, match: RegExpMatchArray) => {
+    const providerId = match[1];
+    const sessionId = safeDecodeId(match[2]);
+    const adapter = providerMap.get(providerId);
+    if (!adapter) {
+      const missing = missingProviderResponse(providerId);
+      return json(res, missing.body, missing.status);
+    }
+    if (!sessionId) return json(res, { ok: false, error: "Invalid session id" }, 404);
+    try {
+      const params = new URL(req.url || "/", `http://localhost:${appConfig.port}`).searchParams;
+      const page = queryRunPage(getRuntimeProtocolV3(adapter, sessionId), {
+        cursor: params.get("cursor"),
+        limit: params.get("limit")
+      });
+      return json(res, {
+        ok: true,
+        ...page,
+        html: renderRuntimeRunPage(page),
+        evidenceRuns: page.runs.map((entry) => entry.run)
+      });
+    } catch (error) {
+      if (error instanceof ProtocolProjectionError) {
+        return json(res, { ok: false, error: error.message, code: error.code }, 400);
+      }
+      return runtimeError(res, error, { protocolInvalid: true });
     }
   });
 

@@ -739,6 +739,24 @@ test("P2b bound card actions follow the recorded child ref rather than the part'
   assert.equal((card.match(/href="\/fixture\/session\/child-1"/g) || []).length, 1, "actions use the recorded card child exactly once");
 });
 
+test("P2b excludes only explicitly classified session turns from agent cards", () => {
+  const protocol = v3Fixture({
+    agentRuns: [
+      { id: "turn-run", sessionId: "root", taskId: null, status: "unknown", mode: "unknown", kind: "session-turn", turnId: "turn-42", agent: null, model: null, childSessionId: null, timeStart: 1100, timeEnd: null, provenance },
+      ...v3Fixture().agentRuns
+    ]
+  });
+  const view = deriveFixture({ protocol, work: projectWork(protocol), execution: projectExecution(protocol), coordination: projectCoordination(protocol), context: projectContext(protocol) });
+  assert.deepEqual(view.cards.map((card) => card.id), ["run:run-1"]);
+  assert.equal(view.cards.some((card) => card.id === "run:turn-run"), false);
+
+  const taskOnlyProtocol = v3Fixture({
+    agentRuns: [{ ...protocol.agentRuns[0], id: "turn-task-run", taskId: "task-1", kind: "session-turn", turnId: "turn-43", status: "unknown", mode: "unknown" }]
+  });
+  const taskOnly = deriveFixture({ protocol: taskOnlyProtocol, work: projectWork(taskOnlyProtocol), execution: projectExecution(taskOnlyProtocol), coordination: projectCoordination(taskOnlyProtocol), context: projectContext(taskOnlyProtocol) });
+  assert.deepEqual(taskOnly.cards.map((card) => card.id), ["task:task-1"], "a task card remains when its only run is a session turn");
+});
+
 test("P2b coordination assignment honors explicit identity and rejects ambiguous actor fallback", () => {
   const protocol = v3Fixture({
     tasks: [
