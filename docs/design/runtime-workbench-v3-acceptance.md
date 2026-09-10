@@ -1,6 +1,6 @@
 # Unified runtime workbench acceptance
 
-Status: production validation complete; final publication pending, 2026-09-11.
+Status: accepted and delivered, 2026-09-11.
 
 The [design](runtime-workbench-v3.md) defines the target. This checklist records
 real local cases and remaining evidence; prototype screenshots do not prove
@@ -94,7 +94,11 @@ missing parent sources, inherited reasoning/tool continuation and owned-scope
 isolation. Real sources contain no inherited assistant/tool rows, so that
 positive path is explicitly fixture-backed. `npm run review` and
 `npm run pre-push` passed. Real OpenCode E2E passed with empty browser errors.
-Final publication is the remaining delivery gate.
+Implementation shipped as `f1cf230`; local and remote SHA matched with a clean
+worktree. Linux Quality
+[34529043096](https://github.com/Guanzhw/AgentSession/actions/runs/34529043096)
+passed on Node 22.15.0 and 26.5.0. Independent final review found no blocking
+issue. This closes the production acceptance requirements for this redesign.
 
 ### Approval destination and combined validation, 2026-09-11
 
@@ -376,5 +380,5 @@ UI and Conversation changes still require their own acceptance below.
       inspector close/focus return, paging and cross-view navigation work.
 - [x] Full tests, governance/typecheck, real provider/API checks, browser E2E,
       server/browser error inspection and independent review pass.
-- [ ] Scoped commits pushed; remote SHA verified. Overall goal is not complete
-      until the full design, including Conversation disclosure, is accepted.
+- [x] Scoped implementation commits pushed; remote SHA verified. The full
+      design, including Conversation disclosure, is accepted.
