@@ -70,6 +70,12 @@ OpenClaw, and DeepSeek Harness (refreshed in S3 below).
   snapshot byte-for-byte with upstream envelope synthesis; keep alpha.3 and
   rc.8 readability regressions; record the unavailable credentialed live
   run (key auth failure) instead of live evidence.
+- [x] Refresh the compatibility snapshot to alpha.2/v3 (tag
+  `dsh-v0.1.5-alpha.2`, commit `b2e3b2a0…`): retain v0/v1/v2 regressions,
+  read the official native v3 fixture, validate system-surface ownership and
+  canonical replacements, accept PTC vocabulary, and reject retired or
+  predecessor required events. Local Windows DSH remains v0-only, so live v3
+  provider/API/browser evidence is explicitly fixture-bound.
 
 ## S4. Runtime Workbench
 

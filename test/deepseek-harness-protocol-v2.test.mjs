@@ -173,7 +173,7 @@ test("derived alpha.3 storage fixture normalizes provenance ranges and recorded 
 test("official alpha.5 checked-in snapshot projects into protocol v2 after envelope synthesis", () => {
   // Reproduce upstream parseSessionLog so the checked-in snapshot stays
   // byte-identical; the physical format itself is unchanged from alpha.3.
-  const fixturePath = path.join(process.cwd(), DSH_COMPATIBILITY_SNAPSHOT.fixture.local);
+  const fixturePath = path.join(process.cwd(), "test/fixtures/dsh-alpha5-fresh-round-trip.jsonl");
   const raw = readFileSync(fixturePath, "utf8");
   const rows = [];
   let nextSeq = 0;

@@ -267,7 +267,7 @@ const deepseekHarness = {
     localManagement: true
   },
   protocolCapabilities: {
-    sessionEvents: { support: "full", provenance: "recorded", details: "DSH alpha.2 v0/v1 frozen events plus v2 one-event-per-row log; v0/v1 packed rows are expanded at the read boundary" },
+    sessionEvents: { support: "full", provenance: "recorded", details: "DSH alpha.2 v0/v1 frozen events, v2 compatibility, and native v3 one-event-per-row logs; v0/v1 packed rows are expanded at the read boundary" },
     sessionRelationships: { support: "partial", provenance: "derived", details: "recorded header lineage and descriptors, with cross-session child edges resolved locally; native v3 keeps unbound children explicit" },
     tasks: { support: "partial", provenance: "derived", details: "native v3 goal/team task facts plus subagent descriptor and tool-workflow child evidence" },
     agentRuns: { support: "partial", provenance: "derived", details: "session-backed subagent and native v3 workflow child lifecycles when exact ids are available" },

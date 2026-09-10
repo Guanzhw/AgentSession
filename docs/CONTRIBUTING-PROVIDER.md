@@ -325,25 +325,26 @@ tools to AgentSession-MCP.
 For DSH, keep compatibility metadata synchronized with the checked-in snapshot:
 
 - repository `deepseek-ai/deepseek-harness`;
-- alpha.2 tag commit `82a5fd61a7cf5c293cec4bdff68f455398d685e9`;
-- tag `dsh-v0.1.3-alpha.2`;
-- package `@deepseek-ai/dsh@0.1.3-alpha.2`;
-- session format `2` (with frozen readable v0/v1 historical generations);
+- alpha.2 tag commit `b2e3b2a0125854567a4a5fcba75782e42fe84901`;
+- tag `dsh-v0.1.5-alpha.2`;
+- package `@deepseek-ai/dsh@0.1.5-alpha.2`;
+- session format `3` (with frozen readable v0/v1/v2 historical generations);
   current SQLite schema `null`, legacy schema `17`.
 
 JSONL is the primary backend. Test raw and multi-frame `.jsonl.zstd`, packed
 `text-chunks`/`reasoning-chunks`/`tool-call-chunks`, zero-based upstream
 sequence, range-encoded `sourceEventSeqs`, header identity, `request/header` and
 `request/context`,
-`session/end-seed`, v2 inherited marker cut, v0/v1 fork seed length, source-event citations, surface
+`session/end-seed`, v2/v3 inherited marker cut, v0/v1 fork seed length, source-event citations, surface
 replacement, compaction, cancellation/interruption, workflow/subagent facts,
 `agent/inbox/spliced`, Agent Teams member/task/mailbox events, `model/selection`,
-`subagent/model-selection-policy`, and `session-log-deepseek/delivery-accepted`.
+`subagent/model-selection-policy`, `session-log-deepseek/delivery-accepted`,
+`system/message`, and `tool/ptc-dispatch*`.
 These records are control/model/delivery facts, not ordinary messages. Preserve
 dangling references as unresolved diagnostics; never invent a readable child
 session. Keep the rc.8 fixture as a v0 readability regression; use small
-source-derived v1/v2 fixtures for generation and surface behavior. Upstream web
-snapshots may omit `seq`/`time` in their presentation form, while persisted v2
+source-derived v1/v2 fixtures plus the official v3 fixture for generation and surface behavior. Upstream web
+snapshots may omit `seq`/`time` in their presentation form, while persisted v2/v3
 rows carry the complete event envelope. Validate the released envelope/storage
 codec and bounded payload facts consumed by AgentSession; do not copy the full
 provider payload schema into the adapter.
@@ -359,7 +360,13 @@ with model-surface replacement state. Replay `goal/change` transitions using
 the released alpha.2 rules; an invalid replay yields no normalized goal and a
 bounded Work diagnostic while preserving every raw event. Native v3 retains
 valid zero-token legacy assistant settlements even though existing aggregate
-token-stat selection keeps its historical behavior.
+token-stat selection keeps its historical behavior. A parent-owned
+`subagent/catalog` is an exact direct-child discovery fact: project its
+recorded child id, creation time, mode, and label, plus a spawned/started
+observation; bind the child actor/session only when that child is present, and
+do not infer a Task or terminal Run. `deliverables/presented` remains a
+recorded event with its call id and bounded file metadata/count; it does not
+invent work entities.
 
 If legacy SQLite persistence or another known backend is detected but unsupported,
 return an explicit storage diagnostic naming the detected and expected schema.

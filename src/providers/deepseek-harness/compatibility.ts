@@ -1,15 +1,13 @@
 /**
  * Checked-in compatibility evidence for the newest official DSH release.
  *
- * Refresh 2026-09-08 (alpha.2): tag `dsh-v0.1.3-alpha.2`, commit
- * `82a5fd61a7cf5c293cec4bdff68f455398d685e9`. This is the first released
- * Session format v2 snapshot: v0/v1 retain their frozen seedLength + packed
- * rows, while v2 stores one event per JSONL row, uses isSeeded and tagged
- * end-seed inheritance, embeds Assistant streams, and admits the generated
- * alpha.2 event catalog. Reads are strictly read-only; no migration is
- * performed by AgentSession.
+ * Refresh 2026-09-10: tag `dsh-v0.1.5-alpha.2`, commit
+ * `b2e3b2a0125854567a4a5fcba75782e42fe84901`. Native Session format v3 keeps
+ * v0/v1/v2 readable and adds system/message surfaces, canonical replacement
+ * coordinates, and PTC vocabulary. Reads are strictly read-only; no migration
+ * is performed by AgentSession.
  */
-const CURRENT_BASE_REQUIRED_EVENT_TYPES = Object.freeze([
+const V2_BASE_REQUIRED_EVENT_TYPES = Object.freeze([
   "agent-preset/selected",
   "agent/inbox/spliced",
   "approval/asked",
@@ -62,16 +60,27 @@ const CURRENT_BASE_REQUIRED_EVENT_TYPES = Object.freeze([
   "web/deepseek-search-llm-request"
 ]);
 
-// The alpha.2 generated catalog includes the model/log-delivery facts below;
-// this bounded list is checked against the official known-event-types source.
+const V2_REQUIRED_EVENT_TYPES = Object.freeze([
+  ...V2_BASE_REQUIRED_EVENT_TYPES,
+  "model/selection",
+  "session-log-deepseek/delivery-accepted",
+  "subagent/model-selection-policy"
+]);
+// V3 preserves the V2 catalog except for the exact code-to-PTC rename and the
+// three newly recorded event kinds.
 const CURRENT_REQUIRED_EVENT_TYPES = Object.freeze([
-  ...CURRENT_BASE_REQUIRED_EVENT_TYPES,
+  ...V2_BASE_REQUIRED_EVENT_TYPES.filter((type) => type !== "tool/code-dispatch" && type !== "tool/code-dispatch-start"),
+  "deliverables/presented",
+  "subagent/catalog",
+  "system/message",
+  "tool/ptc-dispatch",
+  "tool/ptc-dispatch-start",
   "model/selection",
   "session-log-deepseek/delivery-accepted",
   "subagent/model-selection-policy"
 ]);
 const LEGACY_REQUIRED_EVENT_TYPES = Object.freeze([
-  ...CURRENT_BASE_REQUIRED_EVENT_TYPES.filter((type) => type !== "assistant/attempt" && type !== "feedback/message-put" && type !== "feedback/message-delete"),
+  ...V2_BASE_REQUIRED_EVENT_TYPES.filter((type) => type !== "assistant/attempt" && type !== "feedback/message-put" && type !== "feedback/message-delete"),
   "assistant/chunk"
 ]);
 
@@ -85,15 +94,15 @@ const JSONL_LAYOUT = Object.freeze({
 export const DSH_COMPATIBILITY_SNAPSHOT = Object.freeze({
   repository: "deepseek-ai/deepseek-harness",
   // alpha.2 tag commit.
-  commit: "82a5fd61a7cf5c293cec4bdff68f455398d685e9",
+  commit: "b2e3b2a0125854567a4a5fcba75782e42fe84901",
   // Official repository HEAD at the verified alpha.2 tag.
-  headCommit: "82a5fd61a7cf5c293cec4bdff68f455398d685e9",
-  tag: "dsh-v0.1.3-alpha.2",
+  headCommit: "b2e3b2a0125854567a4a5fcba75782e42fe84901",
+  tag: "dsh-v0.1.5-alpha.2",
   npm: Object.freeze({
     package: "@deepseek-ai/dsh",
-    current: "0.1.3-alpha.2"
+    current: "0.1.5-alpha.2"
   }),
-  sessionFormatVersion: 2,
+  sessionFormatVersion: 3,
   // Alpha.2 still ships no session-persistence SQLite plugin. The SQLite
   // packages that exist are a storage-hub kv facet and an FTS5 session-query
   // backend, not session persistence. Schema 17 remains the last legacy
@@ -118,7 +127,7 @@ export const DSH_COMPATIBILITY_SNAPSHOT = Object.freeze({
     version: "0.1.2-alpha.3",
     sessionFormatVersion: 0,
     sqliteSchemaVersion: null,
-    requiredEventTypes: CURRENT_REQUIRED_EVENT_TYPES,
+    requiredEventTypes: V2_REQUIRED_EVENT_TYPES,
     fixture: Object.freeze({
       provenance: "derived-current-shape",
       commit: "dd6322d604e00eec1ba5e0c8541159906a21094a",
@@ -134,26 +143,20 @@ export const DSH_COMPATIBILITY_SNAPSHOT = Object.freeze({
   jsonl: JSONL_LAYOUT,
   requiredEventTypes: CURRENT_REQUIRED_EVENT_TYPES,
   upstreamReferences: Object.freeze({
-    sessionSnapshot: "snapshots/web/fresh-round-trip/session.jsonl",
+    sessionSnapshot: "packages/experimental/webworker-runtime/tests/fixtures/vfs-example/home/sessions/--dsh-workspace--/preview-showcase/session.v3.jsonl",
     sequenceCodec: "packages/core/session/src/seq-ranges.ts",
     eventCatalog: "packages/core/session/src/known-event-types.ts",
-    // The web snapshot omits event envelopes; upstream seeds it through
-    // parseSessionLog, which synthesizes seq (order, packed rows expanded
-    // after their row) and time (0). The fixture regression reproduces that
-    // rule instead of hand-editing official bytes.
-    fixtureEnvelopeRule: "packages/test-support/llm-replay/src/index.ts (parseSessionLog)"
+    fixtureEnvelopeRule: "native v3 fixture stores complete seq/time event envelopes"
   }),
   fixture: Object.freeze({
-    provenance: "official-checked-in-web-snapshot",
-    formatVersion: 0,
-    sourceRelease: "dsh-v0.1.2-alpha.5",
-    commit: "db6bdc3576c2d4e7c965e8e3ed0c2a731eed87f5",
-    local: "test/fixtures/dsh-alpha5-fresh-round-trip.jsonl",
-    // sha256 of the retained local v0 fixture, identical to the upstream
-    // alpha.5 checked-in web snapshot from which this historical evidence came.
-    sha256: "0747344224d4222f861dd9692c4332badfba221afc6e686c3dee18177055d845",
-    envelopeOmitted: "web fixtures omit seq/time; synthesised on read per upstream parseSessionLog",
-    upstreamSource: "snapshots/web/fresh-round-trip/session.jsonl"
+    provenance: "official-checked-in-v3-fixture",
+    formatVersion: 3,
+    sourceRelease: "dsh-v0.1.5-alpha.2",
+    commit: "b2e3b2a0125854567a4a5fcba75782e42fe84901",
+    local: "test/fixtures/dsh-alpha15-v3-preview-showcase.jsonl",
+    // sha256 of the retained local fixture, identical to the upstream source.
+    sha256: "eb7ecaf5fdd8a2b95959ef9cc5eebba5761848f014e4e1a99eaf6134515898cb",
+    upstreamSource: "packages/experimental/webworker-runtime/tests/fixtures/vfs-example/home/sessions/--dsh-workspace--/preview-showcase/session.v3.jsonl"
   })
 });
 

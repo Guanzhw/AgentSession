@@ -280,11 +280,11 @@ test("DeepSeek Harness provider reads current raw sessions, system evidence, wor
 });
 
 test("DeepSeek Harness alpha.2 compatibility snapshot and SQLite diagnostic are explicit", () => {
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.commit, "82a5fd61a7cf5c293cec4bdff68f455398d685e9");
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.headCommit, "82a5fd61a7cf5c293cec4bdff68f455398d685e9");
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.tag, "dsh-v0.1.3-alpha.2");
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.npm.current, "0.1.3-alpha.2");
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.sessionFormatVersion, 2);
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.commit, "b2e3b2a0125854567a4a5fcba75782e42fe84901");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.headCommit, "b2e3b2a0125854567a4a5fcba75782e42fe84901");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.tag, "dsh-v0.1.5-alpha.2");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.npm.current, "0.1.5-alpha.2");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.sessionFormatVersion, 3);
   assert.equal(DSH_COMPATIBILITY_SNAPSHOT.sqliteSchemaVersion, null);
   assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousRelease.sqliteSchemaVersion, 17);
   assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousRelease.package, "@deepseek-ai/dsh");
@@ -293,17 +293,21 @@ test("DeepSeek Harness alpha.2 compatibility snapshot and SQLite diagnostic are 
   assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousRelease.tag, "dsh-v0.1.1-rc.2");
   assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousSnapshot.tag, "dsh-v0.1.2-alpha.3");
   assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousSnapshot.fixture.provenance, "derived-current-shape");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousSnapshot.requiredEventTypes.includes("tool/code-dispatch"), true);
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousSnapshot.requiredEventTypes.includes("tool/ptc-dispatch"), false);
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousRelease.requiredEventTypes.includes("system/message"), false);
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousRelease.requiredEventTypes.includes("subagent/catalog"), false);
   assert.equal(DSH_COMPATIBILITY_SNAPSHOT.legacyFixture.tag, "dsh-v0.1.0-rc.8");
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.fixture.provenance, "official-checked-in-web-snapshot");
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.fixture.commit, "db6bdc3576c2d4e7c965e8e3ed0c2a731eed87f5");
-  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.fixture.sha256, "0747344224d4222f861dd9692c4332badfba221afc6e686c3dee18177055d845");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.fixture.provenance, "official-checked-in-v3-fixture");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.fixture.commit, "b2e3b2a0125854567a4a5fcba75782e42fe84901");
+  assert.equal(DSH_COMPATIBILITY_SNAPSHOT.fixture.sha256, "eb7ecaf5fdd8a2b95959ef9cc5eebba5761848f014e4e1a99eaf6134515898cb");
   assert.ok(DSH_COMPATIBILITY_SNAPSHOT.requiredEventTypes.includes("agent/inbox/spliced"));
   assert.ok(DSH_COMPATIBILITY_SNAPSHOT.requiredEventTypes.includes("team/message/delivered"));
   for (const type of ["model/selection", "session-log-deepseek/delivery-accepted", "subagent/model-selection-policy"]) {
     assert.ok(DSH_COMPATIBILITY_SNAPSHOT.requiredEventTypes.includes(type));
     assert.ok(DSH_KNOWN_EVENT_TYPES.has(type));
     assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousRelease.requiredEventTypes.includes(type), false);
-    // The alpha.3 snapshot already tracked these facts; alpha.2 retains them.
+    // The historical alpha.3 snapshot already tracked these facts.
     assert.equal(DSH_COMPATIBILITY_SNAPSHOT.previousSnapshot.requiredEventTypes.includes(type), true);
   }
   assert.deepEqual(
@@ -328,9 +332,9 @@ test("DeepSeek Harness alpha.2 compatibility snapshot and SQLite diagnostic are 
 });
 
 test("official alpha.5 checked-in web snapshot validates after upstream envelope synthesis", () => {
-  const fixturePath = path.join(process.cwd(), DSH_COMPATIBILITY_SNAPSHOT.fixture.local);
+  const fixturePath = path.join(process.cwd(), "test/fixtures/dsh-alpha5-fresh-round-trip.jsonl");
   const hash = createHash("sha256").update(readFileSync(fixturePath)).digest("hex");
-  assert.equal(hash, DSH_COMPATIBILITY_SNAPSHOT.fixture.sha256, "fixture must stay byte-identical to upstream");
+  assert.equal(hash, "0747344224d4222f861dd9692c4332badfba221afc6e686c3dee18177055d845", "fixture must stay byte-identical to upstream");
 
   // Upstream seeds the envelope-free web snapshot through parseSessionLog:
   // seq is synthesised by log order (packed rows advance by their expanded
@@ -657,6 +661,11 @@ test("DeepSeek Harness selects the highest canonical generation and projects v2 
     const v2UnknownPath = path.join(root, "v2-unknown", "session.v2.jsonl");
     writeJsonl(v2UnknownPath, [{ type: "session", version: 2, id: "v2-unknown", createdAt: 1, isSeeded: false, delegationDepth: 0 }, { type: "future/ignorable", seq: 0, time: 2, data: {}, ignorable: true }]);
     assert.doesNotThrow(() => parseDshSession(v2UnknownPath));
+    for (const type of ["system/message", "subagent/catalog", "tool/ptc-dispatch"]) {
+      const v2FutureRequiredPath = path.join(root, `v2-${type.replaceAll("/", "-")}`, "session.v2.jsonl");
+      writeJsonl(v2FutureRequiredPath, [{ type: "session", version: 2, id: `v2-${type}`, createdAt: 1, isSeeded: false, delegationDepth: 0 }, { type, seq: 0, time: 2, data: {} }]);
+      assert.throws(() => parseDshSession(v2FutureRequiredPath), /Unsupported required/);
+    }
 
     const file = path.join(root, "v2-session", "session.v2.jsonl");
     const records = [

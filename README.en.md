@@ -106,7 +106,7 @@ fact was stored natively.
 | OpenClaw | active — current SQLite (with legacy/archive JSONL fallback) | `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite` (agent schema 19; v2026.9.3 release commit `1391f7cd…`, separately audited HEAD `0140d656…`, schema SQL sha256 `fe932174…`); legacy/archive `sessions/*.jsonl` | v2 canonical events/branches plus v3 recorded Goal, agent identity, spawn Run, compaction context, and request usage; limited goal states map to shared `blocked` while retaining raw status in bounded provenance. Advanced task/run/delivery tables are deferred. |
 | Hermes Agent | active | `$HERMES_HOME/state.db` | `full/recorded` active-only SQLite transcript and async delegation handle/state; native v3 preserves v2 facts and projects dispatch/lifecycle/delivery as separate Coordination observations; `partial/derived` compression continuation/delegation lineage and metadata-only compaction; compression is not spawned work. Current freshness: v0.21.1 / `v2026.9.7`, schema 30, release commit `2237be35…`, separate HEAD `6e2b8e07…`; local install remains v0.19.1, schema 23. |
 | Pi | active | `~/.pi/agent/sessions/**/*.jsonl` | `full/recorded` branch/compaction events and `partial/derived` parent lineage; never invented spawn. Current upstream is `@earendil-works/pi-coding-agent` (npm 0.85.1, package tag/gitHead `d981de12…`; separate upstream HEAD `f53ac113…`, official session format **v3**, verified 2026-09-08); the v3 reader preserves v2 facts, emits assistant-request Usage, and maps readable branch/compaction summaries to Context results. The current official boundary is `firstKeptEntryId`; `retainedTail` is historical/harness extension evidence only, not a current standard field. The local Pi install is 0.80.10, with no live 0.85.1 transcript available; nested `run-N/session.jsonl` files are pi-subagents run artifacts (no parentSession, no lineage). |
-| DeepSeek Harness | active preview | `$DSH_HOME/sessions/**/{session.jsonl,session.v1.jsonl,session.v2.jsonl}[.zstd]` or `~/.dsh/sessions/**` | `full/recorded` v0/v1/v2 events/context; each session root selects the highest generation, with `partial/derived` workflow, team, and cross-session relationships. |
+| DeepSeek Harness | active preview | `$DSH_HOME/sessions/**/{session.jsonl,session.v1.jsonl,session.v2.jsonl,session.v3.jsonl}[.zstd]` or `~/.dsh/sessions/**` | `full/recorded` v0/v1/v2/v3 events/context; each session root selects the highest generation, with `partial/derived` workflow, team, and cross-session relationships. |
 
 All providers also expose message search, token statistics, export, and local
 management that changes only AgentSession metadata. Runtime-environment and
@@ -160,11 +160,11 @@ records the separately audited upstream HEAD `0140d656…`:
 
 ## DeepSeek Harness compatibility
 
-The DSH adapter follows official `dsh-v0.1.3-alpha.2` (commit
-`82a5fd61a7cf5c293cec4bdff68f455398d685e9`, package
-`@deepseek-ai/dsh@0.1.3-alpha.2`) and reads session format v0, v1, and v2. For
+The DSH adapter follows official `dsh-v0.1.5-alpha.2` (commit
+`b2e3b2a0125854567a4a5fcba75782e42fe84901`, package
+`@deepseek-ai/dsh@0.1.5-alpha.2`) and reads session format v0, v1, v2, and v3. For
 each session root it selects only the numerically highest canonical generation:
-`session.jsonl`, `session.v1.jsonl`, or `session.v2.jsonl` (each supports raw and
+`session.jsonl`, `session.v1.jsonl`, `session.v2.jsonl`, or `session.v3.jsonl` (each supports raw and
 `.zstd`). Same-generation dual encodings or raw/zstd mixing produce an explicit
 diagnostic; the adapter does not fall back to an older file or migrate provider
 data.
@@ -175,9 +175,12 @@ v0/v1 retain released packed-row decoding. Append-origin `user/message`,
 surface replacements remain model/context evidence, while `assistant/attempt`
 and control, workflow, and team events never become ordinary conversation
 messages. Runtime Protocol v3 additionally projects recorded goals,
-team/task/mailbox, workflow, readable compaction, and per-request usage; token
-origins, memory/experience/user-info, and async semantics remain unknown without
-evidence. The stock headless CLI has no declared default resume argument, so
+team/task/mailbox, workflow, readable compaction, parent-owned direct-child
+catalog entries, presented deliverable call/file metadata, and per-request
+usage; token origins, memory/experience/user-info, and async semantics remain
+unknown without evidence. Catalog entries bind child actor/session references
+only when the child is present and never infer a terminal run or task. The stock
+headless CLI has no declared default resume argument, so
 AgentSession does not invent a DSH resume command.
 
 ## Installation

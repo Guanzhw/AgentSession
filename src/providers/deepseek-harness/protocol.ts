@@ -69,6 +69,10 @@ function firstString(...values: unknown[]): string | null {
   return null;
 }
 
+function boundedString(value: unknown, limit = 2000): string | null {
+  return typeof value === "string" && value ? value.slice(0, limit) : null;
+}
+
 function eventData(event: DshRecord): DshRecord {
   return event.data && typeof event.data === "object" && !Array.isArray(event.data)
     ? event.data
@@ -101,6 +105,8 @@ function eventKind(event: DshRecord): string {
     case "assistant/message": return "message.assistant";
     case "assistant/attempt": return "assistant.attempt";
     case "tool/call": return "tool.call";
+    case "tool/ptc-dispatch-start": return "tool.ptc-dispatch.started";
+    case "tool/ptc-dispatch": return "tool.ptc-dispatch.completed";
     case "tool/result": return "tool.result";
     case "turn/start": return "turn.started";
     case "turn/end": return "turn.completed";
@@ -122,7 +128,7 @@ function eventKind(event: DshRecord): string {
 }
 
 function eventPhase(event: DshRecord): SessionEventEnvelope["phase"] | undefined {
-  if (["turn/start", "step/start", "tool/call", "compaction/start", "tool-workflow/run-start", "tool-workflow/agent-start"].includes(event.type)) {
+  if (["turn/start", "step/start", "tool/call", "tool/ptc-dispatch-start", "compaction/start", "tool-workflow/run-start", "tool-workflow/agent-start"].includes(event.type)) {
     return "started";
   }
   if (event.type === "assistant/chunk") return "updated";
@@ -133,7 +139,7 @@ function eventPhase(event: DshRecord): SessionEventEnvelope["phase"] | undefined
       ? "failed"
       : "completed";
   }
-  if (["step/end", "tool/result", "compaction/end", "tool-workflow/run-end", "tool-workflow/agent-end", "command/done"].includes(event.type)) {
+  if (["step/end", "tool/result", "tool/ptc-dispatch", "compaction/end", "tool-workflow/run-end", "tool-workflow/agent-end", "command/done"].includes(event.type)) {
     return "completed";
   }
   return undefined;
@@ -142,6 +148,7 @@ function eventPhase(event: DshRecord): SessionEventEnvelope["phase"] | undefined
 function eventCorrelation(event: DshRecord): string | null {
   const data = eventData(event);
   if (event.type === "tool/call") return firstString(data.callId);
+  if (event.type === "tool/ptc-dispatch-start" || event.type === "tool/ptc-dispatch") return firstString(data.subCallId);
   if (event.type === "tool/result") {
     const message = eventData({ data: data.message });
     const block = Array.isArray(message.content)
@@ -215,6 +222,29 @@ function commonProviderData(event: DshRecord) {
   } else if (event.type === "tool/call") {
     providerData.callId = firstString(data.callId);
     providerData.name = firstString(data.name);
+  } else if (event.type === "tool/ptc-dispatch-start" || event.type === "tool/ptc-dispatch") {
+    providerData.rootCallId = firstString(data.rootCallId);
+    providerData.parentCallId = firstString(data.parentCallId);
+    providerData.subCallId = firstString(data.subCallId);
+    providerData.name = firstString(data.name);
+    providerData.isError = event.type === "tool/ptc-dispatch" && data.isError === true;
+  } else if (event.type === "subagent/catalog") {
+    providerData.childId = firstString(data.childId);
+    providerData.childCreatedAt = asNumber(data.childCreatedAt);
+    providerData.mode = firstString(data.mode);
+    providerData.label = typeof data.label === "string" ? data.label : null;
+  } else if (event.type === "deliverables/presented") {
+    providerData.callId = firstString(data.callId);
+    const files = Array.isArray(data.files) ? data.files : [];
+    providerData.fileCount = files.length;
+    providerData.files = files.slice(0, 50).flatMap((value) => {
+      if (!isRecord(value)) return [];
+      const filePath = boundedString(value.path);
+      if (!filePath) return [];
+      const description = boundedString(value.description);
+      return [{ path: filePath, ...(description ? { description } : {}) }];
+    });
+    providerData.filesTruncated = files.length > 50;
   } else if (event.type === "tool/result") {
     providerData.callId = eventCorrelation(event);
     providerData.isError = toolResultHasError(event);
@@ -1077,11 +1107,13 @@ export function buildDshSessionProtocolV3(
   const ownRef: DshSessionRef = { provider: "deepseek-harness", sessionId };
   const owned = dshOwnedEvents(input.records);
   const childById = new Map(input.children.map((child) => [String(child.session.id), child]));
+  const relationships = [...base.relationships];
   const baseRunByChildId = new Map(base.agentRuns
     .filter((run) => run.childSessionId)
     .map((run) => [String(run.childSessionId), run]));
   const baseEventBySourceSeq = new Map(base.events.map((event) => [event.providerData?.sourceSequence, event]));
   const eventFor = (event: DshRecord) => baseEventBySourceSeq.get(sourceSequence(Number(event.seq) || 0)) || null;
+  const coordination: CoordinationObservation[] = [];
 
   // --- Explicit actors ----------------------------------------------------
   const actors: Actor[] = [];
@@ -1183,6 +1215,75 @@ export function buildDshSessionProtocolV3(
     memberActor.name = firstString(member.name, memberId);
   }
 
+  // Parent-owned catalog facts are complete direct-child discovery evidence.
+  // They establish a spawned edge and a started observation, but do not by
+  // themselves establish a Task or terminal Run state.
+  for (const event of owned) {
+    if (event.type !== "subagent/catalog") continue;
+    const data = eventData(event);
+    const childId = firstString(data.childId);
+    if (!childId) continue;
+    const child = childById.get(childId) || null;
+    const childRef = child ? { provider: "deepseek-harness", sessionId: childId } : null;
+    const childActor = child
+      ? ensureActor({
+        providerActorId: childId,
+        kind: "agent",
+        name: firstString(child.session.metadata?.agentPreset, childId),
+        sessionRef: childRef,
+        event,
+        sourceType: "dsh.session-event:subagent/catalog"
+      })
+      : null;
+    const provenance = dshV3Provenance(event, "dsh.session-event:subagent/catalog");
+    const existingRelationIndex = relationships.findIndex((relationship) => relationship.type === "spawned"
+      && relationship.fromSessionId === sessionId && relationship.toSessionId === childId);
+    if (existingRelationIndex < 0) {
+      relationships.push(sessionRelationship({
+        type: "spawned",
+        fromSessionId: sessionId,
+        toSessionId: childId,
+        timestamp: asNumber(event.time),
+        correlationId: childId,
+        details: child
+          ? "DeepSeek Harness parent-owned subagent catalog"
+          : "DeepSeek Harness parent-owned subagent catalog; child session is not present in this snapshot",
+        taskId: null,
+        runId: null,
+        provenance
+      }));
+    } else if (relationships[existingRelationIndex].provenance.fidelity === "derived") {
+      relationships[existingRelationIndex] = sessionRelationship({
+        ...relationships[existingRelationIndex],
+        timestamp: asNumber(event.time),
+        correlationId: childId,
+        details: child
+          ? "DeepSeek Harness parent-owned subagent catalog"
+          : "DeepSeek Harness parent-owned subagent catalog; child session is not present in this snapshot",
+        taskId: null,
+        runId: null,
+        provenance
+      });
+    }
+    coordination.push(coordinationObservation({
+      id: `coord:dsh:subagent-catalog:${childId}:${event.seq}`,
+      sessionId,
+      kind: "spawn",
+      state: "started",
+      timestamp: asNumber(event.time),
+      senderActorId: parent.id,
+      recipientActorId: childActor?.id || null,
+      fromSessionRef: ownRef,
+      toSessionRef: childRef,
+      taskId: null,
+      runId: null,
+      eventId: eventFor(event)?.id || dshEventId(event),
+      turnId: asNumber(data.turn) == null ? null : String(data.turn),
+      correlationId: childId,
+      provenance
+    }));
+  }
+
   // --- Durable goals ------------------------------------------------------
   const goalReplay = dshReplayGoals(input.records);
   const currentGoal = goalReplay.goal;
@@ -1202,7 +1303,6 @@ export function buildDshSessionProtocolV3(
   })] : [];
 
   // --- Coordination: team mailbox and workflow lifecycle -----------------
-  const coordination: CoordinationObservation[] = [];
   const teamMessageSender = new Map<string, Actor>();
   for (const event of owned) {
     if (event.type !== "team/message/queued") continue;
@@ -1388,7 +1488,7 @@ export function buildDshSessionProtocolV3(
     version: 3,
     session: base.session,
     events: base.events,
-    relationships: base.relationships,
+    relationships,
     tasks: base.tasks,
     agentRuns: base.agentRuns,
     contextArtifacts: base.contextArtifacts,

@@ -75,7 +75,7 @@ GET /api/:provider/session/:id/runtime/context?maxItems=
 | OpenClaw | active — current SQLite（含 legacy/archive JSONL 回退） | `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite`（agent schema 19，v2026.9.3 release commit `1391f7cd…`；独立审计 HEAD `0140d656…`；schema SQL sha256 `fe932174…`）；legacy/archive `sessions/*.jsonl` | v2 canonical events/branches + v3 recorded Goal、agent identity、spawn Run、compaction context、request usage；limited goal states map to shared `blocked`，raw status 通过 bounded provenance 保留。高级 task/run/delivery tables deferred。 |
 | Hermes Agent | active | `$HERMES_HOME/state.db` | `full/recorded` active-only SQLite transcript、异步 delegation handle/state；native v3 保留 v2 facts，并将 dispatch/lifecycle/delivery 分开投影为 Coordination；`partial/derived` 压缩延续/delegation lineage 与 metadata-only compaction，压缩不是 spawned。当前 freshness：v0.21.1 / `v2026.9.7`、schema 30，release commit `2237be35…`，独立 HEAD `6e2b8e07…`；本机仍为 v0.19.1、schema 23。 |
 | Pi | active | `~/.pi/agent/sessions/**/*.jsonl` | `full/recorded` branch/compaction 和 `partial/derived` parent lineage；不虚构 spawn。当前 upstream 为 `@earendil-works/pi-coding-agent`（npm 0.85.1，package tag/gitHead `d981de12…`；独立 upstream HEAD `f53ac113…`，官方 session format **v3**,2026-09-08 验证）；v3 保留 v2 facts，并按 assistant request 记录 Usage、把可读 branch/compaction summary 映射为 Context 结果。当前官方字段以 `firstKeptEntryId` 为边界；`retainedTail` 仅作为 historical/harness extension evidence，不作当前标准；本机 Pi 0.80.10，暂无 live 0.85.1 transcript。嵌套 `run-N/session.jsonl` 为 pi-subagents 产物（无 parentSession，不作 lineage）。 |
-| DeepSeek Harness | active preview | `$DSH_HOME/sessions/**/{session.jsonl,session.v1.jsonl,session.v2.jsonl}[.zstd]` 或 `~/.dsh/sessions/**` | `full/recorded` v0/v1/v2 event/context；每个 session root 选择最高 generation，`partial/derived` workflow、team 和跨 session 关系。 |
+| DeepSeek Harness | active preview | `$DSH_HOME/sessions/**/{session.jsonl,session.v1.jsonl,session.v2.jsonl,session.v3.jsonl}[.zstd]` 或 `~/.dsh/sessions/**` | `full/recorded` v0/v1/v2/v3 event/context；每个 session root 选择最高 generation，`partial/derived` workflow、team 和跨 session 关系。 |
 
 当前 Provider 也提供消息搜索、token 统计、导出和只修改 AgentSession 元数据的本地管理。Runtime Environment 与 system-prompt evidence 仍是独立的只读能力：只展示可解析的本地来源，不声称恢复隐藏 prompt。
 未检测到的安装会显示为 unavailable 并保留 Provider diagnostic，不会被报告为空的成功来源。
@@ -94,11 +94,11 @@ OpenClaw 自 2026.7.2-beta.1 起把 session/transcript 主存储迁入每 agent 
 
 ## DeepSeek Harness compatibility
 
-DSH 适配器当前跟随官方 `dsh-v0.1.3-alpha.2`（commit
-`82a5fd61a7cf5c293cec4bdff68f455398d685e9`，package
-`@deepseek-ai/dsh@0.1.3-alpha.2`）并读取 session format v0、v1、v2。每个
+DSH 适配器当前跟随官方 `dsh-v0.1.5-alpha.2`（commit
+`b2e3b2a0125854567a4a5fcba75782e42fe84901`，package
+`@deepseek-ai/dsh@0.1.5-alpha.2`）并读取 session format v0、v1、v2、v3。每个
 session root 只选择数值最高的 canonical generation：`session.jsonl`、
-`session.v1.jsonl` 或 `session.v2.jsonl`（均支持 raw 与 `.zstd`）；同一代双编码
+`session.v1.jsonl`、`session.v2.jsonl` 或 `session.v3.jsonl`（均支持 raw 与 `.zstd`）；同一代双编码
 或 raw/zstd 混用会显式诊断，不回退到旧文件，也不迁移 provider 数据。
 
 JSONL 是当前只读主后端。v2 使用每个 event 一行；v0/v1 保留 released 的
@@ -107,8 +107,10 @@ append-origin 事件生成普通 transcript；surface replacement 只保留为
 model/context evidence，`assistant/attempt` 及 control、workflow、team 事件
 不会伪造成普通 conversation message。Runtime Protocol v3 另外投影官方记录的
 goal、team/task/mailbox、workflow、可读 compaction 与每请求 usage；未有证据的
-token origin、memory/experience/user-info 和 async 语义保持 unknown。官方 headless CLI 没有声明默认 resume
-参数，因此 AgentSession 不伪造 DSH resume 命令。
+token origin、memory/experience/user-info 和 async 语义保持 unknown。也保留
+parent-owned direct-child catalog 及 presented deliverable 的 call/file metadata；
+只有子 session 存在时才绑定 actor/session，不推断 terminal run/task。官方
+headless CLI 没有声明默认 resume 参数，因此 AgentSession 不伪造 DSH resume 命令。
 
 ## Installation
 

@@ -114,6 +114,57 @@ test("DSH native v3 folds recorded goals, team facts, mailbox lifecycle, and wor
   ]);
 });
 
+test("DSH native v3 preserves parent-owned catalog and presented deliverable evidence", () => {
+  const { input } = fixture();
+  const catalogChild = childRecords("catalog-child");
+  const catalogEvent = event("subagent/catalog", 17, {
+    version: 0, childId: "catalog-child", childCreatedAt: 1007, mode: "continuable", label: "Catalog worker"
+  });
+  const danglingCatalogEvent = event("subagent/catalog", 18, {
+    version: 0, childId: "missing-child", childCreatedAt: 1008, mode: "one-shot"
+  });
+  const deliverableEvent = event("deliverables/presented", 19, {
+    turn: 1, callId: "present-call", files: [
+      { path: "artifacts/result.md", description: "Rendered result" },
+      { path: "artifacts/data.json" }
+    ]
+  });
+  const catalogInput = {
+    ...input,
+    records: [...input.records, catalogEvent, danglingCatalogEvent, deliverableEvent],
+    children: [...input.children, { session: extractDshMeta(catalogChild, "catalog-child"), records: catalogChild, messages: [] }]
+  };
+  const base = buildDshSessionProtocol(catalogInput);
+  const v3 = finalizeSessionProtocolV3(buildDshSessionProtocolV3(catalogInput, base));
+  const catalog = v3.events.find((value) => value.providerData?.eventType === "subagent/catalog" && value.providerData?.childId === "catalog-child");
+  assert.equal(catalog?.providerData?.childCreatedAt, 1007);
+  assert.equal(catalog?.providerData?.mode, "continuable");
+  assert.equal(catalog?.providerData?.label, "Catalog worker");
+  const presented = v3.events.find((value) => value.providerData?.eventType === "deliverables/presented");
+  assert.equal(presented?.providerData?.callId, "present-call");
+  assert.equal(presented?.providerData?.fileCount, 2);
+  assert.deepEqual(presented?.providerData?.files, [
+    { path: "artifacts/result.md", description: "Rendered result" },
+    { path: "artifacts/data.json" }
+  ]);
+  const catalogRelation = v3.relationships.find((value) => value.toSessionId === "catalog-child");
+  assert.equal(catalogRelation?.type, "spawned");
+  assert.deepEqual(catalogRelation?.provenance, { fidelity: "recorded", sourceType: "dsh.session-event:subagent/catalog", sourceId: "17" });
+  const catalogSpawn = v3.coordination.find((value) => value.correlationId === "catalog-child");
+  assert.equal(catalogSpawn?.kind, "spawn");
+  assert.equal(catalogSpawn?.state, "started");
+  assert.equal(catalogSpawn?.toSessionRef?.sessionId, "catalog-child");
+  assert.ok(catalogSpawn?.recipientActorId);
+  assert.equal(catalogSpawn?.taskId, null);
+  assert.equal(catalogSpawn?.runId, null);
+  const danglingSpawn = v3.coordination.find((value) => value.correlationId === "missing-child");
+  assert.equal(danglingSpawn?.state, "started");
+  assert.equal(danglingSpawn?.toSessionRef, null);
+  assert.equal(danglingSpawn?.recipientActorId, null);
+  assert.equal(danglingSpawn?.taskId, null);
+  assert.equal(danglingSpawn?.runId, null);
+});
+
 test("DSH native v3 preserves a recorded paused goal phase", () => {
   const sessionId = "dsh-v3-paused";
   const records = [
