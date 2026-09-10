@@ -348,13 +348,14 @@ document.addEventListener("click", async (e) => {
   const sessionId = workbench.dataset.sessionId;
   const partId = button.dataset.partId;
   const field = button.dataset.field;
+  const contentScope = button.dataset.contentScope || "owned";
   const offset = button.dataset.nextOffset;
   if (!provider || !sessionId || !partId || !field || offset == null) return;
 
   button.disabled = true;
   button.setAttribute("aria-busy", "true");
   try {
-    const query = new URLSearchParams({ part: partId, field, offset });
+    const query = new URLSearchParams({ part: partId, field, offset, scope: contentScope });
     const response = await fetch(`/api/${encodeURIComponent(provider)}/session/${encodeURIComponent(sessionId)}/content?${query}`);
     const data = await response.json();
     if (!response.ok || !data?.ok || typeof data.html !== "string") {

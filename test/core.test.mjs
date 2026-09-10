@@ -53,6 +53,7 @@ import {
 import {
   extractMeta as extractCodexMeta,
   recordsToMessages as codexRecordsToMessages,
+  recordsToInheritedMessages as codexRecordsToInheritedMessages,
   classifyCodexRecordProvenance,
   codexOwnedTokenUsageRecords,
   resolveCodexInheritedContext
@@ -1342,6 +1343,54 @@ test("Codex recognizes NEW_TASK envelopes stored in payload.message", () => {
   assert.equal(provenance.get(inherited), "inherited-parent-context");
   assert.equal(provenance.get(envelope), "session");
   assert.equal(provenance.get(childOwned), "session");
+});
+
+test("Codex inherited projection exposes only boundary-marked context without owned usage", () => {
+  const records = [
+    { timestamp: "2026-07-20T00:00:00.000Z", type: "session_meta", payload: { id: "child", parent_thread_id: "parent" } },
+    { timestamp: "2026-07-19T23:59:58.000Z", type: "response_item", payload: { id: "developer-1", type: "message", role: "developer", content: [{ type: "input_text", text: "Inherited instructions" }] } },
+    { timestamp: "2026-07-19T23:59:59.000Z", type: "event_msg", payload: { type: "user_message", message: "Inherited request" } },
+    { timestamp: "2026-07-20T00:00:01.000Z", type: "response_item", payload: { id: "task-1", type: "agent_message", content: [{ type: "output_text", text: "Message Type: NEW_TASK\nTask name: worker" }] } },
+    { timestamp: "2026-07-20T00:00:02.000Z", type: "event_msg", payload: { type: "agent_message", message: "Owned result" } },
+    { timestamp: "2026-07-20T00:00:03.000Z", type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } } } }
+  ];
+
+  const owned = codexRecordsToMessages(records, "child");
+  const inherited = codexRecordsToInheritedMessages(records, "child");
+  assert.equal(owned.some((message) => message.content === "Inherited instructions"), false);
+  assert.deepEqual(inherited.map((message) => [message.role, message.content]), [
+    ["system", "Inherited instructions"],
+    ["user", "Inherited request"]
+  ]);
+  assert.ok(inherited.every((message) => message.metadata?.provenance === "inherited-parent-context"));
+  assert.ok(inherited.every((message) => message.tokens === null));
+});
+
+test("rendered inherited context stays collapsed, searchable, anchored, and outside ToC", () => {
+  const inherited = codexRecordsToInheritedMessages([
+    { timestamp: "2026-07-19T23:59:58.000Z", type: "session_meta", payload: { id: "child", parent_thread_id: "parent" } },
+    { timestamp: "2026-07-19T23:59:59.000Z", type: "response_item", payload: { id: "developer-long", type: "message", role: "developer", content: [{ type: "input_text", text: "Inherited background " + "x".repeat(13000) }] } },
+    { timestamp: "2026-07-20T00:00:01.000Z", type: "response_item", payload: { id: "task-2", type: "agent_message", content: [{ type: "output_text", text: "Message Type: NEW_TASK\nTask name: worker" }] } }
+  ], "child", []);
+  const html = renderSessionPage({
+    session: { id: "child", title: "Child" },
+    provider: "codex",
+    inheritedContext: {
+      sourceSession: { provider: "codex", sessionId: "parent" },
+      messages: inherited,
+      total: inherited.length,
+      truncated: false
+    }
+  });
+
+  assert.match(html, /<details class="inherited-context-disclosure" data-disclosure data-inherited-context>/);
+  assert.match(html, /class="messages inherited-context-messages"/);
+  assert.match(html, /href="\/codex\/session\/parent"/);
+  assert.match(html, /data-part-id="inherited-parent-developer-long:part"/);
+  assert.match(html, /progressive-more/);
+  const toc = html.match(/<div class="toc-list">([\s\S]*?)<\/div>\s*<button class="toc-resize-handle"/)?.[1] || "";
+  assert.doesNotMatch(toc, /Inherited background/);
+  assert.doesNotMatch(html.match(/<section id="session-child"[\s\S]*?<div class="toc-list">([\s\S]*?)<\/div>/)?.[1] || "", /developer-long/);
 });
 
 test("Codex excludes an exact parent token prefix when an older fork omits NEW_TASK", () => {

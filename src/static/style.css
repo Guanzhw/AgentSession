@@ -5136,6 +5136,52 @@ pre code.hljs {
   max-width: 100%;
 }
 
+.inherited-context-disclosure {
+  margin-top: 20px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.inherited-context-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.inherited-context-count,
+.inherited-context-note {
+  color: var(--text-muted);
+  font-size: 0.9em;
+  font-weight: 400;
+}
+
+.inherited-context-body {
+  padding: 0 14px 14px;
+}
+
+.inherited-context-note {
+  margin: 0;
+}
+
+.inherited-context-messages {
+  margin-top: 12px;
+}
+
+.inherited-context-messages .message-body.plain {
+  padding: 0;
+  white-space: normal;
+}
+
+.inherited-context-messages .message-body.plain pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .conversation-process-summary {
   padding: 8px 0;
   cursor: pointer;

@@ -127,20 +127,21 @@ export function normalizeSessionRecord(session: any): any {
   };
 }
 
-export function buildPartsFromProviderMessages(providerMessages: any[] = []) {
+export function buildPartsFromProviderMessages(providerMessages: any[] = [], idPrefix = "", contentScope = "owned") {
   const messages: any[] = [];
   const partsByMessage = new Map<string, any[]>();
 
   for (let i = 0; i < providerMessages.length; i += 1) {
     const source = providerMessages[i] || {};
-    const messageId = source.id || `${source.sessionId || "session"}:msg:${i}`;
+    const messageId = `${idPrefix}${source.id || `${source.sessionId || "session"}:msg:${i}`}`;
     messages.push({
       id: messageId,
       data: {
         role: source.role || "assistant",
         time: { created: Number(source.timestamp) || 0 },
         tokens: source.tokens || null,
-        model: source.metadata?.model || null
+        model: source.metadata?.model || null,
+        contentScope
       }
     });
 
@@ -168,7 +169,11 @@ export function buildPartsFromProviderMessages(providerMessages: any[] = []) {
       });
     }
     parts.push({ id: `${messageId}:part`, data: contentPart });
-    partsByMessage.set(messageId, parts);
+    partsByMessage.set(messageId, parts.map((part) => ({
+      ...part,
+      messageRole: source.role || "assistant",
+      contentScope
+    })));
   }
 
   return { messages, partsByMessage };

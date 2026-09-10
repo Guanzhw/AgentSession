@@ -26,6 +26,9 @@ existing `#tab-events` links preserved.
 Conversation folds completed process using provider-recorded response phases;
 final replies, unclassified communication, and unfinished tail updates remain
 visible. Expansion, search, and anchors retain access to process content.
+Recorded inherited background in Codex child sessions has a separate collapsed
+disclosure, bounded to 40 messages with a source-session link. It stays outside
+the default ToC and does not increase child message counts or request usage.
 Unsupported, unavailable, missing, and invalid evidence stays explicit rather
 than being rendered as observed zeroes.
 

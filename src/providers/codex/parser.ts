@@ -574,7 +574,14 @@ function appendTokenUsage(target: any, tokens: any, attribution = "direct") {
  * @param {string} sessionId
  * @returns {import('../interface.js').Message[]}
  */
-export function recordsToMessages(records: any, sessionId: any, parentRecords: any[] = []): Message[] {
+type CodexMessageSelection = "owned" | "inherited";
+
+function recordsToMessagesBySelection(
+  records: any[],
+  sessionId: any,
+  parentRecords: any[] = [],
+  selection: CodexMessageSelection = "owned"
+): Message[] {
   const messages: any[] = [];
   let idx = 0;
   let model = null;
@@ -599,8 +606,19 @@ export function recordsToMessages(records: any, sessionId: any, parentRecords: a
   // duplicate is skipped by exact normalized content comparison.
   const normalizeMessageText = (value: unknown) => String(value || "").replace(/\s+/g, " ").trim();
   const recordedUserTexts = new Set<string>();
+  const selectedRecord = (record: any) => {
+    const provenance = recordProvenance.get(record);
+    return selection === "inherited"
+      ? provenance === "inherited-parent-context"
+      : provenance === "session";
+  };
+  const messageProvenanceForRecord = (record: any) => (
+    recordProvenance.get(record) === "inherited-parent-context"
+      ? "inherited-parent-context"
+      : "session"
+  );
   for (const record of records) {
-    if (recordProvenance.get(record) !== "session") continue;
+    if (!selectedRecord(record)) continue;
     const text = codexUserTextRecord(record);
     if (text) recordedUserTexts.add(normalizeMessageText(text));
   }
@@ -612,8 +630,8 @@ export function recordsToMessages(records: any, sessionId: any, parentRecords: a
 
   for (const r of records) {
     const ts = r.timestamp ? new Date(r.timestamp).getTime() : 0;
-    if (subagentStart && ts && ts < subagentStart) continue;
-    if (recordProvenance.get(r) !== "session") continue;
+    if (selection === "owned" && subagentStart && ts && ts < subagentStart) continue;
+    if (!selectedRecord(r)) continue;
 
     if (r.type === "session_meta") {
       model = r.payload?.model || r.payload?.model_name || model;
@@ -681,6 +699,38 @@ export function recordsToMessages(records: any, sessionId: any, parentRecords: a
       lastUserTarget = message;
     }
 
+    // Untagged response-item user rows are injected context in Codex's
+    // paginated history format. They are not owned requests, but an
+    // inherited projection can disclose their recorded text as background.
+    if (selection === "inherited"
+      && r.type === "response_item"
+      && r.payload?.type === "message"
+      && String(r.payload?.role || "").toLowerCase() === "user"
+      && !responseUserText) {
+      const content = responseText(r.payload);
+      if (content) {
+        messages.push({
+          id: r.payload.id || `inherited-context-${idx++}`,
+          sessionId,
+          role: "system",
+          content,
+          thinking: null,
+          toolName: null,
+          toolInput: null,
+          toolOutput: null,
+          timestamp: ts,
+          tokens: null,
+          metadata: {
+            model,
+            provider: "openai",
+            provenance: messageProvenanceForRecord(r),
+            source: "codex_inherited_context",
+            sourceRole: "user"
+          }
+        });
+      }
+    }
+
     // Older Codex transcripts persist visible agent output as event messages
     // rather than response_item records. They are still the nearest durable
     // anchor for the following model-usage events.
@@ -706,7 +756,7 @@ export function recordsToMessages(records: any, sessionId: any, parentRecords: a
           metadata: {
             model,
             provider: "openai",
-            provenance: "session",
+            provenance: messageProvenanceForRecord(r),
             source: "codex_agent_message",
             turnId: currentResponseGroup()
           },
@@ -740,7 +790,7 @@ export function recordsToMessages(records: any, sessionId: any, parentRecords: a
           metadata: {
             model,
             provider: "openai",
-            provenance: "session",
+            provenance: messageProvenanceForRecord(r),
             source: "codex_agent_reasoning",
             turnId: currentResponseGroup()
           }
@@ -773,7 +823,7 @@ export function recordsToMessages(records: any, sessionId: any, parentRecords: a
         timestamp: ts,
         tokens: null,
         metadata: {
-          provenance: "session",
+          provenance: messageProvenanceForRecord(r),
           source: "subagent_task",
           taskName: task.taskName,
           promptAvailable: task.promptAvailable
@@ -805,13 +855,44 @@ export function recordsToMessages(records: any, sessionId: any, parentRecords: a
           toolOutput: null,
           timestamp: ts,
           tokens: null,
-          metadata: { model, provider: "openai", provenance: "session", turnId: currentResponseGroup() },
+          metadata: { model, provider: "openai", provenance: messageProvenanceForRecord(r), turnId: currentResponseGroup() },
           presentationPhase
         };
         if (duplicate && presentationPhase) previous.presentationPhase = presentationPhase;
         if (!duplicate) messages.push(message);
         pendingUsageTarget = message;
         lastUsageTarget = message;
+      }
+    }
+
+    // Codex records injected developer context as response-item messages.
+    // It is disclosed only in the explicit inherited projection; owned
+    // transcript semantics intentionally continue to omit these rows.
+    if (selection === "inherited"
+      && r.type === "response_item"
+      && r.payload?.type === "message"
+      && ["developer", "system"].includes(String(r.payload?.role || "").toLowerCase())) {
+      const content = responseText(r.payload);
+      if (content) {
+        messages.push({
+          id: r.payload.id || `inherited-context-${idx++}`,
+          sessionId,
+          role: "system",
+          content,
+          thinking: null,
+          toolName: null,
+          toolInput: null,
+          toolOutput: null,
+          timestamp: ts,
+          tokens: null,
+          metadata: {
+            model,
+            provider: "openai",
+            provenance: messageProvenanceForRecord(r),
+            source: "codex_inherited_context",
+            sourceRole: r.payload.role
+          }
+        });
       }
     }
 
@@ -848,7 +929,7 @@ export function recordsToMessages(records: any, sessionId: any, parentRecords: a
           toolOutput: null,
           timestamp: ts,
           tokens: null,
-          metadata: { model, provider: "openai", provenance: "session", turnId }
+          metadata: { model, provider: "openai", provenance: messageProvenanceForRecord(r), turnId }
         };
         messages.push(message);
         pendingUsageTarget = message;
@@ -888,7 +969,7 @@ export function recordsToMessages(records: any, sessionId: any, parentRecords: a
           provider: "openai",
           callId: r.payload.call_id || null,
           namespace: r.payload.namespace || null,
-          provenance: "session",
+          provenance: messageProvenanceForRecord(r),
           turnId: currentResponseGroup()
         }
       };
@@ -909,6 +990,9 @@ export function recordsToMessages(records: any, sessionId: any, parentRecords: a
     }
 
     if (isCodexTokenUsageRecord(r)) {
+      // Inherited context is disclosure-only. Its usage records must never
+      // attach to a visible child message or alter owned token accounting.
+      if (selection === "inherited") continue;
       const tokens = codexUsageToTokens(codexUsagePayload(r));
       const target = pendingUsageTarget || lastUsageTarget || lastUserTarget;
       if (tokens && target) {
@@ -921,4 +1005,15 @@ export function recordsToMessages(records: any, sessionId: any, parentRecords: a
   }
 
   return messages as Message[];
+}
+
+/** Convert only records proven to be copied parent context. This projection
+ * is separate from the owned transcript so callers cannot accidentally alter
+ * direct message, search, index, export, or token semantics. */
+export function recordsToInheritedMessages(records: any[], sessionId: string, parentRecords: any[] = []): Message[] {
+  return recordsToMessagesBySelection(records, sessionId, parentRecords, "inherited");
+}
+
+export function recordsToMessages(records: any, sessionId: any, parentRecords: any[] = []): Message[] {
+  return recordsToMessagesBySelection(records, sessionId, parentRecords, "owned");
 }

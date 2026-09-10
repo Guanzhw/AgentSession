@@ -1,6 +1,7 @@
 # Runtime Workbench: visual-first detail design
 
-Status: proposed, user-directed redesign, 2026-09-10.
+Status: implemented; production validation recorded in
+[acceptance](runtime-workbench-v3-acceptance.md), 2026-09-11.
 
 This design evolves [UI v2](ui-v2.md) and reuses its
 [visual system](ui-v2-visual-system.md). It replaces the detail page's nested

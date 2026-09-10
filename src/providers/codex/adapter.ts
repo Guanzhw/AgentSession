@@ -6,6 +6,7 @@ import {
   extractCodexSessionId,
   extractMeta,
   recordsToMessages,
+  recordsToInheritedMessages,
   codexOwnedTokenUsageRecords,
   codexUsagePayload,
   codexUsageToTokens,
@@ -17,7 +18,7 @@ import { buildCodexSessionProtocol, buildCodexSessionProtocolV3 } from "./protoc
 import { finalizeSessionProtocol, protocolRevision } from "../shared/session-protocol.js";
 import { finalizeSessionProtocolV3 } from "../shared/session-protocol-v3.js";
 import { icons } from "../../icons.js";
-import type { Message, ProviderAdapter, RawSession } from "../interface.js";
+import type { InheritedContextView, Message, ProviderAdapter, RawSession } from "../interface.js";
 import { buildLinkedMessageSessionViews } from "../shared/linked-message-session.js";
 import { buildResolvedSystemPromptEvidence } from "../shared/system-prompt-evidence.js";
 import { buildCodexRuntimeEnvironment } from "./runtime-environment.js";
@@ -130,6 +131,28 @@ function resolveEntry(entry: { session: RawSession; messages: Message[]; records
     } : sourceSession.metadata
   };
   return { session, messages: resolved.messages };
+}
+
+const CODEX_INHERITED_CONTEXT_LIMIT = 40;
+
+function inheritedContextFor(entry: { session: RawSession; records: any[] }): InheritedContextView | null {
+  const parentSessionId = entry.session.parentId ? String(entry.session.parentId) : "";
+  if (!parentSessionId) return null;
+  const parent = parentEntryFor(entry);
+  // The child boundary remains evidence even when the parent file is no
+  // longer readable; classification can still use the recorded parent id and
+  // task envelope without guessing any source text.
+  const messages = recordsToInheritedMessages(entry.records, String(entry.session.id), parent?.records || []);
+  if (!messages.length) return null;
+  return {
+    sourceSession: {
+      provider: "codex",
+      sessionId: parentSessionId
+    },
+    messages: messages.slice(0, CODEX_INHERITED_CONTEXT_LIMIT),
+    total: messages.length,
+    truncated: messages.length > CODEX_INHERITED_CONTEXT_LIMIT
+  };
 }
 
 function resolveFamily(sessionId: string) {
@@ -333,6 +356,11 @@ const codex = {
   getMessages(sessionId) {
     const entry = sessionFiles.get(sessionId);
     return entry ? resolveEntry(entry).messages : [];
+  },
+
+  getInheritedContext(sessionId) {
+    const entry = sessionFiles.get(sessionId);
+    return entry ? inheritedContextFor(entry) : null;
   },
 
   getSessionProtocol(sessionId) {

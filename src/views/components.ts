@@ -91,7 +91,8 @@ function progressiveContainer(
   limit: number,
   label: string,
   partId: string,
-  field: "text" | "reasoning" | "input" | "output"
+  field: "text" | "reasoning" | "input" | "output",
+  contentScope = ""
 ) {
   const page = renderProgressiveContent(value, format, 0, limit);
   if (page.nextOffset == null || !partId) {
@@ -99,7 +100,7 @@ function progressiveContainer(
   }
   return `<div class="progressive">
 ${page.html}
-<button type="button" class="progressive-more" data-part-id="${escapeHtml(partId)}" data-field="${field}" data-next-offset="${page.nextOffset}" data-load-error="${escapeHtml(t("progressive.load_failed"))}" aria-label="${escapeHtml(label)}">${escapeHtml(label)}</button>
+<button type="button" class="progressive-more" data-part-id="${escapeHtml(partId)}" data-content-scope="${escapeHtml(contentScope)}" data-field="${field}" data-next-offset="${page.nextOffset}" data-load-error="${escapeHtml(t("progressive.load_failed"))}" aria-label="${escapeHtml(label)}">${escapeHtml(label)}</button>
 </div>`;
 }
 
@@ -532,8 +533,13 @@ export function messageBubble(role: any, content: any, meta: any = {}) {
   const safeRole = escapeHtml(role || "unknown");
   const reasoning = meta.reasoning ? `<div class="message-reasoning">${meta.reasoning}</div>` : "";
   // Human-authored message roles (user/agent) and assistant text render
-  // through the same safe Markdown pipeline; machine roles stay plain.
-  const humanRole = ["user", "agent", "assistant"].includes(String(role || "").toLowerCase());
+  // through the same safe Markdown pipeline; machine roles stay plain. A
+  // system message with a part id uses the bounded plain-text continuation
+  // path so long inherited context stays readable without changing the
+  // established system-message rendering semantics.
+  const normalizedRole = String(role || "").toLowerCase();
+  const humanRole = ["user", "agent", "assistant"].includes(normalizedRole);
+  const progressiveSystem = normalizedRole === "system" && Boolean(meta.partId);
   const body = humanRole
     ? `<div class="message-body markdown">${progressiveContainer(
       content || "",
@@ -541,8 +547,19 @@ export function messageBubble(role: any, content: any, meta: any = {}) {
       MESSAGE_CHUNK_LIMIT,
       t("progressive.show_more"),
       meta.partId || "",
-      "text"
+      "text",
+      meta.contentScope || ""
     )}</div>`
+    : progressiveSystem
+      ? `<div class="message-body plain">${progressiveContainer(
+        content || "",
+        "plain",
+        MESSAGE_CHUNK_LIMIT,
+        t("progressive.show_more"),
+        meta.partId || "",
+        "text",
+        meta.contentScope || ""
+      )}</div>`
     : `<pre class="message-body plain">${escapeHtml(content || "")}</pre>`;
 
   return `<section class="message message-${safeRole}">
@@ -552,14 +569,15 @@ export function messageBubble(role: any, content: any, meta: any = {}) {
   </section>`;
 }
 
-export function reasoningBlock(content: any, duration = "", partId = "") {
+export function reasoningBlock(content: any, duration = "", partId = "", contentScope = "") {
   const body = progressiveContainer(
     content,
     "markdown",
     REASONING_CHUNK_LIMIT,
     t("progressive.show_more"),
     partId,
-    "reasoning"
+    "reasoning",
+    contentScope
   );
   const safeDuration = duration ? `<span class="reasoning-duration">${escapeHtml(duration)}</span>` : "";
 
@@ -572,14 +590,15 @@ export function reasoningBlock(content: any, duration = "", partId = "") {
   </details>`;
 }
 
-export function toolCallBlock(tool: any, input: any, output: any, status: any, duration: any, partId: any) {
+export function toolCallBlock(tool: any, input: any, output: any, status: any, duration: any, partId: any, contentScope = "") {
   const inputMarkup = progressiveContainer(
     input,
     "plain",
     TOOL_CHUNK_LIMIT,
     t("progressive.show_more"),
     partId,
-    "input"
+    "input",
+    contentScope
   );
   const outputMarkup = progressiveContainer(
     output,
@@ -587,7 +606,8 @@ export function toolCallBlock(tool: any, input: any, output: any, status: any, d
     TOOL_CHUNK_LIMIT,
     t("progressive.show_more"),
     partId,
-    "output"
+    "output",
+    contentScope
   );
   const safeStatus = escapeHtml(status || "unknown");
   const safeDuration = duration ? `<span class="tool-duration">${escapeHtml(duration)}</span>` : "";

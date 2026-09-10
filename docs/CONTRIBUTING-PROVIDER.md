@@ -189,6 +189,7 @@ Every adapter implements `ProviderAdapter`:
 - stable lowercase `id`, display `name`, and `icon`;
 - `detect()`, `getDataPath()`, `scan()`, and `getSession()`;
 - normalized `getMessages()`, trusted `getTokenStats()`, and bounded `searchMessages()`;
+- optional bounded `getInheritedContext()` disclosure when the provider records copied parent messages separately from the owned transcript;
 - optional `exportSession()`, runtime-environment evidence, system-prompt evidence, structured conversation projections, and a provider-owned resume command;
 - `protocolCapabilities` and `getSessionProtocol(sessionId)` for every readable session;
 - `getStorageDiagnostic()` when a detected backend is known but unsupported.

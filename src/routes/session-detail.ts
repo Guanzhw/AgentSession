@@ -218,6 +218,7 @@ export function registerSessionDetail(
           runtimeEvents: renderRuntimeEvents(runtime, providerSegment, sessionId),
           conversationCompactions: collectConversationCompactions(runtime.protocol),
           conversationView,
+          inheritedContext: adapter.getInheritedContext?.(sessionId) || null,
           terminalLaunchAllowed: Boolean(appConfig.allowTerminalLaunch),
           navigationContext,
           ...renderContext
@@ -277,16 +278,30 @@ export function registerSessionDetail(
     const params = new URL(req.url || "/", `http://localhost:${appConfig.port}`).searchParams;
     const partId = params.get("part") || "";
     const field = params.get("field");
+    const contentScope = params.get("scope") || "owned";
     const offset = Number(params.get("offset") || 0);
-    if (!partId || !["text", "reasoning", "input", "output"].includes(String(field)) || !Number.isSafeInteger(offset) || offset < 0) {
+    if (!partId || !["owned", "inherited-context"].includes(contentScope) || !["text", "reasoning", "input", "output"].includes(String(field)) || !Number.isSafeInteger(offset) || offset < 0) {
       return json(res, { ok: false, error: "Invalid content request" }, 400);
     }
 
     try {
-      let part = findPart(adapter.getSessionContainer?.(sessionId), partId);
-      if (!part) {
+      let part = contentScope === "inherited-context"
+        ? null
+        : findPart(adapter.getSessionContainer?.(sessionId), partId);
+      if (!part && contentScope === "owned") {
         const raw = buildPartsFromProviderMessages(adapter.getMessages(sessionId));
         part = [...raw.partsByMessage.values()].flat().find((candidate: any) => String(candidate.id) === partId) || null;
+      }
+      if (!part && contentScope === "inherited-context") {
+        const inherited = adapter.getInheritedContext?.(sessionId);
+        if (inherited) {
+          const raw = buildPartsFromProviderMessages(
+            inherited.messages,
+            `inherited-${inherited.sourceSession.sessionId}-`,
+            "inherited-context"
+          );
+          part = [...raw.partsByMessage.values()].flat().find((candidate: any) => String(candidate.id) === partId) || null;
+        }
       }
       const data = part?.data && typeof part.data === "object" ? part.data : null;
       if (!data) {
@@ -298,7 +313,7 @@ export function registerSessionDetail(
       let limit: number;
       if (field === "text" && data.type === "text") {
         value = data.text || "";
-        format = "markdown";
+        format = part.contentScope === "inherited-context" && part.messageRole === "system" ? "plain" : "markdown";
         limit = 12000;
       } else if (field === "reasoning" && data.type === "reasoning") {
         value = data.text || "";

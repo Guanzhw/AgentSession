@@ -61,6 +61,22 @@ export interface Message {
   presentationPhase?: MessagePresentationPhase;
 }
 
+/**
+ * Bounded, read-only context copied into a session by its provider. This is a
+ * disclosure projection only: it is intentionally separate from owned
+ * messages, token accounting, search indexes, exports, and runtime protocol
+ * projections.
+ */
+export interface InheritedContextView {
+  sourceSession: {
+    provider: ProviderId;
+    sessionId: string;
+  };
+  messages: Message[];
+  total: number;
+  truncated: boolean;
+}
+
 export interface DailyTokenStat {
   /**
    * Token components are mutually exclusive. Provider adapters must remove
@@ -160,6 +176,8 @@ export interface ProviderAdapter {
   scan(): AsyncIterable<RawSession>;
   getSession(sessionId: string): RawSession | Record<string, unknown> | null;
   getMessages(sessionId: string): Message[];
+  /** Optional bounded disclosure of explicitly recorded inherited context. */
+  getInheritedContext?(sessionId: string): InheritedContextView | null;
   getTokenStats(days?: number): DailyTokenStat[];
   /** Monotonically changes when a file-backed provider's stats source changes. */
   getStatsRevision?(): string | number;

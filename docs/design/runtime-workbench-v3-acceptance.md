@@ -1,6 +1,6 @@
 # Unified runtime workbench acceptance
 
-Status: production acceptance open, 2026-09-10.
+Status: production validation complete; final publication pending, 2026-09-11.
 
 The [design](runtime-workbench-v3.md) defines the target. This checklist records
 real local cases and remaining evidence; prototype screenshots do not prove
@@ -40,6 +40,61 @@ that field. The Conversation slice shipped in `9949426` preserves it as
 final reply. Providers without this evidence retain their communication.
 
 ## Production gates
+
+### Final requirements audit on `64a8adb`, 2026-09-11
+
+The shipped slice passed Linux Quality
+[34525747869](https://github.com/Guanzhw/AgentSession/actions/runs/34525747869)
+on Node 22.15.0 and 26.5.0; local/remote SHA matched with a clean worktree.
+The main agent then exercised the real Codex root, OpenCode and DSH cases in
+all 36 provider × EN/ZH × light/dark × 1280/768/320 combinations. Keyboard
+run selection opened the inspector without page overflow, exact task links
+were preserved, and Escape closed it and restored the run trigger. Screenshots
+were retained locally; representative desktop/narrow screenshots were inspected.
+
+The real Codex root had 105 completed-process disclosures, all initially
+collapsed. Keyboard expansion/collapse worked; a message hash within the first
+folded process opened the correct Conversation content. The known missing DSH
+stored-session reference still returned HTTP 404 `session_not_found`.
+
+Independent final source/test audit found one remaining functional requirement:
+Codex inherited records are filtered before rendering rather than accessible in
+a separate collapsed disclosure. This prevents inherited text search and hash
+access. Spec 20 addresses that bounded read-only view while keeping owned
+messages, default ToC, request usage and protocol work unchanged. Overall
+acceptance was held open for this requirement and its verification below.
+
+Before Spec 20, a read-only scan of the built Codex adapter recorded these
+real child baselines (both parent the Codex root above):
+
+| Child session | Rendered messages | Owned normalized messages | Owned tokens | Protocol events |
+| --- | ---: | ---: | ---: | ---: |
+| `01a058a8-e567-7a00-88fd-1417a52bc6ad` | 34 | 123 | 12,719,184 | 125 |
+| `01a05b54-2137-7600-927b-f64ccbe9eccd` | 37 | 113 | 8,461,784 | 117 |
+
+Both source files contain nine boundary-classified inherited records, including
+three developer message rows and one user row; neither contains inherited
+assistant/tool rows. Record counts must not be presented as message counts.
+Spec 20 must preserve the owned baselines while making recorded inherited
+text available through an explicit separate disclosure.
+
+### Spec 20 final verification, 2026-09-11
+
+Both real child baselines above remain identical after implementation. Each
+now discloses four normalized background messages (three developer rows and
+one injected user row), independently from the owned transcript. The first
+child passed keyboard disclosure, progressive scoped text continuation,
+transcript search reveal, hash reveal, canonical parent linking and ToC
+exclusion. All 12 EN/ZH × light/dark × 1280/768/320 combinations passed with
+the disclosure open, wrapped plain text and no page overflow. Representative
+desktop and narrow screenshots were inspected; browser errors were empty.
+
+`npm test` passed 565/565. Regression fixtures cover the 40-message bound,
+missing parent sources, inherited reasoning/tool continuation and owned-scope
+isolation. Real sources contain no inherited assistant/tool rows, so that
+positive path is explicitly fixture-backed. `npm run review` and
+`npm run pre-push` passed. Real OpenCode E2E passed with empty browser errors.
+Final publication is the remaining delivery gate.
 
 ### Approval destination and combined validation, 2026-09-11
 
@@ -299,27 +354,27 @@ The scoped fix shipped in `67d0949`; the subsequent Linux Quality run
 passed on Node 22.15.0 and 26.5.0. This restores the baseline gate; production
 UI and Conversation changes still require their own acceptance below.
 
-- [ ] Workbench and Conversation are the only primary reading modes; History
+- [x] Workbench and Conversation are the only primary reading modes; History
       remains secondary and existing `#tab-events` access works.
-- [ ] Workbench has linked readable work nodes and execution lanes, not four
+- [x] Workbench has linked readable work nodes and execution lanes, not four
       nested lenses or repeated raw entity inventories.
-- [ ] Task/run/actor selection uses exact normalized IDs in both directions;
+- [x] Task/run/actor selection uses exact normalized IDs in both directions;
       missing bindings remain unlinked. Selection details occupy space only
       when open.
-- [ ] Current run page remains bounded (default 50, maximum 100); replacement
+- [x] Current run page remains bounded (default 50, maximum 100); replacement
       uses current-page evidence and preserves truthful snapshot/range labels.
-- [ ] Existing `runtimeLens=execution|coordination|context|work` links reach the
+- [x] Existing `runtimeLens=execution|coordination|context|work` links reach the
       corresponding content without introducing a new public query contract.
-- [ ] Context checkpoints show recorded resulting content/size; scope assets
+- [x] Context checkpoints show recorded resulting content/size; scope assets
       retain explicit content access and provenance. Unknown token origin does
       not become zero usage or a fabricated allocation.
-- [ ] Conversation highlights real user input and agent communication; internal
+- [x] Conversation highlights real user input and agent communication; internal
       calls disclose under evidence-backed exchanges. Questions, results,
       inherited-context boundaries and ToC/search anchors remain reachable.
-- [ ] 320/768/1280px, EN/ZH, light/dark: readable connected branches and lanes,
+- [x] 320/768/1280px, EN/ZH, light/dark: readable connected branches and lanes,
       no page overflow, no compressed graph labels. Keyboard selection,
       inspector close/focus return, paging and cross-view navigation work.
-- [ ] Full tests, governance/typecheck, real provider/API checks, browser E2E,
+- [x] Full tests, governance/typecheck, real provider/API checks, browser E2E,
       server/browser error inspection and independent review pass.
 - [ ] Scoped commits pushed; remote SHA verified. Overall goal is not complete
       until the full design, including Conversation disclosure, is accepted.

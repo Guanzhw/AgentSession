@@ -1,12 +1,13 @@
 import { t } from "../i18n.js";
 import { escapeHtml } from "../markdown.js";
+import { buildPartsFromProviderMessages } from "../session-queries.js";
 import type { SessionPartNode, SessionTree } from "../providers/opencode/session-tree.js";
 import { isSubagentTool, mergeToolMetadata } from "../providers/shared/subagent-tools.js";
 import { formatDuration, formatLocalizedDurationMs, formatTime, formatTokens, messageBubble, messageHeader, reasoningBlock, todoList, toolCallBlock } from "./components.js";
 import { layout } from "./layout.js";
 import type { SessionNavigationContext } from "../navigation-context.js";
 import type { ConversationCompaction } from "../protocol-runtime.js";
-import type { MessagePresentationPhase } from "../providers/interface.js";
+import type { InheritedContextView, MessagePresentationPhase } from "../providers/interface.js";
 import type {
   ConversationAgentCard,
   ConversationChannelItem,
@@ -331,9 +332,9 @@ function hasOwnMessageBubble(message: any) {
     && message.parts.some((part: any) => part.type === "text" && Boolean(part.data?.text));
 }
 
-function renderMessageGroup(message: any, markup: any, provider: string) {
+function renderMessageGroup(message: any, markup: any, provider: string, anchorPrefix = "msg") {
   const role = messageTurnRole(message.role);
-  const messageAnchor = escapeHtml(anchorId("msg", message.id));
+  const messageAnchor = escapeHtml(anchorId(anchorPrefix, message.id));
   const data = message.data || {};
   const toolOnlyHeader = role === "assistant" && !hasOwnMessageBubble(message)
     ? messageHeader(role, {
@@ -602,11 +603,12 @@ function renderSessionMetricsPanel(sessionMetrics: any) {
   </section>`;
 }
 
-function renderReasoningPart(partData: any, partId = "") {
+function renderReasoningPart(partData: any, partId = "", contentScope = "") {
   return reasoningBlock(
     partData?.text || "",
     formatDuration(partData?.time?.start, partData?.time?.end),
-    partId
+    partId,
+    contentScope
   );
 }
 
@@ -630,7 +632,8 @@ function renderPart(messageData: any, partData: any, partId: any, reasoningMarku
       tokenRequests: messageData.tokenRequests,
       tokenRequestCount: messageData.tokenRequestCount,
       cacheWarning: messageData.cacheWarning,
-      time: messageData.time?.created
+      time: messageData.time?.created,
+      contentScope: messageData.contentScope
     });
   }
 
@@ -648,7 +651,8 @@ function renderPart(messageData: any, partData: any, partId: any, reasoningMarku
       output,
       state.status,
       formatDuration(timing.start, timing.end),
-      partId
+      partId,
+      messageData.contentScope
     );
   }
 
@@ -881,7 +885,7 @@ function renderRawParts(messageData: any, parts: any[] = []) {
   for (const part of parts) {
     const partData = safeParse(part.data);
     if (partData?.type === "reasoning") {
-      const reasoning = renderReasoningPart(partData, part.id);
+      const reasoning = renderReasoningPart(partData, part.id, messageData.contentScope);
       if (reasoning) {
         pendingReasoning.push(reasoning);
       }
@@ -904,7 +908,7 @@ function renderRawParts(messageData: any, parts: any[] = []) {
   return renderedParts.filter(Boolean).join("\n");
 }
 
-function renderRawMessageEntries(messages: any, partsByMessage: any, provider: any): ConversationEntry[] {
+function renderRawMessageEntries(messages: any, partsByMessage: any, provider: any, anchorPrefix = "msg"): ConversationEntry[] {
   const entries: ConversationEntry[] = [];
   let previousCacheUsage = null;
 
@@ -939,13 +943,38 @@ function renderRawMessageEntries(messages: any, partsByMessage: any, provider: a
         role,
         data: messageData,
         parts: parts.map((part: any) => ({ id: part.id, data: safeParse(part.data), type: safeParse(part.data)?.type }))
-      }, renderedParts, provider),
+      }, renderedParts, provider, anchorPrefix),
       timeCreated: Number(parsedData.time?.created) || Number(message.time_created) || 0,
       processOnly: role === "assistant" && !parts.some((part: any) => safeParse(part.data)?.type === "text" && Boolean(safeParse(part.data)?.text))
     });
   }
 
   return entries;
+}
+
+function renderInheritedContext(view: InheritedContextView | null, provider: string) {
+  if (!view?.messages?.length || !view.sourceSession?.sessionId) {
+    return "";
+  }
+  const idPrefix = `inherited-${view.sourceSession.sessionId}-`;
+  const mapped = buildPartsFromProviderMessages(view.messages, idPrefix, "inherited-context");
+  const entries = renderRawMessageEntries(mapped.messages, mapped.partsByMessage, provider, "inherited-msg");
+  const sourceHref = conversationSessionHref(view.sourceSession);
+  const shown = view.messages.length;
+  const bound = view.truncated
+    ? t("detail.inherited_context_truncated", { shown: String(shown), total: String(view.total) })
+    : t("detail.inherited_context_count", { count: String(view.total) });
+  const messageMarkup = entries.map((entry) => entry.markup).filter(Boolean).join("\n");
+  if (!messageMarkup) return "";
+  return `<details class="inherited-context-disclosure" data-disclosure data-inherited-context>
+    <summary class="inherited-context-summary">${escapeHtml(t("detail.inherited_context_title"))}<span class="inherited-context-count">${escapeHtml(bound)}</span></summary>
+    <div class="inherited-context-body">
+      <p class="inherited-context-note">${escapeHtml(t("detail.inherited_context_note"))} ${sourceHref ? `<a href="${escapeHtml(sourceHref)}">${escapeHtml(t("detail.inherited_context_source"))}</a>` : ""}</p>
+      <div class="messages inherited-context-messages" data-inherited-context-messages data-message-count="${shown}">
+        ${messageMarkup}
+      </div>
+    </div>
+  </details>`;
 }
 
 // ── Conversation agent cards, channels, references, inspector (UI v2 P2b) ──
@@ -1572,8 +1601,9 @@ export function renderSessionPage({
   runtimeEvents = "",
   navigationContext = null,
   conversationCompactions = [],
-  conversationView = null
-}: { session: any; sessionTree?: any; sessionMetrics?: any; messages?: any[]; partsByMessage?: Map<any, any>; todos?: any[]; recentSessions?: any[]; meta?: any; provider?: string; providers?: any[]; manageable?: boolean; resumeCommand?: any; terminalLaunchAllowed?: boolean; runtimeWorkbench?: string; runtimeEvents?: string; navigationContext?: SessionNavigationContext | null; conversationCompactions?: ConversationCompaction[]; conversationView?: ConversationViewModel | null }) {
+  conversationView = null,
+  inheritedContext = null
+}: { session: any; sessionTree?: any; sessionMetrics?: any; messages?: any[]; partsByMessage?: Map<any, any>; todos?: any[]; recentSessions?: any[]; meta?: any; provider?: string; providers?: any[]; manageable?: boolean; resumeCommand?: any; terminalLaunchAllowed?: boolean; runtimeWorkbench?: string; runtimeEvents?: string; navigationContext?: SessionNavigationContext | null; conversationCompactions?: ConversationCompaction[]; conversationView?: ConversationViewModel | null; inheritedContext?: InheritedContextView | null }) {
   const title = session.title || session.slug || session.id;
   const starred = meta?.starred ? 1 : 0;
   const encodedProvider = encodeURIComponent(provider);
@@ -1699,6 +1729,7 @@ ${actions}
     ? (sessionTree.detachedChildren || []).map((child: SessionTree) => renderSessionTree(child, 1, provider, true)).filter(Boolean).join("\n")
     : "";
   const conversationMarkup = renderConversationPanel(conversationEntries, conversationCompactions, provider, conversationDefault, detachedMarkup, renderedEntryCount, conversationView, placedCardIds);
+  const inheritedContextMarkup = renderInheritedContext(inheritedContext, provider);
 
   const sessionMetadata = session.metadata && typeof session.metadata === "object"
     ? session.metadata as Record<string, unknown>
@@ -1731,6 +1762,7 @@ ${actions}
     </div>
     <div role="tabpanel" id="tab-conversation" aria-labelledby="tab-btn-conversation">
       ${conversationMarkup}
+      ${inheritedContextMarkup}
     </div>
     <div role="tabpanel" id="tab-events" aria-labelledby="tab-btn-events">
       ${runtimeEvents || `<p class="empty-state">${t("runtime.unavailable")}</p>`}
