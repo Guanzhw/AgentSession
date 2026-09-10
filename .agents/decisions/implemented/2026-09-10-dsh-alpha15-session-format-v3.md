@@ -49,6 +49,12 @@ while older generations retain their established behavior. The adapter gains a
 version-specific surface branch and fixture obligations; unsupported future
 required semantics continue to fail explicitly instead of being approximated.
 
+Recorded absolute working directories use the source host's Windows or POSIX
+path syntax, independently of the viewer OS. The parser preserves that string;
+it does not rewrite foreign source paths to a local working directory. Linux
+CI exposed the previous host-only `isAbsolute` validation rejecting Windows
+fixtures, so validation now accepts either absolute-path syntax at this boundary.
+
 ## Verification
 
 - The checked-in official fixture matches upstream SHA-256
@@ -68,3 +74,6 @@ required semantics continue to fail explicitly instead of being approximated.
   by regressions. The current local DSH package is `0.1.5-alpha.2`; its existing
   14 user sessions remain historical v0 inputs and their source manifest stayed
   byte-identical during verification.
+- The source-host cwd regression and focused DSH/OpenClaw fixture checks pass
+  29/29 on local Node 26.5.1 and the declared minimum Node 22.15.0. The official
+  v3 fixture still parses as 200 records. Remote Linux CI rerun remains pending.

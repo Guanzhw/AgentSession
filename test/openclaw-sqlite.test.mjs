@@ -20,7 +20,50 @@ import { openClawSqliteDailyTokenStats } from "../dist/src/providers/openclaw/sq
 const schemaSql = readFileSync(
   path.join("test", "fixtures", "openclaw-agent-schema-v19.sql"),
   "utf8"
-);
+).replace(/\r\n/g, "\n");
+
+// The minimum-Node CI build's SQLite does not include FTS5. Keep the upstream
+// schema snapshot intact, but omit its two optional search indexes when
+// constructing in-test databases. The adapter reads the canonical tables and
+// does not use either derived FTS5 table.
+function schemaSqlForTestDatabase() {
+  const spans = [
+    [
+      "CREATE VIRTUAL TABLE IF NOT EXISTS standing_intents_fts USING fts5(",
+      ");\n\n",
+      "standing_intents_fts"
+    ],
+    [
+      "CREATE TRIGGER IF NOT EXISTS standing_intents_fts_after_insert",
+      "END;\n\n",
+      "standing_intents_fts_after_insert"
+    ],
+    [
+      "CREATE TRIGGER IF NOT EXISTS standing_intents_fts_after_delete",
+      "END;\n\n",
+      "standing_intents_fts_after_delete"
+    ],
+    [
+      "CREATE TRIGGER IF NOT EXISTS standing_intents_fts_after_update",
+      "END;\n\n",
+      "standing_intents_fts_after_update"
+    ],
+    [
+      "CREATE VIRTUAL TABLE IF NOT EXISTS session_transcript_fts USING fts5(",
+      ");\n\n",
+      "session_transcript_fts"
+    ]
+  ];
+  let sql = schemaSql;
+  for (const [startMarker, endMarker, name] of spans) {
+    const start = sql.indexOf(startMarker);
+    if (start < 0) throw new Error(`OpenClaw fixture is missing ${name} DDL`);
+    const end = sql.indexOf(endMarker, start);
+    if (end < 0) throw new Error(`OpenClaw fixture has incomplete ${name} DDL`);
+    sql = `${sql.slice(0, start)}${sql.slice(end + endMarker.length)}`;
+  }
+  return sql;
+}
 
 const recentFixtureEpoch = (() => {
   const date = new Date();
@@ -75,7 +118,7 @@ function createAgentDatabase(
 ) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new DatabaseSync(dbPath);
-  db.exec(schemaSql);
+  db.exec(schemaSqlForTestDatabase());
   const now = Date.now();
   db.prepare(`
     INSERT INTO schema_meta (meta_key, role, schema_version, agent_id, app_version, created_at, updated_at)
@@ -162,7 +205,7 @@ function createAgentDatabase(
 function createChildAgentDatabase(dbPath, key, parentKey, workspace, entryJson = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new DatabaseSync(dbPath);
-  db.exec(schemaSql);
+  db.exec(schemaSqlForTestDatabase());
   const now = Date.now();
   const windowId = "win-child-1";
   db.prepare(`
@@ -387,7 +430,7 @@ test("OpenClaw current SQLite: legacy-only and unsupported SQLite diagnostics st
     const futureDir = path.join(root, "agents", "future-agent", "agent");
     mkdirSync(futureDir, { recursive: true });
     const db = new DatabaseSync(path.join(futureDir, "openclaw-agent.sqlite"));
-    db.exec(schemaSql);
+    db.exec(schemaSqlForTestDatabase());
     db.prepare(`
       INSERT INTO schema_meta (meta_key, role, schema_version, agent_id, app_version, created_at, updated_at)
       VALUES ('primary', 'agent', 20, 'future-agent', '2026.9.0', 1, 1)

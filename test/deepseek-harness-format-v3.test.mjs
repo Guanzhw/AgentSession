@@ -43,6 +43,23 @@ function user(seq, text, extra = {}) {
   return event("user/message", seq, { id: `user-${seq}`, role: "user", source: { kind: "user" }, content: [{ type: "text", text }] }, { surfaceOp: "append", ...extra });
 }
 
+test("DSH preserves absolute source-host cwd paths on every viewer platform", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "opensession-dsh-source-cwd-"));
+  const filePath = path.join(root, "session.v3.jsonl");
+  try {
+    for (const cwd of ["D:\\WorkSpace\\dsh-fixture", "/home/user/project", "\\\\server\\share\\project"]) {
+      writeJsonl(filePath, [header("foreign-source", { cwd })]);
+      assert.equal(parseDshSession(filePath)[0].cwd, cwd);
+    }
+    for (const cwd of ["relative/project", "D:relative", "", 42]) {
+      writeJsonl(filePath, [header("invalid-source", { cwd })]);
+      assert.throws(() => parseDshSession(filePath), /Invalid session\.cwd/);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function system(seq, text, extra = {}) {
   return event("system/message", seq, { turn: 1, step: 1, message: { id: `system-${seq}`, role: "system", source: { kind: "plugin", plugin: "@deepseek-ai/dsh-system-prompt" }, content: text === "" ? [] : [{ type: "text", text }] } }, { surfaceOp: "append", ...extra });
 }

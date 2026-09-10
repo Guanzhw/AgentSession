@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { posix, win32 } from "node:path";
 import { zstdDecompressSync } from "node:zlib";
 import type { Message, RawSession, TokenUsage } from "../interface.js";
 
@@ -408,7 +408,8 @@ function validateDshHeader(header: DshRecord, filePath: string, generation: DshS
   if (header.delegationDepth !== undefined) {
     nonNegativeSafeInteger(header.delegationDepth, "session.delegationDepth");
   }
-  if (header.cwd !== undefined && (typeof header.cwd !== "string" || !isAbsolute(header.cwd))) {
+  // Recorded paths belong to the source host, which may differ from the viewer.
+  if (header.cwd !== undefined && (typeof header.cwd !== "string" || !(posix.isAbsolute(header.cwd) || win32.isAbsolute(header.cwd)))) {
     throw new DshSessionParseError("Invalid session.cwd in DeepSeek Harness session storage");
   }
   if (header.parentSession !== undefined && typeof header.parentSession !== "string") {
