@@ -156,6 +156,11 @@ export function initRuntimeWorkbench({ ft, formatText }) {
       fact(ft("runtime_inspector_id"), id);
       if (item?.status) fact(ft("runtime_state"), ft(`runtime_status_${item.status}`));
       if (item?.mode) fact(ft("runtime_execution_mode"), ft(`runtime_mode_${item.mode}`));
+      if (kind === "task" || kind === "run") {
+        fact(ft("runtime_outcome"), item?.outcome);
+        fact(ft("runtime_failure_reason"), item?.failureReason);
+        fact(ft("runtime_cancellation_reason"), item?.cancellationReason);
+      }
       if (item?.ownerActorId) fact(ft("runtime_task_owner"), item.ownerActorId);
       if (item?.timeStart != null) fact(ft("runtime_start"), new Date(item.timeStart).toLocaleString(document.documentElement.lang));
       if (item?.timeEnd != null) fact(ft("runtime_end"), new Date(item.timeEnd).toLocaleString(document.documentElement.lang));

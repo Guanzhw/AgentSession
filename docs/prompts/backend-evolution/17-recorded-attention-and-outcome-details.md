@@ -1,6 +1,8 @@
 # Recorded attention and outcome details
 
-Status: proposed; implementation follows spec 16.
+Status: implemented, 2026-09-11; scoped browser and real-provider acceptance
+is recorded in the unified workbench acceptance document. No live unmatched
+DSH approval was available; the overall approval-content destination remains open.
 
 ## Evidence
 
@@ -43,12 +45,31 @@ Neither establishes a positive pending-input or unresolved-failure case.
 - No synthetic retry-resolution rules, text keyword guessing, provider-ID
   branches in the shared view, or new entities solely for display.
 
+The implementation keeps the existing work visualization primary. A compact
+orientation attention strip exposes only normalized session/work
+`waiting_input` and `blocked` records and offers at most three exact,
+entity-labelled goal/task selection links; the remaining bounded work stays
+available through highlighted nodes and an explicit truncation note. A
+run-page attention strip follows the same small limit using only the current
+bounded run page and exact run selections; it does not reuse the whole-session
+run projection. Each attention signal has one
+`data-runtime-attention-state` hook, while graph nodes and run rows retain the
+same state as visual emphasis through their own bounded hooks.
+
+The selection inspector now renders recorded task/run `outcome`,
+`failureReason`, and `cancellationReason` values. Missing values stay absent;
+failed or cancelled history is not promoted to a pending attention signal.
+
 ## Verification
 
 Use the existing positive fixtures for exact waiting/blocked selection and
 recorded reason rendering. Include successful retry/history and cancellation
-cases to verify they do not imply unresolved action. Check current-page changes,
-unknown state and incomplete projections, EN/ZH, keyboard and narrow layouts.
-Use a clearly identified illustrative browser fixture if real positive evidence
-is unavailable; retain that real-case limitation in the final acceptance audit.
-Run the affected view/runtime validation matrix and independent review.
+cases to verify they do not imply unresolved action. Check that changing a run
+page changes only the page-scoped attention signals, while session/work
+signals retain their own scope. Check unknown state and incomplete projections,
+EN/ZH, keyboard and narrow layouts. The local regression tests cover scoped
+selection and inspector field wiring; the parent acceptance audit owns the
+real-provider and browser checks. Use a clearly identified illustrative
+browser fixture if real positive evidence is unavailable; retain that real-case
+limitation in the final acceptance audit. Run the affected view/runtime
+validation matrix and independent review.

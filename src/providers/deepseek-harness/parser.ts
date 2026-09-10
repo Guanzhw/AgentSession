@@ -1282,9 +1282,31 @@ export function dshStoredSystemPrompt(records: DshRecord[]): { content: string; 
   };
 }
 
-/** Map a child session's durable final turn reason to the shared task status vocabulary. */
-export function dshSessionStatus(records: DshRecord[]): "running" | "completed" | "failed" | "blocked" | "cancelled" {
-  const end = latestEvent(records, "turn/end");
+/** Map owned DSH turn and approval events to the shared task status vocabulary. */
+export function dshSessionStatus(records: DshRecord[]): "running" | "waiting_input" | "completed" | "failed" | "blocked" | "cancelled" {
+  let openTurn = false;
+  let pendingApprovals = new Set<string>();
+  let end: DshRecord | null = null;
+  for (const event of dshOwnedEvents(records)) {
+    if (event.type === "turn/start") {
+      openTurn = true;
+      pendingApprovals = new Set();
+      continue;
+    }
+    if (event.type === "turn/end") {
+      openTurn = false;
+      pendingApprovals = new Set();
+      end = event;
+      continue;
+    }
+    if (!openTurn || !isRecord(event.data)) continue;
+    const id = event.data.id;
+    if (typeof id !== "string" || !id) continue;
+    if (event.type === "approval/asked") pendingApprovals.add(id);
+    else if (event.type === "approval/decided") pendingApprovals.delete(id);
+  }
+  if (openTurn && pendingApprovals.size > 0) return "waiting_input";
+  if (openTurn) return "running";
   const kind = end?.data?.reason?.kind;
   if (kind === "completed") return "completed";
   if (kind === "error") return "failed";

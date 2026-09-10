@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { projectRuntimeLanePresentation, renderRuntimeEvents, renderRuntimeWorkbench } from "../dist/src/views/runtime-workbench.js";
+import { projectRuntimeLanePresentation, renderRuntimeEvents, renderRuntimeRunPage, renderRuntimeWorkbench } from "../dist/src/views/runtime-workbench.js";
 import { getLocale, setLocale } from "../dist/src/i18n.js";
 import { renderSessionPage } from "../dist/src/views/session.js";
 import { finalizeSessionProtocolV3, upgradeSessionProtocolV2 } from "../dist/src/providers/shared/session-protocol-v3.js";
@@ -107,6 +107,104 @@ test("Workbench combines recorded graph, lanes, context, and evidence without ne
   assert.match(html, /Context after compaction/);
   assert.match(html, /Retain &lt;the result&gt; and discard copied history/);
   assert.doesNotMatch(html, /Retain <the result>/);
+});
+
+test("Recorded attention stays scoped to session/work and selects exact waiting or blocked entities", () => {
+  const runtime = fixtureRuntime();
+  runtime.v3.session = { ...runtime.v3.session, state: "waiting_input" };
+  runtime.v3.goals = [{
+    id: "goal-attention", sessionId: "runtime-1", title: "Input goal", description: null, status: "blocked",
+    taskIds: ["task-attention", "task-failed"], parentGoalId: null, ownerActorId: null,
+    timeCreated: 900, timeUpdated: 3000, timeCompleted: null, provenance
+  }];
+  runtime.v3.tasks = [
+    { ...runtime.v3.tasks[0], id: "task-attention", title: "Waiting task", status: "waiting_input", timeCompleted: null },
+    { ...runtime.v3.tasks[0], id: "task-failed", title: "Historical failure", status: "failed", timeCompleted: null }
+  ];
+  runtime.v3.agentRuns = [
+    { ...runtime.v3.agentRuns[0], id: "run-attention", taskId: "task-attention", status: "waiting_input", outcome: null, failureReason: null, cancellationReason: null },
+    { ...runtime.v3.agentRuns[0], id: "run-failed", taskId: "task-failed", status: "failed", outcome: "failed", failureReason: "usage_limit_exceeded", cancellationReason: null }
+  ];
+  runtime.projections.work = projectWork(runtime.v3, { maxItems: 100 });
+  runtime.projections.execution = projectExecution(runtime.v3, { maxItems: 100 });
+  const model = deriveWorkOverview({
+    protocol: runtime.v3,
+    work: runtime.projections.work,
+    execution: runtime.projections.execution,
+    coordination: runtime.projections.coordination,
+    context: runtime.projections.context
+  });
+  assert.deepEqual(model.attention.session.map(({ scope, kind, id, status }) => ({ scope, kind, id, status })), [
+    { scope: "session", kind: "session", id: "runtime-1", status: "waiting_input" }
+  ]);
+  assert.deepEqual(model.attention.work.map(({ scope, kind, id, status }) => ({ scope, kind, id, status })), [
+    { scope: "work", kind: "goal", id: "goal-attention", status: "blocked" },
+    { scope: "work", kind: "task", id: "task-attention", status: "waiting_input" }
+  ]);
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  assert.match(html, /data-runtime-attention-scope="session"/);
+  assert.match(html, /data-runtime-attention-scope="work"/);
+  assert.match(html, /data-runtime-attention-kind="goal" data-runtime-attention-id="goal-attention" data-runtime-attention-state="blocked"/);
+  assert.match(html, /data-runtime-attention-kind="task" data-runtime-attention-id="task-attention" data-runtime-attention-state="waiting_input"/);
+  assert.doesNotMatch(html, /data-runtime-attention-id="task-failed"/);
+  assert.match(html, /data-runtime-attention-state="waiting_input"/);
+  assert.match(html, /data-runtime-attention-state="blocked"/);
+});
+
+test("Attention links stay concise, name their entities, and disclose bounded work", () => {
+  const runtime = fixtureRuntime();
+  runtime.v3.tasks = Array.from({ length: 5 }, (_, index) => ({
+    ...runtime.v3.tasks[0], id: `attention-task-${index + 1}`, title: `Waiting task ${index + 1}`, status: "waiting_input", timeCompleted: null
+  }));
+  runtime.v3.goals = [{
+    id: "attention-goal", sessionId: "runtime-1", title: "Blocked goal", description: null, status: "blocked",
+    taskIds: runtime.v3.tasks.map((task) => task.id), parentGoalId: null, ownerActorId: null,
+    timeCreated: 900, timeUpdated: 3000, timeCompleted: null, provenance
+  }];
+  runtime.projections.work = projectWork(runtime.v3, { maxItems: 100 });
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  const attention = html.match(/<section class="runtime-attention-strip"[\s\S]*?<\/section>/)?.[0] || "";
+  assert.match(attention, /Current goal: Blocked goal · blocked/);
+  assert.match(attention, /Task: Waiting task 1 · waiting for input/);
+  assert.match(attention, /data-runtime-attention-truncated/);
+  assert.equal((attention.match(/data-runtime-attention-signal/g) || []).length, 3, "only a bounded set of work links is listed");
+  const firstSignal = attention.match(/data-runtime-attention-signal[\s\S]*?\/span>/)?.[0] || "";
+  assert.equal((firstSignal.match(/data-runtime-attention-state=/g) || []).length, 1, "signal state hook is not duplicated");
+  runtime.v3.agentRuns = Array.from({ length: 5 }, (_, index) => ({
+    ...runtime.v3.agentRuns[0], id: `waiting-run-${index}`, status: "waiting_input", label: "Same worker"
+  }));
+  const page = renderRuntimeRunPage(queryRunPage(runtime.v3));
+  assert.match(page, /#1 Same worker/);
+  assert.match(page, /#2 Same worker/);
+  assert.doesNotMatch(page, /data-runtime-attention-id="waiting-run-3"/);
+});
+
+test("Run-page attention is limited to the current page while historical outcomes remain inspector facts", () => {
+  const runtime = fixtureRuntime();
+  runtime.v3.agentRuns = Array.from({ length: 53 }, (_, index) => ({
+    ...runtime.v3.agentRuns[0],
+    id: `run-page-${index + 1}`,
+    status: index === 0 ? "waiting_input" : index === 50 ? "blocked" : index === 1 ? "failed" : index === 2 ? "cancelled" : "completed",
+    outcome: index === 1 ? "failed" : index === 2 ? "cancelled" : null,
+    failureReason: index === 1 ? "usage_limit_exceeded" : null,
+    cancellationReason: index === 2 ? "user stopped" : null
+  }));
+  runtime.runPage = queryRunPage(runtime.v3);
+  let html = renderRuntimeRunPage(runtime.runPage);
+  assert.match(html, /data-runtime-attention-scope="run-page"/);
+  assert.match(html, /data-runtime-attention-kind="run" data-runtime-attention-id="run-page-1" data-runtime-attention-state="waiting_input"/);
+  assert.doesNotMatch(html, /data-runtime-attention-id="run-page-51"/);
+  const secondPage = queryRunPage(runtime.v3, { cursor: runtime.runPage.nextCursor });
+  html = renderRuntimeRunPage(secondPage);
+  assert.match(html, /data-runtime-attention-kind="run" data-runtime-attention-id="run-page-51" data-runtime-attention-state="blocked"/);
+  assert.doesNotMatch(html, /data-runtime-attention-id="run-page-1"/);
+  assert.doesNotMatch(html, /data-runtime-attention-id="run-page-2"/);
+  assert.doesNotMatch(html, /data-runtime-attention-id="run-page-3"/);
+  const source = readFileSync(path.join(process.cwd(), "src", "static", "app", "runtime-workbench.js"), "utf8");
+  assert.match(source, /runtime_outcome/);
+  assert.match(source, /runtime_failure_reason/);
+  assert.match(source, /runtime_cancellation_reason/);
+  assert.match(source, /fact\(ft\("runtime_failure_reason"\), item\?\.failureReason\)/);
 });
 
 test("Workbench lanes render localized session-turn identity without raw inventory", () => {

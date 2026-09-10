@@ -32,6 +32,8 @@ AgentSession 是本地优先、只读的 harness runtime inspector。它从 Open
 
 从已记录的运行打开子会话时，子会话仍使用 canonical URL，并提供由查看器维护的返回链接，恢复到父级工作台的精确分页、页大小和运行选择。证据发生变化或锚点过期时会明确显示，不会按索引改选其他运行。
 
+已记录的等待和阻塞分别按会话、有界工作投影、当前运行页高亮。选中任务或运行可查看已记录的结果、失败原因和取消原因；历史失败或取消本身不会被当作仍需处理的事项。
+
 ### Session Protocol v2 与 v3
 
 每个注册 Provider 都为每个可读 session 提供 `getSessionProtocol()`。协议边界使用 canonical composite `SessionRef`：`{ provider, sessionId }`；Provider 自己的 session ID 始终保留。

@@ -47,6 +47,11 @@ and offers a viewer-owned return to the exact parent Workbench page and run.
 The return preserves a valid paged-run cursor and page size; changed or stale
 evidence remains visible instead of selecting a different run.
 
+Recorded waits and blocks are highlighted separately for the session, bounded
+work projection, and current run page. Select a task or run to inspect its
+recorded outcome, failure reason, or cancellation reason. Historical failures
+and cancellations alone do not imply that action is still required.
+
 ### Session Protocol v2 and v3
 
 Every registered provider implements `getSessionProtocol()` for every readable

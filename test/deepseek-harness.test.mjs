@@ -29,6 +29,7 @@ import {
   dshUsageOf,
   dshUsageToTokens,
   dshRecordsToMessages,
+  dshSessionStatus,
   dshUsageRecords,
   extractDshMeta,
   parseDshSession
@@ -277,6 +278,46 @@ test("DeepSeek Harness provider reads current raw sessions, system evidence, wor
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("DeepSeek Harness status waits only on an unmatched approval in the current open turn", () => {
+  // Source: deepseek-ai/deepseek-harness b2e3b2a0125854567a4a5fcba75782e42fe84901,
+  // packages/interaction/user-approval/src/invariant.ts and tests/invariant.spec.ts.
+  const completedApproval = [
+    header("session-dsh-completed-approval"),
+    ...events([
+      { type: "turn/start", data: { turn: 1 } },
+      { type: "approval/asked", data: { id: "completed-ask", toolName: "bash" } },
+      { type: "approval/decided", data: { id: "completed-ask", outcome: "cancelled" } },
+      { type: "turn/end", data: { turn: 1, reason: { kind: "completed" } } }
+    ])
+  ];
+  assert.equal(dshSessionStatus(completedApproval), "completed");
+
+  const currentAsk = [
+    header("session-dsh-pending-approval"),
+    ...events([
+      { type: "turn/start", data: { turn: 1 } },
+      { type: "approval/asked", data: { id: "historical-ask", toolName: "bash" } },
+      { type: "approval/decided", data: { id: "historical-ask", outcome: "cancelled" } },
+      { type: "turn/end", data: { turn: 1, reason: { kind: "completed" } } },
+      { type: "turn/start", data: { turn: 2 } },
+      { type: "approval/asked", data: { id: "current-ask", toolName: "bash" } }
+    ])
+  ];
+  assert.equal(dshSessionStatus(currentAsk), "waiting_input");
+
+  const currentResolved = [
+    header("session-dsh-resolved-approval"),
+    ...events([
+      { type: "turn/start", data: { turn: 1 } },
+      { type: "turn/end", data: { turn: 1, reason: { kind: "completed" } } },
+      { type: "turn/start", data: { turn: 2 } },
+      { type: "approval/asked", data: { id: "resolved-ask", toolName: "bash" } },
+      { type: "approval/decided", data: { id: "resolved-ask", outcome: "allowed-once" } }
+    ])
+  ];
+  assert.equal(dshSessionStatus(currentResolved), "running");
 });
 
 test("DeepSeek Harness alpha.2 compatibility snapshot and SQLite diagnostic are explicit", () => {

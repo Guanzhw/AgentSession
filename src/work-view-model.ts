@@ -85,6 +85,15 @@ export interface WorkOverviewContext {
   userInfoCount: number;
 }
 
+export type RecordedAttentionScope = "session" | "work" | "run-page";
+
+export interface RecordedAttentionSignal {
+  scope: RecordedAttentionScope;
+  kind: "session" | "goal" | "task" | "run";
+  id: string;
+  status: "waiting_input" | "blocked";
+}
+
 export interface WorkOverviewModel {
   goal: WorkProjection["goals"][number]["goal"] | null;
   tasks: WorkOverviewTask[];
@@ -95,9 +104,18 @@ export interface WorkOverviewModel {
   evidenceIncomplete: boolean;
   sessionState: NonNullable<SessionProtocolV3["session"]>["state"];
   sessionUpdatedAt: NonNullable<SessionProtocolV3["session"]>["timeUpdated"];
+  /** Recorded waiting/blocked signals, kept separate by their projection scope. */
+  attention: {
+    session: RecordedAttentionSignal[];
+    work: RecordedAttentionSignal[];
+  };
   context: WorkOverviewContext;
   goalTaskGraph: GoalTaskGraph;
   collaborationGraph: CollaborationGraph;
+}
+
+export function isRecordedAttentionStatus(value: unknown): value is RecordedAttentionSignal["status"] {
+  return value === "waiting_input" || value === "blocked";
 }
 
 function finiteTimestamp(value: unknown): number | null {
@@ -426,6 +444,19 @@ export function deriveWorkOverview(input: {
       : null;
   const contextArtifacts = context.artifacts.map((entry) => entry.artifact);
   const session = protocol.session as NonNullable<SessionProtocolV3["session"]>;
+  const attention = {
+    session: isRecordedAttentionStatus(session.state)
+      ? [{ scope: "session" as const, kind: "session" as const, id: session.ref.sessionId, status: session.state }]
+      : [],
+    work: [
+      ...work.goals
+        .filter(({ goal }) => isRecordedAttentionStatus(goal.status))
+        .map(({ goal }) => ({ scope: "work" as const, kind: "goal" as const, id: goal.id, status: goal.status as RecordedAttentionSignal["status"] })),
+      ...work.tasks
+        .filter(({ task }) => isRecordedAttentionStatus(task.status))
+        .map(({ task }) => ({ scope: "work" as const, kind: "task" as const, id: task.id, status: task.status as RecordedAttentionSignal["status"] }))
+    ]
+  };
   return {
     goal,
     tasks,
@@ -436,6 +467,7 @@ export function deriveWorkOverview(input: {
     evidenceIncomplete: work.truncated || work.completeness !== "complete",
     sessionState: session.state,
     sessionUpdatedAt: session.timeUpdated,
+    attention,
     goalTaskGraph: goalTaskGraph(work),
     collaborationGraph: collaborationGraph(execution, coordination),
     context: {

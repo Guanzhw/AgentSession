@@ -12,7 +12,7 @@ import type {
   WorkProjection
 } from "../protocol-runtime-v3.js";
 import { DEFAULT_RUN_PAGE_SIZE } from "../protocol-runtime-v3.js";
-import { deriveWorkOverview, type WorkOverviewTask } from "../work-view-model.js";
+import { deriveWorkOverview, isRecordedAttentionStatus, type RecordedAttentionSignal, type WorkOverviewTask } from "../work-view-model.js";
 import type { SessionProtocolV3 } from "../providers/shared/session-protocol-v3.js";
 import { formatLocalizedDurationMs } from "./components.js";
 
@@ -94,7 +94,7 @@ function eventEvidenceButton(id: string) {
 function entityLabel(value: any, fallback: string) {
   // Goals record their objective in `description` (title is null); the
   // remaining fields are the entity-label chain for actors/runs/artifacts.
-  return value?.title || value?.name || value?.description || value?.agentPath || value?.agent || value?.model || fallback;
+  return value?.title || value?.name || value?.label || value?.description || value?.agentPath || value?.agent || value?.model || fallback;
 }
 
 function statusLabel(value: unknown) {
@@ -107,6 +107,46 @@ function executionModeLabel(value: unknown) {
   const mode = String(value || "unknown");
   const key = `runtime.mode_${mode}`;
   return t(key) === key ? mode : t(key);
+}
+
+function attentionAttribute(status: unknown) {
+  return isRecordedAttentionStatus(status) ? ` data-runtime-attention-state="${escapeHtml(status)}"` : "";
+}
+
+function attentionSignalLabel(signal: RecordedAttentionSignal, entityLabel = "") {
+  const label = signal.kind === "session"
+    ? t("runtime.session_state")
+    : signal.kind === "goal"
+      ? t("runtime.goal_title")
+      : signal.kind === "task"
+        ? t("runtime.task")
+        : t("runtime.run");
+  return `${label}${entityLabel ? `: ${narrativeExcerpt(entityLabel, GOAL_TITLE_LIMIT).text}` : ""} · ${statusLabel(signal.status)}`;
+}
+
+function renderAttentionSignal(signal: RecordedAttentionSignal, entityLabel = "") {
+  const label = attentionSignalLabel(signal, entityLabel);
+  const target = signal.kind === "session"
+    ? `<span class="runtime-attention-session-label">${escapeHtml(label)}</span>`
+    : runtimeSelectButton(signal.kind, signal.id, label);
+  return `<span class="runtime-attention-signal" data-runtime-attention-signal data-runtime-attention-scope="${escapeHtml(signal.scope)}" data-runtime-attention-kind="${escapeHtml(signal.kind)}" data-runtime-attention-id="${escapeHtml(signal.id)}" data-runtime-attention-state="${escapeHtml(signal.status)}">${target}</span>`;
+}
+
+function renderWorkAttention(model: ReturnType<typeof deriveWorkOverview>) {
+  const session = model.attention.session.map((signal) => renderAttentionSignal(signal)).join("");
+  const workSignals = model.attention.work.slice(0, ATTENTION_ENTRY_LIMIT);
+  const work = workSignals.map((signal) => {
+    const entity = signal.kind === "task"
+      ? model.tasks.find((task) => task.id === signal.id)?.task
+      : (model.goal?.id === signal.id ? model.goal : null)
+        || model.goalTaskGraph.nodes.find((node) => node.id === signal.id)
+        || model.goalTaskGraph.completedNodes.find((node) => node.id === signal.id);
+    return renderAttentionSignal(signal, entityLabel(entity, signal.id));
+  }).join("");
+  const workTruncated = model.attention.work.length > workSignals.length;
+  if (!session && !model.attention.work.length) return "";
+  const more = workTruncated ? `<span class="runtime-attention-more" data-runtime-attention-truncated>${escapeHtml(t("runtime.attention_more"))}</span>` : "";
+  return `<section class="runtime-attention-strip" data-runtime-attention aria-label="${escapeHtml(t("runtime.attention_title"))}"><strong>${escapeHtml(t("runtime.attention_title"))}</strong>${session ? `<div class="runtime-attention-scope" data-runtime-attention-scope="session"><span class="runtime-attention-scope-label">${escapeHtml(t("runtime.session_state"))}</span>${session}</div>` : ""}${model.attention.work.length ? `<div class="runtime-attention-scope" data-runtime-attention-scope="work"><span class="runtime-attention-scope-label">${escapeHtml(t("runtime.work_title"))}</span>${work}${more}</div>` : ""}</section>`;
 }
 
 function runtimeRunLabel(run: any, taskLabel = "") {
@@ -145,6 +185,7 @@ const GOAL_TITLE_LIMIT = 96;
 const GOAL_DESCRIPTION_LIMIT = 280;
 const CONTEXT_SUMMARY_LIMIT = 280;
 const EVENT_DENSITY_LIMIT = 1000;
+const ATTENTION_ENTRY_LIMIT = 3;
 const LONG_LIVED_CONTEXT_KINDS = new Set(["memory", "experience", "user-info"]);
 const CONTEXT_ASSET_SCOPE_ORDER = ["session", "agent", "project", "user", "organization"];
 
@@ -333,7 +374,7 @@ function renderOverviewTask(task: WorkOverviewTask) {
   const runLinks = task.runs.length
     ? `<span class="runtime-task-runs" data-runtime-linked-runs>${task.runs.map((run) => runtimeSelectButton("run", run.id, runtimeRunLabel(run))).join(" ")}</span>`
     : `<span class="runtime-unlinked" data-runtime-task-runs-unlinked>${escapeHtml(t("runtime.not_recorded"))}</span>`;
-  return `<tr data-runtime-overview-task="${escapeHtml(task.id)}" ${runtimeEntityAttributes("task", task.id)}><th scope="row">${runtimeSelectButton("task", task.id, taskTitle(task.task))}${task.task.agentPath && task.task.title ? `<small>${escapeHtml(task.task.agentPath)}</small>` : ""}</th><td data-label="${escapeHtml(t("runtime.task_owner"))}">${escapeHtml(task.owner || t("runtime.not_recorded"))}</td><td data-label="${escapeHtml(t("runtime.task_state"))}"><span class="runtime-status runtime-status-${escapeHtml(statusClass(task.task.status))}">${escapeHtml(states.join(" · "))}</span></td><td data-label="${escapeHtml(t("runtime.task_activity"))}">${escapeHtml(elapsed || activity)}${elapsed ? `<small>${escapeHtml(activity)}</small>` : ""}</td><td data-label="${escapeHtml(t("runtime.runs"))}">${runLinks} ${evidenceButton("task", task.id, t("runtime.evidence"))}</td></tr>`;
+  return `<tr data-runtime-overview-task="${escapeHtml(task.id)}" ${runtimeEntityAttributes("task", task.id)}${attentionAttribute(task.task.status)}><th scope="row">${runtimeSelectButton("task", task.id, taskTitle(task.task))}${task.task.agentPath && task.task.title ? `<small>${escapeHtml(task.task.agentPath)}</small>` : ""}</th><td data-label="${escapeHtml(t("runtime.task_owner"))}">${escapeHtml(task.owner || t("runtime.not_recorded"))}</td><td data-label="${escapeHtml(t("runtime.task_state"))}"><span class="runtime-status runtime-status-${escapeHtml(statusClass(task.task.status))}">${escapeHtml(states.join(" · "))}</span></td><td data-label="${escapeHtml(t("runtime.task_activity"))}">${escapeHtml(elapsed || activity)}${elapsed ? `<small>${escapeHtml(activity)}</small>` : ""}</td><td data-label="${escapeHtml(t("runtime.runs"))}">${runLinks} ${evidenceButton("task", task.id, t("runtime.evidence"))}</td></tr>`;
 }
 
 function renderOverviewTaskHead() {
@@ -432,7 +473,7 @@ function renderGoalTaskGraph(model: ReturnType<typeof deriveWorkOverview>) {
     const attrs = completed
       ? runtimeEntityAttributes(node.kind, node.id, { "data-runtime-completed-task": "true" })
       : runtimeEntityAttributes(node.kind, node.id);
-    return `<article class="runtime-graph-node runtime-graph-node-${escapeHtml(node.kind)}${completed ? " runtime-completed-work-node" : ""}" data-runtime-graph-node data-runtime-node-kind="${escapeHtml(node.kind)}" data-runtime-node-id="${escapeHtml(node.id)}" ${attrs} aria-label="${escapeHtml(`${fullLabel} · ${statusLabel(node.state)}`)}"><strong>${runtimeSelectButton(node.kind, node.id, excerpt.text)}</strong>${completeGoal}<span class="runtime-status runtime-status-${escapeHtml(statusClass(node.state))}">${escapeHtml(statusLabel(node.state))}</span>${linkedRuns}${evidenceButton(node.kind, node.id, t("runtime.evidence"))}</article>`;
+    return `<article class="runtime-graph-node runtime-graph-node-${escapeHtml(node.kind)}${completed ? " runtime-completed-work-node" : ""}" data-runtime-graph-node data-runtime-node-kind="${escapeHtml(node.kind)}" data-runtime-node-id="${escapeHtml(node.id)}" ${attrs}${attentionAttribute(node.state)} aria-label="${escapeHtml(`${fullLabel} · ${statusLabel(node.state)}`)}"><strong>${runtimeSelectButton(node.kind, node.id, excerpt.text)}</strong>${completeGoal}<span class="runtime-status runtime-status-${escapeHtml(statusClass(node.state))}">${escapeHtml(statusLabel(node.state))}</span>${linkedRuns}${evidenceButton(node.kind, node.id, t("runtime.evidence"))}</article>`;
   };
   const nodeMarkup = graph.nodes.map((node) => renderNode(node, nodeIndex.get(node.id) || 0)).join("");
   const edgeMarkup = graph.edges.map((edge) => {
@@ -530,7 +571,7 @@ function renderWorkOverview(data: RuntimeData, executionLanes: string) {
   const goalState = goal ? statusLabel(goal.status) : statusLabel("unknown");
   const sessionState = statusLabel(model.sessionState);
   const orientationUpdated = model.sessionUpdatedAt == null ? t("runtime.unknown_time") : timeLabel(model.sessionUpdatedAt);
-  const orientation = `<div class="runtime-orientation-strip" data-runtime-orientation><div class="runtime-orientation-goal"><span class="runtime-orientation-label">${escapeHtml(t("runtime.goal_title"))}</span><h4>${escapeHtml(goalTitle.text)}</h4>${goalDescription ? `<span class="runtime-orientation-goal-description">${escapeHtml(goalDescription.text)}</span>` : ""}${fullGoalNarrative}${!goal ? `<span class="runtime-notice">${escapeHtml(t("runtime.goal_not_recorded_detail"))}</span>` : ""}</div><div class="runtime-orientation-meta" aria-label="${escapeHtml(t("runtime.orientation_summary"))}"><span><b>${escapeHtml(t("runtime.goal_state"))}</b> <span class="runtime-status runtime-status-${escapeHtml(statusClass(goalStatus))}" data-runtime-goal-state>${escapeHtml(goalState)}</span></span><span><b>${escapeHtml(t("runtime.session_state"))}</b> <span class="runtime-status runtime-status-${escapeHtml(statusClass(model.sessionState))}" data-runtime-session-state>${escapeHtml(sessionState)}</span></span><span><b>${escapeHtml(t("detail.updated"))}</b> ${escapeHtml(orientationUpdated)}</span><span><b>${escapeHtml(t("runtime.tasks"))}</b> ${escapeHtml(`${count(model.completedTasks)} / ${count(model.taskTotal)}`)}</span><span class="runtime-orientation-progress"><b>${escapeHtml(t("runtime.progress_title"))}</b> ${escapeHtml(progressSentence)}</span></div></div>`;
+  const orientation = `<div class="runtime-orientation-strip" data-runtime-orientation><div class="runtime-orientation-goal"><span class="runtime-orientation-label">${escapeHtml(t("runtime.goal_title"))}</span><h4>${escapeHtml(goalTitle.text)}</h4>${goalDescription ? `<span class="runtime-orientation-goal-description">${escapeHtml(goalDescription.text)}</span>` : ""}${fullGoalNarrative}${!goal ? `<span class="runtime-notice">${escapeHtml(t("runtime.goal_not_recorded_detail"))}</span>` : ""}</div><div class="runtime-orientation-meta" aria-label="${escapeHtml(t("runtime.orientation_summary"))}"><span><b>${escapeHtml(t("runtime.goal_state"))}</b> <span class="runtime-status runtime-status-${escapeHtml(statusClass(goalStatus))}" data-runtime-goal-state>${escapeHtml(goalState)}</span></span><span><b>${escapeHtml(t("runtime.session_state"))}</b> <span class="runtime-status runtime-status-${escapeHtml(statusClass(model.sessionState))}" data-runtime-session-state>${escapeHtml(sessionState)}</span></span><span><b>${escapeHtml(t("detail.updated"))}</b> ${escapeHtml(orientationUpdated)}</span><span><b>${escapeHtml(t("runtime.tasks"))}</b> ${escapeHtml(`${count(model.completedTasks)} / ${count(model.taskTotal)}`)}</span><span class="runtime-orientation-progress"><b>${escapeHtml(t("runtime.progress_title"))}</b> ${escapeHtml(progressSentence)}</span></div>${renderWorkAttention(model)}</div>`;
   return `<section class="runtime-work-overview" data-runtime-work-overview aria-labelledby="runtime-work-overview-title"><h3 id="runtime-work-overview-title" class="visually-hidden">${escapeHtml(t("runtime.goal_title"))}</h3>${orientation}<div class="runtime-work-progress" data-runtime-progress><div class="runtime-progress-track" role="progressbar" aria-label="${escapeHtml(t("runtime.progress_title"))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${ratio}"><span style="width:${ratio}%"></span></div>${boundedNote}</div>${renderWorkStructure(model)}${executionLanes}<div class="runtime-work-overview-grid">${renderContextResult(data, model)}${renderOverviewTaskTable(model)}</div><span data-runtime-overview-end aria-hidden="true"></span></section>`;
 }
 
@@ -657,9 +698,9 @@ function renderExecutionRun(entry: RunPage["runs"][number], actorId: string | nu
     ? sessionHref(entry.childSession, runtimeParentHref(navigation.provider, navigation.sessionId, run.id, navigation.runCursor, navigation.pageSize))
     : entry.childSession ? sessionHref(entry.childSession) : "";
   if (run.kind !== "session-turn") {
-    return `<li class="runtime-run-segment runtime-run" ${attributes}><strong>${runtimeSelectButton("run", run.id, runtimeRunLabel(run, taskLabel))}</strong><span>${escapeHtml(statusLabel(run.status))}</span>${childHref ? `<a class="runtime-child-session-link" href="${escapeHtml(childHref)}">${escapeHtml(t("runtime.child_session"))}</a>` : ""}${timing}${links}${evidenceButton("run", run.id)}</li>`;
+    return `<li class="runtime-run-segment runtime-run" ${attributes}${attentionAttribute(run.status)}><strong>${runtimeSelectButton("run", run.id, runtimeRunLabel(run, taskLabel))}</strong><span class="runtime-status runtime-status-${escapeHtml(statusClass(run.status))}" data-runtime-run-status="${escapeHtml(String(run.status || "unknown"))}">${escapeHtml(statusLabel(run.status))}</span>${childHref ? `<a class="runtime-child-session-link" href="${escapeHtml(childHref)}">${escapeHtml(t("runtime.child_session"))}</a>` : ""}${timing}${links}${evidenceButton("run", run.id)}</li>`;
   }
-  return `<li class="runtime-run-segment runtime-run runtime-session-turn" ${attributes} data-runtime-run-kind="session-turn" data-runtime-turn-id="${escapeHtml(run.turnId || "")}"><strong>${runtimeSelectButton("run", run.id, t("runtime.session_turn"))}</strong><span data-runtime-run-status="${escapeHtml(String(run.status || "unknown"))}">${escapeHtml(`${t("runtime.execution_status")}: ${statusLabel(run.status)}`)}</span><span data-runtime-run-mode="${escapeHtml(String(run.mode || "unknown"))}">${escapeHtml(`${t("runtime.execution_mode")}: ${executionModeLabel(run.mode)}`)}</span>${timing}${links}${evidenceButton("run", run.id)}</li>`;
+  return `<li class="runtime-run-segment runtime-run runtime-session-turn" ${attributes}${attentionAttribute(run.status)} data-runtime-run-kind="session-turn" data-runtime-turn-id="${escapeHtml(run.turnId || "")}"><strong>${runtimeSelectButton("run", run.id, t("runtime.session_turn"))}</strong><span class="runtime-status runtime-status-${escapeHtml(statusClass(run.status))}" data-runtime-run-status="${escapeHtml(String(run.status || "unknown"))}">${escapeHtml(`${t("runtime.execution_status")}: ${statusLabel(run.status)}`)}</span><span data-runtime-run-mode="${escapeHtml(String(run.mode || "unknown"))}">${escapeHtml(`${t("runtime.execution_mode")}: ${executionModeLabel(run.mode)}`)}</span>${timing}${links}${evidenceButton("run", run.id)}</li>`;
 }
 
 export function renderRuntimeRunPage(page: RunPage, actorByRun: Map<string, string> = new Map(), actorLabels: Map<string, string> = new Map(), presentation: RuntimeLanePresentation = {}, options: { runCursor?: string | null } = {}) {
@@ -691,8 +732,20 @@ export function renderRuntimeRunPage(page: RunPage, actorByRun: Map<string, stri
       : actorLabels.get(laneId) || t("runtime.unassigned_executor");
   const navigation = { provider: page.focus.provider, sessionId: page.focus.sessionId, runCursor: options.runCursor || null, pageSize: page.pageSize || DEFAULT_RUN_PAGE_SIZE };
   const lanes = [...groups.entries()].map(([laneId, entries]) => `<section class="runtime-run-lane" data-runtime-run-lane-section="${escapeHtml(laneId)}"><h4>${escapeHtml(laneLabel(laneId))}</h4><ul data-runtime-run-list>${entries.map((entry) => renderExecutionRun(entry, actorByRun.get(entry.run.id) || null, presentation, taskRunCounts, navigation)).join("")}</ul></section>`).join("");
+  const pageAttentionEntries = page.runs.filter((entry) => isRecordedAttentionStatus(entry.run.status));
+  const pageAttention = pageAttentionEntries
+    .slice(0, ATTENTION_ENTRY_LIMIT)
+    .map((entry) => ({ signal: { scope: "run-page" as const, kind: "run" as const, id: entry.run.id, status: entry.run.status as RecordedAttentionSignal["status"] }, label: `#${page.range.start + page.runs.indexOf(entry)} ${runtimeRunLabel(entry.run, entry.run.taskId ? presentation.taskLabels?.get(entry.run.taskId) || "" : "")}` }))
+    .map(({ signal, label }) => renderAttentionSignal(signal, label))
+    .join("");
+  const pageAttentionMore = pageAttentionEntries.length > ATTENTION_ENTRY_LIMIT
+    ? `<span class="runtime-attention-more" data-runtime-attention-truncated>${escapeHtml(t("runtime.attention_more"))}</span>`
+    : "";
+  const attention = pageAttention
+    ? `<div class="runtime-attention-scope runtime-run-page-attention" data-runtime-attention-scope="run-page"><span class="runtime-attention-scope-label">${escapeHtml(t("runtime.run_page_attention"))}</span>${pageAttention}${pageAttentionMore}</div>`
+    : "";
   const boundedLaneNote = presentation.truncated ? `<p class="runtime-run-page-note runtime-lane-evidence-bounded">${escapeHtml(t("runtime.projection_truncated"))}</p>` : "";
-  return `<section class="runtime-projection-group runtime-run-page" data-runtime-run-page data-runtime-run-page-provider="${escapeHtml(page.focus.provider)}" data-runtime-run-page-session-id="${escapeHtml(page.focus.sessionId)}" data-runtime-run-page-revision="${escapeHtml(revision)}" data-runtime-run-page-limit="${page.pageSize || DEFAULT_RUN_PAGE_SIZE}"><div class="runtime-run-page-heading"><div><h3>${t("runtime.runs")}</h3><span class="runtime-run-page-range" data-runtime-run-range>${escapeHtml(range)}</span></div><a class="btn" data-runtime-runs-refresh href="${escapeHtml(refreshHref)}">${escapeHtml(t("runtime.refresh_runs"))}</a></div><p class="runtime-run-page-note" data-runtime-run-page-note>${escapeHtml(t("runtime.run_page_latest_note"))}</p>${boundedLaneNote}<small class="runtime-run-page-revision" data-runtime-run-revision>${escapeHtml(`${t("runtime.snapshot_label")}: ${revision}`)}</small>${page.runs.length ? `<div class="runtime-run-lanes" data-runtime-run-lanes>${lanes}</div>` : `<p class="runtime-empty">${escapeHtml(t("runtime.no_runs"))}</p>`}<nav class="runtime-pagination runtime-run-pagination" aria-label="${escapeHtml(t("runtime.run_pagination"))}"><button type="button" class="btn" data-runtime-runs-previous data-runtime-runs-cursor="${escapeHtml(page.previousCursor || "")}" ${page.previousCursor ? "" : "disabled"}>${t("runtime.previous")}</button><button type="button" class="btn" data-runtime-runs-next data-runtime-runs-cursor="${escapeHtml(page.nextCursor || "")}" ${page.nextCursor ? "" : "disabled"}>${t("runtime.next")}</button></nav></section>`;
+  return `<section class="runtime-projection-group runtime-run-page" data-runtime-run-page data-runtime-run-page-provider="${escapeHtml(page.focus.provider)}" data-runtime-run-page-session-id="${escapeHtml(page.focus.sessionId)}" data-runtime-run-page-revision="${escapeHtml(revision)}" data-runtime-run-page-limit="${page.pageSize || DEFAULT_RUN_PAGE_SIZE}"><div class="runtime-run-page-heading"><div><h3>${t("runtime.runs")}</h3><span class="runtime-run-page-range" data-runtime-run-range>${escapeHtml(range)}</span></div><a class="btn" data-runtime-runs-refresh href="${escapeHtml(refreshHref)}">${escapeHtml(t("runtime.refresh_runs"))}</a></div>${attention}<p class="runtime-run-page-note" data-runtime-run-page-note>${escapeHtml(t("runtime.run_page_latest_note"))}</p>${boundedLaneNote}<small class="runtime-run-page-revision" data-runtime-run-revision>${escapeHtml(`${t("runtime.snapshot_label")}: ${revision}`)}</small>${page.runs.length ? `<div class="runtime-run-lanes" data-runtime-run-lanes>${lanes}</div>` : `<p class="runtime-empty">${escapeHtml(t("runtime.no_runs"))}</p>`}<nav class="runtime-pagination runtime-run-pagination" aria-label="${escapeHtml(t("runtime.run_pagination"))}"><button type="button" class="btn" data-runtime-runs-previous data-runtime-runs-cursor="${escapeHtml(page.previousCursor || "")}" ${page.previousCursor ? "" : "disabled"}>${t("runtime.previous")}</button><button type="button" class="btn" data-runtime-runs-next data-runtime-runs-cursor="${escapeHtml(page.nextCursor || "")}" ${page.nextCursor ? "" : "disabled"}>${t("runtime.next")}</button></nav></section>`;
 }
 
 function renderRuntimeRunPageError(error: { message: string }, provider: string, sessionId: string) {

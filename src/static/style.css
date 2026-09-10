@@ -5482,6 +5482,11 @@ pre code.hljs {
 .runtime-status-cancelled,
 .runtime-status-interrupted,
 .runtime-status-blocked { color: var(--danger-color, #ef4444); }
+.runtime-status-waiting_input { color: var(--warning-color); }
+.runtime-graph-node[data-runtime-attention-state="waiting_input"] { border-left-color: var(--warning-color); }
+.runtime-graph-node[data-runtime-attention-state="blocked"] { border-left-color: var(--error-text); }
+.runtime-run[data-runtime-attention-state="waiting_input"] { box-shadow: inset 3px 0 var(--warning-color); padding-left: 7px; }
+.runtime-run[data-runtime-attention-state="blocked"] { box-shadow: inset 3px 0 var(--error-text); padding-left: 7px; }
 
 .runtime-capabilities,
 .runtime-diagnostics { margin-top: 20px; }
@@ -5611,6 +5616,15 @@ pre code.hljs {
 .runtime-orientation-meta > span { min-width: 0; overflow-wrap: anywhere; }
 .runtime-orientation-meta b { color: var(--text-muted); font-weight: 500; }
 .runtime-orientation-progress { flex-basis: 100%; text-align: right; }
+.runtime-attention-strip { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; padding: 8px 10px; border-left: 3px solid var(--warning-color); background: color-mix(in srgb, var(--warning-color) 8%, var(--bg-primary)); color: var(--text-secondary); font-size: 12px; }
+.runtime-orientation-strip > .runtime-attention-strip { grid-column: 1 / -1; }
+.runtime-attention-strip > strong { color: var(--text-primary); }
+.runtime-attention-scope { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 5px; }
+.runtime-attention-scope-label { color: var(--text-muted); font-weight: 600; }
+.runtime-attention-signal { display: inline-flex; align-items: baseline; gap: 4px; }
+.runtime-attention-signal .runtime-entity-select { color: var(--accent-color); }
+.runtime-attention-signal[data-runtime-attention-state="blocked"] .runtime-entity-select { color: var(--error-text); }
+.runtime-attention-signal[data-runtime-attention-state="waiting_input"] .runtime-entity-select { color: var(--warning-color); }
 .runtime-work-goal,
 .runtime-work-progress,
 .runtime-work-context,

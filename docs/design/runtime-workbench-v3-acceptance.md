@@ -41,6 +41,47 @@ final reply. Providers without this evidence retain their communication.
 
 ## Production gates
 
+### Recorded attention and outcome details, 2026-09-11
+
+Spec 17 adds scoped session/work/current-page waiting and blocked signals,
+limited to three labelled work or run shortcuts. Identical run labels retain
+their recorded page position. Historical failures and cancellations do not
+become unresolved alerts; their normalized outcomes and reasons are visible
+in selected task/run details. DSH folds current owned turn/approval events,
+so a newer open turn no longer inherits an older completed turn's status.
+
+Main-agent tests passed 553/553. Independent review findings on duplicate
+attributes, indistinguishable shortcuts and an unbounded attention inventory
+were corrected. Browser axe checks of the attention strip pass both themes
+after using the existing semantic text colors. The illustrative positive
+fixture passed selection, reason display, Escape/focus and containment at
+1280/768/320px in EN/ZH and light/dark. Screenshot inspection caught a missing
+locale injection in the temporary QA server; using the production response
+helper and rerunning Chinese checks verified translated inspector labels.
+This was a fixture harness issue, not a production localization change.
+
+After restart, real DSH/Codex/OpenCode work and run APIs had no diagnostics.
+Their sampled work projections had no waiting/blocked tasks; their rendered
+pages had no attention signals or narrow overflow. DSH retained its completed
+and cancelled runs, and OpenCode retained failed history without inventing
+pending work. No real current unmatched DSH approval was available: positive
+approval semantics are source-backed fixtures, not a claimed live approval.
+
+The final OpenCode E2E rerun passed after the final build/restart, with no browser
+errors; server error logs were empty. `npm run pre-push` passed. A temporary
+PowerShell browser-launch pipeline stalled despite its launcher having exited;
+the existing responsive browser was retained and the last 12-combination check
+completed using direct commands.
+
+The full-goal source audit still identifies required work: complete recorded
+goal-to-task selection and verify result/context linkage, expose a selected
+checkpoint's resulting content/access, and provide a recorded pending approval
+question destination. Task selection already highlights checkpoints nested in
+its run, and checkpoint inspectors already link recorded result artifacts;
+those mechanisms should be extended only for proven gaps. Connected result
+presentation and the full cross-view checklist require verification before
+closing the overall goal.
+
 ### Child return and recorded run restoration, 2026-09-11
 
 Spec 16 adds viewer-owned parent/run/page return links without changing child
