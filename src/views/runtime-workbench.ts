@@ -34,6 +34,14 @@ type RuntimeData = {
   runtimeError?: any;
 };
 
+type RuntimeLanePresentation = {
+  taskLabels?: Map<string, string>;
+  coordination?: SessionProtocolV3["coordination"];
+  transformations?: SessionProtocolV3["contextTransformations"];
+  artifacts?: SessionProtocolV3["contextArtifacts"];
+  truncated?: boolean;
+};
+
 function jsonScript(value: unknown) {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
@@ -44,12 +52,12 @@ function count(value: unknown) {
 
 function dateTime(value: unknown) {
   const number = Number(value);
-  return Number.isFinite(number) && number > 0 ? new Date(number).toISOString() : "";
+  return Number.isFinite(number) && number >= 0 ? new Date(number).toISOString() : "";
 }
 
 function timeLabel(value: unknown) {
   const number = Number(value);
-  return Number.isFinite(number) && number > 0 ? new Date(number).toLocaleString() : t("runtime.unknown_time");
+  return Number.isFinite(number) && number >= 0 ? new Date(number).toLocaleString() : t("runtime.unknown_time");
 }
 
 function statusClass(value: unknown) {
@@ -100,10 +108,29 @@ function executionModeLabel(value: unknown) {
   return t(key) === key ? mode : t(key);
 }
 
-function runtimeRunLabel(run: any) {
+function runtimeRunLabel(run: any, taskLabel = "") {
   return run?.kind === "session-turn"
     ? t("runtime.session_turn")
-    : run?.label || t("runtime.recorded_run");
+    : (typeof run?.label === "string" && run.label.trim())
+      ? narrativeExcerpt(run.label.trim(), GOAL_TITLE_LIMIT).text
+      : (taskLabel ? narrativeExcerpt(taskLabel, GOAL_TITLE_LIMIT).text : t("runtime.recorded_run"));
+}
+
+function validRuntimeTime(value: number | null) {
+  return value != null && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function renderRunTiming(run: any) {
+  const start = validRuntimeTime(run?.timeStart);
+  const end = validRuntimeTime(run?.timeEnd);
+  if (start !== null && end !== null && end >= start) {
+    return `<small class="runtime-run-time" data-runtime-run-time="complete"><time datetime="${escapeHtml(dateTime(start))}">${escapeHtml(`${t("runtime.start")}: ${timeLabel(start)}`)}</time><span> · </span><time datetime="${escapeHtml(dateTime(end))}">${escapeHtml(`${t("runtime.end")}: ${timeLabel(end)}`)}</time><span> · ${escapeHtml(`${t("runtime.elapsed")}: ${durationLabel(end - start)}`)}</span></small>`;
+  }
+  if (start !== null || end !== null) {
+    const point = start !== null ? `${t("runtime.start")}: ${timeLabel(start)}` : `${t("runtime.end")}: ${timeLabel(end)}`;
+    return `<small class="runtime-run-time" data-runtime-run-time="partial">${escapeHtml(point)} · ${escapeHtml(t("runtime.partial_time"))}</small>`;
+  }
+  return `<small class="runtime-run-order-note">${escapeHtml(t("runtime.run_display_order_unrecorded"))}</small>`;
 }
 
 function durationLabel(value: number | null) {
@@ -478,6 +505,35 @@ function renderWorkOverview(data: RuntimeData) {
   return `<section class="runtime-work-overview" data-runtime-work-overview aria-labelledby="runtime-work-overview-title"><div class="runtime-work-goal"><div class="runtime-overview-section-heading"><div><h3 id="runtime-work-overview-title">${t("runtime.goal_title")}</h3><p>${t("runtime.goal_description")}</p></div>${goal ? `<span class="runtime-status runtime-status-${escapeHtml(statusClass(goal.status))}">${escapeHtml(statusLabel(goal.status))}</span>` : ""}</div><h4>${escapeHtml(goalTitle.text)}</h4>${goalDescription ? `<p>${escapeHtml(goalDescription.text)}</p>` : ""}${fullGoalNarrative}${!goal ? `<p class="runtime-notice">${escapeHtml(t("runtime.goal_not_recorded_detail"))}</p>` : ""}</div><div class="runtime-work-progress"><div class="runtime-overview-section-heading"><div><h3>${t("runtime.progress_title")}</h3><p>${escapeHtml(progressSentence)}</p></div><strong class="runtime-progress-ratio">${escapeHtml(`${count(model.completedTasks)} / ${count(model.taskTotal)}`)}</strong></div><div class="runtime-progress-track" role="progressbar" aria-label="${escapeHtml(t("runtime.progress_title"))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${ratio}"><span style="width:${ratio}%"></span></div>${boundedNote}</div>${renderWorkStructure(model)}<div class="runtime-work-overview-grid">${renderContextResult(data, model)}${renderOverviewTaskTable(model)}</div><span data-runtime-overview-end aria-hidden="true"></span></section>`;
 }
 
+/** Build the lane evidence from the requested page first, then apply bounds. */
+export function projectRuntimeLanePresentation(protocol: SessionProtocolV3, runEntries: readonly RunPage["runs"][number][]): RuntimeLanePresentation {
+  const runIds = new Set(runEntries.map((entry) => entry.run?.id).filter(Boolean));
+  const taskIds = new Set(runEntries.map((entry) => entry.task?.kind === "task" ? entry.task.id : entry.run?.taskId).filter(Boolean));
+  const taskLabels = new Map<string, string>();
+  protocol.tasks.forEach((task) => {
+    if (task.id && taskIds.has(task.id) && task.title) taskLabels.set(task.id, narrativeExcerpt(String(task.title), GOAL_TITLE_LIMIT).text);
+  });
+  const eligibleCoordination = protocol.coordination.filter((observation) => (
+    (observation.runId && runIds.has(observation.runId))
+    || (!observation.runId && observation.taskId && taskIds.has(observation.taskId))
+  ));
+  const eligibleTransformations = protocol.contextTransformations.filter((transformation) => transformation.runId && runIds.has(transformation.runId));
+  const coordination = eligibleCoordination.slice(0, 100);
+  const transformations = eligibleTransformations.slice(0, 100);
+  const resultIds = new Set(transformations.flatMap((transformation) => transformation.resultArtifactIds || []));
+  const eligibleArtifacts = protocol.contextArtifacts.filter((artifact) => resultIds.has(artifact.id));
+  const artifacts = eligibleArtifacts.slice(0, 100);
+  return {
+    taskLabels,
+    coordination,
+    transformations,
+    artifacts,
+    truncated: coordination.length < eligibleCoordination.length
+      || transformations.length < eligibleTransformations.length
+      || artifacts.length < eligibleArtifacts.length
+  };
+}
+
 function renderRuntimeLanes(data: RuntimeData, provider: string, sessionId: string) {
   const projection = data.projections?.execution;
   if (!projection) return `<section class="runtime-secondary-disclosure"><p class="runtime-empty">${escapeHtml(t("runtime.not_recorded"))}</p></section>`;
@@ -508,12 +564,15 @@ function renderRuntimeLanes(data: RuntimeData, provider: string, sessionId: stri
   const componentValues = [[t("runtime.input_tokens"), usage.input], [t("runtime.output_tokens"), usage.output], [t("runtime.reasoning_tokens"), usage.reasoning], [t("runtime.cache_read_tokens"), usage.cacheRead], [t("runtime.cache_write_tokens"), usage.cacheWrite]];
   const usageNotice = usageComplete ? "" : `<p class="runtime-notice runtime-usage-bound-note" data-runtime-usage-note>${escapeHtml(projection.truncated ? t("runtime.usage_projection_bounded") : t("runtime.usage_evidence_incomplete"))}</p>`;
   const usageSummary = `<section class="runtime-usage-summary" data-runtime-usage-summary data-runtime-usage-complete="${usageComplete ? "true" : "false"}" data-runtime-usage-truncated="${projection.truncated ? "true" : "false"}"><h3>${t("runtime.usage")}</h3><p><span data-runtime-usage-request-count="${escapeHtml(String(usage.requestCount))}">${escapeHtml(`${usageLabel}: ${count(usage.requestCount)}`)}</span> · <span data-runtime-usage-total="${escapeHtml(usage.total == null ? "" : String(usage.total))}">${escapeHtml(`${totalLabel}: ${usageValue(usage.total)}`)}</span></p><small>${escapeHtml(componentValues.map(([label, value]) => `${label}: ${usageValue(value as number | null)}`).join(" · "))} · ${escapeHtml(usageComplete ? t("runtime.complete") : t("runtime.incomplete"))}</small>${usageNotice}</section>`;
+  const lanePresentation: RuntimeLanePresentation = data.v3
+    ? projectRuntimeLanePresentation(data.v3, data.runPage?.runs || projection.runs)
+    : {};
   const page = data.runPage
-    ? renderRuntimeRunPage(data.runPage, actorByRun, actorLabels)
+    ? renderRuntimeRunPage(data.runPage, actorByRun, actorLabels, lanePresentation)
     : data.runPageError
       ? renderRuntimeRunPageError(data.runPageError, provider, sessionId)
       : projection.runs.length
-        ? `<section class="runtime-projection-group"><h3>${t("runtime.runs")}</h3><div class="runtime-run-lanes" data-runtime-run-lanes>${[...new Set(projection.runs.map((entry) => actorByRun.get(entry.run.id) || (entry.run.kind === "session-turn" ? "session" : "unassigned")))].map((laneId) => `<section class="runtime-run-lane" data-runtime-run-lane-section="${escapeHtml(laneId)}"><h4>${escapeHtml(laneId === "session" ? t("runtime.session_owned") : laneId === "unassigned" ? t("runtime.unassigned_executor") : actorLabels.get(laneId) || t("runtime.unassigned_executor"))}</h4><ul data-runtime-run-list>${projection.runs.filter((entry) => (actorByRun.get(entry.run.id) || (entry.run.kind === "session-turn" ? "session" : "unassigned")) === laneId).map((entry) => renderExecutionRun(entry, actorByRun.get(entry.run.id) || null)).join("")}</ul></section>`).join("")}</div></section>`
+        ? `<section class="runtime-projection-group"><h3>${t("runtime.runs")}</h3><div class="runtime-run-lanes" data-runtime-run-lanes>${[...new Set(projection.runs.map((entry) => actorByRun.get(entry.run.id) || (entry.run.kind === "session-turn" ? "session" : "unassigned")))].map((laneId) => { const laneEntries = projection.runs.filter((entry) => (actorByRun.get(entry.run.id) || (entry.run.kind === "session-turn" ? "session" : "unassigned")) === laneId); const taskRunCounts = new Map<string, number>(); laneEntries.forEach((entry) => { const taskId = projectionRefLabel(entry.task) !== t("runtime.not_recorded") ? projectionRefLabel(entry.task) : entry.run.taskId; if (taskId) taskRunCounts.set(taskId, (taskRunCounts.get(taskId) || 0) + 1); }); return `<section class="runtime-run-lane" data-runtime-run-lane-section="${escapeHtml(laneId)}"><h4>${escapeHtml(laneId === "session" ? t("runtime.session_owned") : laneId === "unassigned" ? t("runtime.unassigned_executor") : actorLabels.get(laneId) || t("runtime.unassigned_executor"))}</h4><ul data-runtime-run-list>${laneEntries.map((entry) => renderExecutionRun(entry, actorByRun.get(entry.run.id) || null, lanePresentation, taskRunCounts)).join("")}</ul></section>`; }).join("")}</div></section>`
         : `<section class="runtime-projection-group"><h3>${t("runtime.runs")}</h3><p class="runtime-empty">${escapeHtml(t("runtime.not_recorded"))}</p></section>`;
   return `<section class="runtime-work-lanes" data-runtime-section="runs" aria-labelledby="runtime-work-lanes-title"><div class="runtime-section-heading"><div><h3 id="runtime-work-lanes-title">${t("runtime.runs")}</h3><p>${escapeHtml(t("runtime.run_lanes_description"))}</p></div>${renderProjectionCoverage(projection)}</div>${usageSummary}${page}</section>`;
 }
@@ -522,25 +581,56 @@ function renderRuntimeSecondaryDisclosure(data: RuntimeData) {
   return `<details class="runtime-secondary-disclosure" data-runtime-section="coordination"><summary>${escapeHtml(t("runtime.coordination_title"))}</summary>${renderCoordinationProjection(data)}</details><details class="runtime-secondary-disclosure" data-runtime-section="context"><summary>${escapeHtml(t("runtime.context_title"))}</summary>${renderContextProjection(data)}</details>`;
 }
 
-function renderExecutionRun(entry: any, actorId: string | null = null) {
+function renderExecutionRun(entry: RunPage["runs"][number], actorId: string | null = null, presentation: RuntimeLanePresentation = {}, taskRunCounts = new Map<string, number>()) {
   const run = entry.run;
-  const taskId = entry.task?.id || run.taskId || null;
+  const taskRefId = entry.task ? projectionRefLabel(entry.task) : "";
+  const taskId = taskRefId !== t("runtime.not_recorded") ? taskRefId : run.taskId || null;
   const laneId = actorId || (run.kind === "session-turn" ? "session" : "unassigned");
+  const taskLabel = taskId ? presentation.taskLabels?.get(taskId) || "" : "";
   const attributes = runtimeEntityAttributes("run", run.id, {
     "data-runtime-task-id": taskId,
     "data-runtime-actor-id": actorId,
     "data-runtime-run-lane": laneId
   });
-  const orderNote = run.timeStart == null && run.timeEnd == null
-    ? `<small class="runtime-run-order-note">${escapeHtml(t("runtime.run_display_order_unrecorded"))}</small>`
+  const coordination = (presentation.coordination || []).filter((observation) => (
+    observation.runId === run.id
+    || (!observation.runId && taskId && observation.taskId === taskId && taskRunCounts.get(taskId) === 1)
+  ));
+  const artifactsById = new Map((presentation.artifacts || []).map((artifact) => [artifact.id, artifact]));
+  const checkpoints = (presentation.transformations || []).filter((transformation) => transformation.runId === run.id);
+  const markerMarkup = coordination.map((observation) => {
+    const binding = observation.runId === run.id ? "run" : "task";
+    const label = `${observation.kind || t("runtime.coordination_marker")} · ${observation.state || t("runtime.unknown")}`;
+    return `<span class="runtime-lane-marker runtime-lane-marker-${binding}" ${runtimeEntityAttributes("coordination", observation.id, {
+      "data-runtime-coordination-run-id": observation.runId,
+      "data-runtime-coordination-task-id": observation.taskId
+    })}>${runtimeSelectButton("coordination", observation.id, label)}</span>`;
+  }).join("");
+  const checkpointMarkup = checkpoints.map((transformation) => {
+    const resultArtifacts = (transformation.resultArtifactIds || []).filter((id: string) => artifactsById.has(id));
+    const artifactMarkup = resultArtifacts.map((id: string) => {
+      const artifact = artifactsById.get(id);
+      const label = entityLabel(artifact, id);
+      return `<span class="runtime-lane-checkpoint-artifact" ${runtimeEntityAttributes("artifact", id, {
+        "data-runtime-artifact-context-transformation-id": transformation.id,
+        "data-runtime-artifact-run-id": artifact?.producerRunId || transformation.runId
+      })}>${runtimeSelectButton("artifact", id, label)}</span>`;
+    }).join("");
+    return `<span class="runtime-lane-checkpoint" ${runtimeEntityAttributes("context-transformation", transformation.id, {
+      "data-runtime-context-run-id": transformation.runId
+    })}><span>${runtimeSelectButton("context-transformation", transformation.id, `${t("runtime.context_checkpoint")}: ${transformation.kind || t("runtime.unknown")}`)}</span>${artifactMarkup ? `<span class="runtime-lane-checkpoint-artifacts">${artifactMarkup}</span>` : ""}</span>`;
+  }).join("");
+  const links = markerMarkup || checkpointMarkup
+    ? `<span class="runtime-run-links" data-runtime-run-links>${markerMarkup}${checkpointMarkup}</span>`
     : "";
+  const timing = renderRunTiming(run);
   if (run.kind !== "session-turn") {
-    return `<li class="runtime-run-segment runtime-run" ${attributes}><strong>${runtimeSelectButton("run", run.id, runtimeRunLabel(run))}</strong><span>${escapeHtml(statusLabel(run.status))}</span>${entry.childSession ? `<a href="${escapeHtml(sessionHref(entry.childSession))}">${escapeHtml(t("runtime.child_session"))}</a>` : ""}${orderNote}${evidenceButton("run", run.id)}</li>`;
+    return `<li class="runtime-run-segment runtime-run" ${attributes}><strong>${runtimeSelectButton("run", run.id, runtimeRunLabel(run, taskLabel))}</strong><span>${escapeHtml(statusLabel(run.status))}</span>${entry.childSession ? `<a class="runtime-child-session-link" href="${escapeHtml(sessionHref(entry.childSession))}">${escapeHtml(t("runtime.child_session"))}</a>` : ""}${timing}${links}${evidenceButton("run", run.id)}</li>`;
   }
-  return `<li class="runtime-run-segment runtime-run runtime-session-turn" ${attributes} data-runtime-run-kind="session-turn" data-runtime-turn-id="${escapeHtml(run.turnId || "")}"><strong>${runtimeSelectButton("run", run.id, t("runtime.session_turn"))}</strong><span data-runtime-run-status="${escapeHtml(String(run.status || "unknown"))}">${escapeHtml(`${t("runtime.execution_status")}: ${statusLabel(run.status)}`)}</span><span data-runtime-run-mode="${escapeHtml(String(run.mode || "unknown"))}">${escapeHtml(`${t("runtime.execution_mode")}: ${executionModeLabel(run.mode)}`)}</span>${orderNote}${evidenceButton("run", run.id)}</li>`;
+  return `<li class="runtime-run-segment runtime-run runtime-session-turn" ${attributes} data-runtime-run-kind="session-turn" data-runtime-turn-id="${escapeHtml(run.turnId || "")}"><strong>${runtimeSelectButton("run", run.id, t("runtime.session_turn"))}</strong><span data-runtime-run-status="${escapeHtml(String(run.status || "unknown"))}">${escapeHtml(`${t("runtime.execution_status")}: ${statusLabel(run.status)}`)}</span><span data-runtime-run-mode="${escapeHtml(String(run.mode || "unknown"))}">${escapeHtml(`${t("runtime.execution_mode")}: ${executionModeLabel(run.mode)}`)}</span>${timing}${links}${evidenceButton("run", run.id)}</li>`;
 }
 
-export function renderRuntimeRunPage(page: RunPage, actorByRun: Map<string, string> = new Map(), actorLabels: Map<string, string> = new Map()) {
+export function renderRuntimeRunPage(page: RunPage, actorByRun: Map<string, string> = new Map(), actorLabels: Map<string, string> = new Map(), presentation: RuntimeLanePresentation = {}) {
   const revision = page.revision?.value || t("runtime.not_recorded");
   const range = page.total
     ? t("runtime.run_range", { start: count(page.range.start), end: count(page.range.end), total: count(page.total) })
@@ -553,13 +643,20 @@ export function renderRuntimeRunPage(page: RunPage, actorByRun: Map<string, stri
     entries.push(entry);
     groups.set(laneId, entries);
   }
+  const taskRunCounts = new Map<string, number>();
+  page.runs.forEach((entry) => {
+    const taskRefId = entry.task ? projectionRefLabel(entry.task) : "";
+    const taskId = taskRefId !== t("runtime.not_recorded") ? taskRefId : entry.run.taskId;
+    if (taskId) taskRunCounts.set(taskId, (taskRunCounts.get(taskId) || 0) + 1);
+  });
   const laneLabel = (laneId: string) => laneId === "session"
     ? t("runtime.session_owned")
     : laneId === "unassigned"
       ? t("runtime.unassigned_executor")
       : actorLabels.get(laneId) || t("runtime.unassigned_executor");
-  const lanes = [...groups.entries()].map(([laneId, entries]) => `<section class="runtime-run-lane" data-runtime-run-lane-section="${escapeHtml(laneId)}"><h4>${escapeHtml(laneLabel(laneId))}</h4><ul data-runtime-run-list>${entries.map((entry) => renderExecutionRun(entry, actorByRun.get(entry.run.id) || null)).join("")}</ul></section>`).join("");
-  return `<section class="runtime-projection-group runtime-run-page" data-runtime-run-page data-runtime-run-page-provider="${escapeHtml(page.focus.provider)}" data-runtime-run-page-session-id="${escapeHtml(page.focus.sessionId)}" data-runtime-run-page-revision="${escapeHtml(revision)}" data-runtime-run-page-limit="${page.pageSize || DEFAULT_RUN_PAGE_SIZE}"><div class="runtime-run-page-heading"><div><h3>${t("runtime.runs")}</h3><span class="runtime-run-page-range" data-runtime-run-range>${escapeHtml(range)}</span></div><a class="btn" data-runtime-runs-refresh href="${escapeHtml(refreshHref)}">${escapeHtml(t("runtime.refresh_runs"))}</a></div><p class="runtime-run-page-note" data-runtime-run-page-note>${escapeHtml(t("runtime.run_page_latest_note"))}</p><small class="runtime-run-page-revision" data-runtime-run-revision>${escapeHtml(`${t("runtime.snapshot_label")}: ${revision}`)}</small>${page.runs.length ? `<div class="runtime-run-lanes" data-runtime-run-lanes>${lanes}</div>` : `<p class="runtime-empty">${escapeHtml(t("runtime.no_runs"))}</p>`}<nav class="runtime-pagination runtime-run-pagination" aria-label="${escapeHtml(t("runtime.run_pagination"))}"><button type="button" class="btn" data-runtime-runs-previous data-runtime-runs-cursor="${escapeHtml(page.previousCursor || "")}" ${page.previousCursor ? "" : "disabled"}>${t("runtime.previous")}</button><button type="button" class="btn" data-runtime-runs-next data-runtime-runs-cursor="${escapeHtml(page.nextCursor || "")}" ${page.nextCursor ? "" : "disabled"}>${t("runtime.next")}</button></nav></section>`;
+  const lanes = [...groups.entries()].map(([laneId, entries]) => `<section class="runtime-run-lane" data-runtime-run-lane-section="${escapeHtml(laneId)}"><h4>${escapeHtml(laneLabel(laneId))}</h4><ul data-runtime-run-list>${entries.map((entry) => renderExecutionRun(entry, actorByRun.get(entry.run.id) || null, presentation, taskRunCounts)).join("")}</ul></section>`).join("");
+  const boundedLaneNote = presentation.truncated ? `<p class="runtime-run-page-note runtime-lane-evidence-bounded">${escapeHtml(t("runtime.projection_truncated"))}</p>` : "";
+  return `<section class="runtime-projection-group runtime-run-page" data-runtime-run-page data-runtime-run-page-provider="${escapeHtml(page.focus.provider)}" data-runtime-run-page-session-id="${escapeHtml(page.focus.sessionId)}" data-runtime-run-page-revision="${escapeHtml(revision)}" data-runtime-run-page-limit="${page.pageSize || DEFAULT_RUN_PAGE_SIZE}"><div class="runtime-run-page-heading"><div><h3>${t("runtime.runs")}</h3><span class="runtime-run-page-range" data-runtime-run-range>${escapeHtml(range)}</span></div><a class="btn" data-runtime-runs-refresh href="${escapeHtml(refreshHref)}">${escapeHtml(t("runtime.refresh_runs"))}</a></div><p class="runtime-run-page-note" data-runtime-run-page-note>${escapeHtml(t("runtime.run_page_latest_note"))}</p>${boundedLaneNote}<small class="runtime-run-page-revision" data-runtime-run-revision>${escapeHtml(`${t("runtime.snapshot_label")}: ${revision}`)}</small>${page.runs.length ? `<div class="runtime-run-lanes" data-runtime-run-lanes>${lanes}</div>` : `<p class="runtime-empty">${escapeHtml(t("runtime.no_runs"))}</p>`}<nav class="runtime-pagination runtime-run-pagination" aria-label="${escapeHtml(t("runtime.run_pagination"))}"><button type="button" class="btn" data-runtime-runs-previous data-runtime-runs-cursor="${escapeHtml(page.previousCursor || "")}" ${page.previousCursor ? "" : "disabled"}>${t("runtime.previous")}</button><button type="button" class="btn" data-runtime-runs-next data-runtime-runs-cursor="${escapeHtml(page.nextCursor || "")}" ${page.nextCursor ? "" : "disabled"}>${t("runtime.next")}</button></nav></section>`;
 }
 
 function renderRuntimeRunPageError(error: { message: string }, provider: string, sessionId: string) {
@@ -629,6 +726,7 @@ function renderContextProjection(data: RuntimeData) {
 }
 
 function renderEvidenceData(protocol: SessionProtocol | null, v3: SessionProtocolV3 | null = null, runPage: RunPage | null = null) {
+  const pagePresentation = v3 && runPage ? projectRuntimeLanePresentation(v3, runPage.runs) : {};
   return {
     goals: (v3?.goals || []).slice(0, 100),
     tasks: (protocol?.tasks || []).slice(0, 100),
@@ -636,8 +734,12 @@ function renderEvidenceData(protocol: SessionProtocol | null, v3: SessionProtoco
     runs: (protocol?.agentRuns || []).slice(0, 100),
     runPageRuns: runPage ? runPage.runs.map((entry) => entry.run) : [],
     coordinations: (v3?.coordination || []).slice(0, 100),
+    transformations: (v3?.contextTransformations || []).slice(0, 100),
     artifacts: (protocol?.contextArtifacts || []).slice(0, 100),
-    relationships: (protocol?.relationships || []).slice(0, 100)
+    relationships: (protocol?.relationships || []).slice(0, 100),
+    pageCoordination: pagePresentation.coordination || [],
+    pageTransformations: pagePresentation.transformations || [],
+    pageArtifacts: pagePresentation.artifacts || []
   };
 }
 

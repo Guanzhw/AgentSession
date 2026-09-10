@@ -5427,6 +5427,14 @@ pre code.hljs {
 .runtime-run-segment strong { min-width: 0; flex: 1 1 180px; overflow-wrap: anywhere; }
 .runtime-run-segment .runtime-evidence-trigger { margin-left: auto; }
 .runtime-run-order-note { color: var(--text-muted); }
+.runtime-run-time { flex: 1 1 100%; color: var(--text-muted); font-size: 11px; overflow-wrap: anywhere; }
+.runtime-child-session-link { color: var(--accent-color); font-size: 12px; text-decoration: none; }
+.runtime-child-session-link:hover, .runtime-child-session-link:focus-visible { text-decoration: underline; }
+.runtime-run-links { display: inline-flex; flex: 1 1 100%; flex-wrap: wrap; gap: 6px; align-items: center; }
+.runtime-lane-marker, .runtime-lane-checkpoint { display: inline-flex; align-items: center; gap: 4px; }
+.runtime-lane-marker .runtime-entity-select, .runtime-lane-checkpoint .runtime-entity-select, .runtime-lane-checkpoint-artifact .runtime-entity-select { padding: 2px 6px; border: 1px solid color-mix(in srgb, var(--accent-color) 42%, var(--border-color)); border-radius: 999px; background: color-mix(in srgb, var(--accent-color) 7%, var(--bg-primary)); color: var(--accent-color); font-size: 11px; }
+.runtime-lane-checkpoint-artifacts { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.runtime-lane-evidence-bounded { margin: 0; }
 .runtime-secondary-disclosure { margin-top: 14px; border-top: 1px solid var(--border-color); padding-top: 10px; }
 .runtime-secondary-disclosure > summary { cursor: pointer; font-weight: 600; }
 .runtime-secondary-disclosure > .runtime-lens { margin-top: 12px; }
@@ -7196,7 +7204,7 @@ pre code.hljs {
    the legacy relationship-list presentation. */
 @media (max-width: 820px) {
   .runtime-workbench-body:has([data-runtime-inspector]:not([hidden])) { display: grid; grid-template-columns: 1fr; gap: 14px; }
-  .runtime-selection-inspector { position: static; grid-column: 1; grid-row: 2; width: 100%; margin: 0; }
+  .runtime-selection-inspector { position: static; grid-column: 1; grid-row: 2; width: 100%; margin: 0; scroll-margin-top: calc(var(--topbar-height) + 14px); }
 }
 
 @media (max-width: 520px) {

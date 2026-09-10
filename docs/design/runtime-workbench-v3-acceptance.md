@@ -34,13 +34,38 @@ not hide recorded runs.
 
 A bounded read of the first 400 assistant `response_item` message records in
 the real Codex root found 385 with `payload.phase: commentary` and 15 with
-`payload.phase: final_answer`. The source parser currently drops that field
-when constructing normalized messages. Therefore final-response evidence is
-available at the provider boundary even though the shared Message contract
-does not expose it yet. The Conversation slice must preserve this evidence
-instead of accepting tool-only folding as the full requested outcome.
+`payload.phase: final_answer`. At the pre-change baseline the parser dropped
+that field. The Conversation slice shipped in `9949426` preserves it as
+`Message.presentationPhase` and folds process only behind a later recorded
+final reply. Providers without this evidence retain their communication.
 
 ## Production gates
+
+### Linked execution evidence, 2026-09-11
+
+The lane slice adds bounded recorded/task labels, recorded intervals, exact
+coordination markers and run-bound context/result selection. Initial SSR and
+replacement pages keep separate page evidence, ahead of preserved scope
+evidence. Metadata-only artifacts explicitly distinguish metadata from content.
+
+Main-agent validation: `npm test` passed 547/547; real OpenCode E2E passed with
+empty browser errors; independent review and governance/typecheck passed.
+The real Codex root's spawn marker selected its exact child run and reverse
+selection highlighted five correctly bound markers. Next-page browsing reached
+ranges 51–100 and 101–150 of the then-recorded 183 runs. These counts are a
+snapshot, not fixed provider expectations.
+
+The real DSH three-run page passed all 12 EN/ZH, dark/light, 1280/768/320px
+combinations for run selection, complete recorded times, no overflow and Escape
+focus return. Representative desktop and narrow screenshots were inspected;
+narrow inspector scroll clearance was corrected from the observed fixed-header
+overlap. Its three compactions have no recorded run binding and correctly stay
+outside the lanes. Positive run-bound checkpoint/result rendering is covered
+by fixtures; this real DSH case does not establish that positive provider case.
+
+Completed-work disclosure and compact orientation remain the next slice in
+[spec 15](../prompts/backend-evolution/15-work-orientation-and-completed-disclosure.md).
+This lane delivery does not mark the overall visual redesign complete.
 
 ### First production pass, 2026-09-11
 
@@ -100,6 +125,22 @@ On 320px, selection reveals the independent inspector panel; Escape closes it
 and restores focus to the task trigger without page overflow. Chinese 768px
 dark and 320px light inspector screenshots were inspected. These observations
 are a tested integration slice, not completion of the full matrix below.
+
+The integration slice was pushed as `9949426`. Linux Quality run
+[34508799824](https://github.com/Guanzhw/AgentSession/actions/runs/34508799824)
+passed on both Node 22.15.0 and 26.5.0. The remaining visual work includes
+recorded run-time segments, linked coordination/context checkpoints, and
+completed-branch disclosure; actor-grouped generic rows alone do not close
+those requirements.
+
+For `9949426`, the real three-task DSH page passed all 12 combinations of
+EN/ZH, dark/light, and 1280/768/320px. Each combination used pointer selection
+and Escape, checked exact linked-run highlighting, inspector visibility,
+focus return, page overflow, and desktop graph/inspector geometry. Browser
+errors were empty. Screenshots were saved for all combinations; representative
+desktop, medium and narrow screenshots in both languages/themes were inspected.
+This validates the integration slice's layout/selection matrix, not the still
+pending time-segment/checkpoint visualization.
 
 The pre-UI Quality run for `f985f4a`
 ([34494488516](https://github.com/Guanzhw/AgentSession/actions/runs/34494488516))

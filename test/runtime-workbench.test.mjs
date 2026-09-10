@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { renderRuntimeEvents, renderRuntimeWorkbench } from "../dist/src/views/runtime-workbench.js";
+import { projectRuntimeLanePresentation, renderRuntimeEvents, renderRuntimeWorkbench } from "../dist/src/views/runtime-workbench.js";
 import { getLocale, setLocale } from "../dist/src/i18n.js";
 import { renderSessionPage } from "../dist/src/views/session.js";
 import { finalizeSessionProtocolV3, upgradeSessionProtocolV2 } from "../dist/src/providers/shared/session-protocol-v3.js";
@@ -163,7 +163,15 @@ test("Execution run browsing renders a complete page range, stable cursor hooks,
   assert.match(source, /runtimeRunPageBusy/);
   assert.match(source, /replaceWith\(replacement\)/);
   assert.match(source, /runPageRuns/);
-  assert.match(source, /runPageRuns\) \? evidence\.runPageRuns : \[\]\),[\s\S]*evidence\[kind \+ "s"\]/);
+  const lookupSource = source.slice(source.indexOf("  const evidenceCollections ="), source.indexOf("  const setSelected ="));
+  const lookup = new Function("evidence", `${lookupSource}\nreturn evidenceForKind;`)({
+    runPageRuns: [{ id: "run-1", status: "completed" }],
+    runs: [{ id: "run-1", status: "running" }],
+    pageArtifacts: [{ id: "page-result" }],
+    artifacts: [{ id: "scope-result" }]
+  });
+  assert.equal(lookup("run").find((item) => item.id === "run-1").status, "completed");
+  assert.deepEqual(lookup("artifact").map((item) => item.id), ["page-result", "scope-result"]);
   assert.match(source, /runtimeLens=execution/);
   assert.match(source, /data-runtime-task-id/);
   assert.match(source, /data-runtime-actor-id/);
@@ -190,6 +198,65 @@ test("Initial SSR run page keeps a recorded actor binding omitted from the bound
   assert.match(html, /Runs 1–50 of 123/);
   assert.match(html, /data-runtime-entity-id="run-1"[^>]*data-runtime-actor-id="actor-first-page"/);
   assert.match(html, /<h4>First-page actor<\/h4>/);
+});
+
+test("Execution lanes preserve exact run/task evidence with bounded labels and recorded intervals", () => {
+  const runtime = fixtureRuntime();
+  runtime.v3.agentRuns[0].label = "Recorded worker label";
+  runtime.v3.coordination = [
+    { id: "marker-run", sessionId: "runtime-1", kind: "message", state: "delivered", timestamp: 1800, runId: "run-1", taskId: "task-1", provenance },
+    { id: "marker-task", sessionId: "runtime-1", kind: "handoff", state: "started", timestamp: 1900, runId: null, taskId: "task-1", provenance },
+    { id: "marker-unbound", sessionId: "runtime-1", kind: "wait", state: "started", timestamp: 2000, runId: null, taskId: null, provenance }
+  ];
+  runtime.v3.contextArtifacts = [{
+    id: "artifact-result", sessionId: "runtime-1", kind: "summary", scope: "session", origin: "provider-generated", contentAccess: "summary", title: "Result <summary>", summary: "Recorded result", sourcePath: null, producerRunId: "run-1", sourceSessionIds: [], hash: null, redacted: false, timeCreated: 2700, metadata: {}, provenance
+  }];
+  runtime.v3.contextTransformations = [{
+    id: "checkpoint-run", sessionId: "runtime-1", kind: "compaction", sourceVersionIds: [], resultVersionId: null, sourceArtifactIds: [], resultArtifactIds: ["artifact-result"], runId: "run-1", turnId: null, eventId: null, timestamp: 2600, provenance
+  }, {
+    id: "checkpoint-unbound", sessionId: "runtime-1", kind: "merge", sourceVersionIds: [], resultVersionId: null, sourceArtifactIds: [], resultArtifactIds: [], runId: null, turnId: null, eventId: null, timestamp: 2601, provenance
+  }];
+  runtime.projections.execution = projectExecution(runtime.v3, { maxItems: 100 });
+  runtime.projections.coordination = projectCoordination(runtime.v3, { maxItems: 100 });
+  runtime.projections.context = projectContext(runtime.v3, { maxItems: 100 });
+  runtime.runPage = queryRunPage(runtime.v3);
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  const lane = html.match(/data-runtime-run-lanes[\s\S]*?<\/div><nav class="runtime-pagination/)?.[0] || "";
+  const links = [...html.matchAll(/data-runtime-run-links[\s\S]*?<\/span><\/li>/g)].map((match) => match[0]).join(" ");
+  assert.match(lane, /Recorded worker label/);
+  assert.match(lane, /data-runtime-run-time="complete"/);
+  assert.match(links, /data-runtime-coordination-run-id="run-1"/);
+  assert.match(links, /data-runtime-coordination-task-id="task-1"/);
+  assert.match(links, /data-runtime-entity-id="marker-task"/);
+  assert.match(links, /data-runtime-entity-kind="context-transformation" data-runtime-entity-id="checkpoint-run"/);
+  assert.match(links, /data-runtime-entity-kind="artifact" data-runtime-entity-id="artifact-result"/);
+  assert.doesNotMatch(links, /data-runtime-entity-id="marker-unbound"/);
+  assert.doesNotMatch(links, /data-runtime-entity-id="checkpoint-unbound"/);
+  assert.match(html, /"transformations":\[/);
+});
+
+test("Lane evidence filters exact page bindings before applying the bound", () => {
+  const runtime = fixtureRuntime();
+  runtime.v3.coordination = Array.from({ length: 100 }, (_, index) => ({
+    id: `unbound-marker-${index}`, sessionId: "runtime-1", kind: "wait", state: "started", timestamp: index, runId: null, taskId: "other-task", provenance
+  }));
+  runtime.v3.coordination.push({ id: "late-bound-marker", sessionId: "runtime-1", kind: "message", state: "delivered", timestamp: 101, runId: "run-1", taskId: "task-1", provenance });
+  runtime.v3.contextTransformations = Array.from({ length: 100 }, (_, index) => ({
+    id: `unbound-checkpoint-${index}`, sessionId: "runtime-1", kind: "merge", sourceVersionIds: [], resultVersionId: null, sourceArtifactIds: [], resultArtifactIds: [], runId: null, turnId: null, eventId: null, timestamp: index, provenance
+  }));
+  runtime.v3.contextTransformations.push({ id: "late-bound-checkpoint", sessionId: "runtime-1", kind: "compaction", sourceVersionIds: [], resultVersionId: null, sourceArtifactIds: ["artifact-1"], resultArtifactIds: ["artifact-1"], runId: "run-1", turnId: null, eventId: null, timestamp: 101, provenance });
+  const pageEntry = { run: runtime.v3.agentRuns[0], task: { kind: "task", id: "task-1" } };
+  const presentation = projectRuntimeLanePresentation(runtime.v3, [pageEntry]);
+  assert.deepEqual(presentation.coordination.map((entry) => entry.id), ["late-bound-marker"]);
+  assert.deepEqual(presentation.transformations.map((entry) => entry.id), ["late-bound-checkpoint"]);
+  assert.deepEqual(presentation.artifacts.map((entry) => entry.id), ["artifact-1"]);
+  runtime.projections.execution = projectExecution(runtime.v3, { maxItems: 100 });
+  runtime.projections.coordination = projectCoordination(runtime.v3, { maxItems: 100 });
+  runtime.projections.context = projectContext(runtime.v3, { maxItems: 100 });
+  runtime.runPage = queryRunPage(runtime.v3);
+  const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
+  assert.match(html, /"pageCoordination":\[\{[^\]]*late-bound-marker/);
+  assert.match(html, /"pageTransformations":\[\{[^\]]*late-bound-checkpoint/);
 });
 
 test("stale run-page rendering preserves the other Runtime lenses and offers an Execution refresh", () => {

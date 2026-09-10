@@ -16,7 +16,7 @@ import {
 import { getResumeCommand } from "../resume.js";
 import { renderSessionPage } from "../views/session.js";
 import type { SessionProtocol } from "../providers/shared/session-protocol.js";
-import { renderRuntimeEvents, renderRuntimeRunPage, renderRuntimeWorkbench } from "../views/runtime-workbench.js";
+import { projectRuntimeLanePresentation, renderRuntimeEvents, renderRuntimeRunPage, renderRuntimeWorkbench } from "../views/runtime-workbench.js";
 import { renderProgressiveContent } from "../views/components.js";
 import { providerRenderContext } from "./provider-context.js";
 import { parseSessionNavigationContext } from "../navigation-context.js";
@@ -554,11 +554,15 @@ export function registerSessionDetail(
         const actorId = (entry.ref as { id?: string }).id;
         if (actorId) actorLabels.set(actorId, entry.actor.name || (entry.actor.kind === "team" ? t("runtime.team") : t("runtime.agent")));
       });
+      const lanePresentation = projectRuntimeLanePresentation(protocolV3, page.runs);
       return json(res, {
         ok: true,
         ...page,
-        html: renderRuntimeRunPage(page, actorBindings.actorByRun, actorLabels),
-        evidenceRuns: page.runs.map((entry) => entry.run)
+        html: renderRuntimeRunPage(page, actorBindings.actorByRun, actorLabels, lanePresentation),
+        evidenceRuns: page.runs.map((entry) => entry.run),
+        pageCoordination: lanePresentation.coordination,
+        pageTransformations: lanePresentation.transformations,
+        pageArtifacts: lanePresentation.artifacts
       });
     } catch (error) {
       if (error instanceof ProtocolProjectionError) {

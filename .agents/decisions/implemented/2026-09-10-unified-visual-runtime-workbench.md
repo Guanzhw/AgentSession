@@ -48,3 +48,10 @@ Real Codex hash/disclosure and DSH desktop/narrow selection were inspected.
 This records the implemented navigation and disclosure mechanism; the broader
 visual refinement and complete acceptance matrix remain tracked in the design's
 acceptance notes rather than being implied by this lifecycle status.
+
+The linked-lane follow-up passed 547 tests, real OpenCode E2E, Codex marker
+selection/paging, and the DSH 12-combination language/theme/width matrix.
+Page-scoped marker/checkpoint/artifact evidence is selected before bounding
+and retains the initial scope evidence across replacement. Independent review
+identified and verified corrections to scope preservation and linked selection.
+See the acceptance notes for remaining work and positive-fixture limitations.
