@@ -5763,7 +5763,8 @@ pre code.hljs {
 .runtime-run-page-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
 .runtime-run-page-heading h3 { margin: 0; }
 .runtime-run-page-range,
-.runtime-run-page-revision { color: var(--text-muted); font-size: 11px; }
+.runtime-run-page-revision { color: var(--text-muted); font-size: 11px; overflow-wrap: anywhere; }
+.runtime-completeness { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .runtime-run-pagination { justify-content: flex-start; margin-top: 4px; }
 .runtime-session-edge-list { display: grid; gap: 8px; margin: 14px 0 0; padding: 0; list-style: none; }
 .runtime-session-graph { display: grid; gap: 7px; max-height: 320px; overflow: auto; margin-top: 14px; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: color-mix(in srgb, var(--bg-secondary) 84%, var(--bg-primary)); }

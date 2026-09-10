@@ -152,12 +152,16 @@ test("Execution run browsing renders a complete page range, stable cursor hooks,
   assert.match(html, /data-runtime-runs-previous[^>]*disabled/);
   assert.match(html, /data-runtime-run-page-revision/);
   assert.match(html, /"runPageRuns":\[/);
-  const third = queryRunPage(runtime.v3, { cursor: runtime.runPage.nextCursor });
+  const pageCursor = runtime.runPage.nextCursor;
+  runtime.v3.agentRuns[50].childSessionId = "child/2";
+  const third = queryRunPage(runtime.v3, { cursor: pageCursor });
   runtime.runPage = third;
+  runtime.runCursor = pageCursor;
   html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
   assert.match(html, /Runs 51–53 of 53/);
   assert.match(html, /data-runtime-runs-next[^>]*disabled/);
   assert.match(html, /data-runtime-runs-previous data-runtime-runs-cursor="[^"]+"/);
+  assert.match(html, /runtime-child-session-link[^>]+href="\/fixture\/session\/child%2F2\?from=%2Ffixture%2Fsession%2Fruntime-1%3FruntimeLens%3Dexecution%26runtimeRun%3Drun-51%26runLimit%3D50%26runCursor%3D/);
 
   const source = readFileSync(path.join(process.cwd(), "src", "static", "app", "runtime-workbench.js"), "utf8");
   assert.match(source, /runtime\/execution\/runs/);
@@ -173,7 +177,7 @@ test("Execution run browsing renders a complete page range, stable cursor hooks,
   });
   assert.equal(lookup("run").find((item) => item.id === "run-1").status, "completed");
   assert.deepEqual(lookup("artifact").map((item) => item.id), ["page-result", "scope-result"]);
-  assert.match(source, /runtimeLens=execution/);
+  assert.match(source, /new URLSearchParams\(\{ runtimeLens: "execution" \}\)/);
   assert.match(source, /data-runtime-task-id/);
   assert.match(source, /data-runtime-actor-id/);
   assert.match(source, /runtime-graph-arrow/);
@@ -957,9 +961,11 @@ test("Workbench links only exact task/run/actor bindings and keeps unbound runs 
     coordination: projectCoordination(runtime.v3, { maxItems: 100 }),
     context: projectContext(runtime.v3, { maxItems: 100 })
   };
+  runtime.runPage = queryRunPage(runtime.v3);
   const html = renderRuntimeWorkbench(runtime, "fixture", "runtime-1");
   assert.match(html, /data-runtime-edge-kind="membership"/);
   assert.match(html, /data-runtime-entity-kind="run" data-runtime-entity-id="child-run" data-runtime-task-id="task-1"/);
+  assert.match(html, /runtime-child-session-link[^>]+href="\/fixture\/session\/child-1\?from=%2Ffixture%2Fsession%2Fruntime-1%3FruntimeLens%3Dexecution%26runtimeRun%3Dchild-run%26runLimit%3D50"/);
   assert.match(html, /data-runtime-run-lane-section="unassigned"/);
   assert.doesNotMatch(html, /data-runtime-run-lane-section="session"/);
   assert.match(html, /Executor not recorded/);

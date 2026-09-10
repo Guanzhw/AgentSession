@@ -30,6 +30,7 @@ type RuntimeData = {
   runActorBindings?: RunActorBindings | null;
   summary: any;
   eventNextCursor?: string | null;
+  runCursor?: string | null;
   storageDiagnostic?: any;
   runtimeError?: any;
 };
@@ -200,9 +201,16 @@ function renderEvents(data: RuntimeData) {
   </section>`;
 }
 
-function sessionHref(ref: any) {
+function sessionHref(ref: any, returnTo = "") {
   if (!ref?.provider || !ref?.sessionId) return "";
-  return `/${encodeURIComponent(ref.provider)}/session/${encodeURIComponent(ref.sessionId)}`;
+  const href = `/${encodeURIComponent(ref.provider)}/session/${encodeURIComponent(ref.sessionId)}`;
+  return returnTo ? `${href}?from=${encodeURIComponent(returnTo)}` : href;
+}
+
+function runtimeParentHref(provider: string, sessionId: string, runId: string, runCursor: string | null, pageSize: number) {
+  const query = new URLSearchParams({ runtimeLens: "execution", runtimeRun: runId, runLimit: String(pageSize) });
+  if (runCursor) query.set("runCursor", runCursor);
+  return `/${encodeURIComponent(provider)}/session/${encodeURIComponent(sessionId)}?${query}`;
 }
 
 function localizedRuntimeValue(prefix: string, value: unknown) {
@@ -589,7 +597,7 @@ function renderRuntimeLanes(data: RuntimeData, provider: string, sessionId: stri
     ? projectRuntimeLanePresentation(data.v3, data.runPage?.runs || projection.runs)
     : {};
   const page = data.runPage
-    ? renderRuntimeRunPage(data.runPage, actorByRun, actorLabels, lanePresentation)
+    ? renderRuntimeRunPage(data.runPage, actorByRun, actorLabels, lanePresentation, { runCursor: data.runCursor })
     : data.runPageError
       ? renderRuntimeRunPageError(data.runPageError, provider, sessionId)
       : projection.runs.length
@@ -602,7 +610,7 @@ function renderRuntimeSecondaryDisclosure(data: RuntimeData) {
   return `<details class="runtime-secondary-disclosure" data-runtime-section="coordination"><summary>${escapeHtml(t("runtime.coordination_title"))}</summary>${renderCoordinationProjection(data)}</details><details class="runtime-secondary-disclosure" data-runtime-section="context"><summary>${escapeHtml(t("runtime.context_title"))}</summary>${renderContextProjection(data)}</details>`;
 }
 
-function renderExecutionRun(entry: RunPage["runs"][number], actorId: string | null = null, presentation: RuntimeLanePresentation = {}, taskRunCounts = new Map<string, number>()) {
+function renderExecutionRun(entry: RunPage["runs"][number], actorId: string | null = null, presentation: RuntimeLanePresentation = {}, taskRunCounts = new Map<string, number>(), navigation: { provider: string; sessionId: string; runCursor: string | null; pageSize: number } | null = null) {
   const run = entry.run;
   const taskRefId = entry.task ? projectionRefLabel(entry.task) : "";
   const taskId = taskRefId !== t("runtime.not_recorded") ? taskRefId : run.taskId || null;
@@ -645,18 +653,24 @@ function renderExecutionRun(entry: RunPage["runs"][number], actorId: string | nu
     ? `<span class="runtime-run-links" data-runtime-run-links>${markerMarkup}${checkpointMarkup}</span>`
     : "";
   const timing = renderRunTiming(run);
+  const childHref = entry.childSession && navigation
+    ? sessionHref(entry.childSession, runtimeParentHref(navigation.provider, navigation.sessionId, run.id, navigation.runCursor, navigation.pageSize))
+    : entry.childSession ? sessionHref(entry.childSession) : "";
   if (run.kind !== "session-turn") {
-    return `<li class="runtime-run-segment runtime-run" ${attributes}><strong>${runtimeSelectButton("run", run.id, runtimeRunLabel(run, taskLabel))}</strong><span>${escapeHtml(statusLabel(run.status))}</span>${entry.childSession ? `<a class="runtime-child-session-link" href="${escapeHtml(sessionHref(entry.childSession))}">${escapeHtml(t("runtime.child_session"))}</a>` : ""}${timing}${links}${evidenceButton("run", run.id)}</li>`;
+    return `<li class="runtime-run-segment runtime-run" ${attributes}><strong>${runtimeSelectButton("run", run.id, runtimeRunLabel(run, taskLabel))}</strong><span>${escapeHtml(statusLabel(run.status))}</span>${childHref ? `<a class="runtime-child-session-link" href="${escapeHtml(childHref)}">${escapeHtml(t("runtime.child_session"))}</a>` : ""}${timing}${links}${evidenceButton("run", run.id)}</li>`;
   }
   return `<li class="runtime-run-segment runtime-run runtime-session-turn" ${attributes} data-runtime-run-kind="session-turn" data-runtime-turn-id="${escapeHtml(run.turnId || "")}"><strong>${runtimeSelectButton("run", run.id, t("runtime.session_turn"))}</strong><span data-runtime-run-status="${escapeHtml(String(run.status || "unknown"))}">${escapeHtml(`${t("runtime.execution_status")}: ${statusLabel(run.status)}`)}</span><span data-runtime-run-mode="${escapeHtml(String(run.mode || "unknown"))}">${escapeHtml(`${t("runtime.execution_mode")}: ${executionModeLabel(run.mode)}`)}</span>${timing}${links}${evidenceButton("run", run.id)}</li>`;
 }
 
-export function renderRuntimeRunPage(page: RunPage, actorByRun: Map<string, string> = new Map(), actorLabels: Map<string, string> = new Map(), presentation: RuntimeLanePresentation = {}) {
+export function renderRuntimeRunPage(page: RunPage, actorByRun: Map<string, string> = new Map(), actorLabels: Map<string, string> = new Map(), presentation: RuntimeLanePresentation = {}, options: { runCursor?: string | null } = {}) {
   const revision = page.revision?.value || t("runtime.not_recorded");
   const range = page.total
     ? t("runtime.run_range", { start: count(page.range.start), end: count(page.range.end), total: count(page.total) })
     : t("runtime.no_runs");
-  const refreshHref = `/${encodeURIComponent(page.focus.provider)}/session/${encodeURIComponent(page.focus.sessionId)}?runtimeLens=execution`;
+  const refreshQuery = new URLSearchParams({ runtimeLens: "execution" });
+  if (options.runCursor) refreshQuery.set("runCursor", options.runCursor);
+  refreshQuery.set("runLimit", String(page.pageSize || DEFAULT_RUN_PAGE_SIZE));
+  const refreshHref = `/${encodeURIComponent(page.focus.provider)}/session/${encodeURIComponent(page.focus.sessionId)}?${refreshQuery}`;
   const groups = new Map<string, any[]>();
   for (const entry of page.runs) {
     const laneId = actorByRun.get(entry.run.id) || (entry.run.kind === "session-turn" ? "session" : "unassigned");
@@ -675,14 +689,15 @@ export function renderRuntimeRunPage(page: RunPage, actorByRun: Map<string, stri
     : laneId === "unassigned"
       ? t("runtime.unassigned_executor")
       : actorLabels.get(laneId) || t("runtime.unassigned_executor");
-  const lanes = [...groups.entries()].map(([laneId, entries]) => `<section class="runtime-run-lane" data-runtime-run-lane-section="${escapeHtml(laneId)}"><h4>${escapeHtml(laneLabel(laneId))}</h4><ul data-runtime-run-list>${entries.map((entry) => renderExecutionRun(entry, actorByRun.get(entry.run.id) || null, presentation, taskRunCounts)).join("")}</ul></section>`).join("");
+  const navigation = { provider: page.focus.provider, sessionId: page.focus.sessionId, runCursor: options.runCursor || null, pageSize: page.pageSize || DEFAULT_RUN_PAGE_SIZE };
+  const lanes = [...groups.entries()].map(([laneId, entries]) => `<section class="runtime-run-lane" data-runtime-run-lane-section="${escapeHtml(laneId)}"><h4>${escapeHtml(laneLabel(laneId))}</h4><ul data-runtime-run-list>${entries.map((entry) => renderExecutionRun(entry, actorByRun.get(entry.run.id) || null, presentation, taskRunCounts, navigation)).join("")}</ul></section>`).join("");
   const boundedLaneNote = presentation.truncated ? `<p class="runtime-run-page-note runtime-lane-evidence-bounded">${escapeHtml(t("runtime.projection_truncated"))}</p>` : "";
   return `<section class="runtime-projection-group runtime-run-page" data-runtime-run-page data-runtime-run-page-provider="${escapeHtml(page.focus.provider)}" data-runtime-run-page-session-id="${escapeHtml(page.focus.sessionId)}" data-runtime-run-page-revision="${escapeHtml(revision)}" data-runtime-run-page-limit="${page.pageSize || DEFAULT_RUN_PAGE_SIZE}"><div class="runtime-run-page-heading"><div><h3>${t("runtime.runs")}</h3><span class="runtime-run-page-range" data-runtime-run-range>${escapeHtml(range)}</span></div><a class="btn" data-runtime-runs-refresh href="${escapeHtml(refreshHref)}">${escapeHtml(t("runtime.refresh_runs"))}</a></div><p class="runtime-run-page-note" data-runtime-run-page-note>${escapeHtml(t("runtime.run_page_latest_note"))}</p>${boundedLaneNote}<small class="runtime-run-page-revision" data-runtime-run-revision>${escapeHtml(`${t("runtime.snapshot_label")}: ${revision}`)}</small>${page.runs.length ? `<div class="runtime-run-lanes" data-runtime-run-lanes>${lanes}</div>` : `<p class="runtime-empty">${escapeHtml(t("runtime.no_runs"))}</p>`}<nav class="runtime-pagination runtime-run-pagination" aria-label="${escapeHtml(t("runtime.run_pagination"))}"><button type="button" class="btn" data-runtime-runs-previous data-runtime-runs-cursor="${escapeHtml(page.previousCursor || "")}" ${page.previousCursor ? "" : "disabled"}>${t("runtime.previous")}</button><button type="button" class="btn" data-runtime-runs-next data-runtime-runs-cursor="${escapeHtml(page.nextCursor || "")}" ${page.nextCursor ? "" : "disabled"}>${t("runtime.next")}</button></nav></section>`;
 }
 
 function renderRuntimeRunPageError(error: { message: string }, provider: string, sessionId: string) {
   const refreshHref = `/${encodeURIComponent(provider)}/session/${encodeURIComponent(sessionId)}?runtimeLens=execution`;
-  return `<section class="runtime-projection-group runtime-run-page" data-runtime-run-page-error><div class="runtime-run-page-heading"><h3>${t("runtime.runs")}</h3></div><p class="runtime-notice" data-runtime-run-page-error-message>${escapeHtml(error.message)}</p><a class="btn" href="${escapeHtml(refreshHref)}">${escapeHtml(t("runtime.refresh_runs"))}</a></section>`;
+  return `<section class="runtime-projection-group runtime-run-page" data-runtime-run-page-error><div class="runtime-run-page-heading"><h3>${t("runtime.runs")}</h3></div><p class="runtime-notice" data-runtime-run-page-error-message>${escapeHtml(error.message)}</p><a class="btn" data-runtime-runs-refresh href="${escapeHtml(refreshHref)}">${escapeHtml(t("runtime.refresh_runs"))}</a></section>`;
 }
 
 function renderCoordinationProjection(data: RuntimeData) {

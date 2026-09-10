@@ -6,6 +6,7 @@ export function initRuntimeWorkbench({ ft, formatText }) {
   let evidence = {};
   try { evidence = JSON.parse(evidenceScript?.textContent || "{}"); } catch { evidence = {}; }
   const requestedLens = new URLSearchParams(window.location.search).get("runtimeLens");
+  const requestedRunId = new URLSearchParams(window.location.search).get("runtimeRun");
   const legacySection = ({ execution: "runs", coordination: "coordination", context: "context" })[requestedLens];
   if (legacySection) {
     const target = root.querySelector(`[data-runtime-section="${CSS.escape(legacySection)}"]`);
@@ -48,9 +49,44 @@ export function initRuntimeWorkbench({ ft, formatText }) {
     requestAnimationFrame(() => drawGraphLinks());
     return true;
   };
-  const setSelected = (kind, id, focus = false) => {
+  const visibleTrigger = (kind, id) => {
+    const candidates = [...root.querySelectorAll(`[data-runtime-select-kind="${CSS.escape(kind)}"][data-runtime-select-id="${CSS.escape(id)}"]`)]
+      .filter((candidate) => !candidate.closest("details:not([open])"));
+    return candidates.find((candidate) => candidate.getClientRects().length) || candidates[0] || null;
+  };
+  const updateRefreshLinks = (runId = null, resetCursor = false) => {
+    root.querySelectorAll("[data-runtime-runs-refresh]").forEach((link) => {
+      const href = new URL(link.getAttribute("href") || "", window.location.href);
+      if (runId) href.searchParams.set("runtimeRun", runId);
+      else href.searchParams.delete("runtimeRun");
+      if (resetCursor) href.searchParams.delete("runCursor");
+      link.setAttribute("href", `${href.pathname}${href.search}${href.hash}`);
+    });
+  };
+  const showStaleSelection = () => {
+    const inspector = root.querySelector("[data-runtime-inspector]");
+    if (inspector) inspector.hidden = true;
+    inspectorTrigger = null;
+    let notice = root.querySelector("[data-runtime-run-selection-stale]");
+    if (!notice) {
+      notice = document.createElement("p");
+      notice.className = "runtime-notice";
+      notice.dataset.runtimeRunSelectionStale = "true";
+      root.querySelector("[data-runtime-workbench-main]")?.prepend(notice);
+    }
+    notice.textContent = ft("runtime_run_selection_stale");
+  };
+  const clearStaleSelection = () => root.querySelector("[data-runtime-run-selection-stale]")?.remove();
+  const setSelected = (kind, id) => {
     if (!kind || !id) return;
     selectedKey = entityKey(kind, id);
+    clearStaleSelection();
+    if (kind === "run" && (!inspectorTrigger || !inspectorTrigger.isConnected)) {
+      inspectorTrigger = visibleTrigger(kind, id);
+    }
+    if (kind === "run") {
+      updateRefreshLinks(id);
+    }
     const selectedRun = kind === "run"
       ? root.querySelector(`[data-runtime-entity-kind="run"][data-runtime-entity-id="${CSS.escape(id)}"]`)
       : null;
@@ -185,7 +221,6 @@ export function initRuntimeWorkbench({ ft, formatText }) {
         inspector.querySelector("[data-runtime-inspector-close]")?.focus({ preventScroll: true });
       }
     }
-    if (focus) root.querySelector(`[data-runtime-select-kind="${CSS.escape(kind)}"][data-runtime-select-id="${CSS.escape(id)}"]`)?.focus();
   };
   const closeInspector = () => {
     const inspector = root.querySelector("[data-runtime-inspector]");
@@ -296,6 +331,7 @@ export function initRuntimeWorkbench({ ft, formatText }) {
   };
 
   const showRunPageError = (page, message) => {
+    const selectedRunId = selectedKey?.startsWith("run:") ? selectedKey.slice(4) : null;
     page.replaceChildren();
     const heading = document.createElement("div");
     heading.className = "runtime-run-page-heading";
@@ -308,9 +344,16 @@ export function initRuntimeWorkbench({ ft, formatText }) {
     notice.textContent = message || ft("runtime_run_page_stale");
     const refresh = document.createElement("a");
     refresh.className = "btn";
-    refresh.href = `/${encodeURIComponent(page.dataset.runtimeRunPageProvider || "")}/session/${encodeURIComponent(page.dataset.runtimeRunPageSessionId || "")}?runtimeLens=execution`;
+    refresh.dataset.runtimeRunsRefresh = "true";
+    const refreshQuery = new URLSearchParams({ runtimeLens: "execution" });
+    if (page.dataset.runtimeRunPageLimit) refreshQuery.set("runLimit", page.dataset.runtimeRunPageLimit);
+    refresh.href = `/${encodeURIComponent(page.dataset.runtimeRunPageProvider || "")}/session/${encodeURIComponent(page.dataset.runtimeRunPageSessionId || "")}?${refreshQuery}`;
     refresh.textContent = ft("runtime_refresh_runs");
     page.append(heading, notice, refresh);
+    if (selectedRunId) {
+      updateRefreshLinks(selectedRunId, true);
+      showStaleSelection();
+    }
   };
 
   root.addEventListener("click", async (event) => {
@@ -344,7 +387,20 @@ export function initRuntimeWorkbench({ ft, formatText }) {
       if (Array.isArray(data.pageArtifacts)) evidence.pageArtifacts = data.pageArtifacts;
       if (selectedKey) {
         const separator = selectedKey.indexOf(":");
-        setSelected(selectedKey.slice(0, separator), selectedKey.slice(separator + 1));
+        const kind = selectedKey.slice(0, separator);
+        const id = selectedKey.slice(separator + 1);
+        if (kind === "run") {
+          const trigger = replacement.querySelector(`[data-runtime-run-list] [data-runtime-select-kind="run"][data-runtime-select-id="${CSS.escape(id)}"]`);
+          if (trigger) {
+            inspectorTrigger = trigger;
+            setSelected(kind, id);
+          } else {
+            updateRefreshLinks(id);
+            showStaleSelection();
+          }
+        } else {
+          setSelected(kind, id);
+        }
       }
     } catch (error) {
       console.error("Unable to load recorded run page:", error);
@@ -391,5 +447,25 @@ export function initRuntimeWorkbench({ ft, formatText }) {
     const trigger = event.target.closest("[data-runtime-evidence-kind]");
     if (trigger) openEvidence(trigger.dataset.runtimeEvidenceKind, trigger.dataset.runtimeEvidenceId);
   });
+
+  // Restore only the recorded run named by the URL. A changed snapshot or a
+  // page anchor that no longer contains it stays explicit; do not select a
+  // nearby run by position.
+  if (requestedRunId) {
+    selectedKey = entityKey("run", requestedRunId);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const trigger = root.querySelector(`[data-runtime-run-page] [data-runtime-run-list] [data-runtime-select-kind="run"][data-runtime-select-id="${CSS.escape(requestedRunId)}"]`);
+      if (trigger) {
+        updateRefreshLinks(requestedRunId);
+        inspectorTrigger = trigger;
+        trigger.focus({ preventScroll: true });
+        trigger.scrollIntoView({ block: "center", behavior: "instant" });
+        setSelected("run", requestedRunId);
+        return;
+      }
+      updateRefreshLinks(requestedRunId);
+      showStaleSelection();
+    }));
+  }
 
 }

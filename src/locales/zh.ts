@@ -828,6 +828,8 @@ export const zh = {
   "stats.drill_day_clear": "显示全部日期",
   "detail.breadcrumb_label": "会话导航",
   "detail.back_to_source": "返回{source}",
+  "detail.back_to_workbench": "返回工作台",
+  "runtime.run_selection_stale": "记录的运行已不在此页可见；未改选其他运行。",
   "stats.provider": "提供方",
   "stats.tokens_unit": "Token",
   "stats.no_data": "暂无数据",

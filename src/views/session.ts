@@ -1586,14 +1586,18 @@ export function renderSessionPage({
   const recordedStart = Number.isFinite(startTime) && startTime > 0
     ? new Date(startTime).toLocaleString()
     : t("detail.not_recorded");
-  const sourceLabel = navigationContext?.section === "stats" ? t("nav.stats") : t("nav.sessions");
+  const sourceLabel = navigationContext?.section === "stats"
+    ? t("nav.stats")
+    : navigationContext?.section === "detail"
+      ? t("runtime.title")
+      : t("nav.sessions");
   const backHref = navigationContext?.href || "/sessions";
   const currentRecentIndex = recentSessions.findIndex((item: any) => String(item.id) === String(session.id));
   const previousSession = currentRecentIndex > 0 ? recentSessions[currentRecentIndex - 1] : null;
   const nextSession = currentRecentIndex >= 0 && currentRecentIndex < recentSessions.length - 1 ? recentSessions[currentRecentIndex + 1] : null;
   const sessionHref = (item: any) => `/${encodeURIComponent(item.provider || provider)}/session/${encodeURIComponent(item.id)}`;
   const breadcrumb = navigationContext ? `<nav class="session-breadcrumb" aria-label="${escapeHtml(t("detail.breadcrumb_label"))}">
-    <a href="${escapeHtml(navigationContext.href)}">← ${escapeHtml(t("detail.back_to_source", { source: sourceLabel }))}</a>
+    <a href="${escapeHtml(navigationContext.href)}">← ${escapeHtml(navigationContext.section === "detail" ? t("detail.back_to_workbench") : t("detail.back_to_source", { source: sourceLabel }))}</a>
     <span>${escapeHtml(providerName)}</span>
     ${navigationContext.day ? `<span>${escapeHtml(navigationContext.day)}</span>` : ""}
   </nav>` : "";

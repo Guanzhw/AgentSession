@@ -737,6 +737,21 @@ if [[ "$runtime_work_drawer_open" != "true" ]]; then
 fi
 ab "close Work evidence drawer" press Escape >/dev/null
 
+ab "set narrow run restoration viewport" set viewport 320 900 >/dev/null
+ab "focus recorded lane run" focus "#tab-work [data-runtime-run-list] [data-runtime-select-kind='run']" >/dev/null
+ab "select recorded lane run" press Enter >/dev/null
+ab "refresh selected recorded run" click "#tab-work [data-runtime-runs-refresh]" >/dev/null
+ab "wait for restored run inspector" wait --fn "Boolean(document.querySelector('#tab-work [data-runtime-inspector]:not([hidden])'))" >/dev/null
+restored_run_state="$(read_ab "verify exact narrow run restoration" eval "(() => { const id = new URLSearchParams(location.search).get('runtimeRun'); const selected = document.querySelector('#tab-work [data-runtime-run-list] .runtime-selected[data-runtime-entity-kind=run]'); const inspector = document.querySelector('#tab-work [data-runtime-inspector]'); const rect = inspector.getBoundingClientRect(); return { exact: !!id && selected?.dataset.runtimeEntityId === id, inspectorVisible: !inspector.hidden && rect.top >= 0 && rect.top < innerHeight, focus: document.activeElement.hasAttribute('data-runtime-inspector-close'), bounded: document.documentElement.scrollWidth <= innerWidth }; })()" | tr -d '[:space:]')"
+assert_contains "restored exact run" "$restored_run_state" '"exact":true'
+assert_contains "restored narrow inspector visibility" "$restored_run_state" '"inspectorVisible":true'
+assert_contains "restored narrow inspector focus" "$restored_run_state" '"focus":true'
+assert_contains "restored page containment" "$restored_run_state" '"bounded":true'
+ab "close restored run inspector" press Escape >/dev/null
+restored_run_focus="$(read_ab "verify restored run Escape target" eval "document.activeElement.dataset.runtimeSelectId === new URLSearchParams(location.search).get('runtimeRun') && !!document.activeElement.closest('[data-runtime-run-list]')")"
+assert_contains "restored run focus return" "$restored_run_focus" 'true'
+ab "restore desktop after run navigation" set viewport 1280 900 >/dev/null
+
 ab "open Coordination disclosure" click "#tab-work [data-runtime-section='coordination'] > summary" >/dev/null
 runtime_relationship_count="$(read_ab "count runtime relationship rows" get count "#tab-work .runtime-session-edge")"
 assert_positive_count "runtime relationship rows" "$runtime_relationship_count"

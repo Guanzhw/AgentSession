@@ -3066,6 +3066,14 @@ test("session navigation context accepts viewer-owned sources and rejects unsafe
   assert.equal(parseSessionNavigationContext("//example.com/steal"), null);
   assert.equal(parseSessionNavigationContext("/api/opencode/session/x"), null);
   assert.equal(parseSessionNavigationContext("javascript:alert(1)"), null);
+  assert.deepEqual(parseSessionNavigationContext("/codex/session/run%2Fchild?runtimeLens=execution&runCursor=opaque%2Bcursor&runLimit=100&runtimeRun=run%2F42"), {
+    href: "/codex/session/run%2Fchild?runtimeLens=execution&runCursor=opaque%2Bcursor&runLimit=100&runtimeRun=run%2F42",
+    section: "detail",
+    day: null,
+  });
+  assert.equal(parseSessionNavigationContext("https://example.com/codex/session/child?runtimeLens=execution&runLimit=50&runtimeRun=run"), null);
+  assert.equal(parseSessionNavigationContext("/codex/session/child?runtimeLens=execution&runLimit=50"), null);
+  assert.equal(parseSessionNavigationContext("/codex/session/child?runtimeLens=execution&runLimit=50&runtimeRun=run&redirect=https://example.com"), null);
 });
 
 test("session detail shows a safe source breadcrumb and activates Usage for a stats drill", () => {
@@ -3133,6 +3141,18 @@ test("Token Explorer defers non-primary sections while retaining server-rendered
   const fragment = renderStatsDeferredSection({ ...base, dayDrill: null }, "secondary");
   assert.match(fragment, /Top Token Sessions/);
   assert.match(fragment, /Data Coverage/);
+});
+
+test("session detail restores a local workbench breadcrumb for a recorded run", () => {
+  const html = renderSessionPage({
+    session: { id: "child/1", title: "Child session", directory: "D:\\work", time_created: 1 },
+    provider: "codex",
+    providers: [{ id: "codex", name: "Codex", icon: "", available: true }],
+    navigationContext: parseSessionNavigationContext("/codex/session/parent%2F1?runtimeLens=execution&runCursor=opaque%2Bcursor&runLimit=100&runtimeRun=run%2F42"),
+  });
+  assert.match(html, /Back to workbench/);
+  assert.match(html, /href="\/codex\/session\/parent%2F1\?runtimeLens=execution&amp;runCursor=opaque%2Bcursor&amp;runLimit=100&amp;runtimeRun=run%2F42"/);
+  assert.match(html, /class="action-btn session-back-link" href="\/codex\/session\/parent%2F1\?runtimeLens=execution&amp;runCursor=opaque%2Bcursor&amp;runLimit=100&amp;runtimeRun=run%2F42"/);
 });
 
 test("Statistics SSR keeps the UI v2 reading order and chart explanation", () => {

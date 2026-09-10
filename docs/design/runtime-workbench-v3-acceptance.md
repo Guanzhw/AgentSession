@@ -41,6 +41,34 @@ final reply. Providers without this evidence retain their communication.
 
 ## Production gates
 
+### Child return and recorded run restoration, 2026-09-11
+
+Spec 16 adds viewer-owned parent/run/page return links without changing child
+identity. The DSH child round trip passed EN/ZH × light/dark × 1280/768/320px:
+exact lane selection, completed-task expansion, narrow inspector visibility,
+Escape focus return and page containment. The main agent inspected the narrow
+screenshot. Codex child `01a086ca-43f4-7af2-b03c-49a19c4758c0` returned to
+runs 51–100, including when opened in a new tab. A deliberately invalid viewer
+cursor retained that run ID on recovery; paging to its recorded page restored
+selection, paging away closed the inspector with an explicit notice, and paging
+back restored the same identity. Provider records were not modified.
+
+Independent review identified stale-refresh identity loss and silent off-page
+selection; both corrections were verified. Main-agent live testing corrected
+mobile focus moving away from the inspector. New OpenCode narrow E2E exposed
+unbreakable revision/coverage labels; allowing those labels to wrap restored
+320px containment. Main-agent `npm test` passed 549/549 and `npm run pre-push`
+passed. Final OpenCode `npm run qa:e2e` passed with no browser errors, including
+the new narrow refresh/selection/containment regression. Both server error logs
+were empty. SSR invalid-page recovery
+deliberately resets invalid paging parameters to defaults while retaining the
+requested run; a valid page return retains its cursor and size.
+
+Recorded attention/outcome details remain a separate pending slice in
+[spec 17](../prompts/backend-evolution/17-recorded-attention-and-outcome-details.md).
+Positive waiting/blocked fixtures exist, but the sampled real sessions do not
+establish outstanding input or approval. Full design acceptance remains open.
+
 ### Orientation and completed-work disclosure, 2026-09-11
 
 The primary graph now prioritizes goals and non-completed tasks (up to nine

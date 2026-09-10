@@ -829,6 +829,8 @@ export const en = {
   "stats.drill_day_clear": "Show all days",
   "detail.breadcrumb_label": "Session navigation",
   "detail.back_to_source": "Back to {source}",
+  "detail.back_to_workbench": "Back to workbench",
+  "runtime.run_selection_stale": "The recorded run is no longer visible on this page; no different run was selected.",
   "stats.provider": "Provider",
   "stats.tokens_unit": "tokens",
   "stats.no_data": "No data",

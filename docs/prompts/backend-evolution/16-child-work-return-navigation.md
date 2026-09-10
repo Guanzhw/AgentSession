@@ -1,6 +1,6 @@
 # Return from child execution to its originating work
 
-Status: implementation pending after spec 15.
+Status: implemented and locally verified, 2026-09-11.
 
 ## Observed gap
 

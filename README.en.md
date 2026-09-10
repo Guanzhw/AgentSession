@@ -42,6 +42,11 @@ navigation between five separate lenses:
 - **Context**: compaction results, context versions, and scoped artifacts such as memory, experience, and user info, with direct, inherited, and shared origins.
 - **Evidence**: bounded, source-ordered events, protocol status, diagnostics, and provenance.
 
+When a recorded run opens a child session, the child keeps its canonical URL
+and offers a viewer-owned return to the exact parent Workbench page and run.
+The return preserves a valid paged-run cursor and page size; changed or stale
+evidence remains visible instead of selecting a different run.
+
 ### Session Protocol v2 and v3
 
 Every registered provider implements `getSessionProtocol()` for every readable

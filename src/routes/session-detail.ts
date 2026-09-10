@@ -83,6 +83,7 @@ export function registerSessionDetail(
       return {
         protocol: protocol as SessionProtocol,
         v3,
+        runCursor: runPageOptions.cursor || null,
         runPage,
         runPageError,
         runActorBindings,
@@ -100,6 +101,7 @@ export function registerSessionDetail(
       return {
         protocol: null,
         v3: null,
+        runCursor: runPageOptions.cursor || null,
         runPage: null,
         runPageError: null,
         runActorBindings: null,
@@ -558,7 +560,7 @@ export function registerSessionDetail(
       return json(res, {
         ok: true,
         ...page,
-        html: renderRuntimeRunPage(page, actorBindings.actorByRun, actorLabels, lanePresentation),
+        html: renderRuntimeRunPage(page, actorBindings.actorByRun, actorLabels, lanePresentation, { runCursor: params.get("cursor") }),
         evidenceRuns: page.runs.map((entry) => entry.run),
         pageCoordination: lanePresentation.coordination,
         pageTransformations: lanePresentation.transformations,
