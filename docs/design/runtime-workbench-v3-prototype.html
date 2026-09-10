@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Runtime Workbench v3 · design prototype</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f4f3ef;
+      --panel: #fffefa;
+      --raised: #fff;
+      --text: #191c20;
+      --secondary: #5a626b;
+      --boundary: #e3e0d9;
+      --accent: #345d55;
+      --accent-soft: #e3efeb;
+      --warm: #9b673d;
+      --warm-soft: #f3e7db;
+      --danger: #9d4f42;
+      --danger-soft: #f4e3df;
+      --wait: #7d633a;
+      --wait-soft: #f4ead4;
+      --shadow: 0 1px 0 rgba(25, 28, 32, .07);
+      --focus: #20776a;
+    }
+    [data-theme="dark"] {
+      color-scheme: dark;
+      --page: #0d1117;
+      --panel: #151b24;
+      --raised: #1b2430;
+      --text: #eef2f6;
+      --secondary: #aab5c2;
+      --boundary: #303b48;
+      --accent: #83b8aa;
+      --accent-soft: #203a35;
+      --warm: #d7a071;
+      --warm-soft: #3a2c21;
+      --danger: #e09a8d;
+      --danger-soft: #3a2423;
+      --wait: #e1bb7d;
+      --wait-soft: #3b3021;
+      --shadow: 0 1px 0 rgba(0, 0, 0, .25);
+      --focus: #9bd6c8;
+    }
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--text);
+      font: 14px/1.55 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    button, textarea { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+    .app { display: grid; grid-template-columns: 176px minmax(0, 1fr); min-height: 100vh; }
+    .rail {
+      display: flex; flex-direction: column; gap: 28px; padding: 24px 14px;
+      background: var(--panel); border-right: 1px solid var(--boundary);
+    }
+    .brand { display: flex; align-items: center; gap: 9px; padding: 0 10px; font: 500 14px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .brand-mark { display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid var(--accent); border-radius: 6px; color: var(--accent); }
+    .rail nav { display: grid; gap: 4px; }
+    .nav-item { display: flex; align-items: center; gap: 10px; min-height: 40px; width: 100%; padding: 0 11px; border: 0; border-radius: 7px; background: transparent; text-align: left; }
+    .nav-item:hover, .nav-item.active { background: var(--accent-soft); color: var(--accent); }
+    .nav-item[aria-disabled="true"] { cursor: default; }
+    .nav-item[aria-disabled="true"]:hover { background: transparent; color: var(--text); }
+    button:disabled { cursor: default; }
+    .provider { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: center; margin-top: auto; padding: 12px 10px; border-top: 1px solid var(--boundary); color: var(--secondary); }
+    .provider-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+    .provider small { grid-column: 2; font-size: 11px; }
+    main { min-width: 0; padding: 20px 32px 54px; }
+    .content { max-width: 1440px; margin: 0 auto; }
+    .sample-banner { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; padding: 8px 12px; border: 1px solid var(--warm); background: var(--warm-soft); color: var(--text); font-size: 12px; }
+    .sample-banner strong { color: var(--warm); font-size: 11px; letter-spacing: .08em; }
+    .header { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }
+    .kicker, .eyebrow { color: var(--secondary); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin: 10px 0 6px; max-width: 780px; font-size: 27px; line-height: 1.15; font-weight: 500; letter-spacing: -.02em; }
+    h2 { margin: 5px 0 9px; font-size: 22px; line-height: 1.2; font-weight: 500; letter-spacing: -.015em; }
+    h3 { margin: 4px 0 0; font-size: 16px; line-height: 1.3; font-weight: 500; }
+    p { color: var(--secondary); }
+    .meta { color: var(--secondary); overflow-wrap: anywhere; }
+    .actions, .toolbar, .tablist, .status-line, .legend { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .actions { justify-content: flex-end; }
+    .button, .select-button, .icon-button { min-height: 34px; padding: 0 12px; border: 1px solid var(--boundary); border-radius: 7px; background: var(--panel); cursor: pointer; }
+    .button:hover, .select-button:hover, .icon-button:hover { background: var(--raised); }
+    .button.primary { color: #fff; border-color: var(--accent); background: var(--accent); }
+    [data-theme="dark"] .button.primary { color: #10201c; }
+    .button.quiet { border-color: transparent; background: transparent; color: var(--accent); }
+    .status-line { gap: 9px 20px; margin-top: 12px; padding: 10px 0; color: var(--secondary); font-size: 12px; border-top: 1px solid var(--boundary); border-bottom: 1px solid var(--boundary); }
+    .status { display: inline-flex; align-items: center; gap: 6px; color: var(--text); }
+    .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+    .status.waiting::before { background: var(--wait); }
+    .status.attention::before { background: var(--danger); }
+    .tablist { gap: 24px; margin: 12px 0 12px; border-bottom: 1px solid var(--boundary); }
+    .tab-actions { display: flex; gap: 8px; align-items: center; margin-left: auto; }
+    .history-control { min-height: 32px; margin-bottom: 6px; padding-inline: 0; border: 0; background: transparent; color: var(--secondary); font-size: 12px; cursor: pointer; }
+    .history-control:hover { color: var(--accent); }
+    .tab { position: relative; min-height: 40px; padding: 0 0 10px; border: 0; background: transparent; color: var(--secondary); cursor: pointer; }
+    .tab[aria-selected="true"] { color: var(--text); }
+    .tab[aria-selected="true"]::after { content: ""; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--accent); }
+    .view[hidden] { display: none; }
+    #view-work { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 18px; align-items: start; }
+    #view-work:has(#work-inspector[hidden]) { grid-template-columns: minmax(0, 1fr); }
+    #view-work[hidden], #view-conversation[hidden], #view-events[hidden] { display: none !important; }
+    #view-work > .orientation { grid-column: 1 / -1; }
+    #view-work > .section, #view-work > .lane-section { grid-column: 1; margin-top: 0; }
+    #view-work > .lane-section { margin-top: 0; }
+    #work-inspector { grid-column: 2; grid-row: 2 / span 2; position: sticky; top: 18px; }
+    .orientation { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 25px; align-items: end; padding: 10px 0 14px; }
+    .orientation p { max-width: 770px; margin-bottom: 0; }
+    .attention-note { display: flex; gap: 8px; align-items: flex-start; max-width: 300px; padding: 9px 10px; border-left: 3px solid var(--wait); background: var(--wait-soft); color: var(--text); font-size: 12px; }
+    .attention-note strong { display: block; font-weight: 500; }
+    .section { margin-top: 10px; padding: 15px 18px; background: var(--panel); border: 1px solid var(--boundary); }
+    .section-heading { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 12px; }
+    .section-heading p { margin: 5px 0 0; font-size: 12px; }
+    .eyebrow { display: block; }
+    .structure-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    .graph-wrap { min-width: 0; border-top: 1px solid var(--boundary); border-bottom: 1px solid var(--boundary); }
+    .graph-wrap svg { display: block; width: 100%; height: 220px; overflow: visible; }
+    .graph-edge { fill: none; stroke: var(--secondary); stroke-width: 1.3; vector-effect: non-scaling-stroke; }
+    .graph-edge.accent { stroke: var(--accent); stroke-width: 2; }
+    .graph-edge.dashed { stroke-dasharray: 5 4; }
+    .graph-edge.active { stroke: var(--accent); stroke-width: 2.4; }
+    .graph-node { cursor: pointer; }
+    .graph-node rect { fill: var(--raised); stroke: var(--boundary); stroke-width: 1; }
+    .graph-node:hover rect, .graph-node.selected rect { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+    .graph-node.attention rect { stroke: var(--danger); }
+    .graph-node text { fill: var(--text); font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 14px; }
+    .graph-node .node-meta { fill: var(--secondary); font-size: 12px; }
+    .mobile-flow { display: none; }
+    .mobile-node { display: grid; gap: 2px; width: 100%; min-height: 56px; padding: 9px 11px; border: 1px solid var(--boundary); border-left: 3px solid var(--accent); border-radius: 4px; background: var(--raised); color: var(--text); text-align: left; cursor: pointer; box-shadow: var(--shadow); }
+    .mobile-node:hover, .mobile-node:focus-visible { background: var(--accent-soft); border-color: var(--accent); }
+    .mobile-node span { color: var(--secondary); font-size: 11px; }
+    .mobile-node strong { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+    .mobile-link { position: relative; display: grid; justify-items: start; min-height: 30px; padding: 6px 0 6px 18px; color: var(--secondary); font-size: 11px; }
+    .mobile-link::before { position: absolute; top: 0; bottom: 0; left: 8px; border-left: 1px solid var(--secondary); content: ""; }
+    .mobile-link::after { position: absolute; bottom: 0; left: 5px; width: 6px; height: 6px; border-right: 1px solid var(--secondary); border-bottom: 1px solid var(--secondary); content: ""; transform: rotate(45deg); }
+    .mobile-fork { position: relative; display: grid; gap: 8px; margin: 0 0 0 8px; padding: 5px 0 5px 18px; border-left: 1px solid var(--secondary); }
+    .mobile-branch { position: relative; display: grid; gap: 4px; }
+    .mobile-branch::before { position: absolute; top: 20px; left: -19px; width: 18px; border-top: 1px solid var(--secondary); content: ""; }
+    .mobile-branch::after { position: absolute; top: 17px; left: -2px; width: 6px; height: 6px; border-top: 1px solid var(--secondary); border-right: 1px solid var(--secondary); content: ""; transform: rotate(45deg); }
+    .mobile-branch:first-child .mobile-node { border-left-color: var(--wait); background: var(--wait-soft); }
+    .branch-tag { color: var(--secondary); font-size: 11px; }
+    .mobile-return { position: relative; display: grid; gap: 4px; margin: 4px 0 0 8px; padding: 22px 0 0 18px; }
+    .mobile-return > span { position: absolute; top: 4px; left: 18px; color: var(--accent); font-size: 11px; }
+    .mobile-return::before { position: absolute; top: -3px; left: 8px; width: 9px; height: 22px; border-left: 1px solid var(--accent); border-bottom: 1px solid var(--accent); content: ""; }
+    .mobile-return::after { position: absolute; top: 15px; left: 5px; width: 6px; height: 6px; border-right: 1px solid var(--accent); border-bottom: 1px solid var(--accent); content: ""; transform: rotate(45deg); }
+    .graph-help { display: flex; justify-content: space-between; gap: 10px; padding: 10px 0; color: var(--secondary); font-size: 11px; }
+    .legend { color: var(--secondary); font-size: 11px; }
+    .legend span { display: inline-flex; gap: 5px; align-items: center; }
+    .legend i { width: 16px; border-top: 2px solid var(--accent); }
+    .legend i.dashed { border-top-style: dashed; border-top-color: var(--secondary); }
+    .context-result { display: grid; grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(120px, .55fr)) auto; align-items: center; gap: 14px; padding: 12px 0 0; border-top: 1px solid var(--boundary); }
+    .result-lead { margin: 0; color: var(--text); font-size: 17px; line-height: 1.3; }
+    .result-detail { margin: 0; color: var(--secondary); font-size: 12px; }
+    .result-line { display: flex; justify-content: space-between; gap: 12px; padding-left: 14px; border-left: 1px solid var(--boundary); font-size: 12px; }
+    .result-line span:first-child { color: var(--secondary); }
+    .inspector { min-width: 0; padding: 16px; background: var(--raised); border: 1px solid var(--boundary); box-shadow: var(--shadow); }
+    .inspector[hidden] { display: none; }
+    .inspector h3 { margin-bottom: 4px; overflow-wrap: anywhere; }
+    .inspector-top { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+    .inspector-close { display: none; }
+    .inspector-label { color: var(--accent); font-size: 11px; }
+    .inspector-copy { margin: 12px 0; color: var(--secondary); font-size: 12px; }
+    .evidence { display: grid; gap: 9px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--boundary); }
+    .evidence-row { display: grid; grid-template-columns: 85px minmax(0, 1fr); gap: 8px; font-size: 11px; }
+    .evidence-row dt { color: var(--secondary); }
+    .evidence-row dd { margin: 0; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .lane-section { margin-top: 10px; padding: 15px 18px; background: var(--panel); border: 1px solid var(--boundary); }
+    .lane { display: grid; grid-template-columns: 155px minmax(0, 1fr); min-width: 0; border-top: 1px solid var(--boundary); }
+    .lane-label { padding: 16px 14px 16px 0; }
+    .lane-label strong { display: block; font-weight: 500; }
+    .lane-label small { display: block; color: var(--secondary); font-size: 11px; }
+    .lane-track { position: relative; display: flex; gap: 8px; align-items: center; min-width: 0; min-height: 84px; padding: 12px 0; }
+    .sequence { position: relative; align-self: stretch; display: grid; place-items: center; min-width: 34px; color: var(--secondary); font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .sequence::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; border-left: 1px dashed var(--boundary); }
+    .sequence span { position: relative; padding: 3px 0; background: var(--panel); }
+    .run { position: relative; z-index: 1; display: grid; gap: 3px; min-width: 106px; max-width: 260px; min-height: 54px; padding: 9px 10px; border: 1px solid var(--boundary); border-left: 3px solid var(--accent); border-radius: 4px; background: var(--raised); text-align: left; cursor: pointer; box-shadow: var(--shadow); }
+    .run:hover, .run.selected { background: var(--accent-soft); border-color: var(--accent); }
+    .run.linked { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 26%, transparent); }
+    .run strong { font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
+    .run small { color: var(--secondary); font-size: 10px; }
+    .run.tool { border-left-color: var(--warm); }
+    .run.wait { border-left-color: var(--wait); background: var(--wait-soft); }
+    .run.failure { border-left-color: var(--danger); }
+    .run.failure.recovered { border-left-color: var(--accent); }
+    .run.process { border-style: dashed; }
+    .run .state-word { color: var(--secondary); }
+    .flow-arrow { color: var(--secondary); font-size: 17px; flex: 0 0 auto; }
+    .lane-footnote { padding: 10px 0 0 155px; color: var(--secondary); font-size: 11px; }
+    .conversation { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 18px; align-items: start; }
+    .thread { min-width: 0; }
+    .exchange { padding: 17px 0; border-bottom: 1px solid var(--boundary); }
+    .exchange:last-child { border-bottom: 0; }
+    .message-label { margin-bottom: 6px; color: var(--secondary); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+    .message { margin: 0; max-width: 750px; font-size: 15px; line-height: 1.55; }
+    .message.user { color: var(--text); }
+    .message.assistant { color: var(--text); }
+    .process-summary, .checkpoint, .question, .recovered { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--boundary); background: var(--panel); }
+    .process-summary summary { cursor: pointer; color: var(--secondary); }
+    .process-summary summary::marker { color: var(--accent); }
+    .process-body { display: grid; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--boundary); }
+    .internal-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--boundary); font-size: 12px; }
+    .internal-row:last-child { border-bottom: 0; }
+    .internal-row span { color: var(--secondary); }
+    .checkpoint { border-left: 3px solid var(--accent); }
+    .checkpoint strong, .question strong, .recovered strong { display: block; margin-bottom: 3px; font-weight: 500; }
+    .checkpoint p, .question p, .recovered p { margin: 0; font-size: 12px; }
+    .question { border-left: 3px solid var(--wait); background: var(--wait-soft); }
+    .recovered { border-left: 3px solid var(--danger); background: var(--danger-soft); }
+    .composer { display: grid; gap: 8px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--boundary); }
+    .composer textarea { width: 100%; min-height: 74px; padding: 10px; resize: vertical; border: 1px solid var(--boundary); border-radius: 7px; background: var(--raised); color: var(--text); }
+    .composer-foot { display: flex; justify-content: space-between; gap: 10px; align-items: center; color: var(--secondary); font-size: 11px; }
+    .asset-panel { padding: 16px; background: var(--panel); border: 1px solid var(--boundary); }
+    .asset-panel h3 { margin-bottom: 12px; }
+    .asset-group { margin-top: 14px; }
+    .asset-group h4 { margin: 0 0 5px; color: var(--secondary); font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .06em; }
+    .asset { display: block; width: 100%; padding: 9px 0; border: 0; border-top: 1px solid var(--boundary); background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+    .asset:hover { color: var(--accent); }
+    .asset strong { display: block; font-size: 12px; font-weight: 500; }
+    .asset small { color: var(--secondary); font-size: 11px; }
+    .events-intro { margin-bottom: 16px; color: var(--secondary); }
+    .event-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .event-table th, .event-table td { padding: 11px 8px; border-top: 1px solid var(--boundary); text-align: left; vertical-align: top; }
+    .event-table th { color: var(--secondary); font-size: 11px; font-weight: 500; }
+    .event-table td:first-child, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .event-table tr.selected { background: var(--accent-soft); }
+    .pill { display: inline-flex; align-items: center; min-height: 22px; padding: 0 7px; border: 1px solid var(--boundary); border-radius: 4px; color: var(--secondary); font-size: 10px; }
+    .pill.recorded { color: var(--accent); border-color: var(--accent); }
+    .pill.derived { color: var(--warm); border-color: var(--warm); }
+    .empty { padding: 22px 0; color: var(--secondary); }
+    .mobile-only { display: none; }
+    .status-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
+    .compact-density .lane-track { min-height: 68px; padding-block: 7px; }
+    .compact-density .run { min-height: 44px; padding-block: 6px; }
+    .compact-density .exchange { padding-block: 11px; }
+
+    @media (max-width: 900px) {
+      .app { grid-template-columns: 1fr; }
+      .rail { flex-direction: row; align-items: center; gap: 10px; padding: 8px 10px; border-right: 0; border-bottom: 1px solid var(--boundary); }
+      .brand { padding: 0 5px; }
+      .brand span:last-child, .rail .provider, .nav-item span:first-child { display: none; }
+      .rail nav { display: flex; flex: 1; gap: 4px; }
+      .nav-item { justify-content: center; min-height: 40px; }
+      main { padding: 20px 16px 40px; }
+      .structure-grid, .conversation { grid-template-columns: 1fr; }
+      #view-work { display: block; }
+      #view-work > .section, #view-work > .lane-section { margin-top: 18px; }
+      #work-inspector { position: static; margin-top: 18px; }
+      .context-result { padding: 16px 0 0; border-top: 1px solid var(--boundary); border-left: 0; }
+      .inspector { order: 2; }
+      .lane-footnote { padding-left: 0; }
+    }
+    @media (max-width: 560px) {
+      main { padding-inline: 12px; }
+      .sample-banner { align-items: flex-start; }
+      .header { display: grid; }
+      .actions { justify-content: flex-start; }
+      .actions .button { min-height: 44px; }
+      h1 { font-size: 25px; }
+      .orientation { grid-template-columns: 1fr; gap: 14px; }
+      .section, .lane-section { padding: 15px; }
+      .section-heading { align-items: center; }
+      .graph-wrap { overflow: hidden; }
+      .graph-wrap svg { display: none; }
+      .mobile-flow { display: grid; gap: 0; padding: 12px 0; }
+      .context-result { grid-template-columns: 1fr 1fr; }
+      .context-result > div:first-child, .context-result > .button { grid-column: 1 / -1; }
+      .context-result .result-line { padding-left: 0; border-left: 0; }
+      .graph-help { display: grid; }
+      .graph-help .legend { display: none; }
+      .lane { grid-template-columns: 1fr; }
+      .lane-label { padding: 14px 0 7px; }
+      .lane-track { display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: stretch; gap: 7px; min-height: 0; padding: 4px 0 14px; }
+      .sequence { min-width: 28px; min-height: 38px; }
+      .sequence::before { top: -10px; bottom: -8px; }
+      .run { max-width: none; min-height: 54px; width: 100%; }
+      .flow-arrow { display: none; }
+      .lane-track .run + .run { margin-top: 4px; }
+      .lane-footnote { padding-top: 2px; }
+      .tablist { gap: 18px; }
+      .tab { min-height: 44px; }
+      .inspector { position: fixed; z-index: 10; inset: auto 8px 8px; max-height: min(72vh, 520px); overflow: auto; border-color: var(--accent); }
+      .inspector-close { display: inline-grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid var(--boundary); border-radius: 7px; background: transparent; cursor: pointer; }
+      .mobile-only { display: inline; }
+      .event-table, .event-table tbody, .event-table tr, .event-table td { display: block; }
+      .event-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+      .event-table tr { padding: 10px 0; border-top: 1px solid var(--boundary); }
+      .event-table td { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px; padding: 4px 0; border: 0; }
+      .event-table td::before { content: attr(data-label); color: var(--secondary); font-size: 11px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app" id="app">
+    <aside class="rail" aria-label="Application navigation">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">⌁</span><span>AgentSession</span></div>
+      <nav aria-label="Global destinations">
+        <div class="nav-item active" aria-current="page"><span aria-hidden="true">▦</span><span>Library</span></div>
+        <div class="nav-item" aria-disabled="true" title="Navigation is outside this design prototype"><span aria-hidden="true">◒</span><span>Statistics</span></div>
+        <div class="nav-item" aria-disabled="true" title="Navigation is outside this design prototype"><span aria-hidden="true">⚙</span><span>Settings</span></div>
+      </nav>
+      <div class="provider"><span class="provider-dot" aria-hidden="true"></span><span>Codex CLI</span><small>available</small></div>
+    </aside>
+
+    <main>
+      <div class="content">
+        <div class="sample-banner" role="note"><strong>DESIGN EXAMPLE</strong><span>Illustrative session data for interaction design only — not a live provider session.</span></div>
+        <header>
+          <div class="header">
+            <div>
+              <div class="kicker">Library / Session detail / Workbench</div>
+              <h1>Build a unified Runtime Workbench</h1>
+              <div class="meta">D:\WorkSpace\OpenSession · Codex CLI · example-session-042</div>
+            </div>
+            <div class="actions" aria-label="Session actions">
+              <button class="button" type="button" id="themeToggle">Dark theme</button>
+              <button class="button" type="button" id="densityToggle">Compact density</button>
+              <button class="button primary" type="button" disabled aria-disabled="true" title="Export is outside this design prototype">Export</button>
+            </div>
+          </div>
+          <div class="status-line" aria-label="Session status summary">
+            <span class="status waiting">Waiting for user</span>
+            <span>7 participants · 4 linked runs</span>
+            <span>last recorded update · seq 12</span>
+            <span>context checkpoint · 71k tokens</span>
+          </div>
+        </header>
+
+        <div class="tablist" role="tablist" aria-label="Session detail modes">
+          <button class="tab" id="tab-work" type="button" role="tab" aria-selected="true" aria-controls="view-work">Workbench</button>
+          <button class="tab" id="tab-conversation" type="button" role="tab" aria-selected="false" aria-controls="view-conversation">Conversation</button>
+          <div class="tab-actions"><button class="history-control" id="events-link" type="button" aria-controls="view-events">History &amp; evidence ↗</button></div>
+        </div>
+
+        <section class="view" id="view-work" role="tabpanel" aria-labelledby="tab-work">
+          <div class="orientation">
+            <div>
+              <span class="eyebrow">Current goal</span>
+              <h2>Make multi-agent work legible without losing evidence</h2>
+            </div>
+            <div class="attention-note"><span aria-hidden="true">◌</span><div><strong>Attention: user input required</strong>The main run is paused at a recorded question.</div></div>
+          </div>
+
+          <section class="section" aria-labelledby="structure-title">
+            <div class="section-heading"><div><span class="eyebrow">Work structure</span><h3 id="structure-title">One connected example, four recorded relationships</h3></div><button class="button quiet" type="button" id="clearSelection">Clear selection</button></div>
+            <div class="structure-grid">
+              <div class="graph-wrap">
+                <svg viewBox="0 60 710 220" role="img" aria-labelledby="graph-title graph-desc">
+                  <title id="graph-title">Connected work structure example</title>
+                  <desc id="graph-desc">The goal owns a design task. The design task hands off to a UI worker, whose result returns to the main run. A waiting question is linked to the main run.</desc>
+                  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--secondary)"></path></marker><marker id="arrow-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"></path></marker></defs>
+                  <path class="graph-edge accent" data-edge="goal-task" d="M 208 102 C 278 102, 302 102, 358 102" marker-end="url(#arrow-accent)"></path>
+                  <path class="graph-edge dashed" data-edge="task-worker" d="M 508 102 C 570 102, 593 145, 593 192" marker-end="url(#arrow)"></path>
+                  <path class="graph-edge accent" data-edge="worker-result" d="M 593 250 C 593 277, 250 277, 208 221" marker-end="url(#arrow-accent)"></path>
+                  <path class="graph-edge" data-edge="main-wait" d="M 435 132 C 435 158, 435 170, 435 192" marker-end="url(#arrow)"></path>
+                  <g class="graph-node" data-select="goal" tabindex="0" role="button" aria-label="Goal node: unified workbench">
+                    <rect x="28" y="73" width="180" height="58" rx="4"></rect><text x="42" y="96">Goal</text><text x="42" y="116" class="node-meta">Unified workbench</text>
+                  </g>
+                  <g class="graph-node" data-select="task" tabindex="0" role="button" aria-label="Task node: structure and lanes">
+                    <rect x="358" y="73" width="150" height="58" rx="4"></rect><text x="372" y="96">Task</text><text x="372" y="116" class="node-meta">Structure + lanes</text>
+                  </g>
+                  <g class="graph-node" data-select="question" tabindex="0" role="button" aria-label="Waiting question node">
+                    <rect x="358" y="192" width="150" height="58" rx="4"></rect><text x="372" y="215">Attention</text><text x="372" y="235" class="node-meta">Waiting for user</text>
+                  </g>
+                  <g class="graph-node" data-select="worker" tabindex="0" role="button" aria-label="Agent node: UI worker">
+                    <rect x="508" y="192" width="170" height="58" rx="4"></rect><text x="522" y="215">Agent</text><text x="522" y="235" class="node-meta">ui-worker · result</text>
+                  </g>
+                  <g class="graph-node" data-select="result" tabindex="0" role="button" aria-label="Result node: visual prototype">
+                    <rect x="28" y="192" width="180" height="58" rx="4"></rect><text x="42" y="215">Result</text><text x="42" y="235" class="node-meta">Prototype artifact</text>
+                  </g>
+                </svg>
+                <div class="mobile-flow" aria-label="Connected work relationships on narrow screens">
+                  <button class="mobile-node" type="button" data-select="goal"><span>Goal</span><strong>Unified workbench</strong></button>
+                  <div class="mobile-link" aria-hidden="true"><span>owns</span></div>
+                  <button class="mobile-node" type="button" data-select="task"><span>Task</span><strong>Structure + lanes</strong></button>
+                  <div class="mobile-fork" aria-label="Task branches into a waiting question and a worker handoff">
+                    <div class="mobile-branch"><span class="branch-tag">waits for</span><button class="mobile-node" type="button" data-select="question"><span>Attention</span><strong>User input</strong></button></div>
+                    <div class="mobile-branch"><span class="branch-tag">handoff</span><button class="mobile-node" type="button" data-select="worker"><span>Agent</span><strong>ui-worker</strong></button></div>
+                  </div>
+                  <div class="mobile-return"><span>returns</span><button class="mobile-node" type="button" data-select="result"><span>Result</span><strong>Prototype artifact</strong></button></div>
+                </div>
+                <div class="graph-help"><span>Keyboard: Tab to a node, Enter or Space to inspect.</span><div class="legend"><span><i></i> recorded link</span><span><i class="dashed"></i> handoff</span></div></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="lane-section" aria-labelledby="lanes-title">
+            <div class="section-heading"><div><span class="eyebrow">Execution lanes</span><h3 id="lanes-title">Recorded order · sequence marks</h3></div><span class="pill recorded">snapshot · seq 12</span></div>
+            <div class="lane">
+              <div class="lane-label"><strong>Main agent</strong><small>owner · active / waiting</small></div>
+              <div class="lane-track"><div class="sequence"><span>07</span></div><button class="run" data-select="run-main" type="button"><strong>Plan work</strong><small>recorded run · completed</small></button><span class="flow-arrow" aria-hidden="true">→</span><div class="sequence"><span>08</span></div><button class="run process" data-select="run-model" type="button"><strong>Model + tools</strong><small>3 calls · folded</small></button><span class="flow-arrow" aria-hidden="true">→</span><div class="sequence"><span>09</span></div><button class="run wait" data-select="question" type="button"><strong>Ask user</strong><small>waiting_input</small></button></div>
+            </div>
+            <div class="lane">
+              <div class="lane-label"><strong>ui-worker</strong><small>agent · completed</small></div>
+              <div class="lane-track"><div class="sequence"><span>08</span></div><button class="run tool" data-select="run-ui" type="button"><strong>Build prototype</strong><small>result delivered</small></button><span class="flow-arrow" aria-hidden="true">→</span><div class="sequence"><span>10</span></div><button class="run failure recovered" data-select="run-retry" type="button"><strong>Retry check</strong><small>failed → recovered</small></button></div>
+            </div>
+            <div class="lane">
+              <div class="lane-label"><strong>Context</strong><small>session-owned</small></div>
+              <div class="lane-track"><div class="sequence"><span>10</span></div><button class="run process" data-select="compact" type="button"><strong>Compact checkpoint</strong><small>retained result · 71k</small></button><span class="flow-arrow" aria-hidden="true">→</span><div class="sequence"><span>11</span></div><button class="run" data-asset="session-memory" type="button"><strong>Scope memory</strong><small>session + project</small></button></div>
+            </div>
+            <div class="lane-footnote">State labels stay distinct: <span class="status waiting">waiting for user</span> and <span class="status attention">failed then recovered</span> are not completion synonyms.</div>
+          </section>
+          <aside class="inspector" id="work-inspector" aria-label="Selection inspector" aria-live="polite"></aside>
+        </section>
+
+        <section class="view" id="view-conversation" role="tabpanel" aria-labelledby="tab-conversation" hidden>
+          <div class="orientation"><div><span class="eyebrow">Conversation</span><h2>User input and agent reply are the reading spine</h2><p>Internal calls remain available at the recorded exchange where they happened. Expand a process summary for provider evidence.</p></div><div class="attention-note"><span aria-hidden="true">◌</span><div><strong>Waiting for user</strong>One recorded question has no answer yet.</div></div></div>
+          <div class="conversation">
+            <div class="thread" id="thread" aria-label="Example conversation">
+              <article class="exchange"><div class="message-label">User · sequence 01</div><p class="message user">Can we make the runtime state understandable at a glance without turning it into a dashboard?</p><details class="process-summary"><summary>Internal process · 2 model calls · 1 tool result · collapsed by default</summary><div class="process-body"><div class="internal-row"><strong>Model call</strong><span>reasoning recorded · 1,240 tokens</span></div><div class="internal-row"><strong>Tool call</strong><span>read design contract · result available</span></div><div class="internal-row"><strong>Model call</strong><span>proposal assembled · 980 tokens</span></div></div></details></article>
+              <article class="exchange"><div class="message-label">Agent · sequence 02</div><p class="message assistant">Yes. Start with the goal, connect it to recorded work, then let execution lanes explain who did what. Evidence stays one deliberate step away.</p><div class="recovered"><strong>Failed internal call · resolved retry</strong><p>The first artifact check failed at seq 06; a recorded retry succeeded at seq 10. The failure is preserved as attention context, not presented as a terminal run.</p><button class="button quiet" type="button" data-select="run-retry">Inspect retry evidence →</button></div></article>
+              <article class="exchange"><div class="message-label">Checkpoint · sequence 10</div><div class="checkpoint"><strong>Compact result · 71k tokens retained</strong><p>Goal, open tasks, and key decisions are recorded in the resulting context. Inherited shared context stays collapsed and does not create a new conversation turn.</p><button class="button quiet" type="button" data-select="compact">Inspect checkpoint evidence →</button></div></article>
+              <article class="exchange"><div class="message-label">Agent · sequence 12</div><p class="message assistant">The structure is ready. I’m waiting for your choice of the default mobile branch before I continue.</p><div class="question"><strong>Pending user question</strong><p>Should narrow screens focus the selected branch or show the complete relationship list?</p><button class="button quiet" type="button" data-select="question">Inspect question evidence →</button></div></article>
+              <form class="composer" id="composer"><label for="reply"><span class="eyebrow">Example reply</span><span class="status-sr">This adds a local illustrative message and does not contact a provider.</span></label><textarea id="reply" placeholder="Reply to the illustrative agent…"></textarea><div class="composer-foot"><span>Local prototype only · no network call</span><button class="button primary" type="submit">Send example reply</button></div></form>
+            </div>
+            <aside class="asset-panel" aria-labelledby="assets-title"><span class="eyebrow">Context assets</span><h3 id="assets-title">Scope memory</h3><p class="result-detail">Grouped by recorded scope. Missing scopes remain absent.</p><div class="asset-group"><h4>Session</h4><button class="asset" type="button" data-asset="session-memory"><strong>runtime-workbench-notes</strong><small>3 memories · recorded</small></button></div><div class="asset-group"><h4>Project</h4><button class="asset" type="button" data-asset="project-memory"><strong>ui-v2-visual-system</strong><small>1 experience · inherited</small></button></div><div class="asset-group"><h4>Agent</h4><div class="empty">No agent-scoped asset recorded.</div></div>
+            </aside>
+          </div>
+          <aside class="inspector" id="conversation-inspector" aria-label="Conversation selection inspector" aria-live="polite" hidden></aside>
+        </section>
+
+        <section class="view" id="view-events" role="region" aria-labelledby="events-link" hidden>
+          <div class="orientation"><div><span class="eyebrow">Events / evidence</span><h2>Recorded sequence behind the workbench</h2><p class="events-intro">Use this diagnostic surface to inspect provenance and sequence. It does not replace the work structure.</p></div><div class="actions"><span class="pill recorded">12 visible · bounded snapshot</span><button class="button quiet" type="button" data-tab-back="work">← Back to Workbench</button></div></div>
+          <section class="section"><table class="event-table"><thead><tr><th>Seq</th><th>Event</th><th>State</th><th>Provenance</th><th>Evidence</th></tr></thead><tbody><tr><td data-label="Seq">01</td><td data-label="Event">user.message</td><td data-label="State">recorded</td><td data-label="Provenance"><span class="pill recorded">recorded</span></td><td data-label="Evidence" class="mono">msg_01</td></tr><tr><td data-label="Seq">06</td><td data-label="Event">tool.result</td><td data-label="State">failed, retried</td><td data-label="Provenance"><span class="pill recorded">recorded</span></td><td data-label="Evidence" class="mono">tool_06</td></tr><tr><td data-label="Seq">10</td><td data-label="Event">context.compact</td><td data-label="State">result available</td><td data-label="Provenance"><span class="pill recorded">recorded</span></td><td data-label="Evidence" class="mono">compact_10</td></tr><tr><td data-label="Seq">12</td><td data-label="Event">user_question</td><td data-label="State">waiting_input</td><td data-label="Provenance"><span class="pill recorded">recorded</span></td><td data-label="Evidence" class="mono">question_12</td></tr></tbody></table></section>
+        </section>
+      </div>
+    </main>
+  </div>
+  <div class="status-sr" id="status" aria-live="polite"></div>
+  <script>
+    (() => {
+      const root = document.documentElement;
+      const status = document.getElementById('status');
+      let lastTrigger = null;
+      const data = {
+        goal: { label: 'Goal', title: 'Make multi-agent work legible', state: 'recorded goal', copy: 'The top-level intent anchors the work structure and the main conversation spine.', evidence: 'goal_01', provenance: 'recorded', result: 'Links to task_03 and the main execution run.' },
+        task: { label: 'Task', title: 'Structure + lanes', state: 'in progress', copy: 'A bounded task with a recorded handoff to ui-worker. Its run is linked below.', evidence: 'task_03', provenance: 'recorded', result: 'Owner: main agent · linked result: artifact_10' },
+        question: { label: 'Attention', title: 'Waiting for user', state: 'waiting_input', copy: 'A recorded question is pending. Waiting is distinct from failure and completion.', evidence: 'question_12', provenance: 'recorded', result: 'No answer recorded yet.' },
+        worker: { label: 'Agent', title: 'ui-worker', state: 'completed', copy: 'The worker owns the prototype branch and delivered a result to the parent task.', evidence: 'actor_ui_worker', provenance: 'recorded', result: 'Result delivered at sequence 10.' },
+        result: { label: 'Result', title: 'Prototype artifact', state: 'available', copy: 'A linked result returned from ui-worker. Selecting it highlights the result-bearing run.', evidence: 'artifact_10', provenance: 'recorded', result: 'runtime-workbench-v3-prototype.html' },
+        'run-main': { label: 'Run', title: 'Plan work', state: 'completed', copy: 'Session-owned execution with a canonical link to the goal and task.', evidence: 'run_07', provenance: 'recorded', result: 'Plan accepted; next event is the folded model/tool process.' },
+        'run-model': { label: 'Run', title: 'Model + tools', state: 'folded process', copy: 'Three internal calls are grouped under the exchange. Expand them in Conversation to inspect supported counts.', evidence: 'run_08', provenance: 'recorded', result: '2 model calls · 1 tool result · sequence 08' },
+        'run-ui': { label: 'Run', title: 'Build prototype', state: 'result delivered', copy: 'ui-worker execution connected to the prototype artifact by a recorded result edge.', evidence: 'run_08_ui', provenance: 'recorded', result: 'artifact_10 · result delivery acknowledged' },
+        'run-retry': { label: 'Run', title: 'Retry check', state: 'failed → recovered', copy: 'The first check failed, then a recorded retry recovered. The failure remains visible as context.', evidence: 'run_10_retry', provenance: 'recorded', result: 'Recovered result: visual check passed.' },
+        compact: { label: 'Checkpoint', title: 'Compact result', state: 'result available', copy: 'A recorded context transformation. Retained content is shown because the provider recorded the resulting summary.', evidence: 'compact_10', provenance: 'recorded', result: '71k tokens · goal, open tasks, key decisions retained' },
+        'session-memory': { label: 'Scope memory', title: 'Session memory assets', state: '4 assets · 2 scopes', copy: 'The scope browser exposes memory and experience assets without inventing unavailable scopes.', evidence: 'memory_index_session', provenance: 'recorded', result: 'Session: 3 memories · Project: 1 experience' },
+        'project-memory': { label: 'Scope memory', title: 'ui-v2-visual-system', state: 'inherited', copy: 'One project-scoped experience is available to the illustrative session.', evidence: 'memory_project_ui_v2', provenance: 'recorded', result: 'Inherited context is collapsed separately from the conversation ToC.' }
+      };
+      const relations = {
+        goal: { edges: ['goal-task'], runs: ['run-main'], nodes: ['goal'] },
+        task: { edges: ['goal-task', 'task-worker'], runs: ['run-main', 'run-model', 'run-ui'], nodes: ['task'] },
+        worker: { edges: ['task-worker', 'worker-result'], runs: ['run-ui', 'run-retry'], nodes: ['worker'] },
+        result: { edges: ['worker-result'], runs: ['run-ui'], nodes: ['result'] },
+        'run-main': { edges: ['goal-task'], runs: ['run-main'], nodes: ['task'] },
+        'run-model': { edges: ['goal-task'], runs: ['run-model'], nodes: ['task'] },
+        'run-ui': { edges: ['task-worker', 'worker-result'], runs: ['run-ui'], nodes: ['task', 'worker'] },
+        'run-retry': { edges: ['worker-result'], runs: ['run-retry'], nodes: ['worker'] },
+        compact: { edges: [], runs: ['compact'], nodes: [] },
+        question: { edges: ['main-wait'], runs: ['question'], nodes: ['question'] },
+        'session-memory': { edges: [], runs: ['session-memory'], nodes: [] },
+        'project-memory': { edges: [], runs: [], nodes: [] }
+      };
+      const inspectorFor = (el) => el.closest('.view')?.querySelector('.inspector');
+      const renderInspector = (key, el) => {
+        const item = data[key] || data.goal;
+        const inspector = inspectorFor(el) || document.getElementById('work-inspector');
+        inspector.innerHTML = '<div class="inspector-top"><div><span class="inspector-label">' + item.label + '</span><h3>' + item.title + '</h3><span class="pill">' + item.state + '</span></div><button class="inspector-close" type="button" aria-label="Close inspector">×</button></div><p class="inspector-copy">' + item.copy + '</p><div class="evidence"><dl class="evidence-row"><dt>Result</dt><dd>' + item.result + '</dd></dl><dl class="evidence-row"><dt>Evidence ID</dt><dd>' + item.evidence + '</dd></dl><dl class="evidence-row"><dt>Provenance</dt><dd>' + item.provenance + '</dd></dl></div><button class="button quiet" type="button" data-tab-events="true">Open events →</button>';
+        inspector.hidden = false;
+        lastTrigger = el;
+        const closeInspector = () => { inspector.hidden = true; lastTrigger?.focus(); status.textContent = 'Inspector closed'; };
+        inspector.querySelector('.inspector-close').addEventListener('click', closeInspector);
+        inspector.querySelector('[data-tab-events]').addEventListener('click', () => selectTab('events'));
+        status.textContent = 'Selected ' + item.label + ': ' + item.title;
+        const linked = relations[key] || { edges: [], runs: [], nodes: [] };
+        document.querySelectorAll('.graph-node').forEach((node) => node.classList.toggle('selected', linked.nodes.includes(node.dataset.select) || node.dataset.select === key));
+        document.querySelectorAll('.run').forEach((node) => { node.classList.toggle('selected', node.dataset.select === key); node.classList.toggle('linked', linked.runs.includes(node.dataset.select)); });
+        document.querySelectorAll('.graph-edge').forEach((edge) => edge.classList.toggle('active', linked.edges.includes(edge.dataset.edge)));
+      };
+      const selectTab = (name) => {
+        document.querySelectorAll('[role="tab"]').forEach((tab) => { const active = tab.id === 'tab-' + name; tab.setAttribute('aria-selected', active); });
+        document.querySelectorAll('.view').forEach((view) => { view.hidden = view.id !== 'view-' + name; });
+        if (name !== 'work') { document.getElementById('work-inspector').hidden = true; }
+        status.textContent = 'Showing ' + name;
+      };
+      document.querySelectorAll('[role="tab"]').forEach((tab) => tab.addEventListener('click', () => selectTab(tab.id.replace('tab-', ''))));
+      document.querySelectorAll('[data-select]').forEach((el) => {
+        const activate = () => renderInspector(el.dataset.select, el);
+        el.addEventListener('click', activate);
+        el.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate(); } });
+      });
+      document.querySelectorAll('[data-asset]').forEach((el) => el.addEventListener('click', () => renderInspector(el.dataset.asset, el)));
+      document.getElementById('clearSelection').addEventListener('click', () => { document.querySelectorAll('.graph-node, .run, .graph-edge').forEach((node) => node.classList.remove('selected', 'linked', 'active')); document.getElementById('work-inspector').hidden = true; lastTrigger?.focus(); status.textContent = 'Selection cleared'; });
+      document.getElementById('events-link').addEventListener('click', () => selectTab('events'));
+      document.querySelector('[data-tab-back="work"]').addEventListener('click', () => selectTab('work'));
+      document.addEventListener('keydown', (event) => { if (event.key !== 'Escape') return; const open = document.querySelector('.view:not([hidden]) .inspector:not([hidden])'); if (open) { open.hidden = true; lastTrigger?.focus(); status.textContent = 'Inspector closed'; } });
+      document.getElementById('themeToggle').addEventListener('click', (event) => { const dark = root.dataset.theme !== 'dark'; root.dataset.theme = dark ? 'dark' : 'light'; event.currentTarget.textContent = dark ? 'Light theme' : 'Dark theme'; });
+      document.getElementById('densityToggle').addEventListener('click', (event) => { document.body.classList.toggle('compact-density'); event.currentTarget.textContent = document.body.classList.contains('compact-density') ? 'Calm density' : 'Compact density'; });
+      document.getElementById('composer').addEventListener('submit', (event) => { event.preventDefault(); const textarea = document.getElementById('reply'); const value = textarea.value.trim(); if (!value) { textarea.focus(); return; } const exchange = document.createElement('article'); exchange.className = 'exchange'; exchange.innerHTML = '<div class="message-label">User · local example</div><p class="message user"></p><div class="checkpoint"><strong>Illustrative reply added locally</strong><p>No provider was contacted. This prototype keeps the input visible to test the reading spine.</p></div>'; exchange.querySelector('.message').textContent = value; document.getElementById('thread').insertBefore(exchange, document.getElementById('composer')); textarea.value = ''; status.textContent = 'Added local illustrative reply'; });
+      // Keep the inspector closed initially so it cannot cover the graph on narrow screens.
+      document.getElementById('work-inspector').hidden = true;
+    })();
+  </script>
+</body>
+</html>

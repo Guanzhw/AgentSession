@@ -1,5 +1,9 @@
 # AgentSession UI v2 信息设计方案(草案)
 
+> 2026-09-10：用户已明确要求统一可视化工作台、渐进展开内部调用。
+> 后续详情页导航与信息层级按 [Runtime Workbench 新设计](runtime-workbench-v3.md)
+> 推进；本文保留既有实现和验证记录，不再以四个嵌套透镜作为目标布局。
+
 ## P7 scoped context assets status (2026-09-10)
 
 P7 adds one default-collapsed Memory & experience inspector to the shared
