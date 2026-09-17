@@ -295,7 +295,8 @@ export function createStructuredViewCache<T>(
       return cache.views;
     }
     const views = builder(sessionId);
-    cache = { sessionId, expires: now + 1000, views };
+    // Construction time must not consume the completed view's reuse window.
+    cache = { sessionId, expires: Date.now() + 1000, views };
     return views;
   };
 }

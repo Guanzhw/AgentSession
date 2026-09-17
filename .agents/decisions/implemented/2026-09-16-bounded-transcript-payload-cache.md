@@ -121,6 +121,20 @@ Publish a group's key only after its snapshot was captured successfully.
 Daily buckets, parent-dependent signatures and owned-usage classification keep
 their existing meaning; the grouping changes read order, not usage ownership.
 
+A later isolated scan exposed another consumer: `resolveEntry` loaded the
+declared parent even when a recorded `NEW_TASK` envelope already determined
+the child ownership boundary. Both copied-parent prefix detectors explicitly
+ignore parent records in that case. Let the Codex parser expose this existing
+dependency rule; consumers load parent payloads only when provenance can use
+them. Preserve the recorded parent link and child-owned inherited text.
+Legacy forks without an envelope still use their parent's records. Scan order,
+per-entry errors and yield behavior remain unchanged; no larger cache or
+permanently pinned parent is introduced.
+
+The shared structured-view cache measures its existing one-second reuse window
+from builder completion. Measuring it before a slow builder returns makes a
+fresh tree expire before the immediately following container accessor.
+
 ## Verification
 
 Focused regressions cover multibyte/long-line parsing, complete record order,
@@ -193,3 +207,18 @@ between probes, and the latter probe read transcript metadata before timing;
 these are observed adapter timings, not an identical-input cold-I/O benchmark
 or a real-data equality claim. Independent review also re-ran both Codex
 token-stat regressions successfully and found no new blocking issue.
+
+The subsequent parent-dependency and cache-window correction passes 763 tests,
+independent Codex review (46 focused tests), seven installed-provider Reader
+checks, full live E2E and Windows binary smoke. An oversized-parent regression
+preserves legacy parent-dependent usage, inherited content, complete normalized
+messages and v2/v3 raw-event ownership. Four clock-controlled cache tests cover
+slow construction, exact non-sliding expiry, session replacement and null views.
+A stable nine-child real history has identical tree/container/metrics hashes.
+Separate growing-corpus scans of 535 sessions measured 209.3 seconds / 59.66 GB
+before and 15.1 seconds / 4.16 GB after; production indexing took 28.0 seconds.
+The huge root's tree took 8.7 seconds, its next container accessor reused the
+result without file reads, and metrics took 5.5 seconds. The full API still
+exceeds V8's string-length limit at serialization, and initial HTML independently
+measures 35.2 MB / 19.7 seconds. Those remain explicit P9 acceptance gaps; this
+correction neither changes full export semantics nor claims whole-page success.

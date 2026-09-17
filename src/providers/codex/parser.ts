@@ -305,6 +305,20 @@ function copiedParentTokenPrefix(records: any[], parentRecords: any[], parentId:
 }
 
 /**
+ * Return whether record-level provenance can consume the declared parent
+ * transcript. A recorded NEW_TASK envelope establishes the child boundary
+ * directly, so neither copied-parent prefix detector can use parent records.
+ * Older forks without that envelope still need the parent to prove an
+ * inherited prefix; transcripts without a parent id are self-contained.
+ */
+export function codexNeedsParentRecordsForProvenance(records: any[]) {
+  const primaryMeta = primarySessionMeta(records);
+  const parentId = codexParentSessionId(primaryMeta);
+  if (!parentId) return false;
+  return !records.some((record) => isSubagentTaskEnvelope(record, primaryMeta));
+}
+
+/**
  * A repeated adjacent usage event with the same cumulative snapshot cannot
  * represent another model request. Codex occasionally persists this replay
  * while resuming a rollout, so retain the first event only. Current rollouts

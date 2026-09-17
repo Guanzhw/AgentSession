@@ -14,7 +14,8 @@ import {
   codexUsageToTokens,
   resolveCodexInheritedContext,
   countCodexRenderedMessages,
-  classifyCodexRecordProvenance
+  classifyCodexRecordProvenance,
+  codexNeedsParentRecordsForProvenance
 } from "./parser.js";
 import {
   buildCodexSessionProtocol,
@@ -164,18 +165,23 @@ function resolveEntry(entry: { session: RawSession; messages: Message[]; records
   // the cache, but provenance must use the same record object identities.
   const records = entry.records;
   const messages = entry.messages;
-  const parent = parentEntryFor(entry);
+  const parent = codexNeedsParentRecordsForProvenance(records)
+    ? parentEntryFor(entry)
+    : null;
   return resolveEntryPayload(entry, records, messages, parent?.records || null);
 }
 
 function inheritedContextFor(entry: { session: RawSession; records: any[] }): InheritedContextView | null {
   const parentSessionId = entry.session.parentId ? String(entry.session.parentId) : "";
   if (!parentSessionId) return null;
-  const parent = parentEntryFor(entry);
+  const records = entry.records;
+  const parent = codexNeedsParentRecordsForProvenance(records)
+    ? parentEntryFor(entry)
+    : null;
   // The child boundary remains evidence even when the parent file is no
   // longer readable; classification can still use the recorded parent id and
   // task envelope without guessing any source text.
-  const messages = recordsToInheritedMessages(entry.records, String(entry.session.id), parent?.records || []);
+  const messages = recordsToInheritedMessages(records, String(entry.session.id), parent?.records || []);
   if (!messages.length) return null;
   return {
     sourceSession: {
@@ -214,7 +220,9 @@ function buildCodexOwnedReaderProjection(sessionId: string, evidence?: OwnedRead
   if (!root) return null;
   const rootRecords = root.records;
   const rootMessages = root.messages;
-  const parent = parentEntryFor(root);
+  const parent = codexNeedsParentRecordsForProvenance(rootRecords)
+    ? parentEntryFor(root)
+    : null;
   const rootEntry = resolveEntryPayload(root, rootRecords, rootMessages, parent?.records || null);
   const rootTree = buildMessageSessionTree(rootEntry.session, rootEntry.messages);
   const canonicalId = String(root.session.id);
@@ -247,7 +255,9 @@ function generateCodexMetrics(sessionId: string) {
   const canonicalId = String(root.session.id);
   const rootRecords = root.records;
   const rootMessages = root.messages;
-  const rootParent = parentEntryFor(root);
+  const rootParent = codexNeedsParentRecordsForProvenance(rootRecords)
+    ? parentEntryFor(root)
+    : null;
   const family = sessionFiles.getFamily(canonicalId);
   const childrenByParent = new Map<string, typeof family>();
   for (const entry of family) {
@@ -328,17 +338,19 @@ function loadCodexProtocolInput(sessionId: string) {
   // Freeze the provider revision before reading large bodies so finalization
   // cannot refresh the index and label an older payload with newer metadata.
   const revision = protocolRevision(sessionFiles.getStatsRevision());
-  // Capture the indexed family and parent entry before reading a potentially
+  // Capture the indexed family before reading a potentially
   // very large root body. This keeps the metadata selection on one refresh
   // even if parsing the root crosses the store refresh interval.
   const family = sessionFiles.getFamily(canonicalId);
-  const parent = parentEntryFor(root);
   // Keep the root payload and its precomputed messages before loading a
   // parent: the bounded store may evict either body while the other is read.
   const rootRecords = root.records;
   const rootMessages = root.messages;
+  const parent = codexNeedsParentRecordsForProvenance(rootRecords)
+    ? parentEntryFor(root)
+    : null;
   const parentRecords = parent?.records || null;
-  const recordProvenance = parent
+  const recordProvenance = root.session.parentId
     ? classifyCodexRecordProvenance(rootRecords, parentRecords || [])
     : null;
   const ownedRecords = recordProvenance

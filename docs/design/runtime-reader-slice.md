@@ -166,6 +166,32 @@ expanded narrow content. Run the full test/review suite, real provider/API and
 browser acceptance before publishing the production slice. The private
 prototype is evidence for composition, not a substitute for these checks.
 
+### Parent-read and structured-cache checkpoint, 2026-09-17
+
+- Final `npm test`: 763/763; independent Codex review selection: 46/46.
+  The main agent inspected the complete diff and strengthened the provenance
+  regression. Seven installed-provider Reader/page/preview/API samples and
+  four missing-resource checks pass, as do full live `qa:e2e` (no browser
+  errors) and Windows binary build/smoke. OpenClaw and Pi remain smoke samples.
+- A real child opens its complete owned history with four inherited messages
+  folded separately. Close restores the parent link and focus without overflow
+  or browser errors. No presentation or source-data contract changed.
+- The isolated 535-session scan falls from 209.3 seconds / 59.66 GB read to
+  15.1 seconds / 4.16 GB read. The active corpus grew between observations.
+  The deterministic oversized-parent fixture verifies the read bound; a stable
+  nine-child history has identical serialized tree/container/metrics hashes.
+  Production Codex startup indexing finishes in 28.0 seconds.
+- The huge root's tree builds in 8.7 seconds; its immediately requested
+  container reads no files and reuses that result. Metrics take 5.5 seconds.
+  Parent evidence is still loaded for legacy forks; child-local boundaries
+  retain inherited raw-event filtering in both protocol versions.
+- P9 remains open: the huge full API reaches V8's string-length limit while
+  serializing the combined response and closes the connection; the process
+  survives. Initial HTML independently measures 35.2 MB / 19.7 seconds. These
+  are distinct follow-up loading/export gaps, not passed performance criteria.
+  Detailed evidence is in the [acceptance record](runtime-acceptance-evidence.md)
+  and ignored `tmp/runtime-performance/` / `tmp/reader-p9-*.log`.
+
 ### Nested reading and recorded question-answer checkpoint, 2026-09-17
 
 - Final `npm test`: 758/758. Navigation/location tests: 59/59. Independent
