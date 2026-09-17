@@ -3,6 +3,7 @@ import { layout } from "./layout.js";
 import { formatCompactCount, sessionCard, sessionDayLabel } from "./components.js";
 import { t } from "../i18n.js";
 import { projectFilterValue } from "../project-filter.js";
+import { libraryFamilyEntry } from "./library-family.js";
 
 function dayKey(ts: any) {
   const value = Number(ts) || 0;
@@ -36,8 +37,10 @@ export function renderSessionsPage({
   providers = [],
   selectedProviders = [],
   global = false,
+  familyMode = false,
+  matchingSessions = 0,
   storageDiagnostic = null
-}: { sessions?: any[]; total?: number; limit?: number; offset?: number; query?: string; note?: string; range?: string; project?: string; sort?: string; starredOnly?: boolean; hasSubagent?: boolean; projectOptions?: { id: string; label: string; count?: number; worktree?: string }[]; searchMode?: string; totalMessages?: number; totalTokens?: number; deletedCount?: number; provider?: string | null; providerAvailable?: boolean; manageable?: boolean; providers?: any[]; selectedProviders?: string[]; global?: boolean; storageDiagnostic?: any } = {}) {
+}: { sessions?: any[]; total?: number; limit?: number; offset?: number; query?: string; note?: string; range?: string; project?: string; sort?: string; starredOnly?: boolean; hasSubagent?: boolean; projectOptions?: { id: string; label: string; count?: number; worktree?: string }[]; searchMode?: string; totalMessages?: number; totalTokens?: number; deletedCount?: number; provider?: string | null; providerAvailable?: boolean; manageable?: boolean; providers?: any[]; selectedProviders?: string[]; global?: boolean; familyMode?: boolean; matchingSessions?: number; storageDiagnostic?: any } = {}) {
   const isAvailable = global
     ? providers.some((item: any) => item.available !== false)
     : providerAvailable !== false;
@@ -61,7 +64,9 @@ export function renderSessionsPage({
     : searchMode === "content"
       ? `/${encodeURIComponent(provider || "opencode")}/search`
       : `/${encodeURIComponent(provider || "opencode")}`;
-  const listPath = `${listBasePath}${rawParams.size ? `?${rawParams.toString()}` : ""}`;
+  const returnParams = new URLSearchParams(rawParams);
+  if (offset) returnParams.set("offset", String(offset));
+  const listPath = `${listBasePath}${returnParams.size ? `?${returnParams.toString()}` : ""}`;
 
   const settingsProvider = provider || providers.find((item: any) => item.available !== false)?.id || "opencode";
   const settingsHref = `/${encodeURIComponent(settingsProvider)}/settings`;
@@ -262,7 +267,13 @@ export function renderSessionsPage({
         );
 
   // ── Timeline: sessions grouped by local day (default) ─────────────────────
-  const cards = sessions.map((session) => sessionCard(session, false, {
+  const familyFilters = new URLSearchParams(rawParams);
+  if (!global && provider) familyFilters.set("provider", provider);
+  const cards = sessions.map((session) => familyMode ? libraryFamilyEntry({ ...session.family, session }, {
+    filters: familyFilters.toString(), returnTo: listPath,
+    providerName: providerNames.get(session.provider || provider) || "",
+    manageable: global ? providerManageable.get(session.provider || "") === true : isManageableProvider
+  }) : sessionCard(session, false, {
     showCheckbox: global ? providerManageable.get(session.provider || "") === true : isManageableProvider,
     provider: provider || session.provider,
     manageable: global ? providerManageable.get(session.provider || "") === true : isManageableProvider,
@@ -274,7 +285,7 @@ export function renderSessionsPage({
   const dayIndex = new Map<string, number>();
   const cardIterator = cards[Symbol.iterator]();
   for (const session of sessions) {
-    const key = dayKey(session.time_updated) || "unknown";
+    const key = dayKey(familyMode ? session.family.familyUpdated : session.time_updated) || "unknown";
     const index = dayIndex.get(key);
     const label = key === "unknown"
       ? t("timeline.unknown")
@@ -312,13 +323,13 @@ export function renderSessionsPage({
       <div class="page-header-row">
         <div>
           <h1>${searchMode === "content" && query ? t("sessions.search_title").replace("{query}", escapeHtml(query)) : t("sessions.title")}</h1>
-          <p>${t("sessions.count").replace("{count}", String(total))}</p>
+          <p>${t(familyMode ? "library.family_entries" : "sessions.count").replace("{count}", String(total))}${familyMode ? ` · ${t("library.family_matches", { count: String(matchingSessions) })}` : ""}</p>
         </div>
         ${headerLinks}
       </div>
       ${searchNote}${storageNotices}
     </section>
-    ${searchMode !== "content" ? `${summaryStrip}${searchBar}
+    ${searchMode !== "content" ? `${familyMode ? "" : summaryStrip}${searchBar}
     <div class="library-toolbar">
       ${chipsBar}
       ${viewToggle}
@@ -335,7 +346,7 @@ export function renderSessionsPage({
       <button class="btn batch-action btn-danger" data-action="delete" disabled>${t("batch.delete")}</button>
       <button class="btn batch-action" id="batch-cancel">${t("batch.cancel")}</button>
     </div>` : ""}
-    <section class="session-list session-list-library" id="session-list" data-view="timeline">
+    <section class="session-list session-list-library" id="session-list" data-view="timeline"${familyMode ? ` data-library-families data-library-return="${escapeHtml(listPath)}"` : ""}>
       ${listMarkup}
     </section>
     ${total > offset + sessions.length ? `<button id="scroll-sentinel" class="scroll-load-more" type="button" data-offset="${offset + sessions.length}" data-total="${total}" data-range="${escapeHtml(range)}" data-project="${escapeHtml(project)}" data-query="${escapeHtml(query)}" data-mode="${escapeHtml(searchMode)}" data-sort="${escapeHtml(sort)}" data-starred="${starredOnly ? "1" : ""}" data-has-subagent="${hasSubagent ? "1" : ""}" data-provider="${escapeHtml(provider || "")}" data-providers="${escapeHtml(selectedProviders.join(","))}" data-provider-names="${escapeHtml(JSON.stringify(Object.fromEntries(providerNames)))}" data-return-to="${escapeHtml(listPath)}" data-global="${global ? "true" : "false"}">${t("sessions.load_more")}</button>` : ""}

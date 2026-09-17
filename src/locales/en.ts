@@ -32,6 +32,13 @@ export const en = {
 
   // UI v2 P1 Library
   "library.summary_label": "Library summary",
+  "library.family_entries": "{count} work histories",
+  "library.family_matches": "{count} matching sessions",
+  "library.family_children": "{count} related histories",
+  "library.family_more": "Load more related histories",
+  "library.family_context": "Parent context · matching histories below",
+  "library.family_missing_parent": "Recorded parent is not available in this library",
+  "library.family_cycle": "Recorded parent relationship is cyclic",
   "library.summary_providers": "providers",
   "library.summary_providers_one": "provider",
   "library.summary_sessions": "sessions",

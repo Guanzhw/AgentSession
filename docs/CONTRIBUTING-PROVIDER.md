@@ -189,6 +189,11 @@ Every adapter implements `ProviderAdapter`:
 
 - stable lowercase `id`, display `name`, and `icon`;
 - `detect()`, `getDataPath()`, `scan()`, and `getSession()`;
+- optional `getLibrarySessions()` for a cheap, current metadata-only snapshot
+  of all visible canonical roots and descendants. OpenCode uses it to preserve
+  live SQLite refresh behavior. Other providers use the startup index; Library
+  does not rescan transcripts or construct protocols on navigation. An empty
+  live snapshot replaces that provider's indexed rows for this request only;
 - normalized `getMessages()`, trusted `getTokenStats()`, and bounded `searchMessages()`;
 - optional bounded `getInheritedContext()` disclosure when the provider records copied parent messages separately from the owned transcript;
 - optional `getContextChangeResult(sessionId, checkpointId)` for on-demand

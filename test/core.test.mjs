@@ -2931,7 +2931,7 @@ test("session management uses in-page dialogs", () => {
   assert.match(appJs, /rename-dialog/);
   assert.match(appJs, /confirm-dialog/);
   assert.match(appJs, /aria-describedby/);
-  assert.match(appJs, /selectAllCheckbox\.indeterminate = checked > 0 && checked < checkboxes\.length/);
+  assert.match(appJs, /selectAllCheckbox\.indeterminate = visibleChecked > 0 && visibleChecked < checkboxes\.length/);
   assert.match(appJs, /btn\.disabled = checked === 0/);
   assert.match(appJs, /function isEditableShortcutTarget/);
   assert.match(appJs, /tagName === "TEXTAREA"/);

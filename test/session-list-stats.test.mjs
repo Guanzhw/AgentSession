@@ -371,7 +371,7 @@ function buildRoutes() {
   return routes;
 }
 
-test("list routes attach stats only for the current page on every surface", async () => {
+test("legacy list APIs retain page stats while family Library pages stay metadata-only", async () => {
   clearSessionListStatsCache();
   seedIndex([
     { id: "p-1", provider: "codex", title: "Protocol session", directory: "D:\\p", timeCreated: 1000, timeUpdated: 9000, messageCount: 8, tokenCount: 100 },
@@ -428,18 +428,13 @@ test("list routes attach stats only for the current page on every surface", asyn
   await providerApiRoute.handler({ url: "/api/codex/sessions?kind=unknown&limit=1" }, unknownKindResponse, ["", "codex", ""]);
   assert.equal(JSON.parse(unknownKindResponse.body).sessions.length, 1, "unknown legacy kind parameters are ignored");
 
-  // Global HTML page renders the chips.
+  // Library navigation does not prepare runtime protocols or usage summaries.
+  clearSessionListStatsCache();
   const page = await pageRoute.handler({ url: "/sessions?provider=codex&provider=pi" }, createResponseCapture());
   assert.equal(page.status, 200);
-  assert.match(page.body, /class="stat-chip"/);
-  assert.match(page.body, /2× compacted/);
-  assert.match(page.body, /8 messages/);
-  assert.match(page.body, /100 tokens/);
-  assert.match(page.body, /1 memory/);
-  assert.match(page.body, /2 subagents/);
-  assert.match(page.body, /1 background/);
-  assert.match(page.body, /running/);
-  assert.match(page.body, /blocked/);
+  assert.match(page.body, /data-library-family/);
+  assert.doesNotMatch(page.body, /class="stat-chip"|session-card-stats/);
+  assert.equal(sessionListStatsCacheSize(), 0);
 
   // Provider HTML page.
   const providerPage = await providerPageRoute.handler(
@@ -448,10 +443,10 @@ test("list routes attach stats only for the current page on every surface", asyn
     { provider: "codex" }
   );
   assert.equal(providerPage.status, 200);
-  assert.match(providerPage.body, /2× compacted/);
-  assert.match(providerPage.body, /title="Observed session duration/);
+  assert.match(providerPage.body, /data-library-family/);
+  assert.doesNotMatch(providerPage.body, /session-card-stats/);
 
-  // Unsupported-provider HTML page has no protocol chips, only base stats.
+  // All Library providers use the same quiet metadata navigation.
   const plainPage = await providerPageRoute.handler(
     { url: "/pi" },
     createResponseCapture(),
@@ -461,9 +456,9 @@ test("list routes attach stats only for the current page on every surface", asyn
   assert.doesNotMatch(plainPage.body, /compacted/, "no protocol compaction chips for unsupported providers");
   assert.doesNotMatch(plainPage.body, /\d+ subagents/, "no protocol run chips for unsupported providers");
   assert.doesNotMatch(plainPage.body, /stat-chip-running|stat-chip-blocked/, "no active-status chips for unsupported providers");
-  assert.match(plainPage.body, /5 messages/);
-  assert.match(plainPage.body, /60 tokens/);
-  assert.match(plainPage.body, /title="Recorded session duration/, "base duration chip remains for every provider");
+  assert.match(plainPage.body, /data-library-family/);
+  assert.doesNotMatch(plainPage.body, /session-card-stats/);
+  assert.equal(sessionListStatsCacheSize(), 0);
   clearSessionListStatsCache();
 });
 

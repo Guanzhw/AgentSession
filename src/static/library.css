@@ -112,6 +112,108 @@
   margin: 16px 0 14px;
 }
 
+/* A family is one Library entry; connectors describe recorded parentage. */
+.library-family {
+  border-bottom: 1px solid var(--v2-boundary);
+  min-width: 0;
+}
+
+.library-family > .session-card {
+  border-bottom: 0;
+}
+
+.library-family-relations:has(> *) {
+  padding-bottom: 14px;
+}
+
+.library-family-context,
+.library-family-boundary,
+.library-family-status {
+  display: block;
+  color: var(--v2-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0 0 6px;
+}
+
+.library-family-status[hidden] { display: none; }
+
+.library-family-children > summary {
+  width: fit-content;
+  padding: 8px 0;
+  color: var(--v2-accent);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.library-family-branches {
+  margin: 0 0 0 5px;
+  padding: 0 0 0 20px;
+  list-style: none;
+  border-left: 1px solid var(--v2-boundary);
+}
+
+.library-family-child {
+  position: relative;
+  padding: 10px 0;
+  min-width: 0;
+}
+
+.library-family-child::before {
+  content: "";
+  position: absolute;
+  left: -20px;
+  top: 20px;
+  width: 12px;
+  border-top: 1px solid var(--v2-boundary);
+}
+
+.library-family-child-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 20px;
+}
+
+.library-family-title {
+  color: var(--v2-text);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.library-family-child-title {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.session-list-library .library-family-child .card-checkbox-hit-area {
+  position: static;
+  flex-shrink: 0;
+  transform: none;
+}
+
+.library-family-child-heading time {
+  flex-shrink: 0;
+  color: var(--v2-secondary);
+  font-size: 12px;
+}
+
+.library-family-more {
+  margin: 6px 0 6px 26px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.library-family summary:focus-visible,
+.library-family-title:focus-visible,
+.library-family-more:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
 @media (max-width: 600px) {
   .session-list-library {
     gap: 28px;
@@ -129,4 +231,8 @@
     white-space: normal;
     overflow-wrap: anywhere;
   }
+
+  .library-family-branches { padding-left: 12px; }
+  .library-family-child::before { left: -12px; width: 7px; }
+  .library-family-child-heading { flex-direction: column; gap: 3px; }
 }

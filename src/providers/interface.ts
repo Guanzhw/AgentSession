@@ -39,6 +39,9 @@ export interface RawSession {
   metadata?: Record<string, unknown> | null;
 }
 
+export type LibrarySessionMetadata = Pick<RawSession,
+  "id" | "provider" | "parentId" | "title" | "directory" | "timeCreated" | "timeUpdated">;
+
 export type MessageRole = "user" | "assistant" | "system" | "tool";
 
 /**
@@ -279,6 +282,8 @@ export interface ProviderAdapter {
   detect(): boolean;
   getDataPath(): string | null;
   scan(): AsyncIterable<RawSession>;
+  /** Optional live Library identity/lineage snapshot; no messages, usage scans, or protocols. */
+  getLibrarySessions?(): LibrarySessionMetadata[];
   getSession(sessionId: string): RawSession | Record<string, unknown> | null;
   getMessages(sessionId: string): Message[];
   /** Explicitly recorded inherited context; readers paginate separately from owned history. */

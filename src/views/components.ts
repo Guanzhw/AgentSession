@@ -614,7 +614,7 @@ function renderListStatChips(s: any) {
   return chips.join("");
 }
 
-export function sessionCard(s: any, active = false, { showCheckbox = false, provider = "opencode", manageable = false, showProvider = true, providerName = "", returnTo = "" } = {}) {
+export function sessionCard(s: any, active = false, { showCheckbox = false, provider = "opencode", manageable = false, showProvider = true, providerName = "", returnTo = "", showStats = true } = {}) {
   const sessionProvider = s.provider || provider;
   const title = resolveLibraryTitle(s);
   const encodedProvider = encodeURIComponent(sessionProvider);
@@ -671,7 +671,7 @@ export function sessionCard(s: any, active = false, { showCheckbox = false, prov
         <time class="session-card-time" datetime="${new Date(Number(s.time_updated) || Date.now()).toISOString()}">${escapeHtml(formatTime(s.time_updated))}</time>
       </header>
       <p class="session-card-directory">${escapeHtml(s.directory || "")}</p>
-      ${statsHtml}
+      ${showStats ? statsHtml : ""}
     </div>
     ${actionsHtml}
   </article>`;

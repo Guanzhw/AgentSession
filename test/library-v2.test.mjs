@@ -276,3 +276,48 @@ test("cross-provider batch mutates viewer metadata per provider and skips unsupp
   assert.equal(deletePayload.affected, 1);
   assert.equal(getMeta("pi", "p-1").deleted, 1);
 });
+
+test("family Library routes paginate direct children and preserve canonical filtered reader links", async () => {
+  const provider = "codex";
+  const entries = [{ id: "family-root", parentId: null, title: "Root work" },
+    ...Array.from({ length: 43 }, (_, index) => ({ id: `family-child-${index}`, parentId: "family-root", title: `Child ${index} <review>` })),
+    { id: "family-leaf", parentId: "family-child-0", title: "Unique needle" }];
+  upsertIndex(provider, entries.map((entry) => ({ ...entry, provider, directory: "D:\\family", timeCreated: NOW, timeUpdated: NOW, messageCount: 1, tokenCount: 0 })));
+  const routes = captureGetRoutes(registerSessions, {
+    appConfig: {}, providerMap: new Map([[provider, { id: provider }]]),
+    providerInfo: [{ id: provider, name: "Codex", available: true, manageable: true }]
+  });
+  async function request(pattern, query) {
+    const response = mutationResponse();
+    await routes.find((route) => route.pattern === pattern).handler({ url: `${pattern}?${query}` }, response);
+    return { status: response.statusCode, ...JSON.parse(response.body) };
+  }
+  const families = await request("/api/library/sessions", "provider=codex&returnTo=%2Fsessions%3Fprovider%3Dcodex");
+  assert.equal(families.total, 1);
+  assert.equal(families.matchingSessions, 45);
+  assert.match(families.sessions[0].html, /data-library-family/);
+  assert.match(families.sessions[0].html, /43 related histories/);
+  assert.doesNotMatch(families.sessions[0].html, /Child 0|session-card-stats/);
+  const first = await request("/api/library/children", "provider=codex&parentProvider=codex&parentId=family-root&returnTo=%2Fsessions%3Fprovider%3Dcodex");
+  assert.equal(first.shown, 20);
+  assert.equal(first.total, 43);
+  assert.equal(first.nextOffset, 20);
+  assert.match(first.html, /Child 0 &lt;review&gt;/);
+  assert.match(first.html, /href="\/codex\/session\/family-child-0\?from=%2Fsessions%3Fprovider%3Dcodex"/);
+  assert.doesNotMatch(first.html, /class="session-card"/);
+  assert.match(first.html, /class="card-checkbox" data-id="family-child-0" data-provider="codex"/);
+  const last = await request("/api/library/children", "provider=codex&parentProvider=codex&parentId=family-root&offset=40");
+  assert.equal(last.shown, 3);
+  assert.equal(last.nextOffset, null);
+  const filtered = await request("/api/library/sessions", "provider=codex&q=Unique+needle");
+  assert.equal(filtered.matchingSessions, 1);
+  assert.match(filtered.sessions[0].html, /Parent context · matching histories below/);
+  assert.doesNotMatch(filtered.sessions[0].html, /card-checkbox/);
+  const contextChild = await request("/api/library/children", "provider=codex&parentProvider=codex&parentId=family-root&q=Unique+needle");
+  assert.equal(contextChild.shown, 1);
+  assert.match(contextChild.html, /data-session-id="family-child-0"/);
+  assert.doesNotMatch(contextChild.html, /card-checkbox/);
+  const matchedLeaf = await request("/api/library/children", "provider=codex&parentProvider=codex&parentId=family-child-0&q=Unique+needle");
+  assert.match(matchedLeaf.html, /class="card-checkbox" data-id="family-leaf"/);
+  assert.equal((await request("/api/library/children", "provider=pi&parentProvider=codex&parentId=family-root")).status, 404);
+});

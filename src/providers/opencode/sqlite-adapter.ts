@@ -2,7 +2,8 @@ import { existsSync } from "node:fs";
 import { getConfig } from "../../config.js";
 import { icons } from "../../icons.js";
 import {
-  listSessions,
+  iterateSessionsForIndex,
+  getDb,
   getSession as dbGetSession,
   getMessages as dbGetMessages,
   getParts,
@@ -10,7 +11,7 @@ import {
   getTokenStats as dbGetTokenStats,
 } from "../../db.js";
 import { parseJson } from "../shared/parser.js";
-import type { ProviderAdapter, ProviderId } from "../interface.js";
+import type { ProviderAdapter, ProviderId, LibrarySessionMetadata } from "../interface.js";
 
 function stringifyMessageContent(value: any) {
   if (value == null) {
@@ -50,6 +51,18 @@ export function createOpenCodeSqliteAdapter({
     return useConfiguredDbPath ? (getConfig().dbPath || defaultDataPath()) : defaultDataPath();
   }
 
+  function librarySessionMetadata(s: any): LibrarySessionMetadata {
+    return {
+      id: s.id,
+      provider: id,
+      parentId: s.parent_id || null,
+      title: s.title || s.slug || null,
+      directory: s.directory || null,
+      timeCreated: Number(s.time_created) || 0,
+      timeUpdated: Number(s.time_updated) || 0,
+    };
+  }
+
   return {
     id,
     name,
@@ -68,21 +81,21 @@ export function createOpenCodeSqliteAdapter({
   },
 
   async *scan() {
-    const dbPath = getAdapterDataPath();
-    const { sessions } = listSessions(100000, 0, "", "", dbPath);
-    for (const s of sessions) {
+    for (const session of iterateSessionsForIndex(getAdapterDataPath())) {
       yield {
-        id: s.id,
-        provider: id,
-        parentId: null,
-        title: s.title || s.slug || null,
-        directory: s.directory || null,
-        timeCreated: Number(s.time_created) || 0,
-        timeUpdated: Number(s.time_updated) || 0,
-        messageCount: Number(s.message_count) || 0,
-        tokenCount: s.token_count == null ? null : Number(s.token_count)
+        ...librarySessionMetadata(session),
+        messageCount: Number(session.message_count) || 0,
+        tokenCount: session.token_count == null ? null : Number(session.token_count),
       };
     }
+  },
+
+  getLibrarySessions() {
+    return getDb(getAdapterDataPath()).prepare(`
+      SELECT id, parent_id, slug, title, directory, time_created, time_updated
+      FROM session WHERE time_archived IS NULL
+      ORDER BY time_updated DESC, time_created DESC, id ASC
+    `).all().map(librarySessionMetadata);
   },
 
   getSession(sessionId) {

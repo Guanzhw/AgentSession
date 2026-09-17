@@ -59,6 +59,13 @@ highlighting stays static and toast/loading animations stop.
 Library titles prefer viewer custom titles or readable provider titles. When
 neither exists, Untitled plus a short ID identifies the entry without changing
 its canonical ID.
+Library groups recorded parent/child histories into expandable connected
+branches, loading 20 direct children at a time. Title search and filters match
+children as well as roots, retaining the ancestor path to each match. Missing
+or hidden parents do not hide their children. Returning from standalone reading
+restores filters, loaded branches, position and focus. Library reads session
+metadata; usage details remain in Usage and Reader. OpenCode Library metadata
+is read live on each request.
 Inherited background with a recorded parent-session reference in Codex and
 DeepSeek Harness child sessions has a separate collapsed disclosure, loaded in
 pages of 40 messages with a source-session link. Readers can continue to the end
@@ -130,6 +137,12 @@ facts and marks unrecorded v3 coverage as unknown; providers can add native v3
 evidence incrementally without moving provider interpretation into the browser.
 
 ## Read-only HTTP API
+
+Library uses `GET /api/library/sessions` for family paging and
+`GET /api/library/children?parentProvider=&parentId=&offset=` for up to 20 direct
+children per page. Both accept the same title/project/time/star filters and
+return rendered HTML plus continuation metadata. Existing flat session-list
+APIs retain their shape and statistics semantics.
 
 These `GET` APIs expose the shared reader fragment, normalized protocol and
 bounded runtime projections:

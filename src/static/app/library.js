@@ -1,7 +1,9 @@
 // UI v2 P1 library interactions: day-bucketed timeline default with a
 // compact-list toggle persisted in localStorage, plus j/k row movement.
 // Server-rendered markup stays complete; this only re-buckets the same rows.
-export function initLibrary({ ft }) {
+import { initLibraryFamilies } from "./library-families.js";
+
+export function initLibrary({ ft, loadMoreSessions, updateBatchCount }) {
   const list = document.getElementById("session-list");
   if (!list) return;
 
@@ -36,7 +38,8 @@ export function initLibrary({ ft }) {
   }
 
   function renderList() {
-    const cards = [...list.querySelectorAll(".session-card")];
+    const cards = [...list.querySelectorAll(list.hasAttribute("data-library-families") ? "[data-library-family]" : ".session-card")];
+    if (!cards.length) return;
     const fragment = document.createDocumentFragment();
     if (view === "timeline") {
       let currentDay = null;
@@ -94,6 +97,7 @@ export function initLibrary({ ft }) {
 
   // Re-bucket rows appended by infinite scroll.
   window.__libraryRegroup = renderList;
+  if (list.hasAttribute("data-library-families")) initLibraryFamilies(list, { ft, loadMoreSessions, updateBatchCount });
 
   // j/k move focus through the session rows when the library list is present.
   document.addEventListener("keydown", (event) => {
@@ -104,7 +108,7 @@ export function initLibrary({ ft }) {
     if (target instanceof HTMLElement && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) {
       return;
     }
-    const links = [...list.querySelectorAll(".session-card-title-link")];
+    const links = [...list.querySelectorAll(".session-card-title-link, .library-family-title")].filter((link) => link.getClientRects().length);
     if (!links.length) return;
     event.preventDefault();
     const current = links.indexOf(document.activeElement);

@@ -538,12 +538,13 @@ const batchCancelBtn = document.getElementById("batch-cancel");
 let batchMode = false;
 
 function updateBatchCount() {
-  const checkboxes = [...document.querySelectorAll(".card-checkbox")];
+  const checkboxes = [...document.querySelectorAll(".card-checkbox")].filter((cb) => cb.getClientRects().length);
+  const visibleChecked = checkboxes.filter((cb) => cb.checked).length;
   const checked = document.querySelectorAll(".card-checkbox:checked").length;
   if (batchCountNum) batchCountNum.textContent = checked;
   if (selectAllCheckbox) {
-    selectAllCheckbox.checked = checkboxes.length > 0 && checked === checkboxes.length;
-    selectAllCheckbox.indeterminate = checked > 0 && checked < checkboxes.length;
+    selectAllCheckbox.checked = checkboxes.length > 0 && visibleChecked === checkboxes.length;
+    selectAllCheckbox.indeterminate = visibleChecked > 0 && visibleChecked < checkboxes.length;
   }
   document.querySelectorAll(".batch-action[data-action]").forEach((btn) => {
     btn.disabled = checked === 0;
@@ -573,7 +574,7 @@ if (batchCancelBtn) {
 
 if (selectAllCheckbox) {
   selectAllCheckbox.addEventListener("change", () => {
-    document.querySelectorAll(".card-checkbox").forEach((cb) => {
+    [...document.querySelectorAll(".card-checkbox")].filter((cb) => cb.getClientRects().length).forEach((cb) => {
       cb.checked = selectAllCheckbox.checked;
     });
     updateBatchCount();
@@ -632,6 +633,7 @@ function escapeHtmlClient(str) {
 }
 
 const scrollSentinel = document.getElementById("scroll-sentinel");
+let libraryLoadMore;
 if (scrollSentinel && sessionList) {
   let scrollOffset = Number(scrollSentinel.dataset.offset) || 0;
   const scrollTotal = Number(scrollSentinel.dataset.total) || 0;
@@ -644,7 +646,8 @@ if (scrollSentinel && sessionList) {
   const scrollProviders = scrollSentinel.dataset.providers || "";
   const scrollHasSubagent = scrollSentinel.dataset.hasSubagent || "";
   const isGlobalSessions = scrollSentinel.dataset.global === "true";
-  let isLoading = false;
+  let pendingLoad;
+  let exhausted = scrollOffset >= scrollTotal;
   let observer = null;
 
   const setSentinelState = (className, text, disabled = false) => {
@@ -653,12 +656,7 @@ if (scrollSentinel && sessionList) {
     scrollSentinel.disabled = disabled;
   };
 
-  const loadMoreSessions = async () => {
-    if (isLoading || scrollOffset >= scrollTotal) {
-      return;
-    }
-
-    isLoading = true;
+  const loadSessionPage = async () => {
     setSentinelState("scroll-loading", ft("scroll_loading"), true);
 
     try {
@@ -675,8 +673,10 @@ if (scrollSentinel && sessionList) {
       if (scrollHasSubagent) params.set("has-subagent", scrollHasSubagent);
       if (scrollSentinel.dataset.returnTo) params.set("returnTo", scrollSentinel.dataset.returnTo);
       if (scrollProviders) scrollProviders.split(",").filter(Boolean).forEach((provider) => params.append("provider", provider));
-
-      const res = await fetch(`${isGlobalSessions ? "/api/sessions" : `/api/${PROVIDER}/sessions`}?${params.toString()}`);
+      const isFamilyLibrary = sessionList.hasAttribute("data-library-families");
+      if (isFamilyLibrary && !isGlobalSessions) params.set("provider", PROVIDER);
+      const endpoint = isFamilyLibrary ? "/api/library/sessions" : isGlobalSessions ? "/api/sessions" : `/api/${PROVIDER}/sessions`;
+      const res = await fetch(`${endpoint}?${params.toString()}`);
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
@@ -687,8 +687,10 @@ if (scrollSentinel && sessionList) {
       window.__libraryRegroup?.();
       updateBatchCount();
       scrollOffset = (Number(data.offset) || 0) + (Array.isArray(data.sessions) ? data.sessions.length : 0);
+      scrollSentinel.dataset.offset = String(scrollOffset);
 
       if (!data.hasMore || scrollOffset >= scrollTotal) {
+        exhausted = true;
         observer?.disconnect();
         setSentinelState("scroll-done", ft("scroll_all_loaded"), true);
       } else {
@@ -697,10 +699,16 @@ if (scrollSentinel && sessionList) {
     } catch {
       setSentinelState("scroll-load-more", ft("scroll_load_more"));
       showToast(ft("toast_error"), "error");
-    } finally {
-      isLoading = false;
     }
   };
+
+  const loadMoreSessions = () => {
+    if (pendingLoad) return pendingLoad;
+    if (exhausted) return Promise.resolve();
+    pendingLoad = loadSessionPage().finally(() => { pendingLoad = null; });
+    return pendingLoad;
+  };
+  libraryLoadMore = loadMoreSessions;
 
   scrollSentinel.addEventListener("click", loadMoreSessions);
 
@@ -727,4 +735,4 @@ initSessionWorkbench({ ft, formatText, showToast });
 initEnhancements({ ft, formatText, showToast, escapeHtmlClient });
 initRuntimeWorkbench({ ft, formatText });
 initRuntimeEvents({ ft, formatText });
-initLibrary({ ft });
+initLibrary({ ft, loadMoreSessions: libraryLoadMore, updateBatchCount });

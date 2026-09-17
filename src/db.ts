@@ -183,6 +183,18 @@ export function listSessions(limit = 50, offset = 0, search = "", timeRange = ""
   return { sessions, total: totalRow?.total ?? 0 };
 }
 
+/** Index independently readable descendants without changing root-only lists. */
+export function iterateSessionsForIndex(pathOverride: string | undefined = undefined) {
+  const db = getDb(pathOverride);
+  return db.prepare(`
+    SELECT id, parent_id, slug, title, directory, time_created, time_updated,
+           ${sessionListMetricColumns(db)}
+    FROM session
+    WHERE time_archived IS NULL
+    ORDER BY time_updated DESC, time_created DESC, id ASC
+  `).iterate();
+}
+
 export function listSessionProjects(search = "", timeRange = "", pathOverride: string | undefined = undefined, excludedIds: Set<string> | undefined = undefined, includedIds: string[] | undefined = undefined, titleOverrides: SessionTitleOverrides = undefined, hasSubagent = false) {
   const db = getDb(pathOverride);
   const { whereClause, params } = sessionFilter(search, timeRange, "", excludedIds, includedIds, titleOverrides, hasSubagent);

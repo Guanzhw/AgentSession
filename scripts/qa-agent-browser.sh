@@ -169,8 +169,26 @@ if [[ "${list_filter_label,,}" != "filter current list" ]]; then
   echo "List filter should identify its scoped behavior, got $list_filter_label" >&2
   exit 1
 fi
-summary_present="$(read_ab "verify library summary strip" get count ".library-summary")"
-assert_positive_count "library summary strip" "$summary_present"
+family_state="$(read_ab "verify family Library summary" eval "JSON.stringify({ families: document.querySelectorAll('[data-library-family]').length, summary: /work histories.*matching sessions/.test(document.querySelector('.page-header p')?.textContent || ''), noTranscriptMetrics: !document.querySelector('.session-card-stats') })")"
+assert_contains "family Library summary" "$family_state" '"summary":true'
+assert_contains "family Library summary" "$family_state" '"noTranscriptMetrics":true'
+family_disclosures="$(read_ab "count recorded family disclosures" get count "[data-library-children]")"
+assert_positive_count "recorded family disclosures" "$family_disclosures"
+read_ab "focus a family disclosure" eval "document.querySelector('[data-library-children] > summary').focus(); true" >/dev/null
+ab "expand family with keyboard" press Enter >/dev/null
+ab "wait for child metadata" wait --fn "Number(document.querySelector('[data-library-children][open]')?.dataset.loadedCount) > 0" >/dev/null
+family_children="$(read_ab "verify bounded child metadata" eval "(() => { const branch = document.querySelector('[data-library-children][open]'); const children = branch.querySelector(':scope > [data-family-items]').children; return children.length > 0 && children.length <= 20 && [...children].every((child) => child.querySelector('.library-family-title')?.getAttribute('href').startsWith('/opencode/session/')); })()")"
+assert_contains "bounded child metadata" "$family_children" "true"
+ab "switch family list to compact" click ".library-view-toggle [data-view=compact]" >/dev/null
+family_preserved="$(read_ab "verify expanded family survives regroup" eval "Boolean(document.querySelector('[data-library-family] [data-library-children][open] .library-family-title'))")"
+assert_contains "expanded family survives regroup" "$family_preserved" "true"
+ab "switch family list to timeline" click ".library-view-toggle [data-view=timeline]" >/dev/null
+ab "read a family child on its own" find first ".library-family-title" click >/dev/null
+ab "wait for standalone child reader" wait --load domcontentloaded >/dev/null
+ab "return to family Library" find text "← Back to Sessions" click >/dev/null
+ab "wait for Library focus restoration" wait --fn "document.activeElement?.classList.contains('library-family-title')" >/dev/null
+family_returned="$(read_ab "verify family return context" eval "location.pathname === '/opencode' && Boolean(document.querySelector('[data-library-children][open] .library-family-title:focus'))")"
+assert_contains "family return context" "$family_returned" "true"
 chip_count="$(read_ab "count quick filter chips" get count ".filter-chip")"
 if [[ "$chip_count" -lt 4 ]]; then
   echo "Library should expose today/week/starred/has-subagent chips, got $chip_count" >&2

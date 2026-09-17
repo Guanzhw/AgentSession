@@ -1,5 +1,5 @@
 import { getAllMeta, getDeletedIds, getExcludedIds } from "../meta.js";
-import { getCrossProviderOverview, getCrossProviderSessionProjects, getCrossProviderSessions } from "../index-db.js";
+import { getCrossProviderSessions } from "../index-db.js";
 import {
   getTitleOverrides,
   getStarredIds,
@@ -18,6 +18,8 @@ import { supportsLocalManagement } from "../providers/kinds.js";
 import { renderSessionsPage } from "../views/sessions.js";
 import { sessionCard } from "../views/components.js";
 import { providerRenderContext } from "./provider-context.js";
+import { queryLibraryFamilies, queryLibraryFamilyChildren, queryLibraryFamilyProjects, type LibraryFamilyQuery } from "../library-families.js";
+import { libraryFamilyEntry, libraryFamilyChild } from "../views/library-family.js";
 
 export function registerSessions(
   app: any,
@@ -35,8 +37,8 @@ export function registerSessions(
     return requested.length ? [...new Set(requested)].filter((id) => providerMap.has(id)) : available;
   }
 
-  function buildCrossProviderList(searchParams: URLSearchParams, limit = 30, offset = 0) {
-    const providers = selectedProviderIds(searchParams);
+  function sessionListQuery(searchParams: URLSearchParams, limit = 30, offset = 0, providerOnly = "") {
+    const providers = providerOnly ? [providerOnly] : selectedProviderIds(searchParams);
     const range = searchParams.get("range") || "";
     const query = searchParams.get("q") || "";
     const project = searchParams.get("project") || "";
@@ -51,24 +53,86 @@ export function registerSessions(
     const titleOverrides = providers.flatMap((provider) => [...getTitleOverrides(metaByProvider.get(provider) || new Map())]
       .map(([id, title]) => ({ provider, id, title })));
     const queryOptions = { providers, limit, offset, timeRange: range, search: query, project, sort, excluded, included, hasSubagent, titleOverrides };
+    return { queryOptions, metaByProvider, range, query, project, sort, starredOnly, hasSubagent, providers, excluded, included, titleOverrides };
+  }
+
+  function buildCrossProviderList(searchParams: URLSearchParams, limit = 30, offset = 0) {
+    const { queryOptions, metaByProvider, ...filters } = sessionListQuery(searchParams, limit, offset);
     const results = getCrossProviderSessions(queryOptions);
     const sessions = results.sessions.map((session: any) => normalizeSessionRecord(enrichSession(session, metaByProvider.get(session.provider))));
     attachSessionListStats(sessions, (provider) => providerMap.get(provider));
     return {
       ...results,
       sessions,
-      providers,
-      range,
-      query,
-      project,
-      sort,
-      starredOnly,
-      hasSubagent,
-      excluded,
-      included,
-      titleOverrides,
+      ...filters,
     };
   }
+
+  function withLiveLibrarySessions(query: LibraryFamilyQuery): LibraryFamilyQuery {
+    const liveSessions: NonNullable<LibraryFamilyQuery["liveSessions"]> = new Map();
+    for (const provider of query.providers) {
+      const adapter = providerMap.get(provider);
+      if (adapter.getLibrarySessions) liveSessions.set(provider, adapter.getLibrarySessions());
+    }
+    return { ...query, liveSessions };
+  }
+
+  function buildLibraryList(searchParams: URLSearchParams, limit = 30, offset = 0, providerOnly = "") {
+    const { queryOptions: indexedQuery, metaByProvider, ...filters } = sessionListQuery(searchParams, limit, offset, providerOnly);
+    const queryOptions = withLiveLibrarySessions(indexedQuery);
+    const result = queryLibraryFamilies(queryOptions);
+    const sessions = result.families.map((node) => ({
+      ...normalizeSessionRecord(enrichSession(node.session, metaByProvider.get(node.session.provider))),
+      family: node
+    }));
+    return { ...result, ...filters, sessions, queryOptions };
+  }
+
+  function familyRenderOptions(provider: string, searchParams: URLSearchParams) {
+    const info = providerInfo.find((item: any) => item.id === provider);
+    return {
+      filters: searchParams.toString(),
+      returnTo: searchParams.get("returnTo") || "/sessions",
+      providerName: info?.name || provider,
+      manageable: Boolean(info?.manageable)
+    };
+  }
+
+  app.get("/api/library/sessions", async (req: any, res: any) => {
+    const params = new URL(req.url, "http://localhost").searchParams;
+    const limit = Math.min(Math.max(1, Number(params.get("limit")) || 30), 100);
+    const offset = Math.max(0, Number(params.get("offset")) || 0);
+    const result = buildLibraryList(params, limit, offset);
+    return json(res, {
+      sessions: result.sessions.map((session) => ({
+        id: session.id,
+        provider: session.provider,
+        title: session.title,
+        directory: session.directory,
+        time_updated: session.time_updated,
+        html: libraryFamilyEntry({ ...session.family, session }, familyRenderOptions(session.provider, params))
+      })),
+      total: result.total, offset, hasMore: result.hasMore,
+      matchingSessions: result.overview.totalSessions
+    });
+  });
+
+  app.get("/api/library/children", async (req: any, res: any) => {
+    const params = new URL(req.url, "http://localhost").searchParams;
+    const provider = params.get("parentProvider") || "";
+    if (!providerMap.has(provider)) return json(res, { error: "Provider unavailable" }, 404);
+    const { queryOptions, metaByProvider } = sessionListQuery(params);
+    const result = queryLibraryFamilyChildren({
+      ...withLiveLibrarySessions(queryOptions), provider, parentId: params.get("parentId") || "",
+      limit: 20, offset: Math.max(0, Number(params.get("offset")) || 0)
+    });
+    if (!result.parent) return json(res, { error: "History unavailable in this library" }, 404);
+    return json(res, {
+      html: result.children.map((node) => libraryFamilyChild({ ...node, session: enrichSession(node.session, metaByProvider.get(provider)) }, familyRenderOptions(provider, params))).join(""),
+      total: result.total, offset: result.offset, shown: result.children.length,
+      nextOffset: result.hasMore ? result.offset + result.children.length : null
+    });
+  });
 
   app.get("/api/sessions", async (req: any, res: any) => {
     try {
@@ -108,26 +172,9 @@ export function registerSessions(
     try {
       const searchParams = new URL(req.url || "/", "http://localhost").searchParams;
       const offset = Math.max(0, Number(searchParams.get("offset")) || 0);
-      const result = buildCrossProviderList(searchParams, 30, offset);
-      const overview = getCrossProviderOverview({
-        providers: result.providers,
-        timeRange: result.range,
-        search: result.query,
-        project: result.project,
-        excluded: result.excluded,
-        included: result.included,
-        hasSubagent: result.hasSubagent,
-        titleOverrides: result.titleOverrides,
-      });
-      const projectOptions = getCrossProviderSessionProjects({
-        providers: result.providers,
-        timeRange: result.range,
-        search: result.query,
-        excluded: result.excluded,
-        included: result.included,
-        hasSubagent: result.hasSubagent,
-        titleOverrides: result.titleOverrides,
-      });
+      const result = buildLibraryList(searchParams, 30, offset);
+      const overview = result.overview;
+      const projectOptions = queryLibraryFamilyProjects(result.queryOptions);
       return {
         status: 200,
         body: renderSessionsPage({
@@ -142,12 +189,12 @@ export function registerSessions(
           starredOnly: result.starredOnly,
           hasSubagent: result.hasSubagent,
           projectOptions,
-          totalMessages: overview.totalMessages,
-          totalTokens: overview.totalTokens,
           provider: null,
           providers: providerInfo,
           selectedProviders: result.providers,
           global: true,
+          familyMode: true,
+          matchingSessions: overview.totalSessions,
           manageable: false,
         }),
         contentType: "text/html; charset=utf-8",
@@ -247,12 +294,10 @@ export function registerSessions(
     const renderContext = providerRenderContext(providerSegment, providerInfo, adapter);
 
     try {
-      const catalog = createSessionCatalog(adapter, providerSegment);
-      const indexed = catalog.list({ limit, offset, range, query, project, sort, starredOnly, hasSubagent });
+      const indexed = buildLibraryList(url.searchParams, limit, offset, providerSegment);
       const sessions = indexed.sessions;
-      attachSessionListStats(sessions, () => adapter, providerSegment);
-      const overviewStats = catalog.overview({ range, query, project, starredOnly, hasSubagent });
-      const projectOptions = catalog.projects({ range, query, starredOnly, hasSubagent });
+      const overviewStats = indexed.overview;
+      const projectOptions = queryLibraryFamilyProjects(indexed.queryOptions);
       return {
         status: 200,
         body: renderSessionsPage({
@@ -268,8 +313,8 @@ export function registerSessions(
           hasSubagent,
           projectOptions,
           searchMode: "list",
-          totalMessages: overviewStats.totalMessages,
-          totalTokens: overviewStats.totalTokens,
+          familyMode: true,
+          matchingSessions: overviewStats.totalSessions,
           deletedCount: getDeletedIds(providerSegment).length,
           ...renderContext
         }),

@@ -32,6 +32,13 @@ export const zh = {
 
   // UI v2 P1 库
   "library.summary_label": "库概览",
+  "library.family_entries": "{count} 项工作历史",
+  "library.family_matches": "{count} 条匹配会话",
+  "library.family_children": "{count} 条相关历史",
+  "library.family_more": "加载更多相关历史",
+  "library.family_context": "父会话背景 · 匹配项在下方",
+  "library.family_missing_parent": "记录中的父会话在当前会话库中不可用",
+  "library.family_cycle": "记录中的父子关系存在循环",
   "library.summary_providers": "个提供方",
   "library.summary_providers_one": "个提供方",
   "library.summary_sessions": "个会话",
