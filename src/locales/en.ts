@@ -189,6 +189,7 @@ export const en = {
   "detail.reader_collaboration_links": "{count} related sessions",
   "detail.reader_document_owner": "This session",
   "detail.reader_channel_messages": "{count} messages · expand",
+  "detail.reader_channel_order_note": "Sorted by recorded time; untimed records appear last",
   "detail.reader_time_axis": "Recorded collaboration time axis",
   "detail.reader_main_agent_turns": "Main agent turns",
   "detail.reader_main_agent_turn": "Main agent turn {count}",

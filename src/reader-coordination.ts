@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import { summarizeEvent } from "./event-summary.js";
 import type { EventProvenance } from "./providers/shared/session-protocol.js";
 import type {
   CoordinationKind,
   CoordinationState,
+  CoordinationObservation,
   SessionEventRef,
   SessionProtocolV3
 } from "./providers/shared/session-protocol-v3.js";
@@ -37,6 +39,13 @@ export interface ReaderCoordinationIdentity {
 export interface ReaderCoordinationCursor {
   identity: ReaderCoordinationIdentity;
   lastId: string | null;
+  prefixHash: string;
+  prefixCount: number;
+}
+
+export interface ReaderCoordinationCursorItem {
+  id: string;
+  timestamp: number | null;
 }
 
 export interface ReaderCoordinationItem {
@@ -87,6 +96,23 @@ export interface ReaderCoordinationAssignment {
   cards: ReaderCoordinationCard[];
   taskRunCounts: ReadonlyMap<string, number>;
   byObservation: Array<ReaderCoordinationCard | null>;
+}
+
+/** Sort one assigned channel for display without changing protocol source order. */
+export function sortReaderCoordinationByRecordedTime<T extends Pick<CoordinationObservation, "timestamp">>(
+  observations: readonly T[]
+): T[] {
+  return observations
+    .map((observation, sourceIndex) => ({ observation, sourceIndex }))
+    .sort((left, right) => {
+      const leftTime = left.observation.timestamp;
+      const rightTime = right.observation.timestamp;
+      if (leftTime === null && rightTime === null) return left.sourceIndex - right.sourceIndex;
+      if (leftTime === null) return 1;
+      if (rightTime === null) return -1;
+      return leftTime - rightTime || left.sourceIndex - right.sourceIndex;
+    })
+    .map(({ observation }) => observation);
 }
 
 /** Build the finalized, unbounded card identity universe shared by SSR and continuation. */
@@ -180,8 +206,24 @@ function sameIdentity(left: ReaderCoordinationIdentity, right: ReaderCoordinatio
     && left.size === right.size;
 }
 
-export function encodeReaderCoordinationCursor(identity: ReaderCoordinationIdentity, lastId: string | null): string {
-  return Buffer.from(JSON.stringify({ identity, lastId }), "utf8").toString("base64url");
+export function encodeReaderCoordinationCursor(
+  identity: ReaderCoordinationIdentity,
+  lastId: string | null,
+  prefix: readonly ReaderCoordinationCursorItem[]
+): string {
+  const summary = readerCoordinationPrefixSummary(prefix);
+  return Buffer.from(JSON.stringify({ identity, lastId, ...summary }), "utf8").toString("base64url");
+}
+
+/** Stable bounded identity for the displayed cumulative prefix of one channel. */
+export function readerCoordinationPrefixSummary(
+  prefix: readonly ReaderCoordinationCursorItem[]
+): { prefixHash: string; prefixCount: number } {
+  const canonical = JSON.stringify(prefix.map((item) => [item.id, item.timestamp]));
+  return {
+    prefixHash: createHash("sha256").update(canonical, "utf8").digest("hex"),
+    prefixCount: prefix.length
+  };
 }
 
 export function decodeReaderCoordinationCursor(value: string | null | undefined): ReaderCoordinationCursor | null {
@@ -190,6 +232,8 @@ export function decodeReaderCoordinationCursor(value: string | null | undefined)
     const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
     const identity = parsed?.identity;
     const size = identity?.size;
+    const prefixHash = parsed?.prefixHash;
+    const prefixCount = parsed?.prefixCount;
     if (!identity
       || typeof identity.provider !== "string"
       || typeof identity.sessionId !== "string"
@@ -197,7 +241,9 @@ export function decodeReaderCoordinationCursor(value: string | null | undefined)
       || ![null, undefined].includes(identity.runId) && typeof identity.runId !== "string"
       || ![null, undefined].includes(identity.anchor) && typeof identity.anchor !== "string"
       || !Number.isSafeInteger(size) || size < 1 || size > READER_COORDINATION_MAX_SIZE
-      || (parsed.lastId !== null && typeof parsed.lastId !== "string")) return null;
+      || (parsed.lastId !== null && typeof parsed.lastId !== "string")
+      || typeof prefixHash !== "string" || !/^[0-9a-f]{64}$/i.test(prefixHash)
+      || !Number.isSafeInteger(prefixCount) || prefixCount < 1) return null;
     return {
       identity: {
         provider: identity.provider,
@@ -207,14 +253,16 @@ export function decodeReaderCoordinationCursor(value: string | null | undefined)
         anchor: identity.anchor ?? null,
         size
       },
-      lastId: parsed.lastId ?? null
+      lastId: parsed.lastId ?? null,
+      prefixHash,
+      prefixCount
     };
   } catch {
     return null;
   }
 }
 
-function itemOf(observation: any): ReaderCoordinationItem {
+function itemOf(observation: CoordinationObservation): ReaderCoordinationItem {
   return {
     id: String(observation.id),
     kind: observation.kind,
@@ -229,6 +277,10 @@ function itemOf(observation: any): ReaderCoordinationItem {
     sourceEventRef: observation.sourceEventRef || null,
     provenance: observation.provenance
   };
+}
+
+function cursorItemOf(observation: Pick<CoordinationObservation, "id" | "timestamp">): ReaderCoordinationCursorItem {
+  return { id: observation.id, timestamp: observation.timestamp };
 }
 
 /**
@@ -263,10 +315,10 @@ export function deriveReaderCoordinationPage(
     return { ok: false, code: "invalid_input", error: "The requested coordination card identity is unavailable or ambiguous." };
   }
   const identity = identityOf(query, card, size);
-  const observations = (protocol.coordination || []).filter((observation, index) => (
+  const observations = sortReaderCoordinationByRecordedTime((protocol.coordination || []).filter((observation, index) => (
     assignment.byObservation[index]?.key === card.key
     && (READER_COORDINATION_CHANNEL_KINDS as readonly string[]).includes(observation.kind)
-  ));
+  )));
   const anchorIndex = identity.anchor === null ? 0 : observations.findIndex((observation) => observation.id === identity.anchor);
   if (anchorIndex < 0) {
     return query.cursor
@@ -285,6 +337,10 @@ export function deriveReaderCoordinationPage(
     else {
       const lastIndex = observations.findIndex((observation) => observation.id === cursor.lastId);
       if (lastIndex < 0) return { ok: false, code: "stale_cursor", error: "The coordination continuation is stale; refresh this reader card." };
+      const currentPrefix = readerCoordinationPrefixSummary(observations.slice(anchorIndex, lastIndex + 1).map(cursorItemOf));
+      if (cursor.prefixHash !== currentPrefix.prefixHash || cursor.prefixCount !== currentPrefix.prefixCount) {
+        return { ok: false, code: "stale_cursor", error: "The coordination continuation is stale; refresh this reader card." };
+      }
       offset = lastIndex + 1;
     }
   }
@@ -301,7 +357,9 @@ export function deriveReaderCoordinationPage(
     offset,
     total: observations.length,
     items,
-    nextCursor: nextOffset < observations.length ? encodeReaderCoordinationCursor(identity, items.at(-1)?.id || null) : null
+    nextCursor: nextOffset < observations.length
+      ? encodeReaderCoordinationCursor(identity, items.at(-1)?.id || null, observations.slice(anchorIndex, nextOffset).map(cursorItemOf))
+      : null
   };
 }
 

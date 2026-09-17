@@ -60,6 +60,99 @@ test("reader coordination pages the complete assigned collection with canonical 
   assert.equal(staleAnchor.code, "stale_cursor");
 });
 
+test("reader coordination display order sorts recorded time, keeps ties stable, and puts unknown time last", () => {
+  const value = protocol();
+  value.coordination = value.coordination.slice(0, 4).map((item, index) => ({
+    ...item,
+    timestamp: [20, 10, null, 10][index]
+  }));
+  const sourceIds = value.coordination.map((item) => item.id);
+  const page = deriveReaderCoordinationPage(value, {
+    provider: "codex", sessionId: "root", taskId: "task-1", runId: "run-1", size: 2
+  });
+  assert.equal(page.ok, true);
+  assert.deepEqual(page.items.map((item) => item.id), ["coord:1", "coord:3"]);
+  assert.deepEqual(page.items.map((item) => item.timestamp), [10, 10]);
+  assert.deepEqual(value.coordination.map((item) => item.id), sourceIds, "the protocol source order is not mutated");
+
+  const view = deriveConversationView({
+    protocol: value,
+    work: { tasks: [], truncated: false },
+    execution: { focus: value.session.ref, runs: value.agentRuns.map((run) => ({ run })), actors: [], actorRuns: [], usage: null, truncated: false },
+    coordination: { lineage: [], observations: [], truncated: false, focus: value.session.ref },
+    context: { artifacts: [], artifactSessions: [], artifactRuns: [], lineage: [], truncated: false }
+  });
+  assert.deepEqual(view.cards[0].channel.map((item) => item.id), ["coord:1", "coord:3", "coord:0", "coord:2"]);
+  const continuation = deriveReaderCoordinationPage(value, {
+    provider: "codex", sessionId: "root", taskId: "task-1", runId: "run-1", size: 2, cursor: page.nextCursor
+  });
+  assert.equal(continuation.ok, true);
+  assert.deepEqual(continuation.items.map((item) => item.id), ["coord:0", "coord:2"]);
+  assert.equal(continuation.nextCursor, null);
+});
+
+test("reader coordination rejects a continuation when its displayed prefix moves, but accepts a suffix append", () => {
+  const value = protocol();
+  const first = deriveReaderCoordinationPage(value, {
+    provider: "codex", sessionId: "root", taskId: "task-1", runId: "run-1", size: 2
+  });
+  assert.equal(first.ok, true);
+
+  const inserted = protocol();
+  inserted.coordination.splice(2, 0, { ...inserted.coordination[2], id: "coord:inserted", timestamp: 0.5 });
+  const stale = deriveReaderCoordinationPage(inserted, {
+    provider: "codex", sessionId: "root", taskId: "task-1", runId: "run-1", size: 2, cursor: first.nextCursor
+  });
+  assert.equal(stale.ok, false);
+  assert.equal(stale.code, "stale_cursor");
+
+  const appended = protocol();
+  appended.coordination.push({ ...appended.coordination[0], id: "coord:suffix", timestamp: 100 });
+  const continued = deriveReaderCoordinationPage(appended, {
+    provider: "codex", sessionId: "root", taskId: "task-1", runId: "run-1", size: 2, cursor: first.nextCursor
+  });
+  assert.equal(continued.ok, true);
+  assert.deepEqual(continued.items.map((item) => item.id), ["coord:2", "coord:3"]);
+});
+
+test("reader coordination keeps a fixed cumulative prefix summary across three pages", () => {
+  const makeProtocol = () => {
+    const value = protocol();
+    value.coordination = Array.from({ length: 120 }, (_, index) => ({
+      ...value.coordination[index % value.coordination.length],
+      id: `coord:long:${index}`,
+      timestamp: index
+    }));
+    return value;
+  };
+  const base = makeProtocol();
+  const first = deriveReaderCoordinationPage(base, { provider: "codex", sessionId: "root", runId: "run-1", size: 50 });
+  assert.equal(first.ok, true);
+  const second = deriveReaderCoordinationPage(base, { provider: "codex", sessionId: "root", runId: "run-1", size: 50, cursor: first.nextCursor });
+  assert.equal(second.ok, true);
+  const third = deriveReaderCoordinationPage(base, { provider: "codex", sessionId: "root", runId: "run-1", size: 50, cursor: second.nextCursor });
+  assert.equal(third.ok, true);
+  assert.deepEqual(third.items.map((item) => item.id), Array.from({ length: 20 }, (_, index) => `coord:long:${index + 100}`));
+
+  const inserted = makeProtocol();
+  inserted.coordination.splice(25, 0, { ...inserted.coordination[25], id: "coord:inserted", timestamp: 24.5 });
+  const staleInsert = deriveReaderCoordinationPage(inserted, { provider: "codex", sessionId: "root", runId: "run-1", size: 50, cursor: second.nextCursor });
+  assert.equal(staleInsert.ok, false);
+  assert.equal(staleInsert.code, "stale_cursor");
+
+  const changed = makeProtocol();
+  changed.coordination[25] = { ...changed.coordination[25], timestamp: 125 };
+  const staleTime = deriveReaderCoordinationPage(changed, { provider: "codex", sessionId: "root", runId: "run-1", size: 50, cursor: second.nextCursor });
+  assert.equal(staleTime.ok, false);
+  assert.equal(staleTime.code, "stale_cursor");
+
+  const appended = makeProtocol();
+  appended.coordination.push({ ...appended.coordination[0], id: "coord:long:120", timestamp: 120 });
+  const suffixThird = deriveReaderCoordinationPage(appended, { provider: "codex", sessionId: "root", runId: "run-1", size: 50, cursor: second.nextCursor });
+  assert.equal(suffixThird.ok, true);
+  assert.deepEqual(suffixThird.items.map((item) => item.id), [...third.items.map((item) => item.id), "coord:long:120"]);
+});
+
 test("reader event source exposes bounded scalar evidence without provider data", () => {
   const value = protocol();
   value.events[0].partId = "exact:source.part";
@@ -95,6 +188,9 @@ test("the first reader More request starts after the 50 observations already ren
   const card = view.cards[0];
   assert.equal(card.channel.length, 50);
   assert.equal(decodeReaderCoordinationCursor(card.channelNextCursor).lastId, "coord:49");
+  const page = deriveReaderCoordinationPage(value, { provider: "codex", sessionId: "root", runId: "run-1", size: 50 });
+  assert.equal(page.ok, true);
+  assert.equal(decodeReaderCoordinationCursor(card.channelNextCursor).prefixHash, decodeReaderCoordinationCursor(page.nextCursor).prefixHash, "SSR and continuation use the same prefix summary");
   const html = renderSessionReaderPane({ session: { id: "root", title: "Reader" }, provider: "codex", conversationView: view });
   const url = html.match(/data-reader-coordination-url="([^"]+)"/)?.[1].replaceAll("&amp;", "&");
   assert.ok(url, "SSR exposes the seeded continuation URL");

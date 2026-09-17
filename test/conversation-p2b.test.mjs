@@ -290,7 +290,7 @@ function cardTree() {
 
 // ── Tests ──────────────────────────────────────────────────────────────────
 
-test("P2b view model derives a recorded agent card with a source-ordered channel", () => {
+test("P2b view model derives a recorded-time-ordered agent channel", () => {
   const view = deriveFixture();
   assert.equal(view.cards.length, 1);
   const card = view.cards[0];
@@ -304,12 +304,12 @@ test("P2b view model derives a recorded agent card with a source-ordered channel
   assert.equal(card.bindings.taskToolCallId, "task-part");
   assert.equal(card.bindings.childSessionId, "child-1");
   assert.equal(card.observationCount, 5);
-  assert.deepEqual(card.channel.map((item) => item.kind), ["spawn", "message", "interrupt", "result-delivery", "result-acknowledgement"]);
-  assert.deepEqual(card.channel.map((item) => item.timestamp), [900, 1750, 1600, 1700, 1800], "recorded source order wins when timestamps disagree");
+  assert.deepEqual(card.channel.map((item) => item.kind), ["spawn", "interrupt", "result-delivery", "message", "result-acknowledgement"]);
+  assert.deepEqual(card.channel.map((item) => item.timestamp), [900, 1600, 1700, 1750, 1800], "display order follows recorded time while protocol source order remains unchanged");
   assert.equal(card.channel[0].senderName, "main");
   assert.equal(card.channel[0].recipientName, "worker");
-  assert.equal(card.channel[1].senderName, "worker");
-  assert.equal(card.channel[1].recipientName, "main");
+  assert.equal(card.channel[3].senderName, "worker");
+  assert.equal(card.channel[3].recipientName, "main");
   assert.equal(card.lastActivity, 1800);
 });
 
@@ -403,6 +403,35 @@ test("P2b SSR retains the task disclosure and opens child history through its ca
   assert.doesNotMatch(thread, /No recorded channel activity\./, "channel is not empty");
   // Result arrival on the card.
   assert.match(thread, /data-agent-result-arrival="[^"]+"/);
+});
+
+test("P2b channel marks unknown times and does not fold across the known-time boundary", () => {
+  const protocol = v3Fixture({
+    coordination: [
+      { id: "coord:known", sessionId: "root", kind: "message", state: "delivered", timestamp: 100,
+        taskId: "task-1", runId: "run-1", provenance },
+      { id: "coord:unknown", sessionId: "root", kind: "message", state: "delivered", timestamp: null,
+        taskId: "task-1", runId: "run-1", provenance }
+    ]
+  });
+  const view = deriveFixture({
+    protocol,
+    work: projectWork(protocol),
+    execution: projectExecution(protocol),
+    coordination: projectCoordination(protocol),
+    context: projectContext(protocol)
+  });
+  const html = renderSessionPage({
+    session: cardTree().session,
+    sessionTree: cardTree(),
+    provider: "fixture",
+    conversationView: view
+  });
+  const thread = messagesSection(html);
+  assert.deepEqual([...thread.matchAll(/data-channel-id="([^"]+)"/g)].map((match) => match[1]), ["coord:known", "coord:unknown"]);
+  assert.match(thread, /detail.reader_channel_order_note|Sorted by recorded time/);
+  assert.match(thread, /Time not recorded/);
+  assert.equal((thread.match(/class="reader-channel-group"/g) || []).length, 0, "known and unknown messages stay separate");
 });
 
 test("P2b bound card keeps distinct canonical child readers and dedupes their ToC entries", () => {
@@ -606,6 +635,32 @@ test("P2b channel bound truncation keeps the page bounded", () => {
   assert.equal(view.cards[0].channel.length, 50);
   assert.equal(view.cards[0].channelTruncated, true);
   assert.equal(view.cards[0].observationCount, 60);
+});
+
+test("P2b channel summaries use the complete assigned collection beyond the display bound", () => {
+  const protocol = v3Fixture({
+    agentRuns: [{ ...v3Fixture().agentRuns[0], timeStart: null, timeEnd: null }],
+    coordination: [
+      { id: "coord:interrupt", sessionId: "root", kind: "interrupt", state: "unknown", timestamp: 1000,
+        taskId: "task-1", runId: "run-1", provenance },
+      ...Array.from({ length: 50 }, (_, index) => ({
+        id: `coord:message:${index}`, sessionId: "root", kind: "message", state: "unknown", timestamp: index,
+        taskId: "task-1", runId: "run-1", turnId: `turn-${index}`, provenance
+      }))
+    ]
+  });
+  const view = deriveFixture({
+    protocol,
+    work: projectWork(protocol),
+    execution: projectExecution(protocol),
+    coordination: projectCoordination(protocol),
+    context: projectContext(protocol)
+  });
+  assert.equal(view.cards[0].channel.length, 50);
+  assert.equal(view.cards[0].channelTruncated, true);
+  assert.equal(view.cards[0].interrupted, true);
+  assert.equal(view.cards[0].state, "interrupted");
+  assert.equal(view.cards[0].lastActivity, 1000);
 });
 
 // ── P2b truthful unplaced fallback (DSH evidence: run/task records without a

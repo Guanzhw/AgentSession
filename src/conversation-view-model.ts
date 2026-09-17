@@ -1,6 +1,8 @@
 import type { SessionRef } from "./providers/shared/session-protocol.js";
 import type { SessionEventRef, SessionProtocolV3 } from "./providers/shared/session-protocol-v3.js";
-import { READER_COORDINATION_CHANNEL_KINDS, encodeReaderCoordinationCursor, readerCoordinationAssignment } from "./reader-coordination.js";
+import { READER_COORDINATION_CHANNEL_KINDS, encodeReaderCoordinationCursor, readerCoordinationAssignment, sortReaderCoordinationByRecordedTime } from "./reader-coordination.js";
+import type { ReaderCoordinationCursorItem } from "./reader-coordination.js";
+import type { CoordinationObservation } from "./providers/shared/session-protocol-v3.js";
 import type {
   ContextProjection,
   CoordinationProjection,
@@ -24,6 +26,7 @@ import type {
 export const CONVERSATION_CHANNEL_KINDS = READER_COORDINATION_CHANNEL_KINDS;
 
 export type ConversationChannelKind = (typeof CONVERSATION_CHANNEL_KINDS)[number];
+type ConversationChannelObservation = CoordinationObservation & { kind: ConversationChannelKind };
 
 export const CONVERSATION_MAX_CARDS = 50;
 export const CONVERSATION_MAX_CHANNEL_ITEMS = 50;
@@ -286,35 +289,33 @@ function compareReference(a: SessionRef | null, provider: string, sessionId: str
   return Boolean(a && a.provider === provider && a.sessionId === sessionId);
 }
 
-/**
- * Bound the channel without reordering the normalized coordination facts. Provider
- * normalization owns source order; timestamps are display evidence and may be
- * absent or disagree with the recorded sequence. Observations whose kind is
- * outside the channel set stay off the card; they are Work/Coordination facts,
- * not conversation facts.
- */
-function channelOf(card: CardState, observations: any[], assignments: Array<CardState | null>, nameFor: (actorId: string) => string | null): { channel: ConversationChannelItem[]; count: number; truncated: boolean } {
-  const matching = observations.filter((observation, index) => (
+/** Bound one card's channel after applying its recorded-time display order. */
+function channelOf(card: CardState, observations: CoordinationObservation[], assignments: Array<CardState | null>, nameFor: (actorId: string) => string | null): { channel: ConversationChannelItem[]; count: number; truncated: boolean; cursorPrefix: ReaderCoordinationCursorItem[]; interrupted: boolean; lastActivity: number | null } {
+  const matching = sortReaderCoordinationByRecordedTime(observations.filter((observation, index): observation is ConversationChannelObservation => (
     observation.kind
     && (CONVERSATION_CHANNEL_KINDS as readonly string[]).includes(observation.kind)
     && assignments[index] === card
-  ));
+  )));
   const count = matching.length;
   const truncated = count > CONVERSATION_MAX_CHANNEL_ITEMS;
+  const channel = matching.slice(0, CONVERSATION_MAX_CHANNEL_ITEMS).map((observation) => ({
+    id: String(observation.id || ""),
+    kind: observation.kind,
+    state: observation.state || "unknown",
+    timestamp: finiteTime(observation.timestamp),
+    senderName: observation.senderActorId ? nameFor(observation.senderActorId) ?? null : null,
+    recipientName: observation.recipientActorId ? nameFor(observation.recipientActorId) ?? null : null,
+    eventId: observation.eventId ?? null,
+    turnId: observation.turnId ?? null,
+    sourceEventRef: observation.sourceEventRef ?? null
+  }));
   return {
-    channel: matching.slice(0, CONVERSATION_MAX_CHANNEL_ITEMS).map((observation) => ({
-      id: String(observation.id || ""),
-      kind: observation.kind,
-      state: observation.state || "unknown",
-      timestamp: finiteTime(observation.timestamp),
-      senderName: observation.senderActorId ? nameFor(observation.senderActorId) ?? null : null,
-      recipientName: observation.recipientActorId ? nameFor(observation.recipientActorId) ?? null : null,
-      eventId: observation.eventId ?? null,
-      turnId: observation.turnId ?? null,
-      sourceEventRef: observation.sourceEventRef ?? null
-    })),
+    channel,
     count,
-    truncated
+    truncated,
+    cursorPrefix: channel.map((observation) => ({ id: observation.id, timestamp: observation.timestamp })),
+    interrupted: matching.some((observation) => observation.kind === "interrupt"),
+    lastActivity: matching.reduce<number | null>((latest, observation) => maxTime(latest, observation.timestamp), null)
   };
 }
 
@@ -451,7 +452,6 @@ export function deriveConversationView(input: ConversationViewInput): Conversati
   // presentation: only an interrupt observation for this card may set it.
   for (const card of cards) {
     const channelResult = channelOf(card, observations, assignments, nameFor);
-    const interrupted = channelResult.channel.some((item) => item.kind === "interrupt");
     card.view.channel = channelResult.channel;
     card.view.observationCount = channelResult.count;
     card.view.channelTruncated = channelResult.truncated;
@@ -460,13 +460,11 @@ export function deriveConversationView(input: ConversationViewInput): Conversati
       ? encodeReaderCoordinationCursor({
           provider, sessionId, taskId: canonicalCard.taskId, runId: canonicalCard.runId,
           anchor: null, size: CONVERSATION_MAX_CHANNEL_ITEMS
-        }, channelResult.channel.at(-1)!.id)
+        }, channelResult.channel.at(-1)!.id, channelResult.cursorPrefix)
       : null;
-    card.view.interrupted = interrupted;
-    card.view.state = conversationCardState(card.view.rawStatus, interrupted);
-    for (const item of channelResult.channel) {
-      card.view.lastActivity = maxTime(card.view.lastActivity, item.timestamp);
-    }
+    card.view.interrupted = channelResult.interrupted;
+    card.view.state = conversationCardState(card.view.rawStatus, channelResult.interrupted);
+    card.view.lastActivity = maxTime(card.view.lastActivity, channelResult.lastActivity);
   }
 
   // ── Inspector ────────────────────────────────────────────────────────────

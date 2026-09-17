@@ -190,6 +190,7 @@ export const zh = {
   "detail.reader_collaboration_links": "{count} 条相关会话",
   "detail.reader_document_owner": "本会话",
   "detail.reader_channel_messages": "{count} 条消息 · 展开",
+  "detail.reader_channel_order_note": "按记录时间排列；无时间的记录置后",
   "detail.reader_time_axis": "已记录的协作时间轴",
   "detail.reader_main_agent_turns": "主智能体执行轮次",
   "detail.reader_main_agent_turn": "主智能体轮次 {count}",

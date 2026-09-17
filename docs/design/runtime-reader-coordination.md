@@ -1,6 +1,6 @@
 # Reader coordination: Stage 3C
 
-Status: implementation specification, 2026-09-14. Follows
+Status: implementation specification, updated 2026-09-17. Follows
 [reader completeness](runtime-reader-completeness.md).
 Current presentation choices follow the
 [product presentation specification](runtime-presentation-contract.md).
@@ -68,11 +68,12 @@ message sources continue to use their existing native history anchors.
 
 ## Reading and density
 
-The compact collaboration rail shows separately focusable observation marks
-on a shared time axis, alongside the main agent's execution-turn boundaries.
-Their numbered start/end marks open the exact lifecycle source, making
-continued child work across automatic parent turns visible. Readable user
-inputs retain their own message anchors; no synthetic request is introduced.
+The selected option-3 sidebar uses a compact canonical task map and an
+expandable exchange sequence. The secondary recorded-time diagram retains
+separately focusable observation marks alongside main-agent execution-turn
+boundaries. Their source controls make continued child work across automatic
+parent turns inspectable. Readable user inputs retain their own message
+anchors; no synthetic request is introduced.
 Child-history controls open full child content; observation controls open their
 own sources. These actions have different labels and targets.
 
@@ -83,6 +84,14 @@ events; retain the diagram as the overview. Untimed observations have a
 separate labeled group. Display-time ordering is a derived presentation order,
 not a claim of cross-session source order or causality. Do not draw inferred
 follow-up-to-completion pairing arrows.
+
+The exchange sequence is sorted after canonical assignment: recorded time
+ascending, equal times in stable source order, then untimed records in source
+order. Its expanded body explains that ordering, and untimed records are
+explicitly labeled. This derives a Reader display order only; protocol arrays
+and their source identities remain unchanged. Ordinary-message folding cannot
+cross the timed/untimed boundary. Card state and latest activity use the
+complete assigned collection, not the first 50 displayed records.
 
 Keep one child reader and ToC item even when several observations or runs
 refer to it. Secondary metadata must not displace its body history.
@@ -111,7 +120,11 @@ coordination API response semantics.
 The initial More control carries the same cursor as a fetched first page,
 anchored after the last displayed observation. A 53-record channel therefore
 returns records 51–53 on its first More request. A missing cursor anchor is a
-refresh state rather than an offset into a changed collection.
+refresh state rather than an offset into a changed collection. The cursor also
+contains a fixed-size SHA-256 digest and count of the displayed cumulative
+`(id, timestamp)` prefix from its anchor. If new source evidence inserts into
+or changes that prefix, continuation returns `stale_cursor`; ordinary suffix
+appends can continue. SSR and continuation use the same digest construction.
 
 Appending a page must stay within the owning reader, preserve existing source
 IDs and navigation, and never reset the reader's history position. Stale or
@@ -156,11 +169,37 @@ and resolves both source controls for the exact later orchestration turn.
 Its child-dispatch/parent-turn-start/child-completion ordering is independently
 checked against the original normalized evidence. No user anchor is fabricated.
 
-The option-3 integrated suite passes 704 tests, governance/type checks and
-targeted independent source review. Labels retain exact UTC source times.
+The option-3 integration passed governance/type checks and targeted independent
+source review. Labels retain exact UTC source times.
 The on-demand task sidebar groups consecutive ordinary messages while keeping
 each dispatch, follow-up, return and child completion independently reachable.
 Real desktop and 320/390px checks cover source jumps and same-pane child-history
 return; reload-close restores the canonical sidebar opener and its ancestors.
-The full site E2E suite passes with no browser errors. Compact task overview
-and readable intent/result excerpts remain the next presentation slice.
+The full site E2E suite passed with no browser errors. Compact task overview
+and readable intent/result excerpts subsequently shipped in `7ceeafe`.
+
+The current product-wide evidence and remaining gaps are tracked in
+[the acceptance record](runtime-acceptance-evidence.md); these earlier checks
+do not cover every navigation path or constitute overall product acceptance.
+
+## Recorded-time ordering verification, 2026-09-17
+
+The real selected task now reads: follow-up at 14:24:30.543, child completion
+at 14:43:53.000, parent delivery at 14:43:57.012, follow-up at 14:44:37.045,
+child completion at 14:47:55.000, parent delivery at 14:48:41.299 UTC.
+Each of these six controls was activated in the browser and resolved to its
+own source. Follow-ups focus their native tool bodies; completions and parent
+deliveries focus separately owned event evidence. API pagination returned all
+21 observations through 11 two-item pages without loss or duplication.
+
+The expanded sequence was inspected at desktop and actual 390px widths;
+keyboard source activation and focus worked, with no full-page horizontal
+overflow. The source-navigation owner mismatch identified by P10 remains a
+separate defect, including when opening an unmounted child event; correct
+event resolution is not a claim that all page controls have switched owners.
+
+Verification: 720/720 full tests, 35/35 focused tests, independent review,
+governance/typecheck, the full live E2E suite without browser errors, and
+Windows SEA build/smoke. Seven installed-provider Reader/API samples passed;
+the OpenClaw sample is the installed smoke transcript, not production work
+history. No provider-owned data was modified.

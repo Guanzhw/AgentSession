@@ -1127,13 +1127,14 @@ function renderAgentChannel(channel: ConversationChannelItem[], truncated: boole
       : "";
     const stateLabel = coordinationStateLabel(item.state);
     const source = readerEventSource(item, provider, sessionId);
+    const time = channelTimeLabel(item.timestamp);
     const kindMarkup = source
       ? renderReaderEventSourceLink(source.provider, source.sessionId, source.eventId, coordinationKindLabel(item.kind), "agent-channel-kind agent-channel-source")
       : `<span class="agent-channel-kind">${escapeHtml(coordinationKindLabel(item.kind))}</span>`;
     return `<li class="agent-channel-item" data-channel-kind="${escapeHtml(item.kind)}" data-channel-id="${escapeHtml(item.id)}">
       ${kindMarkup}
       ${stateLabel && item.state !== "unknown" ? `<span class="agent-channel-state">${escapeHtml(stateLabel)}</span>` : ""}
-      ${channelTimeLabel(item.timestamp) ? `<time class="agent-channel-time">${escapeHtml(channelTimeLabel(item.timestamp)!)}</time>` : ""}
+      ${time ? `<time class="agent-channel-time">${escapeHtml(time)}</time>` : `<small class="agent-channel-time agent-channel-time-unknown">${escapeHtml(t("detail.reader_time_unknown"))}</small>`}
       ${directionLabel}
     </li>`;
   });
@@ -1141,7 +1142,10 @@ function renderAgentChannel(channel: ConversationChannelItem[], truncated: boole
   for (let index = 0; index < channel.length;) {
     let end = index + 1;
     if (channel[index].kind === "message") {
-      while (end < channel.length && channel[end].kind === "message") end += 1;
+      const hasRecordedTime = channel[index].timestamp !== null;
+      while (end < channel.length
+        && channel[end].kind === "message"
+        && (channel[end].timestamp !== null) === hasRecordedTime) end += 1;
     }
     const group = itemMarkup.slice(index, end).join("\n");
     groups.push(end - index > 1
@@ -1157,6 +1161,7 @@ function renderAgentChannel(channel: ConversationChannelItem[], truncated: boole
   const heading = disclosure ? 'summary class="agent-channel-summary" aria-expanded="false"' : 'h3 class="agent-channel-summary"';
   return `<${wrapper} class="agent-channel" data-agent-channel data-reader-coordination-provider="${escapeHtml(provider)}" data-reader-coordination-session="${escapeHtml(sessionId)}"${disclosure ? " data-disclosure" : ""}>
     <${heading}><span>${escapeHtml(t("conversation.agent_channel"))}</span>${countLabel ? `<span class="agent-channel-count">${countLabel}</span>` : ""}</${disclosure ? "summary" : "h3"}>
+    ${items ? `<p class="agent-channel-order-note">${escapeHtml(t("detail.reader_channel_order_note"))}</p>` : ""}
     ${items
       ? `<ol class="agent-channel-list" data-reader-coordination-list>${items}</ol>${truncated ? `<button class="agent-channel-more" type="button" data-reader-coordination-more data-reader-coordination-url="${escapeHtml(readerCoordinationUrl(provider, sessionId, card))}">${escapeHtml(t("conversation.agent_channel_load_more"))}</button><span class="agent-channel-load-state" data-reader-coordination-state aria-live="polite"></span>` : ""}`
       : `<p class="agent-channel-empty">${escapeHtml(t("conversation.agent_no_channel"))}</p>`}
