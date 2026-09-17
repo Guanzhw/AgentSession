@@ -58,6 +58,32 @@ recorded observations, not a live process-health claim. Missing time evidence
 produces an untimed relation, not a fabricated duration. Bounded projections
 must disclose omitted navigation records and retain access to their evidence.
 
+### Selected-task excerpts
+
+`GET /api/:provider/session/:id/reader/preview` reads one selected session's
+normalized owned document, never its family. It returns `provider`, `sessionId`,
+`request`, `reply` and an escaped, localized `html` fragment. Each slot contains
+availability, text (at most 400 characters), phase, canonical source reference
+and an explicit `no-readable-content` reason when absent. Only text parts are
+eligible; tools, reasoning and inherited background are excluded. The request
+is the first recorded owned user text, not an inferred task purpose. The reply
+is the latest recorded final text, otherwise the latest assistant text, with
+that distinction visible. An excerpt is not evidence of parent-side delivery.
+
+The task map groups by canonical child identity and preserves separate run
+states and source links. Selection loads only that task's excerpts and retains
+them in its pane. A failed load exposes a retry; a late response updates its
+own target without changing selection. Opening a nested task panel closes the
+other panel. Recorded exchanges remain a secondary disclosure. Partial channel
+counts say "at least" rather than implying all returns have been loaded.
+Full history and exact dispatch/excerpt source links remain distinct actions.
+
+Per-message usage and model metadata now use a native disclosure. User and
+assistant prose share a left-aligned reading column; opening the desktop task
+panel reserves a 360–430 px region at the right edge below the top navigation.
+The reading column is bounded to 80ch with actual prose at 18px / 1.78.
+Inline child history includes its own canonical title and close/standalone actions.
+
 ## Shared HTML contract
 
 - The page `.session-workbench` keeps its root `data-provider` and
@@ -125,7 +151,7 @@ prototype is evidence for composition, not a substitute for these checks.
 
 ### Current validation checkpoint
 
-- The option-3 integrated suite passed 704 tests on 2026-09-17. This count is
+- The compact-task integrated suite passed 715 tests on 2026-09-17. This count is
   engineering verification, not final acceptance of the selected visual option. Governance/typechecking and
   `git diff --check` pass. Independent navigation review was followed by
   main-agent source inspection and real browser corrections.
@@ -166,7 +192,30 @@ prototype is evidence for composition, not a substitute for these checks.
   After browser reload, closing it restores both sidebar disclosures, the
   original child link, focus and parent scroll. Desktop light/dark and 320/390px
   checks confirm source jumps, close behavior and no horizontal overflow.
-- The real implementation and selected image were compared at 1487 × 1058.
-  This is a working visual slice: compact task overviews, readable intent/result
-  excerpts, metadata density and the Library remain follow-up work. Overall
-  visual/product acceptance remains open.
+- The real implementation and selected image were compared together at
+  1487 × 1058 with both selected-task sidebar and full inline child open.
+  The resulting slice includes a compact task map, owned request/reply excerpts,
+  folded per-message metadata, 18px prose, explicit inline-child titles and
+  readable Library titles. Nine actual tasks, encrypted request text and long
+  source paths account for content-dependent differences from the two-task mock.
+  The private `design-qa.md` records the comparison iterations and screenshots.
+- The selected preview endpoint was checked against each of seven installed
+  provider samples: both excerpts are bounded and their source anchors exist in
+  the actual Reader. Missing provider/session paths return 404. Lazy loading,
+  selection preservation, retry and out-of-order responses have focused tests;
+  only selected tasks load excerpts in the real browser. Markdown stays readable.
+- English desktop light/dark, English 320px and Chinese 390px light/dark checks
+  cover this slice. Chinese validation used a temporary isolated viewer-metadata
+  service and real OpenCode data; it did not modify provider files. The 390px
+  inline-child title/control check has no full-page horizontal overflow.
+  Source jumps, reload/close selection and trigger focus remain correct.
+- Independent review found and verified corrections for native nested-panel
+  mutual exclusion and per-run recorded states; known unavailable children now
+  state that locally. Full-product P1–P12 coverage and user visual acceptance
+  remain open in the presentation contract.
+- Final publish validation after the child-title and marker-size corrections:
+  `npm test` passes 715/715, `npm run pre-push` passes, full live `qa:e2e`
+  returns `ok:true` with no browser errors, and Windows `build:binary` plus
+  `smoke:binary` passes with embedded assets and five MCP tools verified.
+  Local evidence uses the ignored `tmp/reader-compact-publish-*-20260917.log`
+  files; the seven-provider check is `tmp/reader-compact-final-api-20260917.log`.

@@ -439,6 +439,7 @@ test('ordinary child links mount complete history inline and preserve the parent
   assert.equal(h.reader.getActivePane(), h.root);
   assert.deepEqual(h.reader.getInlinePanes(), [h.child]);
   assert.equal(h.child.parentElement.className, 'reader-inline-pane');
+  assert.equal(h.child.parentElement.querySelector('.reader-inline-pane-title').textContent, 'child');
   const scopedChildSource = h.child.querySelector('[data-reader-canonical-anchor="child-source"]');
   assert.equal(scopedChildSource.dataset.readerCanonicalAnchor, 'child-source');
   assert.equal(scopedChildSource.id, `reader-scope-${encodeURIComponent('fixture\0child')}--child-source`);

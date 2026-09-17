@@ -20,6 +20,7 @@ export function layout(title: string, body: string, page = "home", { provider = 
   <script>document.documentElement.dataset.theme=localStorage.theme||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light')</script>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/app-shell.css">
+  ${!reader && (page === "home" || page === "search") ? '<link rel="stylesheet" href="/static/library.css">' : ""}
   ${reader ? '<link rel="stylesheet" href="/static/reader.css">' : ""}
   <link rel="stylesheet" href="/static/vendor/highlight.js/github.min.css">
 </head>

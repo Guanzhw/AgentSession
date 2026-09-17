@@ -44,6 +44,16 @@ an on-demand Tasks & collaboration panel for recorded dispatches, exchanges,
 returns and exact sources; ordinary main-agent turns do not construct that
 panel. Surface material product choices for feedback while product-wide and
 user visual acceptance remain open.
+
+The panel now uses a compact canonical task map and selected-task excerpts.
+`src/reader-preview.ts` and `src/routes/reader-preview.ts` serve the first owned
+request and latest recorded final/otherwise latest reply from one normalized
+session document on demand. Source links resolve exact text-part anchors;
+absence remains explicit. The projection never reinterprets provider payloads
+or loads a whole child family. Full child history remains a separate reading
+action. Model/usage metadata moves into a native message disclosure. Library
+title presentation preserves custom-title provenance and uses a short-ID
+untitled label only when no readable provider title is available.
 The [reading-model plan](../../../docs/design/runtime-reading-model.md) defines
 the intended identity, evidence and acceptance boundaries.
 
@@ -89,13 +99,12 @@ and user visual acceptance remain a separate open gate.
 
 ## Verification
 
-The current implementation has 704/704 local tests passing. The latest complete
-real-API validation across seven providers finished with 0 errors; whole-site
-`qa:e2e` exited 0 with `ok:true` and no browser errors, and the Windows final
-binary build and smoke check passed. Real desktop and mobile checks confirmed
-child-history open, refresh, close and return to the canonical sidebar entry
-with focus restored and both nested details expanded. The source selection is
-complete history as the primary reader plus an on-demand Tasks & collaboration
-panel; ordinary main turns do not construct a collaboration panel. Visual
-acceptance remains stage-gated around compact task purpose/return presentation,
-metadata density, and the follow-up Library work.
+The [Reader validation checkpoint](../../../docs/design/runtime-reader-slice.md#current-validation-checkpoint)
+records the current test, seven-provider API, live browser and Windows binary
+results. Real desktop and narrow checks confirm child-history open, refresh,
+close, exact source navigation and restoration of the selected canonical task
+and trigger focus. Independent review corrections preserve separate run states
+and prevent overlapping nested panels. Selected excerpts, folded metadata and
+Library title presentation are implemented; complete history remains primary.
+The product presentation contract owns the remaining P1–P12 acceptance work
+and open user visual acceptance.

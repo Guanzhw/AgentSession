@@ -36,6 +36,7 @@ const mcpEntry = path.join(workDir, "agentsession-mcp.mjs");
 const staticAppAsset = path.join(workDir, "app.js");
 const staticAppShellAsset = path.join(root, "src", "static", "app-shell.css");
 const staticReaderAsset = path.join(root, "src", "static", "reader.css");
+const staticLibraryAsset = path.join(root, "src", "static", "library.css");
 const staticHighlightAsset = path.join(root, "src", "static", "vendor", "highlight.js", "highlight.min.js");
 const staticHighlightThemeAsset = path.join(root, "src", "static", "vendor", "highlight.js", "github.min.css");
 const staticHighlightLicenseAsset = path.join(root, "src", "static", "vendor", "highlight.js", "LICENSE.txt");
@@ -85,6 +86,7 @@ const targets = [
       "static/app.js": staticAppAsset,
       "static/app-shell.css": staticAppShellAsset,
       "static/reader.css": staticReaderAsset,
+      "static/library.css": staticLibraryAsset,
       "static/style.css": path.join(root, "src", "static", "style.css"),
       "static/vendor/highlight.js/highlight.min.js": staticHighlightAsset,
       "static/vendor/highlight.js/github.min.css": staticHighlightThemeAsset,

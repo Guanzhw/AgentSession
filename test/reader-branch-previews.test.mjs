@@ -3,8 +3,6 @@ import test from "node:test";
 
 const { renderSessionPage, renderSessionReaderPane } = await import("../dist/src/views/session.js");
 const { buildMessageSessionTree } = await import("../dist/src/providers/shared/message-session.js");
-const { anchorId } = await import("../dist/src/views/anchors.js");
-const { escapeHtml } = await import("../dist/src/markdown.js");
 const { setLocale } = await import("../dist/src/i18n.js");
 
 function message(id, content, phase, role = "assistant") {
@@ -61,7 +59,7 @@ function branches(html) {
   return output;
 }
 
-test("branch excerpt prefers the latest recorded final reply despite later commentary", () => {
+test("branch renders one lazy preview target despite later commentary", () => {
   const child = childTree([
     message("first-final", "Previous final reply", "final"),
     message("last-final", "Current final reply", "final"),
@@ -69,10 +67,10 @@ test("branch excerpt prefers the latest recorded final reply despite later comme
   ]);
   const html = renderSessionReaderPane(readerInput([child]));
   const [branch] = branches(html);
-  assert.match(branch, /Latest recorded final reply · excerpt/);
-  assert.match(branch, /<blockquote>Current final reply<\/blockquote>/);
-  assert.doesNotMatch(branch, /Previous final reply|Later progress update/);
-  assert.match(branch, /Recorded state: active/);
+  assert.match(branch, /class="reader-task-preview" data-reader-task-preview data-reader-provider="fixture" data-reader-session="child"/);
+  assert.match(branch, /data-reader-preview-content/);
+  assert.doesNotMatch(branch, /Previous final reply|Current final reply|Later progress update/);
+  assert.match(branch, /title="Recorded state">active/);
   assert.doesNotMatch(branch, /state: completed|in_progress/);
   assert.match(branch, /Review the implementation/);
   assert.match(branch, /data-reader-task-lane=[\s\S]*data-channel-id="dispatch"[\s\S]*data-reader-event-id="event:dispatch"/);
@@ -81,7 +79,7 @@ test("branch excerpt prefers the latest recorded final reply despite later comme
   assert.doesNotMatch(branch.match(/<details[^>]*>/)[0], /\sopen(?:\s|>)/);
 });
 
-test("phase-less and commentary-only replies retain a neutral recorded-message label", () => {
+test("phase-less and commentary-only replies retain one lazy preview target", () => {
   for (const phase of [undefined, "commentary"]) {
     const child = childTree([
       message("earlier", "Earlier reply", phase),
@@ -89,13 +87,13 @@ test("phase-less and commentary-only replies retain a neutral recorded-message l
       message("blank", " \n\t ", "final")
     ]);
     const [branch] = branches(renderSessionReaderPane(readerInput([child])));
-    assert.match(branch, /Latest recorded message · excerpt/);
-    assert.match(branch, /<blockquote>Latest available prose<\/blockquote>/);
-    assert.doesNotMatch(branch, /final reply|Earlier reply/);
+    assert.equal((branch.match(/data-reader-task-preview/g) || []).length, 1);
+    assert.match(branch, /data-reader-preview-status/);
+    assert.doesNotMatch(branch, /Latest available prose|Earlier reply/);
   }
 });
 
-test("branch excerpts inspect only direct assistant text, excluding other roles and nested history", () => {
+test("lazy branch preview excludes eager child, role, and nested history bodies", () => {
   const child = childTree([
     message("own", "Child-owned answer", undefined),
     message("user", "User text must stay out", "final", "user"),
@@ -111,25 +109,31 @@ test("branch excerpts inspect only direct assistant text, excluding other roles 
     messages: [message("inherited-final", "Inherited final must stay out", "final")]
   };
   const [branch] = branches(renderSessionReaderPane(input));
-  assert.match(branch, /<blockquote>Child-owned answer<\/blockquote>/);
-  assert.doesNotMatch(branch, /User text|Tool text|Tool output|Reasoning|Grandchild final|Inherited final/);
-  assert.match(branch, /data-reader-excerpt-phase="message"/);
+  assert.match(branch, /data-reader-task-preview/);
+  assert.doesNotMatch(branch, /Child-owned answer|User text|Tool text|Tool output|Reasoning|Grandchild final|Inherited final/);
 });
 
-test("empty branches omit the excerpt while preserving their recorded task and state", () => {
+test("empty branches preserve their recorded task and state beside lazy preview", () => {
   const child = childTree([
     message("user", "Only user text", undefined, "user"),
     { ...message("reasoning", "", "final"), thinking: "Only reasoning" },
     message("empty", " \n ", "final")
   ]);
   const [branch] = branches(renderSessionReaderPane(readerInput([child])));
-  assert.doesNotMatch(branch, /data-reader-branch-excerpt|unavailable|No reply|not recorded/);
+  assert.match(branch, /data-reader-task-preview/);
+  assert.doesNotMatch(branch, /data-reader-branch-excerpt|Only user text|Only reasoning/);
   assert.match(branch, /Review the implementation/);
-  assert.match(branch, /Recorded state: active/);
+  assert.match(branch, /title="Recorded state">active/);
   assert.match(branch, /data-reader-open/);
 });
 
-test("multiple run cards share one canonical child excerpt and retain separate run states", () => {
+test("known unavailable child is explained in the selected task", () => {
+  const [branch] = branches(renderSessionReaderPane(readerInput([], [card({ childSessionAvailable: false })])));
+  assert.match(branch, /Child session unavailable/);
+  assert.doesNotMatch(branch, /data-reader-task-preview|data-reader-open/);
+});
+
+test("multiple run cards share one lazy preview target and retain separate run states", () => {
   const child = childTree([message("final", "One child final", "final")]);
   const input = readerInput([child], [
     card({ state: "completed", responsibility: "First assignment" }),
@@ -138,11 +142,11 @@ test("multiple run cards share one canonical child excerpt and retain separate r
   const output = branches(renderSessionReaderPane(input));
   assert.equal(output.length, 1);
   const [branch] = output;
-  assert.equal((branch.match(/data-reader-branch-excerpt/g) || []).length, 1);
-  assert.equal((branch.match(/data-reader-open/g) || []).length, 1);
+  assert.equal((branch.match(/data-reader-task-preview/g) || []).length, 1);
+  assert.match(branch, /data-reader-open data-reader-provider="fixture" data-reader-session="child"/);
   assert.match(branch, /data-reader-branch-run="run:first"[\s\S]*First assignment[\s\S]*Recorded state: completed/);
   assert.match(branch, /data-reader-branch-run="run:second"[\s\S]*Follow-up assignment[\s\S]*Recorded state: active/);
-  assert.equal((branch.match(/One child final/g) || []).length, 1);
+  assert.doesNotMatch(branch, /One child final/);
 });
 
 test("one canonical task contains distinct followups and returns with owning source and paging", () => {
@@ -163,7 +167,9 @@ test("one canonical task contains distinct followups and returns with owning sou
   }
   assert.match(branch, /data-reader-session="child" data-reader-event-id="event:return-1"/);
   assert.match(branch, /reader\/coordination\?size=50&amp;runId=first&amp;cursor=cursor%3Anext/);
-  assert.doesNotMatch(branch, /<details[^>]*data-agent-channel/);
+  const channels = [...branch.matchAll(/<details[^>]*data-agent-channel[^>]*>/g)].map((match) => match[0]);
+  assert.equal(channels.length, 2);
+  channels.forEach((openingTag) => assert.doesNotMatch(openingTag, /\sopen(?:\s|>)/));
 });
 
 test("canonical branch identity includes provider and uses attached as well as detached children", () => {
@@ -173,8 +179,8 @@ test("canonical branch identity includes provider and uses attached as well as d
   input.sessionTree.messages[0].parts[0].childSessions = [attached];
   const output = branches(renderSessionReaderPane(input));
   assert.equal(output.length, 2);
-  assert.match(output[0], /data-reader-branch-provider="fixture"[\s\S]*Detached provider reply/);
-  assert.match(output[1], /data-reader-branch-provider="other-provider"[\s\S]*Attached provider reply/);
+  assert.match(output[0], /data-reader-branch-provider="fixture"[\s\S]*data-reader-task-preview/);
+  assert.match(output[1], /data-reader-branch-provider="other-provider"[\s\S]*data-reader-task-preview/);
 });
 
 test("only consecutive routine messages fold between visible task milestones", () => {
@@ -190,25 +196,15 @@ test("only consecutive routine messages fold between visible task milestones", (
   assert.ok(branch.indexOf('data-reader-open') < branch.indexOf('data-agent-channel'), 'Full history remains discoverable above the record sequence');
 });
 
-test("bounded escaped excerpts link to the exact normalized child text part", () => {
-  const raw = `<script>alert('unsafe')<\/script> & \"quoted\"\n${"readable ".repeat(45)}`;
-  const child = childTree([message("reply:/source?!", raw, "final")], "fixture", "child:/punctuation");
+test("lazy branches retain canonical child identity for bounded preview loading", () => {
+  const child = childTree([message("reply:/source?!", "reply", "final")], "fixture", "child:/punctuation");
   const input = readerInput([child], [card({ childSession: { provider: "fixture", sessionId: child.session.id } })]);
   const [branch] = branches(renderSessionReaderPane(input));
-  const part = child.messages[0].parts.find((item) => item.type === "text");
-  const target = anchorId("part", part.id);
-  const expected = `${raw.slice(0, 239)}…`;
-  assert.equal(expected.length, 240);
-  assert.ok(branch.includes(`<blockquote>${escapeHtml(expected)}</blockquote>`));
-  assert.doesNotMatch(branch, /<script>/);
-  assert.ok(branch.includes(`data-reader-source data-reader-provider="fixture" data-reader-session="child:/punctuation" data-reader-anchor="${target}"`));
-  assert.ok(branch.includes(`href="/fixture/session/child%3A%2Fpunctuation#${target}"`));
-  const childPane = renderSessionReaderPane({ session: child.session, sessionTree: child, provider: "fixture" });
-  assert.ok(childPane.includes(`id="${target}"`), "the source link names the actual child reader text part");
-  assert.equal((branch.match(/id="part-/g) || []).length, 0, "the excerpt does not clone the child source anchor");
+  assert.match(branch, /data-reader-task-preview data-reader-provider="fixture" data-reader-session="child:\/punctuation"/);
+  assert.doesNotMatch(branch, /reply<\/blockquote>/);
 });
 
-test("initial page and lazy reader fragment render identical branch evidence in both locales", () => {
+test("initial page and lazy reader fragment render one preview target in both locales", () => {
   const input = readerInput([childTree([message("final", "Readable child reply", "final")])]);
   try {
     for (const locale of ["en", "zh"]) {
@@ -216,7 +212,7 @@ test("initial page and lazy reader fragment render identical branch evidence in 
       const pane = renderSessionReaderPane(input);
       const page = renderSessionPage(input);
       assert.equal(rail(page), rail(pane));
-      assert.match(rail(pane), locale === "zh" ? /最新记录的最终回复 · 摘录/ : /Latest recorded final reply · excerpt/);
+      assert.equal((rail(pane).match(/data-reader-task-preview/g) || []).length, 1);
       assert.match(rail(pane), locale === "zh" ? /派发/ : /Dispatch/);
     }
   } finally {

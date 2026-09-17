@@ -67,7 +67,7 @@ function relationHarness(t, entries, { narrow = false, selected = '', enabled = 
     const overview = new Element({ readerCollaborationOverview: '' }, 'details');
     overview.open = false;
     for (const lane of lanes) {
-      const detail = new Element({ readerTaskLane: lane }, 'details');
+      const detail = new Element({ readerBranch: '', readerBranchKey: lane, readerTaskLane: lane }, 'details');
       detail.open = false;
       overview.append(detail);
     }
@@ -109,7 +109,7 @@ function relationHarness(t, entries, { narrow = false, selected = '', enabled = 
   initReaderRelations();
   const flush = () => { for (const [id, callback] of [...frames]) { frames.delete(id); callback(); } };
   return {
-    ...original, workbench, window, media, frames, observers, toggle, makeSection, flush,
+    ...original, workbench, window, media, frames, observers, toggle, makeSection, flush, Element,
     selectLane(lane) { original.select.value = lane; workbench.dispatchEvent({ type: 'change', target: original.select }); flush(); },
     selectPaneLane(pane, lane) { pane.select.value = lane; workbench.dispatchEvent({ type: 'change', target: pane.select }); flush(); },
     resize(value) { media.matches = value; media.dispatchEvent({ type: 'change' }); flush(); },
@@ -258,4 +258,88 @@ test('milestone focus opens the owning collaboration detail and the header trigg
   h.workbench.dispatchEvent({ type: 'click', target: h.toggle, preventDefault() {}, stopPropagation() {} });
   assert.equal(h.overview.open, false);
   assert.equal(h.toggle.attributes.get('aria-expanded'), 'false');
+});
+
+test('task selection loads only its own preview, caches it and isolates late responses', async (t) => {
+  const h = relationHarness(t, entries);
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', (url) => new Promise((resolve) => requests.push({ url, resolve })));
+  const previews = [];
+  const buttons = [];
+  for (const branch of h.overview.querySelectorAll('[data-reader-branch]')) {
+    const key = branch.dataset.readerBranchKey;
+    const button = new h.Element({ readerTaskSelect: key }, 'button');
+    h.overview.append(button);
+    buttons.push(button);
+    const preview = new h.Element({ readerTaskPreview: '', readerProvider: 'fixture', readerSession: key, loadingLabel: 'Loading', errorLabel: 'Failed' });
+    const status = new h.Element({ readerPreviewStatus: '' });
+    const content = new h.Element({ readerPreviewContent: '' });
+    const retry = new h.Element({ readerPreviewRetry: '' });
+    preview.append(status); preview.append(content); preview.append(retry);
+    branch.append(preview);
+    previews.push({ preview, status, content, retry });
+  }
+  assert.equal(requests.length, 0);
+  h.workbench.dispatchEvent({ type: 'click', target: h.toggle });
+  h.workbench.dispatchEvent({ type: 'click', target: buttons[0] });
+  assert.equal(requests.length, 1, 'duplicate selection reuses the pending request');
+  assert.equal(requests[0].url, '/api/fixture/session/child%3Aimplementation/reader/preview');
+  h.workbench.dispatchEvent({ type: 'click', target: buttons[1] });
+  assert.equal(requests.length, 2);
+  requests[1].resolve({ ok: true, json: async () => ({ html: '<p>Review reply</p>' }) });
+  await new Promise(setImmediate);
+  requests[0].resolve({ ok: true, json: async () => ({ html: '<p>Implementation reply</p>' }) });
+  await new Promise(setImmediate);
+  assert.equal(previews[0].content.innerHTML, '<p>Implementation reply</p>');
+  assert.equal(previews[1].content.innerHTML, '<p>Review reply</p>');
+  assert.equal(buttons[1].attributes.get('aria-pressed'), 'true');
+  assert.equal(buttons[0].attributes.get('aria-pressed'), 'false');
+  h.workbench.dispatchEvent({ type: 'click', target: buttons[0] });
+  assert.equal(requests.length, 2, 'loaded preview stays cached in its pane');
+  assert.equal(previews[0].status.hidden, true);
+});
+
+test('failed preview keeps a visible retry and nested task panels do not overlap', async (t) => {
+  const h = relationHarness(t, entries);
+  const branch = h.overview.querySelector('[data-reader-branch]');
+  const preview = new h.Element({ readerTaskPreview: '', readerProvider: 'fixture', readerSession: 'child', loadingLabel: 'Loading', errorLabel: 'Failed' });
+  const status = new h.Element({ readerPreviewStatus: '' });
+  const content = new h.Element({ readerPreviewContent: '' });
+  const retry = new h.Element({ readerPreviewRetry: '' });
+  preview.append(status); preview.append(content); preview.append(retry); branch.append(preview);
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => ++calls === 1 ? { ok: false, status: 404 } : { ok: true, json: async () => ({ html: '<p>Loaded</p>' }) });
+  h.workbench.dispatchEvent({ type: 'click', target: h.toggle });
+  await new Promise(setImmediate);
+  assert.equal(status.textContent, 'Failed (HTTP 404)');
+  assert.equal(retry.hidden, false);
+  h.workbench.dispatchEvent({ type: 'click', target: retry });
+  await new Promise(setImmediate);
+  assert.equal(content.innerHTML, '<p>Loaded</p>');
+  assert.equal(retry.hidden, true);
+  const child = h.makeSection([{ lane: 'grandchild', kind: 'spawn', sequence: 1 }]);
+  h.pane.append(child.pane);
+  h.workbench.dispatchEvent({ type: 'session-reader:inline-opened', detail: { pane: child.pane } });
+  h.workbench.dispatchEvent({ type: 'click', target: child.milestones[0].button });
+  assert.equal(child.overview.open, true);
+  assert.equal(h.overview.open, false);
+});
+
+test('native nested overview selection is exclusive and collapsed task is no longer pressed', (t) => {
+  const h = relationHarness(t, entries);
+  h.workbench.dispatchEvent({ type: 'click', target: h.toggle });
+  const child = h.makeSection([{ lane: 'grandchild', kind: 'spawn', sequence: 1 }]);
+  h.pane.append(child.pane);
+  h.workbench.dispatchEvent({ type: 'session-reader:inline-opened', detail: { pane: child.pane } });
+  child.overview.open = true;
+  h.workbench.dispatchEvent({ type: 'toggle', target: child.overview });
+  assert.equal(h.overview.open, false);
+  const branch = child.overview.querySelector('[data-reader-branch]');
+  assert.equal(branch.open, true);
+  const button = new h.Element({ readerTaskSelect: branch.dataset.readerBranchKey }, 'button');
+  button.setAttribute('aria-pressed', 'true');
+  child.overview.append(button);
+  branch.open = false;
+  h.workbench.dispatchEvent({ type: 'toggle', target: branch });
+  assert.equal(button.attributes.get('aria-pressed'), 'false');
 });

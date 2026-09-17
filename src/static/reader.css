@@ -1,6 +1,8 @@
 /* Reader presentation: a continuous document with evidence kept close to
    the passage that names it.  This file is loaded only for reader pages. */
+body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary); }
 .session-workbench[data-session-reader] {
+  --reader-panel-width: clamp(360px, 28vw, 430px);
   --reader-ink: var(--text-primary);
   --reader-muted: var(--text-muted, var(--text-secondary));
   --reader-line: var(--border-color);
@@ -9,7 +11,18 @@
   --reader-accent: var(--accent-color);
   --reader-accent-soft: var(--v2-accent-soft, var(--bg-secondary));
   color: var(--reader-ink);
+  background: var(--reader-surface);
 }
+
+.session-workbench[data-session-reader] > .main-content { max-width: 1040px; margin-inline: auto; }
+.session-workbench[data-session-reader] .session-header h1 { font-size: 26px; line-height: 1.4; }
+.session-workbench[data-session-reader] .session-meta-row { font-size: 12px; }
+.session-workbench[data-session-reader] .message-usage { margin-left: auto; font-size: 12px; }
+.session-workbench[data-session-reader] .message-usage > summary { cursor: pointer; color: var(--reader-muted); }
+.session-workbench[data-session-reader] .message-usage-body { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; padding: 10px; background: var(--bg-secondary); border-radius: 6px; }
+.session-workbench[data-session-reader] .message-usage[open] { flex: 1 1 100%; }
+.session-workbench[data-session-reader] .message-role { background: none; border: 0; color: var(--reader-ink); text-transform: none; font-size: 15px; font-weight: 650; padding: 0; }
+.session-workbench[data-session-reader] .message-time { margin-left: 4px; }
 
 .session-workbench[data-session-reader] [data-reader-pane] {
   min-width: 0;
@@ -108,9 +121,10 @@
 }
 
 .session-workbench[data-session-reader] [data-reader-pane] > .reader-pane-grid > .reader-pane-main {
-  width: min(100%, 74ch);
-  max-width: 74ch;
+  width: min(100%, 80ch);
+  max-width: 80ch;
   min-width: 0;
+  font-size: 18px;
   margin-inline: auto;
 }
 
@@ -135,27 +149,25 @@
 }
 
 .session-workbench[data-session-reader] [data-reader-pane] .thread-turn-header {
-  margin: 0 0 8px;
-  color: var(--reader-muted);
-  font-size: 11px;
-  letter-spacing: .02em;
+  display: none;
 }
 
 .session-workbench[data-session-reader] [data-reader-pane] .message-turn-assistant {
-  padding: 4px 0;
+  padding: 20px 0;
   border: 0;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
+  border-top: 1px solid var(--reader-line);
 }
 
 .session-workbench[data-session-reader] [data-reader-pane] .message-turn-user {
-  align-self: flex-end;
-  width: min(92%, 58ch);
-  padding: 11px 14px;
-  border: 1px solid var(--reader-line);
-  border-radius: 10px 10px 3px 10px;
-  background: var(--reader-user);
+  align-self: stretch;
+  width: 100%;
+  padding: 18px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .session-workbench[data-session-reader] [data-reader-pane] .message-user {
@@ -169,7 +181,7 @@
 .session-workbench[data-session-reader] [data-reader-pane] .message-content,
 .session-workbench[data-session-reader] [data-reader-pane] .message-body {
   max-width: 72ch;
-  font-size: 16px;
+  font-size: 18px;
   line-height: 1.78;
   overflow-wrap: anywhere;
 }
@@ -192,16 +204,13 @@
 }
 
 .session-workbench[data-session-reader] .reader-relations-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px 10px;
-  margin: 4px 0 15px;
-  padding: 5px 0 9px;
-  border-bottom: 1px solid var(--reader-line);
+  margin: 4px 0 12px;
+  padding: 0;
   color: var(--reader-muted);
   font-size: 12px;
 }
+.session-workbench[data-session-reader] .reader-relations-toolbar > summary { cursor: pointer; }
+.session-workbench[data-session-reader] .reader-relations-options { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 0; }
 
 .session-workbench[data-session-reader] .reader-relations-label {
   color: var(--reader-ink);
@@ -311,7 +320,7 @@
   border-radius: 0 5px 5px 0;
   background: color-mix(in srgb, var(--reader-accent) 4%, transparent);
   color: var(--reader-muted);
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -342,7 +351,7 @@
   overflow-wrap: anywhere;
 }
 
-.session-workbench[data-session-reader] [data-reader-lane-focus] span,
+.session-workbench[data-session-reader] [data-reader-lane-focus] span { font-size: 13px; }
 .session-workbench[data-session-reader] .reader-milestone-body time {
   color: var(--reader-muted);
   font-size: 11px;
@@ -358,6 +367,7 @@
   flex-wrap: wrap;
   grid-column: 1 / -1;
   gap: 4px 10px;
+  font-size: 12px;
 }
 
 .session-workbench[data-session-reader] .reader-milestone-links a,
@@ -374,7 +384,6 @@
 .session-workbench[data-session-reader] .reader-milestone-muted .reader-milestone-body {
   border-left-color: var(--reader-line);
   background: transparent;
-  opacity: .62;
 }
 
 /* Collaboration is a native disclosure. It is absent entirely when the
@@ -411,44 +420,21 @@
 }
 
 .session-workbench[data-session-reader] .reader-collaboration {
-  width: min(100%, 430px);
-  margin: 0 0 14px auto;
-  padding: 15px 16px;
-  border: 1px solid var(--reader-line);
-  border-left: 3px solid var(--reader-accent);
-  border-radius: 8px;
+  width: var(--reader-panel-width);
+  margin: 0;
+  padding: 24px;
+  border: 0;
+  border-left: 1px solid var(--reader-line);
+  border-radius: 0;
   background: var(--reader-surface);
   overflow-wrap: anywhere;
-  max-height: calc(100dvh - var(--topbar-height) - 56px);
+  max-height: none;
   overflow-y: auto;
 }
 
 @media (min-width: 1100px) {
-  .session-workbench[data-session-reader] .reader-pane-grid:has(> .reader-pane-main > .reader-collaboration-overview[open]) > .reader-toc-disclosure {
-    width: min(1180px, 100%);
-  }
-  /* Once opened, the overview earns a bounded companion column without
-     reserving an empty rail for ordinary sessions. */
-  .session-workbench[data-session-reader] [data-reader-pane] > .reader-pane-grid > .reader-pane-main:has(> .reader-collaboration-overview[open]) {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) clamp(360px, 28vw, 430px);
-    gap: 28px;
-    width: min(1180px, 100%);
-    max-width: none;
-    align-items: start;
-  }
-  .session-workbench[data-session-reader] .reader-pane-main:has(> .reader-collaboration-overview[open]) > .conversation-layout,
-  .session-workbench[data-session-reader] .reader-pane-main:has(> .reader-collaboration-overview[open]) > [data-inherited-context] {
-    grid-column: 1;
-  }
-  .session-workbench[data-session-reader] .reader-pane-main:has(> .reader-collaboration-overview[open]) > .reader-collaboration-overview {
-    grid-column: 2;
-    grid-row: 1;
-    width: 100%;
-    margin: 0;
-    position: sticky;
-    top: var(--topbar-height);
-  }
+  .session-workbench[data-session-reader]:has(.reader-collaboration-overview[open]) > .main-content { max-width: none; width: calc(100% - var(--reader-panel-width)); margin-left: 0; margin-right: var(--reader-panel-width); padding-right: 24px; }
+  .session-workbench[data-session-reader] .reader-collaboration-overview[open] > .reader-collaboration { position: fixed; top: var(--topbar-height); right: 0; bottom: 0; z-index: 40; }
 }
 
 .session-workbench[data-session-reader] .reader-collaboration-overview[open] > .reader-collaboration-overview-summary {
@@ -457,7 +443,7 @@
 
 .session-workbench[data-session-reader] .reader-collaboration-heading {
   position: sticky;
-  top: -15px;
+  top: -24px;
   z-index: 1;
   background: var(--reader-surface);
   display: flex;
@@ -468,7 +454,7 @@
 .session-workbench[data-session-reader] .reader-collaboration h2 {
   margin: 0 0 4px;
   color: var(--reader-ink);
-  font-size: 15px;
+  font-size: 20px;
 }
 .session-workbench[data-session-reader] .reader-collaboration-close {
   display: inline-flex;
@@ -486,22 +472,23 @@
 .session-workbench[data-session-reader] .reader-collaboration-close:hover { color: var(--reader-ink); background: var(--reader-accent-soft); }
 .session-workbench[data-session-reader] .reader-collaboration-close .ui-icon { width: 16px; height: 16px; }
 .session-workbench[data-session-reader] .reader-collaboration-note,
-.session-workbench[data-session-reader] .reader-collaboration-summary {
-  color: var(--reader-muted);
-  font-size: 11px;
-}
-.session-workbench[data-session-reader] .reader-collaboration-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  margin: 10px 0;
-}
-.session-workbench[data-session-reader] .reader-branch-root { margin-top: 16px; font-size: 13px; font-weight: 650; }
-.session-workbench[data-session-reader] .reader-branches { display: grid; gap: 8px; margin: 0 0 16px 7px; padding: 12px 0 0 16px; border-left: 1px solid var(--reader-line); }
-.session-workbench[data-session-reader] .reader-branch { position: relative; min-width: 0; border: 1px solid var(--reader-line); border-radius: 6px; padding-inline: 10px; }
-.session-workbench[data-session-reader] .reader-branch::before { content: ""; position: absolute; top: 18px; left: -17px; width: 16px; border-top: 1px solid var(--reader-line); }
-.session-workbench[data-session-reader] .reader-branch[data-reader-task-selected="true"] { border-color: var(--reader-accent); background: var(--reader-accent-soft); }
-.session-workbench[data-session-reader] .reader-branch-name { font-size: 13px; }
+.session-workbench[data-session-reader] .reader-task-map { margin: 24px 0; }
+.session-workbench[data-session-reader] .reader-branch-root { font-size: 14px; font-weight: 650; }
+.session-workbench[data-session-reader] .reader-task-nodes { display: grid; gap: 4px; margin-left: 8px; padding: 12px 0 0 16px; border-left: 1px solid var(--reader-line); max-height: 290px; overflow-y: auto; }
+.session-workbench[data-session-reader] .reader-task-node { position: relative; display: flex; width: 100%; min-width: 0; gap: 10px; padding: 11px 12px; text-align: left; border: 0; border-radius: 7px; background: transparent; color: var(--reader-ink); font: inherit; cursor: pointer; }
+.session-workbench[data-session-reader] .reader-task-node::before { content: ""; position: absolute; top: 23px; left: -16px; width: 16px; border-top: 1px solid var(--reader-line); }
+.session-workbench[data-session-reader] .reader-task-node .ui-icon { width: 17px; height: 17px; margin-top: 2px; }
+.session-workbench[data-session-reader] .reader-task-node[aria-pressed="true"] { color: var(--reader-accent); background: var(--reader-accent-soft); }
+.session-workbench[data-session-reader] .reader-task-node:hover { background: var(--reader-accent-soft); }
+.session-workbench[data-session-reader] .reader-task-node-copy { min-width: 0; flex: 1; }
+.session-workbench[data-session-reader] .reader-task-node-copy strong { display: block; font-size: 14px; overflow-wrap: anywhere; }
+.session-workbench[data-session-reader] .reader-task-node-state, .session-workbench[data-session-reader] .reader-task-node-moments { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 4px; font-size: 11px; color: var(--reader-muted); }
+.session-workbench[data-session-reader] .reader-branches { margin-top: 20px; border-top: 1px solid var(--reader-line); }
+.session-workbench[data-session-reader] .reader-branch { min-width: 0; border: 0; border-radius: 0; padding: 16px 0 0; }
+.session-workbench[data-session-reader] [data-reader-task-enhanced] .reader-branch:not([open]) { display: none; }
+.session-workbench[data-session-reader] [data-reader-task-enhanced] .reader-branch > summary { list-style: none; }
+.session-workbench[data-session-reader] [data-reader-task-enhanced] .reader-branch > summary::-webkit-details-marker { display: none; }
+.session-workbench[data-session-reader] .reader-branch-name { font-size: 18px; }
 .session-workbench[data-session-reader] .reader-branch-state { display: block; margin-top: 3px; color: var(--reader-muted); font-size: 12px; font-weight: 400; }
 .session-workbench[data-session-reader] .reader-branch .agent-channel { margin: 12px 0; border: 0; background: transparent; }
 .session-workbench[data-session-reader] .reader-branch h3.agent-channel-summary { padding: 0 0 8px; margin: 0; font-size: 12px; }
@@ -523,16 +510,17 @@
   font-size: 12px;
   font-weight: 600;
 }
-.session-workbench[data-session-reader] .reader-branch-body { padding: 0 0 9px 12px; }
-.session-workbench[data-session-reader] .reader-branch-run,
-.session-workbench[data-session-reader] .reader-branch-excerpt { margin: 7px 0; }
-.session-workbench[data-session-reader] .reader-branch-excerpt blockquote {
-  margin: 5px 0;
-  padding-left: 10px;
-  border-left: 2px solid var(--reader-line);
-  color: var(--reader-muted);
-  font-size: 12px;
-}
+.session-workbench[data-session-reader] .reader-branch-body { padding: 0 0 9px; }
+.session-workbench[data-session-reader] .reader-child-history-link { display: inline-block; margin: 8px 0 12px; font-size: 13px; }
+.session-workbench[data-session-reader] .reader-task-preview h4 { margin: 14px 0 6px; font-size: 14px; }
+.session-workbench[data-session-reader] .reader-task-preview blockquote { margin: 0; padding: 12px; border-radius: 6px; background: var(--bg-secondary); color: var(--reader-muted); font-size: 14px; line-height: 1.65; overflow-wrap: anywhere; }
+.session-workbench[data-session-reader] .reader-task-preview blockquote > :first-child { margin-top: 0; }
+.session-workbench[data-session-reader] .reader-task-preview blockquote > :last-child { margin-bottom: 0; }
+.session-workbench[data-session-reader] .reader-task-preview pre { max-width: 100%; overflow: auto; font-size: 12px; }
+.session-workbench[data-session-reader] .reader-task-preview a, .session-workbench[data-session-reader] .reader-task-dispatch-source { display: block; margin: 8px 0; font-size: 12px; }
+.session-workbench[data-session-reader] [data-reader-preview-status] { color: var(--reader-muted); font-size: 13px; }
+.session-workbench[data-session-reader] [data-reader-preview-retry] { font: inherit; color: var(--reader-accent); background: transparent; border: 1px solid var(--reader-line); border-radius: 5px; padding: 5px 9px; cursor: pointer; }
+.session-workbench[data-session-reader] .reader-branch-run { margin: 7px 0; }
 .session-workbench[data-session-reader] .reader-observation-sequence,
 .session-workbench[data-session-reader] .reader-relationship-list { display: grid; gap: 7px; margin: 0 0 12px; padding-left: 18px; }
 .session-workbench[data-session-reader] .reader-observation-sequence-item { display: flex; flex-wrap: wrap; gap: 4px 9px; align-items: baseline; font-size: 11px; }
@@ -573,6 +561,7 @@
   cursor: pointer;
   font: inherit;
 }
+.session-workbench[data-session-reader] .reader-inline-pane-title { flex: 1 1 100%; margin: 0 0 4px; font-size: 16px; line-height: 1.5; color: var(--reader-ink); overflow-wrap: anywhere; }
 .session-workbench[data-session-reader] .reader-inline-pane-standalone { color: var(--reader-accent); }
 .session-workbench[data-session-reader] .reader-inline-pane > [data-reader-pane] > .reader-pane-grid { display: block; }
 .session-workbench[data-session-reader] .reader-inline-pane > [data-reader-pane] > .reader-pane-grid > .session-toc {
@@ -592,7 +581,7 @@
   overflow: auto;
 }
 
-.session-workbench[data-session-reader] :is(.reader-collaboration-overview-summary, [data-reader-lane-select], [data-reader-lane-focus], .reader-inline-pane-close, .reader-collaboration-close, .reader-branch summary, .reader-observations-expanded summary, .reader-inspector-disclosure summary):focus-visible {
+.session-workbench[data-session-reader] :is(.reader-collaboration-overview-summary, [data-reader-lane-select], [data-reader-lane-focus], [data-reader-task-select], .message-usage summary, .reader-inline-pane-close, .reader-collaboration-close, .reader-branch summary, .reader-observations-expanded summary, .reader-inspector-disclosure summary):focus-visible {
   outline: 2px solid var(--reader-accent);
   outline-offset: 3px;
 }

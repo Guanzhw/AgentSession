@@ -11,6 +11,7 @@ const staticDir = path.resolve("dist", "src", "static");
 const assets = [
   ["app-shell.css", "text/css; charset=utf-8"],
   ["reader.css", "text/css; charset=utf-8"],
+  ["library.css", "text/css; charset=utf-8"],
   ["vendor/lucide/book-open.svg", "image/svg+xml; charset=utf-8"],
   ["vendor/lucide/chart-no-axes-column.svg", "image/svg+xml; charset=utf-8"],
   ["vendor/lucide/chevron-down.svg", "image/svg+xml; charset=utf-8"],

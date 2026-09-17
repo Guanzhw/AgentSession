@@ -1,6 +1,7 @@
 import { escapeHtml, renderMarkdown } from "../markdown.js";
 import { t, getLocale } from "../i18n.js";
 import { anchorId } from "./anchors.js";
+import { resolveLibraryTitle } from "../session-title.js";
 import type {
   ContextChangeResult,
   ContextChangeRetainedEntry,
@@ -587,7 +588,7 @@ function renderListStatChips(s: any) {
 
 export function sessionCard(s: any, active = false, { showCheckbox = false, provider = "opencode", manageable = false, showProvider = true, providerName = "", returnTo = "" } = {}) {
   const sessionProvider = s.provider || provider;
-  const title = s.title || s.slug || s.id;
+  const title = resolveLibraryTitle(s);
   const encodedProvider = encodeURIComponent(sessionProvider);
   const encodedSessionId = encodeURIComponent(s.id);
   const exportFilePrefix = `session-${String(s.id).slice(0, 8)}`;
@@ -649,7 +650,7 @@ export function sessionCard(s: any, active = false, { showCheckbox = false, prov
 }
 
 export function messageHeader(role: any, meta: any = {}) {
-  const safeRole = escapeHtml(role || "unknown");
+  const safeRole = escapeHtml(["user", "assistant", "agent"].includes(role) ? t(`detail.role_${role}`) : role || "unknown");
   const model = meta.model ? `<span class="message-model">${escapeHtml(meta.model)}</span>` : "";
   const requestCount = Math.max(0, Number(meta.tokenRequestCount) || (meta.tokens ? 1 : 0));
   const requestCountText = formatCompactCount(requestCount);
@@ -669,11 +670,8 @@ export function messageHeader(role: any, meta: any = {}) {
 
   return `<header class="message-meta">
       <span class="message-role">${safeRole}</span>
-      ${model}
-      ${tokenMarkup}
-      ${contextLabel}
-      ${requestLabel}
       ${time}
+      ${model || tokenMarkup || contextLabel || requestLabel ? `<details class="message-usage"><summary>${escapeHtml(t("detail.usage_and_model"))}</summary><div class="message-usage-body">${model}${tokenMarkup}${contextLabel}${requestLabel}</div></details>` : ""}
     </header>`;
 }
 

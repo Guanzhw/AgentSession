@@ -1132,7 +1132,7 @@ function renderAgentChannel(channel: ConversationChannelItem[], truncated: boole
       : `<span class="agent-channel-kind">${escapeHtml(coordinationKindLabel(item.kind))}</span>`;
     return `<li class="agent-channel-item" data-channel-kind="${escapeHtml(item.kind)}" data-channel-id="${escapeHtml(item.id)}">
       ${kindMarkup}
-      ${stateLabel && (disclosure || item.state !== "unknown") ? `<span class="agent-channel-state">${escapeHtml(stateLabel)}</span>` : ""}
+      ${stateLabel && item.state !== "unknown" ? `<span class="agent-channel-state">${escapeHtml(stateLabel)}</span>` : ""}
       ${channelTimeLabel(item.timestamp) ? `<time class="agent-channel-time">${escapeHtml(channelTimeLabel(item.timestamp)!)}</time>` : ""}
       ${directionLabel}
     </li>`;
@@ -1140,7 +1140,7 @@ function renderAgentChannel(channel: ConversationChannelItem[], truncated: boole
   const groups: string[] = [];
   for (let index = 0; index < channel.length;) {
     let end = index + 1;
-    if (!disclosure && channel[index].kind === "message") {
+    if (channel[index].kind === "message") {
       while (end < channel.length && channel[end].kind === "message") end += 1;
     }
     const group = itemMarkup.slice(index, end).join("\n");
@@ -1622,26 +1622,6 @@ function renderConversationPanel(entries: ConversationEntry[], compactions: any[
     </div>`;
 }
 
-function readerChildReplyExcerpt(tree: SessionTree) {
-  let latest: { partId: string; text: string; final: boolean } | null = null;
-  for (let index = tree.messages.length - 1; index >= 0; index -= 1) {
-    const message = tree.messages[index];
-    if (message.role !== "assistant" && message.role !== "agent") continue;
-    const part = message.parts.find((candidate) => candidate.type === "text"
-      && typeof candidate.data.text === "string" && candidate.data.text.trim());
-    if (!part) continue;
-    const text = part.data.text.trim();
-    const excerpt = {
-      partId: part.id,
-      text: text.length > 240 ? `${text.slice(0, 239)}…` : text,
-      final: message.data.presentationPhase === "final"
-    };
-    if (excerpt.final) return excerpt;
-    latest ??= excerpt;
-  }
-  return latest;
-}
-
 function renderReaderBranches(cards: ConversationAgentCard[], tree: SessionTree | null, provider: string, sessionId: string, ownedReader: OwnedReaderProjection | null, readerRelations: ReaderRelations | null) {
   const children = new Map<string, ReaderChildTarget>();
   if (tree) {
@@ -1662,41 +1642,52 @@ function renderReaderBranches(cards: ConversationAgentCard[], tree: SessionTree 
     branch.push(card);
     branches.set(key, branch);
   }
-  return [...branches].map(([href, runs]) => {
+  const taskNodes: string[] = [];
+  const taskDetails = [...branches].map(([href, runs]) => {
     const first = runs[0];
     const child = first.childSession;
     const available = child && runs.some((run) => run.childSessionAvailable !== false);
     const childTarget = available ? children.get(href) : null;
-    const childTree = childTarget && !isOwnedReaderChild(childTarget) ? childTarget : null;
-    const excerpt = childTree ? readerChildReplyExcerpt(childTree) : null;
     const name = first.name || first.responsibility || (childTarget ? (isOwnedReaderChild(childTarget) ? childTarget.title : childTarget.session.title) : null) || t("conversation.agent_unknown");
     const states = [...new Set(runs.map((run) => conversationStateLabel(run.state)).filter(Boolean))];
     const lane = readerRelations?.lanes.find((candidate) => child
       ? candidate.childSession?.provider === child.provider && candidate.childSession.sessionId === child.sessionId
       : candidate.id === `${encodeURIComponent(provider)}:${encodeURIComponent(sessionId)}:${first.id}`);
+    const taskKey = first.id;
+    const detailId = anchorId("reader-task", taskKey);
+    const events = runs.flatMap((run) => run.channel);
+    const dispatch = events.find((item) => item.kind === "spawn" || item.kind === "delegate");
+    const dispatchSource = dispatch && readerEventSource(dispatch, provider, sessionId);
+    const returns = events.filter((item) => item.kind === "result-delivery" || item.kind === "mailbox-delivery");
+    const returnCountLabel = runs.some((run) => run.channelTruncated) ? "detail.reader_task_returns_partial" : "detail.reader_task_returns";
+    const lastReturn = returns.at(-1);
+    const compactTime = (item: ConversationChannelItem | undefined) => item?.timestamp != null
+      ? `<time datetime="${new Date(item.timestamp).toISOString()}" title="${escapeHtml(channelTimeLabel(item.timestamp) || "")}">${escapeHtml(new Date(item.timestamp).toISOString().slice(11, 16))} UTC</time>` : "";
+    taskNodes.push(`<button type="button" class="reader-task-node" data-reader-task-select="${escapeHtml(taskKey)}" aria-controls="${escapeHtml(detailId)}" aria-pressed="false">
+      ${uiIcon("network")}<span class="reader-task-node-copy"><strong>${escapeHtml(name)}</strong>
+      <span class="reader-task-node-state">${escapeHtml(states.join(" · "))}</span>
+      <span class="reader-task-node-moments">${dispatch ? `<span>${escapeHtml(t("conversation.channel_spawn"))} ${compactTime(dispatch)}</span>` : ""}${returns.length ? `<span>${escapeHtml(t(returnCountLabel, { count: String(returns.length) }))} ${compactTime(lastReturn)}</span>` : ""}</span></span>
+    </button>`);
     const runMarkup = runs.map((run) => {
-      const state = conversationStateLabel(run.state);
       return `<div class="reader-branch-run" data-reader-branch-run="${escapeHtml(run.id)}">
         ${runs.length > 1 && run.name ? `<strong>${escapeHtml(run.name)}</strong>` : ""}
-        ${run.responsibility ? `<p class="reader-branch-purpose"><span>${escapeHtml(t("conversation.agent_responsibility"))}:</span> ${escapeHtml(run.responsibility)}</p>` : ""}
-        ${state ? `<p class="reader-branch-recorded-state">${escapeHtml(t("detail.reader_branch_state"))}: ${escapeHtml(state)}</p>` : ""}
-        ${renderAgentChannel(run.channel, run.channelTruncated, run, provider, sessionId, false)}
+        ${run.responsibility && run.responsibility !== run.name ? `<p class="reader-branch-purpose">${escapeHtml(run.responsibility)}</p>` : ""}
+        ${runs.length > 1 && conversationStateLabel(run.state) ? `<p class="reader-branch-state">${escapeHtml(t("detail.reader_branch_state"))}: ${escapeHtml(conversationStateLabel(run.state)!)}</p>` : ""}
+        ${renderAgentChannel(run.channel, run.channelTruncated, run, provider, sessionId)}
       </div>`;
     }).join("");
-    const excerptAnchor = excerpt ? anchorId("part", excerpt.partId) : "";
-    return `<details class="reader-branch" data-reader-branch data-reader-task-lane="${escapeHtml(lane?.id || "")}"${child ? ` data-reader-branch-provider="${escapeHtml(child.provider)}" data-reader-branch-session="${escapeHtml(child.sessionId)}"` : ""}>
+    return `<details id="${escapeHtml(detailId)}" class="reader-branch" data-reader-branch data-reader-branch-key="${escapeHtml(taskKey)}" data-reader-task-lane="${escapeHtml(lane?.id || "")}"${child ? ` data-reader-branch-provider="${escapeHtml(child.provider)}" data-reader-branch-session="${escapeHtml(child.sessionId)}"` : ""}>
       <summary><span class="reader-branch-name">${escapeHtml(name)}</span>${states.length ? `<span class="reader-branch-state" title="${escapeHtml(t("detail.reader_branch_state"))}">${escapeHtml(states.join(" · "))}</span>` : ""}</summary>
       <div class="reader-branch-body">
+        ${child && !available ? `<p class="reader-relationship-empty">${escapeHtml(t("conversation.agent_child_unavailable"))}</p>` : ""}
         ${available ? `<a class="reader-child-history-link" data-reader-open data-reader-provider="${escapeHtml(child!.provider)}" data-reader-session="${escapeHtml(child!.sessionId)}" href="${escapeHtml(href)}">${escapeHtml(t("detail.reader_child_history"))}</a>${childTarget && isOwnedReaderChild(childTarget) && childTarget.link === "inferred" ? `<small>${escapeHtml(t("detail.inferred_link"))}</small>` : ""}` : ""}
+        ${available ? `<section class="reader-task-preview" data-reader-task-preview data-reader-provider="${escapeHtml(child!.provider)}" data-reader-session="${escapeHtml(child!.sessionId)}" data-loading-label="${escapeHtml(t("detail.reader_preview_loading"))}" data-error-label="${escapeHtml(t("detail.reader_preview_error"))}"><p data-reader-preview-status role="status">${escapeHtml(t("detail.reader_preview_loading"))}</p><div data-reader-preview-content></div><button type="button" data-reader-preview-retry hidden>${escapeHtml(t("detail.reader_preview_retry"))}</button></section>` : ""}
+        ${dispatchSource ? `<div class="reader-task-dispatch-source">${renderReaderEventSourceLink(dispatchSource.provider, dispatchSource.sessionId, dispatchSource.eventId, t("detail.reader_dispatch_source"))}</div>` : ""}
         ${runMarkup}
-        ${excerpt ? `<div class="reader-branch-excerpt" data-reader-branch-excerpt data-reader-excerpt-phase="${excerpt.final ? "final" : "message"}">
-          <p class="reader-branch-excerpt-label">${escapeHtml(t(excerpt.final ? "detail.reader_child_final_excerpt" : "detail.reader_child_message_excerpt"))}</p>
-          <blockquote>${escapeHtml(excerpt.text)}</blockquote>
-          <a class="reader-observation-source" data-reader-source data-reader-provider="${escapeHtml(child!.provider)}" data-reader-session="${escapeHtml(child!.sessionId)}" data-reader-anchor="${escapeHtml(excerptAnchor)}" href="${escapeHtml(`${href}#${excerptAnchor}`)}">${escapeHtml(t("detail.reader_child_reply_source"))}</a>
-        </div>` : ""}
       </div>
     </details>`;
   }).join("");
+  return `<div class="reader-task-map" data-reader-task-map><div class="reader-branch-root">${escapeHtml(t("detail.reader_document_owner"))}</div><div class="reader-task-nodes">${taskNodes.join("")}</div></div><div class="reader-branches">${taskDetails}</div>`;
 }
 
 function renderReaderRelationshipRail(view: ConversationViewModel | null, provider: string, sessionId: string, tree: SessionTree | null, ownedReader: OwnedReaderProjection | null = null, readerRelations: ReaderRelations | null = null) {
@@ -1739,10 +1730,9 @@ function renderReaderRelationshipRail(view: ConversationViewModel | null, provid
   const overview = `<aside class="reader-collaboration" data-reader-collaboration aria-label="${escapeHtml(t("detail.reader_collaboration"))}">
     <div class="reader-collaboration-heading"><h2>${escapeHtml(t("detail.reader_collaboration_title"))}</h2><button type="button" class="reader-collaboration-close" data-reader-collaboration-close aria-label="${escapeHtml(t("detail.reader_collaboration_close"))}">${uiIcon("x")}</button></div>
     <p class="reader-collaboration-note">${escapeHtml(t("detail.reader_collaboration_note"))}</p>
-    <div class="reader-collaboration-summary"><span>${escapeHtml(t("detail.reader_collaboration_recorded", { count: String(recorded) }))}</span>${relationships.length ? `<span>${escapeHtml(t("detail.reader_collaboration_links", { count: String(relationshipRecords.length) }))}</span>` : ""}</div>
-    ${branches ? `<div class="reader-branch-root">${escapeHtml(t("detail.reader_document_owner"))}</div><div class="reader-branches">${branches}</div>` : ""}
+    ${branches}
     ${evidenceMarkup}
-    ${relationships ? `<ul class="reader-relationship-list">${relationships}</ul>` : `<p class="reader-relationship-empty">${escapeHtml(t("conversation.inspector_relationships_empty"))}</p>`}
+    ${relationships ? `<ul class="reader-relationship-list">${relationships}</ul>` : ""}
     <details class="reader-inspector-disclosure" data-reader-inspector>
       <summary>${escapeHtml(t("conversation.inspector_title"))}</summary>
       ${renderConversationInspector(view?.inspector ?? null, provider, sessionId)}

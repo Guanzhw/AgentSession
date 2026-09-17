@@ -57,6 +57,6 @@ export function renderReaderRelations(relations: ReaderRelations | null): Reader
   const focusMarkup = visibleLanes.length
     ? `<span class="reader-relations-label">${escapeHtml(t("detail.reader_relation_focus"))}</span><label class="reader-relations-select-label"><span class="sr-only">${escapeHtml(t("detail.reader_relation_focus"))}</span><select data-reader-lane-select>${visibleLanes.length <= 3 ? `<option value="">${escapeHtml(t("detail.reader_relation_all"))}</option>` : ""}${options}</select></label><small class="reader-relations-note">${escapeHtml(t("detail.reader_relation_axis"))}</small>`
     : "";
-  const toolbar = `<div class="reader-relations-toolbar" data-reader-relations-controls>${focusMarkup}${unplaced}</div>`;
+  const toolbar = `<details class="reader-relations-toolbar" data-reader-relations-controls><summary>${escapeHtml(t("detail.reader_relation_navigation"))}</summary><div class="reader-relations-options">${focusMarkup}${unplaced}</div></details>`;
   return { parts, messages, toolbar };
 }

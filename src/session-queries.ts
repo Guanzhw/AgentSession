@@ -14,6 +14,11 @@ export function enrichSession(session: any, metaMap: any): any {
   return {
     ...session,
     starred: Boolean(meta?.starred),
+    // Keep the viewer-owned origin available to presentation surfaces. This
+    // matters when a user deliberately chooses an ID-shaped custom title.
+    custom_title: typeof meta?.custom_title === "string" && meta.custom_title.trim()
+      ? meta.custom_title
+      : null,
     title: meta?.custom_title || session.title
   };
 }

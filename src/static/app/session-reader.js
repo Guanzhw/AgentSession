@@ -366,6 +366,9 @@ export function initSessionReader({ ft, showToast } = {}) {
     wrapper.dataset.readerInlineKey = key;
     const controls = document.createElement("div");
     controls.className = "reader-inline-pane-controls";
+    const title = document.createElement("h3");
+    title.className = "reader-inline-pane-title";
+    title.textContent = pane.dataset.readerTitle;
     const close = document.createElement("button");
     close.type = "button";
     close.className = "reader-inline-pane-close";
@@ -375,7 +378,7 @@ export function initSessionReader({ ft, showToast } = {}) {
     standalone.className = "reader-inline-pane-standalone";
     standalone.href = entry.href || `/${encodeURIComponent(entry.provider)}/session/${encodeURIComponent(entry.session)}`;
     standalone.textContent = ft?.("detail.reader_inline_standalone") || ft?.("detail.reader_child_history") || "Open full child history";
-    controls.append(close, standalone);
+    controls.append(title, standalone, close);
     wrapper.append(controls, pane);
     const originState = entry.originState || {
       scrollX: window.scrollX,

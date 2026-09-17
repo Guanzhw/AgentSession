@@ -25,6 +25,50 @@ export function initReaderRelations() {
     .filter((element) => element.closest("[data-reader-pane]") === pane);
   const overviewFor = (pane) => ownedElements(pane, "[data-reader-collaboration-overview]")[0];
 
+  async function loadPreview(detail) {
+    const preview = detail.querySelector("[data-reader-task-preview]");
+    if (!preview || preview.dataset.readerPreviewLoaded || preview.dataset.readerPreviewLoading) return;
+    const status = preview.querySelector("[data-reader-preview-status]");
+    const retry = preview.querySelector("[data-reader-preview-retry]");
+    preview.dataset.readerPreviewLoading = "true";
+    status.hidden = false;
+    status.textContent = preview.dataset.loadingLabel;
+    retry.hidden = true;
+    try {
+      const response = await fetch(`/api/${encodeURIComponent(preview.dataset.readerProvider)}/session/${encodeURIComponent(preview.dataset.readerSession)}/reader/preview`, { headers: { Accept: "application/json" } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const result = await response.json();
+      preview.querySelector("[data-reader-preview-content]").innerHTML = result.html;
+      preview.dataset.readerPreviewLoaded = "true";
+      status.hidden = true;
+    } catch (error) {
+      status.textContent = `${preview.dataset.errorLabel} (${error.message})`;
+      retry.hidden = false;
+    } finally {
+      delete preview.dataset.readerPreviewLoading;
+    }
+  }
+
+  function selectTask(pane, detail) {
+    if (!detail) return;
+    const overview = overviewFor(pane);
+    overview.dataset.readerTaskEnhanced = "true";
+    for (const branch of ownedElements(pane, "[data-reader-branch]")) branch.open = branch === detail;
+    for (const button of ownedElements(pane, "[data-reader-task-select]")) {
+      button.setAttribute("aria-pressed", String(button.dataset.readerTaskSelect === detail.dataset.readerBranchKey));
+    }
+    const section = paneRelationSection(pane);
+    const context = section && contexts.get(section);
+    if (context?.select && detail.dataset.readerTaskLane) context.select.value = detail.dataset.readerTaskLane;
+    loadPreview(detail);
+    schedule();
+  }
+
+  function ensureSelectedTask(pane) {
+    const branches = ownedElements(pane, "[data-reader-branch]");
+    selectTask(pane, branches.find((branch) => branch.open) || branches[0]);
+  }
+
   function paneRelationSection(pane) {
     return [...pane.querySelectorAll("[data-reader-relations]")]
       .find((section) => section.closest("[data-reader-pane]") === pane) || null;
@@ -113,10 +157,20 @@ export function initReaderRelations() {
     const overview = overviewFor(context.pane);
     if (!overview) return;
     overviewOrigins.set(overview, origin);
-    overview.open = true;
+    openOverview(overview);
     const detail = [...overview.querySelectorAll("[data-reader-task-lane]")]
       .find((candidate) => candidate.dataset.readerTaskLane === lane);
-    if (detail) detail.open = true;
+    if (detail) {
+      detail.open = true;
+      selectTask(context.pane, detail);
+    }
+  }
+
+  function openOverview(overview) {
+    for (const other of workbench.querySelectorAll("[data-reader-collaboration-overview]")) {
+      if (other !== overview) other.open = false;
+    }
+    overview.open = true;
   }
 
   function closeOverview(overview) {
@@ -137,13 +191,31 @@ export function initReaderRelations() {
     if (!overview) return;
     overviewOrigins.set(overview, toggle);
     if (overview.open) closeOverview(overview);
-    else overview.open = true;
+    else {
+      openOverview(overview);
+      ensureSelectedTask(pane);
+    }
     toggle.setAttribute("aria-expanded", String(overview.open));
   }, true);
 
   workbench.addEventListener("toggle", (event) => {
+    const branch = event.target;
+    if (branch?.dataset?.readerBranch !== undefined) {
+      const pane = branch.closest("[data-reader-pane]");
+      if (branch.open) selectTask(pane, branch);
+      else {
+        for (const button of ownedElements(pane, "[data-reader-task-select]")) {
+          if (button.dataset.readerTaskSelect === branch.dataset.readerBranchKey) button.setAttribute("aria-pressed", "false");
+        }
+      }
+      return;
+    }
     const overview = event.target?.closest?.("[data-reader-collaboration-overview]");
     if (!overview) return;
+    if (event.target === overview && overview.open) {
+      openOverview(overview);
+      ensureSelectedTask(overview.closest("[data-reader-pane]"));
+    }
     if (overview.closest("[data-reader-pane]") !== workbench.querySelector("[data-reader-pane]")) return;
     const expanded = Boolean(overview.open);
     workbench.querySelectorAll("[data-reader-collaboration-toggle]").forEach((toggle) => {
@@ -157,6 +229,19 @@ export function initReaderRelations() {
     if (context?.select === event.target) schedule();
   });
   workbench.addEventListener("click", (event) => {
+    const retry = event.target.closest?.("[data-reader-preview-retry]");
+    if (retry && workbench.contains(retry)) {
+      loadPreview(retry.closest("[data-reader-branch]"));
+      return;
+    }
+    const task = event.target.closest?.("[data-reader-task-select]");
+    if (task && workbench.contains(task)) {
+      const pane = task.closest("[data-reader-pane]");
+      const detail = ownedElements(pane, "[data-reader-branch]")
+        .find((branch) => branch.dataset.readerBranchKey === task.dataset.readerTaskSelect);
+      selectTask(pane, detail);
+      return;
+    }
     const close = event.target.closest?.("[data-reader-collaboration-close]");
     if (close && workbench.contains(close)) {
       const overview = close.closest("[data-reader-collaboration-overview]");

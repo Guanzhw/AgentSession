@@ -1,0 +1,132 @@
+/* Library: a calm, prose-first index for returning to recorded work. */
+.content:has(.session-list-library) {
+  max-width: 1040px;
+}
+
+.session-list-library {
+  gap: 34px;
+}
+
+.session-list-library .library-day-heading {
+  padding: 0 0 9px;
+  border-bottom-color: var(--v2-boundary);
+}
+
+.session-list-library .library-day-heading h2 {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.session-list-library .library-day-heading span {
+  font-size: 12px;
+}
+
+.session-list-library .session-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 20px;
+}
+
+.session-list-library .session-card-content {
+  padding: 15px 0 16px;
+}
+
+.session-list-library .session-card-header {
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 5px;
+}
+
+.session-list-library .session-card-title-stack {
+  align-items: baseline;
+  gap: 7px 10px;
+}
+
+.session-list-library .session-card-title {
+  font-size: 17px;
+  font-weight: 620;
+  line-height: 1.4;
+  letter-spacing: -0.012em;
+}
+
+.session-list-library .session-card-time {
+  margin-left: 0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.session-list-library .session-card-directory {
+  max-width: min(68ch, 100%);
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.session-list-library .session-provider-badge {
+  border-color: transparent;
+  background: transparent;
+  padding: 0;
+  font-size: 11px;
+}
+
+.session-list-library .session-card-stats {
+  gap: 5px 10px;
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.session-list-library .stat-chip {
+  border-color: transparent;
+  background: transparent;
+  padding: 0;
+}
+
+.session-list-library .card-actions {
+  align-self: start;
+  padding-top: 11px;
+}
+
+.session-list-library .session-card:hover {
+  background: color-mix(in srgb, var(--v2-accent-soft) 34%, transparent);
+}
+
+.session-list-library .session-card-title-link:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+.library-summary {
+  margin: 4px 0 20px;
+  gap: 5px 13px;
+  font-size: 12px;
+}
+
+.library-summary-part strong {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.library-toolbar {
+  margin: 16px 0 14px;
+}
+
+@media (max-width: 600px) {
+  .session-list-library {
+    gap: 28px;
+  }
+
+  .session-list-library .session-card {
+    gap: 10px;
+  }
+
+  .session-list-library .session-card-title {
+    font-size: 16px;
+  }
+
+  .session-list-library .session-card-directory {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}

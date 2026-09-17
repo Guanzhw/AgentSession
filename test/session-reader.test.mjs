@@ -166,7 +166,8 @@ test("reader pane owns one complete session history and links children on demand
   assert.match(pane, /root-owned body/);
   assert.match(pane, /done/, "native task evidence remains on the root reading spine");
   assert.doesNotMatch(pane.split('<aside class="reader-collaboration"')[0], /child-owned body/);
-  assert.match(pane, /data-reader-branch-excerpt[\s\S]*child-owned body/);
+  assert.match(pane, /data-reader-task-preview data-reader-provider="fixture" data-reader-session="child-1"/);
+  assert.doesNotMatch(pane, /child-owned body/, "child excerpts are loaded only on selection");
   assert.match(pane, /data-reader-open data-reader-provider="fixture" data-reader-session="child-1" href="\/fixture\/session\/child-1"/);
   assert.equal((pane.match(/data-reader-session="child-1"/g) || []).length >= 2, true, "body, action and ToC links share the canonical child target");
   assert.doesNotMatch(pane, /href="#session-child-1"/);
@@ -174,7 +175,8 @@ test("reader pane owns one complete session history and links children on demand
   assert.match(pane, /<details[^>]*class="reader-collaboration-overview"[^>]*data-reader-collaboration-overview>/);
   assert.ok(pane.indexOf('<div class="reader-pane-main"') < pane.indexOf('data-reader-collaboration-overview'), "overview stays inside the reader main column");
   assert.doesNotMatch(pane, /<\/div>\s*<aside class="reader-collaboration"/, "overview is not a permanent grid sibling");
-  assert.match(pane, /class="reader-collaboration-summary"/);
+  assert.match(pane, /data-reader-task-map/);
+  assert.match(pane, /data-reader-task-select="run:child-1"/);
   assert.doesNotMatch(pane, /class="reader-time-lane"|data-reader-relation-canvas/);
   assert.match(pane, /data-reader-observation-id="coord-1"/);
   assert.match(pane, /data-reader-event-source/);

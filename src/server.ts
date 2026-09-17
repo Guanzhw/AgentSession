@@ -30,6 +30,7 @@ import { registerMutations } from "./routes/mutations.js";
 import { registerSessions } from "./routes/sessions.js";
 import { registerSessionDetail } from "./routes/session-detail.js";
 import { registerReaderCoordinationRoutes } from "./routes/reader-coordination.js";
+import { registerReaderPreviewRoutes } from "./routes/reader-preview.js";
 import { registerSettingsStatsTrash } from "./routes/settings-stats-trash.js";
 
 // ── Build router with current state ─────────────────────────────────────────
@@ -47,6 +48,7 @@ function buildRouter(
   registerSettingsStatsTrash(router, { appConfig, providerMap, providerInfo });
   registerSessions(router, { appConfig, providerMap, providerInfo });
   registerReaderCoordinationRoutes(router, { appConfig, providerMap, providerInfo });
+  registerReaderPreviewRoutes(router, { appConfig, providerMap, providerInfo });
   registerSessionDetail(router, { appConfig, providerMap, providerInfo });
   return router;
 }

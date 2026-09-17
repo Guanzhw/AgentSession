@@ -18,7 +18,7 @@ AgentSession metadata.
 
 ## Reading work history
 
-The primary rail uses `Library | Statistics | Settings`. Session detail leads
+The primary navigation uses `Library | Usage | Settings`. Session detail leads
 with recorded prose and local collaboration inserts at dispatch, follow-up and
 return positions. Opening a child inserts its complete owned history there,
 keeping the parent mounted; closing returns to the original reading position.
@@ -31,9 +31,14 @@ final replies, unclassified communication, and unfinished tail updates remain
 visible. Expansion, search, and anchors retain access to process content.
 Dispatches, follow-ups, and result deliveries with resolved source positions
 appear inline with local branch connections and exact source links. Vertical
-distance represents reading position, not elapsed time. A shared-time-axis
-collaboration overview starts collapsed and can reveal parallel work when
-needed. Tools and reasoning stay independently expandable.
+distance represents reading position, not elapsed time. The on-demand Tasks &
+collaboration panel shows a compact task map followed by the selected task's
+initial request and latest reply excerpts. Exchanges and complete child history
+remain expandable. Per-message model and token details live under Usage & model;
+tools and reasoning stay independently expandable.
+Library titles prefer viewer custom titles or readable provider titles. When
+neither exists, Untitled plus a short ID identifies the entry without changing
+its canonical ID.
 Recorded inherited background in Codex child sessions has a separate collapsed
 disclosure, loaded in pages of 40 messages with a source-session link. All
 recorded background remains reachable even when the parent file is missing. It stays outside

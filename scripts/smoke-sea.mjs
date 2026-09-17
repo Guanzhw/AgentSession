@@ -19,6 +19,7 @@ const staticAssets = [
   { path: "style.css", contentType: "text/css; charset=utf-8", marker: ":root", minLength: 1000 },
   { path: "app-shell.css", contentType: "text/css; charset=utf-8", marker: ":root", minLength: 1000 },
   { path: "reader.css", contentType: "text/css; charset=utf-8", marker: ".session-workbench", minLength: 1000 },
+  { path: "library.css", contentType: "text/css; charset=utf-8", marker: ".session-list-library", minLength: 1000 },
   { path: "app.js", contentType: "application/javascript; charset=utf-8", marker: "function", minLength: 1000 },
   { path: "vendor/highlight.js/highlight.min.js", contentType: "application/javascript; charset=utf-8", marker: "hljs", minLength: 1000 },
   { path: "vendor/highlight.js/github.min.css", contentType: "text/css; charset=utf-8", marker: ".hljs", minLength: 1000 },

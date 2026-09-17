@@ -4523,7 +4523,8 @@ test("tool-only assistant turns still render assistant metadata", () => {
   });
 
   assert.match(html, /message-turn-assistant/);
-  assert.match(html, /message-role">assistant<\/span>/);
+  assert.match(html, /message-role">Assistant<\/span>/);
+  assert.match(html, /<details class="message-usage"><summary>Usage &amp; model<\/summary>/);
   assert.match(html, /openai\/gpt-5/);
 });
 
@@ -4716,6 +4717,6 @@ test("subagent invocation headers show child-session token usage", () => {
   assert.ok(parentHeader > parentStart && parentHeader < subagentStart);
   assert.match(
     html.slice(parentHeader, subagentStart),
-    /message-role">assistant<\/span>/
+    /message-role">Assistant<\/span>/
   );
 });
