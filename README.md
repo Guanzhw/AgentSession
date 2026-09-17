@@ -1,8 +1,8 @@
 # AgentSession
 
-AgentSession 是本地优先、只读的 harness runtime inspector。它从 OpenCode、Claude Code、Codex CLI、OpenClaw、Hermes Agent、Pi 和 DeepSeek Harness 的本地记录中重建：harness 如何运行、如何派生 session、如何调度工作，以及上下文如何被加载、压缩、继承和重新注入。
+AgentSession 是本地优先的 agent 工作历史阅读器：以完整记录为内容，以 runtime 关系组织工作过程，默认连续阅读。它读取 OpenCode、Claude Code、Codex CLI、OpenClaw、Hermes Agent、Pi 和 DeepSeek Harness 的本地记录，让读者同时了解说了什么、谁执行了什么，以及结果如何回到主任务。
 
-对话仍然是兼容的阅读投影，但不是唯一的结构模型。所有 Provider 原始数据库、transcript 和事件日志都保持只读；收藏、自定义标题和排除状态写入独立的 AgentSession 元数据。
+所有 Provider 原始数据库、transcript 和事件日志都保持只读；收藏、自定义标题和排除状态写入独立的 AgentSession 元数据。
 
 [English](./README.en.md) · [中文](./README.md)
 
@@ -10,20 +10,20 @@ AgentSession 是本地优先、只读的 harness runtime inspector。它从 Open
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
 
-## Work Graph
+## 阅读工作历史
 
-顶层导航为 `库 | 统计 | 设置`（Library | Statistics | Settings）。session 详情有
-`工作 | 对话` 两个主模式，默认打开统一工作台；工作结构、执行轨道与选中详情在同一界面联动。
-事件是次级证据入口，支持分页、筛选与原有 `#tab-events` 链接。
+顶层导航为 `库 | 统计 | 设置`（Library | Statistics | Settings）。详情页以正文历史为主，在派发、跟进和返回的位置插入协作记录。打开子会话时，它的完整自有历史在当前位置展开，主会话继续保留；关闭后回到原来的阅读位置。搜索可明确选择主会话或已打开的子会话，并分别保留查询和结果位置。
+`工作`与`事件`保留为次级证据折叠区；事件支持分页、筛选与原有 `#tab-events` 链接。
 对话按 Provider 明确记录的回复阶段折叠已完成过程，保留最终回复、未分类通信和仍在进行的尾部进展；展开、搜索和锚点可访问过程内容。
-Codex 子会话中已记录的继承背景单独折叠展示，最多显示 40 条消息，并提供来源会话链接；这些背景不进入默认目录，也不增加子会话消息数或请求用量。
+能定位到正文来源的协作记录用局部连线关联同一分支，点击来源可追溯准确记录。连线的纵向距离表示阅读位置，不表示耗时。共享时间轴的协作概览默认折叠，供需要时查看并行关系；工具和推理可独立展开。
+Codex 子会话中已记录的继承背景单独折叠展示，每次加载 40 条消息，可继续读取到末尾，并提供来源会话链接；父文件缺失时仍可读取子文件保留的背景。这些背景不进入默认目录，也不增加子会话消息数或请求用量。
 每个可读 session 都按协议证据展示；“不支持”“不可用”“缺失”“无效”不会被渲染成观测到的零值。
 
 浏览器代码高亮使用仓库内 vendored 的
 `@highlightjs/cdn-assets` 11.12.0 bundle，位于
 `src/static/vendor/highlight.js`；许可证与来源记录和资产并列，支持离线使用。
 
-工作台消费以下服务端派生证据，不要求用户在五个独立 lens 间切换：
+次级工作台消费以下服务端派生证据：
 
 - **Work**：目标、Task、依赖关系，以及 Task 与每次 AgentRun 的明确关联。
 - **Execution**：参与者、运行尝试和当前 session 的请求用量；继承或共享的 input/cacheRead 仍归属发生它的真实请求并计一次，不会因共享上下文而在跨请求间去重（同一共享上下文在不同请求中的 cacheRead 各自计费一次）；继承的已存历史本身不另造一条新请求。
@@ -56,9 +56,15 @@ Session Protocol v3 在同一 canonical session 边界上增加 Work、Execution
 
 ## Read-only HTTP API
 
-以下 API 都是 `GET`，返回 bounded、服务端归一化的 JSON：
+以下 API 都是 `GET`。阅读片段复用详情页渲染，其余接口提供服务端归一化的协议与有界投影：
 
 ```text
+GET /api/:provider/session/:id/reader
+GET /api/:provider/session/:id/reader/coordination?runId=&taskId=&cursor=&size=
+GET /api/:provider/session/:id/reader/event/:eventId
+GET /api/:provider/session/:id/inherited-context?offset=
+GET /api/:provider/session/:id/search?q=&offset=&limit=
+GET /api/:provider/session/:id/context-result?checkpoint=&offset=&limit=
 GET /api/:provider/session/:id/protocol
 GET /api/:provider/session/:id/runtime/summary
 GET /api/:provider/session/:id/runtime/events?cursor=&limit=&category=&kind=&phase=&correlationId=
@@ -68,6 +74,12 @@ GET /api/:provider/session/:id/runtime/execution?maxItems=
 GET /api/:provider/session/:id/runtime/coordination?maxItems=
 GET /api/:provider/session/:id/runtime/context?maxItems=
 ```
+
+`/reader` 返回 `{ ok, provider, sessionId, title, html }`；`html` 是一个不含页面外壳或脚本的会话阅读片段，用于同页打开子会话。长正文继续使用现有内容展开接口。
+
+阅读器搜索覆盖当前会话完整可用的自有正文、推理和工具内容，包括尚未展开的部分；返回所属消息/内容块、源位置和有界片段，继承背景单独保留。`/context-result` 按需读取已记录的摘要及可用保留上下文，支持条目分页和正文续载；加密字段和仅有元数据的图片附件与可读正文分开标明。
+
+`/reader/coordination` 为阅读器的工作项提供有界交互续页；来源为完整的归一化记录，而非已经截断的概览。`/reader/event/:eventId` 解析所属会话中的准确事件：存在原文时返回阅读目标，否则返回有界事件证据。子会话完成与父会话收到结果保留为不同记录。
 
 完整 `/protocol` 返回 v2 snapshot、capability descriptors、validation 和可用的 storage diagnostic。四个领域 API 返回有界的 v3 投影；`events` 使用 cursor/limit，`graph` 使用 depth/maxNodes。响应会报告 truncation、缺失 session、不可用 Provider 和校验诊断。未知 session 返回 404；已知但不完整或无效的 session 保留诊断，不会被伪装成完整结果。
 

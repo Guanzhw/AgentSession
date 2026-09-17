@@ -143,7 +143,7 @@ test("Conversation SSR folds process only before a later final and keeps the tai
   assert.match(toc, /unclassified communication/);
 });
 
-test("Conversation SSR keeps commentary and internal process visible when no final is recorded", () => {
+test("Conversation SSR keeps unfinished commentary visible and tool detail expandable", () => {
   const html = render([
     message("u1", "user", 1000, [textPart("u1", "open question")]),
     message("c1", "assistant", 1100, [textPart("c1", "open commentary")], "commentary"),
@@ -153,7 +153,9 @@ test("Conversation SSR keeps commentary and internal process visible when no fin
   assert.doesNotMatch(thread, /data-conversation-process-count=/);
   assert.match(thread, /open commentary/);
   assert.match(thread, /open tool result/);
-  assert.doesNotMatch(thread, /<details class="conversation-process-disclosure"/);
+  assert.match(thread, /data-reader-execution-count="1"/);
+  assert.ok(thread.indexOf("open commentary") < thread.indexOf("data-reader-execution"));
+  assert.doesNotMatch(thread, /<details[^>]*data-reader-execution[^>]*\sopen(?:\s|>)/);
 });
 
 test("Conversation SSR does not combine process disclosures across a checkpoint", () => {

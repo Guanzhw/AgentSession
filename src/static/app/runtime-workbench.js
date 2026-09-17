@@ -10,6 +10,8 @@ export function initRuntimeWorkbench({ ft, formatText }) {
   const legacySection = ({ execution: "runs", coordination: "coordination", context: "context" })[requestedLens];
   if (legacySection) {
     const target = root.querySelector(`[data-runtime-section="${CSS.escape(legacySection)}"]`);
+    const tabPanel = target?.closest("details[data-detail-tab-panel]");
+    if (tabPanel instanceof HTMLDetailsElement) tabPanel.open = true;
     if (target instanceof HTMLDetailsElement) target.open = true;
     requestAnimationFrame(() => target?.scrollIntoView({ block: "start", behavior: "instant" }));
   }

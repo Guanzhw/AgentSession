@@ -59,7 +59,7 @@ function referenceMatchesAlias(reference: string, alias: string) {
   return alias.endsWith(`/${reference}`) || reference.endsWith(`/${alias}`);
 }
 
-function explicitlyReferencesChild(part: SessionPartNode, child: SessionTree) {
+function explicitlyReferencesChild(part: SessionPartNode, child: { session: Row }) {
   const references = partReferences(part);
   for (const alias of aliasesForSession(child.session)) {
     for (const reference of references) {
@@ -81,9 +81,16 @@ export interface SubagentEvidence {
   relationships?: SessionRelationship[];
 }
 
+export interface OwnedReaderChildLink {
+  session: Row;
+  parentPartId: string | null;
+  link: "explicit" | "inferred";
+  detached: boolean;
+}
+
 function evidenceAnchor(
   evidence: SubagentEvidence | undefined,
-  child: SessionTree
+  child: { session: Row }
 ): string | null {
   if (!evidence) return null;
   const childId = String(child.session.id);
@@ -100,7 +107,7 @@ function evidenceAnchor(
 function relationshipAnchor(
   evidence: SubagentEvidence | undefined,
   rootSessionId: string,
-  child: SessionTree
+  child: { session: Row }
 ): string | null {
   if (!evidence) return null;
   const childId = String(child.session.id);
@@ -113,20 +120,18 @@ function relationshipAnchor(
 }
 
 /**
- * Attach child sessions to the spawn tool part the protocol evidence names:
- * a task whose toolCallId/correlationId matches the part id, or a spawned
- * relationship whose correlationId/sourceId matches it. Falls back to the
- * existing explicit-reference and creation-order pairing when the evidence
- * carries no anchor.
+ * Resolve root-to-child attachment without constructing child trees. This is
+ * the bounded reader counterpart to buildLinkedMessageSessionViews: it keeps
+ * the same protocol/evidence, explicit-reference, and chronology semantics,
+ * while returning metadata-only targets for the reader to load on demand.
  */
-function attachEvidenceChildren(
+export function buildOwnedReaderChildLinks(
   rootSessionId: string,
   tree: SessionTree,
-  children: SessionTree[],
-  evidence: SubagentEvidence | undefined
-): Set<string> {
-  const attached = new Set<string>();
-  if (!evidence) return attached;
+  children: Array<{ session: Row }>,
+  evidence?: SubagentEvidence
+): OwnedReaderChildLink[] {
+  const links = new Map<string, OwnedReaderChildLink>();
   const parts = tree.messages
     .flatMap((message) => message.parts)
     .filter((part) => part.type === "tool");
@@ -134,86 +139,58 @@ function attachEvidenceChildren(
   for (const part of parts) {
     partsByAnchor.set(part.id, part);
     partsByAnchor.set(part.messageId, part);
-    // Agent Loop event ids append a kind suffix to the source message id.
     partsByAnchor.set(part.id.replace(/:(tool|reasoning|text)$/, ""), part);
   }
-  const subagentMarkedParts = new Set<SessionPartNode>();
 
   for (const child of children) {
     const childId = String(child.session.id);
-    if (attached.has(childId)) continue;
     const anchor = evidenceAnchor(evidence, child)
       || relationshipAnchor(evidence, rootSessionId, child);
-    if (!anchor) continue;
-    const part = partsByAnchor.get(anchor);
-    if (!part || part.childSessions.some((candidate) => String(candidate.session.id) === childId)) {
-      continue;
-    }
-    part.childSessions.push(child);
-    attached.add(childId);
-    subagentMarkedParts.add(part);
-  }
-
-  // A protocol task/run proves the part launched a subagent even when the
-  // part's tool name is not a known launcher label. Mark it so Tree, Runtime,
-  // and rendering consume the normalized fact without provider-id
-  // branching.
-  for (const part of subagentMarkedParts) {
-    const state = part.data?.state && typeof part.data.state === "object" ? part.data.state : {};
-    if (isSubagentTool(part.tool, mergeToolMetadata(state.metadata, part.data?.metadata))) continue;
-    part.data.state = { ...state, metadata: { ...(state.metadata || {}), subagent: true } };
-  }
-
-  return attached;
-}
-
-function attachDirectChildren(
-  tree: SessionTree,
-  children: SessionTree[],
-  alreadyAttached: Set<string> | null = null
-) {
-  const taskParts = tree.messages
-    .flatMap((message) => message.parts)
-    .filter((part) => part.type === "tool" && isSubagentTool(
-      part.tool,
-      mergeToolMetadata(part.data?.state?.metadata, part.data?.metadata)
-    ));
-  const attached = new Set(alreadyAttached || []);
-  const partsWithChildren = new Set<SessionPartNode>();
-
-  for (const part of taskParts) {
-    for (const child of children) {
-      const childId = String(child.session.id);
-      if (attached.has(childId)) continue;
-      if (explicitlyReferencesChild(part, child)) {
-        part.childSessions.push(child);
-        attached.add(childId);
-        partsWithChildren.add(part);
+    const part = anchor ? partsByAnchor.get(anchor) : null;
+    if (part) {
+      links.set(childId, { session: child.session, parentPartId: part.id, link: "explicit", detached: false });
+      if (!isSubagentTool(part.tool, mergeToolMetadata(part.data?.state?.metadata, part.data?.metadata))) {
+        const state = part.data?.state && typeof part.data.state === "object" ? part.data.state : {};
+        part.data.state = { ...state, metadata: { ...(state.metadata || {}), subagent: true } };
       }
     }
   }
 
+  const taskParts = parts.filter((part) => isSubagentTool(
+    part.tool,
+    mergeToolMetadata(part.data?.state?.metadata, part.data?.metadata)
+  ));
+  const explicitParts = new Set<SessionPartNode>();
+  for (const part of taskParts) {
+    for (const child of children) {
+      const childId = String(child.session.id);
+      if (links.has(childId) || !explicitlyReferencesChild(part, child)) continue;
+      links.set(childId, { session: child.session, parentPartId: part.id, link: "explicit", detached: false });
+      explicitParts.add(part);
+    }
+  }
   const unmatchedChildren = children
-    .filter((child) => !attached.has(String(child.session.id)))
+    .filter((child) => !links.has(String(child.session.id)))
     .sort((a, b) => asNumber(a.session.time_created ?? a.session.timeCreated) - asNumber(b.session.time_created ?? b.session.timeCreated));
-  const unmatchedParts = taskParts.filter((part) => !partsWithChildren.has(part));
-
-  // Some providers persist the child relation but omit the spawn call id or
-  // task path. In that case creation order is the only source-owned link.
+  // Match the legacy builder: chronology can reuse a part that only received
+  // protocol evidence, but not one matched by an explicit child reference.
+  const unmatchedParts = taskParts.filter((part) => !explicitParts.has(part));
   for (const child of unmatchedChildren) {
     const childTime = asNumber(child.session.time_created ?? child.session.timeCreated);
     let partIndex = unmatchedParts.findIndex((part) => !childTime || !part.timeStart || part.timeStart <= childTime);
     if (partIndex < 0) partIndex = 0;
     const part = unmatchedParts.splice(partIndex, 1)[0];
     if (!part) continue;
-    part.childSessions.push(child);
-    const inferredChildSessionIds = part.inferredChildSessionIds || new Set<string>();
-    inferredChildSessionIds.add(String(child.session.id));
-    part.inferredChildSessionIds = inferredChildSessionIds;
-    attached.add(String(child.session.id));
+    links.set(String(child.session.id), { session: child.session, parentPartId: part.id, link: "inferred", detached: false });
   }
 
-  tree.detachedChildren = children.filter((child) => !attached.has(String(child.session.id)));
+  for (const child of children) {
+    const childId = String(child.session.id);
+    if (!links.has(childId)) {
+      links.set(childId, { session: child.session, parentPartId: null, link: "inferred", detached: true });
+    }
+  }
+  return [...links.values()];
 }
 
 export function buildLinkedMessageSessionViews(
@@ -243,8 +220,23 @@ export function buildLinkedMessageSessionViews(
     const children = (childrenByParent.get(sessionId) || [])
       .map((child) => build(String(child.session.id), nextSeen))
       .filter(Boolean) as SessionTree[];
-    const evidenceAttached = attachEvidenceChildren(sessionId, tree, children, evidence);
-    attachDirectChildren(tree, children, evidenceAttached);
+    const links = buildOwnedReaderChildLinks(sessionId, tree, children, evidence);
+    const linkById = new Map(links.map((link) => [String(link.session.id), link]));
+    for (const child of children) {
+      const link = linkById.get(String(child.session.id));
+      if (!link) continue;
+      if (link.parentPartId) {
+        const part = tree.messages.flatMap((message) => message.parts).find((candidate) => candidate.id === link.parentPartId);
+        if (!part) continue;
+        part.childSessions.push(child);
+        if (link.link === "inferred") {
+          const inferred = part.inferredChildSessionIds || new Set<string>();
+          inferred.add(String(child.session.id));
+          part.inferredChildSessionIds = inferred;
+        }
+      }
+    }
+    tree.detachedChildren = children.filter((child) => linkById.get(String(child.session.id))?.detached);
     return tree;
   };
 

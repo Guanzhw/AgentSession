@@ -1,0 +1,83 @@
+/* Selected reading direction: a quiet horizontal shell shared by all pages. */
+:root {
+  --font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
+  --topbar-height: 64px;
+  --session-anchor-offset: 88px;
+  --settings-anchor-offset: 88px;
+}
+
+.ui-icon {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  vertical-align: -0.2em;
+  background: currentColor;
+  mask: var(--ui-icon) center / contain no-repeat;
+}
+
+.app-navigation {
+  display: flex;
+  gap: 32px;
+  height: var(--topbar-height);
+  padding: 0 32px;
+}
+
+.app-navigation .logo {
+  gap: 9px;
+  font-family: var(--font-family);
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.035em;
+}
+
+.app-navigation .logo-text { display: inline; }
+.app-navigation .logo > svg { display: none; }
+.app-navigation-links { display: flex; align-items: center; gap: 8px; }
+.app-navigation .app-navigation-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  min-height: 40px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-family: var(--font-family);
+  font-size: 14px;
+}
+.app-navigation-link:hover { background: var(--bg-tertiary); }
+.app-navigation .app-navigation-link.active { color: var(--accent-color); background: var(--v2-accent-soft); }
+.app-navigation .topbar-actions { margin-left: auto; }
+.app-navigation .search-form { min-width: 0; }
+.app-navigation .search-input { width: clamp(140px, 20vw, 260px); max-width: 100%; }
+.app-navigation .search-input:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
+.app-navigation .provider-context { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.app-navigation .nav-link-trash { font-size: 13px; }
+.app-navigation .theme-toggle { color: var(--text-secondary); min-width: 40px; min-height: 40px; }
+.theme-toggle .ui-icon-sun { display: none; }
+[data-theme="dark"] .theme-toggle .ui-icon-sun { display: inline-block; }
+[data-theme="dark"] .theme-toggle .ui-icon-moon { display: none; }
+
+.content { max-width: 1280px; padding: calc(var(--topbar-height) + 32px) 32px 64px; }
+.content:has(.session-workbench) { max-width: none; padding: calc(var(--topbar-height) + 24px) 32px 64px; }
+
+@media (max-width: 1000px) {
+  .app-navigation { gap: 16px; padding-inline: 20px; }
+  .app-navigation .provider-context { display: none; }
+  .app-navigation .app-navigation-link { padding-inline: 8px; }
+}
+
+@media (max-width: 768px) {
+  :root { --topbar-height: 56px; --session-anchor-offset: 72px; --settings-anchor-offset: 72px; }
+  .app-navigation { gap: 8px; padding-inline: 12px; }
+  .app-navigation .logo-text { display: none; }
+  .app-navigation .logo > svg { display: block; }
+  .app-navigation-links { gap: 2px; }
+  .app-navigation .app-navigation-link { gap: 5px; min-height: 44px; padding-inline: 6px; font-size: 13px; }
+  .app-navigation .app-navigation-link .ui-icon { display: none; }
+  .app-navigation .search-form { display: none; }
+  .app-navigation .nav-link-trash { display: none; }
+  .app-navigation .theme-toggle { min-width: 44px; min-height: 44px; }
+  .content, .content:has(.session-workbench) { padding: calc(var(--topbar-height) + 20px) 16px 48px; }
+}

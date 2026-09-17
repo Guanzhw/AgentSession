@@ -138,6 +138,7 @@ export function buildPartsFromProviderMessages(providerMessages: any[] = [], idP
       id: messageId,
       data: {
         role: source.role || "assistant",
+        presentationPhase: source.presentationPhase,
         time: { created: Number(source.timestamp) || 0 },
         tokens: source.tokens || null,
         model: source.metadata?.model || null,
@@ -168,7 +169,9 @@ export function buildPartsFromProviderMessages(providerMessages: any[] = [], idP
         data: { type: "reasoning", text: source.thinking }
       });
     }
-    parts.push({ id: `${messageId}:part`, data: contentPart });
+    // Match reader-tree event IDs so search and continuation reach the same part.
+    const contentSuffix = contentPart.type === "tool" ? "tool" : "text";
+    parts.push({ id: `${messageId}:${contentSuffix}`, data: contentPart });
     partsByMessage.set(messageId, parts.map((part) => ({
       ...part,
       messageRole: source.role || "assistant",

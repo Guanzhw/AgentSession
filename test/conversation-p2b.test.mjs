@@ -303,25 +303,71 @@ test("P2b view model derives a recorded agent card with a source-ordered channel
   assert.deepEqual(card.childSession, { provider: "fixture", sessionId: "child-1" });
   assert.equal(card.bindings.taskToolCallId, "task-part");
   assert.equal(card.bindings.childSessionId, "child-1");
-  assert.equal(card.observationCount, 4);
-  assert.deepEqual(card.channel.map((item) => item.kind), ["message", "interrupt", "result-delivery", "result-acknowledgement"]);
-  assert.deepEqual(card.channel.map((item) => item.timestamp), [1750, 1600, 1700, 1800], "recorded source order wins when timestamps disagree");
-  assert.equal(card.channel[0].senderName, "worker");
-  assert.equal(card.channel[0].recipientName, "main");
+  assert.equal(card.observationCount, 5);
+  assert.deepEqual(card.channel.map((item) => item.kind), ["spawn", "message", "interrupt", "result-delivery", "result-acknowledgement"]);
+  assert.deepEqual(card.channel.map((item) => item.timestamp), [900, 1750, 1600, 1700, 1800], "recorded source order wins when timestamps disagree");
+  assert.equal(card.channel[0].senderName, "main");
+  assert.equal(card.channel[0].recipientName, "worker");
+  assert.equal(card.channel[1].senderName, "worker");
+  assert.equal(card.channel[1].recipientName, "main");
   assert.equal(card.lastActivity, 1800);
 });
 
-test("P2b references carry only recorded anchors and dedupe result delivery exactly once", () => {
-  const view = deriveFixture();
-  const kinds = view.references.map((reference) => reference.kind);
-  assert.deepEqual(kinds, ["message", "result", "acknowledgement"]);
-  const resultRows = view.references.filter((reference) => reference.kind === "result");
-  assert.equal(resultRows.length, 1, "a result-delivery observation produces exactly one main-thread row");
-  assert.equal(view.references.filter((reference) => reference.kind === "acknowledgement").length, 1);
-  assert.equal(view.references[0].anchorMessageId, "a2");
+test("reader view exposes source-ordered main-agent turn boundaries only for root session runs", () => {
+  const protocol = v3Fixture({
+    tasks: [],
+    actors: [],
+    agentRuns: [
+      { id: "run:turn-1", sessionId: "root", taskId: null, status: "completed", mode: "unknown", kind: "session-turn", turnId: "turn-1", agent: null, model: null, childSessionId: null, timeStart: 300, timeEnd: 100, provenance },
+      { id: "run:child-turn", sessionId: "child-1", taskId: null, status: "completed", mode: "unknown", kind: "session-turn", turnId: "child-turn", agent: null, model: null, childSessionId: null, timeStart: 250, timeEnd: 260, provenance },
+      { id: "run:turn-2", sessionId: "root", taskId: null, status: "completed", mode: "unknown", kind: "session-turn", turnId: "turn-2", agent: null, model: null, childSessionId: null, timeStart: 50, timeEnd: 400, provenance },
+      { id: "run:turn-3", sessionId: "root", taskId: null, status: "running", mode: "unknown", kind: "session-turn", turnId: "turn-3", agent: null, model: null, childSessionId: null, timeStart: null, timeEnd: null, provenance }
+    ],
+    events: [
+      { id: "event:turn-1-start", sessionId: "root", sequence: 1, timestamp: 300, kind: "task_started", normalizedKind: "run.started", turnId: "turn-1", runId: "run:turn-1", provenance },
+      { id: "event:turn-1-end", sessionId: "root", sequence: 2, timestamp: 100, kind: "task_complete", normalizedKind: "run.completed", turnId: "turn-1", runId: "run:turn-1", provenance },
+      { id: "event:child-start", sessionId: "root", sequence: 3, timestamp: 250, kind: "task_started", normalizedKind: "run.started", turnId: "child-turn", runId: "run:child-turn", provenance },
+      { id: "event:turn-2-start", sessionId: "root", sequence: 4, timestamp: 50, kind: "task_started", normalizedKind: "run.started", turnId: "turn-2", runId: "run:turn-2", provenance },
+      { id: "event:turn-2-end", sessionId: "root", sequence: 5, timestamp: 400, kind: "task_complete", normalizedKind: "run.completed", turnId: "turn-2", runId: "run:turn-2", provenance },
+      { id: "event:turn-3-start", sessionId: "root", sequence: 6, timestamp: null, kind: "task_started", normalizedKind: "run.started", turnId: "turn-3", runId: "run:turn-3", provenance },
+      { id: "event:unrelated", sessionId: "root", sequence: 7, timestamp: 500, kind: "message", normalizedKind: "message", runId: "run:turn-1", provenance }
+    ]
+  });
+  const view = deriveConversationView({
+    protocol,
+    work: projectWork(protocol),
+    execution: projectExecution(protocol),
+    coordination: projectCoordination(protocol),
+    context: projectContext(protocol)
+  });
+  assert.deepEqual(view.turnBoundaries.map((boundary) => boundary.eventId), [
+    "event:turn-1-start", "event:turn-1-end", "event:turn-2-start", "event:turn-2-end", "event:turn-3-start"
+  ]);
+  assert.deepEqual(view.turnBoundaries.map((boundary) => boundary.displayNumber), [1, 1, 2, 2, 3]);
+  assert.deepEqual(view.turnBoundaries.map((boundary) => boundary.timestamp), [300, 100, 50, 400, null], "source order is retained despite clock disagreement");
+  assert.equal(view.turnBoundaries.some((boundary) => boundary.runId === "run:child-turn"), false);
+  const html = renderSessionPage({
+    session: cardTree().session,
+    sessionTree: cardTree(),
+    provider: "fixture",
+    conversationView: view
+  });
+  assert.doesNotMatch(html, /data-reader-collaboration-toggle|data-reader-collaboration-overview/, "turn boundaries alone do not create a tasks drawer");
+  assert.doesNotMatch(html, /data-reader-lane="main-agent-turns"/);
+  assert.doesNotMatch(html, /data-reader-event-id="event:child-start"/);
+  assert.doesNotMatch(html, /data-reader-turn-boundary[^>]*data-reader-anchor/);
 });
 
-test("P2b SSR renders a collapsed agent card replacing the nested session block", () => {
+test("conversation channels retain source evidence without treating execution turn IDs as text anchors", () => {
+  const view = deriveFixture();
+  assert.equal("references" in view, false, "reader-relations owns main-history source placement");
+  const channel = view.cards.flatMap((card) => card.channel);
+  assert.equal(channel.filter((item) => item.kind === "result-delivery").length, 1);
+  assert.equal(channel.filter((item) => item.kind === "result-acknowledgement").length, 1);
+  assert.equal(channel.find((item) => item.kind === "message").turnId, "a2");
+});
+
+test("P2b SSR retains the task disclosure and opens child history through its canonical reader", () => {
   const view = deriveFixture();
   const html = renderSessionPage({
     session: cardTree().session,
@@ -329,24 +375,28 @@ test("P2b SSR renders a collapsed agent card replacing the nested session block"
     provider: "fixture",
     conversationView: view
   });
-  const thread = html.slice(html.indexOf('<section id="session-messages"'));
+  const thread = messagesSection(html);
   assert.equal((thread.match(/data-agent-card/g) || []).length >= 1, true);
   assert.match(thread, /data-agent-card-id="run:run-1"/);
   assert.match(thread, /data-agent-name="worker"/);
   assert.match(thread, /data-agent-state="interrupted"/);
   assert.match(thread, /data-agent-child-session="child-1"/);
-  assert.equal((thread.match(/class="subsession-container/g) || []).length, 0, "bound card replaces the nested session block");
-  assert.match(thread, /id="session-child-1" class="session-event-anchor"/, "child-session deep-link anchor is preserved");
+  assert.doesNotMatch(thread, /Worker session output/, "the parent does not eagerly duplicate child bodies");
+  assert.match(thread, /data-reader-open[^>]*data-reader-session="child-1"/, "bound child history stays reachable");
+  assert.match(thread, /class="tool-call tool-status-running"/, "the task tool disclosure remains reachable");
+  assert.equal((thread.match(/id="part-task-part"/g) || []).length, 1, "the task part keeps one canonical anchor");
+  assert.equal((thread.match(/id="session-child-1"/g) || []).length, 0, "the child pane owns its own anchors");
   assert.match(thread, /id="part-task-part"/, "dispatch part anchor is preserved");
   assert.match(thread, /href="\/fixture\/session\/child-1"/);
-  assert.equal((thread.match(/class="subagent-export-btn" href="\/fixture\/session\/child-1"/g) || []).length, 1, "child session Open action renders once");
+  assert.equal((thread.match(/class="subagent-export-btn"[^>]*href="\/fixture\/session\/child-1"/g) || []).length, 1, "child session Open action renders once");
   // Card starts collapsed; the channel is a nested disclosure.
   assert.match(thread, /<details class="agent-card"/);
   assert.doesNotMatch(thread, /<details class="agent-card[^>]*open/);
-  assert.match(thread, /<details class="agent-channel" data-agent-channel data-disclosure>/);
+  assert.match(thread, /<details class="agent-channel" data-agent-channel[^>]*data-disclosure>/);
   assert.match(thread, /aria-expanded="false"/);
   // Channel items and their recorded fields only.
-  assert.equal((thread.match(/data-channel-kind=/g) || []).length, 4);
+  assert.equal((thread.match(/data-channel-kind=/g) || []).length, 5);
+  assert.match(thread, /data-channel-kind="spawn"/);
   assert.match(thread, /data-channel-kind="message"/);
   assert.match(thread, /data-channel-kind="result-delivery"/);
   assert.match(thread, /agent-channel-direction[^>]*>worker → main</);
@@ -355,7 +405,37 @@ test("P2b SSR renders a collapsed agent card replacing the nested session block"
   assert.match(thread, /data-agent-result-arrival="[^"]+"/);
 });
 
-test("P2b main-thread references render once and never duplicate into the ToC", () => {
+test("P2b bound card keeps distinct canonical child readers and dedupes their ToC entries", () => {
+  const view = deriveFixture();
+  const worker = childSession("child-1", "Worker session");
+  const sibling = childSession("child-2", "Sibling session");
+  const task = flowTool("task-part", {
+    tool: "task",
+    status: "running",
+    title: "Review docs",
+    childSessions: [worker, worker, sibling]
+  });
+  const tree = flowSession("root", [flowMessage("a1", "assistant", 1100, [task])]);
+  const html = renderSessionPage({ session: tree.session, sessionTree: tree, provider: "fixture", conversationView: view });
+  const messages = messagesSection(html);
+  const toc = tocSection(html);
+
+  assert.equal((messages.match(/data-agent-card-id="run:run-1"/g) || []).length, 1);
+  assert.doesNotMatch(messages, /Worker session output|Sibling session output/);
+  assert.doesNotMatch(messages, /id="session-child-[12]"/);
+  assert.match(messages, /data-reader-open[^>]*data-reader-session="child-1"/);
+  assert.match(messages, /data-reader-open[^>]*data-reader-session="child-2"/);
+  for (const child of [worker, sibling]) {
+    const childHtml = renderSessionPage({ session: child.session, sessionTree: child, provider: "fixture" });
+    assert.equal((childHtml.match(new RegExp(`id="session-${child.session.id}"`, "g")) || []).length, 1);
+    assert.match(childHtml, new RegExp(`${child.session.title} output`));
+  }
+  assert.equal((messages.match(/id="part-task-part"/g) || []).length, 1);
+  assert.equal((toc.match(/data-reader-session="child-1"/g) || []).length, 1);
+  assert.equal((toc.match(/data-reader-session="child-2"/g) || []).length, 1);
+});
+
+test("conversation channels do not create legacy main-thread references or duplicate ToC entries", () => {
   const view = deriveFixture();
   const html = renderSessionPage({
     session: cardTree().session,
@@ -363,15 +443,13 @@ test("P2b main-thread references render once and never duplicate into the ToC", 
     provider: "fixture",
     conversationView: view
   });
-  const thread = html.slice(html.indexOf('<section id="session-messages"'));
-  assert.equal((thread.match(/data-agent-reference/g) || []).length, 3);
-  assert.equal((thread.match(/data-reference-kind="result"/g) || []).length, 1);
-  assert.equal((thread.match(/data-reference-kind="acknowledgement"/g) || []).length, 1);
-  assert.equal((thread.match(/data-reference-kind="message"/g) || []).length, 1);
+  const thread = messagesSection(html);
+  assert.doesNotMatch(thread, /data-agent-reference|data-reference-kind/);
+  assert.match(thread, /data-channel-kind="result-delivery"/);
   const toc = html.match(/<div class="toc-list">([\s\S]*?)<\/div>\s*<button class="toc-resize-handle"/)?.[1] || "";
   assert.doesNotMatch(toc, /data-agent-reference|agent-card|agent-channel|agent-reference|data-channel-kind/);
-  assert.match(toc, /href="#part-task-part"/, "task ToC entry remains at the dispatch anchor");
-  assert.match(toc, /href="#session-child-1"/, "child session ToC entry still resolves");
+  assert.doesNotMatch(toc, /href="#part-task-part"/, "a resolved single-child task has no duplicate task node");
+  assert.match(toc, /href="\/fixture\/session\/child-1"/, "the combined task/child entry resolves canonically");
 });
 
 test("P2b nested-session fallback stays when no protocol binding exists", () => {
@@ -475,8 +553,9 @@ test("P2b inspector degradation: no protocol evidence keeps truthful not-recorde
     provider: "fixture"
   });
   assert.match(html, /data-conversation-layout/);
-  // Without a view model the inspector renders the unavailable state.
-  assert.match(html, /data-inspector-unavailable/);
+  // Without a view model there is no collaboration drawer; missing evidence
+  // remains an ordinary readable page rather than an invented inspector.
+  assert.doesNotMatch(html, /data-inspector-unavailable|data-reader-collaboration-overview/);
 });
 
 test("P2b disclosure and responsive hooks are present in markup and styles", () => {
@@ -527,7 +606,6 @@ test("P2b channel bound truncation keeps the page bounded", () => {
   assert.equal(view.cards[0].channel.length, 50);
   assert.equal(view.cards[0].channelTruncated, true);
   assert.equal(view.cards[0].observationCount, 60);
-  assert.equal(view.references.length, 50, "references are bounded");
 });
 
 // ── P2b truthful unplaced fallback (DSH evidence: run/task records without a
@@ -591,7 +669,9 @@ function unplacedFixture() {
 }
 
 function messagesSection(html) {
-  return html.slice(html.indexOf('<section id="session-messages"'));
+  const start = html.indexOf('<section id="session-messages"');
+  const end = html.indexOf('<aside class="reader-collaboration', start);
+  return html.slice(start, end < 0 ? undefined : end);
 }
 
 function tocSection(html) {
@@ -691,8 +771,8 @@ test("P2b unplaced section stays out of the ToC and adds no agent entries", () =
   const toc = tocSection(html);
   assert.doesNotMatch(toc, /data-agent-card|data-agent-cards-unplaced|data-agent-channel|data-channel-kind|data-agent-reference/);
   assert.doesNotMatch(toc, /href="#agent-card-/);
-  assert.match(toc, /href="#part-task-part"/, "spine task ToC entry remains");
-  assert.match(toc, /href="#session-child-1"/, "bound child-session ToC entry remains");
+  assert.doesNotMatch(toc, /href="#part-task-part"/, "resolved single-child task is not duplicated");
+  assert.match(toc, /href="\/fixture\/session\/child-1"/, "combined task/child reader entry remains");
   // The unplaced section lives inside the messages surface, not in the ToC.
   const messages = messagesSection(html);
   assert.match(messages, /data-agent-cards-unplaced/);
@@ -716,6 +796,9 @@ test("P2b already-placed cards are never rebound to a second spine part", () => 
   assert.equal((messages.match(/data-agent-card-id="run:run-1"/g) || []).length, 1, "bound card renders exactly once");
   assert.equal((messages.match(/class="subagent-branch"/g) || []).length, 1, "second task part keeps the nested fallback");
   assert.equal((messages.match(/data-agent-card-id=/g) || []).length, 2, "bound card plus one unplaced card");
+  assert.doesNotMatch(messages, /Worker session output|id="session-child-1"|id="msg-child-1-answer"/, "child body and anchors belong to its own pane");
+  assert.equal((messages.match(/id="part-other-part"/g) || []).length, 1, "the later task keeps its own tool part anchor");
+  assert.match(messages, /class="subagent-existing-link"[^>]*data-reader-session="child-1"[^>]*href="\/fixture\/session\/child-1"/, "the later task links to the same canonical child");
 });
 
 test("P2b bound card actions follow the recorded child ref rather than the part's first child", () => {
@@ -730,12 +813,15 @@ test("P2b bound card actions follow the recorded child ref rather than the part'
   });
   const tree = flowSession("root", [flowMessage("a1", "assistant", 1100, [task])]);
   const html = renderSessionPage({ session: tree.session, sessionTree: tree, provider: "fixture", conversationView: view });
-  const card = messagesSection(html).match(/<details class="agent-card"[\s\S]*?<\/details>/)?.[0] || "";
+  const messages = messagesSection(html);
+  const card = messages.match(/<details class="agent-card"[\s\S]*?<\/details>/)?.[0] || "";
   assert.match(card, /href="\/fixture\/session\/child-1"/);
   assert.doesNotMatch(card, /href="\/fixture\/session\/child-other"/);
+  assert.match(messages, /data-reader-session="child-other"/, "the first child remains reachable");
+  assert.match(messages, /data-reader-session="child-1"/, "the recorded child remains reachable");
   const toc = tocSection(html);
-  assert.match(toc, /href="#session-child-other"/, "every replaced child keeps its ToC target");
-  assert.match(toc, /href="#session-child-1"/, "the recorded child keeps its ToC target");
+  assert.match(toc, /href="\/fixture\/session\/child-other"/, "every child keeps its canonical ToC target");
+  assert.match(toc, /href="\/fixture\/session\/child-1"/, "the recorded child keeps its canonical ToC target");
   assert.equal((card.match(/href="\/fixture\/session\/child-1"/g) || []).length, 1, "actions use the recorded card child exactly once");
 });
 
@@ -776,25 +862,26 @@ test("P2b coordination assignment honors explicit identity and rejects ambiguous
       { id: "coord:unknown-explicit", sessionId: "root", kind: "message", state: "delivered", timestamp: 1, senderActorId: "actor:one", recipientActorId: "actor:main", runId: "missing-run", turnId: "a1", provenance },
       { id: "coord:ambiguous-actor", sessionId: "root", kind: "message", state: "delivered", timestamp: 2, senderActorId: "actor:shared", recipientActorId: "actor:main", turnId: "a2", provenance },
       { id: "coord:unique-actor", sessionId: "root", kind: "message", state: "delivered", timestamp: 3, senderActorId: "actor:one", recipientActorId: "actor:main", turnId: "a3", taskId: null, runId: null, provenance },
-      { id: "coord:explicit-task", sessionId: "root", kind: "message", state: "delivered", timestamp: 4, senderActorId: "actor:one", recipientActorId: "actor:main", taskId: "task-2", turnId: "a4", provenance }
+      { id: "coord:explicit-task", sessionId: "root", kind: "message", state: "delivered", timestamp: 4, senderActorId: "actor:one", recipientActorId: "actor:main", taskId: "task-2", turnId: "a4", provenance },
+      { id: "coord:explicit-run", sessionId: "root", kind: "message", state: "delivered", timestamp: 5, senderActorId: "actor:one", recipientActorId: "actor:main", taskId: "task-2", runId: "run-2", turnId: "a4", provenance }
     ]
   });
   const fixture = { protocol, work: projectWork(protocol), execution: projectExecution(protocol), coordination: projectCoordination(protocol), context: projectContext(protocol) };
   const view = deriveConversationView(fixture);
-  assert.deepEqual(view.references.map((reference) => reference.id), ["coord:unique-actor", "coord:explicit-task"]);
   assert.equal(view.cards.find((card) => card.id === "run:run-1").channel.filter((item) => item.id === "coord:unique-actor").length, 1);
-  assert.equal(view.cards.find((card) => card.id === "run:run-2").channel.filter((item) => item.id === "coord:explicit-task").length, 1);
+  assert.equal(view.cards.find((card) => card.id === "run:run-2").channel.filter((item) => item.id === "coord:explicit-run").length, 1);
+  assert.equal(view.cards.every((card) => !card.channel.some((item) => item.id === "coord:explicit-task")), true, "a task-only observation does not claim a particular run");
   assert.equal(view.cards.every((card) => !card.channel.some((item) => item.id === "coord:ambiguous-actor")), true);
   assert.equal(new Set(view.cards.flatMap((card) => card.channel.map((item) => item.id))).size, 2, "one observation cannot appear in two card channels");
 });
 
-test("P2b valid task binding replaces a task part even when it has no child sessions", () => {
+test("P2b valid task binding keeps the task disclosure even when it has no child sessions", () => {
   const task = flowTool("task-part", { tool: "task", status: "running", title: "Review docs", childSessions: [] });
   const tree = flowSession("root", [flowMessage("a1", "assistant", 1100, [task])]);
   const html = renderSessionPage({ session: tree.session, sessionTree: tree, provider: "fixture", conversationView: deriveFixture() });
   const messages = messagesSection(html);
   assert.match(messages, /data-agent-card-id="run:run-1"/);
-  assert.doesNotMatch(messages, /class="tool-call/);
+  assert.match(messages, /class="tool-call/);
   assert.doesNotMatch(messages, /class="subagent-branch/);
 });
 

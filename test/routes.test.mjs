@@ -388,24 +388,15 @@ test("progressive content endpoint returns bounded continuation chunks", async (
   const output = `# Result\n\n${"line\n".repeat(1400)}`;
   const provider = {
     id: "codex",
-    getSessionContainer(sessionId) {
-      if (sessionId !== "session-1") return null;
-      return {
-        id: sessionId,
-        messages: [{
-          parts: [{
-            id: "tool-1",
-            data: {
-              type: "tool",
-              state: { status: "completed", input: { query: "x" }, output }
-            },
-            childSessions: []
-          }]
-        }],
-        detachedChildren: []
-      };
+    getSession(sessionId) {
+      return sessionId === "session-1" ? { id: sessionId, title: "Continuation" } : null;
     },
-    getMessages() { return []; }
+    getMessages(sessionId) {
+      return sessionId === "session-1" ? [{
+        id: "tool-1", sessionId, role: "tool", content: output,
+        toolName: "run", toolInput: { query: "x" }, toolOutput: output, timestamp: 1
+      }] : [];
+    }
   };
   const routes = captureGetRoutes(registerSessionDetail, {
     appConfig: { port: 0, metaDir: temp, projectPaths: {}, resumeCommands: {}, allowTerminalLaunch: false },
@@ -416,7 +407,7 @@ test("progressive content endpoint returns bounded continuation chunks", async (
   assert.ok(route);
 
   const firstResponse = createResponseCapture();
-  const firstUrl = "/api/codex/session/session-1/content?part=tool-1&field=output&offset=0";
+  const firstUrl = "/api/codex/session/session-1/content?part=tool-1:tool&field=output&offset=0";
   await route.handler({ url: firstUrl }, firstResponse, ["", "codex", "session-1"]);
   assert.equal(firstResponse.statusCode, 200);
   const first = JSON.parse(firstResponse.body);
@@ -427,7 +418,7 @@ test("progressive content endpoint returns bounded continuation chunks", async (
   assert.ok(first.html.length < output.length, "response contains one bounded chunk");
 
   const secondResponse = createResponseCapture();
-  const secondUrl = `/api/codex/session/session-1/content?part=tool-1&field=output&offset=${first.nextOffset}`;
+  const secondUrl = `/api/codex/session/session-1/content?part=tool-1:tool&field=output&offset=${first.nextOffset}`;
   await route.handler({ url: secondUrl }, secondResponse, ["", "codex", "session-1"]);
   const second = JSON.parse(secondResponse.body);
   assert.equal(second.ok, true);
@@ -435,7 +426,7 @@ test("progressive content endpoint returns bounded continuation chunks", async (
 
   const invalidResponse = createResponseCapture();
   await route.handler(
-    { url: "/api/codex/session/session-1/content?part=tool-1&field=output&offset=-1" },
+    { url: "/api/codex/session/session-1/content?part=tool-1:tool&field=output&offset=-1" },
     invalidResponse,
     ["", "codex", "session-1"]
   );

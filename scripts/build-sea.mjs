@@ -34,9 +34,28 @@ const bundle = async (entryPoint, outfile, define = {}) => {
 const viewerEntry = path.join(workDir, "agentsession.mjs");
 const mcpEntry = path.join(workDir, "agentsession-mcp.mjs");
 const staticAppAsset = path.join(workDir, "app.js");
+const staticAppShellAsset = path.join(root, "src", "static", "app-shell.css");
+const staticReaderAsset = path.join(root, "src", "static", "reader.css");
 const staticHighlightAsset = path.join(root, "src", "static", "vendor", "highlight.js", "highlight.min.js");
 const staticHighlightThemeAsset = path.join(root, "src", "static", "vendor", "highlight.js", "github.min.css");
 const staticHighlightLicenseAsset = path.join(root, "src", "static", "vendor", "highlight.js", "LICENSE.txt");
+const staticLucideDir = path.join(root, "src", "static", "vendor", "lucide");
+const staticLucideAssets = Object.fromEntries([
+  "book-open.svg",
+  "chart-no-axes-column.svg",
+  "chevron-down.svg",
+  "ellipsis.svg",
+  "external-link.svg",
+  "moon.svg",
+  "network.svg",
+  "search.svg",
+  "settings-2.svg",
+  "star.svg",
+  "sun.svg",
+  "x.svg",
+  "LICENSE",
+  "README.md"
+].map((name) => [`static/vendor/lucide/${name}`, path.join(staticLucideDir, name)]));
 
 await Promise.all([
   bundle("bin/binary.ts", viewerEntry),
@@ -64,10 +83,13 @@ const targets = [
     output: path.join(outDir, `agentsession${extension}`),
     assets: {
       "static/app.js": staticAppAsset,
+      "static/app-shell.css": staticAppShellAsset,
+      "static/reader.css": staticReaderAsset,
       "static/style.css": path.join(root, "src", "static", "style.css"),
       "static/vendor/highlight.js/highlight.min.js": staticHighlightAsset,
       "static/vendor/highlight.js/github.min.css": staticHighlightThemeAsset,
       "static/vendor/highlight.js/LICENSE.txt": staticHighlightLicenseAsset,
+      ...staticLucideAssets
     }
   },
   {

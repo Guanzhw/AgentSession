@@ -1,5 +1,6 @@
-import type { ProtocolCapabilities, SessionProtocol } from "./shared/session-protocol.js";
+import type { AgentRun, EventProvenance, ProtocolCapabilities, SessionProtocol, SessionRelationship, Task } from "./shared/session-protocol.js";
 import type { SessionProtocolV3 } from "./shared/session-protocol-v3.js";
+import type { SessionTree } from "./shared/session-tree.js";
 
 export type ProviderId = "opencode" | "claude-code" | "codex" | "openclaw" | "hermes" | "pi" | "deepseek-harness";
 
@@ -75,6 +76,84 @@ export interface InheritedContextView {
   messages: Message[];
   total: number;
   truncated: boolean;
+}
+
+/** Evidence used to attach owned child rollouts to their recorded launcher. */
+export interface OwnedReaderLinkEvidence {
+  tasks?: Task[];
+  agentRuns?: AgentRun[];
+  relationships?: SessionRelationship[];
+}
+
+/** Metadata-only child target used by the bounded reader projection. */
+export interface OwnedReaderChildDescriptor {
+  provider: ProviderId;
+  sessionId: string;
+  title: string | null;
+  available: boolean;
+  link: "explicit" | "inferred";
+  parentPartId: string | null;
+  detached: boolean;
+}
+
+/** Root-owned reader content with metadata-only child navigation targets. */
+export interface OwnedReaderProjection {
+  rootTree: SessionTree;
+  children: OwnedReaderChildDescriptor[];
+}
+
+export type ContextChangeSummaryAvailability = "readable" | "recorded-empty" | "not-recorded";
+
+export interface ContextChangeSummary {
+  value: string | null;
+  availability: ContextChangeSummaryAvailability;
+}
+
+export interface ContextChangeSourceEvidence extends EventProvenance {
+  /** Raw record position used as a stable reader anchor; it is adapter-derived. */
+  sourceOrdinal: number | null;
+  sourceOrdinalProvenance: "source-order/derived";
+}
+
+export interface ContextChangeContentField {
+  label: string;
+  value: string;
+}
+
+export interface ContextChangeAttachment {
+  kind: "image";
+  sourcePath: string;
+  contentAccess: "metadata-only";
+}
+
+export interface ContextChangeRetainedEntry {
+  /** Position within the provider-retained group, not a provider record id. */
+  sourceOrdinal: number;
+  sourceOrdinalProvenance: "source-order/derived";
+  kind: "message" | "tool" | "reasoning" | "text" | "other";
+  role: string | null;
+  fields: ContextChangeContentField[];
+  content: string;
+  attachments: ContextChangeAttachment[];
+  omittedEncryptedFieldPaths: string[];
+  omittedEncryptedFieldCount: number;
+}
+
+export interface ContextChangeRetainedGroup {
+  /** Provider-neutral display label; provider field names stay adapter-owned. */
+  label: string;
+  entries: ContextChangeRetainedEntry[];
+}
+
+export interface ContextChangeResult {
+  checkpointId: string;
+  source: ContextChangeSourceEvidence;
+  summary: ContextChangeSummary;
+  groups: ContextChangeRetainedGroup[];
+  omitted: {
+    encryptedFieldPaths: string[];
+    encryptedFieldCount: number;
+  };
 }
 
 export interface DailyTokenStat {
@@ -166,6 +245,12 @@ export interface ProviderAdapter {
    * unknown.
    */
   getSessionProtocolV3?(sessionId: string): SessionProtocolV3 | null;
+  /**
+   * Optional on-demand recorded context result. Null means the checkpoint is
+   * unknown; a known checkpoint without readable content retains an explicit
+   * not-recorded summary and empty groups. Uses this session's owned records.
+   */
+  getContextChangeResult?(sessionId: string, checkpointId: string): ContextChangeResult | null;
   capabilities?: {
     localManagement?: boolean;
     /** Data path uses the OpenCode SQLite schema accepted by native stats and list queries. */
@@ -176,8 +261,10 @@ export interface ProviderAdapter {
   scan(): AsyncIterable<RawSession>;
   getSession(sessionId: string): RawSession | Record<string, unknown> | null;
   getMessages(sessionId: string): Message[];
-  /** Optional bounded disclosure of explicitly recorded inherited context. */
+  /** Explicitly recorded inherited context; readers paginate separately from owned history. */
   getInheritedContext?(sessionId: string): InheritedContextView | null;
+  /** Optional bounded reader projection; child bodies remain on-demand. */
+  getOwnedReaderProjection?(sessionId: string, evidence?: OwnedReaderLinkEvidence): OwnedReaderProjection | null;
   getTokenStats(days?: number): DailyTokenStat[];
   /** Monotonically changes when a file-backed provider's stats source changes. */
   getStatsRevision?(): string | number;

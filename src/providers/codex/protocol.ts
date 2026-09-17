@@ -44,8 +44,21 @@ type Row = Record<string, any>;
 
 export interface CodexProtocolChild {
   session: RawSession;
-  messages: Message[];
-  records: Row[];
+  facts: CodexProtocolChildFacts;
+}
+
+export interface CodexProtocolChildFacts {
+  model: string | null;
+  taskEnvelopeId: string | null;
+  hasTaskEnvelope: boolean;
+  terminalMessageTime: number | null;
+  completedTurns: Array<{
+    sourceId: string;
+    eventId: string;
+    turnId: string | null;
+    timestamp: number | null;
+    hasError: boolean;
+  }>;
 }
 
 export interface CodexProtocolInput {
@@ -130,6 +143,14 @@ function codexCompactionShape(record: Row) {
     return "event-context-compacted";
   }
   return null;
+}
+
+export function codexCompactionEventId(compaction: {
+  sourceId?: string | null;
+  recordIndices?: number[];
+}) {
+  const recordIndex = compaction.recordIndices?.[0] ?? 0;
+  return `event:compaction:${compaction.sourceId || recordIndex}`;
 }
 
 function codexCompactionExplicitId(record: Row) {
@@ -257,21 +278,6 @@ function primarySessionMeta(records: Row[]) {
   return records.find((record) => record.type === "session_meta")?.payload || {};
 }
 
-function childModel(child: CodexProtocolChild): string | null {
-  for (const record of child.records) {
-    const payload = record.payload;
-    if (record.type === "session_meta" && payload) {
-      const model = firstString(payload.model, payload.model_name);
-      if (model) return model;
-    }
-    if (record.type === "turn_context" && payload) {
-      const model = firstString(payload.model);
-      if (model) return model;
-    }
-  }
-  return null;
-}
-
 /**
  * Normalized protocol for one Codex session:
  * - events: one envelope per normalized message (derived) plus recorded
@@ -387,7 +393,7 @@ export function buildCodexSessionProtocol(input: CodexProtocolInput): SessionPro
     const provenance = codexCompactionProvenance(compaction);
     const sourceEvidence = codexCompactionSourceEvidence(compaction);
     pushAnchored(compactionEnvelope({
-      id: `event:compaction:${compaction.sourceId || recordIndex}`,
+      id: codexCompactionEventId(compaction),
       sessionId,
       timestamp: asNumber(ts),
       correlationId: compaction.sourceId,
@@ -434,13 +440,20 @@ export function buildCodexSessionProtocol(input: CodexProtocolInput): SessionPro
   });
 
   // Derived message envelopes, interleaved at their producing record.
+  const messagesById = new Map(input.messages.map((message) => [message.id, message]));
   for (const event of messageSessionEvents(input.messages, sessionId, "codex.normalized-message")) {
+    const messageId = event.provenance.sourceId || null;
+    const message = messageId ? messagesById.get(messageId) : null;
+    const toolCallId = typeof message?.metadata?.callId === "string" && message.metadata.callId
+      ? message.metadata.callId
+      : null;
+    const boundEvent = { ...event, messageId, toolCallId };
     const recordIndex = event.provenance.sourceId ? messageAnchors.get(event.provenance.sourceId) : null;
     if (recordIndex == null) {
-      events.push(event); // documented fallback: normalized message order, appended
+      events.push(boundEvent); // documented fallback: normalized message order, appended
       continue;
     }
-    pushAnchored(event, recordIndex);
+    pushAnchored(boundEvent, recordIndex);
   }
 
   const relationships: ReturnType<typeof sessionRelationship>[] = [];
@@ -489,9 +502,7 @@ export function buildCodexSessionProtocol(input: CodexProtocolInput): SessionPro
     const ts = record.timestamp ? new Date(String(record.timestamp)).getTime() : null;
     const text = envelopeTextOf(record);
     const run = input.children.find((child) => {
-      const childEnvelope = (child.records || []).find(isSubagentTaskEnvelopeRecord);
-      const childTaskId = childEnvelope?.payload ? firstString(childEnvelope.payload.id, childEnvelope.payload.call_id) : null;
-      if (childTaskId === taskId) return true;
+      if (child.facts.taskEnvelopeId === taskId) return true;
       const nickname = child.session.metadata?.agentNickname;
       const path = child.session.metadata?.agentPath;
       return Boolean(
@@ -528,7 +539,7 @@ export function buildCodexSessionProtocol(input: CodexProtocolInput): SessionPro
         status: "completed",
         mode: "subagent",
         agent: runAgentPath || firstString(run.session.metadata?.agentPath, run.session.metadata?.agentNickname),
-        model: childModel(run),
+        model: run.facts.model,
         childSessionId: String(run.session.id),
         timeStart: asNumber(run.session.timeCreated),
         timeEnd: asNumber(run.session.timeUpdated),
@@ -650,24 +661,23 @@ export function buildCodexSessionProtocol(input: CodexProtocolInput): SessionPro
 
   const terminalAgentMessageTime = (child: CodexProtocolChild): number | null => {
     const identities = childIdentityParts(child);
-    const findTerminal = (records: Row[], requireAuthorMatch: boolean): number | null => {
-      for (const record of records) {
-        if (record.type !== "response_item" || record.payload?.type !== "agent_message") continue;
-        const author = firstString(record.payload.author, record.payload.sender);
-        if (requireAuthorMatch && (!author || !identities.some((identity) => (
-          identity === author || identity.endsWith(`/${author}`) || author.endsWith(`/${identity}`)
-        )))) continue;
-        if (!/^Message Type:\s*FINAL_ANSWER\b/m.test(envelopeText(record.payload))) continue;
-        return record.timestamp ? asNumber(new Date(String(record.timestamp)).getTime()) : null;
-      }
-      return null;
-    };
-    const parentTime = findTerminal(input.records, true);
-    if (parentTime != null) return parentTime;
-    // Some Codex versions persist FINAL_ANSWER only inside the child rollout.
-    // Its transcript identity already scopes the evidence, so no author field
-    // is required for this fallback.
-    return findTerminal(child.records || [], false);
+    let parentTime: number | null = null;
+    for (const record of input.records) {
+      if (record.type !== "response_item" || record.payload?.type !== "agent_message") continue;
+      const author = firstString(record.payload.author, record.payload.sender);
+      if (!author || !identities.some((identity) => (
+        identity === author || identity.endsWith(`/${author}`) || author.endsWith(`/${identity}`)
+      ))) continue;
+      if (!/^Message Type:\s*FINAL_ANSWER\b/m.test(envelopeText(record.payload))) continue;
+      // Match the old findTerminal behavior: the first matching parent
+      // envelope wins, even when its timestamp is unavailable.
+      parentTime = recordTimestamp(record);
+      break;
+    }
+    if (parentTime !== null) return parentTime;
+    // Some Codex versions persist FINAL_ANSWER only inside the child rollout;
+    // the adapter has already reduced that evidence to this child fact.
+    return child.facts.terminalMessageTime;
   };
 
   const spawnCalls = input.records.filter((record) => (
@@ -721,7 +731,7 @@ export function buildCodexSessionProtocol(input: CodexProtocolInput): SessionPro
         status: completed ? "completed" : "running",
         mode: activity?.mode ?? "subagent",
         agent: firstString(run.session.metadata?.agentPath, run.session.metadata?.agentNickname),
-        model: childModel(run),
+        model: run.facts.model,
         childSessionId: String(run.session.id),
         timeStart: asNumber(run.session.timeCreated),
         timeEnd: completionTime,
@@ -747,7 +757,7 @@ export function buildCodexSessionProtocol(input: CodexProtocolInput): SessionPro
     const isFork = childMeta.inheritedContext
       && !childMeta.agentPath
       && !childMeta.agentNickname
-      && !(child.records || []).some(isSubagentTaskEnvelopeRecord);
+      && !child.facts.hasTaskEnvelope;
     if (isFork) continue;
     if (runs.some((run) => run.childSessionId === childId)) continue;
     if (childrenById.has(childId) && !runs.some((run) => run.childSessionId === childId)) {
@@ -760,7 +770,7 @@ export function buildCodexSessionProtocol(input: CodexProtocolInput): SessionPro
         status: "completed",
         mode: "subagent",
         agent: firstString(childMeta.agentPath, childMeta.agentNickname),
-        model: childModel(child),
+        model: child.facts.model,
         childSessionId: childId,
         timeStart: asNumber(child.session.timeCreated),
         timeEnd: asNumber(child.session.timeUpdated),
@@ -784,7 +794,7 @@ export function buildCodexSessionProtocol(input: CodexProtocolInput): SessionPro
     const isFork = childMeta.inheritedContext
       && !childMeta.agentPath
       && !childMeta.agentNickname
-      && !(child.records || []).some(isSubagentTaskEnvelopeRecord);
+      && !child.facts.hasTaskEnvelope;
     const task = tasks.find((candidate) => (
       runs.some((run) => run.childSessionId === childId && run.taskId === candidate.id)
     ));
@@ -911,12 +921,71 @@ function passthroughTurnId(record: Row): string | null {
   return firstString(record.payload?.internal_chat_message_metadata_passthrough?.turn_id);
 }
 
-function isAgentEnvelope(record: Row): record is Row & { payload: { id?: unknown; author?: unknown; recipient?: unknown } } {
+function isAgentEnvelope(record: Row): record is Row & {
+  payload: {
+    id?: unknown;
+    author?: unknown;
+    recipient?: unknown;
+  }
+} {
   return record.type === "response_item" && record.payload?.type === "agent_message";
 }
 
 function isFinalAnswerEnvelope(record: Row): boolean {
-  return isAgentEnvelope(record) && /^Message Type:\s*FINAL_ANSWER\b/m.test(envelopeText(record.payload).replace(/\s+/g, " ").trim());
+  return isAgentEnvelope(record)
+    && /^Message Type:\s*FINAL_ANSWER\b/m.test(envelopeText(record.payload).replace(/\s+/g, " ").trim());
+}
+
+function isChildFinalAnswerEnvelope(record: Row): boolean {
+  return isAgentEnvelope(record)
+    && /^Message Type:\s*FINAL_ANSWER\b/m.test(envelopeText(record.payload));
+}
+
+/** Project only the child evidence consumed by the protocol builders. The
+ * caller supplies ownership-filtered records, so fallback source ids retain
+ * the established post-filter index semantics. */
+export function codexProtocolChildFactsFromRecords(records: Row[]): CodexProtocolChildFacts {
+  let model: string | null = null;
+  let taskEnvelopeId: string | null = null;
+  let hasTaskEnvelope = false;
+  let terminalMessageTime: number | null = null;
+  let terminalMessageSeen = false;
+  const completedTurns: CodexProtocolChildFacts["completedTurns"] = [];
+  for (const [index, record] of records.entries()) {
+    const payload = record.payload;
+    if (!model && record.type === "session_meta" && payload) {
+      model = firstString(payload.model, payload.model_name);
+    }
+    if (!model && record.type === "turn_context" && payload) {
+      model = firstString(payload.model);
+    }
+    if (!hasTaskEnvelope && isSubagentTaskEnvelopeRecord(record)) {
+      hasTaskEnvelope = true;
+      taskEnvelopeId = firstString(record.payload.id, record.payload.call_id);
+    }
+    if (!terminalMessageSeen && isChildFinalAnswerEnvelope(record)) {
+      terminalMessageSeen = true;
+      terminalMessageTime = recordTimestamp(record);
+    }
+    const lifecycle = codexTurnLifecycle(record, index);
+    if (lifecycle?.type === "task_complete") {
+      const sourceId = String(lifecycle.record.ordinal ?? lifecycle.recordIndex);
+      completedTurns.push({
+        sourceId,
+        eventId: codexTurnEventId(lifecycle),
+        turnId: lifecycle.turnId,
+        timestamp: lifecycle.completedAt ?? recordTimestamp(lifecycle.record),
+        hasError: lifecycle.hasError
+      });
+    }
+  }
+  return {
+    model,
+    taskEnvelopeId,
+    hasTaskEnvelope,
+    terminalMessageTime,
+    completedTurns
+  };
 }
 
 function recordTimestamp(record: Row): number | null {
@@ -947,7 +1016,7 @@ function codexTurnReason(value: unknown): string | null {
 
 type CodexTurnLifecycleType = "task_started" | "task_complete" | "turn_aborted";
 
-interface CodexTurnLifecycle {
+export interface CodexTurnLifecycle {
   record: Row;
   recordIndex: number;
   type: CodexTurnLifecycleType;
@@ -959,7 +1028,7 @@ interface CodexTurnLifecycle {
   reason: string | null;
 }
 
-function codexTurnLifecycle(record: Row, recordIndex: number): CodexTurnLifecycle | null {
+export function codexTurnLifecycle(record: Row, recordIndex: number): CodexTurnLifecycle | null {
   if (record.type !== "event_msg") return null;
   const type = record.payload?.type;
   if (type !== "task_started" && type !== "task_complete" && type !== "turn_aborted") return null;
@@ -977,6 +1046,10 @@ function codexTurnLifecycle(record: Row, recordIndex: number): CodexTurnLifecycl
     errorCategory: hasError ? codexErrorCategory(error) : null,
     reason: type === "turn_aborted" ? codexTurnReason(record.payload?.reason) : null
   };
+}
+
+export function codexTurnEventId(lifecycle: Pick<CodexTurnLifecycle, "type" | "record" | "recordIndex">) {
+  return `event:turn:${lifecycle.type}:${String(lifecycle.record.ordinal ?? lifecycle.recordIndex)}`;
 }
 
 /**
@@ -1148,6 +1221,16 @@ export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: Ses
       toSessionRef: run ? { provider: "codex", sessionId: String(run.childSessionId) } : null
     };
   };
+  const eventIdByToolCall = new Map<string, string>();
+  for (const event of base.events) {
+    if (event.toolCallId && !eventIdByToolCall.has(event.toolCallId)) {
+      eventIdByToolCall.set(event.toolCallId, event.id);
+    }
+  }
+  const eventForToolCall = (callId: string | null) => callId
+    ? eventIdByToolCall.get(callId) ?? null
+    : null;
+  const resultSourceEvents = [] as ReturnType<typeof sessionEvent>[];
 
   for (const [index, record] of input.records.entries()) {
     if (record.type !== "response_item") continue;
@@ -1186,7 +1269,7 @@ export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: Ses
       relationshipType: kind === "spawn" && bound.toSessionRef ? "spawned" : null,
       taskId: bound.taskId,
       runId: bound.runId,
-      eventId: null,
+      eventId: eventForToolCall(callId),
       turnId: passthroughTurnId(record),
       correlationId: callId,
       provenance: {
@@ -1243,6 +1326,27 @@ export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: Ses
     )) ?? null;
     const run = child ? runByChildId.get(String(child.session.id)) ?? null : null;
     const taskId = run?.taskId ?? null;
+    // Current Codex parser output does not normalize response_item agent
+    // returns into Message rows. Keep one exact, bounded recorded event anchor
+    // so the delivery remains reachable without copying its body.
+    const sourceEventId = `event:result:${firstString(record.payload.id) ?? `envelope-${index}`}`;
+    resultSourceEvents.push(sessionEvent({
+      id: sourceEventId,
+      sessionId,
+      timestamp: recordTimestamp(record),
+      kind: "result-delivery",
+      category: "message",
+      normalizedKind: "message.result-delivery",
+      phase: "completed",
+      turnId: passthroughTurnId(record),
+      correlationId: firstString(record.payload.id) ?? null,
+      provenance: {
+        fidelity: "recorded",
+        sourceType: "codex.response_item:agent_message:FINAL_ANSWER",
+        sourceId: firstString(record.payload.id) ?? String(index)
+      },
+      providerData: { sourceSequence: sourceSequence(index, 0) }
+    }));
     observations.push(coordinationObservation({
       id: `coord:result-delivery:${firstString(record.payload.id) ?? `envelope-${index}`}`,
       sessionId,
@@ -1256,11 +1360,49 @@ export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: Ses
       relationshipType: null,
       taskId,
       runId: run?.id ?? null,
-      eventId: null,
+      eventId: sourceEventId,
       turnId: passthroughTurnId(record),
       correlationId: firstString(record.payload.id) ?? null,
       provenance: { fidelity: "recorded", sourceType: "codex.response_item:agent_message:FINAL_ANSWER", sourceId: firstString(record.payload.id) ?? author }
     }));
+  }
+
+  // A child's recorded task_complete is a completion observation owned by
+  // that child. It is deliberately separate from parent result delivery:
+  // no delivery, causal pairing, or parent-turn binding is inferred here.
+  for (const child of input.children) {
+    const childSessionId = String(child.session.id);
+    const childRun = runByChildId.get(childSessionId) ?? null;
+    for (const lifecycle of child.facts.completedTurns) {
+      const sourceEventId = lifecycle.eventId;
+      const sourceId = lifecycle.sourceId;
+      observations.push(coordinationObservation({
+        id: `coord:child-turn-completed:${childSessionId}:${sourceId}`,
+        sessionId,
+        kind: "child-turn-completed",
+        state: lifecycle.hasError ? "failed" : "completed",
+        timestamp: lifecycle.timestamp,
+        senderActorId: actorIdByPath.get(String(firstString(child.session.metadata?.agentPath, child.session.metadata?.agentNickname) || "")) ?? null,
+        recipientActorId: null,
+        fromSessionRef: { provider: "codex", sessionId: childSessionId },
+        toSessionRef: null,
+        relationshipType: null,
+        taskId: childRun?.taskId ?? null,
+        runId: childRun?.id ?? null,
+        eventId: null,
+        sourceEventRef: {
+          session: { provider: "codex", sessionId: childSessionId },
+          eventId: sourceEventId
+        },
+        turnId: lifecycle.turnId,
+        correlationId: lifecycle.turnId,
+        provenance: {
+          fidelity: "recorded",
+          sourceType: "codex.child.event_msg:task_complete",
+          sourceId
+        }
+      }));
+    }
   }
 
   // --- Context versions and transformations ---------------------------------
@@ -1304,7 +1446,7 @@ export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: Ses
       resultVersionId: compaction.windowId ?? null,
       sourceArtifactIds: [],
       resultArtifactIds: [`artifact:${compaction.sourceId || recordIndex}`],
-      eventId: `event:compaction:${compaction.sourceId || recordIndex}`,
+      eventId: codexCompactionEventId(compaction),
       runId: null,
       turnId: null,
       timestamp: asNumber(mergedCompactionTimestamp(compaction)),
@@ -1418,7 +1560,7 @@ export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: Ses
         ? errorCategory ? "failed" as const : "completed" as const
         : undefined;
     return sessionEvent({
-      id: `event:turn:${lifecycle.type}:${sourceId}`,
+      id: codexTurnEventId(lifecycle),
       sessionId,
       timestamp: lifecycle.type === "task_started"
         ? lifecycle.startedAt ?? recordTimestamp(lifecycle.record)
@@ -1520,7 +1662,7 @@ export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: Ses
     sessionId,
     version: 3,
     session: base.session,
-    events: sequenceEventsBySource([...base.events, ...turnEvents]),
+    events: sequenceEventsBySource([...base.events, ...turnEvents, ...resultSourceEvents]),
     relationships: base.relationships,
     tasks: base.tasks,
     agentRuns: [...base.agentRuns, ...turnRuns],

@@ -41,7 +41,7 @@ const inheritedRecords = Array.from({ length: 45 }, (_, index) => record(
     id: `dev-${index}`,
     type: "message",
     role: "developer",
-    content: [{ type: "input_text", text: index === 0 ? `Inherited long background ${"x".repeat(13000)}` : `Inherited developer context ${index}` }]
+    content: [{ type: "input_text", text: index === 0 ? `Inherited long background ${"x".repeat(13000)}` : `Inherited developer context ${index}${index === 44 ? "z".repeat(13000) : ""}` }]
   }
 ));
 const childRecords = [
@@ -76,6 +76,9 @@ const childRecords = [
 ];
 writeRollout("parent", parentRecords);
 writeRollout("child", childRecords);
+writeRollout("orphan-large", childRecords.map((item) => item.type === "session_meta"
+  ? { ...item, payload: { id: "orphan-large", parent_thread_id: "missing-parent" } }
+  : item));
 writeRollout("orphan-child", [
   record("2026-09-11T01:00:00.000Z", "session_meta", { id: "orphan-child", session_id: "orphan-child", parent_thread_id: "missing-parent" }),
   record("2026-09-11T00:59:59.000Z", "event_msg", { type: "user_message", message: "Recorded orphan context" }),
@@ -115,7 +118,7 @@ test.after(() => {
   rmSync(temp, { recursive: true, force: true });
 });
 
-test("real Codex adapter bounds inherited context while preserving owned projections", async () => {
+test("real Codex adapter retains inherited context while preserving owned projections", async () => {
   const scanned = [];
   for await (const session of codex.scan()) scanned.push(session);
   assert.ok(scanned.some((session) => session.id === "child"));
@@ -123,8 +126,8 @@ test("real Codex adapter bounds inherited context while preserving owned project
   const inherited = codex.getInheritedContext("child");
   assert.equal(inherited.sourceSession.sessionId, "parent");
   assert.equal(inherited.total, 51);
-  assert.equal(inherited.messages.length, 40);
-  assert.equal(inherited.truncated, true);
+  assert.equal(inherited.messages.length, 51);
+  assert.equal(inherited.truncated, false);
   assert.equal(inherited.messages[0].role, "assistant");
   assert.equal(inherited.messages[1].role, "tool");
   assert.equal(inherited.messages.at(-1).metadata.provenance, "inherited-parent-context");
@@ -151,12 +154,14 @@ test("real adapter SSR and content route disclose inherited context, including m
   assert.equal(page.status, 200);
   assert.match(page.body, /class="inherited-context-disclosure"/);
   assert.match(page.body, /Showing 40 of 51 recorded messages/);
+  assert.match(page.body, /data-inherited-context-more data-next-offset="40"/);
+  assert.doesNotMatch(page.body, /data-part-id="inherited-parent-dev-44:text"/);
   assert.match(page.body, /href="\/codex\/session\/parent"/);
-  assert.match(page.body, /inherited-parent-dev-0:part/);
+  assert.match(page.body, /inherited-parent-dev-0:text/);
   for (const [part, field] of [
     ["inherited-parent-reason-1:reasoning", "reasoning"],
-    ["inherited-parent-tool-call-inherited:part", "input"],
-    ["inherited-parent-tool-call-inherited:part", "output"]
+    ["inherited-parent-tool-call-inherited:tool", "input"],
+    ["inherited-parent-tool-call-inherited:tool", "output"]
   ]) {
     assert.match(
       page.body,
@@ -168,7 +173,7 @@ test("real adapter SSR and content route disclose inherited context, including m
   const contentRoute = routes.find(({ pattern }) => pattern instanceof RegExp && pattern.source.includes("content"));
   assert.ok(contentRoute);
   const contentResponse = responseCapture();
-  const contentUrl = "/api/codex/session/child/content?part=inherited-parent-dev-0%3Apart&field=text&offset=12000&scope=inherited-context";
+  const contentUrl = "/api/codex/session/child/content?part=inherited-parent-dev-0%3Atext&field=text&offset=12000&scope=inherited-context";
   const contentMatch = new URL(contentUrl, "http://127.0.0.1").pathname.match(contentRoute.pattern);
   assert.ok(contentMatch);
   await contentRoute.handler({ url: contentUrl }, contentResponse, contentMatch);
@@ -178,7 +183,7 @@ test("real adapter SSR and content route disclose inherited context, including m
 
   const ownedScopeResponse = responseCapture();
   await contentRoute.handler(
-    { url: "/api/codex/session/child/content?part=inherited-parent-dev-0%3Apart&field=text&offset=12000&scope=owned" },
+    { url: "/api/codex/session/child/content?part=inherited-parent-dev-0%3Atext&field=text&offset=12000&scope=owned" },
     ownedScopeResponse,
     contentMatch
   );
@@ -186,8 +191,8 @@ test("real adapter SSR and content route disclose inherited context, including m
 
   for (const [part, field, offset] of [
     ["inherited-parent-reason-1:reasoning", "reasoning", "6000"],
-    ["inherited-parent-tool-call-inherited:part", "input", "3000"],
-    ["inherited-parent-tool-call-inherited:part", "output", "3000"]
+    ["inherited-parent-tool-call-inherited:tool", "input", "3000"],
+    ["inherited-parent-tool-call-inherited:tool", "output", "3000"]
   ]) {
     const response = responseCapture();
     const url = `/api/codex/session/child/content?part=${encodeURIComponent(part)}&field=${field}&offset=${offset}&scope=inherited-context`;
@@ -210,11 +215,45 @@ test("real adapter SSR and content route disclose inherited context, including m
   assert.match(orphanPage.body, /href="\/codex\/session\/missing-parent"/);
 });
 
+test("inherited continuation reaches later messages and long fields without the parent file", async () => {
+  const routes = captureRoutes({
+    appConfig: { port: 0, metaDir: temp, resumeCommands: {}, allowTerminalLaunch: false },
+    providerMap: new Map([["codex", codex]]), providerInfo: []
+  });
+  const inheritedRoute = routes.find(({ pattern }) => pattern instanceof RegExp && pattern.source.includes("inherited-context"));
+  const contentRoute = routes.find(({ pattern }) => pattern instanceof RegExp && pattern.source.endsWith("\\/content$"));
+  async function request(route, url) {
+    const response = responseCapture();
+    await route.handler({ url }, response, new URL(url, "http://localhost").pathname.match(route.pattern));
+    return response;
+  }
+  for (const [id, parent] of [["child", "parent"], ["orphan-large", "missing-parent"]]) {
+    const response = await request(inheritedRoute, `/api/codex/session/${id}/inherited-context?offset=40`);
+    assert.equal(response.statusCode, 200);
+    const page = JSON.parse(response.body);
+    assert.equal(page.shown, 51);
+    assert.equal(page.total, 51);
+    assert.equal(page.nextOffset, null);
+    assert.equal(page.scope, "inherited-context");
+    assert.match(page.html, new RegExp(`data-part-id="inherited-${parent}-dev-44:text"`));
+    assert.doesNotMatch(page.html, /dev-0:text|Owned result/);
+    const part = encodeURIComponent(`inherited-${parent}-dev-44:text`);
+    const long = await request(contentRoute, `/api/codex/session/${id}/content?part=${part}&field=text&offset=12000&scope=inherited-context`);
+    assert.equal(long.statusCode, 200);
+    assert.match(JSON.parse(long.body).html, /zzzz/);
+    assert.equal((await request(contentRoute, `/api/codex/session/${id}/content?part=${part}&field=text&offset=12000&scope=owned`)).statusCode, 404);
+  }
+  for (const offset of ["-1", "1.5", "Infinity"]) {
+    assert.equal((await request(inheritedRoute, `/api/codex/session/child/inherited-context?offset=${offset}`)).statusCode, 400);
+  }
+  assert.equal((await request(inheritedRoute, "/api/codex/session/missing/inherited-context?offset=40")).statusCode, 404);
+});
+
 test("inherited renderer remains usable directly with the real adapter projection", () => {
   const view = codex.getInheritedContext("child");
   const html = renderSessionPage({ session: codex.getSession("child"), provider: "codex", inheritedContext: view });
   assert.match(html, /data-inherited-context-messages/);
-  assert.match(html, /data-part-id="inherited-parent-dev-0:part"/);
+  assert.match(html, /data-part-id="inherited-parent-dev-0:text"/);
 });
 
 test("inherited anchors and scoped continuation stay separate from a colliding owned id", () => {
@@ -224,7 +263,7 @@ test("inherited anchors and scoped continuation stay separate from a colliding o
     session: codex.getSession("child"),
     provider: "codex",
     messages: [{ id: ownedId, data: { role: "assistant", time: { created: 1 } } }],
-    partsByMessage: new Map([[ownedId, [{ id: `${ownedId}:part`, data: { type: "text", text: "Owned collision" } }]]]),
+    partsByMessage: new Map([[ownedId, [{ id: `${ownedId}:text`, data: { type: "text", text: "Owned collision" } }]]]),
     inheritedContext: view
   });
   assert.match(html, /id="msg-inherited-parent-dev-0"/);

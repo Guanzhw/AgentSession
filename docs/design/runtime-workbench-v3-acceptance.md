@@ -1,6 +1,13 @@
 # Unified runtime workbench acceptance
 
-Status: accepted and delivered, 2026-09-11.
+Status: implementation delivered on 2026-09-11; product acceptance reopened on
+2026-09-13 after user review of a real session.
+
+The engineering results below remain historical evidence. The user could not
+understand what Work communicated and found Conversation still linear; those
+results do not establish the intended product outcome. The
+[runtime reading-model plan](runtime-reading-model.md) starts a real-case
+prototype gate before further production changes.
 
 The [design](runtime-workbench-v3.md) defines the target. This checklist records
 real local cases and remaining evidence; prototype screenshots do not prove

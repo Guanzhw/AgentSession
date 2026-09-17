@@ -139,15 +139,20 @@ export function safeJsonParse(value: any): any {
   }
 }
 
+function staticContentType(relativePath: string): string {
+  if (relativePath.endsWith(".css")) return "text/css; charset=utf-8";
+  if (relativePath.endsWith(".js")) return "application/javascript; charset=utf-8";
+  if (relativePath.endsWith(".svg")) return "image/svg+xml; charset=utf-8";
+  if (relativePath.endsWith(".md") || relativePath.endsWith(".txt") || path.basename(relativePath).toUpperCase() === "LICENSE") {
+    return "text/plain; charset=utf-8";
+  }
+  return "application/octet-stream";
+}
+
 export function serveStatic(reqPath: string, res: any): void {
   const relativePath = reqPath.replace(/^\/static\//, "");
   const filePath = path.join(staticDir, relativePath);
-
-  const contentType = filePath.endsWith(".css")
-    ? "text/css; charset=utf-8"
-    : filePath.endsWith(".js")
-      ? "application/javascript; charset=utf-8"
-      : "application/octet-stream";
+  const contentType = staticContentType(relativePath);
 
   try {
     const body = isBinaryRuntime()

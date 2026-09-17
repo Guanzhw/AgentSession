@@ -1,5 +1,11 @@
 # AgentSession UI v2 visual system
 
+> Historical baseline. The 2026-09-17 selected reading direction supersedes
+> this document's page hierarchy, navigation and palette; see
+> [runtime visual direction](runtime-visual-direction.md) and
+> [presentation contract](runtime-presentation-contract.md). Previous
+> verification below applies to UI v2, not to the new Reader.
+
 > Status: P4 implemented · Date: 2026-09-07 · Scope: P1-P4 visual implementation
 >
 > P4c mobile interaction finish is implemented and recorded in the

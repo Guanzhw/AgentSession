@@ -21,23 +21,45 @@ export interface SessionFileSignature {
   signature: string;
 }
 
+export function sessionFileSignature(filePath: string, stat: { size: number; mtimeMs: number }): string {
+  return `${path.resolve(filePath)}:${stat.size}:${stat.mtimeMs}`;
+}
+
+interface SessionFilePayload<TRecords, TMessages> {
+  records: TRecords;
+  messages: TMessages;
+}
+
+/** A provider-owned immutable read extent, including how to reread that extent. */
+interface SessionFilePayloadSnapshot<TRecords, TMessages> {
+  signature: string;
+  sourceBytes: number;
+  read: () => SessionFilePayload<TRecords, TMessages>;
+}
+
 interface SessionFileStoreOptions<TSession extends { id: string; parentId?: string | null }, TRecords, TMessages> {
   discoverFiles: () => SessionFileDescriptor[];
   readEntry: (descriptor: SessionFileDescriptor) => {
     session: TSession;
     records: TRecords;
     messages: TMessages;
+    payloadSnapshot?: SessionFilePayloadSnapshot<TRecords, TMessages>;
   };
   refreshIntervalMs?: number;
   onError?: (filePath: string, error: unknown) => void;
   /** Whether a failed refresh may retain a previously cached entry. */
   retainCachedOnError?: boolean;
+  /** Optional LRU payload budget measured by source file bytes; metadata stays indexed.
+   * One oversized active payload is retained whole. */
+  maxCachedSourceBytes?: number;
 }
 
 /**
  * Maintain a provider-owned canonical session index for transcript files.
  * Directory refreshes only stat files; unchanged transcripts keep their parsed
  * records and normalized messages. A size or mtime change reparses that file.
+ * A configured payload budget evicts only records/messages, which reload on
+ * demand; canonical metadata, aliases, and relationships remain indexed.
  */
 export function createSessionFileStore<
   TSession extends { id: string; parentId?: string | null },
@@ -46,45 +68,137 @@ export function createSessionFileStore<
 >(options: SessionFileStoreOptions<TSession, TRecords, TMessages>) {
   const refreshIntervalMs = Math.max(0, options.refreshIntervalMs ?? 1000);
   let lastRefresh = 0;
-  let entriesByPath = new Map<string, IndexedSessionFile<TSession, TRecords, TMessages> & { signature: string }>();
-  let entriesById = new Map<string, IndexedSessionFile<TSession, TRecords, TMessages> & { signature: string }>();
-  let childrenByParent = new Map<string, Array<IndexedSessionFile<TSession, TRecords, TMessages> & { signature: string }>>();
+  type Entry = IndexedSessionFile<TSession, TRecords, TMessages> & {
+    signature: string;
+    sourceBytes: number;
+    payloadSnapshot?: SessionFilePayloadSnapshot<TRecords, TMessages>;
+  };
+  type Payload = { records: TRecords; messages: TMessages; signature: string; sourceBytes: number };
+  let entriesByPath = new Map<string, Entry>();
+  let entriesById = new Map<string, Entry>();
+  let childrenByParent = new Map<string, Entry[]>();
   let revision = 0;
+  const payloads = new Map<string, Payload>();
+  let cachedSourceBytes = 0;
+  const bounded = options.maxCachedSourceBytes !== undefined;
+
+  const sourceState = (descriptor: SessionFileDescriptor) => {
+    let sourceBytes = 0;
+    const signature = [descriptor.filePath, ...(descriptor.dependencyPaths || [])]
+      .map(signaturePath => {
+        const resolved = path.resolve(signaturePath);
+        try {
+          const stat = statSync(resolved);
+          sourceBytes += stat.size;
+          return sessionFileSignature(resolved, stat);
+        } catch {
+          return `${resolved}:missing`;
+        }
+      })
+      .join("|");
+    return { signature, sourceBytes };
+  };
+  const changedSource = (filePath: string) => new Error(`Session transcript changed; reload the session: ${filePath}`);
+  const requireSignature = (descriptor: SessionFileDescriptor, signature: string) => {
+    if (sourceState(descriptor).signature !== signature) throw changedSource(descriptor.filePath);
+  };
+
+  const removePayload = (filePath: string) => {
+    const cached = payloads.get(filePath);
+    if (!cached) return;
+    cachedSourceBytes -= cached.sourceBytes;
+    payloads.delete(filePath);
+  };
+  const cachePayload = (entry: Entry, loaded: { records: TRecords; messages: TMessages }) => {
+    removePayload(entry.filePath);
+    const payload = { records: loaded.records, messages: loaded.messages, signature: entry.signature, sourceBytes: entry.sourceBytes };
+    payloads.set(entry.filePath, payload);
+    cachedSourceBytes += entry.sourceBytes;
+    while (cachedSourceBytes > options.maxCachedSourceBytes! && payloads.size > 1) {
+      removePayload(payloads.keys().next().value!);
+    }
+    return payload;
+  };
+  const readPayload = (entry: Entry) => {
+    if (entriesByPath.get(entry.filePath) !== entry) {
+      // A scan may still hold an older immutable snapshot after another
+      // lookup refreshes the index. Read its own extent without replacing
+      // the current entry's path-keyed payload.
+      if (entry.payloadSnapshot) return entry.payloadSnapshot.read();
+      throw changedSource(entry.filePath);
+    }
+    const cached = payloads.get(entry.filePath);
+    if (cached) {
+      if (cached.signature !== entry.signature) throw changedSource(entry.filePath);
+      payloads.delete(entry.filePath);
+      payloads.set(entry.filePath, cached);
+      return cached;
+    }
+    // An evicted body has no stale copy to fall back to. Preserve read errors
+    // instead of making a previously indexed session appear empty.
+    let loaded: SessionFilePayload<TRecords, TMessages>;
+    if (entry.payloadSnapshot) {
+      loaded = entry.payloadSnapshot.read();
+    } else {
+      requireSignature(entry, entry.signature);
+      loaded = options.readEntry(entry);
+      requireSignature(entry, entry.signature);
+    }
+    return cachePayload(entry, loaded);
+  };
+  const indexedEntry = (
+    descriptor: SessionFileDescriptor,
+    signature: string,
+    sourceBytes: number,
+    loaded: ReturnType<typeof options.readEntry>
+  ): Entry => {
+    if (!bounded) return { ...descriptor, ...loaded, signature, sourceBytes };
+    const entry: Entry = {
+      ...descriptor,
+      session: loaded.session,
+      signature,
+      sourceBytes,
+      payloadSnapshot: loaded.payloadSnapshot,
+      get records() { return readPayload(entry).records; },
+      get messages() { return readPayload(entry).messages; }
+    };
+    cachePayload(entry, loaded);
+    return entry;
+  };
 
   const refresh = (force = false) => {
     const now = Date.now();
     if (!force && lastRefresh && now - lastRefresh < refreshIntervalMs) return;
-    const nextByPath = new Map<string, IndexedSessionFile<TSession, TRecords, TMessages> & { signature: string }>();
+    const nextByPath = new Map<string, Entry>();
 
     for (const descriptor of options.discoverFiles()) {
       const filePath = path.resolve(descriptor.filePath);
       try {
-        const signature = [filePath, ...(descriptor.dependencyPaths || [])]
-          .map(signaturePath => {
-            try {
-              const stat = statSync(path.resolve(signaturePath));
-              return `${path.resolve(signaturePath)}:${stat.size}:${stat.mtimeMs}`;
-            } catch {
-              return `${path.resolve(signaturePath)}:missing`;
-            }
-          })
-          .join("|");
+        const { signature, sourceBytes } = sourceState(descriptor);
         const cached = entriesByPath.get(filePath);
         if (cached?.signature === signature) {
           nextByPath.set(filePath, cached);
           continue;
         }
         const loaded = options.readEntry({ ...descriptor, filePath });
-        nextByPath.set(filePath, { ...descriptor, filePath, ...loaded, signature });
+        if (bounded && !loaded.payloadSnapshot) requireSignature(descriptor, signature);
+        nextByPath.set(filePath, indexedEntry(
+          { ...descriptor, filePath },
+          loaded.payloadSnapshot?.signature ?? signature,
+          loaded.payloadSnapshot?.sourceBytes ?? sourceBytes,
+          loaded
+        ));
       } catch (error) {
         options.onError?.(filePath, error);
         const cached = entriesByPath.get(filePath);
-        if (cached && options.retainCachedOnError !== false) nextByPath.set(filePath, cached);
+        if (cached && options.retainCachedOnError !== false && (!bounded || payloads.has(filePath))) {
+          nextByPath.set(filePath, cached);
+        }
       }
     }
 
-    const nextById = new Map<string, IndexedSessionFile<TSession, TRecords, TMessages> & { signature: string }>();
-    const nextChildren = new Map<string, Array<IndexedSessionFile<TSession, TRecords, TMessages> & { signature: string }>>();
+    const nextById = new Map<string, Entry>();
+    const nextChildren = new Map<string, Entry[]>();
     for (const entry of nextByPath.values()) {
       nextById.set(String(entry.session.id), entry);
       if (entry.sessionId && !nextById.has(entry.sessionId)) nextById.set(entry.sessionId, entry);
@@ -104,11 +218,18 @@ export function createSessionFileStore<
     entriesByPath = nextByPath;
     entriesById = nextById;
     childrenByParent = nextChildren;
+    for (const filePath of payloads.keys()) {
+      if (!entriesByPath.has(filePath)) removePayload(filePath);
+    }
     if (changed) revision++;
     lastRefresh = now;
   };
 
-  const publicEntry = (entry: IndexedSessionFile<TSession, TRecords, TMessages> & { signature: string }) => entry as IndexedSessionFile<TSession, TRecords, TMessages>;
+  const publicEntry = (entry: Entry) => entry as IndexedSessionFile<TSession, TRecords, TMessages>;
+  const refreshEvictedEntry = (entry: Entry | undefined) => {
+    if (bounded && entry && !payloads.has(entry.filePath)
+      && sourceState(entry).signature !== entry.signature) refresh(true);
+  };
 
   return {
     refresh,
@@ -118,12 +239,15 @@ export function createSessionFileStore<
     },
     get(sessionId: string) {
       refresh();
+      refreshEvictedEntry(entriesById.get(sessionId));
       const entry = entriesById.get(sessionId);
       return entry ? publicEntry(entry) : null;
     },
     getByFilePath(filePath: string) {
       refresh();
-      const entry = entriesByPath.get(path.resolve(filePath));
+      const resolved = path.resolve(filePath);
+      refreshEvictedEntry(entriesByPath.get(resolved));
+      const entry = entriesByPath.get(resolved);
       return entry ? publicEntry(entry) : null;
     },
     getStatsRevision() {
@@ -138,7 +262,7 @@ export function createSessionFileStore<
       refresh();
       const family: IndexedSessionFile<TSession, TRecords, TMessages>[] = [];
       const seen = new Set<string>();
-      const visit = (entry: IndexedSessionFile<TSession, TRecords, TMessages> & { signature: string }) => {
+      const visit = (entry: Entry) => {
         const canonicalId = String(entry.session.id);
         if (seen.has(canonicalId)) return;
         seen.add(canonicalId);

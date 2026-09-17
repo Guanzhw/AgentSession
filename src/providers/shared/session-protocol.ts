@@ -123,6 +123,12 @@ export interface SessionEventEnvelope {
   runId?: string | null;
   parentEventId?: string | null;
   correlationId?: string | null;
+  /** Normalized readable-message identity when this event has one. */
+  messageId?: string | null;
+  /** Exact native readable part within its message, when the provider records one. */
+  partId?: string | null;
+  /** Normalized tool-call identity when this event is a tool event. */
+  toolCallId?: string | null;
   provenance: EventProvenance;
   /** Present on events whose kind is "context.compaction". */
   compaction?: ContextCompactionEvent | null;
@@ -949,6 +955,7 @@ export function validateSessionProtocol(
     if (event?.sequence !== index + 1) error("EVENT_SEQUENCE_NOT_DENSE", "Event sequence must be dense and start at 1", ref, event?.provenance);
     if (event?.sessionId !== expectedSessionId) error("EVENT_SESSION_MISMATCH", "Event sessionId differs from canonical session", ref, event?.provenance);
     if (event?.category && !EVENT_CATEGORIES.has(event.category)) error("EVENT_CATEGORY_INVALID", "Event category is not in the v2 vocabulary", ref, event.provenance);
+    if (event?.partId != null && (typeof event.partId !== "string" || !event.partId.trim())) error("EVENT_PART_ID_INVALID", "Event part identity must be a non-empty string when present", ref, event.provenance);
     if (event?.approval) {
       const approval = event.approval;
       if (!APPROVAL_EVENT_STATES.has(approval.state)) error("APPROVAL_STATE_INVALID", "Approval detail state is invalid", ref, event.provenance);

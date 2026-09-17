@@ -29,7 +29,7 @@ import {
   sourceSequence,
   validateSessionProtocol
 } from "../dist/src/providers/shared/session-protocol.js";
-import { buildCodexSessionProtocol, codexCompactionRecord } from "../dist/src/providers/codex/protocol.js";
+import { buildCodexSessionProtocol, codexCompactionRecord, codexProtocolChildFactsFromRecords } from "../dist/src/providers/codex/protocol.js";
 import { buildClaudeSessionProtocol, claudeCompactionRecord } from "../dist/src/providers/claude-code/protocol.js";
 import { buildPiSessionProtocol, piCompactionEntry } from "../dist/src/providers/pi/protocol.js";
 import { buildHermesSessionProtocol } from "../dist/src/providers/hermes/protocol.js";
@@ -597,11 +597,10 @@ test("Codex NEW_TASK envelopes become Tasks and child rollouts become AgentRuns"
   ];
   const child = {
     session: session("child-1", "root", { agentPath: "/root/reviewer", agentNickname: "reviewer" }, 2000),
-    messages: [message("child-msg", "assistant", 2100)],
-    records: [
+    facts: codexProtocolChildFactsFromRecords([
       { type: "session_meta", timestamp: "2026-07-19T00:00:30Z", payload: { id: "child-1", model: "gpt-5" } },
       { type: "response_item", timestamp: "2026-07-19T00:00:31Z", payload: { type: "message", role: "assistant" } }
-    ]
+    ])
   };
   const protocol = buildCodexSessionProtocol({
     session: session("root"),
@@ -687,10 +686,9 @@ test("Codex sub_agent_activity and call-output evidence bind spawn calls to chil
   ];
   const child = {
     session: session("child-1", "root", { agentPath: "/root/worker", agentNickname: "worker" }, 2000),
-    messages: [message("child-msg", "assistant", 2100)],
-    records: [
+    facts: codexProtocolChildFactsFromRecords([
       { type: "session_meta", timestamp: "2026-07-19T00:00:30Z", payload: { id: "child-1", model: "gpt-5" } }
-    ]
+    ])
   };
   const protocol = buildCodexSessionProtocol({
     session: session("root"),
@@ -748,8 +746,7 @@ test("Codex execution mode comes only from recorded source evidence", () => {
   ];
   const child = {
     session: session("child-1", "root", { agentPath: "/root/worker" }, 2000),
-    messages: [],
-    records: [{ type: "session_meta", timestamp: "2026-07-19T00:00:30Z", payload: { id: "child-1" } }]
+    facts: codexProtocolChildFactsFromRecords([{ type: "session_meta", timestamp: "2026-07-19T00:00:30Z", payload: { id: "child-1" } }])
   };
   const protocol = buildCodexSessionProtocol({
     session: session("root"),
@@ -775,8 +772,7 @@ test("Codex call-output alone binds a child without claiming completion", () => 
   ];
   const child = {
     session: session("child-1", "root", { agentPath: "/root/worker" }, 2000),
-    messages: [],
-    records: [{ type: "session_meta", timestamp: "2026-07-19T00:00:30Z", payload: { id: "child-1" } }]
+    facts: codexProtocolChildFactsFromRecords([{ type: "session_meta", timestamp: "2026-07-19T00:00:30Z", payload: { id: "child-1" } }])
   };
   const protocol = buildCodexSessionProtocol({
     session: session("root"),
@@ -803,8 +799,7 @@ test("Codex child-local FINAL_ANSWER completes a spawn-bound run", () => {
   ];
   const child = {
     session: session("child-1", "root", { agentPath: "/root/worker" }, 2000),
-    messages: [],
-    records: [
+    facts: codexProtocolChildFactsFromRecords([
       { type: "session_meta", timestamp: "2026-07-19T00:00:30Z", payload: { id: "child-1" } },
       {
         type: "response_item",
@@ -814,7 +809,7 @@ test("Codex child-local FINAL_ANSWER completes a spawn-bound run", () => {
           message: "Message Type: FINAL_ANSWER\nTask name: worker\nPayload:\ndone"
         }
       }
-    ]
+    ])
   };
 
   const protocol = buildCodexSessionProtocol({
@@ -877,16 +872,14 @@ test("Codex envelopes and spawn evidence coexist without duplicate runs", () => 
   ];
   const childOne = {
     session: session("child-1", "root", { agentPath: "/root/reviewer", agentNickname: "reviewer" }, 2000),
-    messages: [],
-    records: [
+    facts: codexProtocolChildFactsFromRecords([
       { type: "session_meta", timestamp: "2026-07-19T00:00:30Z", payload: { id: "child-1" } },
       { type: "response_item", timestamp: "2026-07-19T00:00:31Z", payload: { type: "agent_message", id: "task-1", content: [{ type: "text", text: "Message Type: NEW_TASK\n\nTask name: reviewer" }] } }
-    ]
+    ])
   };
   const childTwo = {
     session: session("child-2", "root", { agentPath: "/root/coder" }, 3000),
-    messages: [],
-    records: [{ type: "session_meta", timestamp: "2026-07-19T00:00:40Z", payload: { id: "child-2" } }]
+    facts: codexProtocolChildFactsFromRecords([{ type: "session_meta", timestamp: "2026-07-19T00:00:40Z", payload: { id: "child-2" } }])
   };
   const protocol = buildCodexSessionProtocol({
     session: session("root"),
@@ -939,8 +932,7 @@ test("Codex spawn-bound children render under the launch tool call in source ord
   ];
   const child = {
     session: session("child-1", "root", { agentPath: "/root/worker" }, 1300),
-    messages: childMessages,
-    records: [{ type: "session_meta", timestamp: "2026-07-19T00:00:30Z", payload: { id: "child-1" } }]
+    facts: codexProtocolChildFactsFromRecords([{ type: "session_meta", timestamp: "2026-07-19T00:00:30Z", payload: { id: "child-1" } }])
   };
   const protocol = buildCodexSessionProtocol({
     session: session("root"),

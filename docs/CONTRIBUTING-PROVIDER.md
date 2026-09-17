@@ -10,15 +10,16 @@ deleted, or repaired.
 `src/providers/<provider-id>/` and do not add central provider-ID branches in
 routes, projections, or browser code.
 
-### UI v2 P0 surface contract
+### Work-history reader surface contract
 
-The shared viewer presents Library / Statistics / Settings in the primary rail. A
-session detail has Work (default), Conversation, and Events tabs. Provider
-adapters continue to supply only normalized evidence: Work embeds the existing
-Work Graph lenses, Conversation renders the linear message projection, and the
-Events shell links to recorded evidence without fabricating an event stream.
-Missing provider fields remain empty or unknown. The browser only switches
-server-rendered panels and does not interpret provider data.
+The shared viewer presents Library / Statistics / Settings in the primary rail.
+Session detail opens complete owned history, with source-positioned
+collaboration inserts and full child histories loaded inline. Work and Events
+are secondary disclosures. Provider adapters supply normalized content,
+canonical identities and protocol evidence; the browser manages reading,
+navigation and connection geometry. Missing fields remain empty or unknown.
+See the [reader contract](design/runtime-reader-slice.md) for pane ownership,
+search scope and progressive content.
 
 ## Provider evidence freshness
 
@@ -190,7 +191,16 @@ Every adapter implements `ProviderAdapter`:
 - `detect()`, `getDataPath()`, `scan()`, and `getSession()`;
 - normalized `getMessages()`, trusted `getTokenStats()`, and bounded `searchMessages()`;
 - optional bounded `getInheritedContext()` disclosure when the provider records copied parent messages separately from the owned transcript;
+- optional `getContextChangeResult(sessionId, checkpointId)` for on-demand
+  recorded context-change result bodies, using canonical protocol checkpoint
+  IDs and the provider's owned-record boundary;
 - optional `exportSession()`, runtime-environment evidence, system-prompt evidence, structured conversation projections, and a provider-owned resume command;
+- optional `getOwnedReaderProjection()` for providers whose legacy structured
+  tree loads a complete family. Return the complete selected session tree plus
+  canonical metadata-only child descriptors; reuse recorded protocol evidence
+  supplied by the route for attachment. Child histories load through the same
+  reader endpoint on demand. Keep full-tree exports and family-inclusive
+  metrics semantically unchanged;
 - `protocolCapabilities` and `getSessionProtocol(sessionId)` for every readable session;
 - `getStorageDiagnostic()` when a detected backend is known but unsupported.
 
@@ -221,6 +231,41 @@ Shared helpers in `src/providers/shared/` are schema-neutral: file caching,
 message/session projections, runtime evidence, canonical project mapping, and
 Session Protocol validation/finalization. Do not move provider field
 assumptions into those helpers.
+
+## Reader context-change bodies
+
+The context-result accessor returns normalized summary availability, ordered
+retained groups, derived source-order positions, omitted encrypted-field paths
+and metadata-only image attachment references. It is separate from inherited
+parent context. The reader calls it only when a checkpoint is opened or its
+content continued; ordinary reader/protocol/graph preparation must not load
+retained result bodies. Adapters without this accessor continue to use their
+existing normalized checkpoint summary where recorded.
+
+Keep raw provider field interpretation in the adapter. Preserve readable text
+beside omitted fields, retain empty-versus-absent summary evidence, and never
+copy ciphertext or image encodings into reader plaintext. Test canonical IDs,
+owned-record isolation, complete body continuation and explicit availability.
+The Codex adapter demonstrates this optional consumer; other adapters need
+source evidence before adding it.
+
+## Reader collaboration sources
+
+When a recorded collaboration event has a readable normalized message or tool
+call, bind its `messageId` and `toolCallId` on the event envelope at the provider
+boundary. A coordination observation's local `eventId` refers to that same
+event. Shared reader code resolves the existing content part; it does not parse
+provider call names or construct message IDs from raw payloads.
+
+Use `sourceEventRef` for an exact event owned by another canonical session.
+`child-turn-completed` represents a child's recorded terminal lifecycle event;
+its source owner must equal its `fromSessionRef`. Build that ID from the same
+owned records and lifecycle helper used by the child protocol. Preserve the
+recorded completion clock, and represent parent result delivery separately.
+
+Validate reference shape and ownership locally. Only the owning session can
+establish whether a referenced external event is currently readable. A missing
+source stays explicit rather than becoming a nearby message or inferred edge.
 
 ## Session Protocol v2
 

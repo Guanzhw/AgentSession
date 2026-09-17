@@ -305,6 +305,7 @@ test("Execution run browsing renders a complete page range, stable cursor hooks,
   assert.equal(lookup("run").find((item) => item.id === "run-1").status, "completed");
   assert.deepEqual(lookup("artifact").map((item) => item.id), ["page-result", "scope-result"]);
   assert.match(source, /new URLSearchParams\(\{ runtimeLens: "execution" \}\)/);
+  assert.match(source, /closest\("details\[data-detail-tab-panel\]"\)/, "a restored runtime lens opens its containing reader disclosure");
   assert.match(source, /data-runtime-task-id/);
   assert.match(source, /data-runtime-actor-id/);
   assert.match(source, /runtime-graph-arrow/);
@@ -524,17 +525,17 @@ test("P7 empty and truncated context assets stay honest and localized", () => {
   }
 });
 
-test("P6 keeps rail search and Work overview readable at desktop and medium widths", () => {
+test("P6 keeps top navigation search and Work overview readable at desktop and medium widths", () => {
   const style = readFileSync(path.join(process.cwd(), "src", "static", "style.css"), "utf8");
-  assert.match(style, /\.app-rail \.search-form \{[\s\S]*?width: 100%;[\s\S]*?min-width: 0;/);
-  assert.match(style, /\.app-rail \.search-input \{[\s\S]*?width: 100%;[\s\S]*?max-width: 100%;/);
-  assert.match(style, /\.app-rail \.search-visible-label \{[\s\S]*?white-space: normal;/);
-  assert.match(style, /\.app-rail \.search-input:focus-visible \{[\s\S]*?outline: 2px solid var\(--accent-color\);/);
+  const shellStyle = readFileSync(path.join(process.cwd(), "src", "static", "app-shell.css"), "utf8");
+  assert.match(shellStyle, /\.app-navigation \.search-form \{ min-width: 0; \}/);
+  assert.match(shellStyle, /\.app-navigation \.search-input \{[^}]*max-width: 100%;/);
+  assert.match(shellStyle, /\.app-navigation \.search-input:focus-visible \{ outline: 2px solid var\(--accent-color\);/);
   assert.match(style, /\.runtime-work-overview-grid \{ display: grid; grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, 280px\), 1fr\)\);/);
   assert.match(style, /\.runtime-work-overview \{ display: grid; grid-template-columns: minmax\(0, 1fr\);/);
   assert.match(style, /@media \(max-width: 1240px\) \{[\s\S]*?\.runtime-work-overview-grid \{ grid-template-columns: 1fr; \}/);
   assert.match(style, /\.runtime-overview-task-table th:nth-child\(3\),[\s\S]*?\.runtime-overview-task-table td:nth-child\(5\) \{ white-space: nowrap;/);
-  assert.match(style, /@media \(max-width: 768px\) \{[\s\S]*?\.rail-utility \.search-form \{\s*display: none;/);
+  assert.match(shellStyle, /@media \(max-width: 768px\) \{[\s\S]*?\.app-navigation \.search-form \{ display: none;/);
 });
 
 test("P6 session metrics use localized hierarchy, recorded span, and token details", () => {
@@ -800,22 +801,21 @@ test("child session lineage renders the focused session once under its recorded 
   assert.equal((coordination.match(/href="\/fixture\/session\/parent-1"/g) || []).length, 1);
 });
 
-test("Work is the unconditional default top-level tab", () => {
+test("complete history is primary and runtime evidence remains in secondary disclosures", () => {
   const html = renderSessionPage({
     session: { id: "linear", title: "Linear", time_created: 1 },
     provider: "fixture",
     runtimeWorkbench: renderRuntimeWorkbench(fixtureRuntime(), "fixture", "linear")
   });
-  assert.match(html, /id="tab-btn-work"/);
-  assert.match(html, /id="tab-work"/);
-  assert.match(html, /aria-selected="true" aria-controls="tab-work"/);
-  assert.match(html, /id="tab-btn-work"[^>]*>Work<\/button>/);
-  assert.match(html, /id="tab-btn-conversation"[^>]*>Conversation<\/button>/);
-  assert.match(html, /id="tab-btn-events"[^>]*>Events<\/a>/);
+  assert.match(html, /data-reader-host/);
+  assert.match(html, /<details id="tab-work"/);
+  assert.match(html, /<details id="tab-events"/);
+  assert.doesNotMatch(html, /id="tab-btn-(?:work|conversation|events)"/);
+  assert.ok(html.indexOf('data-reader-host') < html.indexOf('<details id="tab-work"'));
   assert.doesNotMatch(html, /id="tab-btn-flow"/);
 });
 
-test("session tabpanels stay balanced when reasoning contains replacement tokens", () => {
+test("reader and secondary disclosures stay balanced when reasoning contains replacement tokens", () => {
   const tree = {
     session: { id: "balanced", title: "Balanced" },
     messages: [{
@@ -844,39 +844,38 @@ test("session tabpanels stay balanced when reasoning contains replacement tokens
     sessionTree: tree,
     provider: "fixture"
   });
-  const mainStart = html.indexOf('<section id="session-balanced" class="main-content">');
+  const mainStart = html.indexOf('<section class="main-content">');
   const mainEnd = html.lastIndexOf("\n  </section>\n</div>");
   assert.ok(mainStart >= 0 && mainEnd > mainStart, "main content must have a closing section");
   const main = html.slice(mainStart, mainEnd);
-  const panelIds = [...main.matchAll(/<div role="tabpanel" id="(tab-(?:work|conversation|events))"/g)].map((match) => match[1]);
-  assert.deepEqual(panelIds, ["tab-work", "tab-conversation", "tab-events"]);
-  assert.equal((main.match(/<div role="tabpanel"/g) || []).length, 3);
+  const panelIds = [...main.matchAll(/<details id="(tab-(?:work|events))"/g)].map((match) => match[1]);
+  assert.deepEqual(panelIds, ["tab-work", "tab-events"]);
+  assert.equal((main.match(/data-reader-pane\b/g) || []).length, 1);
+  assert.equal((main.match(/id="session-balanced"/g) || []).length, 1);
   const reasoningStart = main.indexOf('<div class="reasoning-body markdown">');
   const reasoningEnd = main.indexOf("</details>", reasoningStart);
   const messageBody = main.indexOf('<div class="message-body', reasoningStart);
   assert.ok(reasoningStart >= 0 && reasoningEnd > reasoningStart && messageBody > reasoningEnd, "reasoning must close before the message body");
   assert.match(main, /context context/);
-  assert.match(main, /id="tab-events"[\s\S]*\n    <\/div>$/);
+  assert.match(main, /id="tab-events"[\s\S]*\n    <\/details>$/);
   assert.match(html.slice(mainEnd), /^\n  <\/section>\n<\/div>/);
 });
 
-test("top-level session tabs manage only the two primary modes", () => {
+test("secondary navigation opens evidence disclosures without retaining primary-tab state", () => {
   const enhancements = readFileSync(path.join(process.cwd(), "src", "static", "app", "enhancements.js"), "utf8");
-  assert.match(enhancements, /tabBar\.parentElement\?\.querySelectorAll\(":scope > \[role='tabpanel'\]"\)/);
-  assert.doesNotMatch(enhancements, /document\.querySelectorAll\("\[role='tabpanel'\]"\)/);
-  assert.match(enhancements, /targetPanelId === "tab-work"/);
-  assert.match(enhancements, /data-runtime-root.*scrollIntoView|data-runtime-root\]\?\.scrollIntoView/);
+  assert.match(enhancements, /target instanceof HTMLDetailsElement\) target\.open = true/);
+  assert.doesNotMatch(enhancements, /tabButtons|tabPanels|function switchTab/);
   assert.match(enhancements, /data-detail-tab/);
-  assert.match(enhancements, /hashEvents && tab === tabButtons\[0\]/);
-  assert.match(enhancements, /tab === tabButtons\[0\] \? "0" : "-1"/);
+  assert.match(enhancements, /data-runtime-open-events/);
+  assert.match(enhancements, /runtime:filter-events/);
 });
 
-test("top-level detail tab switches preserve Workbench as one surface", () => {
+test("secondary detail navigation preserves the reader rather than reloading the page", () => {
   const enhancements = readFileSync(path.join(process.cwd(), "src", "static", "app", "enhancements.js"), "utf8");
-  const switchTab = enhancements.match(/function switchTab\(tabButton\) \{([\s\S]*?)\n  \}/)?.[1] || "";
-  assert.match(switchTab, /history\.replaceState\(null, "", `#\$\{encodeURIComponent\(targetPanelId\)\}`\)/);
-  assert.doesNotMatch(switchTab, /location\.(assign|reload|replace)\s*\(/);
-  assert.doesNotMatch(switchTab, /data-runtime-lens/);
+  const navigation = enhancements.slice(enhancements.indexOf('(function initReaderNavigation()'), enhancements.indexOf('// ── Runtime Workbench overflow'));
+  assert.match(navigation, /history\.replaceState\(null, "", `#\$\{encodeURIComponent\(targetId\)\}`\)/);
+  assert.doesNotMatch(navigation, /location\.(assign|reload|replace)\s*\(/);
+  assert.doesNotMatch(navigation, /data-runtime-lens/);
 });
 
 test("Runtime work cards allow long canonical task and agent ids to wrap on narrow screens", () => {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
 
-import { buildCodexSessionProtocol, buildCodexSessionProtocolV3 } from "../dist/src/providers/codex/protocol.js";
+import { buildCodexSessionProtocol, buildCodexSessionProtocolV3, codexProtocolChildFactsFromRecords } from "../dist/src/providers/codex/protocol.js";
 import { classifyCodexRecordProvenance, extractMeta, parseSession, recordsToMessages } from "../dist/src/providers/codex/parser.js";
 import { finalizeSessionProtocol, protocolRevision } from "../dist/src/providers/shared/session-protocol.js";
 import { finalizeSessionProtocolV3 } from "../dist/src/providers/shared/session-protocol-v3.js";
@@ -64,12 +64,36 @@ function buildFixture() {
       session,
       messages: [],
       records,
-      children: [{ session: child, messages: [], records: [] }]
+      children: [{ session: child, facts: codexProtocolChildFactsFromRecords([]) }]
     },
     session,
     child
   };
 }
+
+test("Codex child facts preserve first-match evidence and filtered fallback indexes", () => {
+  const facts = codexProtocolChildFactsFromRecords([
+    { type: "session_meta", payload: { id: "child" } },
+    { type: "turn_context", payload: { model: "first-valid-model" } },
+    { type: "session_meta", payload: { id: "child", model: "later-model" } },
+    { type: "response_item", payload: { type: "agent_message", content: [{ type: "text", text: "Message Type: NEW_TASK\nTask name: missing-id" }] } },
+    { type: "response_item", payload: { type: "agent_message", id: "later-task", content: [{ type: "text", text: "Message Type: NEW_TASK\nTask name: later" }] } },
+    { type: "response_item", timestamp: "not-a-time", payload: { type: "agent_message", content: [{ type: "text", text: "prefix\nMessage Type: FINAL_ANSWER\nfirst" }] } },
+    { type: "response_item", timestamp: "2026-08-31T10:15:00.000Z", payload: { type: "agent_message", content: [{ type: "text", text: "Message Type: FINAL_ANSWER\nsecond" }] } },
+    { type: "event_msg", payload: { type: "task_complete", turn_id: "child-turn" } }
+  ]);
+  assert.equal(facts.model, "first-valid-model", "model selection keeps the first valid source");
+  assert.equal(facts.hasTaskEnvelope, true);
+  assert.equal(facts.taskEnvelopeId, null, "a later envelope must not replace the first matching envelope");
+  assert.equal(facts.terminalMessageTime, null, "a later terminal must not replace the first matching terminal");
+  assert.deepEqual(facts.completedTurns, [{
+    sourceId: "7",
+    eventId: "event:turn:task_complete:7",
+    turnId: "child-turn",
+    timestamp: null,
+    hasError: false
+  }]);
+});
 
 function finalizedPair() {
   const { input, session } = buildFixture();
@@ -89,7 +113,13 @@ test("Codex v3 mapping validates with zero errors and preserves v2 facts", () =>
   assert.equal(v3.version, 3);
   assert.equal(v3.tasks.length, base.tasks.length);
   assert.equal(v3.agentRuns.length, base.agentRuns.length);
-  assert.equal(v3.events.length, base.events.length);
+  const baseEventIds = new Set(base.events.map((event) => event.id));
+  assert.deepEqual(
+    v3.events.filter((event) => baseEventIds.has(event.id)).map(({ id, kind, timestamp }) => ({ id, kind, timestamp })),
+    base.events.map(({ id, kind, timestamp }) => ({ id, kind, timestamp }))
+  );
+  assert.equal(v3.events.length, base.events.length + 1);
+  assert.ok(v3.events.some((event) => event.id === "event:result:amsg-1"));
   assert.equal(v3.contextArtifacts.length, base.contextArtifacts.length);
   assert.equal(v3.upgrade, undefined);
 });
@@ -238,7 +268,7 @@ test("Codex v3 leaves ambiguous task-name matches unbound instead of guessing", 
   const children = [
     rawSession("child-a", "root2", { agentPath: "/root/team-reviewer" }, 1010, 1020),
     rawSession("child-b", "root2", { agentPath: "/root/ui-reviewer" }, 1030, 1040)
-  ].map((child) => ({ session: child, messages: [], records: [] }));
+  ].map((child) => ({ session: child, facts: codexProtocolChildFactsFromRecords([]) }));
   const input = { session, messages: [], records, children };
   const base = finalizeSessionProtocol(buildCodexSessionProtocol(input), { provider: "codex", session, revision: protocolRevision("fixture") });
   const v3 = finalizeSessionProtocolV3(buildCodexSessionProtocolV3(input, base));
@@ -533,7 +563,7 @@ test("Codex v3 excludes self-authored FINAL_ANSWER envelopes regardless of paren
   ];
   const session2 = rawSession("root-resolved", null, null, 1000, 1000);
   const child = rawSession("child-b", "root-resolved", { agentPath: "/root/child" }, 1070, 1080);
-  const input2 = { session: session2, messages: [], records: records2, children: [{ session: child, messages: [], records: [] }] };
+  const input2 = { session: session2, messages: [], records: records2, children: [{ session: child, facts: codexProtocolChildFactsFromRecords([]) }] };
   const base2 = finalizeSessionProtocol(buildCodexSessionProtocol(input2), { provider: "codex", session: session2, revision: protocolRevision("fixture") });
   const v3b = finalizeSessionProtocolV3(buildCodexSessionProtocolV3(input2, base2));
   assert.equal(v3b.validation?.ok, true);

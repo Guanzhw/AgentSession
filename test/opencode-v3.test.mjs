@@ -8,6 +8,8 @@ import { buildOpenCodeSessionTree } from "../dist/src/providers/opencode/session
 import { closeDb } from "../dist/src/db.js";
 import { buildOpenCodeSessionProtocol, buildOpenCodeSessionProtocolV3 } from "../dist/src/providers/opencode/protocol.js";
 import { finalizeSessionProtocolV3 } from "../dist/src/providers/shared/session-protocol-v3.js";
+import { validateSessionProtocol } from "../dist/src/providers/shared/session-protocol.js";
+import { deriveReaderRelations } from "../dist/src/reader-relations.js";
 
 const source = readFileSync(new URL("./fixtures/opencode-native-v3-synthetic.jsonl", import.meta.url), "utf8")
   .trim().split("\n").map((line) => JSON.parse(line));
@@ -78,6 +80,60 @@ test("OpenCode v2 todo identity uses (session_id, position), and tool correlatio
   assert.equal(base.relationships.find((relation) => relation.taskId === task.id).correlationId, "call-exact");
   const reordered = buildOpenCodeSessionProtocol({ ...tree, todos: [{ ...tree.todos[0], content: "edited", priority: "low", time_updated: 999 }] }, "fixture-revision");
   assert.equal(reordered.tasks.find((candidate) => candidate.kind === "todo").id, todo.id);
+});
+
+test("OpenCode native events retain exact message, part and tool-call identities without reordering", () => {
+  const tree = treeFromSource();
+  const message = tree.messages.find((item) => item.id === "m-tools");
+  const textPart = (id, type) => ({
+    id, messageId: message.id, sessionId: message.sessionId, type, tool: null,
+    data: { type, text: id }, timeStart: message.timeCreated, timeEnd: null, childSessions: []
+  });
+  message.parts.unshift(textPart("thought-one", "reasoning"), textPart("text-one", "text"));
+  message.parts.push(textPart("thought-two", "reasoning"), textPart("text-two", "text"));
+  const base = buildOpenCodeSessionProtocol(tree, "native-identities");
+  const v3 = finalizeSessionProtocolV3(buildOpenCodeSessionProtocolV3(tree, base));
+  assert.equal(base.validation.ok, true);
+  assert.equal(v3.validation.ok, true);
+  assert.deepEqual(base.events.map((event) => event.id), [
+    `session.started:${tree.session.id}`,
+    ...tree.messages.flatMap((item) => [`message:${item.id}`, ...item.parts.map((part) => `part:${part.id}`)])
+  ]);
+  assert.deepEqual(base.events.map((event) => event.sequence), base.events.map((_, index) => index + 1));
+  for (const item of tree.messages) {
+    const envelope = base.events.find((event) => event.id === `message:${item.id}`);
+    assert.equal(envelope.messageId, item.id);
+    assert.equal(envelope.partId, undefined);
+    assert.equal(envelope.toolCallId, undefined);
+    for (const part of item.parts) {
+      const event = base.events.find((candidate) => candidate.id === `part:${part.id}`);
+      assert.equal(event.messageId, item.id);
+      assert.equal(event.partId, part.id);
+      assert.equal(event.toolCallId, part.type === "tool" ? part.data.callID : null);
+      assert.equal(event.correlationId, part.data.callID || null);
+    }
+  }
+  assert.deepEqual(v3.events, base.events);
+
+  const document = { messages: tree.messages, partsByMessage: new Map(tree.messages.map((item) => [item.id, item.parts])) };
+  const relations = deriveReaderRelations(v3, document);
+  assert.equal(relations.milestones.length, 9, "seven launches and two recorded returns retain exact positions");
+  assert.deepEqual(relations.unplaced.map((item) => item.id), ["coord:opencode:subtask:p-subtask"]);
+  for (const milestone of relations.milestones) {
+    const event = base.events.find((candidate) => candidate.id === milestone.eventId);
+    assert.deepEqual(milestone.position, { messageId: message.id, partId: event.partId, side: "before" });
+  }
+});
+
+test("protocol finalization retains optional part identity and rejects an empty supplied identity", () => {
+  const { base } = finalizedPair();
+  const partEvent = base.events.find((event) => event.partId === "p-exact");
+  const changed = (partId) => ({
+    ...base, events: base.events.map((event) => event.id === partEvent.id ? { ...event, partId } : event)
+  });
+  assert.equal(validateSessionProtocol(changed(null)).ok, true);
+  assert.equal(validateSessionProtocol(changed(undefined)).ok, true);
+  assert.equal(validateSessionProtocol(changed(" ")).errors.some((error) => error.code === "EVENT_PART_ID_INVALID"), true);
 });
 
 test("OpenCode native v3 distinguishes exact child launch, missing child, and result delivery", () => {

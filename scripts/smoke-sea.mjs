@@ -15,6 +15,36 @@ const mcp = path.join(binaryDir, `agentsession-mcp${extension}`);
 const metadata = JSON.parse(readFileSync(path.join(binaryDir, "binary-metadata.json"), "utf8"));
 const packageVersion = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).version;
 const expectedProviderIds = ["opencode", "claude-code", "codex", "openclaw", "hermes", "pi", "deepseek-harness"];
+const staticAssets = [
+  { path: "style.css", contentType: "text/css; charset=utf-8", marker: ":root", minLength: 1000 },
+  { path: "app-shell.css", contentType: "text/css; charset=utf-8", marker: ":root", minLength: 1000 },
+  { path: "reader.css", contentType: "text/css; charset=utf-8", marker: ".session-workbench", minLength: 1000 },
+  { path: "app.js", contentType: "application/javascript; charset=utf-8", marker: "function", minLength: 1000 },
+  { path: "vendor/highlight.js/highlight.min.js", contentType: "application/javascript; charset=utf-8", marker: "hljs", minLength: 1000 },
+  { path: "vendor/highlight.js/github.min.css", contentType: "text/css; charset=utf-8", marker: ".hljs", minLength: 1000 },
+  { path: "vendor/highlight.js/LICENSE.txt", contentType: "text/plain; charset=utf-8", marker: "BSD 3-Clause", minLength: 500 },
+  ...[
+    "book-open.svg",
+    "chart-no-axes-column.svg",
+    "chevron-down.svg",
+    "ellipsis.svg",
+    "external-link.svg",
+    "moon.svg",
+    "network.svg",
+    "search.svg",
+    "settings-2.svg",
+    "star.svg",
+    "sun.svg",
+    "x.svg"
+  ].map((name) => ({
+    path: `vendor/lucide/${name}`,
+    contentType: "image/svg+xml; charset=utf-8",
+    marker: "<svg",
+    minLength: 100
+  })),
+  { path: "vendor/lucide/LICENSE", contentType: "text/plain; charset=utf-8", marker: "ISC License", minLength: 500 },
+  { path: "vendor/lucide/README.md", contentType: "text/plain; charset=utf-8", marker: "Lucide UI icons", minLength: 100 }
+];
 if (metadata.version !== packageVersion) throw new Error("Binary metadata version does not match package version");
 
 for (const [executable, expected] of [[viewer, "AgentSession —"], [mcp, "AgentSession-MCP"]]) {
@@ -69,20 +99,11 @@ try {
     || JSON.stringify(providers.map((provider) => provider.id)) !== JSON.stringify(expectedProviderIds)) {
     throw new Error("Viewer binary returned an invalid provider list");
   }
-  for (const asset of [
-    "style.css",
-    "app.js",
-    "vendor/highlight.js/highlight.min.js",
-    "vendor/highlight.js/github.min.css",
-    "vendor/highlight.js/LICENSE.txt"
-  ]) {
-    const response = await fetch(`http://127.0.0.1:${port}/static/${asset}`);
+  for (const asset of staticAssets) {
+    const response = await fetch(`http://127.0.0.1:${port}/static/${asset.path}`);
     const body = await response.text();
-    if (!response.ok || body.length < (asset.endsWith("LICENSE.txt") ? 500 : 1000)) {
-      throw new Error(`Embedded ${asset} is unavailable`);
-    }
-    if (asset.endsWith("LICENSE.txt") && !body.includes("BSD 3-Clause")) {
-      throw new Error("Embedded Highlight.js license is not the vendored license");
+    if (!response.ok || response.headers.get("content-type") !== asset.contentType || body.length < asset.minLength || !body.includes(asset.marker)) {
+      throw new Error(`Embedded ${asset.path} is unavailable or has the wrong content type`);
     }
   }
 } finally {

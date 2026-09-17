@@ -1,4 +1,6 @@
-import { initSessionWorkbench } from "./app/session-workbench.js";
+import { initSessionWorkbench, loadProgressiveContent } from "./app/session-workbench.js";
+import { initSessionReader } from "./app/session-reader.js";
+import { initReaderRelations } from "./app/reader-relations.js";
 import { initEnhancements } from "./app/enhancements.js";
 import { initRuntimeWorkbench } from "./app/runtime-workbench.js";
 import { initRuntimeEvents } from "./app/runtime-events.js";
@@ -12,7 +14,6 @@ if (themeToggle) {
   function updateToggleIcon() {
     const isDark = document.documentElement.dataset.theme === 'dark';
     const label = isDark ? ft("theme_to_light") : ft("theme_to_dark");
-    themeToggle.textContent = isDark ? '☀️' : '🌙';
     themeToggle.setAttribute("aria-label", label);
     themeToggle.setAttribute("title", label);
   }
@@ -284,10 +285,6 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     const transcriptSearch = document.querySelector("[data-session-search]");
     if (transcriptSearch) {
-      const conversationTab = document.querySelector("[aria-controls='tab-conversation']");
-      if (conversationTab && conversationTab.getAttribute("aria-selected") !== "true") {
-        conversationTab.click();
-      }
       transcriptSearch.open = true;
       requestAnimationFrame(() => transcriptSearch.querySelector("[data-session-search-input]")?.focus());
     } else {
@@ -341,41 +338,10 @@ document.addEventListener("click", async (e) => {
   const button = e.target.closest(".progressive-more");
   if (!button) return;
   e.preventDefault();
-  const container = button.closest(".progressive");
-  const workbench = button.closest(".session-workbench");
-  if (!container || !workbench || button.disabled) return;
-  const provider = workbench.dataset.provider;
-  const sessionId = workbench.dataset.sessionId;
-  const partId = button.dataset.partId;
-  const field = button.dataset.field;
-  const contentScope = button.dataset.contentScope || "owned";
-  const offset = button.dataset.nextOffset;
-  if (!provider || !sessionId || !partId || !field || offset == null) return;
-
-  button.disabled = true;
-  button.setAttribute("aria-busy", "true");
   try {
-    const query = new URLSearchParams({ part: partId, field, offset, scope: contentScope });
-    const response = await fetch(`/api/${encodeURIComponent(provider)}/session/${encodeURIComponent(sessionId)}/content?${query}`);
-    const data = await response.json();
-    if (!response.ok || !data?.ok || typeof data.html !== "string") {
-      throw new Error(data?.error || `HTTP ${response.status}`);
-    }
-    const chunk = document.createElement("div");
-    chunk.className = "progressive-chunk";
-    chunk.innerHTML = data.html;
-    container.insertBefore(chunk, button);
-    if (data.nextOffset == null) {
-      button.remove();
-    } else {
-      button.dataset.nextOffset = String(data.nextOffset);
-      button.disabled = false;
-      button.removeAttribute("aria-busy");
-    }
+    await loadProgressiveContent(button);
   } catch (error) {
     console.error("Unable to load progressive content:", error);
-    button.disabled = false;
-    button.removeAttribute("aria-busy");
     showToast(button.dataset.loadError || "Unable to load more content", "error");
   }
 });
@@ -755,6 +721,8 @@ if (scrollSentinel && sessionList) {
 }
 
 
+initSessionReader({ ft, showToast });
+initReaderRelations();
 initSessionWorkbench({ ft, formatText, showToast });
 initEnhancements({ ft, formatText, showToast, escapeHtmlClient });
 initRuntimeWorkbench({ ft, formatText });

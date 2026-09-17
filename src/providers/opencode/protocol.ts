@@ -137,7 +137,7 @@ export function buildOpenCodeSessionProtocol(tree: OpenCodeSessionTree, revision
     const messageKind = role === "user" ? "message.user" : role === "assistant" ? "message.assistant" : `message.${role}`;
     events.push(sessionEvent({
       id: `message:${message.id}`, sessionId, timestamp: message.timeCreated || null,
-      kind: messageKind, turnId: message.id,
+      kind: messageKind, turnId: message.id, messageId: message.id,
       provenance: { fidelity: "recorded", sourceType: "opencode.message", sourceId: message.id },
       providerData: { model: message.data.modelID || null, provider: message.data.providerID || null }
     }));
@@ -162,6 +162,7 @@ export function buildOpenCodeSessionProtocol(tree: OpenCodeSessionTree, revision
       const callId = typeof data.callID === "string" && data.callID ? data.callID : null;
       const partEvent = sessionEvent({
         id: `part:${part.id}`, sessionId, timestamp, kind, phase, turnId: message.id,
+        messageId: message.id, partId: part.id, toolCallId: data.type === "tool" ? callId : null,
         correlationId: callId,
         provenance: { fidelity: "recorded", sourceType: `opencode.part.${String(data.type || "unknown")}`, sourceId: part.id },
         providerData: {

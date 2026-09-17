@@ -1,14 +1,19 @@
 import assert from "node:assert/strict";
 import {
+  closeSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   realpathSync,
   rmSync,
   statSync,
   utimesSync,
-  writeFileSync
+  writeFileSync,
+  writeSync
 } from "node:fs";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -265,6 +270,66 @@ test("Codex token stats exclude parent usage copied by a legacy fork without NEW
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Codex token stats reuse one parent snapshot across many children", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "opensession-codex-token-parent-group-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const sessions = path.join(root, "sessions", "2026", "07", "20");
+  mkdirSync(sessions, { recursive: true });
+  const row = (type, payload, seconds = 0) => ({ type, payload, timestamp: recentFixtureTime(seconds) });
+  const token = (total, seconds) => row("event_msg", {
+    type: "token_count",
+    info: { last_token_usage: { input_tokens: total, output_tokens: 0, total_tokens: total } }
+  }, seconds);
+  const writeRollout = (name, records) => {
+    const filePath = path.join(sessions, `${name}.jsonl`);
+    writeJsonLines(filePath, records);
+    return filePath;
+  };
+
+  const parentFile = writeRollout("00-root", [
+    row("session_meta", { id: "root" }),
+    token(10, 1)
+  ]);
+  const paddingFd = openSync(parentFile, "a");
+  try {
+    const padding = Buffer.alloc(64 * 1024, 32);
+    padding[padding.length - 1] = 10;
+    for (let index = 0; index < 1025; index += 1) writeSync(paddingFd, padding);
+  } finally {
+    closeSync(paddingFd);
+  }
+  const childFiles = [];
+  for (let index = 0; index < 4; index += 1) {
+    childFiles.push(writeRollout(`child-${index}`, [
+      row("session_meta", { id: `child-${index}`, parent_thread_id: "root" }),
+      token(5, 10 + index)
+    ]));
+  }
+
+  initConfig(["--codex-dir", root]);
+  const openCounts = new Map();
+  const originalOpenSync = fs.openSync;
+  t.mock.method(fs, "openSync", (...args) => {
+    const descriptor = originalOpenSync(...args);
+    const filePath = path.resolve(String(args[0]));
+    openCounts.set(filePath, (openCounts.get(filePath) || 0) + 1);
+    return descriptor;
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+
+  const { default: isolatedCodex } = await import("../dist/src/providers/codex/adapter.js?token-parent-group-test");
+  const stats = isolatedCodex.getTokenStats(30);
+  const day = stats.find((item) => item.day === recentFixtureDay());
+  assert.deepEqual(day && { total: day.totalTokens, events: day.messageCount }, { total: 30, events: 5 });
+
+  const opened = (filePath) => openCounts.get(path.resolve(filePath)) || 0;
+  assert.ok(opened(parentFile) <= 2, `parent should be read once during token aggregation after initial indexing, got ${opened(parentFile)}`);
+  for (const childFile of childFiles) {
+    assert.ok(opened(childFile) <= 2, `child should not be reread more than once, got ${opened(childFile)}`);
   }
 });
 

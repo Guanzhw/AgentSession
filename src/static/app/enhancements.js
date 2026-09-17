@@ -1,180 +1,64 @@
 export function initEnhancements({ ft, formatText, showToast, escapeHtmlClient }) {
-// ── Tab bar navigation ──────────────────────────────────────────────
+// ── Secondary detail navigation ─────────────────────────────────────
 
-(function initTabBar() {
-  const tabBar = document.querySelector(".tab-bar");
-  if (!tabBar) return;
-
-  // Enable tabs: show tab bar, hide inactive panels
-  tabBar.removeAttribute("hidden");
-  const tabButtons = tabBar.querySelectorAll("[role='tab']");
-  // Only manage the session workbench's two primary panels. Events is a
-  // secondary evidence surface and remains a deep-linkable disclosure.
-  const tabPanels = tabBar.parentElement?.querySelectorAll(":scope > [role='tabpanel']") || [];
-
-  let hashTarget = null;
-  if (location.hash) {
-    try {
-      hashTarget = document.getElementById(decodeURIComponent(location.hash.slice(1)));
-    } catch {}
-  }
-  const hashPanel = hashTarget?.matches("[role='tabpanel']")
-    ? hashTarget
-    : hashTarget?.closest("[role='tabpanel']");
-  const hashEvents = hashPanel?.id === "tab-events";
-  const hashTab = hashPanel
-    ? Array.from(tabButtons).find((tab) => tab.getAttribute("aria-controls") === hashPanel.id)
-    : null;
-  const initiallySelected = hashTab || tabBar.querySelector("[role='tab'][aria-selected='true']") || tabButtons[0];
-
-  // Server-rendered markup defaults to Work. Apply the deep-link selection to
-  // the tab semantics as well as the panel visibility before the first paint.
-  tabButtons.forEach((tab) => {
-    const selected = !hashEvents && tab === initiallySelected;
-    tab.setAttribute("aria-selected", selected ? "true" : "false");
-    tab.setAttribute("tabindex", selected || (hashEvents && tab === tabButtons[0]) ? "0" : "-1");
-  });
-
-  // JavaScript progressively enhances the no-JS stacked content into tabs.
-  tabPanels.forEach(function (panel) {
-    if (hashEvents ? panel.id === "tab-events" : panel.id === initiallySelected?.getAttribute("aria-controls")) {
-      panel.removeAttribute("hidden");
-    } else {
-      panel.setAttribute("hidden", "");
-    }
-  });
-
-  function switchTab(tabButton) {
-    // Deactivate all tabs
-    tabButtons.forEach(function (btn) {
-      btn.setAttribute("aria-selected", "false");
-      btn.setAttribute("tabindex", "-1");
-    });
-    // Activate selected tab
-    tabButton.setAttribute("aria-selected", "true");
-    tabButton.setAttribute("tabindex", "0");
-    tabButton.focus();
-    const targetPanelId = tabButton.getAttribute("aria-controls");
-    // Top-level detail tabs are shareable entry points. Replace only the hash
-    // so switching tabs never reloads the page or changes nested Runtime lens state.
-    if (targetPanelId) {
-      history.replaceState(null, "", `#${encodeURIComponent(targetPanelId)}`);
-    }
-    document.querySelector(".session-workbench")?.classList.toggle("session-conversation-tab-active", targetPanelId === "tab-conversation");
-    tabBar.querySelector("[data-detail-tab='tab-events']")?.classList.remove("is-active");
-    // Show/hide panels
-    tabPanels.forEach(function (panel) {
-      if (panel.id === targetPanelId) {
-        panel.removeAttribute("hidden");
-      } else {
-        panel.setAttribute("hidden", "");
+(function initReaderNavigation() {
+  const unifiedReader = document.querySelector(".session-workbench[data-session-reader]");
+  if (unifiedReader) {
+    const openReaderTarget = (targetId) => {
+      if (!targetId) return;
+      const target = unifiedReader.querySelector(`#${CSS.escape(targetId)}`);
+      if (target instanceof HTMLDetailsElement) target.open = true;
+      const readerShell = targetId === "tab-conversation"
+        ? unifiedReader.querySelector("[data-reader-shell]")
+        : target;
+      readerShell?.scrollIntoView({ block: "start", behavior: "instant" });
+      history.replaceState(null, "", `#${encodeURIComponent(targetId)}`);
+    };
+    document.addEventListener("click", (event) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const detailTabLink = event.target.closest("[data-detail-tab]");
+      if (detailTabLink) {
+        event.preventDefault();
+        openReaderTarget(detailTabLink.dataset.detailTab);
+        return;
+      }
+      const openEvents = event.target.closest("[data-runtime-open-events]");
+      if (openEvents) {
+        event.preventDefault();
+        openReaderTarget("tab-events");
+        window.dispatchEvent(new CustomEvent("runtime:filter-events", { detail: {
+          taskId: openEvents.dataset.runtimeEventTaskId || "",
+          runId: openEvents.dataset.runtimeEventRunId || "",
+          correlationId: openEvents.dataset.runtimeEventCorrelationId || ""
+        } }));
+        return;
+      }
+      const searchToggle = event.target.closest("[data-session-search-toggle]");
+      if (searchToggle) {
+        event.preventDefault();
+        const search = unifiedReader.querySelector("[data-session-search]");
+        if (search) {
+          search.open = true;
+          requestAnimationFrame(() => search.querySelector("[data-session-search-input]")?.focus());
+        }
+        return;
+      }
+      const focusLink = event.target.closest("[data-detail-focus='runtime-evidence']");
+      if (focusLink) {
+        event.preventDefault();
+        openReaderTarget("tab-events");
       }
     });
-    if (targetPanelId === "tab-work") {
-      // The conversation panel can leave the Runtime controls beneath the
-      // fixed topbar. Reveal first, then align the runtime header without
-      // stealing focus from the selected tab (including keyboard users).
-      requestAnimationFrame(function () {
-        document.querySelector("[data-runtime-root]")?.scrollIntoView({ block: "start", behavior: "instant" });
-      });
+    if (location.hash) {
+      try {
+        const initialTarget = decodeURIComponent(location.hash.slice(1));
+        if (["tab-conversation", "tab-work", "tab-events"].includes(initialTarget)) {
+          requestAnimationFrame(() => openReaderTarget(initialTarget));
+        }
+      } catch {}
     }
+    return;
   }
-
-  // Click handler
-  tabBar.addEventListener("click", function (e) {
-    var tab = e.target.closest("[role='tab']");
-    if (!tab) return;
-    e.preventDefault();
-    switchTab(tab);
-  });
-
-  // Keyboard navigation: roving tabindex
-  tabBar.addEventListener("keydown", function (e) {
-    var tabs = Array.from(tabBar.querySelectorAll("[role='tab']"));
-    var current = document.activeElement;
-    var currentIndex = tabs.indexOf(current);
-    if (currentIndex === -1) return;
-
-    var nextIndex = currentIndex;
-    if (e.key === "ArrowRight") {
-      e.preventDefault();
-      nextIndex = (currentIndex + 1) % tabs.length;
-    } else if (e.key === "ArrowLeft") {
-      e.preventDefault();
-      nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
-    } else if (e.key === "Home") {
-      e.preventDefault();
-      nextIndex = 0;
-    } else if (e.key === "End") {
-      e.preventDefault();
-      nextIndex = tabs.length - 1;
-    } else {
-      return;
-    }
-
-    tabs[nextIndex].focus();
-    switchTab(tabs[nextIndex]);
-  });
-
-  document.querySelector(".session-workbench")?.classList.toggle("session-conversation-tab-active", initiallySelected?.getAttribute("aria-controls") === "tab-conversation");
-  tabBar.querySelector("[data-detail-tab='tab-events']")?.classList.toggle("is-active", hashEvents);
-
-  document.addEventListener("click", function (e) {
-    const detailTabLink = e.target.closest("[data-detail-tab]");
-    if (detailTabLink) {
-      const targetPanelId = detailTabLink.getAttribute("data-detail-tab");
-      const targetTab = targetPanelId
-        ? tabBar.querySelector(`[aria-controls='${CSS.escape(targetPanelId)}']`)
-        : null;
-      if (targetTab) {
-        e.preventDefault();
-        targetTab.click();
-        requestAnimationFrame(() => document.getElementById(targetPanelId)?.scrollIntoView({ block: "start", behavior: "instant" }));
-      } else if (targetPanelId === "tab-events") {
-        e.preventDefault();
-        tabButtons.forEach((tab) => {
-          tab.setAttribute("aria-selected", "false");
-          tab.setAttribute("tabindex", tab === tabButtons[0] ? "0" : "-1");
-        });
-        tabPanels.forEach((panel) => panel.toggleAttribute("hidden", panel.id !== targetPanelId));
-        history.replaceState(null, "", `#${encodeURIComponent(targetPanelId)}`);
-        detailTabLink.classList.add("is-active");
-        document.querySelector(".session-workbench")?.classList.remove("session-conversation-tab-active");
-        requestAnimationFrame(() => document.getElementById(targetPanelId)?.scrollIntoView({ block: "start", behavior: "instant" }));
-      }
-      return;
-    }
-    const openEvents = e.target.closest("[data-runtime-open-events]");
-    if (openEvents) {
-      e.preventDefault();
-      const eventsLink = tabBar.querySelector("[data-detail-tab='tab-events']");
-      eventsLink?.click();
-      window.dispatchEvent(new CustomEvent("runtime:filter-events", { detail: {
-        taskId: openEvents.dataset.runtimeEventTaskId || "",
-        runId: openEvents.dataset.runtimeEventRunId || "",
-        correlationId: openEvents.dataset.runtimeEventCorrelationId || ""
-      } }));
-      return;
-    }
-    const searchToggle = e.target.closest("[data-session-search-toggle]");
-    if (searchToggle) {
-      e.preventDefault();
-      const conversationTab = tabBar.querySelector("[aria-controls='tab-conversation']");
-      if (conversationTab) switchTab(conversationTab);
-      const search = document.querySelector("[data-session-search]");
-      if (search) {
-        search.open = true;
-        requestAnimationFrame(() => search.querySelector("[data-session-search-input]")?.focus());
-      }
-      return;
-    }
-    const focusLink = e.target.closest("[data-detail-focus='runtime-evidence']");
-    if (!focusLink) return;
-    const eventsLink = tabBar.querySelector("[data-detail-tab='tab-events']");
-    if (!eventsLink) return;
-    e.preventDefault();
-    eventsLink.click();
-  });
 })();
 
 // ── Runtime Workbench overflow ────────────────────────────────────────

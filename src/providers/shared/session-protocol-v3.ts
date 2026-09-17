@@ -72,9 +72,15 @@ export type CoordinationKind =
   | "interrupt"
   | "handoff"
   | "result-delivery"
-  | "result-acknowledgement";
+  | "result-acknowledgement"
+  | "child-turn-completed";
 
 export type CoordinationState = "requested" | "started" | "delivered" | "acknowledged" | "completed" | "failed" | "cancelled" | "unknown";
+
+export interface SessionEventRef {
+  session: SessionRef;
+  eventId: string;
+}
 
 export interface CoordinationObservation {
   id: string;
@@ -90,6 +96,8 @@ export interface CoordinationObservation {
   taskId?: string | null;
   runId?: string | null;
   eventId?: string | null;
+  /** Exact source event in the owning session's protocol snapshot. */
+  sourceEventRef?: SessionEventRef | null;
   turnId?: string | null;
   correlationId?: string | null;
   provenance: EventProvenance;
@@ -188,7 +196,7 @@ const GOAL_STATUSES = new Set<GoalStatus>(["unknown", "queued", "active", "pause
 const ACTOR_KINDS = new Set<ActorKind>(["human", "agent", "team", "system", "unknown"]);
 const COORDINATION_KINDS = new Set<CoordinationKind>([
   "spawn", "delegate", "follow-up", "message", "mailbox-delivery", "wait", "interrupt",
-  "handoff", "result-delivery", "result-acknowledgement"
+  "handoff", "result-delivery", "result-acknowledgement", "child-turn-completed"
 ]);
 const COORDINATION_STATES = new Set<CoordinationState>([
   "requested", "started", "delivered", "acknowledged", "completed", "failed", "cancelled", "unknown"
@@ -276,7 +284,28 @@ export function coordinationObservation(fields: CoordinationObservation): Coordi
   if (!id || !sessionId) throw new TypeError("Coordination observation requires id and sessionId");
   if (!COORDINATION_KINDS.has(fields.kind)) throw new TypeError(`Invalid coordination kind: ${String(fields.kind)}`);
   if (fields.state !== undefined && !COORDINATION_STATES.has(fields.state)) throw new TypeError(`Invalid coordination state: ${String(fields.state)}`);
-  return { ...fields, id, sessionId, state: fields.state ?? "unknown", timestamp: finiteOrNull(fields.timestamp), senderActorId: optionalId(fields.senderActorId), recipientActorId: optionalId(fields.recipientActorId), fromSessionRef: ref(fields.fromSessionRef), toSessionRef: ref(fields.toSessionRef), relationshipType: fields.relationshipType ?? null, taskId: optionalId(fields.taskId), runId: optionalId(fields.runId), eventId: optionalId(fields.eventId), turnId: optionalId(fields.turnId), correlationId: optionalId(fields.correlationId), provenance: provenance(fields.provenance) };
+  const sourceEventRef = fields.sourceEventRef
+    ? { session: ref(fields.sourceEventRef.session), eventId: optionalId(fields.sourceEventRef.eventId) }
+    : null;
+  if (sourceEventRef && (!sourceEventRef.session || !sourceEventRef.eventId)) {
+    throw new TypeError("Coordination source event reference is incomplete");
+  }
+  const normalizedSourceEventRef = sourceEventRef
+    ? { session: sourceEventRef.session!, eventId: sourceEventRef.eventId! }
+    : null;
+  const fromSessionRef = ref(fields.fromSessionRef);
+  const toSessionRef = ref(fields.toSessionRef);
+  if (fields.kind === "child-turn-completed") {
+    if (!normalizedSourceEventRef) {
+      throw new TypeError("Child completion requires its owning source event reference");
+    }
+    if (!fromSessionRef
+      || normalizedSourceEventRef.session.provider !== fromSessionRef.provider
+      || normalizedSourceEventRef.session.sessionId !== fromSessionRef.sessionId) {
+      throw new TypeError("Child completion source event must belong to its recorded child session");
+    }
+  }
+  return { ...fields, id, sessionId, state: fields.state ?? "unknown", timestamp: finiteOrNull(fields.timestamp), senderActorId: optionalId(fields.senderActorId), recipientActorId: optionalId(fields.recipientActorId), fromSessionRef, toSessionRef, relationshipType: fields.relationshipType ?? null, taskId: optionalId(fields.taskId), runId: optionalId(fields.runId), eventId: optionalId(fields.eventId), sourceEventRef: normalizedSourceEventRef, turnId: optionalId(fields.turnId), correlationId: optionalId(fields.correlationId), provenance: provenance(fields.provenance) };
 }
 
 export function contextVersion(fields: ContextVersion): ContextVersion {
@@ -503,6 +532,24 @@ export function validateSessionProtocolV3(protocol: SessionProtocolV3): Protocol
     if (observation.taskId && !taskIds.has(observation.taskId)) error("COORDINATION_TASK_DANGLING", "Coordination task is not present", { kind: "coordination", id: observation.id }, observation.provenance);
     if (observation.runId && !runIds.has(observation.runId)) error("COORDINATION_RUN_DANGLING", "Coordination run is not present", { kind: "coordination", id: observation.id }, observation.provenance);
     if (observation.eventId && !eventIds.has(observation.eventId)) error("COORDINATION_EVENT_DANGLING", "Coordination event is not present", { kind: "coordination", id: observation.id }, observation.provenance);
+    const sourceEventRef = observation.sourceEventRef;
+    if (sourceEventRef) {
+      if (!validRef(sourceEventRef.session) || !nonEmpty(sourceEventRef.eventId)) {
+        error("COORDINATION_SOURCE_EVENT_REF_INVALID", "Coordination source event reference is incomplete", { kind: "coordination", id: observation.id }, observation.provenance);
+      } else {
+        if (sourceEventRef.session.provider === provider && sourceEventRef.session.sessionId === sessionId && !eventIds.has(sourceEventRef.eventId)) {
+          error("COORDINATION_SOURCE_EVENT_DANGLING", "Coordination source event is not present", { kind: "coordination", id: observation.id }, observation.provenance);
+        }
+        if (observation.kind === "child-turn-completed") {
+          const owner = observation.fromSessionRef;
+          if (!owner || owner.provider !== sourceEventRef.session.provider || owner.sessionId !== sourceEventRef.session.sessionId) {
+            error("COORDINATION_SOURCE_EVENT_OWNER_MISMATCH", "Child completion source event must belong to its recorded child session", { kind: "coordination", id: observation.id }, observation.provenance);
+          }
+        }
+      }
+    } else if (observation.kind === "child-turn-completed") {
+      error("COORDINATION_SOURCE_EVENT_REF_INVALID", "Child completion requires its owning source event reference", { kind: "coordination", id: observation.id }, observation.provenance);
+    }
   }
   for (const version of protocol.contextVersions) {
     if (!validProvenance(version.provenance)) error("CONTEXT_VERSION_PROVENANCE_INVALID", "Context version provenance is invalid", { kind: "context-version", id: version.id });

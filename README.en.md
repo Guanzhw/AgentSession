@@ -1,12 +1,12 @@
 # AgentSession
 
-AgentSession is a local-first, read-only harness runtime inspector. It reads
-OpenCode, Claude Code, Codex CLI, OpenClaw, Hermes Agent, Pi, and DeepSeek Harness data to reconstruct how a harness ran,
-derived sessions, scheduled work, and loaded, compacted, inherited, or
-re-injected context.
+AgentSession is a local-first agent work-history reader: complete records are
+the content, runtime relationships organize the work, and continuous reading
+is the default. It reads OpenCode, Claude Code, Codex CLI, OpenClaw, Hermes
+Agent, Pi, and DeepSeek Harness data to show what was said, who performed the
+work, and how results returned to the main task.
 
-Conversation remains a useful compatibility projection, but it is not the only
-structured model. Provider-owned databases, transcripts, and event logs are
+Provider-owned databases, transcripts, and event logs are
 always read-only. Stars, custom titles, and exclusions live in separate
 AgentSession metadata.
 
@@ -16,18 +16,27 @@ AgentSession metadata.
 ![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
 ![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
 
-## Work Graph
+## Reading work history
 
-The primary rail uses `Library | Statistics | Settings`. Session detail has two
-primary modes, `Work | Conversation`, with the unified Workbench selected by
-default. Work structure, execution lanes, and selection details are linked on
-one surface. Events is a secondary evidence entry with paging, filters, and
-existing `#tab-events` links preserved.
+The primary rail uses `Library | Statistics | Settings`. Session detail leads
+with recorded prose and local collaboration inserts at dispatch, follow-up and
+return positions. Opening a child inserts its complete owned history there,
+keeping the parent mounted; closing returns to the original reading position.
+Search explicitly selects the root or an opened child and keeps each query and
+result position separately.
+Work and Events remain secondary evidence disclosures. Event paging, filters
+and existing `#tab-events` links are preserved.
 Conversation folds completed process using provider-recorded response phases;
 final replies, unclassified communication, and unfinished tail updates remain
 visible. Expansion, search, and anchors retain access to process content.
+Dispatches, follow-ups, and result deliveries with resolved source positions
+appear inline with local branch connections and exact source links. Vertical
+distance represents reading position, not elapsed time. A shared-time-axis
+collaboration overview starts collapsed and can reveal parallel work when
+needed. Tools and reasoning stay independently expandable.
 Recorded inherited background in Codex child sessions has a separate collapsed
-disclosure, bounded to 40 messages with a source-session link. It stays outside
+disclosure, loaded in pages of 40 messages with a source-session link. All
+recorded background remains reachable even when the parent file is missing. It stays outside
 the default ToC and does not increase child message counts or request usage.
 Unsupported, unavailable, missing, and invalid evidence stays explicit rather
 than being rendered as observed zeroes.
@@ -36,8 +45,7 @@ Browser code highlighting is served from the repository's vendored
 `@highlightjs/cdn-assets` 11.12.0 bundle under `src/static/vendor/highlight.js`,
 with its license and provenance recorded beside the assets for offline use.
 
-The Workbench consumes the following server-derived evidence without requiring
-navigation between five separate lenses:
+The secondary Workbench consumes the following server-derived evidence:
 
 - **Work**: goals, Tasks, dependencies, and explicit links from a Task to each AgentRun attempt.
 - **Execution**: actors, run attempts, and request usage for the selected session; inherited or shared input/cache still belongs to the real request where it occurred and is counted once there — the same shared context's cacheRead across distinct requests is not deduplicated, and inherited stored history is never a new request.
@@ -96,9 +104,16 @@ evidence incrementally without moving provider interpretation into the browser.
 
 ## Read-only HTTP API
 
-These `GET` APIs return bounded, server-normalized JSON:
+These `GET` APIs expose the shared reader fragment, normalized protocol and
+bounded runtime projections:
 
 ```text
+GET /api/:provider/session/:id/reader
+GET /api/:provider/session/:id/reader/coordination?runId=&taskId=&cursor=&size=
+GET /api/:provider/session/:id/reader/event/:eventId
+GET /api/:provider/session/:id/inherited-context?offset=
+GET /api/:provider/session/:id/search?q=&offset=&limit=
+GET /api/:provider/session/:id/context-result?checkpoint=&offset=&limit=
 GET /api/:provider/session/:id/protocol
 GET /api/:provider/session/:id/runtime/summary
 GET /api/:provider/session/:id/runtime/events?cursor=&limit=&category=&kind=&phase=&correlationId=
@@ -108,6 +123,25 @@ GET /api/:provider/session/:id/runtime/execution?maxItems=
 GET /api/:provider/session/:id/runtime/coordination?maxItems=
 GET /api/:provider/session/:id/runtime/context?maxItems=
 ```
+
+`/reader` returns `{ ok, provider, sessionId, title, html }`. The HTML is one
+session's reader pane without page chrome or scripts, reused for in-page child
+navigation. Long content uses the existing content-continuation endpoint.
+
+Reader search covers the selected session's complete available owned text,
+reasoning and tool content, including unloaded chunks. Results identify the
+owning message/part, source offset and bounded source excerpt; inherited
+background is separate. `/context-result` lazily returns the recorded summary
+and retained-context entries where available, with entry pagination and body
+continuation. Encrypted fields and metadata-only image attachments are
+identified separately from readable plaintext.
+
+`/reader/coordination` pages a reader work item's interactions from the complete
+normalized collection rather than an already truncated overview.
+`/reader/event/:eventId` resolves an exact event in its owning session: readable
+content returns a native reading target, while lifecycle-only records return
+bounded event evidence. Child completion and parent result delivery remain
+distinct records.
 
 The full `/protocol` response contains the v2 snapshot, capability
 descriptors, validation, and any storage diagnostic. The four domain APIs return

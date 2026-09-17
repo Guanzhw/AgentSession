@@ -15,3 +15,5 @@ tmp/
 .agentsession/
 .pi/
 .opensessionviewer/
+.firecrawl/
+/design-qa.md

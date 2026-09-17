@@ -27,7 +27,7 @@ browser() {
 }
 
 cleanup() {
-  browser --session "$SESSION_NAME" close --all >/dev/null 2>&1 || true
+  browser --session "$SESSION_NAME" close >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -58,7 +58,22 @@ read_ab() {
   local out="$ROOT/tmp/qa-agent-browser-$slug.out.txt"
   echo "[qa] agent-browser: $label" >&2
   browser --session "$SESSION_NAME" "$@" > "$out"
-  cat "$out"
+  if [[ "${1:-}" == "eval" ]]; then
+    node - "$out" <<'NODE'
+const fs = require("node:fs");
+
+const outputPath = process.argv[2];
+const raw = fs.readFileSync(outputPath, "utf8");
+try {
+  const value = JSON.parse(raw.trim());
+  process.stdout.write(typeof value === "string" ? `${value}\n` : raw);
+} catch {
+  process.stdout.write(raw);
+}
+NODE
+  else
+    cat "$out"
+  fi
 }
 
 assert_contains() {
@@ -92,7 +107,7 @@ assert_positive_count() {
 
 wait_for_server
 
-ab "clear previous session" close --all >/dev/null || true
+ab "clear previous session" close >/dev/null || true
 
 ab "open centralized sessions" open "$BASE/sessions" >/dev/null
 ab "wait for centralized sessions" wait --text "Library" >/dev/null
@@ -173,17 +188,17 @@ if [[ "$summary_chip_roundtrip" != *"same-path|"* ]]; then
   echo "Filter chips should round-trip to the same list path, got $summary_chip_roundtrip" >&2
   exit 1
 fi
-if [[ "$summary_chip_roundtrip" != *"same-path|\""* ]]; then
+if [[ "$summary_chip_roundtrip" != "same-path|" ]]; then
   echo "Provider-page chips should not invent cross-provider params, got $summary_chip_roundtrip" >&2
   exit 1
 fi
-rail_state="$(read_ab "verify primary rail links" eval "JSON.stringify([...document.querySelectorAll('.rail-link')].map((link) => ({ text: link.textContent.trim(), href: link.getAttribute('href'), shortcut: link.dataset.navShortcut, current: link.getAttribute('aria-current') })))")"
+rail_state="$(read_ab "verify primary navigation links" eval "JSON.stringify([...document.querySelectorAll('.app-navigation-link')].map((link) => ({ text: link.textContent.trim(), href: link.getAttribute('href'), shortcut: link.dataset.navShortcut, current: link.getAttribute('aria-current') })))")"
 assert_contains "primary rail" "$rail_state" "Library"
-assert_contains "primary rail" "$rail_state" "Statistics"
+assert_contains "primary navigation" "$rail_state" "Usage"
 assert_contains "primary rail" "$rail_state" "Settings"
-assert_contains "primary rail" "$rail_state" "\\\"shortcut\\\":\\\"1\\\""
-assert_contains "primary rail" "$rail_state" "\\\"shortcut\\\":\\\"2\\\""
-assert_contains "primary rail" "$rail_state" "\\\"shortcut\\\":\\\"3\\\""
+assert_contains "primary rail" "$rail_state" '"shortcut":"1"'
+assert_contains "primary rail" "$rail_state" '"shortcut":"2"'
+assert_contains "primary rail" "$rail_state" '"shortcut":"3"'
 MSYS2_ARG_CONV_EXCL='*' browser --session "$SESSION_NAME" press 2 >/dev/null
 keyboard_stats_path="$(read_ab "verify keyboard Statistics shortcut" eval "location.pathname")"
 if [[ "$keyboard_stats_path" != "/stats" && "$keyboard_stats_path" != "\"/stats\"" ]]; then
@@ -330,18 +345,22 @@ ab "open search" open "$BASE/opencode/search?q=assistant" >/dev/null
 ab "wait for search" wait --text "Search" >/dev/null
 
 ab "open session detail" open "$BASE/opencode/session/$SAMPLE_SESSION_ID" >/dev/null
-work_graph_default="$(read_ab "verify Work default tab" eval "document.getElementById('tab-btn-work')?.getAttribute('aria-selected') === 'true' && !document.getElementById('tab-work')?.hidden")"
-if [[ "$work_graph_default" != "true" ]]; then
-  echo "Session detail should open on Work, got $work_graph_default" >&2
-  exit 1
-fi
-ab "open Find in conversation from Work" click "[data-session-search-toggle]" >/dev/null
-sleep 0.25
-find_from_work_state="$(read_ab "verify Find switches to Conversation" eval "JSON.stringify({ selected: document.querySelector('#tab-btn-conversation')?.getAttribute('aria-selected'), panelHidden: document.querySelector('#tab-conversation')?.hidden, searchOpen: document.querySelector('[data-session-search]')?.open, focused: document.activeElement === document.querySelector('[data-session-search-input]') })")"
-assert_contains "Find from Work" "$find_from_work_state" "\\\"selected\\\":\\\"true\\\""
-assert_contains "Find from Work" "$find_from_work_state" "\\\"searchOpen\\\":true"
-assert_contains "Find from Work" "$find_from_work_state" "\\\"focused\\\":true"
-ab "wait for reasoning" wait ".reasoning-block" >/dev/null
+ab "wait for complete history reader" wait --load networkidle >/dev/null
+reader_state="$(read_ab "verify unified history reader" eval "(() => { const workbench = document.querySelector('.session-workbench[data-session-reader]'); const host = workbench?.querySelector('[data-reader-host]'); const pane = host?.querySelector('[data-reader-pane]'); const work = document.getElementById('tab-work'); const events = document.getElementById('tab-events'); return JSON.stringify({ reader: !!workbench, rootSession: workbench?.dataset.sessionId || '', currentSession: workbench?.dataset.readerCurrentSession || '', onePane: host?.querySelectorAll('[data-reader-pane]').length === 1, paneAttrs: !!pane?.dataset.readerProvider && !!pane?.dataset.readerSession && !!pane?.dataset.readerTitle, messages: !!pane?.querySelector('#session-messages'), users: pane?.querySelectorAll('#session-messages .message-turn-user').length || 0, assistants: pane?.querySelectorAll('#session-messages .message-turn-assistant').length || 0, tools: pane?.querySelectorAll('#session-messages .tool-call').length || 0, reasoning: pane?.querySelectorAll('#session-messages .reasoning-block').length || 0, inheritedSeparate: !pane?.querySelector('#session-messages [data-inherited-context]'), noPrimaryTabs: !document.querySelector('.tab-bar [role=tab]'), conversationEntry: !!document.getElementById('tab-conversation'), workDisclosure: work?.tagName === 'DETAILS' && !work.open, eventsDisclosure: events?.tagName === 'DETAILS' && !events.open, backShell: !!workbench?.querySelector('[data-reader-back]'), statusShell: !!workbench?.querySelector('[data-reader-status]') }); })()" | tr -d '[:space:]')"
+assert_contains "unified history reader" "$reader_state" '"reader":true'
+assert_contains "unified history reader" "$reader_state" '"currentSession":"'$SAMPLE_SESSION_ID'"'
+assert_contains "unified history reader" "$reader_state" '"onePane":true'
+assert_contains "unified history reader" "$reader_state" '"paneAttrs":true'
+assert_contains "unified history reader" "$reader_state" '"messages":true'
+assert_contains "unified history reader" "$reader_state" '"inheritedSeparate":true'
+assert_contains "unified history reader" "$reader_state" '"noPrimaryTabs":true'
+assert_contains "unified history reader" "$reader_state" '"conversationEntry":true'
+assert_contains "unified history reader" "$reader_state" '"workDisclosure":true'
+assert_contains "unified history reader" "$reader_state" '"eventsDisclosure":true'
+assert_positive_count "recorded user history" "$(printf '%s' "$reader_state" | grep -o '"users":[0-9]*' | cut -d: -f2)"
+assert_positive_count "recorded assistant history" "$(printf '%s' "$reader_state" | grep -o '"assistants":[0-9]*' | cut -d: -f2)"
+assert_positive_count "recorded tool history" "$(printf '%s' "$reader_state" | grep -o '"tools":[0-9]*' | cut -d: -f2)"
+assert_positive_count "recorded reasoning history" "$(printf '%s' "$reader_state" | grep -o '"reasoning":[0-9]*' | cut -d: -f2)"
 detail="$(read_ab "read session detail" get text body)"
 assert_not_contains "detail" "$detail" "System Prompts"
 assert_contains "detail" "$detail" "Find in conversation"
@@ -369,14 +388,53 @@ if [[ "$detail_copy_id_count" != "1" ]]; then
   exit 1
 fi
 
-ab "open transcript search" click "[data-session-search-toggle]" >/dev/null
-ab "search transcript" fill "[data-session-search-input]" "tool" >/dev/null
-ab "wait for transcript search results" wait --fn "document.querySelector('[data-session-search-status]')?.textContent.includes('hits')" >/dev/null
-transcript_search_feedback="$(read_ab "verify transcript search feedback" eval "(() => document.querySelectorAll('mark[data-session-search-highlight]').length > 0 && document.querySelectorAll('.session-search-current').length === 1 && /[0-9]+ \/ [0-9]+ turns · [0-9]+ hits/.test(document.querySelector('[data-session-search-status]')?.textContent || ''))()")"
-if [[ "$transcript_search_feedback" != "true" ]]; then
-  echo "Transcript search should show word highlights, one current turn, and explicit turn/hit counts" >&2
+child_link_state="$(read_ab "verify canonical child reader links" eval "(() => { const links = [...document.querySelectorAll('[data-reader-pane] .subagent-reader-link [data-reader-open][data-reader-session]')]; const link = links[0]; window.__qaChildSessionId = link?.dataset.readerSession || ''; return JSON.stringify({ count: links.length, selected: window.__qaChildSessionId, canonical: links.every((item) => /^\\/[a-z][a-z0-9-]*\\/session\\//.test(item.getAttribute('href') || '') && item.dataset.readerProvider && item.dataset.readerSession), state: link?.dataset.readerChildState || '' }); })()" | tr -d '[:space:]')"
+assert_positive_count "canonical child reader links" "$(printf '%s' "$child_link_state" | grep -o '"count":[0-9]*' | cut -d: -f2)"
+assert_contains "canonical child reader links" "$child_link_state" '"canonical":true'
+child_session_id="$(printf '%s' "$child_link_state" | sed -n 's/.*"selected":"\([^"]*\)".*/\1/p')"
+if [[ -z "$child_session_id" ]]; then
+  echo "A real subagent session should expose a canonical reader link, got $child_link_state" >&2
   exit 1
 fi
+
+ab "reveal child link and capture actual departure position" eval "(() => { const pane = document.querySelector('[data-reader-pane]'); const link = pane?.querySelector('.subagent-reader-link [data-reader-open][data-reader-session]'); if (!link) return false; let details = link.closest('details'); while (details) { details.open = true; details = details.parentElement?.closest('details') || null; } link.scrollIntoView({ block: 'center', behavior: 'auto' }); link.addEventListener('click', () => { window.__qaReaderParent = { provider: pane.dataset.readerProvider, session: pane.dataset.readerSession, anchor: link.closest('[id]')?.id || '', scrollY: window.scrollY, pane, focus: document.activeElement }; }, { once: true }); return true; })()" >/dev/null
+ab "open child history in reader" click ".subagent-reader-link [data-reader-open][data-reader-session]" >/dev/null
+ab "wait for inline child history" wait --fn "document.querySelector('[data-reader-inline-pane] [data-reader-pane]')?.dataset.readerSession === window.__qaChildSessionId" >/dev/null
+child_reader_state="$(read_ab "verify child history pane" eval "(() => { const root = document.querySelector('[data-reader-host] [data-reader-pane]'); const pane = document.querySelector('[data-reader-inline-pane] [data-reader-pane]'); const messages = pane?.querySelector('[data-reader-canonical-anchor=session-messages]'); const ids = [...document.querySelectorAll('[id]')].map((element) => element.id); return JSON.stringify({ child: pane?.dataset.readerSession || '', twoPanes: document.querySelectorAll('[data-reader-host] [data-reader-pane]').length === 2, parentPreserved: root === window.__qaReaderParent?.pane, title: pane?.dataset.readerTitle || '', messages: !!messages, readable: (messages?.textContent || '').trim().length > 0, closeVisible: !!pane?.parentElement.querySelector('[data-reader-inline-close]'), uniqueIds: new Set(ids).size === ids.length, searchScopes: document.querySelector('[data-session-search-scope]')?.options.length === 2 }); })()" | tr -d '[:space:]')"
+assert_contains "child history pane" "$child_reader_state" '"child":"'$child_session_id'"'
+assert_contains "child history pane" "$child_reader_state" '"twoPanes":true'
+assert_contains "child history pane" "$child_reader_state" '"parentPreserved":true'
+assert_contains "child history pane" "$child_reader_state" '"messages":true'
+assert_contains "child history pane" "$child_reader_state" '"readable":true'
+assert_contains "child history pane" "$child_reader_state" '"closeVisible":true'
+assert_contains "child history pane" "$child_reader_state" '"uniqueIds":true'
+assert_contains "child history pane" "$child_reader_state" '"searchScopes":true'
+ab "close inline child history" click "[data-reader-inline-close]" >/dev/null
+ab "wait for parent history restoration" wait --fn "document.querySelector('.session-workbench')?.dataset.readerCurrentSession === window.__qaReaderParent?.session && document.querySelector('[data-reader-pane] #session-messages')" >/dev/null
+sleep 0.25
+parent_restore_state="$(read_ab "verify parent reader restoration" eval "(() => { const pane = document.querySelector('[data-reader-pane]'); return JSON.stringify({ current: document.querySelector('.session-workbench')?.dataset.readerCurrentSession || '', onePane: document.querySelectorAll('[data-reader-host] [data-reader-pane]').length === 1, samePane: pane === window.__qaReaderParent?.pane, anchorRestored: !!document.getElementById(window.__qaReaderParent?.anchor || ''), positionRestored: Math.abs(window.scrollY - (window.__qaReaderParent?.scrollY || 0)) < 12, focusRestored: document.activeElement === window.__qaReaderParent?.focus, backDisabled: document.querySelector('[data-reader-back]')?.disabled === true }); })()" | tr -d '[:space:]')"
+assert_contains "parent reader restoration" "$parent_restore_state" '"current":"'$SAMPLE_SESSION_ID'"'
+assert_contains "parent reader restoration" "$parent_restore_state" '"onePane":true'
+assert_contains "parent reader restoration" "$parent_restore_state" '"samePane":true'
+assert_contains "parent reader restoration" "$parent_restore_state" '"anchorRestored":true'
+assert_contains "parent reader restoration" "$parent_restore_state" '"positionRestored":true'
+assert_contains "parent reader restoration" "$parent_restore_state" '"focusRestored":true'
+
+ab "set wide reader search viewport" set viewport 1360 980 >/dev/null
+ab "open active reader search" click "[data-session-search-toggle]" >/dev/null
+ab "search transcript" fill "[data-session-search-input]" "tool" >/dev/null
+ab "wait for transcript search results" wait --fn "document.querySelector('[data-session-search-status]')?.textContent.includes('hits')" >/dev/null
+transcript_search_feedback="$(read_ab "verify active-pane transcript search" eval "(() => { const workbench = document.querySelector('.session-workbench'); const pane = document.querySelector('[data-reader-pane]'); const search = document.querySelector('[data-session-search]'); return JSON.stringify({ shell: !!search && search.closest('.session-workbench') === workbench, onePane: document.querySelectorAll('[data-reader-pane]').length === 1, highlights: document.querySelectorAll('[data-session-search-highlight]').length > 0, current: document.querySelectorAll('.session-search-current').length === 1, currentInPane: [...document.querySelectorAll('.session-search-current')].every((item) => pane?.contains(item)), feedback: /[0-9]+ \/ [0-9]+ matches · [0-9]+ visible hits · complete owned history/.test(document.querySelector('[data-session-search-status]')?.textContent || '') }); })()" | tr -d '[:space:]')"
+assert_contains "active-pane transcript search" "$transcript_search_feedback" '"shell":true'
+assert_contains "active-pane transcript search" "$transcript_search_feedback" '"onePane":true'
+assert_contains "active-pane transcript search" "$transcript_search_feedback" '"highlights":true'
+assert_contains "active-pane transcript search" "$transcript_search_feedback" '"current":true'
+assert_contains "active-pane transcript search" "$transcript_search_feedback" '"currentInPane":true'
+assert_contains "active-pane transcript search" "$transcript_search_feedback" '"feedback":true'
+wide_reader_search_bounds="$(read_ab "verify wide reader search bounds" eval "(() => { const panel = document.querySelector('.session-search-panel'); const close = document.querySelector('[data-session-search-close]'); const status = document.querySelector('[data-session-search-status]'); const p = panel?.getBoundingClientRect(); const c = close?.getBoundingClientRect(); return JSON.stringify({ statusLong: (status?.textContent || '').length >= 40, closeInPanel: !!p && !!c && c.left >= p.left && c.right <= p.right && c.top >= p.top && c.bottom <= p.bottom, closeInViewport: !!c && c.left >= 0 && c.right <= innerWidth && c.top >= 0 && c.bottom <= innerHeight }); })()" | tr -d '[:space:]')"
+assert_contains "wide reader search bounds" "$wide_reader_search_bounds" '"statusLong":true'
+assert_contains "wide reader search bounds" "$wide_reader_search_bounds" '"closeInPanel":true'
+assert_contains "wide reader search bounds" "$wide_reader_search_bounds" '"closeInViewport":true'
 read_ab "remember transcript search scroll" eval "window.__qaTranscriptSearchScrollY = window.scrollY; true" >/dev/null
 ab "close transcript search" click "[data-session-search-close]" >/dev/null
 transcript_search_close_state="$(read_ab "verify transcript search close position" eval "!document.querySelector('[data-session-search]').open && Math.abs(window.scrollY - window.__qaTranscriptSearchScrollY) < 2")"
@@ -384,6 +442,17 @@ if [[ "$transcript_search_close_state" != "true" ]]; then
   echo "Closing transcript search should preserve the current result scroll position" >&2
   exit 1
 fi
+ab "set narrow reader search viewport" set viewport 390 844 >/dev/null
+ab "reopen narrow reader search" click "[data-session-search-toggle]" >/dev/null
+ab "search narrow transcript" fill "[data-session-search-input]" "tool" >/dev/null
+ab "wait for narrow transcript results" wait --fn "document.querySelector('[data-session-search-status]')?.textContent.includes('hits')" >/dev/null
+narrow_reader_search_bounds="$(read_ab "verify narrow reader search bounds" eval "(() => { const panel = document.querySelector('.session-search-panel'); const close = document.querySelector('[data-session-search-close]'); const status = document.querySelector('[data-session-search-status]'); const p = panel?.getBoundingClientRect(); const c = close?.getBoundingClientRect(); return JSON.stringify({ statusLong: (status?.textContent || '').length >= 40, closeInPanel: !!p && !!c && c.left >= p.left && c.right <= p.right && c.top >= p.top && c.bottom <= p.bottom, closeInViewport: !!c && c.left >= 0 && c.right <= innerWidth && c.top >= 0 && c.bottom <= innerHeight }); })()" | tr -d '[:space:]')"
+assert_contains "narrow reader search bounds" "$narrow_reader_search_bounds" '"statusLong":true'
+assert_contains "narrow reader search bounds" "$narrow_reader_search_bounds" '"closeInPanel":true'
+assert_contains "narrow reader search bounds" "$narrow_reader_search_bounds" '"closeInViewport":true'
+ab "close narrow reader search" click "[data-session-search-close]" >/dev/null
+ab "wait for narrow reader search close" wait --fn "!document.querySelector('[data-session-search]').open" >/dev/null
+ab "restore desktop reader search viewport" set viewport 1280 900 >/dev/null
 echo "[qa] agent-browser: reopen transcript search with shortcut" >&2
 MSYS2_ARG_CONV_EXCL='*' browser --session "$SESSION_NAME" press / >/dev/null
 # A browser-side wait here can wedge the Windows agent-browser transport after
@@ -396,15 +465,6 @@ if [[ "$transcript_search_shortcut_state" != "true" ]]; then
   exit 1
 fi
 ab "close transcript search after shortcut" press Escape >/dev/null
-
-ab "open Work before slash shortcut" click "#tab-btn-work" >/dev/null
-MSYS2_ARG_CONV_EXCL='*' browser --session "$SESSION_NAME" press / >/dev/null
-sleep 0.25
-slash_from_work_state="$(read_ab "verify slash switches to Conversation" eval "JSON.stringify({ selected: document.querySelector('#tab-btn-conversation')?.getAttribute('aria-selected'), searchOpen: document.querySelector('[data-session-search]')?.open, focused: document.activeElement === document.querySelector('[data-session-search-input]') })")"
-assert_contains "slash from Work" "$slash_from_work_state" "\\\"selected\\\":\\\"true\\\""
-assert_contains "slash from Work" "$slash_from_work_state" "\\\"searchOpen\\\":true"
-assert_contains "slash from Work" "$slash_from_work_state" "\\\"focused\\\":true"
-ab "close transcript search after Work slash" press Escape >/dev/null
 
 resume_preview_count="$(read_ab "count resume command previews" get count ".resume-command-preview")"
 resume_copy_count="$(read_ab "count resume command copy buttons" get count ".resume-command-preview [data-action='copy-resume-command']")"
@@ -421,29 +481,34 @@ else
   fi
 fi
 
-tab_layout_state="$(read_ab "verify stable session tab layout" eval "(() => { const workbench = document.querySelector('.session-workbench'); const main = workbench?.querySelector('.main-content'); const events = document.getElementById('tab-btn-events'); const conversation = document.getElementById('tab-btn-conversation'); if (!workbench || !main || !events || !conversation) return false; conversation.click(); const conversationGrid = getComputedStyle(workbench).gridTemplateColumns.trim().split(/\\s+/).length; events.click(); const eventGrid = getComputedStyle(workbench).gridTemplateColumns.trim().split(/\\s+/).length; const eventMainColumn = getComputedStyle(main).gridColumnStart; conversation.click(); return conversationGrid === 2 && eventGrid === 1 && eventMainColumn === '1' && workbench.classList.contains('session-conversation-tab-active'); })()")"
-if [[ "$tab_layout_state" != "true" ]]; then
-  echo "Session tab changes should preserve the content position and width, got $tab_layout_state" >&2
-  exit 1
-fi
+secondary_layout_state="$(read_ab "verify secondary reader disclosures" eval "(() => { const workbench = document.querySelector('.session-workbench[data-session-reader]'); const work = document.getElementById('tab-work'); const events = document.getElementById('tab-events'); return JSON.stringify({ noPrimaryTabs: !document.querySelector('.tab-bar [role=tab]'), workDetails: work?.tagName === 'DETAILS', eventsDetails: events?.tagName === 'DETAILS', workClosed: work ? !work.open : false, eventsClosed: events ? !events.open : false, conversationEntry: !!document.getElementById('tab-conversation'), currentPane: !!workbench?.querySelector('[data-reader-host] [data-reader-pane]') }); })()" | tr -d '[:space:]')"
+assert_contains "secondary reader disclosures" "$secondary_layout_state" '"noPrimaryTabs":true'
+assert_contains "secondary reader disclosures" "$secondary_layout_state" '"workDetails":true'
+assert_contains "secondary reader disclosures" "$secondary_layout_state" '"eventsDetails":true'
+assert_contains "secondary reader disclosures" "$secondary_layout_state" '"workClosed":true'
+assert_contains "secondary reader disclosures" "$secondary_layout_state" '"eventsClosed":true'
+assert_contains "secondary reader disclosures" "$secondary_layout_state" '"currentPane":true'
 
-deep_link_state="$(read_ab "verify Conversation deep link" eval "(() => { const target = document.querySelector('#tab-conversation [id^=msg_]'); if (!target) return JSON.stringify({ ready: false }); location.assign(location.pathname + '?qa_deep_link=conversation#' + target.id); return JSON.stringify({ ready: true, id: target.id }); })()")"
+deep_link_state="$(read_ab "verify Conversation deep link" eval "(() => { const target = document.querySelector('[data-reader-pane] #session-messages [id^=msg_]'); if (!target) return JSON.stringify({ ready: false }); location.assign(location.pathname + '?qa_deep_link=conversation#' + target.id); return JSON.stringify({ ready: true, id: target.id }); })()")"
 sleep 0.7
-conversation_hash_state="$(read_ab "read Conversation deep link state" eval "JSON.stringify({ hash: location.hash, selected: document.querySelector('#tab-btn-conversation')?.getAttribute('aria-selected'), hidden: document.querySelector('#tab-conversation')?.hidden })")"
+conversation_hash_state="$(read_ab "read Conversation deep link state" eval "JSON.stringify({ hash: location.hash, reader: !!document.querySelector('.session-workbench[data-session-reader]'), current: document.querySelector('.session-workbench')?.dataset.readerCurrentSession || '', target: !!document.getElementById(location.hash.slice(1)) })")"
 assert_contains "Conversation deep link" "$deep_link_state" "ready"
-assert_contains "Conversation deep link" "$conversation_hash_state" "\\\"selected\\\":\\\"true\\\""
-assert_contains "Conversation deep link" "$conversation_hash_state" "\\\"hidden\\\":false"
+assert_contains "Conversation deep link" "$conversation_hash_state" '"reader":true'
+assert_contains "Conversation deep link" "$conversation_hash_state" '"current":"'$SAMPLE_SESSION_ID'"'
+assert_contains "Conversation deep link" "$conversation_hash_state" '"target":true'
 ab "open Events deep link" open "$BASE/opencode/session/$SAMPLE_SESSION_ID?qa_deep_link=events#tab-events" >/dev/null
 sleep 0.7
-events_hash_state="$(read_ab "read Events deep link state" eval "JSON.stringify({ hash: location.hash, secondaryActive: document.querySelector('#tab-btn-events')?.classList.contains('is-active'), primaryCount: document.querySelectorAll('.tab-bar [role=tab]').length, returnTabIndex: document.querySelector('#tab-btn-work')?.tabIndex, hidden: document.querySelector('#tab-events')?.hidden, direct: Boolean(document.querySelector('#tab-events [data-runtime-events-root]')), shell: Boolean(document.querySelector('#tab-events #detail-events-shell')), table: Boolean(document.querySelector('#tab-events [data-runtime-event]')) })")"
-assert_contains "Events deep link" "$events_hash_state" "\\\"direct\\\":true"
-assert_contains "Events deep link" "$events_hash_state" "\\\"shell\\\":false"
-assert_contains "Events deep link" "$events_hash_state" "\\\"table\\\":true"
-assert_contains "Events deep link" "$events_hash_state" "\\\"secondaryActive\\\":true"
-assert_contains "Events primary mode count" "$events_hash_state" "\\\"primaryCount\\\":2"
-assert_contains "Events keyboard return" "$events_hash_state" "\\\"returnTabIndex\\\":0"
-assert_contains "Events deep link" "$events_hash_state" "\\\"hidden\\\":false"
-ab "restore Conversation after deep links" click "#tab-btn-conversation" >/dev/null
+ab "open Events disclosure from deep link" eval "(() => { const details = document.getElementById('tab-events'); if (details && !details.open) details.open = true; return Boolean(details?.open); })()" >/dev/null
+events_hash_state="$(read_ab "read Events deep link state" eval "JSON.stringify({ hash: location.hash, reader: !!document.querySelector('.session-workbench[data-session-reader]'), primaryCount: document.querySelectorAll('.tab-bar [role=tab]').length, disclosure: document.getElementById('tab-events')?.tagName === 'DETAILS', open: document.getElementById('tab-events')?.open === true, direct: Boolean(document.querySelector('#tab-events [data-runtime-events-root]')), shell: Boolean(document.querySelector('#tab-events #detail-events-shell')), table: Boolean(document.querySelector('#tab-events [data-runtime-event]')) })")"
+assert_contains "Events deep link" "$events_hash_state" '"direct":true'
+assert_contains "Events deep link" "$events_hash_state" '"shell":false'
+assert_contains "Events deep link" "$events_hash_state" '"table":true'
+assert_contains "Events deep link" "$events_hash_state" '"reader":true'
+assert_contains "Events disclosure" "$events_hash_state" '"disclosure":true'
+assert_contains "Events disclosure" "$events_hash_state" '"open":true'
+assert_contains "Events primary mode count" "$events_hash_state" '"primaryCount":0'
+ab "restore Conversation after deep links" open "$BASE/opencode/session/$SAMPLE_SESSION_ID" >/dev/null
+ab "wait for reader after deep links" wait --load networkidle >/dev/null
 
 toc_unexpected="$(read_ab "count unexpected toc entries" get count ".session-toc .toc-link:not(.toc-user):not(.toc-assistant):not(.toc-agent):not(.toc-task)")"
 if [[ "$toc_unexpected" != "0" ]]; then
@@ -457,44 +522,13 @@ if [[ "$toc_checkpoint_count" != "0" ]]; then
   exit 1
 fi
 
-thread_state="$(read_ab "verify conversation thread segments and toggle" eval "(() => { const messages = document.querySelector('#session-messages'); const stored = localStorage.getItem('agentsession.conversationView'); const expected = stored === 'thread' || stored === 'linear' ? stored : messages?.dataset.conversationDefault; const userSections = [...document.querySelectorAll('#session-messages > .thread-turn-user')]; return { defaultMode: messages?.dataset.conversationDefault, storedMode: stored, modeConsistent: messages?.classList.contains('conversation-' + expected), messageCount: messages?.dataset.conversationMessageCount, toggles: document.querySelectorAll('[data-conversation-view] [data-conversation-view-mode]').length, userSegments: userSections.length, userBlocks: document.querySelectorAll('#session-messages > .thread-turn-user > .thread-turn-content > .message-turn-user').length, userTurnsWithBlock: userSections.filter((section) => section.querySelector(':scope > .thread-turn-content > .message-turn-user')).length, checkpoints: document.querySelectorAll('[data-compaction-checkpoint]').length, uniqueCheckpointIds: new Set([...document.querySelectorAll('[data-compaction-checkpoint]')].map((el) => el.getAttribute('data-compaction-checkpoint'))).size }; })()")"
-thread_state_compact="$(printf '%s' "$thread_state" | tr -d '[:space:]')"
-if [[ "$thread_state_compact" == *"\"toggles\":0"* ]]; then
-  echo "Conversation view toggle is missing: $thread_state" >&2
-  exit 1
-fi
-assert_contains "conversation view mode follows the default" "$thread_state_compact" "\"modeConsistent\":true"
-user_turn_blocks="$(echo "$thread_state_compact" | grep -o '"userBlocks":[0-9]*' | cut -d: -f2)"
-user_turns_with_block="$(echo "$thread_state_compact" | grep -o '"userTurnsWithBlock":[0-9]*' | cut -d: -f2)"
-user_turn_segments="$(echo "$thread_state_compact" | grep -o '"userSegments":[0-9]*' | cut -d: -f2)"
-if [[ "$user_turn_blocks" != "$user_turns_with_block" ]]; then
-  echo "Each top-level rendered user block should own exactly one thread turn, got blocks $user_turn_blocks turns-with-block $user_turns_with_block" >&2
-  exit 1
-fi
-if [[ -n "$user_turn_blocks" && -n "$user_turn_segments" ]] && (( user_turn_segments < user_turn_blocks )); then
-  echo "Thread user-turn segments should not be fewer than top-level rendered user blocks, got segments $user_turn_segments blocks $user_turn_blocks" >&2
-  exit 1
-fi
-checkpoint_total="$(echo "$thread_state_compact" | grep -o '"checkpoints":[0-9]*' | cut -d: -f2)"
-checkpoint_unique="$(echo "$thread_state_compact" | grep -o '"uniqueCheckpointIds":[0-9]*' | cut -d: -f2)"
-if [[ "$checkpoint_unique" != "$checkpoint_total" ]]; then
-  echo "Compaction checkpoints must render exactly once, got total $checkpoint_total unique $checkpoint_unique" >&2
-  exit 1
-fi
-
-toggle_to_linear="$(read_ab "switch conversation view to Linear" eval "(() => { const btn = document.querySelector(\"[data-conversation-view-mode='linear']\"); const messages = document.querySelector('#session-messages'); if (!btn || !messages) return 'ready=false'; btn.click(); return [messages.className, 'pressed=' + btn.getAttribute('aria-pressed'), 'stored=' + localStorage.getItem('agentsession.conversationView')].join('|'); })()")"
-if [[ "$toggle_to_linear" != *"ready=false"* ]]; then
-  assert_contains "conversation toggle Linear" "$toggle_to_linear" "conversation-linear"
-  assert_contains "conversation toggle Linear pressed" "$toggle_to_linear" "pressed=true"
-  assert_contains "conversation toggle persisted" "$toggle_to_linear" "stored=linear"
-fi
-toggle_back_to_thread="$(read_ab "switch conversation view back to Thread" eval "(() => { const btn = document.querySelector(\"[data-conversation-view-mode='thread']\"); if (!btn) return 'ready=false'; btn.click(); return [document.querySelector('#session-messages')?.className, 'stored=' + localStorage.getItem('agentsession.conversationView')].join('|'); })()")"
-if [[ "$toggle_back_to_thread" != *"ready=false"* ]]; then
-  assert_contains "conversation toggle Thread" "$toggle_back_to_thread" "conversation-thread"
-fi
+reader_history_state="$(read_ab "verify complete reader history surface" eval "(() => { const pane = document.querySelector('[data-reader-pane]'); const messages = pane?.querySelector('#session-messages'); const users = messages?.querySelectorAll('.message-turn-user').length || 0; const assistants = messages?.querySelectorAll('.message-turn-assistant').length || 0; return JSON.stringify({ pane: !!pane, messages: !!messages, users, assistants, toc: document.querySelectorAll('.session-toc .toc-link').length, noConversationToggle: !document.querySelector('[data-conversation-view-mode]') }); })()" | tr -d '[:space:]')"
+assert_contains "complete reader history" "$reader_history_state" '"pane":true'
+assert_contains "complete reader history" "$reader_history_state" '"messages":true'
+assert_contains "complete reader history" "$reader_history_state" '"noConversationToggle":true'
 
 # ── P2b: conversation inspector, references (guarded real-data assertions) ──
-inspector_state="$(read_ab "verify P2b inspector" eval "(() => { const inspector = document.querySelector('[data-conversation-inspector]'); if (!inspector) return { present: false }; const sessionId = inspector.querySelector('[data-inspector-session-id]')?.textContent || ''; const width = window.innerWidth; const pos = getComputedStyle(inspector).position; const relCount = inspector.querySelectorAll('[data-inspector-relationships] .inspector-relationship').length; const moreLink = !!inspector.querySelector('[data-relationships-more]'); return { present: true, sessionId: sessionId.trim().length > 0, usage: !!inspector.querySelector('[data-inspector-usage]'), coverage: !!inspector.querySelector('[data-inspector-coverage]'), relationships: relCount, moreLink, relationshipConsistent: (relCount === 5 && moreLink) || (relCount < 5 && !moreLink), scopeGroups: [...inspector.querySelectorAll('[data-asset-scope]')].map((g) => g.dataset.assetScope), scopesPopulated: [...inspector.querySelectorAll('[data-asset-scope]')].every((g) => g.querySelectorAll('.inspector-asset').length > 0), positionedPerWidth: width > 1100 ? pos === 'sticky' : pos === 'static' }; })()" | tr -d '[:space:]')"
+inspector_state="$(read_ab "verify P2b inspector" eval "(() => { const inspector = document.querySelector('[data-conversation-inspector]'); if (!inspector) return { present: false }; const sessionId = inspector.querySelector('[data-inspector-session-id]')?.textContent || ''; const width = window.innerWidth; const pos = getComputedStyle(inspector).position; const readerPane = Boolean(inspector.closest('[data-reader-pane]')); const relCount = inspector.querySelectorAll('[data-inspector-relationships] .inspector-relationship').length; const moreLink = !!inspector.querySelector('[data-relationships-more]'); return { present: true, sessionId: sessionId.trim().length > 0, usage: !!inspector.querySelector('[data-inspector-usage]'), coverage: !!inspector.querySelector('[data-inspector-coverage]'), relationships: relCount, moreLink, relationshipConsistent: (relCount === 5 && moreLink) || (relCount < 5 && !moreLink), scopeGroups: [...inspector.querySelectorAll('[data-asset-scope]')].map((g) => g.dataset.assetScope), scopesPopulated: [...inspector.querySelectorAll('[data-asset-scope]')].every((g) => g.querySelectorAll('.inspector-asset').length > 0), readerPane, positionedPerWidth: readerPane ? pos === 'static' : width > 1100 ? pos === 'sticky' : pos === 'static' }; })()" | tr -d '[:space:]')"
 if [[ "$inspector_state" == *'"present":true'* ]]; then
   assert_contains "P2b inspector canonical session id" "$inspector_state" '"sessionId":true'
   assert_contains "P2b inspector usage" "$inspector_state" '"usage":true'
@@ -530,7 +564,7 @@ if [[ "$toc_task_count" != "0" ]]; then
   assert_contains "task toc labels" "$toc_task_labels" "T"
 fi
 
-has_deep_toc_target="$(read_ab "activate deep toc entry" eval "(() => { const link = [...document.querySelectorAll('.session-toc .toc-link')].find((candidate) => candidate.closest('.toc-children .toc-children')); if (!link) return false; link.click(); return true; })()")"
+has_deep_toc_target="$(read_ab "activate deep toc entry" eval "(() => { const link = [...document.querySelectorAll('.session-toc .toc-link')].find((candidate) => candidate.getAttribute('href')?.startsWith('#') && candidate.closest('.toc-children .toc-children')); if (!link) return false; link.click(); return true; })()")"
 if [[ "$has_deep_toc_target" == "true" ]]; then
   toc_parent_count="$(read_ab "count active toc parents" get count ".session-toc .toc-link.active-parent")"
   assert_positive_count "active toc parents" "$toc_parent_count"
@@ -552,9 +586,9 @@ if [[ "$tool_reasoning_count" != "0" ]]; then
   exit 1
 fi
 subagent_reasoning_count="$(read_ab "count subagent reasoning blocks" get count ".subagent-reasoning .reasoning-block")"
-attached_reasoning_count=$((message_reasoning_count + turn_reasoning_count + subagent_reasoning_count))
-if [[ "$attached_reasoning_count" != "$reasoning_count" ]]; then
-  echo "Reasoning blocks should attach to assistant/tool/task content, got total $reasoning_count attached $attached_reasoning_count" >&2
+reasoning_unattached_count="$(read_ab "count unattached reasoning blocks" eval "[...document.querySelectorAll('.reasoning-block')].filter((block) => !block.closest('.message-reasoning, .turn-reasoning, .subagent-reasoning, .message-turn-assistant')).length")"
+if [[ "$reasoning_unattached_count" != "0" ]]; then
+  echo "Reasoning blocks should attach to assistant/message/turn/subagent content, got total $reasoning_count unattached $reasoning_unattached_count" >&2
   exit 1
 fi
 
@@ -597,7 +631,8 @@ assert_positive_count "subagent export buttons" "$subagent_export_count"
 agent_card_count="$(read_ab "count P2b agent cards" get count "details[data-agent-card]")"
 agent_card_count_n="$(printf '%s' "$agent_card_count" | tr -dc '0-9')"
 if [[ "$agent_card_count_n" != "0" ]]; then
-  agent_card_state="$(read_ab "verify P2b agent card props" eval "(async () => { const cards = [...document.querySelectorAll('details[data-agent-card]')]; const f = cards[0]; const s = f?.querySelector(':scope > summary'); const before = { open: f?.hasAttribute('open'), ariaExpanded: s?.getAttribute('aria-expanded') }; s?.click(); await new Promise((resolve) => setTimeout(resolve, 0)); const afterOpen = f?.hasAttribute('open'); const afterExpanded = s?.getAttribute('aria-expanded'); const channel = f?.querySelector('[data-agent-channel]'); const channelState = channel ? { present: true, collapsed: !channel.hasAttribute('open'), items: channel.querySelectorAll('.agent-channel-item').length, empty: !!channel.querySelector('.agent-channel-empty') } : { present: false }; const childLink = [...(f?.querySelectorAll('.subagent-export-btn') || [])].find((a) => a.getAttribute('href')?.includes('/session/')); s?.click(); await new Promise((resolve) => setTimeout(resolve, 0)); return { count: cards.length, defaultCollapsed: before.open === false, defaultAria: before.ariaExpanded === 'false', openedAfterToggle: afterOpen, expandedAfterToggle: afterExpanded === 'true', childLink: !!childLink, focusKept: document.activeElement === s, channelState, uniqueCards: new Set(cards.map((c) => c.dataset.agentCardId)).size === cards.length, named: cards.every((c) => (c.dataset.agentName || '').length > 0) }; })()" | tr -d '[:space:]')"
+  agent_card_state="$(read_ab "verify P2b agent card props" eval "(async () => { const cards = [...document.querySelectorAll('details[data-agent-card]')]; const f = cards[0]; const s = f?.querySelector(':scope > summary'); const parent = f?.closest('details[data-reader-execution]'); if (parent && !parent.open) parent.open = true; const before = { open: f?.hasAttribute('open'), ariaExpanded: s?.getAttribute('aria-expanded') }; s?.click(); await new Promise((resolve) => setTimeout(resolve, 0)); const afterOpen = f?.hasAttribute('open'); const afterExpanded = s?.getAttribute('aria-expanded'); const channel = f?.querySelector('[data-agent-channel]'); const channelState = channel ? { present: true, collapsed: !channel.hasAttribute('open'), items: channel.querySelectorAll('.agent-channel-item').length, empty: !!channel.querySelector('.agent-channel-empty') } : { present: false }; const childLink = [...(f?.querySelectorAll('.subagent-export-btn') || [])].find((a) => a.getAttribute('href')?.includes('/session/')); s?.click(); await new Promise((resolve) => setTimeout(resolve, 0)); return { count: cards.length, parentOpen: parent ? parent.open : true, defaultCollapsed: before.open === false, defaultAria: before.ariaExpanded === 'false', openedAfterToggle: afterOpen, expandedAfterToggle: afterExpanded === 'true', childLink: !!childLink, focusKept: document.activeElement === s, channelState, uniqueCards: new Set(cards.map((c) => c.dataset.agentCardId)).size === cards.length, named: cards.every((c) => (c.dataset.agentName || '').length > 0) }; })()" | tr -d '[:space:]')"
+  assert_contains "P2b agent cards visible parent" "$agent_card_state" '"parentOpen":true'
   assert_contains "P2b agent cards default collapsed" "$agent_card_state" '"defaultCollapsed":true'
   assert_contains "P2b agent cards toggle expanded" "$agent_card_state" '"openedAfterToggle":true'
   assert_contains "P2b agent cards aria-expanded" "$agent_card_state" '"expandedAfterToggle":true'
@@ -641,27 +676,21 @@ if [[ "$subagent_branch_word_count" != "0" ]]; then
   exit 1
 fi
 
-runtime_tab_click="$(read_ab "open Work tab" eval "(() => { const tab = document.getElementById('tab-btn-work'); if (!tab) return 'missing'; tab.click(); return 'clicked'; })()")"
-if [[ "$runtime_tab_click" != "clicked" && "$runtime_tab_click" != '"clicked"' ]]; then
-  echo "Runtime tab should open the workbench, got $runtime_tab_click" >&2
-  exit 1
-fi
-
-runtime_tab_selected="$(read_ab "verify Work tab selection" get attr "#tab-btn-work" aria-selected)"
-if [[ "$runtime_tab_selected" != "true" && "$runtime_tab_selected" != '"true"' ]]; then
-  echo "Runtime tab should be selected after opening the workbench, got state $runtime_tab_selected" >&2
-  exit 1
-fi
+ab "open Work disclosure" eval "(() => { const details = document.getElementById('tab-work'); if (details && !details.open) details.open = true; return Boolean(details?.open); })()" >/dev/null
+runtime_disclosure_state="$(read_ab "verify Work disclosure" eval "JSON.stringify({ details: document.getElementById('tab-work')?.tagName === 'DETAILS', open: document.getElementById('tab-work')?.open === true, noPrimaryTabs: !document.querySelector('.tab-bar [role=tab]') })" | tr -d '[:space:]')"
+assert_contains "Work disclosure" "$runtime_disclosure_state" '"details":true'
+assert_contains "Work disclosure" "$runtime_disclosure_state" '"open":true'
+assert_contains "Work disclosure" "$runtime_disclosure_state" '"noPrimaryTabs":true'
 
 runtime_root_count="$(read_ab "count runtime workbenches" get count "#tab-work .runtime-workbench[data-runtime-available='true']")"
 if [[ "$runtime_root_count" != "1" ]]; then
-  echo "Runtime tab should contain one available workbench, got $runtime_root_count" >&2
+  echo "Work disclosure should contain one available workbench, got $runtime_root_count" >&2
   exit 1
 fi
 
 runtime_workbench_main_count="$(read_ab "count unified runtime workbench" get count "#tab-work [data-runtime-workbench-main]")"
 if [[ "$runtime_workbench_main_count" != "1" ]]; then
-  echo "Work tab should expose one unified workbench surface, got $runtime_workbench_main_count" >&2
+  echo "Work disclosure should expose one unified workbench surface, got $runtime_workbench_main_count" >&2
   exit 1
 fi
 
@@ -671,7 +700,7 @@ assert_contains "coordination secondary disclosure" "$runtime_section_ids" "coor
 assert_contains "context secondary disclosure" "$runtime_section_ids" "context"
 runtime_work_visible="$(read_ab "verify Workbench visibility" eval "(() => { const panel = document.querySelector('#tab-work [data-runtime-workbench-main]'); return Boolean(panel && !panel.hidden && panel.getBoundingClientRect().height > 0); })()")"
 if [[ "$runtime_work_visible" != "true" ]]; then
-  echo "Workbench should be visible in the selected Work tab, got $runtime_work_visible" >&2
+  echo "Workbench should be visible in the open Work disclosure, got $runtime_work_visible" >&2
   exit 1
 fi
 
@@ -694,7 +723,11 @@ if [[ "$runtime_overview_count" == "1" ]]; then
   assert_contains "P3b legacy relations removed" "$p3a_overview_state" '"legacyRemoved":true'
 fi
 
-ab "open Events tab" click "#tab-btn-events" >/dev/null
+ab "open Events disclosure" eval "(() => { const details = document.getElementById('tab-events'); if (details && !details.open) details.open = true; return Boolean(details?.open); })()" >/dev/null
+events_disclosure_state="$(read_ab "verify Events disclosure" eval "JSON.stringify({ details: document.getElementById('tab-events')?.tagName === 'DETAILS', open: document.getElementById('tab-events')?.open === true, noPrimaryTabs: !document.querySelector('.tab-bar [role=tab]') })" | tr -d '[:space:]')"
+assert_contains "Events disclosure" "$events_disclosure_state" '"details":true'
+assert_contains "Events disclosure" "$events_disclosure_state" '"open":true'
+assert_contains "Events disclosure" "$events_disclosure_state" '"noPrimaryTabs":true'
 runtime_event_count="$(read_ab "count runtime events" get count "#tab-events [data-runtime-event]")"
 assert_positive_count "runtime events" "$runtime_event_count"
 
@@ -709,7 +742,7 @@ if [[ "$runtime_drawer_open" != "true" ]]; then
 fi
 ab "close runtime evidence drawer" press Escape >/dev/null
 
-ab "open Work tab" click "#tab-btn-work" >/dev/null
+ab "reopen Work disclosure" eval "(() => { const details = document.getElementById('tab-work'); if (details && !details.open) details.open = true; return Boolean(details?.open); })()" >/dev/null
 completed_work_count="$(read_ab "count completed work disclosures" get count "#tab-work [data-runtime-completed-work]")"
 if [[ "$completed_work_count" == "1" ]]; then
   completed_work_closed="$(read_ab "verify completed work starts collapsed" eval "!document.querySelector('#tab-work [data-runtime-completed-work]').open")"

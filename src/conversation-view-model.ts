@@ -1,5 +1,6 @@
 import type { SessionRef } from "./providers/shared/session-protocol.js";
-import type { SessionProtocolV3 } from "./providers/shared/session-protocol-v3.js";
+import type { SessionEventRef, SessionProtocolV3 } from "./providers/shared/session-protocol-v3.js";
+import { READER_COORDINATION_CHANNEL_KINDS, encodeReaderCoordinationCursor, readerCoordinationAssignment } from "./reader-coordination.js";
 import type {
   ContextProjection,
   CoordinationProjection,
@@ -14,26 +15,18 @@ import type {
  * Conversation surface from the finalized Session Protocol v3 snapshot and its
  * execution/coordination/context projections. It never reads provider-owned
  * raw fields, never branches on provider id, and never invents facts: every
- * field on a card, channel item, reference row, or inspector section is either
+ * field on a card, channel item, or inspector section is either
  * recorded evidence or explicitly null/absent. The Conversation renderer
  * consumes this model only; runtime protocol facts stay authoritative in the
  * Session Protocol and the Work/Events surfaces.
  */
 
-export const CONVERSATION_CHANNEL_KINDS = [
-  "message",
-  "mailbox-delivery",
-  "interrupt",
-  "handoff",
-  "result-delivery",
-  "result-acknowledgement"
-] as const;
+export const CONVERSATION_CHANNEL_KINDS = READER_COORDINATION_CHANNEL_KINDS;
 
 export type ConversationChannelKind = (typeof CONVERSATION_CHANNEL_KINDS)[number];
 
 export const CONVERSATION_MAX_CARDS = 50;
 export const CONVERSATION_MAX_CHANNEL_ITEMS = 50;
-export const CONVERSATION_MAX_REFERENCES = 50;
 export const CONVERSATION_MAX_RELATIONSHIPS = 5;
 
 /** Kinds that begin a new card-owning dispatch when they are recorded. */
@@ -46,12 +39,16 @@ export interface ConversationChannelItem {
   timestamp: number | null;
   senderName: string | null;
   recipientName: string | null;
+  eventId: string | null;
+  turnId: string | null;
+  sourceEventRef: SessionEventRef | null;
 }
 
 export interface ConversationCardBinding {
   taskToolCallId: string | null;
   childSessionId: string | null;
   turnId: string | null;
+  actorIds: string[];
 }
 
 export interface ConversationAgentCard {
@@ -71,23 +68,12 @@ export interface ConversationAgentCard {
   lastActivity: number | null;
   observationCount: number;
   channelTruncated: boolean;
+  channelNextCursor: string | null;
   channel: ConversationChannelItem[];
   childSession: SessionRef | null;
   /** Explicit normalized availability; null remains unknown. */
   childSessionAvailable: boolean | null;
   bindings: ConversationCardBinding;
-}
-
-export type ConversationReferenceKind = "dispatched" | "message" | "mailbox" | "result" | "acknowledgement";
-
-export interface ConversationReference {
-  /** Observation id: each observation produces at most one main-thread row. */
-  id: string;
-  kind: ConversationReferenceKind;
-  name: string | null;
-  cardId: string;
-  anchorMessageId: string | null;
-  timestamp: number | null;
 }
 
 export interface ConversationAssetView {
@@ -161,9 +147,21 @@ export interface ConversationInspectorView {
   assets: ConversationAssetGroup[];
 }
 
+export type ConversationTurnBoundaryKind = "run.started" | "run.completed" | "run.failed" | "run.cancelled";
+
+/** One recorded lifecycle edge of a root session-owned execution turn. */
+export interface ConversationTurnBoundary {
+  eventId: string;
+  runId: string;
+  turnId: string | null;
+  timestamp: number | null;
+  normalizedKind: ConversationTurnBoundaryKind;
+  displayNumber: number;
+}
+
 export interface ConversationViewModel {
   cards: ConversationAgentCard[];
-  references: ConversationReference[];
+  turnBoundaries: ConversationTurnBoundary[];
   inspector: ConversationInspectorView | null;
 }
 
@@ -186,6 +184,42 @@ interface CardState {
 
 interface MutableCard {
   state: CardState;
+}
+
+const MAIN_TURN_BOUNDARY_KINDS = new Set<ConversationTurnBoundaryKind>([
+  "run.started", "run.completed", "run.failed", "run.cancelled"
+]);
+
+function deriveTurnBoundaries(protocol: SessionProtocolV3): ConversationTurnBoundary[] {
+  const sessionTurnRuns = new Map(
+    (protocol.agentRuns || [])
+      .filter((run) => run.kind === "session-turn" && run.sessionId === protocol.sessionId)
+      .map((run) => [run.id, run])
+  );
+  const displayNumbers = new Map<string, number>();
+  let nextDisplayNumber = 1;
+  const boundaries: ConversationTurnBoundary[] = [];
+  for (const event of protocol.events || []) {
+    const runId = event.runId || "";
+    const normalizedKind = event.normalizedKind as ConversationTurnBoundaryKind | undefined;
+    if (event.sessionId !== protocol.sessionId || !runId || !sessionTurnRuns.has(runId)
+      || !normalizedKind || !MAIN_TURN_BOUNDARY_KINDS.has(normalizedKind)) continue;
+    let displayNumber = displayNumbers.get(runId);
+    if (displayNumber === undefined) {
+      displayNumber = nextDisplayNumber;
+      nextDisplayNumber += 1;
+      displayNumbers.set(runId, displayNumber);
+    }
+    boundaries.push({
+      eventId: String(event.id),
+      runId,
+      turnId: event.turnId ?? sessionTurnRuns.get(runId)?.turnId ?? null,
+      timestamp: event.timestamp ?? null,
+      normalizedKind,
+      displayNumber
+    });
+  }
+  return boundaries;
 }
 
 function refOf(value: SessionRef | null | undefined, fallbackProvider: string, fallbackSessionId: string): SessionRef | null {
@@ -253,7 +287,7 @@ function compareReference(a: SessionRef | null, provider: string, sessionId: str
 }
 
 /**
- * Bound the channel without reordering the Coordination projection. Provider
+ * Bound the channel without reordering the normalized coordination facts. Provider
  * normalization owns source order; timestamps are display evidence and may be
  * absent or disagree with the recorded sequence. Observations whose kind is
  * outside the channel set stay off the card; they are Work/Coordination facts,
@@ -274,7 +308,10 @@ function channelOf(card: CardState, observations: any[], assignments: Array<Card
       state: observation.state || "unknown",
       timestamp: finiteTime(observation.timestamp),
       senderName: observation.senderActorId ? nameFor(observation.senderActorId) ?? null : null,
-      recipientName: observation.recipientActorId ? nameFor(observation.recipientActorId) ?? null : null
+      recipientName: observation.recipientActorId ? nameFor(observation.recipientActorId) ?? null : null,
+      eventId: observation.eventId ?? null,
+      turnId: observation.turnId ?? null,
+      sourceEventRef: observation.sourceEventRef ?? null
     })),
     count,
     truncated
@@ -300,41 +337,30 @@ export function deriveConversationView(input: ConversationViewInput): Conversati
     return actor?.name ?? null;
   };
 
-  const actorRunsByRun = new Map<string, Set<string>>();
-  for (const link of execution.actorRuns || []) {
-    const runId = entityRefId(link.run);
-    const actorId = entityRefId(link.actor);
-    if (!runId || !actorId) continue;
-    if (!actorRunsByRun.has(runId)) actorRunsByRun.set(runId, new Set());
-    actorRunsByRun.get(runId)!.add(actorId);
-  }
-
   const tasksById = new Map<string, any>();
   for (const entry of work.tasks || []) tasksById.set(entry.task.id, entry.task);
-  const runsById = new Map<string, any>();
+  const readerAssignment = readerCoordinationAssignment(protocol);
+  const readerCardsByKey = new Map(readerAssignment.cards.map((card) => [card.key, card]));
   const runIdsWithTask = new Set<string>();
-  for (const entry of execution.runs || []) {
-    runsById.set(entry.run.id, entry.run);
-    if (entry.run.kind !== "session-turn" && entry.run.taskId) runIdsWithTask.add(entry.run.taskId);
+  for (const card of readerAssignment.cards) {
+    if (card.runId && card.taskId) runIdsWithTask.add(card.taskId);
   }
-
   // One card per run, plus one per task that has no run, in deterministic
   // source order. Cards are bounded: beyond the limit the remaining evidence
   // stays in Work/Coordination and is not mirrored into the conversation.
   const cards: CardState[] = [];
-  const cardsByRun = new Map<string, CardState>();
-  const cardsByTask = new Map<string, CardState>();
   const addCard = (state: CardState) => {
     if (cards.length >= CONVERSATION_MAX_CARDS) return;
     cards.push(state);
-    if (state.runId) cardsByRun.set(state.runId, state);
-    if (state.taskId) cardsByTask.set(state.taskId, state);
   };
   for (const entry of execution.runs || []) {
     const run = entry.run;
     if (run.kind === "session-turn") continue;
     const task = run.taskId ? tasksById.get(run.taskId) : null;
-    const linkedActors = [...(actorRunsByRun.get(run.id) || [])].map((actorId) => actorsById.get(actorId)).filter(Boolean);
+    const readerCard = readerCardsByKey.get(`run:${run.id}`);
+    if (!readerCard) continue;
+    const linkedActorIds = new Set(readerCard?.actorIds || []);
+    const linkedActors = [...linkedActorIds].map((actorId) => actorsById.get(actorId)).filter(Boolean);
     const name = linkedActors[0]?.name ?? run.agent ?? (task ? assigneeOf(task) || null : null) ?? null;
     addCard({
       view: {
@@ -348,6 +374,7 @@ export function deriveConversationView(input: ConversationViewInput): Conversati
         lastActivity: maxTime(run.timeStart, run.timeEnd),
         observationCount: 0,
         channelTruncated: false,
+        channelNextCursor: null,
         channel: [],
         childSession: refOf(
           run.childSessionId ? { provider, sessionId: run.childSessionId } : null,
@@ -358,18 +385,20 @@ export function deriveConversationView(input: ConversationViewInput): Conversati
         bindings: {
           taskToolCallId: task?.toolCallId ?? null,
           childSessionId: run.childSessionId ?? null,
-          turnId: null
+          turnId: null,
+          actorIds: [...linkedActorIds]
         }
       },
       runId: run.id,
       taskId: run.taskId,
-      linkedActorIds: new Set(actorRunsByRun.get(run.id) || []),
+      linkedActorIds,
       dispatchTurnId: null,
       sortIndex: cards.length
     });
   }
   for (const entry of work.tasks || []) {
     if (runIdsWithTask.has(entry.task.id)) continue;
+    if (!readerCardsByKey.has(`task:${entry.task.id}`)) continue;
     addCard({
       view: {
         id: `task:${entry.task.id}`,
@@ -382,13 +411,15 @@ export function deriveConversationView(input: ConversationViewInput): Conversati
         lastActivity: maxTime(entry.task.timeCreated, entry.task.timeUpdated),
         observationCount: 0,
         channelTruncated: false,
+        channelNextCursor: null,
         channel: [],
         childSession: null,
         childSessionAvailable: null,
         bindings: {
           taskToolCallId: entry.task.toolCallId ?? null,
           childSessionId: null,
-          turnId: null
+          turnId: null,
+          actorIds: []
         }
       },
       runId: null,
@@ -400,8 +431,13 @@ export function deriveConversationView(input: ConversationViewInput): Conversati
   }
 
   // Dispatch turn anchors come from recorded spawn/delegate observations.
-  const observations = (coordination.observations || []).map((entry) => entry.observation);
-  const assignments = observations.map((observation) => cardForObservation(observation, cardsByRun, cardsByTask));
+  // The embedded coordination projection is intentionally bounded for the
+  // workbench. Conversation cards use the finalized collection so a reader
+  // continuation can reach every assigned observation without losing source
+  // identity to that overview bound.
+  const observations = protocol.coordination || [];
+  const cardStatesByKey = new Map(cards.map((card) => [card.view.id, card]));
+  const assignments = readerAssignment.byObservation.map((card) => card ? cardStatesByKey.get(card.key) || null : null);
   for (let observationIndex = 0; observationIndex < observations.length; observationIndex += 1) {
     const observation = observations[observationIndex];
     if (!DISPATCH_KINDS.has(observation.kind)) continue;
@@ -419,38 +455,18 @@ export function deriveConversationView(input: ConversationViewInput): Conversati
     card.view.channel = channelResult.channel;
     card.view.observationCount = channelResult.count;
     card.view.channelTruncated = channelResult.truncated;
+    const canonicalCard = readerCardsByKey.get(card.view.id)!;
+    card.view.channelNextCursor = channelResult.truncated
+      ? encodeReaderCoordinationCursor({
+          provider, sessionId, taskId: canonicalCard.taskId, runId: canonicalCard.runId,
+          anchor: null, size: CONVERSATION_MAX_CHANNEL_ITEMS
+        }, channelResult.channel.at(-1)!.id)
+      : null;
     card.view.interrupted = interrupted;
     card.view.state = conversationCardState(card.view.rawStatus, interrupted);
     for (const item of channelResult.channel) {
       card.view.lastActivity = maxTime(card.view.lastActivity, item.timestamp);
     }
-  }
-
-  // Main-thread references: recorded message/mailbox traffic from or to a
-  // card, plus result delivery/acknowledgement anchors. Each observation
-  // contributes at most one row and only when its recorded turnId names a
-  // spine position; otherwise the fact stays in the channel/card.
-  const references: ConversationReference[] = [];
-  for (let observationIndex = 0; observationIndex < observations.length; observationIndex += 1) {
-    const observation = observations[observationIndex];
-    if (references.length >= CONVERSATION_MAX_REFERENCES) break;
-    if (!observation.turnId) continue;
-    const card = assignments[observationIndex] || null;
-    if (!card) continue;
-    let kind: ConversationReferenceKind | null = null;
-    if (observation.kind === "message") kind = "message";
-    if (observation.kind === "mailbox-delivery") kind = "mailbox";
-    if (observation.kind === "result-delivery") kind = "result";
-    if (observation.kind === "result-acknowledgement") kind = "acknowledgement";
-    if (!kind) continue;
-    references.push({
-      id: String(observation.id || ""),
-      kind,
-      name: card.view.name,
-      cardId: card.view.id,
-      anchorMessageId: observation.turnId,
-      timestamp: finiteTime(observation.timestamp)
-    });
   }
 
   // ── Inspector ────────────────────────────────────────────────────────────
@@ -583,29 +599,7 @@ export function deriveConversationView(input: ConversationViewInput): Conversati
 
   return {
     cards: cards.map((card) => card.view),
-    references,
+    turnBoundaries: deriveTurnBoundaries(protocol),
     inspector
   };
-}
-
-function cardForObservation(
-  observation: any,
-  cardsByRun: Map<string, CardState>,
-  cardsByTask: Map<string, CardState>
-): CardState | null {
-  // Explicit protocol identity is authoritative. If it cannot resolve, the
-  // observation remains unassigned rather than being reassigned by actor.
-  if (observation.runId || observation.taskId) {
-    if (observation.runId && cardsByRun.has(observation.runId)) return cardsByRun.get(observation.runId)!;
-    if (observation.taskId && cardsByTask.has(observation.taskId)) return cardsByTask.get(observation.taskId)!;
-    return null;
-  }
-  const candidates = new Set<CardState>();
-  for (const card of [...cardsByRun.values(), ...cardsByTask.values()]) {
-    if ((observation.senderActorId && card.linkedActorIds.has(observation.senderActorId))
-      || (observation.recipientActorId && card.linkedActorIds.has(observation.recipientActorId))) {
-      candidates.add(card);
-    }
-  }
-  return candidates.size === 1 ? [...candidates][0] : null;
 }

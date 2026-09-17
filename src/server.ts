@@ -29,6 +29,7 @@ import { Router } from "./router.js";
 import { registerMutations } from "./routes/mutations.js";
 import { registerSessions } from "./routes/sessions.js";
 import { registerSessionDetail } from "./routes/session-detail.js";
+import { registerReaderCoordinationRoutes } from "./routes/reader-coordination.js";
 import { registerSettingsStatsTrash } from "./routes/settings-stats-trash.js";
 
 // ── Build router with current state ─────────────────────────────────────────
@@ -45,6 +46,7 @@ function buildRouter(
   // provider route (`/:provider`) so `/stats` cannot be mistaken for a provider.
   registerSettingsStatsTrash(router, { appConfig, providerMap, providerInfo });
   registerSessions(router, { appConfig, providerMap, providerInfo });
+  registerReaderCoordinationRoutes(router, { appConfig, providerMap, providerInfo });
   registerSessionDetail(router, { appConfig, providerMap, providerInfo });
   return router;
 }

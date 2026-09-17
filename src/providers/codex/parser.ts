@@ -1,9 +1,12 @@
-import { readFileSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, readSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { StringDecoder } from "node:string_decoder";
 import { zstdDecompressSync } from "node:zlib";
 import type { Message, RawSession } from "../interface.js";
 import { asNumber } from "../shared/parser.js";
 
 export const CODEX_MAX_DECOMPRESSED_ROLLOUT_BYTES = 64 * 1024 * 1024;
+const CODEX_READ_CHUNK_BYTES = 64 * 1024;
 
 export function codexUsageToTokens(usage: any) {
   if (!usage || typeof usage !== "object") return null;
@@ -400,25 +403,100 @@ export function resolveCodexInheritedContext(messages: Message[], _parentMessage
   return { messages: resolved, excludedUserMessages };
 }
 
-/**
- * Parse a Codex CLI JSONL session file.
- * @param {string} filePath
- * @returns {object[]}
- */
-export function parseSession(filePath: any) {
-  const bytes = readFileSync(filePath);
-  const content = /\.jsonl\.zst$/i.test(String(filePath))
-    ? zstdDecompressSync(bytes, { maxOutputLength: CODEX_MAX_DECOMPRESSED_ROLLOUT_BYTES }).toString("utf-8")
-    : bytes.toString("utf-8");
-  const records = [];
-  for (const line of content.split("\n")) {
+function* fileChunks(descriptor: number, size: number): Generator<Buffer> {
+  const bytes = Buffer.allocUnsafe(CODEX_READ_CHUNK_BYTES);
+  for (let offset = 0; offset < size;) {
+    const length = readSync(descriptor, bytes, 0, Math.min(bytes.length, size - offset), offset);
+    if (!length) throw new Error("Codex transcript truncated while reading its recorded extent");
+    offset += length;
+    yield bytes.subarray(0, length);
+  }
+}
+
+function parseChunks(chunks: Iterable<Buffer>, filePath: string): any[] {
+  const records: any[] = [];
+  const decoder = new StringDecoder("utf8");
+  let fragments: string[] = [];
+  const parseLine = (line: string) => {
     const trimmed = line.trim();
-    if (!trimmed) continue;
+    if (!trimmed) return;
     try {
       records.push(JSON.parse(trimmed));
     } catch (err) { console.warn("Skipping malformed JSON line in:", filePath, err); /* skip */ }
+  };
+  const consume = (chunk: string) => {
+    let start = 0;
+    let newline: number;
+    while ((newline = chunk.indexOf("\n", start)) !== -1) {
+      const end = chunk.slice(start, newline);
+      parseLine(fragments.length ? fragments.join("") + end : end);
+      fragments = [];
+      start = newline + 1;
+    }
+    if (start < chunk.length) fragments.push(chunk.slice(start));
+  };
+
+  // Decode one complete line at a time so large rollouts never require a
+  // second, whole-file string alongside their parsed records.
+  for (const bytes of chunks) {
+    consume(decoder.write(bytes));
   }
+  consume(decoder.end());
+  if (fragments.length) parseLine(fragments.join(""));
   return records;
+}
+
+export interface CodexSessionReadSnapshot {
+  size: number;
+  mtimeMs: number;
+  digest: string;
+}
+
+/** Read a finite plain-JSONL prefix that remains verifiable after append or eviction. */
+export function readCodexSessionSnapshot(filePath: string, expected?: CodexSessionReadSnapshot) {
+  const descriptor = openSync(filePath, "r");
+  try {
+    const before = fstatSync(descriptor);
+    const size = expected?.size ?? before.size;
+    const hash = createHash("sha256");
+    function* chunks() {
+      for (const bytes of fileChunks(descriptor, size)) {
+        hash.update(bytes);
+        yield bytes;
+      }
+    }
+    const records = parseChunks(chunks(), filePath);
+    const digest = hash.digest("hex");
+    if (expected) {
+      if (digest !== expected.digest) throw new Error(`Codex transcript snapshot changed: ${filePath}`);
+    } else {
+      const after = fstatSync(descriptor);
+      if (after.size !== before.size || after.mtimeMs !== before.mtimeMs) {
+        // Growth alone does not prove append: a writer may replace an earlier
+        // record and grow the file. Verify the exact bytes already parsed.
+        const verification = createHash("sha256");
+        for (const bytes of fileChunks(descriptor, size)) verification.update(bytes);
+        if (verification.digest("hex") !== digest) throw new Error(`Codex transcript changed while reading: ${filePath}`);
+      }
+    }
+    return { records, snapshot: expected ?? { size, mtimeMs: before.mtimeMs, digest } };
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+/** Parse complete Codex JSONL records without retaining a whole-file string. */
+export function parseSession(filePath: string): any[] {
+  if (!/\.jsonl\.zst$/i.test(filePath)) return readCodexSessionSnapshot(filePath).records;
+  const bytes = zstdDecompressSync(readFileSync(filePath), {
+    maxOutputLength: CODEX_MAX_DECOMPRESSED_ROLLOUT_BYTES
+  });
+  function* chunks() {
+    for (let offset = 0; offset < bytes.length; offset += CODEX_READ_CHUNK_BYTES) {
+      yield bytes.subarray(offset, offset + CODEX_READ_CHUNK_BYTES);
+    }
+  }
+  return parseChunks(chunks(), filePath);
 }
 
 /**

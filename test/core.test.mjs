@@ -34,6 +34,7 @@ import { renderSettingsPage } from "../dist/src/views/settings.js";
 import { renderStatsDeferredSection, renderStatsPage } from "../dist/src/views/stats.js";
 import { formatDuration, formatDurationMs, sessionCard } from "../dist/src/views/components.js";
 import { renderSessionsPage } from "../dist/src/views/sessions.js";
+import { layout } from "../dist/src/views/layout.js";
 import { EMPTY_PROJECT_FILTER, normalizeCrossProviderProjectPath } from "../dist/src/project-filter.js";
 import { parseSessionNavigationContext } from "../dist/src/navigation-context.js";
 import {
@@ -1386,7 +1387,7 @@ test("rendered inherited context stays collapsed, searchable, anchored, and outs
   assert.match(html, /<details class="inherited-context-disclosure" data-disclosure data-inherited-context>/);
   assert.match(html, /class="messages inherited-context-messages"/);
   assert.match(html, /href="\/codex\/session\/parent"/);
-  assert.match(html, /data-part-id="inherited-parent-developer-long:part"/);
+  assert.match(html, /data-part-id="inherited-parent-developer-long:text"/);
   assert.match(html, /progressive-more/);
   const toc = html.match(/<div class="toc-list">([\s\S]*?)<\/div>\s*<button class="toc-resize-handle"/)?.[1] || "";
   assert.doesNotMatch(toc, /Inherited background/);
@@ -1843,8 +1844,14 @@ test("shared views preserve provider-marked custom subagent tools across Tree, m
   assert.equal(views.metrics.steps[0].reason, "tool-calls");
   const html = renderSessionPage({ session: views.tree.session, sessionTree: views.tree, provider: "fixture" });
   assert.match(html, /subagent-branch/);
-  assert.match(html, /Security audit complete\./);
-  assert.match(html, /Performance audit complete\./);
+  assert.match(html, /data-reader-session="child-security"/);
+  assert.match(html, /data-reader-session="child-performance"/);
+  for (const part of views.tree.messages[0].parts) {
+    for (const child of part.childSessions) {
+      const childHtml = renderSessionPage({ session: child.session, sessionTree: child, provider: "fixture" });
+      assert.match(childHtml, /audit complete\./);
+    }
+  }
 });
 
 test("chronological child fallback remains visibly inferred in detail", () => {
@@ -2612,7 +2619,21 @@ test("session list query options accept known sort and starred values only", () 
   assert.equal(resolveStarredFilter(new URLSearchParams("starred=false")), false);
 });
 
-test("primary rail keeps library, stats, and settings reachable on narrow screens", () => {
+test("reader shell loads its selected presentation and keeps search scoped to the transcript", () => {
+  const html = layout("Reader", "<article>History</article>", "home", { provider: "codex", reader: true });
+  assert.match(html, /href="\/static\/app-shell.css"/);
+  assert.match(html, /href="\/static\/reader.css"/);
+  assert.doesNotMatch(html, /id="search-input"/);
+  assert.match(html, /ui-icon-sun/);
+  assert.match(html, /ui-icon-moon/);
+  for (const name of ["book-open", "chart-no-axes-column", "settings-2", "sun", "moon"]) {
+    const svg = readFileSync(path.join(process.cwd(), "src", "static", "vendor", "lucide", `${name}.svg`), "utf8");
+    assert.match(svg, /<svg\s/);
+  }
+  assert.match(readFileSync(path.join(process.cwd(), "src", "static", "vendor", "lucide", "LICENSE"), "utf8"), /ISC License/);
+});
+
+test("top navigation keeps library, stats, and settings reachable on narrow screens", () => {
   const html = renderSessionsPage({
     sessions: [],
     total: 0,
@@ -2625,15 +2646,18 @@ test("primary rail keeps library, stats, and settings reachable on narrow screen
   });
   const style = readFileSync(path.join(process.cwd(), "dist", "src", "static", "style.css"), "utf8");
 
-  assert.match(html, /href="\/sessions" class="nav-link rail-link rail-link-library /);
+  const shellStyle = readFileSync(path.join(process.cwd(), "src", "static", "app-shell.css"), "utf8");
+  assert.match(html, /href="\/sessions" class="nav-link app-navigation-link /);
   assert.match(html, /data-nav-shortcut="1"/);
-  assert.match(html, /href="\/stats" class="nav-link nav-link-stats [^"]*rail-link rail-link-stats/);
+  assert.match(html, /href="\/stats" class="nav-link nav-link-stats app-navigation-link/);
   assert.match(html, /data-nav-shortcut="2"/);
   assert.match(html, /href="\/opencode\/trash" class="nav-link nav-link-trash /);
-  assert.match(html, /href="\/opencode\/settings" class="nav-link nav-link-settings rail-link rail-link-settings /);
+  assert.match(html, /href="\/opencode\/settings" class="nav-link nav-link-settings app-navigation-link /);
   assert.match(html, /data-nav-shortcut="3"/);
-  assert.match(style, /\.app-rail \{[\s\S]*width: var\(--rail-width\);[\s\S]*height: 100vh;/);
-  assert.match(style, /@media \(max-width: 768px\) \{[\s\S]*\.app-rail \{[\s\S]*width: 100%;[\s\S]*height: 56px;/);
+  assert.match(shellStyle, /\.app-navigation \{[\s\S]*?display: flex;[\s\S]*?height: var\(--topbar-height\);/);
+  assert.match(shellStyle, /@media \(max-width: 768px\) \{[\s\S]*?\.app-navigation \.app-navigation-link \{[^}]*min-height: 44px;/);
+  assert.match(html, /\/static\/vendor\/lucide\/book-open\.svg/);
+  assert.doesNotMatch(html, /app-rail|rail-link-icon/);
   assert.match(style, /\.card-checkbox-hit-area \{[\s\S]*width: 44px;[\s\S]*height: 44px;/);
   assert.match(style, /\.card-checkbox \{[\s\S]*width: 18px;[\s\S]*height: 18px;/);
   assert.match(style, /\.session-list-library\.batch-mode \.session-card-content \{ padding-left: 30px; \}/);
@@ -2831,9 +2855,10 @@ test("session detail P0 header preserves evidence boundaries and local exports",
     provider: "fixture",
     manageable: true
   });
-  assert.match(html, /id="tab-btn-work"[^>]*>Work<\/button>/);
-  assert.match(html, /id="tab-btn-conversation"[^>]*>Conversation<\/button>/);
-  assert.match(html, /id="tab-btn-events"[^>]*>Events<\/a>/);
+  assert.match(html, /data-session-reader/);
+  assert.match(html, /<details id="tab-work"/);
+  assert.match(html, /<details id="tab-events"/);
+  assert.doesNotMatch(html, /id="tab-btn-(?:work|conversation|events)"/);
   assert.match(html, /Project path not recorded/);
   assert.match(html, /Started<\/span> Not recorded/);
   assert.doesNotMatch(html, /1970/);
@@ -2879,12 +2904,22 @@ test("highlight assets are repository-local and keyboard rail shortcuts protect 
   assert.match(app, /getComputedStyle\(globalSearch\)\.display !== "none"/);
   assert.match(enhancements, /location\.hash/);
   assert.match(enhancements, /data-session-search-toggle/);
-  assert.match(style, /\.tab-bar\[hidden\] \{\s*display: none;/);
-  assert.match(style, /\.session-workbench:not\(.session-conversation-tab-active\) \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\);/);
+  assert.match(style, /\[data-session-reader\]/);
   assert.match(style, /\.runtime-status-completed \{ color: var\(--success-text\); \}/);
   assert.match(style, /\.stats-provider-item\.current \{[\s\S]*?color: var\(--v2-accent-foreground\);/);
   assert.match(style, /\.stats-provider-selector \.stats-provider-item:has\(input:checked\) \{[\s\S]*?color: var\(--v2-accent-foreground\);/);
   assert.match(style, /\.stats-provider-capability\.filter \{[\s\S]*?color: var\(--text-secondary\) !important;/);
+});
+
+test("conversation search renders an explicit canonical root scope", () => {
+  const html = renderSessionPage({
+    session: { id: "root/search", title: "Root search" },
+    provider: "fixture"
+  });
+  assert.match(html, /data-session-search-scope/);
+  assert.match(html, /data-reader-scope-root="true"/);
+  assert.match(html, /value="fixture::root%2Fsearch"/);
+  assert.match(html, /Current session: Root search/);
 });
 
 test("session management uses in-page dialogs", () => {
@@ -3135,7 +3170,7 @@ test("session detail shows a safe source breadcrumb and activates Usage for a st
   assert.match(html, /class="session-breadcrumb"/);
   assert.match(html, /Back to Statistics/);
   assert.match(html, /2026-07-11/);
-  assert.match(html, /nav-link nav-link-stats active/);
+  assert.match(html, /nav-link nav-link-stats app-navigation-link active/);
 });
 
 test("session raw data exposes an opaque project key and configured directory provenance", () => {
@@ -3201,7 +3236,7 @@ test("session detail restores a local workbench breadcrumb for a recorded run", 
   });
   assert.match(html, /Back to workbench/);
   assert.match(html, /href="\/codex\/session\/parent%2F1\?runtimeLens=execution&amp;runCursor=opaque%2Bcursor&amp;runLimit=100&amp;runtimeRun=run%2F42"/);
-  assert.match(html, /class="action-btn session-back-link" href="\/codex\/session\/parent%2F1\?runtimeLens=execution&amp;runCursor=opaque%2Bcursor&amp;runLimit=100&amp;runtimeRun=run%2F42"/);
+  assert.match(html, /class="more-actions-list">\s*<a href="\/codex\/session\/parent%2F1\?runtimeLens=execution&amp;runCursor=opaque%2Bcursor&amp;runLimit=100&amp;runtimeRun=run%2F42">Back<\/a>/);
 });
 
 test("Statistics SSR keeps the UI v2 reading order and chart explanation", () => {
@@ -3520,7 +3555,7 @@ test("stats advanced modules are capability-gated and export URLs are canonical"
   assert.match(full, /Advanced insights and estimates/);
 });
 
-test("stats page uses the Stats primary rail label", () => {
+test("stats page uses the Usage navigation label", () => {
   const html = renderStatsPage({
     tokenStats: [],
     modelRanking: [],
@@ -3532,7 +3567,7 @@ test("stats page uses the Stats primary rail label", () => {
     providers: []
   });
 
-  assert.match(html, />Statistics</);
+  assert.match(html, /app-navigation-link active[\s\S]*?>Usage</);
   assert.doesNotMatch(html, />Token</);
 });
 
@@ -3977,10 +4012,11 @@ test("detached child sessions contribute one task entry instead of conversation 
   const html = renderSessionPage({ session: tree.session, sessionTree: tree, provider: "codex" });
   const toc = html.match(/<div class="toc-list">([\s\S]*?)<\/div>\s*<button class="toc-resize-handle"/)?.[1] || "";
 
-  assert.match(toc, /href="#session-background-child"/);
+  assert.match(toc, /href="\/codex\/session\/background-child"/);
   assert.match(toc, /Background review/);
   assert.doesNotMatch(toc, /BACKGROUND_TO_C_ENTRY/);
-  assert.match(html, /BACKGROUND_TO_C_ENTRY/);
+  assert.doesNotMatch(html, /BACKGROUND_TO_C_ENTRY/);
+  assert.match(renderSessionPage({ session: child.session, sessionTree: child, provider: "codex" }), /BACKGROUND_TO_C_ENTRY/);
 });
 
 test("attached child sessions stop the parent TOC at the task boundary", () => {
@@ -4018,10 +4054,11 @@ test("attached child sessions stop the parent TOC at the task boundary", () => {
   const html = renderSessionPage({ session: tree.session, sessionTree: tree, provider: "codex" });
   const toc = html.match(/<div class="toc-list">([\s\S]*?)<\/div>\s*<button class="toc-resize-handle"/)?.[1] || "";
 
-  assert.match(toc, /href="#part-task-part"/);
-  assert.match(toc, /href="#session-attached-child"/);
+  assert.doesNotMatch(toc, /href="#part-task-part"/);
+  assert.equal((toc.match(/href="\/codex\/session\/attached-child"/g) || []).length, 1);
   assert.doesNotMatch(toc, /CHILD_SHARED_CONTEXT_SHOULD_NOT_BE_IN_PARENT_TOC/);
-  assert.match(html, /CHILD_SHARED_CONTEXT_SHOULD_NOT_BE_IN_PARENT_TOC/);
+  assert.doesNotMatch(html, /CHILD_SHARED_CONTEXT_SHOULD_NOT_BE_IN_PARENT_TOC/);
+  assert.match(renderSessionPage({ session: child.session, sessionTree: child, provider: "codex" }), /CHILD_SHARED_CONTEXT_SHOULD_NOT_BE_IN_PARENT_TOC/);
 });
 
 
@@ -4035,15 +4072,14 @@ function flowVisible(id, role, timeCreated, parts = [], options = {}) {
   return message;
 }
 
-test("conversation view defaults follow the 20-message threshold between Linear and Thread", () => {
+test("short and long histories share continuous reading without a presentation-mode toggle", () => {
   const shortTree = flowSession("root", [
     flowVisible("u1", "user", 1000, [], { text: true }),
     flowVisible("a1", "assistant", 2000)
   ]);
   const short = renderSessionPage({ session: shortTree.session, sessionTree: shortTree, provider: "codex" });
-  assert.match(short, /class="messages conversation-linear" data-conversation-default="linear" data-conversation-message-count="2"/);
-  assert.match(short, /data-conversation-view-mode="thread" aria-pressed="false"/);
-  assert.match(short, /data-conversation-view-mode="linear" aria-pressed="true"/);
+  assert.match(short, /class="messages conversation-thread" data-conversation-default="thread" data-conversation-message-count="2"/);
+  assert.doesNotMatch(short, /data-conversation-view-mode/);
 
   const longMessages = [];
   for (let index = 1; index <= 11; index += 1) {
@@ -4053,7 +4089,7 @@ test("conversation view defaults follow the 20-message threshold between Linear 
   const longTree = flowSession("root", longMessages);
   const long = renderSessionPage({ session: longTree.session, sessionTree: longTree, provider: "codex" });
   assert.match(long, /class="messages conversation-thread" data-conversation-default="thread" data-conversation-message-count="22"/);
-  assert.match(long, /data-conversation-view-mode="thread" aria-pressed="true"/);
+  assert.doesNotMatch(long, /data-conversation-view-mode/);
 });
 
 test("conversation thread segments the spine into user turns with a prelude before the first user message", () => {
@@ -4109,11 +4145,12 @@ test("conversation renders one recorded compaction checkpoint at its causal posi
   assert.match(html, /compaction-checkpoint-kicker[^>]*>Context compacted</);
   assert.match(html, /compaction-checkpoint-meta[^>]*>before 120 · after 45 ·/);
   assert.match(html, /compaction-checkpoint-result-label[^>]*>Post-compaction context</);
-  assert.match(html, /compaction-checkpoint-summary[^>]*>Kept the session goal\.</);
-  assert.doesNotMatch(html, /compaction-checkpoint-result-missing/);
+  assert.match(html, /compaction-checkpoint-result-placeholder[^>]*>Open to load the recorded context result\.</);
+  assert.doesNotMatch(html, /compaction-checkpoint-summary[^>]*>Kept the session goal\.</);
+  assert.match(html, /data-context-result[^>]*data-context-result-checkpoint="cp-1"/);
   assert.match(html, /Trigger<\/dt><dd>automatic<\/dd>/);
   assert.match(html, /Strategy<\/dt><dd>summary<\/dd>/);
-  assert.match(html, /Continued session<\/dt><dd><a href="\/codex\/session\/continued-next">continued-next<\/a><\/dd>/);
+  assert.match(html, /Continued session<\/dt><dd><a[^>]*data-reader-session="continued-next"[^>]*href="\/codex\/session\/continued-next">continued-next<\/a><\/dd>/);
   const toc = html.match(/<div class="toc-list">([\s\S]*?)<\/div>\s*<button class="toc-resize-handle"/)?.[1] || "";
   assert.doesNotMatch(toc, /checkpoint|cp-1|Context compacted/);
 });
@@ -4144,8 +4181,8 @@ test("conversation checkpoints render only recorded fields with a derived placem
   assert.match(html, /data-compaction-placement="timestamp"/);
   assert.match(html, /class="compaction-checkpoint-meta">[^<]*position derived[^<]*</);
   assert.match(html, /data-compaction-fidelity="recorded"/);
-  assert.doesNotMatch(html, /compaction-checkpoint-result-label/);
-  assert.match(html, /compaction-checkpoint-result-missing[^>]*>No readable post-compaction context is available in the recorded evidence\.</);
+  assert.match(html, /compaction-checkpoint-result-label[^>]*>Post-compaction context</);
+  assert.match(html, /compaction-checkpoint-result-placeholder[^>]*>Open to load the recorded context result\.</);
   assert.doesNotMatch(html, /compaction-checkpoint-facts/);
   assert.doesNotMatch(html, /before 120|after 45/);
 });
@@ -4183,10 +4220,10 @@ test("conversation checkpoints with neither anchor nor timestamp render after al
   assert.match(html, /class="compaction-checkpoint-meta">[^<]*position derived[^<]*</);
 });
 
-test("conversation default mode counts rendered top-level entries only", () => {
+test("reader message count includes only rendered top-level entries", () => {
   // 24 tree rows (11 user + 11 assistant + 2 compact) but only 20 render
-  // visible content: invisible messages and compact rows must not push the
-  // default into Thread nor inflate the rendered message count.
+  // visible content: invisible messages and compact rows must not inflate
+  // the rendered message count.
   const longMessages = [];
   for (let index = 1; index <= 11; index += 1) {
     longMessages.push(flowVisible(`u${index}`, "user", index * 1000, [], { text: true }));
@@ -4196,7 +4233,7 @@ test("conversation default mode counts rendered top-level entries only", () => {
   longMessages.push(flowVisible("shared-2", "compact", 8000, [], { text: false }));
   const tree = flowSession("root", longMessages);
   const html = renderSessionPage({ session: tree.session, sessionTree: tree, provider: "codex" });
-  assert.match(html, /class="messages conversation-linear" data-conversation-default="linear" data-conversation-message-count="20"/);
+  assert.match(html, /class="messages conversation-thread" data-conversation-default="thread" data-conversation-message-count="20"/);
 });
 
 test("conversation keeps compact and inherited context messages out of the ToC", () => {
@@ -4242,7 +4279,7 @@ test("raw fallback conversation path segments the same thread spine and merges t
   });
   assert.equal((html.match(/thread-turn thread-turn-user/g) || []).length, 2);
   assert.equal((html.match(/thread-turn thread-turn-prelude/g) || []).length, 1);
-  assert.match(html, /data-conversation-default="linear"/);
+  assert.match(html, /data-conversation-default="thread"/);
   assert.match(html, /raw first question/);
   const thread = html.slice(html.indexOf('<section id="session-messages"'));
   assert.ok(thread.indexOf('id="msg-raw-a1"') < thread.indexOf("raw tool output"), "tool output merges into the owning assistant entry");

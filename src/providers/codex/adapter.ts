@@ -3,6 +3,8 @@ import path from "node:path";
 import { getConfig } from "../../config.js";
 import {
   parseSession,
+  readCodexSessionSnapshot,
+  type CodexSessionReadSnapshot,
   extractCodexSessionId,
   extractMeta,
   recordsToMessages,
@@ -14,12 +16,18 @@ import {
   countCodexRenderedMessages,
   classifyCodexRecordProvenance
 } from "./parser.js";
-import { buildCodexSessionProtocol, buildCodexSessionProtocolV3 } from "./protocol.js";
+import {
+  buildCodexSessionProtocol,
+  buildCodexSessionProtocolV3,
+  codexProtocolChildFactsFromRecords
+} from "./protocol.js";
+import { normalizeCodexContextChangeResult } from "./context-result.js";
 import { finalizeSessionProtocol, protocolRevision } from "../shared/session-protocol.js";
 import { finalizeSessionProtocolV3 } from "../shared/session-protocol-v3.js";
 import { icons } from "../../icons.js";
-import type { InheritedContextView, Message, ProviderAdapter, RawSession } from "../interface.js";
-import { buildLinkedMessageSessionViews } from "../shared/linked-message-session.js";
+import type { InheritedContextView, Message, OwnedReaderLinkEvidence, OwnedReaderProjection, ProviderAdapter, RawSession } from "../interface.js";
+import { buildLinkedMessageSessionViews, buildOwnedReaderChildLinks } from "../shared/linked-message-session.js";
+import { buildMessageSessionTree, buildMessageSessionViews } from "../shared/message-session.js";
 import { buildResolvedSystemPromptEvidence } from "../shared/system-prompt-evidence.js";
 import { buildCodexRuntimeEnvironment } from "./runtime-environment.js";
 import {
@@ -28,6 +36,7 @@ import {
   createSessionFileStore,
   createIncrementalTokenStats,
   searchNormalizedMessages,
+  sessionFileSignature,
   type TokenFieldMapping
 } from "../shared/file-adapter-helpers.js";
 
@@ -73,21 +82,35 @@ function discoverSessionFiles() {
   return files;
 }
 
+function readSnapshotPayload(filePath: string, canonicalId: string, snapshot: CodexSessionReadSnapshot) {
+  const { records } = readCodexSessionSnapshot(filePath, snapshot);
+  return { records, messages: recordsToMessages(records, canonicalId) };
+}
+
 const sessionFiles = createSessionFileStore({
   discoverFiles: discoverSessionFiles,
+  // Keep the full canonical index while bounding retained transcript bodies.
+  // A single rollout over this budget remains readable and is cached whole.
+  maxCachedSourceBytes: 64 * 1024 * 1024,
   readEntry(entry) {
-    const records = parseSession(entry.filePath);
+    const captured = /\.jsonl\.zst$/i.test(entry.filePath) ? null : readCodexSessionSnapshot(entry.filePath);
+    const records = captured?.records ?? parseSession(entry.filePath);
     const canonicalId = extractCodexSessionId(records, entry.sessionId);
     const messages = recordsToMessages(records, canonicalId);
     const session = extractMeta(records, entry.sessionId, messages);
     return {
       records,
       session,
-      messages
+      messages,
+      payloadSnapshot: captured ? {
+        signature: sessionFileSignature(entry.filePath, captured.snapshot),
+        sourceBytes: captured.snapshot.size,
+        read: readSnapshotPayload.bind(null, entry.filePath, canonicalId, captured.snapshot)
+      } : undefined
     };
   },
   onError(filePath, err) {
-    console.warn("Skipping unparseable Codex session file:", filePath, err);
+    console.warn("Could not load Codex session file:", filePath, err);
   }
 });
 
@@ -107,20 +130,23 @@ function ownedTokenCount(records: any[], parentRecords: any[] = []) {
   );
 }
 
-function resolveEntry(entry: { session: RawSession; messages: Message[]; records: any[] }) {
-  const parent = parentEntryFor(entry);
-  const parentRecords = parent?.records || [];
-  const sourceMessages = parent
-    ? recordsToMessages(entry.records, entry.session.id, parentRecords)
-    : entry.messages;
-  const sourceSession = parent
-    ? extractMeta(entry.records, entry.session.id, sourceMessages, parentRecords)
+function resolveEntryPayload(
+  entry: { session: RawSession },
+  records: any[],
+  messages: Message[],
+  parentRecords: any[] | null
+) {
+  const sourceMessages = parentRecords
+    ? recordsToMessages(records, entry.session.id, parentRecords)
+    : messages;
+  const sourceSession = parentRecords
+    ? extractMeta(records, entry.session.id, sourceMessages, parentRecords)
     : entry.session;
-  const resolved = resolveCodexInheritedContext(sourceMessages, parent?.messages || []);
+  const resolved = resolveCodexInheritedContext(sourceMessages, []);
   const inheritedContext = sourceSession.metadata?.inheritedContext;
   const session = {
     ...sourceSession,
-    tokenCount: ownedTokenCount(entry.records, parentRecords) || null,
+    tokenCount: ownedTokenCount(records, parentRecords || []) || null,
     messageCount: countCodexRenderedMessages(resolved.messages),
     metadata: inheritedContext ? {
       ...sourceSession.metadata,
@@ -133,7 +159,14 @@ function resolveEntry(entry: { session: RawSession; messages: Message[]; records
   return { session, messages: resolved.messages };
 }
 
-const CODEX_INHERITED_CONTEXT_LIMIT = 40;
+function resolveEntry(entry: { session: RawSession; messages: Message[]; records: any[] }) {
+  // Capture a body before loading its parent: either may evict the other from
+  // the cache, but provenance must use the same record object identities.
+  const records = entry.records;
+  const messages = entry.messages;
+  const parent = parentEntryFor(entry);
+  return resolveEntryPayload(entry, records, messages, parent?.records || null);
+}
 
 function inheritedContextFor(entry: { session: RawSession; records: any[] }): InheritedContextView | null {
   const parentSessionId = entry.session.parentId ? String(entry.session.parentId) : "";
@@ -149,9 +182,9 @@ function inheritedContextFor(entry: { session: RawSession; records: any[] }): In
       provider: "codex",
       sessionId: parentSessionId
     },
-    messages: messages.slice(0, CODEX_INHERITED_CONTEXT_LIMIT),
+    messages,
     total: messages.length,
-    truncated: messages.length > CODEX_INHERITED_CONTEXT_LIMIT
+    truncated: false
   };
 }
 
@@ -176,6 +209,109 @@ function generateCodexViews(sessionId: string) {
   } : undefined);
 }
 
+function buildCodexOwnedReaderProjection(sessionId: string, evidence?: OwnedReaderLinkEvidence): OwnedReaderProjection | null {
+  const root = sessionFiles.get(sessionId);
+  if (!root) return null;
+  const rootRecords = root.records;
+  const rootMessages = root.messages;
+  const parent = parentEntryFor(root);
+  const rootEntry = resolveEntryPayload(root, rootRecords, rootMessages, parent?.records || null);
+  const rootTree = buildMessageSessionTree(rootEntry.session, rootEntry.messages);
+  const canonicalId = String(root.session.id);
+  const directChildren = sessionFiles.getFamily(canonicalId).filter((entry) => (
+    entry.session.parentId && String(entry.session.parentId) === canonicalId
+  ));
+  const links = buildOwnedReaderChildLinks(
+    canonicalId,
+    rootTree,
+    directChildren.map((entry) => ({ session: entry.session as Record<string, any> })),
+    evidence
+  );
+  return {
+    rootTree,
+    children: links.map((link) => ({
+      provider: "codex",
+      sessionId: String(link.session.id),
+      title: typeof link.session.title === "string" ? link.session.title : null,
+      available: link.session.available !== false,
+      link: link.link,
+      parentPartId: link.parentPartId,
+      detached: link.detached
+    }))
+  };
+}
+
+function generateCodexMetrics(sessionId: string) {
+  const root = sessionFiles.get(sessionId);
+  if (!root) return null;
+  const canonicalId = String(root.session.id);
+  const rootRecords = root.records;
+  const rootMessages = root.messages;
+  const rootParent = parentEntryFor(root);
+  const family = sessionFiles.getFamily(canonicalId);
+  const childrenByParent = new Map<string, typeof family>();
+  for (const entry of family) {
+    const parentId = entry.session.parentId;
+    if (!parentId) continue;
+    const key = String(parentId);
+    const children = childrenByParent.get(key) || [];
+    children.push(entry);
+    childrenByParent.set(key, children);
+  }
+  const totals = {
+    messages: 0, toolCalls: 0, branches: Math.max(0, family.length - 1), steps: 0,
+    inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+    totalTokens: 0, directInputTokens: 0, directOutputTokens: 0, directReasoningTokens: 0,
+    directCacheReadTokens: 0, directCacheWriteTokens: 0, directTotalTokens: 0, cost: 0, runtimeMs: 0
+  };
+  const tools = new Map<string, number>();
+  let timeStart = 0;
+  let timeEnd = 0;
+  let rootSteps: any[] = [];
+  const seen = new Set<string>();
+  const visit = (entry: typeof family[number], parentRecords: any[] | null, isRoot = false) => {
+    const id = String(entry.session.id);
+    if (seen.has(id)) return;
+    seen.add(id);
+    const records = isRoot ? rootRecords : entry.records;
+    const messages = isRoot ? rootMessages : entry.messages;
+    const resolved = resolveEntryPayload(entry, records, messages, parentRecords);
+    const directView = buildMessageSessionViews(resolved.session, resolved.messages);
+    const direct = directView.metrics;
+    totals.messages += direct.totals.messages;
+    totals.toolCalls += direct.totals.toolCalls;
+    totals.inputTokens += direct.totals.directInputTokens;
+    totals.outputTokens += direct.totals.directOutputTokens;
+    totals.reasoningTokens += direct.totals.directReasoningTokens;
+    totals.cacheReadTokens += direct.totals.directCacheReadTokens;
+    totals.cacheWriteTokens += direct.totals.directCacheWriteTokens;
+    totals.totalTokens += direct.totals.directTotalTokens;
+    if (isRoot) {
+      totals.directInputTokens = direct.totals.directInputTokens;
+      totals.directOutputTokens = direct.totals.directOutputTokens;
+      totals.directReasoningTokens = direct.totals.directReasoningTokens;
+      totals.directCacheReadTokens = direct.totals.directCacheReadTokens;
+      totals.directCacheWriteTokens = direct.totals.directCacheWriteTokens;
+      totals.directTotalTokens = direct.totals.directTotalTokens;
+      rootSteps = direct.steps;
+    }
+    for (const tool of direct.tools) tools.set(tool.name, (tools.get(tool.name) || 0) + tool.count);
+    const directStart = directView.tree.metrics.timeStart;
+    const directEnd = directView.tree.metrics.timeEnd;
+    if (directStart && (!timeStart || directStart < timeStart)) timeStart = directStart;
+    if (directEnd > timeEnd) timeEnd = directEnd;
+    for (const child of childrenByParent.get(id) || []) visit(child, records, false);
+  };
+  visit(root, rootParent?.records || null, true);
+  totals.runtimeMs = timeStart && timeEnd ? Math.max(0, timeEnd - timeStart) : 0;
+  return {
+    sessionId: canonicalId,
+    totals: { ...totals, steps: rootSteps.length },
+    tools: [...tools.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name, count]) => ({ name, count })),
+    steps: rootSteps
+  };
+}
+
 const codexProtocolCapabilities = {
   sessionEvents: { support: "partial" as const, provenance: "derived" as const, details: "derived message envelopes plus recorded compaction, NEW_TASK, and session-turn lifecycle events" },
   sessionRelationships: { support: "partial" as const, provenance: "derived" as const, details: "recorded incoming thread spawns plus derived outgoing edges and forks" },
@@ -189,31 +325,55 @@ function loadCodexProtocolInput(sessionId: string) {
   const root = sessionFiles.get(sessionId);
   if (!root) return null;
   const canonicalId = String(root.session.id);
-  const family = resolveFamily(canonicalId);
-  if (!family) return null;
-  const rootEntry = family.find((item) => String(item.session.id) === canonicalId);
-  if (!rootEntry) return null;
+  // Freeze the provider revision before reading large bodies so finalization
+  // cannot refresh the index and label an older payload with newer metadata.
+  const revision = protocolRevision(sessionFiles.getStatsRevision());
+  // Capture the indexed family and parent entry before reading a potentially
+  // very large root body. This keeps the metadata selection on one refresh
+  // even if parsing the root crosses the store refresh interval.
+  const family = sessionFiles.getFamily(canonicalId);
   const parent = parentEntryFor(root);
-  const ownedRecords = parent
-    ? root.records.filter((record) => (
-      classifyCodexRecordProvenance(root.records, parent.records).get(record) === "session"
-    ))
-    : root.records;
+  // Keep the root payload and its precomputed messages before loading a
+  // parent: the bounded store may evict either body while the other is read.
+  const rootRecords = root.records;
+  const rootMessages = root.messages;
+  const parentRecords = parent?.records || null;
+  const recordProvenance = parent
+    ? classifyCodexRecordProvenance(rootRecords, parentRecords || [])
+    : null;
+  const ownedRecords = recordProvenance
+    ? rootRecords.filter((record) => recordProvenance.get(record) === "session")
+    : rootRecords;
+  const rootEntry = resolveEntryPayload(root, rootRecords, rootMessages, parentRecords);
+  // getFamily() returns indexed entries without touching their payloads. Only
+  // direct children belong in this protocol input; grandchildren remain
+  // indexed for lookup but must not be loaded as a side effect here.
   const children = family.filter((item) => (
     item.session.parentId && String(item.session.parentId) === canonicalId
   ));
   return {
     canonicalId,
+    revision,
     rootEntry,
     input: {
       session: rootEntry.session,
       messages: rootEntry.messages,
       records: ownedRecords,
-      children: children.map((child) => ({
-        session: child.session,
-        messages: child.messages,
-        records: sessionFiles.get(String(child.session.id))?.records || []
-      }))
+      children: children.map((child) => {
+        // A direct child always inherits from this root. Capture its body once
+        // and classify against the same root record objects held above.
+        const childRecords = child.records;
+        const childMessages = child.messages;
+        const childEntry = resolveEntryPayload(child, childRecords, childMessages, rootRecords);
+        const childProvenance = classifyCodexRecordProvenance(childRecords, rootRecords);
+        const ownedChildRecords = childRecords.filter((record) => (
+          childProvenance.get(record) === "session"
+        ));
+        return {
+          session: childEntry.session,
+          facts: codexProtocolChildFactsFromRecords(ownedChildRecords)
+        };
+      })
     }
   };
 }
@@ -223,7 +383,7 @@ function finalizeCodexV2Protocol(loaded: NonNullable<ReturnType<typeof loadCodex
     provider: "codex",
     session: loaded.rootEntry.session,
     capabilities: codexProtocolCapabilities,
-    revision: protocolRevision(sessionFiles.getStatsRevision())
+    revision: loaded.revision
   });
 }
 
@@ -274,27 +434,60 @@ const codexTokenMapping: TokenFieldMapping = {
   cacheWriteTokens: (r) => codexDailyTokenComponents(codexUsagePayload(r)).cacheWrite,
 };
 
-const getCodexTokenStats = createIncrementalTokenStats(
+let tokenStatsGroupPath: string | null = null;
+let tokenStatsParentRecords: any[] | null = null;
+
+function resetTokenStatsParentSnapshot() {
+  tokenStatsGroupPath = null;
+  tokenStatsParentRecords = null;
+}
+
+const getCodexTokenStatsBase = createIncrementalTokenStats(
   () => {
     const signatures = sessionFiles.getFileSignatures();
     const signatureByPath = new Map(signatures.map(({ filePath, signature }) => [filePath, signature]));
-    return signatures.map((file) => {
+    const files = signatures.map((file) => {
       const entry = sessionFiles.getByFilePath(file.filePath);
       const parent = entry ? parentEntryFor(entry) : null;
       return {
         ...file,
+        groupPath: parent?.filePath || file.filePath,
+        hasParent: Boolean(parent),
         // A child token prefix depends on its declared parent's records too.
         signature: `${file.signature}|parent:${parent ? signatureByPath.get(parent.filePath) || "missing" : "none"}`
       };
     });
+    files.sort((left, right) => (
+      left.groupPath.localeCompare(right.groupPath)
+      || Number(left.hasParent) - Number(right.hasParent)
+      || left.filePath.localeCompare(right.filePath)
+    ));
+    return files;
   },
   (filePath) => {
     const entry = sessionFiles.getByFilePath(filePath);
     const parent = entry ? parentEntryFor(entry) : null;
-    return codexOwnedTokenUsageRecords(entry?.records || [], parent?.records || []);
+    const groupPath = parent?.filePath || entry?.filePath || filePath;
+    if (groupPath !== tokenStatsGroupPath) {
+      tokenStatsGroupPath = null;
+      tokenStatsParentRecords = null;
+      const capturedParentRecords = parent?.records || entry?.records || [];
+      tokenStatsParentRecords = capturedParentRecords;
+      tokenStatsGroupPath = groupPath;
+    }
+    return codexOwnedTokenUsageRecords(entry?.records || [], parent ? tokenStatsParentRecords || [] : []);
   },
   codexTokenMapping,
 );
+
+function getCodexTokenStats(days = 30) {
+  resetTokenStatsParentSnapshot();
+  try {
+    return getCodexTokenStatsBase(days);
+  } finally {
+    resetTokenStatsParentSnapshot();
+  }
+}
 
 const codex = {
   id: "codex",
@@ -321,7 +514,11 @@ const codex = {
 
   async *scan() {
     for (const entry of sessionFiles.list()) {
-      if (entry.records.length) yield resolveEntry(entry).session;
+      try {
+        if (entry.records.length) yield resolveEntry(entry).session;
+      } catch (error) {
+        console.warn("Skipping unreadable Codex session during scan:", entry.filePath, error);
+      }
     }
   },
 
@@ -371,7 +568,20 @@ const codex = {
     return buildCodexSessionProtocolV3For(sessionId);
   },
 
+  getContextChangeResult(sessionId, checkpointId) {
+    const loaded = loadCodexProtocolInput(sessionId);
+    return loaded ? normalizeCodexContextChangeResult(loaded.input.records, checkpointId) : null;
+  },
+
+  getOwnedReaderProjection(sessionId, evidence) {
+    return buildCodexOwnedReaderProjection(sessionId, evidence);
+  },
+
   ...createStructuredViewMethods(getCodexViews),
+
+  getSessionMetrics(sessionId) {
+    return generateCodexMetrics(sessionId);
+  },
 
   getTokenStats(days = 30) {
     return getCodexTokenStats(days);
@@ -382,8 +592,11 @@ const codex = {
   },
 
   searchMessages(query, limit = 20) {
+    function* entries() {
+      for (const entry of sessionFiles.list()) yield resolveEntry(entry);
+    }
     return searchNormalizedMessages(
-      sessionFiles.list().map((entry) => resolveEntry(entry)),
+      entries(),
       query,
       limit
     );

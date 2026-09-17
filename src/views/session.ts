@@ -4,15 +4,21 @@ import { buildPartsFromProviderMessages } from "../session-queries.js";
 import type { SessionPartNode, SessionTree } from "../providers/opencode/session-tree.js";
 import { isSubagentTool, mergeToolMetadata } from "../providers/shared/subagent-tools.js";
 import { formatDuration, formatLocalizedDurationMs, formatTime, formatTokens, messageBubble, messageHeader, reasoningBlock, todoList, toolCallBlock } from "./components.js";
+import { anchorId } from "./anchors.js";
 import { layout } from "./layout.js";
+import { readerEventHref, renderReaderEventSourceLink } from "./reader-coordination.js";
+import { readerRelationPositionKey, renderReaderRelations } from "./reader-relations.js";
+import { uiIcon } from "../ui-icons.js";
+import type { ReaderRelationMarkup } from "./reader-relations.js";
+import type { ReaderRelations } from "../reader-relations.js";
 import type { SessionNavigationContext } from "../navigation-context.js";
 import type { ConversationCompaction } from "../protocol-runtime.js";
-import type { InheritedContextView, MessagePresentationPhase } from "../providers/interface.js";
+import type { InheritedContextView, MessagePresentationPhase, OwnedReaderChildDescriptor, OwnedReaderProjection } from "../providers/interface.js";
 import type {
   ConversationAgentCard,
   ConversationChannelItem,
   ConversationInspectorView,
-  ConversationReference,
+  ConversationTurnBoundary,
   ConversationViewModel
 } from "../conversation-view-model.js";
 
@@ -100,13 +106,6 @@ function annotateCacheWarning(message: any, previousUsage: any) {
 
 function formatCount(value: any) {
   return (Number(value) || 0).toLocaleString();
-}
-
-function anchorId(prefix: any, id: any) {
-  const cleanId = String(id || "").replace(/[^A-Za-z0-9_-]/g, "-");
-  const normalizedPrefix = prefix.endsWith("-") ? prefix.slice(0, -1) : prefix;
-  const alreadyHasPrefix = cleanId.toLowerCase().startsWith(normalizedPrefix.toLowerCase() + "-") || cleanId.toLowerCase().startsWith(normalizedPrefix.toLowerCase() + "_");
-  return alreadyHasPrefix ? cleanId : `${normalizedPrefix}-${cleanId}`;
 }
 
 function stringifyCompact(value: any) {
@@ -222,31 +221,6 @@ function renderMetric(label: any, value: any) {
   return `<span class="session-stat"><span class="session-stat-label">${escapeHtml(label)}</span><strong class="session-stat-value">${escapeHtml(String(value))}</strong></span>`;
 }
 
-function renderSubsessionHeader(tree: SessionTree, inferred = false) {
-  const session = tree.session || {};
-  const title = session.title || session.slug || session.id;
-  const metrics = tree.metrics;
-  const pieces = [
-    inferred ? t("detail.inferred_link") : "",
-    `${formatCount(metrics.totalMessages)} messages`,
-    `${formatCount(metrics.totalToolCalls)} tools`
-  ];
-
-  if (metrics.descendantCount) {
-    pieces.push(`${formatCount(metrics.descendantCount)} nested`);
-  }
-  if (metrics.runtimeMs) {
-    pieces.push(formatDuration(metrics.timeStart, metrics.timeEnd));
-  }
-
-  const kind = inferred ? t("detail.linked_session") : t("detail.subsession");
-  return `<summary class="subsession-summary" aria-label="${escapeHtml(`Toggle ${kind} ${title}`)}">
-    <span class="subsession-kicker">${escapeHtml(kind)}</span>
-    <span class="subsession-title">${escapeHtml(title)}</span>
-    <span class="subsession-meta">${escapeHtml(pieces.filter(Boolean).join(" · "))}</span>
-  </summary>`;
-}
-
 function renderChildSessionExportActions(child: { provider?: string; sessionId: string } | null | undefined, provider: string, suffix = "", available: boolean | null = null) {
   if (!child?.sessionId || available === false) {
     return "";
@@ -254,7 +228,7 @@ function renderChildSessionExportActions(child: { provider?: string; sessionId: 
   const childProvider = child.provider || provider;
   const encoded = encodeURIComponent(child.sessionId);
   return `<span class="subagent-actions" aria-label="Subagent export actions">
-    <a class="subagent-export-btn" href="/${escapeHtml(childProvider)}/session/${encoded}" title="${escapeHtml(`Open${suffix}`)}">Open</a>
+    <a class="subagent-export-btn" data-reader-open data-reader-provider="${escapeHtml(childProvider)}" data-reader-session="${escapeHtml(child.sessionId)}" href="/${escapeHtml(childProvider)}/session/${encoded}" title="${escapeHtml(`Open${suffix}`)}">Open</a>
     <a class="subagent-export-btn" href="/api/${escapeHtml(childProvider)}/session/${encoded}/export?format=md" title="${escapeHtml(`Export${suffix} as Markdown`)}">MD</a>
     <a class="subagent-export-btn" href="/api/${escapeHtml(childProvider)}/session/${encoded}/export?format=json" title="${escapeHtml(`Export${suffix} as JSON`)}">JSON</a>
   </span>`;
@@ -320,6 +294,33 @@ function renderSubagentBranch(part: SessionPartNode, childMarkup: string, provid
   </details>`;
 }
 
+type ReaderChildTarget = SessionTree | OwnedReaderChildDescriptor;
+
+function isOwnedReaderChild(child: ReaderChildTarget): child is OwnedReaderChildDescriptor {
+  return !("session" in child);
+}
+
+function renderChildReaderLink(child: ReaderChildTarget, provider = "opencode", inferred = false) {
+  const childId = isOwnedReaderChild(child) ? child.sessionId : child.session.id;
+  const title = isOwnedReaderChild(child) ? (child.title || childId) : (child.session.title || child.session.slug || childId);
+  const childProvider = isOwnedReaderChild(child) ? child.provider : (child.session.provider || provider);
+  const childInferred = isOwnedReaderChild(child) ? child.link === "inferred" : inferred;
+  const href = `/${escapeHtml(childProvider)}/session/${encodeURIComponent(childId)}`;
+  if (isOwnedReaderChild(child)) {
+    return `<details class="subagent-reader-link subagent-reader-link-disclosure${childInferred ? " subagent-reader-link-inferred" : ""}" data-reader-child-disclosure data-reader-child-provider="${escapeHtml(childProvider)}" data-reader-child-session="${escapeHtml(childId)}" data-reader-child-state="${child.available ? "recorded" : "unavailable"}">
+      <summary class="subagent-existing-link"><span class="subsession-kicker">${escapeHtml(childInferred ? t("detail.inferred_link") : t("detail.subsession"))}</span><span class="subsession-title">${escapeHtml(title)}</span><span class="subsession-meta">${escapeHtml(t("detail.reader_open_child"))}</span></summary>
+      <div class="reader-child-disclosure-body"><div data-reader-child-preview-state>${escapeHtml(child.available ? t("detail.reader_open_child") : t("conversation.inspector_session_unavailable"))}</div><div data-reader-child-token-state></div><a class="reader-child-history-link" data-reader-open data-reader-provider="${escapeHtml(childProvider)}" data-reader-session="${escapeHtml(childId)}" href="${href}">${escapeHtml(t("detail.reader_child_history"))}</a></div>
+    </details>`;
+  }
+  return `<p class="subagent-reader-link${inferred ? " subagent-reader-link-inferred" : ""}" data-session-id="${escapeHtml(childId)}" data-reader-child-state="${child.session.available === false ? "unavailable" : "recorded"}">
+    <a class="subagent-existing-link" data-reader-open data-reader-provider="${escapeHtml(childProvider)}" data-reader-session="${escapeHtml(childId)}" href="${href}">
+      <span class="subsession-kicker">${escapeHtml(inferred ? t("detail.inferred_link") : t("detail.subsession"))}</span>
+      <span class="subsession-title">${escapeHtml(title)}</span>
+      <span class="subsession-meta">${escapeHtml(t("detail.reader_open_child"))}</span>
+    </a>
+  </p>`;
+}
+
 function messageTurnRole(role: any) {
   const normalized = String(role || "assistant").toLowerCase();
   if (normalized === "agent") return "assistant";
@@ -349,42 +350,6 @@ function renderMessageGroup(message: any, markup: any, provider: string, anchorP
   return `<article id="${messageAnchor}" class="message-group message-turn message-turn-${escapeHtml(role)}" data-role="${escapeHtml(role)}">${toolOnlyHeader}${markup}</article>`;
 }
 
-function renderSubagentChildSession(tree: SessionTree, provider: string, depth = 1): string {
-  const messageBlocks = [];
-  let previousCacheUsage = null;
-
-  for (const sourceMessage of tree.messages) {
-    const annotated = annotateCacheWarning(sourceMessage, previousCacheUsage);
-    const message = annotated.message;
-    if (annotated.usage && messageTurnRole(message.role) === "assistant") {
-      previousCacheUsage = annotated.usage;
-    }
-    const result: any = renderMessagePartsResult(message, depth, provider);
-    if (result.hasVisibleContent && result.markup) {
-      const group: any = [renderMessageGroup(message, result.markup, provider)];
-      attachPendingReasoning(group, result.pendingReasoning);
-      messageBlocks.push(group[0]);
-    } else if (result.pendingReasoning.length && messageTurnRole(message.role) === "assistant") {
-      messageBlocks.push(renderMessageGroup(
-        message,
-        renderTurnReasoning(result.pendingReasoning.join("\n")),
-        provider
-      ));
-    } else if (!result.pendingReasoning.length && hasVisibleMessagePart(message)) {
-      const messageAnchor = escapeHtml(anchorId("msg", message.id));
-      messageBlocks.push(`<span id="${messageAnchor}" class="session-event-anchor" aria-hidden="true"></span>`);
-    }
-  }
-
-  const messageMarkup: any = messageBlocks.filter(Boolean).join("\n");
-
-  const detachedMarkup: any = tree.detachedChildren
-    .map((child) => renderSessionTree(child, depth + 1, provider, true))
-    .filter(Boolean)
-    .join("\n");
-  return [messageMarkup, detachedMarkup].filter(Boolean).join("\n");
-}
-
 function makeTocNode(id: any, type: any, label: any, meta: any, depth: any, children: any[] = []) {
   return {
     id,
@@ -396,32 +361,68 @@ function makeTocNode(id: any, type: any, label: any, meta: any, depth: any, chil
   };
 }
 
-function collectMessageTaskTocNodes(message: any, parentAgentDepth: any): any[] {
+function collectMessageTaskTocNodes(message: any, parentAgentDepth: any, seenChildSessionIds = new Set<string>(), provider = "opencode", ownedChildrenByPart: Map<string, OwnedReaderChildDescriptor[]> | null = null): any[] {
   const nodes: any[] = [];
-  const childNode = (child: any) => makeTocNode(
-    anchorId("session", child.session?.id || ""),
-    "Task",
-    child.session?.title || child.session?.slug || child.session?.id || t("detail.subsession"),
-    t("detail.subsession"),
-    parentAgentDepth + 1
-  );
+  const childNode = (child: ReaderChildTarget, labelOverride = "", metaOverride = "") => {
+    const childSessionId = isOwnedReaderChild(child) ? child.sessionId : child.session?.id || "";
+    const childSession = isOwnedReaderChild(child) ? child : child.session;
+    const childLabel = isOwnedReaderChild(child) ? child.title : child.session.title || child.session.slug;
+    return {
+      ...makeTocNode(
+        anchorId("session", childSessionId),
+        "Task",
+        labelOverride || childLabel || childSessionId || t("detail.subsession"),
+        metaOverride || t("detail.subsession"),
+        parentAgentDepth + 1
+      ),
+      readerProvider: isOwnedReaderChild(child) ? child.provider : child.session?.provider || provider,
+      readerSession: childSessionId
+    };
+  };
 
   for (const part of message.parts) {
+    const childTargets: ReaderChildTarget[] = [
+      ...part.childSessions,
+      ...(ownedChildrenByPart?.get(String(part.id)) || [])
+    ];
     if (part.type === "tool" && isTaskTool(part.data)) {
-      const children = part.childSessions.map(childNode);
-      nodes.push(makeTocNode(
-        anchorId("part", part.id),
-        "Task",
-        taskDisplayTitle(part.data),
-        part.childSessions.length ? childSessionCountLabel(part.childSessions.length) : partStatus(part.data) || part.tool || "task",
-        parentAgentDepth + 1,
-        children
-      ));
+      const children = childTargets
+        .filter((child: any) => {
+          const childId = isOwnedReaderChild(child) ? child.sessionId : child.session.id;
+          if (seenChildSessionIds.has(childId)) {
+            return false;
+          }
+          seenChildSessionIds.add(childId);
+          return true;
+        })
+        .map((child) => childNode(child));
+      if (children.length === 1) {
+        // A task and its single canonical child are one navigable work item;
+        // the native part anchor remains in the transcript for evidence.
+        nodes.push(childNode(
+          childTargets.find((child: ReaderChildTarget) => (isOwnedReaderChild(child) ? child.sessionId : child.session?.id) === children[0].readerSession) || childTargets[0],
+          taskDisplayTitle(part.data),
+          t("detail.subsession")
+        ));
+      } else {
+        nodes.push(makeTocNode(
+          anchorId("part", part.id),
+          "Task",
+          taskDisplayTitle(part.data),
+          childTargets.length ? childSessionCountLabel(childTargets.length) : partStatus(part.data) || part.tool || "task",
+          parentAgentDepth + 1,
+          children
+        ));
+      }
     }
 
-    for (const child of part.childSessions) {
+    for (const child of childTargets) {
       if (!(part.type === "tool" && isTaskTool(part.data))) {
-        nodes.push(childNode(child));
+        const childId = isOwnedReaderChild(child) ? child.sessionId : child.session.id;
+        if (!seenChildSessionIds.has(childId)) {
+          seenChildSessionIds.add(childId);
+          nodes.push(childNode(child));
+        }
       }
     }
   }
@@ -455,10 +456,11 @@ function foldedCommentaryMessageIds(messages: any[]) {
   return folded;
 }
 
-function collectTocNodes(tree: SessionTree, userDepth = 0): any[] {
+function collectTocNodes(tree: SessionTree, userDepth = 0, provider = "opencode", ownedChildrenByPart: Map<string, OwnedReaderChildDescriptor[]> | null = null, ownedDetachedChildren: OwnedReaderChildDescriptor[] = []): any[] {
   const nodes: any[] = [];
   let currentUserNode: any = null;
   const foldedCommentary = foldedCommentaryMessageIds(tree.messages);
+  const seenChildSessionIds = new Set<string>();
 
   tree.messages.forEach((message) => {
     const role = String(message.role || "").toLowerCase();
@@ -468,7 +470,7 @@ function collectTocNodes(tree: SessionTree, userDepth = 0): any[] {
 
     const label = foldedCommentary.has(String(message.id || "")) ? "" : tocMessageText(message);
     const agentDepth = userDepth + 1;
-    const taskNodes: any = collectMessageTaskTocNodes(message, label ? agentDepth : userDepth);
+    const taskNodes: any = collectMessageTaskTocNodes(message, label ? agentDepth : userDepth, seenChildSessionIds, provider, ownedChildrenByPart);
     if (!label) {
       if (taskNodes.length) {
         if (currentUserNode) {
@@ -508,14 +510,23 @@ function collectTocNodes(tree: SessionTree, userDepth = 0): any[] {
     }
   });
 
-  for (const child of tree.detachedChildren) {
-    nodes.push(makeTocNode(
-      anchorId("session", child.session.id || ""),
-      "Task",
-      child.session.title || child.session.slug || child.session.id || t("detail.subsession"),
-      t("detail.subsession"),
-      userDepth + 1
-    ));
+  for (const child of [...tree.detachedChildren, ...ownedDetachedChildren]) {
+    const childId = isOwnedReaderChild(child) ? child.sessionId : child.session.id;
+    if (seenChildSessionIds.has(childId)) {
+      continue;
+    }
+    seenChildSessionIds.add(childId);
+    nodes.push({
+      ...makeTocNode(
+        anchorId("session", childId || ""),
+        "Task",
+        (isOwnedReaderChild(child) ? child.title : child.session.title || child.session.slug || child.session.id) || t("detail.subsession"),
+        t("detail.subsession"),
+        userDepth + 1
+      ),
+      readerProvider: isOwnedReaderChild(child) ? child.provider : child.session.provider || provider,
+      readerSession: childId || ""
+    });
   }
   return nodes;
 }
@@ -532,7 +543,13 @@ function renderTocNode(node: any) {
         : normalizedType;
   const typeLabel = typeName.slice(0, 1).toUpperCase();
   const linkTitle = [typeName, node.label, node.meta].filter(Boolean).join(" - ");
-  const link = `<a class="toc-link toc-${escapeHtml(node.type.toLowerCase())}" href="#${escapeHtml(node.id)}" title="${escapeHtml(linkTitle)}" style="--toc-depth:${Math.min(node.depth, 6)}">
+  const readerAttributes = node.readerSession
+    ? ` data-reader-open data-reader-provider="${escapeHtml(node.readerProvider || "opencode")}" data-reader-session="${escapeHtml(node.readerSession)}"`
+    : "";
+  const readerHref = node.readerSession
+    ? `/${escapeHtml(node.readerProvider || "opencode")}/session/${encodeURIComponent(node.readerSession)}`
+    : `#${escapeHtml(node.id)}`;
+  const link = `<a class="toc-link toc-${escapeHtml(node.type.toLowerCase())}" href="${escapeHtml(readerHref)}"${readerAttributes} title="${escapeHtml(linkTitle)}" style="--toc-depth:${Math.min(node.depth, 6)}">
       <span class="toc-type" title="${escapeHtml(typeName)}" aria-label="${escapeHtml(typeName)}">${escapeHtml(typeLabel)}</span>
       <span class="toc-label">${escapeHtml(node.label)}</span>
       ${node.meta ? `<span class="toc-meta">${escapeHtml(node.meta)}</span>` : ""}
@@ -550,12 +567,20 @@ function renderTocNode(node: any) {
   </details>`;
 }
 
-function renderToc(tree: SessionTree | null) {
+function renderToc(tree: SessionTree | null, provider = "opencode", ownedReader: OwnedReaderProjection | null = null) {
   if (!tree) {
     return `<aside class="session-toc"><h2>${escapeHtml(t("detail.toc_navigate"))}</h2><p class="toc-empty">${escapeHtml(t("detail.toc_no_indexed_messages"))}</p><button class="toc-resize-handle" type="button" aria-label="${escapeHtml(t("detail.toc_resize"))}"></button></aside>`;
   }
 
-  const nodes = collectTocNodes(tree);
+  const ownedChildrenByPart = new Map<string, OwnedReaderChildDescriptor[]>();
+  for (const child of ownedReader?.children || []) {
+    if (child.parentPartId) {
+      const entries = ownedChildrenByPart.get(child.parentPartId) || [];
+      entries.push(child);
+      ownedChildrenByPart.set(child.parentPartId, entries);
+    }
+  }
+  const nodes = collectTocNodes(tree, 0, provider, ownedChildrenByPart, (ownedReader?.children || []).filter((child) => child.detached));
   const markup = nodes.map(renderTocNode).join("\n");
 
   return `<aside class="session-toc">
@@ -571,9 +596,11 @@ function renderToc(tree: SessionTree | null) {
   </aside>`;
 }
 
-function renderSessionMetricsPanel(sessionMetrics: any) {
+export function renderSessionMetricsPanel(sessionMetrics: any, lazy: { provider: string; sessionId: string } | null = null) {
   if (!sessionMetrics?.totals) {
-    return "";
+    return lazy
+      ? `<section class="session-metrics-panel" data-reader-metrics data-reader-metrics-provider="${escapeHtml(lazy.provider)}" data-reader-metrics-session="${escapeHtml(lazy.sessionId)}"><p class="metrics-detail" data-reader-metrics-state>${escapeHtml(t("runtime.unavailable"))}</p></section>`
+      : "";
   }
 
   const totals = sessionMetrics.totals;
@@ -663,42 +690,56 @@ function renderPart(messageData: any, partData: any, partId: any, reasoningMarku
   return "";
 }
 
-function renderPartNode(messageData: any, part: SessionPartNode, depth = 0, provider = "opencode", reasoningMarkup = "", view: ConversationViewModel | null = null, placedCardIds: Set<string> | null = null): string {
+function renderPartNode(messageData: any, part: SessionPartNode, depth = 0, provider = "opencode", reasoningMarkup = "", view: ConversationViewModel | null = null, placedCardIds: Set<string> | null = null, ownedChildren: OwnedReaderChildDescriptor[] = []): string {
   const isTaskPart = part.type === "tool" && isTaskTool(part.data);
-  const isTaskWithSession = isTaskPart && part.childSessions.length > 0;
-  // P2b: a compact agent card replaces the noisy nested block on the main
-  // reading spine only when real Task/AgentRun/Actor evidence binds it. The
-  // nested-session rendering stays the fallback when no binding exists.
+  const childTargets: ReaderChildTarget[] = [...part.childSessions, ...ownedChildren];
+  const isTaskWithSession = isTaskPart && childTargets.length > 0;
+  // P2b: a compact agent card decorates the existing task/child content on the
+  // main reading spine only when real Task/AgentRun/Actor evidence binds it.
+  // Without a binding, the existing nested-session rendering remains intact.
   const boundCard = isTaskPart && depth === 0
-    ? conversationCardForPart(view, part, String(messageData?.id || ""), placedCardIds)
+    ? conversationCardForPart(view, part, String(messageData?.id || ""), placedCardIds, ownedChildren)
     : null;
   if (boundCard) {
     placedCardIds?.add(boundCard.id);
-    return renderAgentCard(boundCard, part, provider);
+    const taskMarkup = renderPart(messageData, part.data, part.id, "");
+    const childMarkup = childTargets
+      .map((child) => renderChildReaderLink(child, provider, false))
+      .filter(Boolean)
+      .join("\n");
+    // Keep the tool's canonical part id on its native disclosure. The card's
+    // wrapper therefore does not emit a second `part-*` id.
+    const retainedMarkup = [taskMarkup, childMarkup].filter(Boolean).join("\n");
+    return renderAgentCard(boundCard, part, provider, retainedMarkup, String(part.sessionId || ""));
   }
-  const renderedPart = isTaskWithSession ? "" : renderPart(messageData, part.data, part.id, reasoningMarkup);
+  const renderedPart = isTaskPart
+    ? renderPart(messageData, part.data, part.id, "")
+    : renderPart(messageData, part.data, part.id, reasoningMarkup);
   const partAnchor = escapeHtml(anchorId("part", part.id));
-  const anchoredPart = renderedPart
-    ? (part.type === "tool" ? renderedPart : `<div id="${partAnchor}" class="session-part-anchor">${renderedPart}</div>`)
-    : `<span id="${partAnchor}" class="session-event-anchor" aria-hidden="true"></span>`;
+  const renderedPartOwnsAnchor = part.type === "tool" && Boolean(renderedPart);
 
   // A task can produce more than one child session. Give each child its own
   // branch container so navigation, export actions, and QA identify every
   // session instead of collapsing several IDs into one visual branch.
   if (isTaskWithSession) {
-    const branches: any = part.childSessions.map((child, index) => (
-      renderSubagentBranch(
+    const branches: any = childTargets.map((child, index) => {
+      const childMarkup = renderChildReaderLink(child, provider, false);
+      if (isOwnedReaderChild(child)) {
+        return `<div class="subsession-branch" data-parent-part-id="${escapeHtml(part.id)}">${childMarkup}</div>`;
+      }
+      return renderSubagentBranch(
         { ...part, childSessions: [child] },
-        renderSubagentChildSession(child, provider, depth + 1),
+        childMarkup,
         provider,
         index === 0 ? reasoningMarkup : ""
-      )
-    )).join("\n");
-    return `<div id="${partAnchor}" class="session-part-anchor">${branches}</div>`;
+      );
+    }).join("\n");
+    const anchorAttribute = renderedPartOwnsAnchor ? "" : ` id="${partAnchor}"`;
+    return `<div class="session-part-anchor"${anchorAttribute}>${renderedPart}${branches}</div>`;
   }
 
-  const childMarkup = part.childSessions
-    .map((child) => renderSubagentChildSession(child, provider, depth + 1))
+  const childMarkup = childTargets
+    .map((child) => renderChildReaderLink(child, provider, false))
     .filter(Boolean)
     .join("\n");
   if (!childMarkup && !renderedPart) {
@@ -707,7 +748,8 @@ function renderPartNode(messageData: any, part: SessionPartNode, depth = 0, prov
 
   const branch = `<div class="subsession-branch" data-parent-part-id="${escapeHtml(part.id)}">${childMarkup}</div>`;
 
-  return `<div id="${partAnchor}" class="session-part-anchor">${renderedPart}${branch}</div>`;
+  const anchorAttribute = renderedPartOwnsAnchor ? "" : ` id="${partAnchor}"`;
+  return `<div class="session-part-anchor"${anchorAttribute}>${renderedPart}${branch}</div>`;
 }
 
 function attachReasoningToRenderedPart(renderedPart: any, reasoningMarkup: any) {
@@ -753,30 +795,57 @@ function attachPendingReasoning(renderedParts: any, pendingReasoning: any) {
   pendingReasoning.length = 0;
 }
 
-function renderMessagePartsResult(message: any, depth = 0, provider = "opencode", initialReasoning: any[] = [], view: ConversationViewModel | null = null, placedCardIds: Set<string> | null = null): any {
-  const renderedParts = [];
+function renderMessagePartsResult(message: any, depth = 0, provider = "opencode", initialReasoning: any[] = [], view: ConversationViewModel | null = null, placedCardIds: Set<string> | null = null, relations: ReaderRelationMarkup | null = null, ownedChildrenByPart: Map<string, OwnedReaderChildDescriptor[]> | null = null): any {
+  const renderedParts: string[] = [];
+  let executionParts: ConversationItem[] = [];
   const pendingReasoning = [...initialReasoning];
   let visibleCount = 0;
+  let hasMilestones = false;
+  const flushExecution = () => {
+    if (!executionParts.length) return;
+    renderedParts.push(renderConversationProcessDisclosure(executionParts, "data-reader-execution"));
+    executionParts = [];
+  };
+  const milestone = (partId: string, side: "before" | "after") => {
+    const markup = relations?.parts.get(readerRelationPositionKey(partId, side));
+    if (!markup) return;
+    flushExecution();
+    attachPendingReasoning(renderedParts, pendingReasoning);
+    renderedParts.push(markup);
+    visibleCount += 1;
+    hasMilestones = true;
+  };
 
   for (const part of message.parts) {
+    milestone(part.id, "before");
     if (part.type === "reasoning") {
       const reasoning = renderReasoningPart(part.data, part.id);
       if (reasoning) {
         pendingReasoning.push(reasoning);
       }
+      milestone(part.id, "after");
       continue;
     }
 
     const reasoningMarkup = pendingReasoning.join("\n");
     const isToolPart = part.type === "tool";
-    let rendered: any = renderPartNode(message.data, part, depth, provider, isToolPart ? "" : reasoningMarkup, view, placedCardIds);
+    let rendered: any = renderPartNode(message.data, part, depth, provider, isToolPart ? "" : reasoningMarkup, view, placedCardIds, ownedChildrenByPart?.get(String(part.id)) || []);
     if (rendered && reasoningMarkup && isToolPart) {
       rendered = `${renderTurnReasoning(reasoningMarkup)}\n${rendered}`;
     } else if (rendered && reasoningMarkup && !rendered.includes(reasoningMarkup) && !(part.type === "text" && !part.data?.text)) {
       rendered = attachReasoningToRenderedPart(rendered, reasoningMarkup) || rendered;
     }
     if (rendered) {
-      renderedParts.push(rendered);
+      const children = ownedChildrenByPart?.get(String(part.id)) || [];
+      const hasChild = part.childSessions.length > 0 || children.length > 0;
+      const hasLocalRelation = relations?.parts.has(readerRelationPositionKey(part.id, "before"))
+        || relations?.parts.has(readerRelationPositionKey(part.id, "after"));
+      if (isToolPart && (!hasChild || hasLocalRelation)) {
+        executionParts.push({ kind: "block", role: "assistant", html: rendered, processOnly: true });
+      } else {
+        flushExecution();
+        renderedParts.push(rendered);
+      }
       // Child markup can contain hidden event anchors even when the task branch
       // itself is visible. Classify the source part, not its generated HTML.
       if (isVisiblePartNode(part)) {
@@ -784,20 +853,16 @@ function renderMessagePartsResult(message: any, depth = 0, provider = "opencode"
         pendingReasoning.length = 0;
       }
     }
+    milestone(part.id, "after");
   }
+  flushExecution();
 
   return {
     markup: renderedParts.filter(Boolean).join("\n"),
     hasVisibleContent: visibleCount > 0,
+    hasMilestones,
     pendingReasoning
   };
-}
-
-function renderMessageParts(message: any, depth = 0, provider = "opencode", view: ConversationViewModel | null = null, placedCardIds: Set<string> | null = null) {
-  const result = renderMessagePartsResult(message, depth, provider, [], view, placedCardIds);
-  const renderedParts = result.markup ? [result.markup] : [];
-  attachPendingReasoning(renderedParts, result.pendingReasoning);
-  return renderedParts.filter(Boolean).join("\n");
 }
 
 interface ConversationEntry {
@@ -807,6 +872,7 @@ interface ConversationEntry {
   timeCreated: number;
   presentationPhase?: MessagePresentationPhase;
   processOnly: boolean;
+  hasMilestones?: boolean;
 }
 
 /**
@@ -815,7 +881,7 @@ interface ConversationEntry {
  * these entries by user turn; nested session rendering keeps its existing
  * linear behavior inside subagent branches.
  */
-function renderSessionMessageEntries(tree: SessionTree, depth = 0, provider = "opencode", view: ConversationViewModel | null = null, placedCardIds: Set<string> | null = null): ConversationEntry[] {
+function renderSessionMessageEntries(tree: SessionTree, depth = 0, provider = "opencode", view: ConversationViewModel | null = null, placedCardIds: Set<string> | null = null, relations: ReaderRelationMarkup | null = null, ownedChildrenByPart: Map<string, OwnedReaderChildDescriptor[]> | null = null): ConversationEntry[] {
   const entries: ConversationEntry[] = [];
   let previousCacheUsage = null;
 
@@ -826,7 +892,7 @@ function renderSessionMessageEntries(tree: SessionTree, depth = 0, provider = "o
       previousCacheUsage = annotated.usage;
     }
     let markup = "";
-    const result = renderMessagePartsResult(message, depth, provider, [], view, placedCardIds);
+    const result = renderMessagePartsResult(message, depth, provider, [], view, placedCardIds, relations, ownedChildrenByPart);
     if (result.hasVisibleContent && result.markup) {
       const group = [renderMessageGroup(message, result.markup, provider)];
       attachPendingReasoning(group, result.pendingReasoning);
@@ -841,10 +907,13 @@ function renderSessionMessageEntries(tree: SessionTree, depth = 0, provider = "o
       const messageAnchor = escapeHtml(anchorId("msg", message.id));
       markup = `<span id="${messageAnchor}" class="session-event-anchor" aria-hidden="true"></span>`;
     }
+    const before = relations?.messages.get(readerRelationPositionKey(message.id, "before")) || "";
+    const after = relations?.messages.get(readerRelationPositionKey(message.id, "after")) || "";
     entries.push({
       messageId: String(message.id || ""),
       role: messageTurnRole(message.role),
-      markup,
+      markup: before + markup + after,
+      hasMilestones: result.hasMilestones || Boolean(before || after),
       timeCreated: Number(message.timeCreated) || 0,
       presentationPhase: message.data?.presentationPhase,
       processOnly: messageTurnRole(message.role) === "assistant" && !hasOwnMessageBubble(message)
@@ -854,41 +923,25 @@ function renderSessionMessageEntries(tree: SessionTree, depth = 0, provider = "o
   return entries;
 }
 
-function renderSessionTree(tree: SessionTree, depth = 0, provider = "opencode", inferred = false): string {
-  const messageMarkup = renderSessionMessageEntries(tree, depth, provider)
-    .map((entry) => entry.markup)
-    .filter(Boolean)
-    .join("\n");
-
-  const detachedMarkup: any = tree.detachedChildren
-    .map((child) => renderSessionTree(child, depth + 1, provider, true))
-    .filter(Boolean)
-    .join("\n");
-  const body: any = [messageMarkup, detachedMarkup].filter(Boolean).join("\n");
-
-  if (depth === 0) {
-    return body;
-  }
-
-  return `<details id="${escapeHtml(anchorId("session", tree.session.id || ""))}" class="subsession-container${inferred ? " subsession-container-inferred" : ""}" data-session-id="${escapeHtml(tree.session.id || "")}" data-session-relationship="${inferred ? "inferred" : "nested"}" data-depth="${depth}">
-    ${renderSubsessionHeader(tree, inferred)}
-    <div class="subsession-body">
-      ${body || `<p class="empty-state">${t("detail.no_messages")}</p>`}
-    </div>
-  </details>`;
-}
-
-function renderRawParts(messageData: any, parts: any[] = []) {
-  const renderedParts = [];
-  const pendingReasoning = [];
+function renderRawParts(messageData: any, parts: any[] = [], relations: ReaderRelationMarkup | null = null) {
+  const renderedParts: string[] = [];
+  const pendingReasoning: string[] = [];
+  const milestone = (id: string, side: "before" | "after") => {
+    const markup = relations?.parts.get(readerRelationPositionKey(id, side));
+    if (!markup) return;
+    attachPendingReasoning(renderedParts, pendingReasoning);
+    renderedParts.push(markup);
+  };
 
   for (const part of parts) {
+    milestone(part.id, "before");
     const partData = safeParse(part.data);
     if (partData?.type === "reasoning") {
       const reasoning = renderReasoningPart(partData, part.id, messageData.contentScope);
       if (reasoning) {
         pendingReasoning.push(reasoning);
       }
+      milestone(part.id, "after");
       continue;
     }
 
@@ -901,6 +954,7 @@ function renderRawParts(messageData: any, parts: any[] = []) {
       renderedParts.push(rendered);
       pendingReasoning.length = 0;
     }
+    milestone(part.id, "after");
   }
 
   attachPendingReasoning(renderedParts, pendingReasoning);
@@ -908,7 +962,7 @@ function renderRawParts(messageData: any, parts: any[] = []) {
   return renderedParts.filter(Boolean).join("\n");
 }
 
-function renderRawMessageEntries(messages: any, partsByMessage: any, provider: any, anchorPrefix = "msg"): ConversationEntry[] {
+function renderRawMessageEntries(messages: any, partsByMessage: any, provider: any, anchorPrefix = "msg", relations: ReaderRelationMarkup | null = null): ConversationEntry[] {
   const entries: ConversationEntry[] = [];
   let previousCacheUsage = null;
 
@@ -923,7 +977,10 @@ function renderRawMessageEntries(messages: any, partsByMessage: any, provider: a
       previousCacheUsage = annotated.usage;
     }
     const parts = partsByMessage.get(message.id) || [];
-    const renderedParts = renderRawParts(messageData, parts);
+    const before = relations?.messages.get(readerRelationPositionKey(message.id, "before")) || "";
+    const after = relations?.messages.get(readerRelationPositionKey(message.id, "after")) || "";
+    const renderedParts = before + renderRawParts(messageData, parts, relations) + after;
+    const hasMilestones = Boolean(before || after) || parts.some((part: any) => relations?.parts.has(readerRelationPositionKey(part.id, "before")) || relations?.parts.has(readerRelationPositionKey(part.id, "after")));
     if (!renderedParts) {
       continue;
     }
@@ -932,12 +989,14 @@ function renderRawMessageEntries(messages: any, partsByMessage: any, provider: a
     const previous = entries[entries.length - 1];
     if (String(messageData.role || "").toLowerCase() === "tool" && previous?.role === "assistant") {
       previous.markup += `\n${renderedParts}`;
+      previous.hasMilestones ||= hasMilestones;
       continue;
     }
 
     entries.push({
       messageId: String(message.id || ""),
       role,
+      hasMilestones,
       markup: renderMessageGroup({
         id: message.id,
         role,
@@ -952,41 +1011,49 @@ function renderRawMessageEntries(messages: any, partsByMessage: any, provider: a
   return entries;
 }
 
+export function renderInheritedContextPage(view: InheritedContextView, provider: string, offset = 0) {
+  const mapped = buildPartsFromProviderMessages(view.messages, `inherited-${view.sourceSession.sessionId}-`, "inherited-context");
+  const end = Math.min(offset + 40, mapped.messages.length);
+  const entries = renderRawMessageEntries(mapped.messages.slice(offset, end), mapped.partsByMessage, provider, "inherited-msg");
+  const label = end < view.total
+    ? t("detail.inherited_context_truncated", { shown: String(end), total: String(view.total) })
+    : t("detail.inherited_context_count", { count: String(view.total) });
+  return {
+    html: entries.map((entry) => entry.markup).filter(Boolean).join("\n"),
+    nextOffset: end < mapped.messages.length ? end : null,
+    shown: end,
+    total: view.total,
+    label
+  };
+}
+
 function renderInheritedContext(view: InheritedContextView | null, provider: string) {
   if (!view?.messages?.length || !view.sourceSession?.sessionId) {
     return "";
   }
-  const idPrefix = `inherited-${view.sourceSession.sessionId}-`;
-  const mapped = buildPartsFromProviderMessages(view.messages, idPrefix, "inherited-context");
-  const entries = renderRawMessageEntries(mapped.messages, mapped.partsByMessage, provider, "inherited-msg");
+  const page = renderInheritedContextPage(view, provider);
   const sourceHref = conversationSessionHref(view.sourceSession);
-  const shown = view.messages.length;
-  const bound = view.truncated
-    ? t("detail.inherited_context_truncated", { shown: String(shown), total: String(view.total) })
-    : t("detail.inherited_context_count", { count: String(view.total) });
-  const messageMarkup = entries.map((entry) => entry.markup).filter(Boolean).join("\n");
-  if (!messageMarkup) return "";
+  if (!page.html) return "";
+  const sourceProvider = view.sourceSession.provider || provider;
+  const sourceAnchor = anchorId("session", view.sourceSession.sessionId);
   return `<details class="inherited-context-disclosure" data-disclosure data-inherited-context>
-    <summary class="inherited-context-summary">${escapeHtml(t("detail.inherited_context_title"))}<span class="inherited-context-count">${escapeHtml(bound)}</span></summary>
+    <summary class="inherited-context-summary">${escapeHtml(t("detail.inherited_context_title"))}<span class="inherited-context-count">${escapeHtml(page.label)}</span></summary>
     <div class="inherited-context-body">
-      <p class="inherited-context-note">${escapeHtml(t("detail.inherited_context_note"))} ${sourceHref ? `<a href="${escapeHtml(sourceHref)}">${escapeHtml(t("detail.inherited_context_source"))}</a>` : ""}</p>
-      <div class="messages inherited-context-messages" data-inherited-context-messages data-message-count="${shown}">
-        ${messageMarkup}
+      <p class="inherited-context-note">${escapeHtml(t("detail.inherited_context_note"))} ${sourceHref ? `<a data-reader-open data-reader-provider="${escapeHtml(sourceProvider)}" data-reader-session="${escapeHtml(view.sourceSession.sessionId)}" data-reader-anchor="${escapeHtml(sourceAnchor)}" href="${escapeHtml(sourceHref)}">${escapeHtml(t("detail.inherited_context_source"))}</a>` : ""}</p>
+      <div class="messages inherited-context-messages" data-inherited-context-messages data-message-count="${page.shown}">
+        ${page.html}
       </div>
+      ${page.nextOffset === null ? "" : `<button type="button" class="progressive-more" data-inherited-context-more data-next-offset="${page.nextOffset}">${escapeHtml(t("detail.inherited_context_more"))}</button>`}
     </div>
   </details>`;
 }
 
-// ── Conversation agent cards, channels, references, inspector (UI v2 P2b) ──
+// ── Conversation agent cards, channels, inspector ──
 
 // One stable anchor per card; sanitized through the same helper as spine
 // anchors so deep links, ToC jumps, and the browser navigation remain stable.
 function agentCardAnchorId(cardId: string) {
   return anchorId("agent-card", cardId);
-}
-
-function agentReferenceAnchorId(referenceId: string) {
-  return anchorId("agent-ref", referenceId);
 }
 
 function conversationSessionHref(ref: { provider: string; sessionId: string } | null | undefined) {
@@ -1016,17 +1083,41 @@ function coordinationStateLabel(state: string) {
 }
 
 function coordinationKindLabel(kind: string) {
-  const normalized = String(kind).replace(/[^a-z0-9_-]/gi, "-").toLowerCase();
+  const normalized = kind.replace(/[^a-z0-9_]/gi, "_").toLowerCase();
   const label = t(`conversation.channel_${normalized}`);
   return label === `conversation.channel_${normalized}` ? kind : label;
 }
 
 function channelTimeLabel(timestamp: number | null) {
-  return timestamp ? formatTime(timestamp) : null;
+  return Number.isFinite(timestamp)
+    ? new Date(timestamp!).toISOString().replace("T", " ").replace("Z", " UTC")
+    : null;
 }
 
-function renderAgentChannel(channel: ConversationChannelItem[], truncated: boolean) {
-  const items = channel.map((item) => {
+function readerEventSource(item: ConversationChannelItem, provider: string, sessionId: string) {
+  const source = item.sourceEventRef;
+  const eventId = source?.eventId || item.eventId;
+  if (!eventId) return null;
+  const owner = source?.session || { provider, sessionId };
+  if (!owner.provider || !owner.sessionId) return null;
+  return {
+    provider: owner.provider,
+    sessionId: owner.sessionId,
+    eventId,
+    href: readerEventHref(owner.provider, owner.sessionId, eventId)
+  };
+}
+
+function readerCoordinationUrl(provider: string, sessionId: string, card: ConversationAgentCard) {
+  const params = new URLSearchParams({ size: "50" });
+  if (card.id.startsWith("task:") && card.id.slice(5)) params.set("taskId", card.id.slice(5));
+  if (card.id.startsWith("run:") && card.id.slice(4)) params.set("runId", card.id.slice(4));
+  if (card.channelNextCursor) params.set("cursor", card.channelNextCursor);
+  return `/api/${encodeURIComponent(provider)}/session/${encodeURIComponent(sessionId)}/reader/coordination?${params}`;
+}
+
+function renderAgentChannel(channel: ConversationChannelItem[], truncated: boolean, card: ConversationAgentCard, provider: string, sessionId: string, disclosure = true) {
+  const itemMarkup = channel.map((item) => {
     const direction = [
       item.senderName ? escapeHtml(item.senderName) : "",
       item.recipientName ? escapeHtml(item.recipientName) : ""
@@ -1035,25 +1126,44 @@ function renderAgentChannel(channel: ConversationChannelItem[], truncated: boole
       ? `<span class="agent-channel-direction">${direction.filter(Boolean).join(" → ")}</span>`
       : "";
     const stateLabel = coordinationStateLabel(item.state);
+    const source = readerEventSource(item, provider, sessionId);
+    const kindMarkup = source
+      ? renderReaderEventSourceLink(source.provider, source.sessionId, source.eventId, coordinationKindLabel(item.kind), "agent-channel-kind agent-channel-source")
+      : `<span class="agent-channel-kind">${escapeHtml(coordinationKindLabel(item.kind))}</span>`;
     return `<li class="agent-channel-item" data-channel-kind="${escapeHtml(item.kind)}" data-channel-id="${escapeHtml(item.id)}">
-      <span class="agent-channel-kind">${escapeHtml(coordinationKindLabel(item.kind))}</span>
-      ${stateLabel ? `<span class="agent-channel-state">${escapeHtml(stateLabel)}</span>` : ""}
+      ${kindMarkup}
+      ${stateLabel && (disclosure || item.state !== "unknown") ? `<span class="agent-channel-state">${escapeHtml(stateLabel)}</span>` : ""}
       ${channelTimeLabel(item.timestamp) ? `<time class="agent-channel-time">${escapeHtml(channelTimeLabel(item.timestamp)!)}</time>` : ""}
       ${directionLabel}
     </li>`;
-  }).join("\n");
+  });
+  const groups: string[] = [];
+  for (let index = 0; index < channel.length;) {
+    let end = index + 1;
+    if (!disclosure && channel[index].kind === "message") {
+      while (end < channel.length && channel[end].kind === "message") end += 1;
+    }
+    const group = itemMarkup.slice(index, end).join("\n");
+    groups.push(end - index > 1
+      ? `<li class="reader-channel-group"><details><summary>${escapeHtml(t("detail.reader_channel_messages", { count: String(end - index) }))}</summary><ol>${group}</ol></details></li>`
+      : group);
+    index = end;
+  }
+  const items = groups.join("\n");
   const countLabel = channel.length
     ? escapeHtml(t("conversation.agent_channel_items", { count: String(channel.length) }))
     : "";
-  return `<details class="agent-channel" data-agent-channel data-disclosure>
-    <summary class="agent-channel-summary" aria-expanded="false"><span>${escapeHtml(t("conversation.agent_channel"))}</span>${countLabel ? `<span class="agent-channel-count">${countLabel}</span>` : ""}</summary>
+  const wrapper = disclosure ? "details" : "section";
+  const heading = disclosure ? 'summary class="agent-channel-summary" aria-expanded="false"' : 'h3 class="agent-channel-summary"';
+  return `<${wrapper} class="agent-channel" data-agent-channel data-reader-coordination-provider="${escapeHtml(provider)}" data-reader-coordination-session="${escapeHtml(sessionId)}"${disclosure ? " data-disclosure" : ""}>
+    <${heading}><span>${escapeHtml(t("conversation.agent_channel"))}</span>${countLabel ? `<span class="agent-channel-count">${countLabel}</span>` : ""}</${disclosure ? "summary" : "h3"}>
     ${items
-      ? `<ol class="agent-channel-list">${items}</ol>${truncated ? `<p class="agent-channel-more">${escapeHtml(t("conversation.agent_channel_more", { count: String(channel.length) }))}</p>` : ""}`
+      ? `<ol class="agent-channel-list" data-reader-coordination-list>${items}</ol>${truncated ? `<button class="agent-channel-more" type="button" data-reader-coordination-more data-reader-coordination-url="${escapeHtml(readerCoordinationUrl(provider, sessionId, card))}">${escapeHtml(t("conversation.agent_channel_load_more"))}</button><span class="agent-channel-load-state" data-reader-coordination-state aria-live="polite"></span>` : ""}`
       : `<p class="agent-channel-empty">${escapeHtml(t("conversation.agent_no_channel"))}</p>`}
-  </details>`;
+  </${wrapper}>`;
 }
 
-function renderAgentCard(card: ConversationAgentCard, part: SessionPartNode | null, provider: string) {
+function renderAgentCard(card: ConversationAgentCard, part: SessionPartNode | null, provider: string, retainedMarkup = "", sessionId = "") {
   const displayName = card.name || card.responsibility || t("conversation.agent_unknown");
   const stateLabel = conversationStateLabel(card.state);
   const meta = [];
@@ -1075,16 +1185,6 @@ function renderAgentCard(card: ConversationAgentCard, part: SessionPartNode | nu
   const resultLabel = resultArrival ? channelTimeLabel(resultArrival)! : null;
   const childSession = card.childSession;
   const cardAnchor = agentCardAnchorId(card.id);
-  // Preserve the canonical child-session anchor at the dispatch position so
-  // ToC task links and cross-page deep links keep resolving under cards. The
-  // anchor is only emitted when this card actually replaces one of the part's
-  // own child-session blocks; otherwise the nested fallback owns that id.
-  // Standalone (unplaced) cards have no spine position: the card anchor is
-  // the only target, and no invented `part-`/`session-` anchor is emitted.
-  const partChildIds = new Set((part?.childSessions || []).map((child: any) => String(child.session?.id || "")));
-  const childAnchors = part
-    ? [...partChildIds].filter(Boolean).map((id) => `<span id="${escapeHtml(anchorId("session", id))}" class="session-event-anchor" aria-hidden="true"></span>`).join("")
-    : "";
   const actions = childSession
     ? renderChildSessionExportActions(
         childSession,
@@ -1095,7 +1195,8 @@ function renderAgentCard(card: ConversationAgentCard, part: SessionPartNode | nu
     : "";
   const cardBody = `
     <div class="agent-card-body">
-      ${renderAgentChannel(card.channel, card.channelTruncated)}
+      ${retainedMarkup}
+      ${renderAgentChannel(card.channel, card.channelTruncated, card, provider, sessionId)}
     </div>`;
   const details = `<details class="agent-card" id="${escapeHtml(cardAnchor)}" data-agent-card data-agent-card-id="${escapeHtml(card.id)}" data-agent-name="${escapeHtml(card.name || "")}" data-agent-state="${escapeHtml(card.state || "")}" data-agent-child-session="${escapeHtml(childSession?.sessionId || "")}" data-disclosure>
       <summary class="agent-card-summary" aria-expanded="false">
@@ -1112,34 +1213,20 @@ function renderAgentCard(card: ConversationAgentCard, part: SessionPartNode | nu
   if (!part) {
     return details;
   }
-  return `<div class="session-part-anchor" id="${escapeHtml(anchorId("part", part.id))}">
-    ${childAnchors}
+  return `<div class="session-part-anchor">
     ${details}
   </div>`;
 }
 
-function renderUnplacedAgentSection(cards: ConversationAgentCard[], provider: string) {
+function renderUnplacedAgentSection(cards: ConversationAgentCard[], provider: string, sessionId: string) {
   if (!cards.length) {
     return "";
   }
-  const items = cards.map((card) => renderAgentCard(card, null, provider)).join("\n");
+  const items = cards.map((card) => renderAgentCard(card, null, provider, "", sessionId)).join("\n");
   return `<section class="agent-cards-unplaced" data-agent-cards-unplaced>
     <h2 class="agent-cards-unplaced-title">${escapeHtml(t("conversation.agent_unplaced_title"))}</h2>
     <p class="agent-cards-unplaced-note">${escapeHtml(t("conversation.agent_unplaced_note"))}</p>
     <div class="agent-cards-unplaced-list">${items}</div>
-  </section>`;
-}
-
-function renderAgentReference(reference: ConversationReference) {
-  const kindLabel = t(`conversation.reference_${reference.kind}`);
-  const link = reference.cardId
-    ? `<a class="agent-reference-target" href="#${escapeHtml(agentCardAnchorId(reference.cardId))}">${escapeHtml(reference.name || t("conversation.agent_unknown"))}</a>`
-    : `<span class="agent-reference-target">${escapeHtml(reference.name || t("conversation.agent_unknown"))}</span>`;
-  const time = channelTimeLabel(reference.timestamp);
-  return `<section id="${escapeHtml(agentReferenceAnchorId(reference.id))}" class="agent-reference-row" data-agent-reference data-reference-id="${escapeHtml(reference.id)}" data-reference-kind="${escapeHtml(reference.kind)}" data-reference-card="${escapeHtml(reference.cardId)}">
-    ${link}
-    <span class="agent-reference-kind">${escapeHtml(kindLabel === `conversation.reference_${reference.kind}` ? reference.kind : kindLabel)}</span>
-    ${time ? `<time class="agent-reference-time">${escapeHtml(time)}</time>` : ""}
   </section>`;
 }
 
@@ -1203,11 +1290,15 @@ function renderInspectorUsage(inspector: ConversationInspectorView) {
 function renderInspectorRelationships(inspector: ConversationInspectorView) {
   const rows = inspector.relationships.map((relationship) => {
     const href = conversationSessionHref(relationship.otherSession);
+    const other = relationship.otherSession;
+    const sourceAttributes = other
+      ? ` data-reader-source data-reader-provider="${escapeHtml(other.provider)}" data-reader-session="${escapeHtml(other.sessionId)}" data-reader-anchor="${escapeHtml(anchorId("session", other.sessionId))}"`
+      : "";
     return `<li class="inspector-relationship" data-relationship-type="${escapeHtml(relationship.type)}" data-relationship-direction="${relationship.outgoing ? "outgoing" : "incoming"}">
       <span class="inspector-relationship-type">${escapeHtml(t(`conversation.relationship_${relationship.type}`))}</span>
       ${href && relationship.otherSession && relationship.otherSessionAvailable !== false
-        ? `<a class="inspector-relationship-link" href="${escapeHtml(href)}">${escapeHtml(relationship.otherSession.sessionId)}</a>`
-        : `<span class="inspector-relationship-link"${relationship.otherSessionAvailable === false ? " data-relationship-unavailable" : ""}>${escapeHtml(relationship.otherSessionAvailable === false ? t("conversation.inspector_session_unavailable") : t("conversation.inspector_not_recorded"))}</span>`}
+        ? `<a class="inspector-relationship-link"${sourceAttributes} href="${escapeHtml(href)}">${escapeHtml(relationship.otherSession.sessionId)}</a>`
+        : `<span class="inspector-relationship-link"${sourceAttributes}${relationship.otherSessionAvailable === false ? " data-relationship-unavailable" : ""}>${escapeHtml(relationship.otherSessionAvailable === false ? t("conversation.inspector_session_unavailable") : t("conversation.inspector_not_recorded"))}</span>`}
     </li>`;
   }).join("\n");
   const overflow = inspector.relationshipCount > inspector.relationships.length
@@ -1233,7 +1324,7 @@ function renderInspectorAssetGroup(group: { scope: string; items: any[] }) {
     for (const source of asset.sourceSessions || []) {
       const href = conversationSessionHref(source);
       if (href) {
-        sources.push(`<a class="inspector-asset-source" href="${escapeHtml(href)}">${escapeHtml(t("conversation.asset_source"))}</a>`);
+        sources.push(`<a class="inspector-asset-source" data-reader-source data-reader-provider="${escapeHtml(source.provider)}" data-reader-session="${escapeHtml(source.sessionId)}" data-reader-anchor="${escapeHtml(anchorId("session", source.sessionId))}" href="${escapeHtml(href)}">${escapeHtml(t("conversation.asset_source"))}</a>`);
       }
     }
     if (asset.producerRunId) {
@@ -1281,14 +1372,17 @@ function renderConversationInspector(inspector: ConversationInspectorView | null
   </aside>`;
 }
 
-function conversationCardForPart(view: ConversationViewModel | null, part: SessionPartNode, messageId: string, placedCardIds: Set<string> | null = null) {
+function conversationCardForPart(view: ConversationViewModel | null, part: SessionPartNode, messageId: string, placedCardIds: Set<string> | null = null, ownedChildren: OwnedReaderChildDescriptor[] = []) {
   if (!view?.cards.length || !part) {
     return null;
   }
   // A card already placed at another spine position must not be re-bound
   // (exactly-once); the part keeps the nested-session fallback instead.
   const available = (card: ConversationAgentCard) => !placedCardIds?.has(card.id);
-  const childIds = new Set((part.childSessions || []).map((child: any) => String(child.session?.id || "")));
+  const childIds = new Set([
+    ...(part.childSessions || []).map((child: any) => String(child.session?.id || "")),
+    ...ownedChildren.map((child) => child.sessionId)
+  ]);
   for (const card of view.cards) {
     if (available(card) && card.bindings.taskToolCallId && card.bindings.taskToolCallId === part.id) {
       return card;
@@ -1309,12 +1403,7 @@ function conversationCardForPart(view: ConversationViewModel | null, part: Sessi
 
 // ── Conversation thread (UI v2 P2a) ────────────────────────────────────
 
-const CONVERSATION_THREAD_THRESHOLD = 20;
-function conversationDefaultMode(messageCount: number) {
-  return Number(messageCount) > CONVERSATION_THREAD_THRESHOLD ? "thread" : "linear";
-}
-
-function renderCompactionCheckpoint(compaction: any, provider: string, placement: "anchored" | "timestamp" | "end") {
+function renderCompactionCheckpoint(compaction: any, provider: string, sessionId: string, placement: "anchored" | "timestamp" | "end") {
   const tokenParts = [];
   if (compaction.tokensBefore != null) {
     tokenParts.push(`${t("conversation.checkpoint_before")} ${formatCount(compaction.tokensBefore)}`);
@@ -1330,7 +1419,6 @@ function renderCompactionCheckpoint(compaction: any, provider: string, placement
     // event provenance stays available on the element as a data attribute.
     placement !== "anchored" ? t("conversation.checkpoint_position_derived") : ""
   ].filter(Boolean).join(" · ");
-  const summary = compactText(compaction.summary, 160);
   const facts = [];
   if (compaction.trigger) {
     facts.push(`<dt>${escapeHtml(t("conversation.checkpoint_trigger"))}</dt><dd>${escapeHtml(compaction.trigger === "unknown" ? t("conversation.checkpoint_unknown") : compaction.trigger)}</dd>`);
@@ -1340,11 +1428,9 @@ function renderCompactionCheckpoint(compaction: any, provider: string, placement
   }
   if (compaction.continuationSessionId) {
     const encoded = encodeURIComponent(compaction.continuationSessionId);
-    facts.push(`<dt>${escapeHtml(t("conversation.checkpoint_continuation"))}</dt><dd><a href="/${escapeHtml(provider)}/session/${encoded}">${escapeHtml(compaction.continuationSessionId)}</a></dd>`);
+    facts.push(`<dt>${escapeHtml(t("conversation.checkpoint_continuation"))}</dt><dd><a data-reader-open data-reader-provider="${escapeHtml(provider)}" data-reader-session="${escapeHtml(compaction.continuationSessionId)}" href="/${escapeHtml(provider)}/session/${encoded}">${escapeHtml(compaction.continuationSessionId)}</a></dd>`);
   }
-  const result = summary
-    ? `<div class="compaction-checkpoint-result"><span class="compaction-checkpoint-result-label">${escapeHtml(t("conversation.checkpoint_result_label"))}</span><span class="compaction-checkpoint-summary">${escapeHtml(summary)}</span></div>`
-    : `<div class="compaction-checkpoint-result compaction-checkpoint-result-missing">${escapeHtml(t("conversation.checkpoint_result_missing"))}</div>`;
+  const result = `<div class="compaction-checkpoint-result"><span class="compaction-checkpoint-result-label">${escapeHtml(t("conversation.checkpoint_result_label"))}</span><span class="compaction-checkpoint-result-placeholder">${escapeHtml(t("conversation.context_result_load_prompt"))}</span><details class="context-result-disclosure" data-context-result data-context-result-provider="${escapeHtml(provider)}" data-context-result-session="${escapeHtml(sessionId)}" data-context-result-checkpoint="${escapeHtml(compaction.id)}"><summary>${escapeHtml(t("conversation.context_result_disclosure"))}</summary><div class="context-result-panel" data-context-result-panel><span class="context-result-state">${escapeHtml(t("conversation.context_result_load_prompt"))}</span></div></details></div>`;
   const evidence = facts.length
     ? `<details class="compaction-checkpoint-details"><summary>${escapeHtml(t("conversation.checkpoint_details"))}</summary><dl class="compaction-checkpoint-facts">${facts.join("")}</dl></details>`
     : "";
@@ -1356,20 +1442,21 @@ function renderCompactionCheckpoint(compaction: any, provider: string, placement
   </section>`;
 }
 
-function renderConversationProcessDisclosure(items: ConversationItem[]) {
+function renderConversationProcessDisclosure(items: ConversationItem[], attribute = "data-conversation-process") {
   const count = String(items.length);
-  return `<details class="conversation-process-disclosure" data-conversation-process data-conversation-process-count="${escapeHtml(count)}">
+  return `<details class="conversation-process-disclosure" ${attribute} ${attribute}-count="${escapeHtml(count)}">
     <summary class="conversation-process-summary"><span class="conversation-process-kicker">${escapeHtml(t("conversation.process_kicker"))}</span><span class="conversation-process-count">${escapeHtml(t("conversation.process_items", { count }))}</span></summary>
     <div class="conversation-process-body">${items.map((item) => item.html).join("\n")}</div>
   </details>`;
 }
 
 interface ConversationItem {
-  kind: "block" | "checkpoint" | "reference";
+  kind: "block" | "checkpoint";
   role?: string;
   html: string;
   presentationPhase?: MessagePresentationPhase;
   processOnly?: boolean;
+  hasMilestones?: boolean;
 }
 
 function isRecordedFinalItem(item: ConversationItem) {
@@ -1403,6 +1490,7 @@ function renderConversationSegmentItems(items: ConversationItem[]) {
     const foldable = hasLaterFinal[index]
       && item.kind === "block"
       && item.role === "assistant"
+      && !item.hasMilestones
       && (item.processOnly === true || item.presentationPhase === "commentary");
     if (foldable) {
       processItems.push(item);
@@ -1425,7 +1513,7 @@ function renderConversationSegmentItems(items: ConversationItem[]) {
  * checkpoints render exactly once, in both modes, and never as a message
  * group or ToC entry.
  */
-function renderConversationThread(entries: ConversationEntry[], compactions: any[], provider: string, view: ConversationViewModel | null = null) {
+function renderConversationThread(entries: ConversationEntry[], compactions: any[], provider: string, sessionId: string, view: ConversationViewModel | null = null) {
   // Resolve each checkpoint to the entry index it follows and to one of the
   // explicit placement kinds: -1 means before the first entry; entries.length
   // means after the last (explicit end placement). The placement kind is
@@ -1454,29 +1542,10 @@ function renderConversationThread(entries: ConversationEntry[], compactions: any
   for (const compaction of compactions) {
     place(compaction);
   }
-  // Main-thread reference rows are anchored exactly like checkpoints: their
-  // recorded turn name must resolve against the spine, otherwise the fact
-  // stays in the card channel (never placed by guess).
-  const referencesByEntryIndex = new Map<number, ConversationReference[]>();
-  for (const reference of view?.references || []) {
-    const position = reference.anchorMessageId ? indexOf(reference.anchorMessageId) : -1;
-    if (position < 0) {
-      continue;
-    }
-    const list = referencesByEntryIndex.get(position) || [];
-    list.push(reference);
-    referencesByEntryIndex.set(position, list);
-  }
-
   const items: ConversationItem[] = [];
   const pushCheckpoints = (position: number) => {
     for (const placed of byEntryIndex.get(position) || []) {
-      items.push({ kind: "checkpoint", html: renderCompactionCheckpoint(placed.compaction, provider, placed.placement) });
-    }
-  };
-  const pushReferences = (position: number) => {
-    for (const reference of referencesByEntryIndex.get(position) || []) {
-      items.push({ kind: "reference", html: renderAgentReference(reference) });
+      items.push({ kind: "checkpoint", html: renderCompactionCheckpoint(placed.compaction, provider, sessionId, placed.placement) });
     }
   };
   pushCheckpoints(-1);
@@ -1487,11 +1556,9 @@ function renderConversationThread(entries: ConversationEntry[], compactions: any
         role: entry.role,
         html: entry.markup,
         presentationPhase: entry.presentationPhase,
-        processOnly: entry.processOnly
+        processOnly: entry.processOnly,
+        hasMilestones: entry.hasMilestones
       });
-    }
-    if (referencesByEntryIndex.has(index)) {
-      pushReferences(index);
     }
     if (byEntryIndex.has(index)) {
       pushCheckpoints(index);
@@ -1523,13 +1590,12 @@ function renderConversationThread(entries: ConversationEntry[], compactions: any
 
   const trailing = byEntryIndex.get(entries.length) || [];
   return trailing.length
-    ? `${thread}${thread ? "\n" : ""}${trailing.map((placed) => renderCompactionCheckpoint(placed.compaction, provider, placed.placement)).join("\n")}`
+    ? `${thread}${thread ? "\n" : ""}${trailing.map((placed) => renderCompactionCheckpoint(placed.compaction, provider, sessionId, placed.placement)).join("\n")}`
     : thread;
 }
 
-function renderConversationPanel(entries: ConversationEntry[], compactions: any[], provider: string, defaultMode: string, detachedMarkup = "", normalizedMessageCount = entries.length, view: ConversationViewModel | null = null, placedCardIds: Set<string> | null = null) {
-  const threadMarkup = renderConversationThread(entries, compactions, provider, view);
-  const inspectorMarkup = renderConversationInspector(view?.inspector ?? null, provider, "");
+function renderConversationPanel(entries: ConversationEntry[], compactions: any[], provider: string, sessionId: string, detachedMarkup = "", normalizedMessageCount = entries.length, view: ConversationViewModel | null = null, placedCardIds: Set<string> | null = null, relations: ReaderRelationMarkup | null = null) {
+  const threadMarkup = renderConversationThread(entries, compactions, provider, sessionId, view);
   // P2b truthful fallback: view-model cards without a real transcript/part
   // binding (e.g. run/task records whose ids name no tree part) render
   // exactly once in an explicitly unplaced section, never at an invented
@@ -1537,38 +1603,223 @@ function renderConversationPanel(entries: ConversationEntry[], compactions: any[
   const unplacedCards = view
     ? view.cards.filter((card) => !placedCardIds?.has(card.id))
     : [];
-  const unplacedMarkup = renderUnplacedAgentSection(unplacedCards, provider);
+  const unplacedMarkup = renderUnplacedAgentSection(unplacedCards, provider, sessionId);
   if (!threadMarkup && !detachedMarkup && !unplacedMarkup) {
     return `<div class="conversation-layout" data-conversation-layout>
       <section id="session-messages" class="messages"><p class="empty-state">${escapeHtml(t("detail.no_messages"))}</p></section>
-      ${inspectorMarkup}
     </div>`;
   }
 
-  const toggle = `
-    <div class="conversation-view-bar" data-conversation-view>
-      <div class="conversation-view-toggle" role="group" aria-label="${escapeHtml(t("conversation.view_label"))}">
-        <button type="button" class="conversation-view-btn" data-conversation-view-mode="thread" aria-pressed="${defaultMode === "thread" ? "true" : "false"}">${escapeHtml(t("conversation.view_thread"))}</button>
-        <button type="button" class="conversation-view-btn" data-conversation-view-mode="linear" aria-pressed="${defaultMode === "linear" ? "true" : "false"}">${escapeHtml(t("conversation.view_linear"))}</button>
-      </div>
-    </div>`;
-  return `${toggle}
-    <div class="conversation-layout" data-conversation-layout>
+  return `<div class="conversation-layout" data-conversation-layout>
       <div class="conversation-thread-col">
-        <section id="session-messages" class="messages conversation-${escapeHtml(defaultMode)}" data-conversation-default="${escapeHtml(defaultMode)}" data-conversation-message-count="${normalizedMessageCount}">
+        <section id="session-messages" class="messages conversation-thread" data-conversation-default="thread" data-conversation-message-count="${normalizedMessageCount}"${relations ? " data-reader-relations" : ""}>
+          ${relations?.toolbar || ""}
           ${threadMarkup}
           ${detachedMarkup}
           ${unplacedMarkup}
         </section>
       </div>
-      ${inspectorMarkup}
     </div>`;
 }
 
-function renderTranscriptSearch() {
+function readerChildReplyExcerpt(tree: SessionTree) {
+  let latest: { partId: string; text: string; final: boolean } | null = null;
+  for (let index = tree.messages.length - 1; index >= 0; index -= 1) {
+    const message = tree.messages[index];
+    if (message.role !== "assistant" && message.role !== "agent") continue;
+    const part = message.parts.find((candidate) => candidate.type === "text"
+      && typeof candidate.data.text === "string" && candidate.data.text.trim());
+    if (!part) continue;
+    const text = part.data.text.trim();
+    const excerpt = {
+      partId: part.id,
+      text: text.length > 240 ? `${text.slice(0, 239)}…` : text,
+      final: message.data.presentationPhase === "final"
+    };
+    if (excerpt.final) return excerpt;
+    latest ??= excerpt;
+  }
+  return latest;
+}
+
+function renderReaderBranches(cards: ConversationAgentCard[], tree: SessionTree | null, provider: string, sessionId: string, ownedReader: OwnedReaderProjection | null, readerRelations: ReaderRelations | null) {
+  const children = new Map<string, ReaderChildTarget>();
+  if (tree) {
+    for (const child of [
+      ...tree.messages.flatMap((message) => message.parts.flatMap((part) => part.childSessions)),
+      ...tree.detachedChildren
+    ]) {
+      children.set(conversationSessionHref({ provider: child.session.provider || provider, sessionId: child.session.id }), child);
+    }
+  }
+  for (const child of ownedReader?.children || []) {
+    children.set(conversationSessionHref({ provider: child.provider, sessionId: child.sessionId }), child);
+  }
+  const branches = new Map<string, ConversationAgentCard[]>();
+  for (const card of cards) {
+    const key = card.childSession ? conversationSessionHref(card.childSession) : card.id;
+    const branch = branches.get(key) || [];
+    branch.push(card);
+    branches.set(key, branch);
+  }
+  return [...branches].map(([href, runs]) => {
+    const first = runs[0];
+    const child = first.childSession;
+    const available = child && runs.some((run) => run.childSessionAvailable !== false);
+    const childTarget = available ? children.get(href) : null;
+    const childTree = childTarget && !isOwnedReaderChild(childTarget) ? childTarget : null;
+    const excerpt = childTree ? readerChildReplyExcerpt(childTree) : null;
+    const name = first.name || first.responsibility || (childTarget ? (isOwnedReaderChild(childTarget) ? childTarget.title : childTarget.session.title) : null) || t("conversation.agent_unknown");
+    const states = [...new Set(runs.map((run) => conversationStateLabel(run.state)).filter(Boolean))];
+    const lane = readerRelations?.lanes.find((candidate) => child
+      ? candidate.childSession?.provider === child.provider && candidate.childSession.sessionId === child.sessionId
+      : candidate.id === `${encodeURIComponent(provider)}:${encodeURIComponent(sessionId)}:${first.id}`);
+    const runMarkup = runs.map((run) => {
+      const state = conversationStateLabel(run.state);
+      return `<div class="reader-branch-run" data-reader-branch-run="${escapeHtml(run.id)}">
+        ${runs.length > 1 && run.name ? `<strong>${escapeHtml(run.name)}</strong>` : ""}
+        ${run.responsibility ? `<p class="reader-branch-purpose"><span>${escapeHtml(t("conversation.agent_responsibility"))}:</span> ${escapeHtml(run.responsibility)}</p>` : ""}
+        ${state ? `<p class="reader-branch-recorded-state">${escapeHtml(t("detail.reader_branch_state"))}: ${escapeHtml(state)}</p>` : ""}
+        ${renderAgentChannel(run.channel, run.channelTruncated, run, provider, sessionId, false)}
+      </div>`;
+    }).join("");
+    const excerptAnchor = excerpt ? anchorId("part", excerpt.partId) : "";
+    return `<details class="reader-branch" data-reader-branch data-reader-task-lane="${escapeHtml(lane?.id || "")}"${child ? ` data-reader-branch-provider="${escapeHtml(child.provider)}" data-reader-branch-session="${escapeHtml(child.sessionId)}"` : ""}>
+      <summary><span class="reader-branch-name">${escapeHtml(name)}</span>${states.length ? `<span class="reader-branch-state" title="${escapeHtml(t("detail.reader_branch_state"))}">${escapeHtml(states.join(" · "))}</span>` : ""}</summary>
+      <div class="reader-branch-body">
+        ${available ? `<a class="reader-child-history-link" data-reader-open data-reader-provider="${escapeHtml(child!.provider)}" data-reader-session="${escapeHtml(child!.sessionId)}" href="${escapeHtml(href)}">${escapeHtml(t("detail.reader_child_history"))}</a>${childTarget && isOwnedReaderChild(childTarget) && childTarget.link === "inferred" ? `<small>${escapeHtml(t("detail.inferred_link"))}</small>` : ""}` : ""}
+        ${runMarkup}
+        ${excerpt ? `<div class="reader-branch-excerpt" data-reader-branch-excerpt data-reader-excerpt-phase="${excerpt.final ? "final" : "message"}">
+          <p class="reader-branch-excerpt-label">${escapeHtml(t(excerpt.final ? "detail.reader_child_final_excerpt" : "detail.reader_child_message_excerpt"))}</p>
+          <blockquote>${escapeHtml(excerpt.text)}</blockquote>
+          <a class="reader-observation-source" data-reader-source data-reader-provider="${escapeHtml(child!.provider)}" data-reader-session="${escapeHtml(child!.sessionId)}" data-reader-anchor="${escapeHtml(excerptAnchor)}" href="${escapeHtml(`${href}#${excerptAnchor}`)}">${escapeHtml(t("detail.reader_child_reply_source"))}</a>
+        </div>` : ""}
+      </div>
+    </details>`;
+  }).join("");
+}
+
+function renderReaderRelationshipRail(view: ConversationViewModel | null, provider: string, sessionId: string, tree: SessionTree | null, ownedReader: OwnedReaderProjection | null = null, readerRelations: ReaderRelations | null = null) {
+  const cards = view?.cards || [];
+  const observations = cards.flatMap((card) => (card.channel || []).map((item) => ({ card, item })));
+  const turnBoundaries = view?.turnBoundaries || [];
+  const sourceMarkup = (item: ConversationChannelItem) => {
+    const source = readerEventSource(item, provider, sessionId);
+    if (!source) return `<span class="reader-observation-source reader-observation-source-missing">${escapeHtml(t("detail.reader_observation_no_source"))}</span>`;
+    return renderReaderEventSourceLink(source.provider, source.sessionId, source.eventId);
+  };
+  const observationLabel = (card: ConversationAgentCard, item: ConversationChannelItem) => {
+    const agent = card.name || card.responsibility || t("conversation.agent_unknown");
+    return `${coordinationKindLabel(item.kind)} · ${agent}`;
+  };
+  const turnLabel = (boundary: ConversationTurnBoundary) => {
+    const phase = boundary.normalizedKind.slice("run.".length);
+    return `${t("detail.reader_main_agent_turn", { count: String(boundary.displayNumber) })} · ${t(`detail.reader_turn_${phase}`)}`;
+  };
+  const detailSequence = observations.map(({ card, item }) => `<li class="reader-observation-sequence-item" data-reader-observation-id="${escapeHtml(item.id)}"><span class="reader-observation-sequence-label">${escapeHtml(observationLabel(card, item))}</span>${channelTimeLabel(item.timestamp) ? `<time>${escapeHtml(channelTimeLabel(item.timestamp)!)}</time>` : `<small>${escapeHtml(t("detail.reader_time_unknown"))}</small>`}${sourceMarkup(item)}</li>`).join("");
+  const turnSequence = turnBoundaries.map((boundary) => `<li class="reader-observation-sequence-item reader-main-turn-sequence-item" data-reader-turn-boundary data-reader-turn-number="${boundary.displayNumber}"><span class="reader-observation-sequence-label">${escapeHtml(turnLabel(boundary))}</span>${channelTimeLabel(boundary.timestamp) ? `<time>${escapeHtml(channelTimeLabel(boundary.timestamp)!)}</time>` : `<small>${escapeHtml(t("detail.reader_time_unknown"))}</small>`}${renderReaderEventSourceLink(provider, sessionId, boundary.eventId)}</li>`).join("");
+  const branches = renderReaderBranches(cards, tree, provider, sessionId, ownedReader, readerRelations);
+  const relationshipRecords = (view?.inspector?.relationships || []).filter((relationship) => relationship.otherSession);
+  const relationships = relationshipRecords.map((relationship) => {
+    const target = relationship.otherSession;
+    if (!target) return "";
+    const href = conversationSessionHref(target);
+    const targetAnchor = anchorId("session", target.sessionId);
+    const link = href && relationship.otherSessionAvailable !== false
+      ? `<a href="${escapeHtml(href)}" data-reader-source data-reader-provider="${escapeHtml(target.provider)}" data-reader-session="${escapeHtml(target.sessionId)}" data-reader-anchor="${escapeHtml(targetAnchor)}">${escapeHtml(target.sessionId)}</a>`
+      : `<span data-reader-source data-reader-provider="${escapeHtml(target.provider)}" data-reader-session="${escapeHtml(target.sessionId)}" data-reader-anchor="${escapeHtml(targetAnchor)}">${escapeHtml(relationship.otherSessionAvailable === false ? t("conversation.inspector_session_unavailable") : t("conversation.inspector_not_recorded"))}</span>`;
+    return `<li data-reader-relationship data-reader-time-known="${relationship.timestamp !== null ? "true" : "false"}"><span>${escapeHtml(t(`conversation.relationship_${relationship.type}`))}</span> ${link}${relationship.timestamp !== null ? `<time>${escapeHtml(formatTime(relationship.timestamp))}</time>` : `<small>${escapeHtml(t("detail.reader_time_unknown"))}</small>`}</li>`;
+  }).join("\n");
+  const hasFacts = cards.length > 0 || relationshipRecords.length > 0;
+  if (!hasFacts) return "";
+  const recorded = observations.length + turnBoundaries.length;
+  const evidenceMarkup = recorded
+    ? `<details class="reader-observations-expanded" data-reader-observations-expanded><summary>${escapeHtml(t("detail.reader_timeline_expand"))}</summary><ol class="reader-observation-sequence" data-reader-observation-sequence>${turnSequence}${detailSequence}</ol></details>`
+    : "";
+  const overview = `<aside class="reader-collaboration" data-reader-collaboration aria-label="${escapeHtml(t("detail.reader_collaboration"))}">
+    <div class="reader-collaboration-heading"><h2>${escapeHtml(t("detail.reader_collaboration_title"))}</h2><button type="button" class="reader-collaboration-close" data-reader-collaboration-close aria-label="${escapeHtml(t("detail.reader_collaboration_close"))}">${uiIcon("x")}</button></div>
+    <p class="reader-collaboration-note">${escapeHtml(t("detail.reader_collaboration_note"))}</p>
+    <div class="reader-collaboration-summary"><span>${escapeHtml(t("detail.reader_collaboration_recorded", { count: String(recorded) }))}</span>${relationships.length ? `<span>${escapeHtml(t("detail.reader_collaboration_links", { count: String(relationshipRecords.length) }))}</span>` : ""}</div>
+    ${branches ? `<div class="reader-branch-root">${escapeHtml(t("detail.reader_document_owner"))}</div><div class="reader-branches">${branches}</div>` : ""}
+    ${evidenceMarkup}
+    ${relationships ? `<ul class="reader-relationship-list">${relationships}</ul>` : `<p class="reader-relationship-empty">${escapeHtml(t("conversation.inspector_relationships_empty"))}</p>`}
+    <details class="reader-inspector-disclosure" data-reader-inspector>
+      <summary>${escapeHtml(t("conversation.inspector_title"))}</summary>
+      ${renderConversationInspector(view?.inspector ?? null, provider, sessionId)}
+    </details>
+  </aside>`;
+  return `<details id="${escapeHtml(anchorId("collaboration", sessionId))}" class="reader-collaboration-overview" data-reader-collaboration-overview>
+    <summary class="reader-collaboration-overview-summary">${uiIcon("chevron-down")}<span>${escapeHtml(t("detail.reader_collaboration_title"))}</span><small>${escapeHtml(t("detail.reader_collaboration_note"))}</small></summary>
+    ${overview}
+  </details>`;
+}
+
+/** Render the reusable, page-shell-free reader fragment for one canonical session. */
+export function renderSessionReaderPane({
+  session,
+  sessionTree = null,
+  ownedReader = null,
+  messages = [],
+  partsByMessage = new Map(),
+  provider = "opencode",
+  conversationCompactions = [],
+  conversationView = null,
+  readerRelations = null,
+  inheritedContext = null
+}: { session: any; sessionTree?: SessionTree | null; ownedReader?: OwnedReaderProjection | null; messages?: any[]; partsByMessage?: Map<any, any>; provider?: string; conversationCompactions?: ConversationCompaction[]; conversationView?: ConversationViewModel | null; readerRelations?: ReaderRelations | null; inheritedContext?: InheritedContextView | null }) {
+  const title = session.title || session.slug || session.id;
+  const placedCardIds = new Set<string>();
+  const relationMarkup = renderReaderRelations(readerRelations);
+  const effectiveTree = ownedReader?.rootTree || sessionTree;
+  const ownedChildrenByPart = new Map<string, OwnedReaderChildDescriptor[]>();
+  for (const child of ownedReader?.children || []) {
+    if (child.parentPartId) {
+      const entries = ownedChildrenByPart.get(child.parentPartId) || [];
+      entries.push(child);
+      ownedChildrenByPart.set(child.parentPartId, entries);
+    }
+  }
+  const conversationEntries = effectiveTree
+    ? renderSessionMessageEntries(effectiveTree, 0, provider, conversationView, placedCardIds, relationMarkup, ownedChildrenByPart)
+    : renderRawMessageEntries(messages, partsByMessage, provider, "msg", relationMarkup);
+  const renderedEntryCount = conversationEntries.filter((entry) => entry.markup).length;
+  const detachedMarkup = effectiveTree
+    ? [
+      ...(effectiveTree.detachedChildren || []).map((child: SessionTree) => renderChildReaderLink(child, provider, true)),
+      ...(ownedReader?.children || []).filter((child) => child.detached).map((child) => renderChildReaderLink(child, provider, true))
+    ]
+      .filter(Boolean)
+      .join("\n")
+    : "";
+  const conversationMarkup = renderConversationPanel(conversationEntries, conversationCompactions, provider, String(session.id), detachedMarkup, renderedEntryCount, conversationView, placedCardIds, relationMarkup);
+  const inheritedContextMarkup = renderInheritedContext(inheritedContext, provider);
+  const sessionAnchor = anchorId("session", session.id);
+  return `<div id="${escapeHtml(sessionAnchor)}" class="reader-pane" data-reader-pane data-reader-provider="${escapeHtml(provider)}" data-reader-session="${escapeHtml(session.id)}" data-reader-title="${escapeHtml(title)}">
+    <div class="reader-pane-grid">
+      <details class="reader-toc-disclosure" data-reader-toc>
+        <summary>${uiIcon("chevron-down")}<span>${escapeHtml(t("detail.reader_toc_toggle"))}</span></summary>
+        ${renderToc(effectiveTree, provider, ownedReader)}
+      </details>
+      <div class="reader-pane-main" data-reader-transcript>
+        ${conversationMarkup}
+        ${inheritedContextMarkup}
+        ${renderReaderRelationshipRail(conversationView, provider, String(session.id), effectiveTree, ownedReader, readerRelations)}
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderTranscriptSearch(provider: string, sessionId: string, title: string) {
+  const scopeValue = `${encodeURIComponent(provider)}::${encodeURIComponent(sessionId)}`;
   return `<details class="session-search" data-session-search>
-    <summary class="action-btn session-search-toggle" data-session-search-toggle>${t("detail.search_messages")}</summary>
+    <summary class="action-btn session-search-toggle" data-session-search-toggle>${uiIcon("search")}<span>${escapeHtml(t("detail.search_messages"))}</span></summary>
     <div class="session-search-panel">
+      <label class="session-search-scope" for="session-transcript-search-scope">
+        <span>${escapeHtml(t("detail.search_scope"))}</span>
+        <select id="session-transcript-search-scope" data-session-search-scope aria-label="${escapeHtml(t("detail.search_scope"))}">
+          <option data-reader-scope-root="true" data-reader-provider="${escapeHtml(provider)}" data-reader-session="${escapeHtml(sessionId)}" value="${escapeHtml(scopeValue)}">${escapeHtml(t("detail.search_scope_root", { title }))} · ${escapeHtml(provider)}/${escapeHtml(sessionId)}</option>
+        </select>
+      </label>
       <label class="session-search-field" for="session-transcript-search">
         <span class="visually-hidden">${t("detail.search_messages")}</span>
         <input id="session-transcript-search" type="search" autocomplete="off" data-session-search-input placeholder="${t("detail.search_placeholder")}" aria-describedby="session-transcript-search-status">
@@ -1587,6 +1838,7 @@ export function renderSessionPage({
   session,
   sessionTree = null,
   sessionMetrics = null,
+  lazySessionMetrics = null,
   messages = [],
   partsByMessage = new Map(),
   todos = [],
@@ -1602,8 +1854,9 @@ export function renderSessionPage({
   navigationContext = null,
   conversationCompactions = [],
   conversationView = null,
-  inheritedContext = null
-}: { session: any; sessionTree?: any; sessionMetrics?: any; messages?: any[]; partsByMessage?: Map<any, any>; todos?: any[]; recentSessions?: any[]; meta?: any; provider?: string; providers?: any[]; manageable?: boolean; resumeCommand?: any; terminalLaunchAllowed?: boolean; runtimeWorkbench?: string; runtimeEvents?: string; navigationContext?: SessionNavigationContext | null; conversationCompactions?: ConversationCompaction[]; conversationView?: ConversationViewModel | null; inheritedContext?: InheritedContextView | null }) {
+  inheritedContext = null,
+  readerPane = ""
+}: { session: any; sessionTree?: any; sessionMetrics?: any; lazySessionMetrics?: { provider: string; sessionId: string } | null; messages?: any[]; partsByMessage?: Map<any, any>; todos?: any[]; recentSessions?: any[]; meta?: any; provider?: string; providers?: any[]; manageable?: boolean; resumeCommand?: any; terminalLaunchAllowed?: boolean; runtimeWorkbench?: string; runtimeEvents?: string; navigationContext?: SessionNavigationContext | null; conversationCompactions?: ConversationCompaction[]; conversationView?: ConversationViewModel | null; inheritedContext?: InheritedContextView | null; readerPane?: string }) {
   const title = session.title || session.slug || session.id;
   const starred = meta?.starred ? 1 : 0;
   const encodedProvider = encodeURIComponent(provider);
@@ -1632,31 +1885,39 @@ export function renderSessionPage({
     ${navigationContext.day ? `<span>${escapeHtml(navigationContext.day)}</span>` : ""}
   </nav>` : "";
 
+  const rootCollaborationId = anchorId("collaboration", session.id);
+  const hasCollaboration = Boolean(
+    conversationView?.cards?.length
+      || conversationView?.inspector?.relationships?.some((relationship) => relationship.otherSession)
+      || readerPane.includes("data-reader-collaboration-overview")
+  );
+  const collaborationToggle = hasCollaboration
+    ? `<button type="button" class="reader-header-collaboration" data-reader-collaboration-toggle aria-controls="${escapeHtml(rootCollaborationId)}" aria-expanded="false">${uiIcon("network")}<span>${escapeHtml(t("detail.reader_collaboration_title"))}</span></button>`
+    : "";
+
   // Action parity: visible actions + "More" dropdown
   const visibleStarAction = manageable ? `
-        <button class="star-btn action-btn ${starred ? "starred" : ""}" type="button" data-star-format="label" data-id="${escapeHtml(session.id)}" title="${starred ? t("action.starred") : t("action.star")}" aria-label="${starred ? t("action.starred") : t("action.star")}">
-          ${starred ? t("action.starred") : t("action.star")}
+        <button class="star-btn action-btn ${starred ? "starred" : ""}" type="button" data-star-format="icon" data-id="${escapeHtml(session.id)}" title="${starred ? t("action.starred") : t("action.star")}" aria-label="${starred ? t("action.starred") : t("action.star")}">
+          ${uiIcon("star")}
         </button>
   ` : "";
-  const resumeActions = resumeCommand && terminalLaunchAllowed ? `
-        <button class="action-btn" data-action="resume-session" data-id="${escapeHtml(session.id)}" ${resumeCommand.available ? "" : "disabled"}>${t("action.open_terminal")}</button>
-  ` : `<span class="action-btn action-unavailable" aria-disabled="true">${escapeHtml(t("detail.resume_unavailable"))}</span>`;
-  const exportActions = `
-        <a class="action-btn" href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=md">${t("action.export_md")}</a>
-        <a class="action-btn" href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=json">${t("action.export_json")}</a>
-  `;
-  const moreActionsDropdown = manageable ? `
+  const renderMoreActions = (resumePreview: string) => `
         <details class="more-actions">
-          <summary class="action-btn">${t("action.more_actions")}</summary>
+          <summary class="action-btn">${uiIcon("ellipsis")}<span>${escapeHtml(t("action.more_actions"))}</span></summary>
           <div class="more-actions-list">
-            <button type="button" data-action="rename" data-id="${escapeHtml(session.id)}">${t("action.rename")}</button>
-            <button type="button" data-action="copy-session-id" data-id="${escapeHtml(session.id)}">${t("action.copy_session_id_menu")}</button>
-            <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=md">${t("action.export_md")}</a>
-            <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=json">${t("action.export_json")}</a>
-            <button type="button" data-action="delete" data-id="${escapeHtml(session.id)}" class="menu-danger">${t("action.delete")}</button>
+            <a href="${escapeHtml(backHref)}">${escapeHtml(t("detail.back"))}</a>
+            ${previousSession ? `<a href="${sessionHref(previousSession)}" aria-label="${escapeHtml(t("detail.previous"))}">${escapeHtml(t("detail.previous"))}</a>` : ""}
+            ${nextSession ? `<a href="${sessionHref(nextSession)}" aria-label="${escapeHtml(t("detail.next"))}">${escapeHtml(t("detail.next"))}</a>` : ""}
+            ${resumeCommand && terminalLaunchAllowed ? `<button type="button" data-action="resume-session" data-id="${escapeHtml(session.id)}" ${resumeCommand.available ? "" : "disabled"}>${escapeHtml(t("action.open_terminal"))}</button>` : `<span class="action-unavailable" aria-disabled="true">${escapeHtml(t("detail.resume_unavailable"))}</span>`}
+            <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=md">${escapeHtml(t("action.export_md"))}</a>
+            <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=json">${escapeHtml(t("action.export_json"))}</a>
+            ${resumePreview}
+            ${manageable ? `<button type="button" data-action="rename" data-id="${escapeHtml(session.id)}">${escapeHtml(t("action.rename"))}</button>` : ""}
+            ${manageable ? `<button type="button" data-action="copy-session-id" data-id="${escapeHtml(session.id)}">${escapeHtml(t("action.copy_session_id_menu"))}</button>` : ""}
+            ${manageable ? `<button type="button" data-action="delete" data-id="${escapeHtml(session.id)}" class="menu-danger">${escapeHtml(t("action.delete"))}</button>` : ""}
           </div>
         </details>
-  ` : "";
+  `;
 
   const resumePreview = resumeCommand && terminalLaunchAllowed ? `
         <details class="resume-command-preview">
@@ -1681,15 +1942,10 @@ export function renderSessionPage({
       <div class="session-actions-shell">
         <div class="session-actions">
           ${visibleStarAction}
-          <a class="action-btn session-back-link" href="${escapeHtml(backHref)}">← ${escapeHtml(t("detail.back"))}</a>
-          ${previousSession ? `<a class="action-btn session-neighbor" href="${sessionHref(previousSession)}" aria-label="${escapeHtml(t("detail.previous"))}">← ${escapeHtml(t("detail.previous"))}</a>` : ""}
-          ${nextSession ? `<a class="action-btn session-neighbor" href="${sessionHref(nextSession)}" aria-label="${escapeHtml(t("detail.next"))}">${escapeHtml(t("detail.next"))} →</a>` : ""}
-          ${resumeActions}
-          ${exportActions}
-          ${renderTranscriptSearch()}
-          ${moreActionsDropdown}
+          ${collaborationToggle}
+          ${renderTranscriptSearch(provider, String(session.id), title)}
+          ${renderMoreActions(resumePreview)}
         </div>
-        ${resumePreview}
       </div>
   `;
 
@@ -1712,24 +1968,16 @@ ${actions}
     </header>
   `;
 
-  // Exactly-once placement bookkeeping: cards bound to a real transcript part
-  // are consumed on the spine; the remainder renders in the unplaced section.
-  const placedCardIds = new Set<string>();
-  const conversationEntries = sessionTree
-    ? renderSessionMessageEntries(sessionTree, 0, provider, conversationView, placedCardIds)
-    : renderRawMessageEntries(messages, partsByMessage, provider);
-  // Canonical rendered top-level conversation entries: raw tool rows are
-  // merged into their assistant entry, messages that render no visible
-  // content produce no block, and tree rows without markup contribute
-  // nothing — so the count reflects the actual thread spine, not the raw
-  // tool/compact/inherited row totals.
-  const renderedEntryCount = conversationEntries.filter((entry) => entry.markup).length;
-  const conversationDefault = conversationDefaultMode(renderedEntryCount);
-  const detachedMarkup = sessionTree
-    ? (sessionTree.detachedChildren || []).map((child: SessionTree) => renderSessionTree(child, 1, provider, true)).filter(Boolean).join("\n")
-    : "";
-  const conversationMarkup = renderConversationPanel(conversationEntries, conversationCompactions, provider, conversationDefault, detachedMarkup, renderedEntryCount, conversationView, placedCardIds);
-  const inheritedContextMarkup = renderInheritedContext(inheritedContext, provider);
+  const renderedReaderPane = readerPane || renderSessionReaderPane({
+    session,
+    sessionTree,
+    messages,
+    partsByMessage,
+    provider,
+    conversationCompactions,
+    conversationView,
+    inheritedContext
+  });
 
   const sessionMetadata = session.metadata && typeof session.metadata === "object"
     ? session.metadata as Record<string, unknown>
@@ -1742,34 +1990,37 @@ ${actions}
     : "";
 
   const body = `
-<div class="session-workbench" data-session-id="${escapeHtml(session.id)}" data-provider="${escapeHtml(provider)}">
-  ${renderToc(sessionTree)}
-  <section id="${escapeHtml(anchorId("session", session.id))}" class="main-content">
+<div class="session-workbench" data-session-id="${escapeHtml(session.id)}" data-provider="${escapeHtml(provider)}" data-session-reader data-reader-current-provider="${escapeHtml(provider)}" data-reader-current-session="${escapeHtml(session.id)}">
+  <section class="main-content">
     ${breadcrumb}
     ${header}
-    <div class="tab-bar" hidden>
-      <div role="tablist" aria-label="${escapeHtml(t("detail.tab_bar_label"))}">
-        <button role="tab" aria-selected="true" aria-controls="tab-work" id="tab-btn-work" tabindex="0">${t("detail.tab_work")}</button>
-        <button role="tab" aria-selected="false" aria-controls="tab-conversation" id="tab-btn-conversation" tabindex="-1">${t("detail.tab_conversation")}</button>
+    <span id="tab-conversation" class="reader-entry-anchor" data-reader-entry-anchor aria-hidden="true"></span>
+    <div class="reader-shell" data-reader-shell>
+      <div class="reader-shell-bar">
+        <button type="button" class="reader-back" data-reader-back hidden>${escapeHtml(t("detail.reader_back"))}</button>
+        <span class="reader-current-title" data-reader-current-title hidden aria-live="polite"></span>
+        <output class="reader-status" data-reader-status aria-live="polite"></output>
       </div>
-      <a class="detail-secondary-tab" data-detail-tab="tab-events" id="tab-btn-events" href="#tab-events">${t("detail.tab_events")}</a>
+      <div data-reader-host>
+        ${renderedReaderPane}
+      </div>
     </div>
-    <div role="tabpanel" id="tab-work" aria-labelledby="tab-btn-work">
-      ${runtimeWorkbench || `<p class="empty-state">${t("runtime.unavailable")}</p>`}
+    <details id="tab-work" class="reader-secondary-disclosure" data-detail-tab-panel>
+      <summary>${escapeHtml(t("detail.tab_work"))}</summary>
+      <div class="reader-secondary-content">
+        ${runtimeWorkbench || `<p class="empty-state">${t("runtime.unavailable")}</p>`}
+      </div>
       ${projectEvidence}
-      ${renderSessionMetricsPanel(sessionMetrics)}
+      ${renderSessionMetricsPanel(sessionMetrics, lazySessionMetrics)}
       ${todoList(todos)}
-    </div>
-    <div role="tabpanel" id="tab-conversation" aria-labelledby="tab-btn-conversation">
-      ${conversationMarkup}
-      ${inheritedContextMarkup}
-    </div>
-    <div role="tabpanel" id="tab-events" aria-labelledby="tab-btn-events">
-      ${runtimeEvents || `<p class="empty-state">${t("runtime.unavailable")}</p>`}
-    </div>
+    </details>
+    <details id="tab-events" class="reader-secondary-disclosure" data-detail-tab-panel>
+      <summary>${escapeHtml(t("detail.tab_events"))}</summary>
+      <div class="reader-secondary-content">${runtimeEvents || `<p class="empty-state">${t("runtime.unavailable")}</p>`}</div>
+    </details>
   </section>
 </div>
   `;
 
-  return layout(title, body, navigationContext?.section === "stats" ? "stats" : "home", { provider, providers, manageable });
+  return layout(title, body, navigationContext?.section === "stats" ? "stats" : "home", { provider, providers, manageable, reader: true });
 }

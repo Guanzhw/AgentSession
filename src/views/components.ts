@@ -1,5 +1,11 @@
 import { escapeHtml, renderMarkdown } from "../markdown.js";
 import { t, getLocale } from "../i18n.js";
+import { anchorId } from "./anchors.js";
+import type {
+  ContextChangeResult,
+  ContextChangeRetainedEntry,
+  ContextChangeRetainedGroup
+} from "../providers/interface.js";
 
 function formatCount(value: any, prefix = "") {
   const amount = Number(value) || 0;
@@ -17,7 +23,7 @@ export function formatCompactCount(value: any) {
   return String(amount);
 }
 
-function stringifyData(value: any) {
+export function stringifyProgressiveValue(value: any) {
   if (value == null) {
     return "";
   }
@@ -39,6 +45,44 @@ const REASONING_CHUNK_LIMIT = 6000;
 const MESSAGE_CHUNK_LIMIT = 12000;
 
 type ProgressiveFormat = "markdown" | "plain" | "auto";
+
+export type ProgressiveField = "text" | "reasoning" | "input" | "output";
+
+export interface ContextResultContentIdentity {
+  provider: string;
+  sessionId: string;
+  checkpointId: string;
+  target: "summary" | "entry";
+  groupIndex?: number;
+  entryIndex?: number;
+}
+
+export function resolveProgressiveField(data: any, field: ProgressiveField, contentScope = "owned", messageRole = "") {
+  if (!data || typeof data !== "object") return null;
+  if (field === "text" && data.type === "text") {
+    return {
+      value: data.text || "",
+      format: contentScope === "inherited-context" && messageRole === "system" ? "plain" as const : "markdown" as const,
+      limit: MESSAGE_CHUNK_LIMIT
+    };
+  }
+  if (field === "reasoning" && data.type === "reasoning") {
+    return { value: data.text || "", format: "markdown" as const, limit: REASONING_CHUNK_LIMIT };
+  }
+  if (data.type !== "tool") return null;
+  const state = data.state && typeof data.state === "object" ? data.state : {};
+  if (field === "input") {
+    return { value: state.input, format: "plain" as const, limit: TOOL_CHUNK_LIMIT };
+  }
+  if (field === "output") {
+    return {
+      value: state.status === "error" ? (state.error ?? state.output) : state.output,
+      format: "auto" as const,
+      limit: TOOL_CHUNK_LIMIT
+    };
+  }
+  return null;
+}
 
 function takeChunk(text: string, offset: number, limit: number) {
   const start = Math.max(0, Math.min(text.length, Number(offset) || 0));
@@ -64,10 +108,18 @@ function takeChunk(text: string, offset: number, limit: number) {
  * initial page HTML.
  */
 function renderProgressiveHtml(text: string, format: ProgressiveFormat, sourceWasString: boolean, chunk: string) {
-  const markdown = format === "markdown" || (format === "auto" && sourceWasString && looksLikeMarkdown(text));
+  const markdown = resolveProgressiveRenderFormat(sourceWasString ? text : null, format) === "markdown";
   return markdown
     ? `<div class="tool-output-body markdown">${renderMarkdown(chunk)}</div>`
     : `<pre>${escapeHtml(chunk)}</pre>`;
+}
+
+/** Resolve the exact format used by bounded content rendering for search/UI correspondence. */
+export function resolveProgressiveRenderFormat(value: any, format: ProgressiveFormat): "markdown" | "plain" {
+  const text = stringifyProgressiveValue(value);
+  return format === "markdown" || (format === "auto" && typeof value === "string" && looksLikeMarkdown(text))
+    ? "markdown"
+    : "plain";
 }
 
 export function renderProgressiveContent(
@@ -76,13 +128,109 @@ export function renderProgressiveContent(
   offset = 0,
   limit = TOOL_CHUNK_LIMIT
 ) {
-  const text = stringifyData(value);
+  const text = stringifyProgressiveValue(value);
   const page = takeChunk(text, offset, limit);
   return {
     html: renderProgressiveHtml(text, format, typeof value === "string", page.chunk),
     nextOffset: page.nextOffset,
     totalLength: text.length
   };
+}
+
+const CONTEXT_RESULT_CHUNK_LIMIT = 6000;
+const CONTEXT_RESULT_PAGE_SIZE = 20;
+
+function contextResultIdentityAttributes(identity: ContextResultContentIdentity) {
+  return ` data-content-scope="context-result" data-context-result-target="${escapeHtml(identity.target)}" data-context-result-provider="${escapeHtml(identity.provider)}" data-context-result-session="${escapeHtml(identity.sessionId)}" data-context-result-checkpoint="${escapeHtml(identity.checkpointId)}"${identity.target === "entry" ? ` data-context-result-group="${identity.groupIndex}" data-context-result-entry="${identity.entryIndex}"` : ""}`;
+}
+
+function renderContextResultBody(value: any, identity: ContextResultContentIdentity, label: string) {
+  const page = renderProgressiveContent(value, "plain", 0, CONTEXT_RESULT_CHUNK_LIMIT);
+  if (page.nextOffset == null) {
+    return `<div class="context-result-body"${contextResultIdentityAttributes(identity)}>${page.html}</div>`;
+  }
+  const entryIdentity = identity.target === "entry"
+    ? ` data-context-result-group="${identity.groupIndex}" data-context-result-entry="${identity.entryIndex}"`
+    : "";
+  return `<div class="progressive context-result-body"${contextResultIdentityAttributes(identity)}>
+${page.html}
+<button type="button" class="progressive-more" data-content-scope="context-result" data-context-result-target="${escapeHtml(identity.target)}" data-context-result-provider="${escapeHtml(identity.provider)}" data-context-result-session="${escapeHtml(identity.sessionId)}" data-context-result-checkpoint="${escapeHtml(identity.checkpointId)}"${entryIdentity} data-field="${identity.target === "summary" ? "summary" : "content"}" data-next-offset="${page.nextOffset}" data-load-error="${escapeHtml(t("progressive.load_failed"))}" aria-label="${escapeHtml(label)}">${escapeHtml(label)}</button>
+</div>`;
+}
+
+function contextResultEntryMarkup(
+  entry: ContextChangeRetainedEntry,
+  identity: ContextResultContentIdentity
+) {
+  const role = entry.role || t("conversation.context_result_role_unknown");
+  const source = `${t("conversation.context_result_source_position")}: ${entry.sourceOrdinal} (${entry.sourceOrdinalProvenance})`;
+  const omitted = entry.omittedEncryptedFieldCount
+    ? `<details class="context-result-omitted"><summary>${escapeHtml(t("conversation.context_result_omitted"))} (${entry.omittedEncryptedFieldCount})</summary><ul>${entry.omittedEncryptedFieldPaths.map((path) => `<li><code>${escapeHtml(path)}</code></li>`).join("")}</ul></details>`
+    : "";
+  const attachments = (entry.attachments || []).map((attachment) => `<div class="context-result-attachment"><strong>${escapeHtml(t("conversation.context_result_image_not_rendered"))}</strong><span>${escapeHtml(t("conversation.context_result_image_source"))}: <code>${escapeHtml(attachment.sourcePath)}</code></span></div>`).join("");
+  return `<article class="context-result-entry" data-context-result-entry data-context-result-group="${identity.groupIndex}" data-context-result-entry-index="${identity.entryIndex}">
+    <header class="context-result-entry-header"><strong>${escapeHtml(role)}</strong><span>${escapeHtml(entry.kind)}</span></header>
+    ${entry.content ? renderContextResultBody(entry.content, identity, t("progressive.show_more")) : `<p class="context-result-empty">${escapeHtml(t("conversation.context_result_entry_empty"))}</p>`}
+    <div class="context-result-entry-meta"><span>${escapeHtml(source)}</span>${entry.fields.length ? `<span>${escapeHtml(t("conversation.context_result_fields"))}: ${escapeHtml(entry.fields.map((field) => field.label).join(", "))}</span>` : ""}</div>
+    ${attachments ? `<div class="context-result-attachments">${attachments}</div>` : ""}
+    ${omitted}
+  </article>`;
+}
+
+/** Render one normalized recorded context result page without interpreting provider payloads. */
+export function renderContextChangeResult(
+  result: ContextChangeResult,
+  identity: { provider: string; sessionId: string },
+  offset = 0,
+  limit = CONTEXT_RESULT_PAGE_SIZE
+) {
+  const allEntries: Array<{ group: ContextChangeRetainedGroup; groupIndex: number; entry: ContextChangeRetainedEntry; entryIndex: number }> = [];
+  result.groups.forEach((group, groupIndex) => group.entries.forEach((entry, entryIndex) => allEntries.push({ group, groupIndex, entry, entryIndex })));
+  const page = allEntries.slice(offset, offset + limit);
+  const grouped = new Map<number, typeof page>();
+  page.forEach((item) => grouped.set(item.groupIndex, [...(grouped.get(item.groupIndex) || []), item]));
+  const groupsMarkup = [...grouped.entries()].map(([groupIndex, entries]) => `<section class="context-result-group" data-context-result-group-index="${groupIndex}">
+    <h4>${escapeHtml(entries[0].group.label)}</h4>
+    <div class="context-result-entry-list">${entries.map(({ entry, entryIndex }) => contextResultEntryMarkup(entry, {
+      ...identity,
+      checkpointId: result.checkpointId,
+      target: "entry",
+      groupIndex,
+      entryIndex
+    })).join("")}</div>
+  </section>`).join("");
+  const more = offset + page.length < allEntries.length
+    ? `<button type="button" class="context-result-more" data-context-result-more data-context-result-provider="${escapeHtml(identity.provider)}" data-context-result-session="${escapeHtml(identity.sessionId)}" data-context-result-checkpoint="${escapeHtml(result.checkpointId)}" data-context-result-offset="${offset + page.length}" data-context-result-limit="${limit}">${escapeHtml(t("conversation.context_result_more"))}</button>`
+    : "";
+  const pageMarkup = `<div class="context-result-page" data-context-result-page data-context-result-offset="${offset}">
+    ${groupsMarkup || `<p class="context-result-empty">${escapeHtml(t("conversation.context_result_no_entries"))}</p>`}
+    ${more}
+  </div>`;
+  if (offset > 0) return { html: pageMarkup, nextOffset: offset + page.length < allEntries.length ? offset + page.length : null, totalEntries: allEntries.length };
+
+  const summaryMarkup = result.summary.availability === "readable" && result.summary.value
+    ? `<section class="context-result-summary"><h4>${escapeHtml(t("conversation.context_result_summary"))}</h4>${renderContextResultBody(result.summary.value, {
+      ...identity,
+      checkpointId: result.checkpointId,
+      target: "summary"
+    }, t("progressive.show_more"))}</section>`
+    : `<p class="context-result-availability context-result-availability-${escapeHtml(result.summary.availability)}">${escapeHtml(result.summary.availability === "recorded-empty" ? t("conversation.context_result_recorded_empty") : t("conversation.context_result_unavailable"))}</p>`;
+  const source = result.source;
+  const sourceDetails = `<details class="context-result-source"><summary>${escapeHtml(t("conversation.context_result_source"))}</summary><dl>
+    <dt>${escapeHtml(t("conversation.context_result_source_type"))}</dt><dd>${escapeHtml(source.sourceType)}</dd>
+    <dt>${escapeHtml(t("conversation.context_result_source_fidelity"))}</dt><dd>${escapeHtml(source.fidelity)}</dd>
+    ${source.sourceId ? `<dt>${escapeHtml(t("conversation.context_result_source_id"))}</dt><dd><code>${escapeHtml(source.sourceId)}</code></dd>` : ""}
+    ${source.sourceOrdinal != null ? `<dt>${escapeHtml(t("conversation.context_result_source_position"))}</dt><dd>${escapeHtml(String(source.sourceOrdinal))} (${escapeHtml(source.sourceOrdinalProvenance)})</dd>` : ""}
+  </dl></details>`;
+  const omitted = result.omitted.encryptedFieldCount
+    ? `<details class="context-result-omitted"><summary>${escapeHtml(t("conversation.context_result_omitted"))} (${result.omitted.encryptedFieldCount})</summary><ul>${result.omitted.encryptedFieldPaths.map((path) => `<li><code>${escapeHtml(path)}</code></li>`).join("")}</ul></details>`
+    : "";
+  return { html: `<div class="context-result-rendered" data-context-result-rendered data-context-result-checkpoint="${escapeHtml(result.checkpointId)}">
+    ${summaryMarkup}
+    ${sourceDetails}
+    <section class="context-result-groups"><h4>${escapeHtml(t("conversation.context_result_retained"))}</h4>${pageMarkup}</section>
+    ${omitted}
+  </div>`, nextOffset: offset + page.length < allEntries.length ? offset + page.length : null, totalEntries: allEntries.length };
 }
 
 function progressiveContainer(
@@ -98,7 +246,7 @@ function progressiveContainer(
   if (page.nextOffset == null || !partId) {
     return page.html;
   }
-  return `<div class="progressive">
+  return `<div class="progressive" data-progressive-part-id="${escapeHtml(partId)}" data-progressive-field="${field}" data-content-scope="${escapeHtml(contentScope)}">
 ${page.html}
 <button type="button" class="progressive-more" data-part-id="${escapeHtml(partId)}" data-content-scope="${escapeHtml(contentScope)}" data-field="${field}" data-next-offset="${page.nextOffset}" data-load-error="${escapeHtml(t("progressive.load_failed"))}" aria-label="${escapeHtml(label)}">${escapeHtml(label)}</button>
 </div>`;
@@ -562,7 +710,10 @@ export function messageBubble(role: any, content: any, meta: any = {}) {
       )}</div>`
     : `<pre class="message-body plain">${escapeHtml(content || "")}</pre>`;
 
-  return `<section class="message message-${safeRole}">
+  const partAttributes = meta.partId
+    ? ` data-part-id="${escapeHtml(meta.partId)}" data-content-scope="${escapeHtml(meta.contentScope || "owned")}"`
+    : "";
+  return `<section class="message message-${safeRole}"${partAttributes}>
     ${messageHeader(role, meta)}
     ${reasoning}
     ${body}
@@ -581,7 +732,7 @@ export function reasoningBlock(content: any, duration = "", partId = "", content
   );
   const safeDuration = duration ? `<span class="reasoning-duration">${escapeHtml(duration)}</span>` : "";
 
-  return `<details class="reasoning-block" ${partId ? `id="part-${escapeHtml(partId)}" data-part-id="${escapeHtml(partId)}"` : ""}>
+  return `<details class="reasoning-block" ${partId ? `id="${escapeHtml(anchorId("part", partId))}" data-part-id="${escapeHtml(partId)}"` : ""}>
     <summary aria-label="Toggle reasoning">
       <span class="reasoning-title">Reasoning</span>
       ${safeDuration}
@@ -613,7 +764,7 @@ export function toolCallBlock(tool: any, input: any, output: any, status: any, d
   const safeDuration = duration ? `<span class="tool-duration">${escapeHtml(duration)}</span>` : "";
   const summary = escapeHtml(toolDescription(tool || "tool", input));
 
-  return `<details class="tool-call tool-status-${safeStatus}" ${partId ? `id="part-${escapeHtml(partId)}" data-part-id="${escapeHtml(partId)}"` : ""}>
+  return `<details class="tool-call tool-status-${safeStatus}" ${partId ? `id="${escapeHtml(anchorId("part", partId))}" data-part-id="${escapeHtml(partId)}"` : ""}>
     <summary aria-label="${escapeHtml(`Toggle tool call ${tool || "tool"}`)}">
       <span class="tool-name">${summary}</span>
       <span class="tool-status">${safeStatus}</span>
@@ -622,11 +773,11 @@ export function toolCallBlock(tool: any, input: any, output: any, status: any, d
     <div class="tool-panels">
       <section>
         <h4>${t("tool.input")}</h4>
-        ${inputMarkup}
+        <div data-content-field="input">${inputMarkup}</div>
       </section>
       <section>
         <h4>${t("tool.output")}</h4>
-        ${outputMarkup}
+        <div data-content-field="output">${outputMarkup}</div>
       </section>
     </div>
   </details>`;
