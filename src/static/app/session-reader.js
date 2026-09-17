@@ -1,5 +1,6 @@
 import { readerPaneAnchor, scopeReaderPane, unscopeReaderPane } from "./reader-pane-dom.js";
 import { createReaderLocation, parseReaderLocation, stripReaderLocation } from "./reader-location.js";
+import { ensureReaderAnchor } from "./reader-process.js";
 
 /* Unified session reader navigation.
  *
@@ -732,7 +733,18 @@ export function initSessionReader({ ft, showToast } = {}) {
     const key = canonicalKey(provider, session);
     if (!paneFor(key)?.isConnected && !await openPane(provider, session, { href: sourceHref, record: false })) return;
     const pane = paneFor(key);
-    const target = anchor ? readerPaneAnchor(pane, anchor) : null;
+    const intent = eventSourceIntent;
+    let target;
+    try {
+      target = anchor ? await ensureReaderAnchor(pane, anchor) : null;
+    } catch (error) {
+      if (pane?.isConnected && intent === eventSourceIntent) {
+        const key = error.code === "process_not_found" ? "detail.reader_source_missing" : "detail.reader_event_failed";
+        setStatus(ft?.(key) || "", "error", sourceHref);
+      }
+      return false;
+    }
+    if (!pane?.isConnected || intent !== eventSourceIntent) return false;
     if (!target) {
       setStatus(ft?.("detail.reader_source_missing") || "Source unavailable", "error", sourceHref);
       return false;
@@ -801,6 +813,9 @@ export function initSessionReader({ ft, showToast } = {}) {
       const response = await fetch(`/api/${encodeURIComponent(provider)}/session/${encodeURIComponent(session)}/reader/event/${encodeURIComponent(eventId)}`);
       const data = await response.json().catch(() => null);
       if (!response.ok || !data?.ok || !data.evidence) throw new Error(data?.error || `HTTP ${response.status}`);
+      if (!isCurrent()) return false;
+      if (data.nativeTarget) await ensureReaderAnchor(pane, data.nativeTarget.anchor);
+      if (!isCurrent()) return false;
       const target = data.nativeTarget
         ? nativeEventPartFor(pane, data.nativeTarget)
         : null;
@@ -831,7 +846,7 @@ export function initSessionReader({ ft, showToast } = {}) {
     })().catch((error) => {
       console.error("Unable to load reader event source:", error);
       if (pane?.isConnected && intent === eventSourceIntent) {
-        const messageKey = error?.code === "source_missing" ? "detail.reader_source_missing" : "detail.reader_event_failed";
+        const messageKey = ["source_missing", "process_not_found"].includes(error?.code) ? "detail.reader_source_missing" : "detail.reader_event_failed";
         setStatus(ft?.(messageKey) || "", "error", link.href || "");
       }
       return false;
@@ -1217,7 +1232,8 @@ export function initSessionReader({ ft, showToast } = {}) {
   syncCollaborationLayout();
   const initialRevision = swapRevision;
   if (initial && (inlineStackFrom(history.state).length || new URLSearchParams(location.search).has("readerSource")
-    || new URLSearchParams(location.search).has("readerEvent"))) queueMicrotask(async () => {
+    || new URLSearchParams(location.search).has("readerEvent")
+    || location.hash && readerPaneAnchor(initial, decodeURIComponent(location.hash.slice(1))))) queueMicrotask(async () => {
     if (initialRevision !== swapRevision) return;
     await applyInlineStack(inlineStackFrom(history.state), { rootIdentity: history.state?.readerInlineRoot });
     if (initialRevision === swapRevision) await replayLocation();

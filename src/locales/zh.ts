@@ -289,6 +289,8 @@ export const zh = {
   "conversation.thread_turn": "用户轮次",
   "conversation.process_kicker": "已记录过程",
   "conversation.process_items": "{count} 条",
+  "conversation.process_load": "读取 {count} 次工具调用",
+  "conversation.process_attention": "{count} 次失败或中断",
   "conversation.checkpoint_kicker": "上下文已压缩",
   "conversation.checkpoint_before": "压缩前",
   "conversation.checkpoint_after": "压缩后",

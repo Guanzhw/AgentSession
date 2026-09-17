@@ -29,7 +29,7 @@ import {
 import { buildCodexRuntimeEnvironment } from "../dist/src/providers/codex/runtime-environment.js";
 import { codexDailyTokenComponents } from "../dist/src/providers/codex/adapter.js";
 import { buildPiRuntimeEnvironment } from "../dist/src/providers/pi/runtime-environment.js";
-import { renderSessionPage } from "../dist/src/views/session.js";
+import { renderSessionPage, renderReaderProcessChunk } from "../dist/src/views/session.js";
 import { renderSettingsPage } from "../dist/src/views/settings.js";
 import { renderStatsDeferredSection, renderStatsPage } from "../dist/src/views/stats.js";
 import { formatDuration, formatDurationMs, sessionCard } from "../dist/src/views/components.js";
@@ -4370,7 +4370,11 @@ test("session rendering merges reasoning tokens into output and nests tools in a
   });
 
   assert.match(html, /message-turn-assistant/);
-  assert.match(html, /message-turn-assistant[\s\S]*tool-call/);
+  assert.match(html, /message-turn-assistant[\s\S]*data-reader-process-chunk[\s\S]*id="part-tool-1" data-part-id="tool-1" data-reader-process-anchor/);
+  const process = renderReaderProcessChunk({ sessionTree, messageId: "assistant-1", firstPartId: "tool-1", lastPartId: "tool-1" });
+  assert.equal(process.count, 1);
+  assert.match(process.html, /class="tool-call[^>]*id="part-tool-1" data-part-id="tool-1"/);
+  assert.doesNotMatch(process.html, /reasoning-block/, "reasoning attached to readable prose is not copied into the tool process");
   assert.match(html, /message-reasoning[\s\S]*data-progressive-part-id="reasoning-1" data-progressive-field="reasoning"/);
   assert.doesNotMatch(html, /tool-reasoning/);
   assert.match(html, /token-chip-label">↑<\/span>100/);
@@ -4645,8 +4649,14 @@ test("reasoning does not cross assistant message boundaries", () => {
   });
   const firstStart = html.indexOf('id="msg-first"');
   const secondStart = html.indexOf('id="msg-second"');
-  const firstMarkup = html.slice(firstStart, secondStart);
-  const secondMarkup = html.slice(secondStart);
+  const firstInitial = html.slice(firstStart, secondStart);
+  const secondInitial = html.slice(secondStart);
+  assert.match(firstInitial, /data-part-id="first-reasoning" data-reader-process-anchor/);
+  assert.doesNotMatch(firstInitial, /data-part-id="second-reasoning"/);
+  assert.match(secondInitial, /data-part-id="second-reasoning" data-reader-process-anchor/);
+  assert.doesNotMatch(secondInitial, /data-part-id="first-reasoning"/);
+  const firstMarkup = renderReaderProcessChunk({ sessionTree, messageId: "first", firstPartId: "first-todo", lastPartId: "first-todo" }).html;
+  const secondMarkup = renderReaderProcessChunk({ sessionTree, messageId: "second", firstPartId: "second-tool", lastPartId: "second-tool" }).html;
 
   assert.equal((firstMarkup.match(/reasoning-block/g) || []).length, 1);
   assert.match(firstMarkup, /data-progressive-part-id="first-reasoning" data-progressive-field="reasoning"/);
@@ -4655,6 +4665,7 @@ test("reasoning does not cross assistant message boundaries", () => {
   assert.equal((secondMarkup.match(/reasoning-block/g) || []).length, 1);
   assert.match(secondMarkup, /data-progressive-part-id="second-reasoning" data-progressive-field="reasoning"/);
   assert.doesNotMatch(secondMarkup, /data-progressive-part-id="first-reasoning"/);
+  assert.equal(renderReaderProcessChunk({ sessionTree, messageId: "first", firstPartId: "second-tool", lastPartId: "second-tool" }), null);
 });
 
 test("subagent invocation headers show child-session token usage", () => {

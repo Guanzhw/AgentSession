@@ -154,7 +154,7 @@ test("Conversation SSR keeps unfinished commentary visible and tool detail expan
   const thread = threadOf(html);
   assert.doesNotMatch(thread, /data-conversation-process-count=/);
   assert.match(thread, /open commentary/);
-  assert.match(thread, /id="msg-tool1"[\s\S]*id="part-tool1-tool-part"[\s\S]*data-progressive-part-id="tool1-tool-part" data-progressive-field="output"/);
+  assert.match(thread, /id="msg-tool1"[\s\S]*id="part-tool1-tool-part"[^>]*data-reader-process-anchor/);
   assert.doesNotMatch(thread, /open tool result/);
   const field = resolveProgressiveField(tool.data, "output");
   const page = renderProgressiveContent(field.value, field.format, 0, field.limit);

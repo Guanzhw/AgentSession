@@ -222,7 +222,7 @@ test("reader endpoint returns the same fragment contract and explicit missing er
     appConfig: { port: 0, metaDir: ".", resumeCommands: {}, allowTerminalLaunch: false },
     providerMap: new Map([["fixture", provider]]), providerInfo: []
   });
-  const route = routes.find(({ pattern }) => pattern instanceof RegExp && pattern.source.includes("reader"));
+  const route = routes.find(({ pattern }) => pattern instanceof RegExp && pattern.test("/api/fixture/session/root/reader"));
   assert.ok(route);
   const response = { statusCode: 0, body: "", writeHead(status) { this.statusCode = status; }, end(body = "") { this.body += body; } };
   const match = "/api/fixture/session/root/reader".match(route.pattern);

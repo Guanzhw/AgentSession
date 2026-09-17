@@ -14,7 +14,7 @@ import {
   supportsSystemPromptEvidence,
 } from "../providers/kinds.js";
 import { getResumeCommand } from "../resume.js";
-import { renderSessionPage, renderSessionReaderPane, renderInheritedContextPage, renderSessionMetricsPanel } from "../views/session.js";
+import { renderSessionPage, renderSessionReaderPane, renderReaderProcessChunk, renderInheritedContextPage, renderSessionMetricsPanel } from "../views/session.js";
 import type { SessionProtocol } from "../providers/shared/session-protocol.js";
 import type { ContextChangeResult } from "../providers/interface.js";
 import { decorateRuntimeTransformationEvidence, projectRuntimeLanePresentation, renderRuntimeEvents, renderRuntimeRunPage, renderRuntimeWorkbench } from "../views/runtime-workbench.js";
@@ -164,6 +164,9 @@ export function registerSessionDetail(
       conversationCompactions: collectConversationCompactions(runtime.protocol),
       conversationView,
       readerRelations: runtime.v3 ? deriveReaderRelations(runtime.v3, document) : null,
+      // An unavailable runtime still permits direct reading; keep those tools
+      // rendered because a later process request cannot reproduce its boundaries.
+      deferExecution: !supportsSessionProtocol(adapter) || Boolean(runtime.v3),
       inheritedContext: adapter.getInheritedContext?.(sessionId) || null
     };
     return { runtime, readerPane: renderSessionReaderPane(readerInput) };
@@ -311,6 +314,46 @@ export function registerSessionDetail(
     } catch (err: any) {
       console.error(`Route error: ${err.message}`);
       return { status: 500, body: JSON.stringify({ error: "Internal server error" }), contentType: "application/json; charset=utf-8" };
+    }
+  });
+
+  // Bounded process markup uses the same owned tree and relation boundaries,
+  // without constructing the full reader or its runtime inspection panels.
+  app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/reader\/process$/, async (req: any, res: any, match: RegExpMatchArray) => {
+    const providerId = match[1];
+    const sessionId = safeDecodeId(match[2]);
+    const adapter = providerMap.get(providerId);
+    if (!adapter) {
+      const missing = missingProviderResponse(providerId);
+      return json(res, missing.body, missing.status);
+    }
+    const params = new URL(req.url || "/", `http://localhost:${appConfig.port}`).searchParams;
+    const messageId = params.get("messageId") || "";
+    const firstPartId = params.get("firstPartId") || "";
+    const lastPartId = params.get("lastPartId") || "";
+    if (!sessionId || !messageId || !firstPartId || !lastPartId) {
+      return json(res, { ok: false, error: "Invalid process reference", code: "invalid_input" }, 400);
+    }
+    try {
+      const document = getSessionDocument(adapter, providerId, sessionId);
+      if (!document) return json(res, { ok: false, error: "Process not found", code: "process_not_found" }, 404);
+      const protocol = supportsSessionProtocol(adapter) ? getRuntimeProtocolV3(adapter, sessionId) : null;
+      const ownedReader = typeof adapter.getOwnedReaderProjection === "function"
+        ? adapter.getOwnedReaderProjection(sessionId, protocol ? {
+            tasks: protocol.tasks, agentRuns: protocol.agentRuns, relationships: protocol.relationships
+          } : undefined)
+        : undefined;
+      const fragment = renderReaderProcessChunk({
+        sessionTree: ownedReader === undefined ? adapter.getSessionTree?.(sessionId) || null : null,
+        ownedReader,
+        readerRelations: protocol ? deriveReaderRelations(protocol, document) : null,
+        messageId, firstPartId, lastPartId
+      });
+      if (!fragment) return json(res, { ok: false, error: "Process not found", code: "process_not_found" }, 404);
+      return json(res, { ok: true, provider: providerId, sessionId, messageId, firstPartId, lastPartId, ...fragment });
+    } catch (error) {
+      console.error(`Process route error: ${error instanceof Error ? error.message : String(error)}`);
+      return json(res, { ok: false, error: "Unable to load process", code: "process_failed" }, 500);
     }
   });
 

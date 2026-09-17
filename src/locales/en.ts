@@ -290,6 +290,8 @@ export const en = {
   "conversation.thread_turn": "User turn",
   "conversation.process_kicker": "Recorded process",
   "conversation.process_items": "{count} items",
+  "conversation.process_load": "Load {count} tool calls",
+  "conversation.process_attention": "{count} failed or interrupted",
   "conversation.checkpoint_kicker": "Context compacted",
   "conversation.checkpoint_before": "before",
   "conversation.checkpoint_after": "after",

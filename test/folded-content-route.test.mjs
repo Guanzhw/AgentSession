@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { Router } from '../dist/src/router.js';
 import { registerSessionDetail } from '../dist/src/routes/session-detail.js';
-import { renderSessionReaderPane } from '../dist/src/views/session.js';
+import { renderSessionReaderPane, renderReaderProcessChunk } from '../dist/src/views/session.js';
 import { buildPartsFromProviderMessages } from '../dist/src/session-queries.js';
 import { buildMessageSessionTree } from '../dist/src/providers/shared/message-session.js';
 import { renderProgressiveContent } from '../dist/src/views/components.js';
@@ -29,15 +29,18 @@ test('folded fields read their exact first and final pages through the registere
     getInheritedContext: (id) => id === 'child' ? { sourceSession: { provider: 'codex', sessionId: 'root' }, messages: [inheritedMessage] } : null
   };
   const document = buildPartsFromProviderMessages(messages);
+  const sessionTree = buildMessageSessionTree(session, messages);
   const html = renderSessionReaderPane({
     session, provider: 'codex', messages: document.messages, partsByMessage: document.partsByMessage,
-    sessionTree: buildMessageSessionTree(session, messages)
+    sessionTree
   });
   assert.match(html, /Readable answer/);
   assert.match(html, /id="part-tool-1-tool" data-part-id="tool:1:tool"/);
   assert.match(html, /id="part-assistant-1-reasoning" data-part-id="assistant:1:reasoning"/);
   assert.doesNotMatch(html, /output-start|reason-start|input-start|short output/);
-  assert.equal((html.match(/data-load-initial/g) || []).length, 4, 'reasoning, tool input, tool output and short output; empty fields make no requests');
+  const process = renderReaderProcessChunk({ sessionTree, messageId: sessionTree.messages[0].id, firstPartId: 'tool:1:tool', lastPartId: 'empty:1:tool' });
+  assert.equal((html.match(/data-load-initial/g) || []).length, 1, 'reasoning attached to visible prose retains its folded field');
+  assert.equal((process.html.match(/data-load-initial/g) || []).length, 3, 'process retains exact input/output continuation identities; empty fields make no requests');
 
   const router = new Router();
   registerSessionDetail(router, {

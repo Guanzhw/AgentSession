@@ -12,10 +12,7 @@ const safeScope = (scope) => {
 const ownedElements = (pane) => [pane, ...pane.querySelectorAll("*")]
   .filter((element) => element === pane || element.closest?.("[data-reader-pane]") === pane);
 
-export function scopeReaderPane(pane, scope) {
-  if (!pane || pane.dataset.readerDomScope) return pane;
-  const prefix = `reader-scope-${safeScope(scope)}`;
-  const elements = ownedElements(pane);
+function scopeElements(pane, elements, prefix) {
   const anchors = new Map();
   elements.forEach((element) => {
     if (!element.id) return;
@@ -29,21 +26,35 @@ export function scopeReaderPane(pane, scope) {
     IDREF_ATTRIBUTES.forEach((attribute) => {
       const value = element.getAttribute(attribute);
       if (!value) return;
-      element.setAttribute(attribute, value.split(/\s+/).map((part) => anchors.get(part) || part).join(" "));
+      element.setAttribute(attribute, value.split(/\s+/).map((part) => anchors.get(part) || readerPaneAnchor(pane, part)?.id || part).join(" "));
     });
     const href = element.getAttribute("href") || "";
     if (href.startsWith("#")) {
       let canonical;
       try { canonical = decodeURIComponent(href.slice(1)); } catch { canonical = null; }
-      const scoped = canonical && anchors.get(canonical);
+      const scoped = canonical && (anchors.get(canonical) || readerPaneAnchor(pane, canonical)?.id);
       if (scoped) {
         element.dataset.readerCanonicalHref = href;
         element.setAttribute("href", `#${encodeURIComponent(scoped)}`);
       }
     }
   });
+}
+
+export function scopeReaderPane(pane, scope) {
+  if (!pane || pane.dataset.readerDomScope) return pane;
+  const prefix = `reader-scope-${safeScope(scope)}`;
+  scopeElements(pane, ownedElements(pane), prefix);
   pane.dataset.readerDomScope = prefix;
   return pane;
+}
+
+/** Apply an already mounted child pane's namespace to fresh server markup. */
+export function scopeReaderFragment(pane, fragment) {
+  if (!pane.dataset.readerDomScope) return;
+  const elements = [...fragment.querySelectorAll("*")]
+    .filter((element) => element.closest("[data-reader-pane]") === pane);
+  scopeElements(pane, elements, pane.dataset.readerDomScope);
 }
 
 export function readerPaneAnchor(pane, canonicalAnchor) {

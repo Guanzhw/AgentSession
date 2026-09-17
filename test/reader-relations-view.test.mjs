@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { renderSessionReaderPane } from "../dist/src/views/session.js";
+import { renderSessionReaderPane, renderReaderProcessChunk } from "../dist/src/views/session.js";
 import { buildMessageSessionTree } from "../dist/src/providers/shared/message-session.js";
 import { buildPartsFromProviderMessages } from "../dist/src/session-queries.js";
 import { renderProgressiveContent, resolveProgressiveField } from "../dist/src/views/components.js";
@@ -72,7 +72,10 @@ test("adjacent tool calls share a closed process disclosure without consuming pr
   const process = html.indexOf('data-reader-execution');
   assert.ok(html.indexOf('Readable answer') < process);
   assert.match(html, /data-reader-execution-count="2"/);
-  assert.match(html.slice(process), /id="part-one-tool"[\s\S]*data-progressive-part-id="one:tool" data-progressive-field="output"[\s\S]*id="part-two-tool"[\s\S]*data-progressive-part-id="two:tool" data-progressive-field="output"/);
+  assert.match(html.slice(process), /id="part-one-tool"[^>]*data-reader-process-anchor[\s\S]*id="part-two-tool"[^>]*data-reader-process-anchor/);
+  const fragment = renderReaderProcessChunk({ sessionTree: tree, messageId: tree.messages[0].id, firstPartId: 'one:tool', lastPartId: 'two:tool' });
+  assert.equal(fragment.count, 2);
+  assert.match(fragment.html, /data-progressive-part-id="one:tool" data-progressive-field="output"[\s\S]*data-progressive-part-id="two:tool" data-progressive-field="output"/);
   assert.doesNotMatch(html, /First output|Second output/);
   const parts = tree.messages.flatMap((message) => message.parts);
   for (const [partId, expected] of [['one:tool', 'First output'], ['two:tool', 'Second output']]) {

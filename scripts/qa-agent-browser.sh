@@ -346,6 +346,22 @@ ab "wait for search" wait --text "Search" >/dev/null
 
 ab "open session detail" open "$BASE/opencode/session/$SAMPLE_SESSION_ID" >/dev/null
 ab "wait for complete history reader" wait --load networkidle >/dev/null
+process_chunk_count="$(read_ab "count deferred tool processes" get count "[data-reader-process-chunk]")"
+if [[ "$process_chunk_count" -gt 0 ]]; then
+  process_initial="$(read_ab "verify unloaded process anchors" eval "(() => { const chunks = [...document.querySelectorAll('[data-reader-process-chunk]')]; return JSON.stringify({ unloaded: chunks.every((chunk) => chunk.dataset.readerProcessState === 'unloaded'), bounded: chunks.every((chunk) => Number(chunk.dataset.readerProcessCount) <= 20), anchors: chunks.every((chunk) => !!chunk.querySelector('[data-reader-process-anchor]')) }); })()" | tr -d '[:space:]')"
+  assert_contains "initial process state" "$process_initial" '"unloaded":true'
+  assert_contains "initial process state" "$process_initial" '"bounded":true'
+  assert_contains "initial process state" "$process_initial" '"anchors":true'
+  ab "reveal process entry" eval "(() => { const group = document.querySelector('[data-reader-process-group]'); let ancestor = group.parentElement.closest('details'); while (ancestor) { ancestor.open = true; ancestor = ancestor.parentElement.closest('details'); } return true; })()" >/dev/null
+  ab "open one process" find first "[data-reader-process-group] > summary" click >/dev/null
+  ab "wait for first process chunk" wait --fn "document.querySelector('[data-reader-process-chunk]')?.dataset.readerProcessState === 'loaded'" >/dev/null
+  process_loaded="$(read_ab "verify loaded process ownership" eval "(() => { const chunk = document.querySelector('[data-reader-process-chunk]'); const chunks = [...document.querySelectorAll('[data-reader-process-chunk]')]; const ids = [...document.querySelectorAll('[id]')].map((element) => element.id); return JSON.stringify({ exactTools: chunk.querySelectorAll('.tool-call').length === Number(chunk.dataset.readerProcessCount), onlyOneLoaded: chunks.filter((item) => item.dataset.readerProcessState === 'loaded').length === 1, noStubs: !chunk.querySelector('[data-reader-process-anchor]'), uniqueIds: new Set(ids).size === ids.length, fieldsUnloaded: [...chunk.querySelectorAll('.progressive-more')].every((button) => button.dataset.nextOffset === '0') }); })()" | tr -d '[:space:]')"
+  assert_contains "loaded process" "$process_loaded" '"exactTools":true'
+  assert_contains "loaded process" "$process_loaded" '"onlyOneLoaded":true'
+  assert_contains "loaded process" "$process_loaded" '"noStubs":true'
+  assert_contains "loaded process" "$process_loaded" '"uniqueIds":true'
+  assert_contains "loaded process" "$process_loaded" '"fieldsUnloaded":true'
+fi
 reader_state="$(read_ab "verify unified history reader" eval "(() => { const workbench = document.querySelector('.session-workbench[data-session-reader]'); const host = workbench?.querySelector('[data-reader-host]'); const pane = host?.querySelector('[data-reader-pane]'); const work = document.getElementById('tab-work'); const events = document.getElementById('tab-events'); return JSON.stringify({ reader: !!workbench, rootSession: workbench?.dataset.sessionId || '', currentSession: workbench?.dataset.readerCurrentSession || '', onePane: host?.querySelectorAll('[data-reader-pane]').length === 1, paneAttrs: !!pane?.dataset.readerProvider && !!pane?.dataset.readerSession && !!pane?.dataset.readerTitle, messages: !!pane?.querySelector('#session-messages'), users: pane?.querySelectorAll('#session-messages .message-turn-user').length || 0, assistants: pane?.querySelectorAll('#session-messages .message-turn-assistant').length || 0, tools: pane?.querySelectorAll('#session-messages .tool-call').length || 0, reasoning: pane?.querySelectorAll('#session-messages .reasoning-block').length || 0, inheritedSeparate: !pane?.querySelector('#session-messages [data-inherited-context]'), noPrimaryTabs: !document.querySelector('.tab-bar [role=tab]'), conversationEntry: !!document.getElementById('tab-conversation'), workDisclosure: work?.tagName === 'DETAILS' && !work.open, eventsDisclosure: events?.tagName === 'DETAILS' && !events.open, backShell: !!workbench?.querySelector('[data-reader-back]'), statusShell: !!workbench?.querySelector('[data-reader-status]') }); })()" | tr -d '[:space:]')"
 assert_contains "unified history reader" "$reader_state" '"reader":true'
 assert_contains "unified history reader" "$reader_state" '"currentSession":"'$SAMPLE_SESSION_ID'"'

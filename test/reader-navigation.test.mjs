@@ -13,7 +13,7 @@ test('unplaced inline history has browser-localized position labels', () => {
 });
 
 function readerHarness(t, initialHref = '/fixture/session/root?view=history#root-source', initialEvents = [], {
-  narrow = false, collaboration = false, browserSnapshot = null, initialRootSession = null, markup = null
+  narrow = false, collaboration = false, browserSnapshot = null, initialRootSession = null, markup = null, ft
 } = {}) {
   const location = new URL(initialHref, 'http://localhost');
   const navigations = [];
@@ -24,6 +24,7 @@ function readerHarness(t, initialHref = '/fixture/session/root?view=history#root
   const panes = new Map();
   const eventResponses = new Map(initialEvents);
   const inheritedResponses = [];
+  const processResponses = [];
   const paneResponses = new Map();
   let document;
   let window;
@@ -178,6 +179,11 @@ function readerHarness(t, initialHref = '/fixture/session/root?view=history#root
     requestAnimationFrame: (callback) => frames.push(callback),
     fetch: async (url) => {
       requests.push(url);
+      if (url.includes('/reader/process?')) {
+        const data = await processResponses.shift();
+        if (data instanceof Error) throw data;
+        return { ok: data.ok, status: data.ok ? 200 : 404, json: async () => data };
+      }
       if (url.includes('/inherited-context?')) {
         const data = await inheritedResponses.shift();
         return { ok: true, json: async () => data };
@@ -203,8 +209,8 @@ function readerHarness(t, initialHref = '/fixture/session/root?view=history#root
     parent.append(link);
     return link;
   };
-  const initialMarkup = markup?.({ root, child, makePane, makeElement, addRecordedChild });
-  const reader = initSessionReader();
+  const initialMarkup = markup?.({ root, child, makePane, makeElement, addRecordedChild, processResponses });
+  const reader = initSessionReader({ ft });
   const click = async (target) => {
     const event = { type: 'click', target, button: 0, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
     await workbench.dispatchEvent(event);
@@ -220,7 +226,7 @@ function readerHarness(t, initialHref = '/fixture/session/root?view=history#root
     while (frames.length) frames.shift()();
   };
   return {
-    reader, root, child, back, status, currentTitle, location, window, document, requests, makePane, flush, eventResponses, inheritedResponses, paneResponses, swaps, anchorReveals,
+    reader, root, child, back, status, currentTitle, location, window, document, requests, makePane, flush, eventResponses, inheritedResponses, processResponses, paneResponses, swaps, anchorReveals,
     makeElement, addRecordedChild, navigations, initialMarkup,
     click,
     async resize(isNarrow) { media.matches = isNarrow; await media.dispatchEvent({ type: 'change' }); },
@@ -249,6 +255,144 @@ function readerHarness(t, initialHref = '/fixture/session/root?view=history#root
     }
   };
 }
+
+function addDeferredProcess({ makeElement }, pane, anchor = 'deferred-tool') {
+  const chunk = makeElement({ readerProcessChunk: '', readerProcessState: 'unloaded',
+    readerProcessUrl: `/api/fixture/session/${pane.dataset.readerSession}/reader/process?messageId=message&firstPartId=tool&lastPartId=tool` });
+  const placeholder = makeElement({ readerProcessAnchor: '', partId: 'tool' }, anchor);
+  const button = makeElement({ readerProcessLoad: '', loadingLabel: 'Loading', retryLabel: 'Retry', loadError: 'Load failed' });
+  button.textContent = 'Load tool';
+  chunk.append(placeholder, button, makeElement({ readerProcessStatus: '' }));
+  const target = makeElement({ partId: 'tool' }, anchor);
+  const label = makeElement();
+  label.setAttribute('aria-controls', `${anchor} ${pane.dataset.readerSession}-source`);
+  const link = makeElement();
+  link.href = `#${pane.dataset.readerSession}-source`;
+  target.append(label, link);
+  Object.defineProperty(chunk, 'innerHTML', { set(html) {
+    assert.equal(html, 'process:tool');
+    chunk.replaceChildren(target);
+  } });
+  pane.append(chunk);
+  return { chunk, target, label, link };
+}
+
+test('an initial raw process hash materializes its source before revealing it', async (t) => {
+  const h = readerHarness(t, '/fixture/session/root#deferred-tool', [], { markup(h) {
+    h.processResponses.push({ ok: true, html: 'process:tool' });
+    return addDeferredProcess(h, h.root);
+  } });
+  await h.flush();
+  assert.equal(h.initialMarkup.chunk.dataset.readerProcessState, 'loaded');
+  assert.equal(h.document.activeElement, h.initialMarkup.target);
+  assert.equal(h.location.hash, '#deferred-tool');
+  assert.equal(h.anchorReveals.at(-1).target, h.initialMarkup.target);
+  assert.equal(h.historyState().readerEntry, 0, 'Reload does not create a new reading location');
+});
+
+test('a deferred source response preserves a newer same-pane navigation', async (t) => {
+  const h = readerHarness(t);
+  await h.flush();
+  const process = addDeferredProcess(h, h.root);
+  let resolveProcess;
+  h.processResponses.push(new Promise((resolve) => { resolveProcess = resolve; }));
+  const source = h.makeElement({ readerSource: '' });
+  source.href = '#deferred-tool';
+  h.root.append(source);
+  const pending = h.click(source);
+  const newer = h.makeElement({ readerSource: '' });
+  newer.href = '#root-source';
+  h.root.append(newer);
+  await h.click(newer);
+  const newerHref = h.href();
+  resolveProcess({ ok: true, html: 'process:tool' });
+  await pending;
+  assert.equal(process.chunk.dataset.readerProcessState, 'loaded', 'Useful content may finish without taking navigation ownership');
+  assert.equal(h.document.activeElement, h.root.children[0]);
+  assert.equal(h.href(), newerHref);
+  assert.equal(h.anchorReveals.at(-1).target, h.root.children[0]);
+});
+
+test('a native event waits for its process and respects newer source navigation', async (t) => {
+  const h = readerHarness(t);
+  await h.flush();
+  const process = addDeferredProcess(h, h.root);
+  let resolveProcess;
+  h.processResponses.push(new Promise((resolve) => { resolveProcess = resolve; }));
+  const pending = h.source('root', 'tool-event', { partId: 'tool', anchor: 'deferred-tool' });
+  await h.flush();
+  assert.equal(process.chunk.dataset.readerProcessState, 'loading');
+  const newer = h.makeElement({ readerSource: '' });
+  newer.href = '#root-source';
+  h.root.append(newer);
+  await h.click(newer);
+  resolveProcess({ ok: true, html: 'process:tool' });
+  await pending;
+  assert.equal(h.document.activeElement, h.root.children[0]);
+  assert.equal(h.location.hash, '#root-source');
+  assert.equal(h.location.searchParams.has('readerEvent'), false);
+  assert.equal(h.root.querySelector('[data-reader-event-evidence]'), null);
+});
+
+test('closing a child while its deferred source loads preserves the parent location', async (t) => {
+  const h = readerHarness(t);
+  h.addRecordedChild();
+  const process = addDeferredProcess(h, h.child);
+  await h.reader.openPane('fixture', 'child');
+  let resolveProcess;
+  h.processResponses.push(new Promise((resolve) => { resolveProcess = resolve; }));
+  const source = h.makeElement({ readerSource: '' });
+  source.href = '#deferred-tool';
+  h.child.append(source);
+  const pending = h.click(source);
+  await h.child.parentElement.querySelector('[data-reader-inline-close]').dispatchEvent({ type: 'click', preventDefault() {} });
+  const parentHref = h.href();
+  const parentFocus = h.document.activeElement;
+  resolveProcess({ ok: true, html: 'process:tool' });
+  await pending;
+  assert.equal(process.chunk.dataset.readerProcessState, 'unloaded');
+  assert.equal(h.href(), parentHref);
+  assert.equal(h.document.activeElement, parentFocus);
+  assert.deepEqual(h.reader.getInlinePanes(), []);
+});
+
+test('a late child process scopes its IDs and references to existing pane anchors', async (t) => {
+  const h = readerHarness(t);
+  h.addRecordedChild();
+  const process = addDeferredProcess(h, h.child);
+  await h.reader.openPane('fixture', 'child');
+  h.processResponses.push({ ok: true, html: 'process:tool' });
+  await h.source('child', 'tool-event', { partId: 'tool', anchor: 'deferred-tool' });
+  const existing = readerPaneAnchor(h.child, 'child-source');
+  assert.equal(readerPaneAnchor(h.child, 'deferred-tool'), process.target);
+  assert.notEqual(process.target.id, 'deferred-tool');
+  assert.equal(process.label.getAttribute('aria-controls'), `${process.target.id} ${existing.id}`);
+  assert.equal(decodeURIComponent(process.link.href.slice(1)), existing.id);
+  assert.equal(parseReaderLocation(h.location).source.hash, '#deferred-tool');
+  assert.equal(h.document.activeElement, process.target);
+  await h.child.parentElement.querySelector('[data-reader-inline-close]').dispatchEvent({ type: 'click', preventDefault() {} });
+  assert.equal(process.target.id, 'deferred-tool');
+  assert.equal(process.label.getAttribute('aria-controls'), 'deferred-tool child-source');
+  assert.equal(process.link.href, '#child-source');
+});
+
+test('deferred source navigation distinguishes network failure from missing source', async (t) => {
+  const h = readerHarness(t, undefined, [], { ft: (key) => key });
+  const process = addDeferredProcess(h, h.root);
+  const source = h.makeElement({ readerSource: '' });
+  source.href = '#deferred-tool';
+  h.root.append(source);
+  h.processResponses.push(new TypeError('Network unavailable'));
+  await h.click(source);
+  assert.equal(h.status.children[0].textContent, 'detail.reader_event_failed');
+  assert.equal(process.chunk.dataset.readerProcessState, 'error');
+  h.processResponses.push({ ok: false, code: 'process_not_found', error: 'No recorded tool range' });
+  await h.click(source);
+  assert.equal(h.status.children[0].textContent, 'detail.reader_source_missing');
+  h.processResponses.push({ ok: true, html: 'process:tool' });
+  await h.click(source);
+  assert.equal(h.document.activeElement, process.target);
+});
 
 test('inline child Back/Forward restores the root URL, scroll, focus, and reading state', async (t) => {
   const h = readerHarness(t);

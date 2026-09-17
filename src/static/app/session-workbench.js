@@ -1,4 +1,5 @@
 import { readerPaneAnchor } from "./reader-pane-dom.js";
+import { ensureReaderAnchor, initReaderProcesses } from "./reader-process.js";
 
 const progressiveContentLoads = new WeakMap();
 
@@ -106,6 +107,7 @@ export function selectVisibleSearchHit(match, visibleHits) {
 export function initSessionWorkbench({ ft, formatText, showToast }) {
 const sessionWorkbench = document.querySelector(".session-workbench");
 if (sessionWorkbench) {
+  initReaderProcesses(sessionWorkbench);
   sessionWorkbench.addEventListener("toggle", (event) => {
     void loadFoldedContent(event.target);
   }, true);
@@ -280,7 +282,20 @@ if (sessionWorkbench) {
   const revealSearchMatch = async (entry, query, scroll = true, revealRevision = transcriptRevealRevision) => {
     const match = entry.match;
     const pane = getSearchPane();
+    const source = findMatchPart(match);
+    if (source?.hasAttribute("data-reader-process-anchor")) {
+      try {
+        await ensureReaderAnchor(pane, source.dataset.readerCanonicalAnchor || source.id);
+      } catch (error) {
+        if (revealRevision === transcriptRevealRevision && pane === getSearchPane()) {
+          transcriptSearchStatus.textContent = ft("detail.search_failed");
+        }
+        return;
+      }
+      if (revealRevision !== transcriptRevealRevision || pane !== getSearchPane() || !pane.isConnected) return;
+    }
     const part = findMatchPart(match);
+    entry.turn = part?.closest(".message-turn") || entry.turn;
     const target = part || entry.turn;
     if (!target) return;
     revealAncestorDetails(target);
@@ -525,6 +540,9 @@ if (sessionWorkbench) {
     transcriptCurrentTarget = null;
     if (transcriptSearchInput?.value.trim()) void updateTranscriptMatches(false, state?.index ?? 0, state?.offset ?? 0);
     else updateTranscriptSearchControls();
+  });
+  sessionWorkbench.addEventListener("session-reader:process-loaded", (event) => {
+    invalidateNavigationCache(event.detail.pane);
   });
   sessionWorkbench.addEventListener("session-reader:inline-opened", (event) => {
     refreshSearchScopes();
@@ -824,9 +842,15 @@ if (sessionWorkbench) {
     if (!link) return;
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     const pane = link.closest("[data-reader-pane]") || getReaderPane();
-    const target = readerPaneAnchor(pane, decodeURIComponent(link.getAttribute("href").slice(1)));
-    if (!target) return;
     event.preventDefault();
+    let target;
+    try {
+      target = await ensureReaderAnchor(pane, decodeURIComponent(link.getAttribute("href").slice(1)));
+    } catch {
+      showToast(ft("detail.reader_event_failed"), "error");
+      return;
+    }
+    if (!target || !pane.isConnected) return;
     manualNavigationAt.set(pane, Date.now());
     history.pushState(null, "", link.getAttribute("href"));
     revealAncestorDetails(target);
@@ -842,17 +866,9 @@ if (sessionWorkbench) {
     requestAnimationFrame(updateActiveFromScroll);
   }, { passive: true });
 
-  const initialPane = getReaderPane();
-  const initialHashTarget = location.hash
-    ? readerPaneAnchor(initialPane, decodeURIComponent(location.hash.slice(1)))
-    : null;
-  if (initialHashTarget) {
-    revealAncestorDetails(initialHashTarget);
-    setActiveTarget(initialHashTarget.id, initialPane);
-    requestAnimationFrame(() => initialHashTarget.scrollIntoView({ block: "start", behavior: "auto" }));
-  } else {
-    updateActiveFromScroll();
-  }
+  // Canonical hash navigation is replayed by the reader controller, which
+  // materializes folded process anchors before scrolling or taking focus.
+  updateActiveFromScroll();
 
   sessionWorkbench.addEventListener("session-reader:inline-opened", (event) => {
     const pane = event.detail?.pane;

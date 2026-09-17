@@ -49,6 +49,9 @@ remain expandable. Per-message model and token details live under Usage & model;
 tools and reasoning stay independently expandable. Canonically identified tool
 input/output and reasoning bodies load when opened, with local retry and
 continuation to the end. Search still covers the complete available source.
+Ordinary tool processes load in chunks of up to 20 tools. Search and source
+links open the matching chunk directly; prose, collaboration entries and
+attention summaries stay in their recorded positions.
 Library titles prefer viewer custom titles or readable provider titles. When
 neither exists, Untitled plus a short ID identifies the entry without changing
 its canonical ID.

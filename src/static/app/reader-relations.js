@@ -269,6 +269,7 @@ export function initReaderRelations() {
     if (pane) attachPane(pane);
     schedule();
   });
+  workbench.addEventListener("session-reader:process-loaded", schedule);
   workbench.addEventListener("session-reader:inline-opened", (event) => attachPane(event.detail?.pane));
   workbench.addEventListener("session-reader:inline-closed", (event) => detachPane(event.detail?.pane));
   workbench.addEventListener("session-reader:before-swap", detachAll);

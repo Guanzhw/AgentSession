@@ -176,6 +176,35 @@ expanded narrow content. Run the full test/review suite, real provider/API and
 browser acceptance before publishing the production slice. The private
 prototype is evidence for composition, not a substitute for these checks.
 
+### Deferred tool-process checkpoint, 2026-09-17
+
+- Ordinary tool-only execution groups keep canonical source placeholders and
+  load server-rendered chunks of at most 20 tools. The read-only
+  `/api/:provider/session/:id/reader/process` route uses message and first/last
+  part IDs; existing links preserve their recorded endpoint when tools append.
+  Prose, milestones, task entries and failure/interruption counts remain in
+  their original positions. Invalid runtime evidence retains directly rendered
+  tools and its existing diagnostic.
+- Source and full-text search navigation await the owning chunk; field content
+  still uses the existing continuation route. Late child fragments reuse the
+  pane's ID namespace. Manual loads, source jumps and search share one pending
+  request. Failed loads are retryable and distinct from missing evidence.
+- `npm test` passes 795/795. Full live E2E, seven-provider API checks and Windows
+  binary build/smoke pass. Independent client/server review findings are fixed
+  and regression-tested. Actual chunk API checks cover Codex, DSH and OpenClaw;
+  the chosen OpenCode E2E sample has no eligible ordinary tool chunk.
+- Real browser checks cover direct hashes, late output search, failed-load
+  retry, child scoping, focus and parent-search restoration, plus 390px reading.
+  A real 22-tool group loads its first 20 on expansion and the remaining two on
+  request, with unique IDs and focus on the newly loaded tool. Stable-session
+  prose and source anchors are unchanged. Long-history markup falls from
+  23.75 to 14.25 MB and from 225,445 to 114,421 parsed elements, with all earlier
+  prose and anchors retained despite appended records.
+- Long-page HTTP generation remains about 14.2 seconds. P9 preparation cost and
+  final product/visual acceptance remain open. Exact measurements and evidence
+  limits are in the [acceptance record](runtime-acceptance-evidence.md) and the
+  [loading decision](../../.agents/decisions/implemented/2026-09-17-deferred-reader-execution.md).
+
 ### Folded-content and complete-JSON checkpoint, 2026-09-17
 
 - `npm test` passes 778/778; independent stream and folded-loader reviews,
