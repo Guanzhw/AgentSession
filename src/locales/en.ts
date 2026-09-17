@@ -1057,7 +1057,10 @@ export const en = {
 
   // Progressive expansion
   "progressive.show_more": "Show more",
-  "progressive.load_failed": "Unable to load more content",
+  "progressive.load_content": "Load content",
+  "progressive.loading": "Loading content…",
+  "progressive.retry": "Retry loading",
+  "progressive.load_failed": "Unable to load content",
 
   // JS prompts/confirms
   "js.rename_prompt": "Enter new title:",

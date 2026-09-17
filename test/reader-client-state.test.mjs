@@ -18,7 +18,7 @@ test('shared progressive request releases a detached cached pane for retry', asy
     calls += 1;
     return new Promise((resolve) => { finishResponse = resolve; });
   };
-  const pane = { dataset: { readerProvider: 'fixture', readerSession: 'child' } };
+  const pane = { dataset: { readerProvider: 'fixture', readerSession: 'child' }, isConnected: true };
   let activePane = pane;
   const workbench = { dataset: { provider: 'fixture', sessionId: 'parent' }, querySelector: () => activePane };
   const attributes = new Map();
@@ -27,13 +27,14 @@ test('shared progressive request releases a detached cached pane for retry', asy
     disabled: false,
     isConnected: true,
     closest(selector) {
-      if (selector === '.progressive') return {};
+      if (selector === '.progressive') return { querySelector: () => null };
       if (selector === '.session-workbench') return workbench;
       if (selector === '[data-reader-pane]') return pane;
       throw new Error(`Unexpected selector ${selector}`);
     },
     setAttribute(name, value) { attributes.set(name, value); },
-    removeAttribute(name) { attributes.delete(name); }
+    removeAttribute(name) { attributes.delete(name); },
+    getAttribute(name) { return attributes.get(name) ?? null; }
   };
   const manual = loadProgressiveContent(button);
   const search = loadProgressiveContent(button, { dispatch: false });
@@ -72,7 +73,7 @@ test('progressive content commits to a connected inline child even when it is no
   });
   const child = { dataset: { readerProvider: 'fixture', readerSession: 'child' }, isConnected: true };
   const inserted = [];
-  const container = { insertBefore(chunk, before) { inserted.push({ chunk, before }); } };
+  const container = { querySelector: () => null, insertBefore(chunk, before) { inserted.push({ chunk, before }); } };
   const workbench = {
     dataset: { provider: 'fixture', sessionId: 'root' },
     querySelector: () => ({ dataset: { readerProvider: 'fixture', readerSession: 'root' } }),

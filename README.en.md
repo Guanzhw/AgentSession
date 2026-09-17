@@ -46,7 +46,9 @@ distance represents reading position, not elapsed time. The on-demand Tasks &
 collaboration panel shows a compact task map followed by the selected task's
 initial request and latest reply excerpts. Exchanges and complete child history
 remain expandable. Per-message model and token details live under Usage & model;
-tools and reasoning stay independently expandable.
+tools and reasoning stay independently expandable. Canonically identified tool
+input/output and reasoning bodies load when opened, with local retry and
+continuation to the end. Search still covers the complete available source.
 Library titles prefer viewer custom titles or readable provider titles. When
 neither exists, Untitled plus a short ID identifies the entry without changing
 its canonical ID.

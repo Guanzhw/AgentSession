@@ -44,6 +44,7 @@ import type { ProjectionOptions, RunPage, V3Projection } from "../protocol-runti
 import type { SessionProtocolV3 } from "../providers/shared/session-protocol-v3.js";
 import { deriveConversationView } from "../conversation-view-model.js";
 import { deriveReaderRelations } from "../reader-relations.js";
+import { streamJson } from "../json-stream.js";
 
 export function registerSessionDetail(
   app: any,
@@ -447,15 +448,20 @@ export function registerSessionDetail(
         return json(res, { ok: false, error: "Not found" }, 404);
       }
 
-      return json(res, {
+      await streamJson(res, {
         session: document.apiSession,
         tree: adapter.getSessionTree?.(sessionId) || null,
         container: adapter.getSessionContainer?.(sessionId) || null,
         metrics: adapter.getSessionMetrics?.(sessionId) || null,
         messages: document.apiMessages
       });
+      return;
     } catch (err: any) {
       console.error(`Route error: ${err.message}`);
+      if (res.headersSent || res.writableEnded) {
+        if (!res.writableEnded && typeof res.destroy === "function") res.destroy(err);
+        return;
+      }
       return json(res, { error: "Internal server error" }, 500);
     }
   });
@@ -652,18 +658,15 @@ export function registerSessionDetail(
         const sessionTree = adapter.getSessionTree?.(id) || null;
         const sessionContainer = adapter.getSessionContainer?.(id) || null;
         const sessionMetrics = adapter.getSessionMetrics?.(id) || null;
-        const body = JSON.stringify({
+        await streamJson(res, {
           session,
           tree: sessionTree,
           container: sessionContainer,
           metrics: sessionMetrics,
           messages: document.exportMessages
-        }, null, 2);
-        res.writeHead(200, {
-          "Content-Type": "application/json; charset=utf-8",
+        }, 200, {
           "Content-Disposition": `attachment; filename="${filename}"`
-        });
-        res.end(body);
+        }, 16 * 1024, 2);
         return;
       }
 

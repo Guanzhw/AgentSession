@@ -3,7 +3,7 @@ import test from "node:test";
 
 const { renderSessionPage, renderSessionReaderPane } = await import("../dist/src/views/session.js");
 const { registerSessionDetail } = await import("../dist/src/routes/session-detail.js");
-const { reasoningBlock, toolCallBlock } = await import("../dist/src/views/components.js");
+const { reasoningBlock, toolCallBlock, renderProgressiveContent } = await import("../dist/src/views/components.js");
 const { anchorId } = await import("../dist/src/views/anchors.js");
 const { buildPartsFromProviderMessages } = await import("../dist/src/session-queries.js");
 const { buildMessageSessionTree } = await import("../dist/src/providers/shared/message-session.js");
@@ -35,10 +35,14 @@ test("mapped document part identities stay aligned with the shared reader tree",
 
 test("plain tool search fields exclude the display heading from occurrence order", () => {
   const html = toolCallBlock("run", {}, "output output", "completed", null, "tool-search");
-  const outputField = html.match(/<div data-content-field="output">([\s\S]*?)<\/div>/)?.[1];
+  const outputField = html.match(/<div[^>]*data-content-field="output"[^>]*>[\s\S]*?<\/div>/)?.[0];
   assert.ok(outputField);
   assert.doesNotMatch(outputField, /<h4>/);
-  assert.equal((outputField.match(/output/g) || []).length, 2);
+  assert.match(outputField, /data-progressive-field="output"/);
+  assert.match(outputField, /data-next-offset="0"/);
+  const loaded = renderProgressiveContent("output output", "auto");
+  assert.doesNotMatch(loaded.html, /<h4>/);
+  assert.equal((loaded.html.match(/output/g) || []).length, 2);
 });
 
 test("native part anchors normalize punctuation consistently across source renderers", () => {
@@ -164,7 +168,8 @@ test("reader pane owns one complete session history and links children on demand
   assert.match(pane, /data-reader-pane/);
   assert.match(pane, /data-reader-provider="fixture" data-reader-session="root"/);
   assert.match(pane, /root-owned body/);
-  assert.match(pane, /done/, "native task evidence remains on the root reading spine");
+  assert.match(pane, /id="part-task-part" data-part-id="task-part"/, "native task evidence remains on the root reading spine");
+  assert.match(pane, /data-progressive-part-id="task-part" data-progressive-field="output"/, "task output retains its canonical content endpoint identity");
   assert.doesNotMatch(pane.split('<aside class="reader-collaboration"')[0], /child-owned body/);
   assert.match(pane, /data-reader-task-preview data-reader-provider="fixture" data-reader-session="child-1"/);
   assert.doesNotMatch(pane, /child-owned body/, "child excerpts are loaded only on selection");

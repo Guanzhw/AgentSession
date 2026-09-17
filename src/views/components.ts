@@ -261,15 +261,23 @@ function progressiveContainer(
   label: string,
   partId: string,
   field: ProgressiveField,
-  contentScope = ""
+  contentScope = "",
+  deferInitial = false
 ) {
-  const page = renderProgressiveContent(value, format, 0, limit);
+  const deferred = deferInitial && Boolean(partId) && value != null && value !== "";
+  const page = deferred
+    ? { html: "", nextOffset: 0 }
+    : renderProgressiveContent(value, format, 0, limit);
+  const fieldAttribute = deferInitial ? ` data-content-field="${field}"` : "";
+  const fieldClass = deferInitial && field === "reasoning" ? "reasoning-body markdown" : "";
   if (page.nextOffset == null || !partId) {
-    return page.html;
+    return deferInitial
+      ? `<div${fieldClass ? ` class="${fieldClass}"` : ""}${fieldAttribute}>${page.html}</div>`
+      : page.html;
   }
-  return `<div class="progressive" data-progressive-part-id="${escapeHtml(partId)}" data-progressive-field="${field}" data-content-scope="${escapeHtml(contentScope)}">
+  return `<div class="${fieldClass ? `${fieldClass} ` : ""}progressive"${fieldAttribute} data-progressive-part-id="${escapeHtml(partId)}" data-progressive-field="${field}" data-content-scope="${escapeHtml(contentScope)}">
 ${page.html}
-<button type="button" class="progressive-more" data-part-id="${escapeHtml(partId)}" data-content-scope="${escapeHtml(contentScope)}" data-field="${field}" data-next-offset="${page.nextOffset}" data-load-error="${escapeHtml(t("progressive.load_failed"))}" aria-label="${escapeHtml(label)}">${escapeHtml(label)}</button>
+<button type="button" class="progressive-more" data-part-id="${escapeHtml(partId)}" data-content-scope="${escapeHtml(contentScope)}" data-field="${field}" data-next-offset="${page.nextOffset}" data-load-error="${escapeHtml(t("progressive.load_failed"))}"${deferred ? ` data-load-initial data-more-label="${escapeHtml(label)}" data-loading-label="${escapeHtml(t("progressive.loading"))}" data-retry-label="${escapeHtml(t("progressive.retry"))}"` : ""}>${escapeHtml(deferred ? t("progressive.load_content") : label)}</button>
 </div>`;
 }
 
@@ -754,7 +762,8 @@ export function reasoningBlock(content: any, duration = "", partId = "", content
     t("progressive.show_more"),
     partId,
     "reasoning",
-    contentScope
+    contentScope,
+    true
   );
   const safeDuration = duration ? `<span class="reasoning-duration">${escapeHtml(duration)}</span>` : "";
 
@@ -763,7 +772,7 @@ export function reasoningBlock(content: any, duration = "", partId = "", content
       <span class="reasoning-title">Reasoning</span>
       ${safeDuration}
     </summary>
-    <div class="reasoning-body markdown">${body}</div>
+    ${body}
   </details>`;
 }
 
@@ -775,7 +784,8 @@ export function toolCallBlock(tool: any, input: any, output: any, status: any, d
     t("progressive.show_more"),
     partId,
     "input",
-    contentScope
+    contentScope,
+    true
   );
   const outputMarkup = progressiveContainer(
     output,
@@ -784,7 +794,8 @@ export function toolCallBlock(tool: any, input: any, output: any, status: any, d
     t("progressive.show_more"),
     partId,
     "output",
-    contentScope
+    contentScope,
+    true
   );
   const safeStatus = escapeHtml(status || "unknown");
   const safeDuration = duration ? `<span class="tool-duration">${escapeHtml(duration)}</span>` : "";
@@ -799,11 +810,11 @@ export function toolCallBlock(tool: any, input: any, output: any, status: any, d
     <div class="tool-panels">
       <section>
         <h4>${t("tool.input")}</h4>
-        <div data-content-field="input">${inputMarkup}</div>
+        ${inputMarkup}
       </section>
       <section>
         <h4>${t("tool.output")}</h4>
-        <div data-content-field="output">${outputMarkup}</div>
+        ${outputMarkup}
       </section>
     </div>
   </details>`;

@@ -148,6 +148,16 @@ scope changes. Progressive content
 requests resolve the nearest pane's provider/session before the page root.
 Deep-link reveal, keyboard handling and ToC must work after inline mounting.
 
+Folded tool input/output and reasoning bodies with canonical part IDs start
+unloaded. Opening the specific disclosure requests the first `/content` page
+at offset zero; opening an outer process group does not fetch all its tools.
+Automatic, manual and search loads share the same pending request. Empty fields
+need no fetch. Loading and failed/retry states stay local to the field. Search
+can load all pages through a late match without an earlier sibling response
+resetting its selection. The complete reading spine and source anchors remain
+present. Full API and JSON export responses stream their existing five fields;
+this changes transport construction, not transcript or family coverage.
+
 Use a readable prose column and local collaboration inserts. The selected
 option-3 presentation moves the auxiliary overview to an on-demand right
 Tasks & collaboration panel: opening a passage's task selects its actual
@@ -165,6 +175,34 @@ continued content owned by the selected session, source-anchor jumps, and
 expanded narrow content. Run the full test/review suite, real provider/API and
 browser acceptance before publishing the production slice. The private
 prototype is evidence for composition, not a substitute for these checks.
+
+### Folded-content and complete-JSON checkpoint, 2026-09-17
+
+- `npm test` passes 778/778; independent stream and folded-loader reviews,
+  main-agent diff inspection, governance/typechecking and `git diff --check`
+  pass. Seven installed-provider Reader/page/preview/API samples and four
+  missing-resource checks pass. Full live `qa:e2e` has no browser errors;
+  Windows binary build/smoke verifies embedded assets and five MCP tools.
+  OpenClaw and Pi samples remain installation smoke coverage.
+- Stable real compact API and pretty JSON export preserve exact bytes and
+  hashes. The formerly failing large-root API (722 MB) and export (720 MB)
+  complete and parse to EOF in about 29 seconds. Source/family content is not
+  dropped; the transport no longer builds one enormous string. See the
+  [streaming decision](../../.agents/decisions/implemented/2026-09-17-large-session-json-streaming.md).
+- Real deferred tool content loads only when its own disclosure opens. Search
+  reaches an unloaded later output page and highlights it; earlier input
+  completion does not reset that search. Browser-induced request failure
+  exposes local retry, successful retry removes the status node, and expanded
+  fields fit 390px. Native source navigation/reload opens and loads its exact
+  tool. Parent loaded content survives child close with focus restoration.
+- Large-root HTML falls from 35.6 MB to 23.75 MB; elements fall from 232,296 to
+  225,445 after removing redundant placeholders. Original prose and anchor
+  order are unchanged across these growing-history snapshots. Page generation
+  still takes 13.6 seconds. This closes the complete-JSON failure and reduces
+  hidden content cost, not P9 responsiveness or final product visual acceptance.
+  See the [deferred-content decision](../../.agents/decisions/implemented/2026-09-17-deferred-folded-content.md).
+- Private evidence is in ignored `tmp/reader-folded-*`,
+  `tmp/reader-large-root-*-20260917.*` and `tmp/json-stream-*.log`.
 
 ### Parent-read and structured-cache checkpoint, 2026-09-17
 

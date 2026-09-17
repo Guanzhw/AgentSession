@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { renderSessionPage } from "../dist/src/views/session.js";
+import { renderProgressiveContent, resolveProgressiveField } from "../dist/src/views/components.js";
 
 function metrics(messageCount) {
   return {
@@ -144,15 +145,21 @@ test("Conversation SSR folds process only before a later final and keeps the tai
 });
 
 test("Conversation SSR keeps unfinished commentary visible and tool detail expandable", () => {
+  const tool = toolPart("tool1", "open tool result");
   const html = render([
     message("u1", "user", 1000, [textPart("u1", "open question")]),
     message("c1", "assistant", 1100, [textPart("c1", "open commentary")], "commentary"),
-    message("tool1", "tool", 1200, [toolPart("tool1", "open tool result")])
+    message("tool1", "tool", 1200, [tool])
   ]);
   const thread = threadOf(html);
   assert.doesNotMatch(thread, /data-conversation-process-count=/);
   assert.match(thread, /open commentary/);
-  assert.match(thread, /open tool result/);
+  assert.match(thread, /id="msg-tool1"[\s\S]*id="part-tool1-tool-part"[\s\S]*data-progressive-part-id="tool1-tool-part" data-progressive-field="output"/);
+  assert.doesNotMatch(thread, /open tool result/);
+  const field = resolveProgressiveField(tool.data, "output");
+  const page = renderProgressiveContent(field.value, field.format, 0, field.limit);
+  assert.match(page.html, /open tool result/);
+  assert.equal(page.nextOffset, null);
   assert.match(thread, /data-reader-execution-count="1"/);
   assert.ok(thread.indexOf("open commentary") < thread.indexOf("data-reader-execution"));
   assert.doesNotMatch(thread, /<details[^>]*data-reader-execution[^>]*\sopen(?:\s|>)/);

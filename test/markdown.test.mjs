@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { renderMarkdown } from "../dist/src/markdown.js";
-import { messageBubble, reasoningBlock, toolCallBlock } from "../dist/src/views/components.js";
+import { messageBubble, reasoningBlock, toolCallBlock, renderProgressiveContent } from "../dist/src/views/components.js";
 import { setLocale } from "../dist/src/i18n.js";
 
 // ---------------------------------------------------------------------------
@@ -159,19 +159,22 @@ test("long Markdown messages use server-backed continuation", () => {
 // Progressive expansion (no permanent data loss)
 // ---------------------------------------------------------------------------
 
-test("reasoningBlock bounds initial HTML and adds a server continuation marker", () => {
+test("reasoningBlock preserves its anchor and defers the first folded chunk", () => {
   setLocale("en");
   const long = "x".repeat(7000);
   const html = reasoningBlock(long, "", "reasoning-1");
-  assert.ok(html.includes('class="progressive"'));
+  assert.ok(html.includes('class="reasoning-body markdown progressive"'));
   assert.ok(html.includes("progressive-more"));
   assert.ok(html.includes('data-part-id="reasoning-1"'));
   assert.ok(html.includes('data-field="reasoning"'));
-  assert.ok(html.includes('data-next-offset="6000"'));
-  assert.ok(html.includes("Show more"));
+  assert.ok(html.includes('data-next-offset="0"'));
+  assert.ok(html.includes("Load content"));
   assert.ok(!html.includes("truncated"), "no permanent truncation marker");
-  assert.ok(html.includes("x".repeat(6000)), "the complete first chunk is present");
-  assert.ok(!html.includes("x".repeat(6001)), "the remainder is not embedded initially");
+  assert.ok(!html.includes("x".repeat(10)), "folded content is not embedded initially");
+  const first = renderProgressiveContent(long, "markdown", 0, 6000);
+  assert.equal(first.nextOffset, 6000);
+  assert.ok(first.html.includes("x".repeat(6000)), "the first content page remains complete");
+  assert.ok(renderProgressiveContent(long, "markdown", first.nextOffset, 6000).html.includes("x".repeat(1000)));
 });
 
 test("reasoningBlock renders short content without a wrapper", () => {
@@ -180,24 +183,31 @@ test("reasoningBlock renders short content without a wrapper", () => {
   assert.ok(html.includes("<p>short reasoning</p>"));
 });
 
-test("reasoningBlock splits at paragraph boundaries and localizes the button", () => {
+test("reasoningBlock localizes deferred loading while content keeps paragraph boundaries", () => {
   setLocale("zh");
   const paragraphs = "para two\n\n".repeat(700);
   const zh = reasoningBlock(paragraphs, "", "reasoning-zh");
-  assert.ok(zh.includes("显示更多"));
-  assert.ok((zh.match(/<p>para two<\/p>/g) || []).length < 700, "later paragraphs are not embedded initially");
+  assert.ok(zh.includes("加载内容"));
+  assert.ok(zh.includes('data-more-label="显示更多"'));
+  assert.ok(!zh.includes("<p>para two</p>"), "no folded body is embedded initially");
+  const first = renderProgressiveContent(paragraphs, "markdown", 0, 6000);
+  assert.ok(first.nextOffset > 0);
+  assert.equal(paragraphs.slice(0, first.nextOffset).endsWith("\n\n"), true);
   setLocale("en");
 });
 
-test("toolCallBlock keeps full input/output with bounded initial rendering", () => {
+test("toolCallBlock keeps input/output identities while deferring folded rendering", () => {
   setLocale("en");
   const longInput = "z".repeat(3500);
   const longOutput = "y".repeat(3500);
   const html = toolCallBlock("grep", longInput, longOutput, "completed", "", "p1");
   assert.ok(html.includes('id="part-p1"'));
   assert.ok(html.includes("progressive-more"));
-  assert.ok(html.includes("z".repeat(3000)) && !html.includes("z".repeat(3001)), "input is bounded");
-  assert.ok(html.includes("y".repeat(3000)) && !html.includes("y".repeat(3001)), "output is bounded");
+  assert.ok(!html.includes("z".repeat(10)), "input starts unloaded");
+  assert.ok(!html.includes("y".repeat(10)), "output starts unloaded");
+  assert.equal((html.match(/data-next-offset="0"/g) || []).length, 2);
+  assert.ok(renderProgressiveContent(longInput, "plain").html.includes("z".repeat(3000)));
+  assert.ok(renderProgressiveContent(longOutput, "auto", 3000).html.includes("y".repeat(500)));
   assert.ok(html.includes('data-field="input"'));
   assert.ok(html.includes('data-field="output"'));
   assert.ok(!html.includes("truncated"));
@@ -219,7 +229,9 @@ test("toolCallBlock renders string output as Markdown when appropriate", () => {
     "",
     "markdown-tool"
   );
-  assert.ok(long.includes('class="tool-output-body markdown"'));
+  assert.ok(long.includes('data-load-initial'));
+  assert.ok(!long.includes('<h1>Heading</h1>'));
+  assert.ok(renderProgressiveContent(`# Heading\n\n${"plain text\n".repeat(500)}\n- final item`, "auto").html.includes('<h1>Heading</h1>'));
   assert.ok(long.includes('data-part-id="markdown-tool"'));
   assert.ok(long.includes('data-field="output"'));
 });

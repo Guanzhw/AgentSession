@@ -1056,7 +1056,10 @@ export const zh = {
 
   // Progressive expansion
   "progressive.show_more": "显示更多",
-  "progressive.load_failed": "无法继续加载内容",
+  "progressive.load_content": "加载内容",
+  "progressive.loading": "正在加载内容…",
+  "progressive.retry": "重试加载",
+  "progressive.load_failed": "无法加载内容",
 
   // JS prompts/confirms
   "js.rename_prompt": "输入新标题：",

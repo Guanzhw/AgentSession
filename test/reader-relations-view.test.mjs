@@ -3,6 +3,7 @@ import test from "node:test";
 import { renderSessionReaderPane } from "../dist/src/views/session.js";
 import { buildMessageSessionTree } from "../dist/src/providers/shared/message-session.js";
 import { buildPartsFromProviderMessages } from "../dist/src/session-queries.js";
+import { renderProgressiveContent, resolveProgressiveField } from "../dist/src/views/components.js";
 
 const messages = [
   { id: "u", sessionId: "root", role: "user", content: "Please implement", timestamp: 1 },
@@ -27,7 +28,8 @@ const relations = { lanes: [lane], unplaced: [], milestones: [
 const input = () => ({ session, provider: "fixture", readerRelations: relations, sessionTree: buildMessageSessionTree(session, messages) });
 
 test("inline markers retain exact part order within grouped history and canonical task navigation", () => {
-  const pane = renderSessionReaderPane(input());
+  const model = input();
+  const pane = renderSessionReaderPane(model);
   const html = pane.slice(pane.indexOf('<section id="session-messages"'));
   const ordered = ["id=\"milestone-dispatch-event\"", "id=\"part-dispatch-tool\"", "id=\"milestone-returned-1\"", "Work continues after first return", "id=\"milestone-followup\"", "id=\"milestone-returned-2\"", "Final answer"];
   for (let index = 1; index < ordered.length; index += 1) {
@@ -38,7 +40,11 @@ test("inline markers retain exact part order within grouped history and canonica
   assert.match(html, /Worker &lt;A&gt;/);
   assert.match(html, /href="\/fixture\/session\/child%2Fa"/);
   assert.match(html, /readerEvent=returned-1/);
-  assert.match(html, /Recorded reasoning/);
+  assert.match(html, /data-progressive-part-id="a1:reasoning" data-progressive-field="reasoning"/);
+  assert.ok(html.indexOf('id="part-a1-reasoning"') < html.indexOf('id="milestone-dispatch-event"'));
+  const reasoning = model.sessionTree.messages.flatMap((message) => message.parts).find((part) => part.id === "a1:reasoning");
+  const field = resolveProgressiveField(reasoning.data, "reasoning");
+  assert.match(renderProgressiveContent(field.value, field.format, 0, field.limit).html, /Recorded reasoning/);
   assert.match(html, /data-reader-relations/);
   assert.match(html, /reader-collaboration-insert/);
   assert.match(html, /data-reader-relations-controls/);
@@ -66,7 +72,15 @@ test("adjacent tool calls share a closed process disclosure without consuming pr
   const process = html.indexOf('data-reader-execution');
   assert.ok(html.indexOf('Readable answer') < process);
   assert.match(html, /data-reader-execution-count="2"/);
-  assert.match(html.slice(process), /First output[\s\S]*Second output/);
+  assert.match(html.slice(process), /id="part-one-tool"[\s\S]*data-progressive-part-id="one:tool" data-progressive-field="output"[\s\S]*id="part-two-tool"[\s\S]*data-progressive-part-id="two:tool" data-progressive-field="output"/);
+  assert.doesNotMatch(html, /First output|Second output/);
+  const parts = tree.messages.flatMap((message) => message.parts);
+  for (const [partId, expected] of [['one:tool', 'First output'], ['two:tool', 'Second output']]) {
+    const field = resolveProgressiveField(parts.find((part) => part.id === partId).data, "output");
+    const page = renderProgressiveContent(field.value, field.format, 0, field.limit);
+    assert.ok(page.html.includes(expected));
+    assert.equal(page.nextOffset, null);
+  }
   assert.doesNotMatch(html, /<details[^>]*data-reader-execution[^>]*\sopen(?:\s|>)/);
 });
 

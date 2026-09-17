@@ -45,6 +45,10 @@ function createResponseCapture() {
     headersSent: false,
     writableEnded: false,
     body: "",
+    write(chunk) {
+      this.body += Buffer.isBuffer(chunk) ? chunk.toString("utf-8") : String(chunk);
+      return true;
+    },
     writeHead(status, headers = {}) {
       this.statusCode = status;
       this.headers = headers;
@@ -158,6 +162,25 @@ test("session exports stay complete and keep the HTTP server alive", async (t) =
 
   const route = routes.find(({ pattern }) => pattern instanceof RegExp && pattern.source.includes("export"));
   assert.ok(route);
+  const apiRoute = routes.find(({ pattern }) => pattern instanceof RegExp && pattern.test("/api/codex/session/session-1"));
+  assert.ok(apiRoute);
+
+  const fullApiCapture = createResponseCapture();
+  await apiRoute.handler(
+    { url: "/api/codex/session/session-1" },
+    fullApiCapture,
+    ["", "codex", "session-1"]
+  );
+  const expectedApi = {
+    session: document.apiSession,
+    tree: null,
+    container: null,
+    metrics: null,
+    messages: document.apiMessages
+  };
+  assert.equal(fullApiCapture.statusCode, 200);
+  assert.equal(fullApiCapture.body, JSON.stringify(expectedApi));
+  assert.deepEqual(JSON.parse(fullApiCapture.body), expectedApi);
 
   for (const format of ["json", "md"]) {
     const url = `/api/codex/session/session-1/export?format=${format}`;
@@ -173,6 +196,13 @@ test("session exports stay complete and keep the HTTP server alive", async (t) =
       const exported = JSON.parse(response.body);
       assert.equal(exported.session.id, "session-1");
       assert.equal(exported.messages[0].parts[0].text, "Export body");
+      assert.equal(response.body, JSON.stringify({
+        session: document.exportSession,
+        tree: null,
+        container: null,
+        metrics: null,
+        messages: document.exportMessages
+      }, null, 2));
     } else {
       assert.match(response.body, /^# Export fixture/m);
       assert.match(response.body, /Export body/);
@@ -249,6 +279,13 @@ test("session exports stay complete and keep the HTTP server alive", async (t) =
   const exported = await exportedResponse.json();
   assert.equal(exported.session.id, "session-1");
   assert.equal(exported.messages[0].parts[0].text, "Export body");
+
+  const fullApiHttpResponse = await fetch(`${baseUrl}/api/codex/session/session-1`);
+  assert.equal(fullApiHttpResponse.status, 200);
+  assert.equal(fullApiHttpResponse.headers.get("content-type"), "application/json; charset=utf-8");
+  const fullApi = await fullApiHttpResponse.json();
+  assert.equal(fullApi.session.id, "session-1");
+  assert.equal(fullApi.messages[0].content, "Export body");
 
   const followUp = await fetch(`${baseUrl}/still-alive`);
   assert.equal(followUp.status, 404);

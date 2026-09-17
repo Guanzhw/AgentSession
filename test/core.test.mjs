@@ -4282,8 +4282,9 @@ test("raw fallback conversation path segments the same thread spine and merges t
   assert.match(html, /data-conversation-default="thread"/);
   assert.match(html, /raw first question/);
   const thread = html.slice(html.indexOf('<section id="session-messages"'));
-  assert.ok(thread.indexOf('id="msg-raw-a1"') < thread.indexOf("raw tool output"), "tool output merges into the owning assistant entry");
-  assert.ok(thread.indexOf("raw tool output") < thread.indexOf("raw second question"), "merged tool output stays inside the owning user turn");
+  assert.ok(thread.indexOf('id="msg-raw-a1"') < thread.indexOf('id="part-p-t1"'), "tool evidence merges into the owning assistant entry");
+  assert.ok(thread.indexOf('id="part-p-t1"') < thread.indexOf("raw second question"), "merged tool evidence stays inside the owning user turn");
+  assert.match(thread, /data-progressive-part-id="p-t1" data-progressive-field="output"/);
 });
 
 
@@ -4370,7 +4371,7 @@ test("session rendering merges reasoning tokens into output and nests tools in a
 
   assert.match(html, /message-turn-assistant/);
   assert.match(html, /message-turn-assistant[\s\S]*tool-call/);
-  assert.match(html, /message-reasoning[\s\S]*I should inspect the file/);
+  assert.match(html, /message-reasoning[\s\S]*data-progressive-part-id="reasoning-1" data-progressive-field="reasoning"/);
   assert.doesNotMatch(html, /tool-reasoning/);
   assert.match(html, /token-chip-label">↑<\/span>100/);
   assert.match(html, /token-chip-label">↓<\/span>152/);
@@ -4648,12 +4649,12 @@ test("reasoning does not cross assistant message boundaries", () => {
   const secondMarkup = html.slice(secondStart);
 
   assert.equal((firstMarkup.match(/reasoning-block/g) || []).length, 1);
-  assert.match(firstMarkup, /Plan the work/);
+  assert.match(firstMarkup, /data-progressive-part-id="first-reasoning" data-progressive-field="reasoning"/);
   assert.match(firstMarkup, /tool-call[\s\S]*todowrite/);
-  assert.doesNotMatch(firstMarkup, /Start the search/);
+  assert.doesNotMatch(firstMarkup, /data-progressive-part-id="second-reasoning"/);
   assert.equal((secondMarkup.match(/reasoning-block/g) || []).length, 1);
-  assert.match(secondMarkup, /Start the search/);
-  assert.doesNotMatch(secondMarkup, /Plan the work/);
+  assert.match(secondMarkup, /data-progressive-part-id="second-reasoning" data-progressive-field="reasoning"/);
+  assert.doesNotMatch(secondMarkup, /data-progressive-part-id="first-reasoning"/);
 });
 
 test("subagent invocation headers show child-session token usage", () => {

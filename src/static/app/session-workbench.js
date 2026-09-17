@@ -20,8 +20,11 @@ export function loadProgressiveContent(button, { dispatch = true } = {}) {
     const offset = button.dataset.nextOffset;
     const contextResult = contentScope === "context-result";
     if (!provider || !sessionId || !field || offset == null || contextResult && (!contextTarget || !contextCheckpoint) || !contextResult && !partId) return null;
+    container.querySelector("[data-progressive-status]")?.remove();
+    const idleLabel = button.textContent;
     button.disabled = true;
     button.setAttribute("aria-busy", "true");
+    if (button.dataset.loadingLabel) button.textContent = button.dataset.loadingLabel;
     try {
       const query = new URLSearchParams({ field, offset, scope: contentScope });
       if (contextResult) {
@@ -42,6 +45,7 @@ export function loadProgressiveContent(button, { dispatch = true } = {}) {
       chunk.className = "progressive-chunk";
       chunk.innerHTML = data.html;
       container.insertBefore(chunk, button);
+      delete button.dataset.loadInitial;
       if (dispatch && button.dataset.searchRevealPending !== "true") {
         workbench.dispatchEvent(new CustomEvent("session-reader:content-updated", {
           bubbles: true,
@@ -52,11 +56,21 @@ export function loadProgressiveContent(button, { dispatch = true } = {}) {
         button.remove();
       } else {
         button.dataset.nextOffset = String(data.nextOffset);
+        button.textContent = button.dataset.moreLabel || idleLabel;
         button.disabled = false;
         button.removeAttribute("aria-busy");
       }
       return { data, button: data.nextOffset == null ? null : button, pane, provider, sessionId };
     } catch (error) {
+      if (button.dataset.retryLabel) {
+        const status = document.createElement("span");
+        status.dataset.progressiveStatus = "";
+        status.setAttribute("role", "status");
+        status.setAttribute("aria-live", "polite");
+        status.textContent = button.dataset.loadError;
+        container.append(status);
+      }
+      button.textContent = button.dataset.retryLabel || idleLabel;
       button.disabled = false;
       button.removeAttribute("aria-busy");
       throw error;
@@ -66,11 +80,22 @@ export function loadProgressiveContent(button, { dispatch = true } = {}) {
       if (button?.disabled || button?.getAttribute("aria-busy") === "true") {
         button.disabled = false;
         button.removeAttribute("aria-busy");
+        button.textContent = idleLabel;
       }
     }
   })();
-  progressiveContentLoads.set(button, promise);
-  return promise.finally(() => progressiveContentLoads.delete(button));
+  const tracked = promise.finally(() => progressiveContentLoads.delete(button));
+  progressiveContentLoads.set(button, tracked);
+  return tracked;
+}
+
+export function loadFoldedContent(details) {
+  if (!details.open || !details.matches("details.tool-call, details.reasoning-block")) return Promise.resolve([]);
+  const buttons = [...details.querySelectorAll(".progressive-more[data-load-initial]")]
+    .filter((button) => button.closest("details") === details);
+  // First pages preserve the existing anchors. Do not restart a search that
+  // is simultaneously revealing another field in this same disclosure.
+  return Promise.allSettled(buttons.map((button) => loadProgressiveContent(button, { dispatch: false })));
 }
 
 export function selectVisibleSearchHit(match, visibleHits) {
@@ -81,6 +106,9 @@ export function selectVisibleSearchHit(match, visibleHits) {
 export function initSessionWorkbench({ ft, formatText, showToast }) {
 const sessionWorkbench = document.querySelector(".session-workbench");
 if (sessionWorkbench) {
+  sessionWorkbench.addEventListener("toggle", (event) => {
+    void loadFoldedContent(event.target);
+  }, true);
   const getReaderPane = () => sessionWorkbench.querySelector("[data-reader-pane]") || sessionWorkbench;
   const readerKey = (pane = getReaderPane()) => `${pane?.dataset.readerProvider || sessionWorkbench.dataset.provider || ""}\u0000${pane?.dataset.readerSession || sessionWorkbench.dataset.sessionId || ""}`;
   const transcriptSearch = sessionWorkbench.querySelector("[data-session-search]");
@@ -252,6 +280,10 @@ if (sessionWorkbench) {
   const revealSearchMatch = async (entry, query, scroll = true, revealRevision = transcriptRevealRevision) => {
     const match = entry.match;
     const pane = getSearchPane();
+    const part = findMatchPart(match);
+    const target = part || entry.turn;
+    if (!target) return;
+    revealAncestorDetails(target);
     const progressive = findMatchProgressive(match);
     if (progressive) {
       let button = progressive.querySelector(`.progressive-more[data-field="${match.field}"]`);
@@ -277,10 +309,6 @@ if (sessionWorkbench) {
     }
     if (revealRevision !== transcriptRevealRevision || pane !== getSearchPane()) return;
     showSourceExcerpt(match);
-    const part = findMatchPart(match);
-    const target = part || entry.turn;
-    if (!target) return;
-    revealAncestorDetails(target);
     clearTranscriptHighlights();
     transcriptOccurrenceCount = highlightTranscriptMatches(query);
     transcriptCurrentTarget?.classList.remove("session-search-current");

@@ -69,8 +69,9 @@ export function safeDecodeId(encoded: string): string | null {
 }
 
 export function json(res: any, data: any, status = 200): void {
+  const body = JSON.stringify(data);
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify(data));
+  res.end(body);
 }
 
 export function isLoopbackHostname(hostname: string): boolean {

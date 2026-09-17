@@ -38,7 +38,13 @@ function routesFor(messages) {
     const route = routes.find(({ pattern }) => pattern instanceof RegExp && pattern.source.endsWith(`${endpoint}$`));
     assert.ok(route, endpoint);
     const pathname = `/api/fixture/session/${session.id}/${endpoint}`;
-    const response = { statusCode: 0, body: "", writeHead(status) { this.statusCode = status; }, end(body = "") { this.body += body; } };
+    const response = {
+      statusCode: 0,
+      body: "",
+      writeHead(status) { this.statusCode = status; },
+      write(body = "") { this.body += body; return true; },
+      end(body = "") { this.body += body; }
+    };
     await route.handler({ url: `${pathname}?${query}` }, response, pathname.match(route.pattern));
     return response;
   };
