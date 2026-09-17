@@ -38,6 +38,15 @@ links and their own full tool disclosure; child bodies load on demand. A child
 is never lost behind an agent metadata card, and its inherited context remains
 a separate disclosure in its own reader.
 
+Codex prepares HTML and reader-pane input through the optional
+`getSessionReaderSnapshot()` capability: one request captures root records,
+family metadata and revision, then reuses them for prose and lazy runtime
+projections. Its inherited context retains the same owned/shared boundary.
+Protocol-only failures still leave prose readable with an explicit diagnostic;
+provider source remains read-only and request snapshot closures are not retained
+by the runtime cache.
+Other providers continue through their existing accessors.
+
 Add the read-only endpoint `GET /api/:provider/session/:id/reader` for this
 observed consumer. Its JSON result is:
 

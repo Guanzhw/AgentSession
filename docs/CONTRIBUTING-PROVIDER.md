@@ -195,6 +195,14 @@ Every adapter implements `ProviderAdapter`:
   does not rescan transcripts or construct protocols on navigation. An empty
   live snapshot replaces that provider's indexed rows for this request only;
 - normalized `getMessages()`, trusted `getTokenStats()`, and bounded `searchMessages()`;
+- optional `getSessionReaderSnapshot(sessionId)` for providers whose Reader
+  accessors otherwise repeat expensive parsing. Capture the canonical session,
+  normalized messages, inherited context and revision once per HTML/pane
+  request. Its lazy `getProtocolSnapshots()` and `getOwnedReaderProjection()`
+  reuse that source extent. Protocol failures stay inside the runtime
+  diagnostic boundary; the finalized runtime cache does not retain the
+  snapshot's raw-input closures. Codex implements this capability; other
+  providers keep their existing accessors;
 - optional bounded `getInheritedContext()` disclosure when the provider records copied parent messages separately from the owned transcript;
 - optional `getContextChangeResult(sessionId, checkpointId)` for on-demand
   recorded context-change result bodies, using canonical protocol checkpoint

@@ -16,7 +16,7 @@ import {
 import { getResumeCommand } from "../resume.js";
 import { renderSessionPage, renderSessionReaderPane, renderReaderProcessChunk, renderInheritedContextPage, renderSessionMetricsPanel } from "../views/session.js";
 import type { SessionProtocol } from "../providers/shared/session-protocol.js";
-import type { ContextChangeResult } from "../providers/interface.js";
+import type { ContextChangeResult, SessionReaderSnapshot } from "../providers/interface.js";
 import { decorateRuntimeTransformationEvidence, projectRuntimeLanePresentation, renderRuntimeEvents, renderRuntimeRunPage, renderRuntimeWorkbench } from "../views/runtime-workbench.js";
 import { renderContextChangeResult, renderProgressiveContent, resolveProgressiveField, resolveProgressiveRenderFormat, progressiveText, type ProgressiveField } from "../views/components.js";
 import { providerRenderContext } from "./provider-context.js";
@@ -59,12 +59,12 @@ export function registerSessionDetail(
 ) {
   const { appConfig, providerMap, providerInfo } = deps;
 
-  const runtimeRenderData = (adapter: any, sessionId: string, session: Record<string, unknown>, runPageOptions: { cursor?: string | null; limit?: string | null } = {}) => {
+  const runtimeRenderData = (adapter: any, sessionId: string, session: Record<string, unknown>, runPageOptions: { cursor?: string | null; limit?: string | null } = {}, captured?: SessionReaderSnapshot) => {
     try {
       let protocol: SessionProtocol;
       let v3: SessionProtocolV3;
       try {
-        ({ v2: protocol, v3 } = getRuntimeProtocolSnapshots(adapter, sessionId, session));
+        ({ v2: protocol, v3 } = getRuntimeProtocolSnapshots(adapter, sessionId, session, captured));
       } catch (error) {
         if (error instanceof TypeError) {
           throw new ProtocolRuntimeError("protocol_invalid", "Runtime protocol is invalid for this session.");
@@ -135,12 +135,10 @@ export function registerSessionDetail(
     }
   };
 
-  const prepareReaderSources = (adapter: any, sessionId: string, document: any, protocol: SessionProtocolV3 | null) => {
-    const ownedReader = typeof adapter.getOwnedReaderProjection === "function"
-      ? adapter.getOwnedReaderProjection(sessionId, protocol ? {
-          tasks: protocol.tasks, agentRuns: protocol.agentRuns, relationships: protocol.relationships
-        } : undefined)
-      : undefined;
+  const prepareReaderSources = (adapter: any, sessionId: string, document: any, protocol: SessionProtocolV3 | null, captured?: SessionReaderSnapshot) => {
+    const evidence = protocol ? { tasks: protocol.tasks, agentRuns: protocol.agentRuns, relationships: protocol.relationships } : undefined;
+    const ownedReader = captured ? captured.getOwnedReaderProjection(evidence)
+      : typeof adapter.getOwnedReaderProjection === "function" ? adapter.getOwnedReaderProjection(sessionId, evidence) : undefined;
     return {
       sessionTree: ownedReader === undefined ? adapter.getSessionTree?.(sessionId) || null : null,
       ownedReader,
@@ -152,8 +150,8 @@ export function registerSessionDetail(
   // Keeping the normalized tree, runtime compactions, inherited context and
   // conversation projection together makes both consumers render the same
   // reader input and keeps child loading on the existing provider boundary.
-  const prepareReader = (adapter: any, providerId: string, sessionId: string, document: any, runPageOptions: { cursor?: string | null; limit?: string | null } = {}) => {
-    const runtime = runtimeRenderData(adapter, sessionId, document.session, runPageOptions);
+  const prepareReader = (adapter: any, providerId: string, sessionId: string, document: any, runPageOptions: { cursor?: string | null; limit?: string | null } = {}, captured?: SessionReaderSnapshot) => {
+    const runtime = runtimeRenderData(adapter, sessionId, document.session, runPageOptions, captured);
     const conversationView = runtime.v3 && runtime.projections
       ? deriveConversationView({
           protocol: runtime.v3,
@@ -163,7 +161,7 @@ export function registerSessionDetail(
           context: runtime.projections.context
         })
       : null;
-    const sources = prepareReaderSources(adapter, sessionId, document, runtime.v3);
+    const sources = prepareReaderSources(adapter, sessionId, document, runtime.v3, captured);
     const readerInput = {
       session: document.session,
       ...sources,
@@ -175,7 +173,7 @@ export function registerSessionDetail(
       // An unavailable runtime still permits direct reading; keep those tools
       // rendered because a later process request cannot reproduce its boundaries.
       deferExecution: !supportsSessionProtocol(adapter) || Boolean(runtime.v3),
-      inheritedContext: adapter.getInheritedContext?.(sessionId) || null
+      inheritedContext: captured ? captured.inheritedContext : adapter.getInheritedContext?.(sessionId) || null
     };
     return { runtime, readerPane: renderSessionReaderPane(readerInput) };
   };
@@ -286,7 +284,8 @@ export function registerSessionDetail(
     const navigationContext = parseSessionNavigationContext(pageUrl.searchParams.get("from"));
 
     try {
-      const document = getSessionDocument(adapter, providerSegment, sessionId);
+      const captured = adapter.getSessionReaderSnapshot?.(sessionId);
+      const document = getSessionDocument(adapter, providerSegment, sessionId, captured);
       if (!document) {
         return { status: 404, body: "<h1>Session not found</h1>", contentType: "text/html; charset=utf-8" };
       }
@@ -297,13 +296,14 @@ export function registerSessionDetail(
       const reader = prepareReader(adapter, providerSegment, sessionId, document, {
         cursor: pageUrl.searchParams.get("runCursor"),
         limit: pageUrl.searchParams.get("runLimit")
-      });
+      }, captured);
+      const lazyReaderMetrics = Boolean(captured) || typeof adapter.getOwnedReaderProjection === "function";
       return {
         status: 200,
         body: renderSessionPage({
           session: document.session,
-          sessionMetrics: typeof adapter.getOwnedReaderProjection === "function" ? null : adapter.getSessionMetrics?.(sessionId) || null,
-          lazySessionMetrics: typeof adapter.getOwnedReaderProjection === "function"
+          sessionMetrics: lazyReaderMetrics ? null : adapter.getSessionMetrics?.(sessionId) || null,
+          lazySessionMetrics: lazyReaderMetrics
             ? { provider: providerSegment, sessionId }
             : null,
           todos: document.todos,
@@ -403,11 +403,12 @@ export function registerSessionDetail(
     }
 
     try {
-      const document = getSessionDocument(adapter, providerId, sessionId);
+      const captured = adapter.getSessionReaderSnapshot?.(sessionId);
+      const document = getSessionDocument(adapter, providerId, sessionId, captured);
       if (!document) {
         return json(res, { ok: false, error: "Not found" }, 404);
       }
-      const reader = prepareReader(adapter, providerId, sessionId, document);
+      const reader = prepareReader(adapter, providerId, sessionId, document, {}, captured);
       const title = document.session.title || document.session.slug || document.session.id;
       return json(res, { ok: true, provider: providerId, sessionId, title, html: reader.readerPane });
     } catch (err: any) {

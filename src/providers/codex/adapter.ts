@@ -26,7 +26,7 @@ import { normalizeCodexContextChangeResult } from "./context-result.js";
 import { finalizeSessionProtocol, protocolRevision } from "../shared/session-protocol.js";
 import { finalizeSessionProtocolV3 } from "../shared/session-protocol-v3.js";
 import { icons } from "../../icons.js";
-import type { InheritedContextView, Message, OwnedReaderLinkEvidence, OwnedReaderProjection, ProviderAdapter, RawSession } from "../interface.js";
+import type { InheritedContextView, Message, OwnedReaderLinkEvidence, OwnedReaderProjection, ProviderAdapter, RawSession, SessionReaderSnapshot } from "../interface.js";
 import { buildLinkedMessageSessionViews, buildOwnedReaderChildLinks } from "../shared/linked-message-session.js";
 import { buildMessageSessionTree, buildMessageSessionViews } from "../shared/message-session.js";
 import { buildResolvedSystemPromptEvidence } from "../shared/system-prompt-evidence.js";
@@ -224,13 +224,21 @@ function buildCodexOwnedReaderProjection(sessionId: string, evidence?: OwnedRead
     ? parentEntryFor(root)
     : null;
   const rootEntry = resolveEntryPayload(root, rootRecords, rootMessages, parent?.records || null);
-  const rootTree = buildMessageSessionTree(rootEntry.session, rootEntry.messages);
   const canonicalId = String(root.session.id);
   const directChildren = sessionFiles.getFamily(canonicalId).filter((entry) => (
     entry.session.parentId && String(entry.session.parentId) === canonicalId
   ));
+  return ownedReaderFromInput(rootEntry, directChildren, evidence);
+}
+
+function ownedReaderFromInput(
+  rootEntry: { session: RawSession; messages: Message[] },
+  directChildren: Array<{ session: RawSession }>,
+  evidence?: OwnedReaderLinkEvidence
+): OwnedReaderProjection {
+  const rootTree = buildMessageSessionTree(rootEntry.session, rootEntry.messages);
   const links = buildOwnedReaderChildLinks(
-    canonicalId,
+    String(rootEntry.session.id),
     rootTree,
     directChildren.map((entry) => ({ session: entry.session as Record<string, any> })),
     evidence
@@ -350,12 +358,6 @@ function loadCodexProtocolInput(sessionId: string) {
     ? parentEntryFor(root)
     : null;
   const parentRecords = parent?.records || null;
-  const recordProvenance = root.session.parentId
-    ? classifyCodexRecordProvenance(rootRecords, parentRecords || [])
-    : null;
-  const ownedRecords = recordProvenance
-    ? rootRecords.filter((record) => recordProvenance.get(record) === "session")
-    : rootRecords;
   const rootEntry = resolveEntryPayload(root, rootRecords, rootMessages, parentRecords);
   // getFamily() returns indexed entries without touching their payloads. Only
   // direct children belong in this protocol input; grandchildren remain
@@ -367,26 +369,39 @@ function loadCodexProtocolInput(sessionId: string) {
     canonicalId,
     revision,
     rootEntry,
-    input: {
-      session: rootEntry.session,
-      messages: rootEntry.messages,
-      records: ownedRecords,
-      children: children.map((child) => {
-        // A direct child always inherits from this root. Capture its body once
-        // and classify against the same root record objects held above.
-        const childRecords = child.records;
-        const childMessages = child.messages;
-        const childEntry = resolveEntryPayload(child, childRecords, childMessages, rootRecords);
-        const childProvenance = classifyCodexRecordProvenance(childRecords, rootRecords);
-        const ownedChildRecords = childRecords.filter((record) => (
-          childProvenance.get(record) === "session"
-        ));
-        return {
-          session: childEntry.session,
-          facts: codexProtocolChildFactsFromRecords(ownedChildRecords)
-        };
-      })
-    }
+    input: protocolInputFromCaptured(rootEntry, rootRecords, parentRecords, children,
+      (child) => ({ records: child.records, messages: child.messages }))
+  };
+}
+
+function protocolInputFromCaptured(
+  rootEntry: { session: RawSession; messages: Message[] },
+  rootRecords: any[],
+  parentRecords: any[] | null,
+  children: Array<NonNullable<ReturnType<typeof sessionFiles.get>>>,
+  readChild: (child: NonNullable<ReturnType<typeof sessionFiles.get>>) => { records: any[]; messages: Message[] }
+) {
+  const recordProvenance = rootEntry.session.parentId
+    ? classifyCodexRecordProvenance(rootRecords, parentRecords || []) : null;
+  return {
+    session: rootEntry.session,
+    messages: rootEntry.messages,
+    records: recordProvenance
+      ? rootRecords.filter((record) => recordProvenance.get(record) === "session") : rootRecords,
+    children: children.map((child) => {
+      // A direct child always inherits from this root. Capture its body once
+      // and classify against the same root record objects held above.
+      const { records: childRecords, messages: childMessages } = readChild(child);
+      const childEntry = resolveEntryPayload(child, childRecords, childMessages, rootRecords);
+      const childProvenance = classifyCodexRecordProvenance(childRecords, rootRecords);
+      const ownedChildRecords = childRecords.filter((record) => (
+        childProvenance.get(record) === "session"
+      ));
+      return {
+        session: childEntry.session,
+        facts: codexProtocolChildFactsFromRecords(ownedChildRecords)
+      };
+    })
   };
 }
 
@@ -410,6 +425,41 @@ function buildCodexSessionProtocolSnapshotsFor(sessionId: string) {
   const v2 = finalizeCodexV2Protocol(loaded);
   const v3 = finalizeSessionProtocolV3(buildCodexSessionProtocolV3(loaded.input, v2));
   return { v2, v3 };
+}
+
+function captureCodexReader(sessionId: string): SessionReaderSnapshot | null {
+  const captured = sessionFiles.captureSession(sessionId);
+  if (!captured) return null;
+  const { entry, records, messages, children } = captured;
+  const parentRecords = captured.parent && codexNeedsParentRecordsForProvenance(records)
+    ? captured.readPayload(captured.parent).records : null;
+  const rootEntry = resolveEntryPayload(entry, records, messages, parentRecords);
+  const inheritedMessages = rootEntry.session.parentId
+    ? recordsToInheritedMessages(records, rootEntry.session.id, parentRecords || []) : [];
+  return {
+    session: rootEntry.session,
+    messages: rootEntry.messages,
+    revision: captured.revision,
+    inheritedContext: inheritedMessages.length ? {
+      sourceSession: { provider: "codex", sessionId: String(rootEntry.session.parentId) },
+      messages: inheritedMessages,
+      total: inheritedMessages.length,
+      truncated: false
+    } : null,
+    getProtocolSnapshots() {
+      const loaded = {
+        canonicalId: String(rootEntry.session.id),
+        revision: protocolRevision(captured.revision),
+        rootEntry,
+        input: protocolInputFromCaptured(rootEntry, records, parentRecords, children, captured.readPayload)
+      };
+      const v2 = finalizeCodexV2Protocol(loaded);
+      return { v2, v3: finalizeSessionProtocolV3(buildCodexSessionProtocolV3(loaded.input, v2)) };
+    },
+    getOwnedReaderProjection(evidence) {
+      return ownedReaderFromInput(rootEntry, children, evidence);
+    }
+  };
 }
 
 const getCodexViews = createStructuredViewCache(generateCodexViews);
@@ -566,6 +616,10 @@ const codex = {
   getMessages(sessionId) {
     const entry = sessionFiles.get(sessionId);
     return entry ? resolveEntry(entry).messages : [];
+  },
+
+  getSessionReaderSnapshot(sessionId) {
+    return captureCodexReader(sessionId);
   },
 
   getInheritedContext(sessionId) {

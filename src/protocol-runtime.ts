@@ -1,4 +1,4 @@
-import type { ProviderAdapter, SessionProtocolSnapshots } from "./providers/interface.js";
+import type { ProviderAdapter, SessionProtocolSnapshots, SessionReaderSnapshot } from "./providers/interface.js";
 import {
   finalizeSessionProtocol,
   type EventCategory,
@@ -50,13 +50,15 @@ function clampInteger(value: unknown, fallback: number, minimum: number, maximum
   return parsed;
 }
 
-export function sessionRevision(adapter: ProviderAdapter, session: Record<string, unknown>): string {
-  let providerRevision = "";
-  try {
-    const value = adapter.getStatsRevision?.();
-    providerRevision = value === undefined ? "" : String(value);
-  } catch {
-    // A revision is an optimization, never a reason to make the source unreadable.
+export function sessionRevision(adapter: ProviderAdapter, session: Record<string, unknown>, capturedRevision?: string | number): string {
+  let providerRevision = capturedRevision === undefined ? "" : String(capturedRevision);
+  if (capturedRevision === undefined) {
+    try {
+      const value = adapter.getStatsRevision?.();
+      providerRevision = value === undefined ? "" : String(value);
+    } catch {
+      // A revision is an optimization, never a reason to make the source unreadable.
+    }
   }
   return [
     providerRevision,
@@ -139,9 +141,10 @@ export function getRuntimeProtocol(
 export function getRuntimeProtocolSnapshots(
   adapter: ProviderAdapter,
   sessionId: string,
-  knownSession?: Record<string, unknown> | null
+  knownSession?: Record<string, unknown> | null,
+  captured?: Pick<SessionReaderSnapshot, "revision" | "getProtocolSnapshots">
 ): SessionProtocolSnapshots {
-  if (!adapter.getSessionProtocolSnapshots) {
+  if (!captured && !adapter.getSessionProtocolSnapshots) {
     return {
       v2: getRuntimeProtocol(adapter, sessionId, knownSession),
       v3: getRuntimeProtocolV3(adapter, sessionId, knownSession)
@@ -153,14 +156,14 @@ export function getRuntimeProtocolSnapshots(
   if (!session || String(session.id || "") !== sessionId) {
     throw new ProtocolRuntimeError("session_not_found", "No provider-stored session matches this reference.");
   }
-  const revision = sessionRevision(adapter, session);
+  const revision = sessionRevision(adapter, session, captured?.revision);
   const key = `${adapter.id}\u0000${sessionId}`;
   const cached = protocolCache.get(key);
   if (cached?.revision === revision && cached.v3) {
     touchCache(key, cached);
     return { v2: cached.protocol, v3: cached.v3 };
   }
-  const snapshots = adapter.getSessionProtocolSnapshots(sessionId);
+  const snapshots = captured ? captured.getProtocolSnapshots() : adapter.getSessionProtocolSnapshots!(sessionId);
   if (!snapshots) {
     throw new ProtocolRuntimeError("session_not_found", "No provider-stored protocol matches this session.");
   }

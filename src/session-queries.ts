@@ -4,6 +4,7 @@ import { getAllMeta, getExcludedIds, getMeta } from "./meta.js";
 import { usesOpenCodeStatsStore } from "./providers/kinds.js";
 import { safeJsonParse } from "./server-helpers.js";
 import { baseSessionListStats, boundedListStats } from "./session-list-stats.js";
+import type { SessionReaderSnapshot } from "./providers/interface.js";
 
 export function enrichSession(session: any, metaMap: any): any {
   if (!session) {
@@ -196,11 +197,17 @@ export function buildPartsFromProviderMessages(providerMessages: any[] = [], idP
  * existing file-provider API shape and its intentional lack of viewer-meta
  * enrichment.
  */
-export function getSessionDocument(adapter: any, providerId: string, sessionId: string): any | null {
-  const sqlite = usesOpenCodeStatsStore(adapter);
+export function getSessionDocument(
+  adapter: any,
+  providerId: string,
+  sessionId: string,
+  captured?: Pick<SessionReaderSnapshot, "session" | "messages"> | null
+): any | null {
+  const sqlite = captured === undefined && usesOpenCodeStatsStore(adapter);
   const dbPath = sqlite ? adapter.getDataPath() : undefined;
-  const rawSession = sqlite ? getSession(sessionId, dbPath) : adapter.getSession(sessionId);
-  if (!rawSession) return null;
+  const rawSession = captured !== undefined ? captured?.session
+    : sqlite ? getSession(sessionId, dbPath) : adapter.getSession(sessionId);
+  if (!rawSession || (captured !== undefined && rawSession.id !== sessionId)) return null;
 
   const metaMap = getAllMeta(providerId);
   const normalizedRawSession = normalizeSessionRecord(rawSession);
@@ -230,7 +237,7 @@ export function getSessionDocument(adapter: any, providerId: string, sessionId: 
     };
   }
 
-  const providerMessages = adapter.getMessages(sessionId);
+  const providerMessages = captured ? captured.messages : adapter.getMessages(sessionId);
   const mapped = buildPartsFromProviderMessages(providerMessages);
   const exportMessages = mapped.messages.map((message: any) => ({
     ...message,

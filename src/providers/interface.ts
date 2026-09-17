@@ -232,6 +232,16 @@ export interface SessionProtocolSnapshots {
   v3: SessionProtocolV3;
 }
 
+/** Request-local Reader input. Lazy projections share this captured source extent. */
+export interface SessionReaderSnapshot {
+  session: RawSession;
+  messages: Message[];
+  revision: string | number;
+  inheritedContext: InheritedContextView | null;
+  getProtocolSnapshots(): SessionProtocolSnapshots;
+  getOwnedReaderProjection(evidence?: OwnedReaderLinkEvidence): OwnedReaderProjection;
+}
+
 export interface ProviderAdapter {
   id: ProviderId;
   name: string;
@@ -286,6 +296,8 @@ export interface ProviderAdapter {
   getLibrarySessions?(): LibrarySessionMetadata[];
   getSession(sessionId: string): RawSession | Record<string, unknown> | null;
   getMessages(sessionId: string): Message[];
+  /** Optional single preparation for the HTML Reader and its pane endpoint. */
+  getSessionReaderSnapshot?(sessionId: string): SessionReaderSnapshot | null;
   /** Explicitly recorded inherited context; readers paginate separately from owned history. */
   getInheritedContext?(sessionId: string): InheritedContextView | null;
   /** Optional bounded reader projection; child bodies remain on-demand. */

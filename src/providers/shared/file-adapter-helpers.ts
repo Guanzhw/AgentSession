@@ -75,6 +75,7 @@ export function createSessionFileStore<
     payloadSnapshot?: SessionFilePayloadSnapshot<TRecords, TMessages>;
   };
   type Payload = { records: TRecords; messages: TMessages; signature: string; sourceBytes: number };
+  type Capture = { sessionId: string; entry?: Entry; payload?: SessionFilePayload<TRecords, TMessages> };
   let entriesByPath = new Map<string, Entry>();
   let entriesById = new Map<string, Entry>();
   let childrenByParent = new Map<string, Entry[]>();
@@ -167,7 +168,7 @@ export function createSessionFileStore<
     return entry;
   };
 
-  const refresh = (force = false) => {
+  const refresh = (force = false, capture?: Capture) => {
     const now = Date.now();
     if (!force && lastRefresh && now - lastRefresh < refreshIntervalMs) return;
     const nextByPath = new Map<string, Entry>();
@@ -179,16 +180,27 @@ export function createSessionFileStore<
         const cached = entriesByPath.get(filePath);
         if (cached?.signature === signature) {
           nextByPath.set(filePath, cached);
+          if (capture && (String(cached.session.id) === capture.sessionId || cached.sessionId === capture.sessionId)) {
+            capture.entry = cached;
+            capture.payload = bounded ? payloads.get(filePath) : cached;
+          }
           continue;
         }
         const loaded = options.readEntry({ ...descriptor, filePath });
         if (bounded && !loaded.payloadSnapshot) requireSignature(descriptor, signature);
-        nextByPath.set(filePath, indexedEntry(
+        const entry = indexedEntry(
           { ...descriptor, filePath },
           loaded.payloadSnapshot?.signature ?? signature,
           loaded.payloadSnapshot?.sourceBytes ?? sourceBytes,
           loaded
-        ));
+        );
+        nextByPath.set(filePath, entry);
+        // Retain only this request's target while later changed files may
+        // evict its body from the provider's normal bounded cache.
+        if (capture && (String(entry.session.id) === capture.sessionId || entry.sessionId === capture.sessionId)) {
+          capture.entry = entry;
+          capture.payload = loaded;
+        }
       } catch (error) {
         options.onError?.(filePath, error);
         const cached = entriesByPath.get(filePath);
@@ -234,6 +246,29 @@ export function createSessionFileStore<
 
   return {
     refresh,
+    captureSession(sessionId: string) {
+      const capture: Capture = { sessionId };
+      refresh(true, capture);
+      const entry = entriesById.get(sessionId);
+      if (!entry) return null;
+      const payload = capture.entry === entry && capture.payload
+        ? capture.payload : bounded ? readPayload(entry) : entry;
+      const canonicalId = String(entry.session.id);
+      const parent = entry.session.parentId ? entriesById.get(String(entry.session.parentId)) : undefined;
+      return {
+        revision,
+        entry: publicEntry(entry),
+        records: payload.records,
+        messages: payload.messages,
+        parent: parent && String(parent.session.id) !== canonicalId ? publicEntry(parent) : null,
+        children: (childrenByParent.get(canonicalId) || []).map(publicEntry),
+        // A held entry can become obsolete after this capture. Read records
+        // and messages together from its immutable extent without refreshing.
+        readPayload(held: IndexedSessionFile<TSession, TRecords, TMessages>) {
+          return bounded ? readPayload(held as Entry) : { records: held.records, messages: held.messages };
+        }
+      };
+    },
     list() {
       refresh();
       return [...entriesByPath.values()].map(publicEntry);
