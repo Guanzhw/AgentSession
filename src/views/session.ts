@@ -1881,7 +1881,7 @@ function renderReaderBranches(cards: ConversationAgentCard[], tree: SessionTree 
       </div>
     </details>`;
   }).join("");
-  return `<div class="reader-task-map" data-reader-task-map><div class="reader-branch-root">${escapeHtml(t("detail.reader_document_owner"))}</div><div class="reader-task-nodes">${taskNodes.join("")}</div></div><div class="reader-branches">${taskDetails}</div>`;
+  return `<details class="reader-task-map" data-reader-task-map><summary>${escapeHtml(t("detail.activity_all_tasks", { count: String(branches.size) }))}</summary><div class="reader-task-nodes">${taskNodes.join("")}</div></details><div class="reader-branches">${taskDetails}</div>`;
 }
 
 function renderReaderRelationshipRail(view: ConversationViewModel | null, provider: string, sessionId: string, tree: SessionTree | null, ownedReader: OwnedReaderProjection | null = null, readerRelations: ReaderRelations | null = null) {
@@ -1923,7 +1923,7 @@ function renderReaderRelationshipRail(view: ConversationViewModel | null, provid
     : "";
   const overview = `<aside class="reader-collaboration" data-reader-collaboration aria-label="${escapeHtml(t("detail.reader_collaboration"))}">
     <div class="reader-collaboration-heading"><h2>${escapeHtml(t("detail.reader_collaboration_title"))}</h2><button type="button" class="reader-collaboration-close" data-reader-collaboration-close aria-label="${escapeHtml(t("detail.reader_collaboration_close"))}">${uiIcon("x")}</button></div>
-    <p class="reader-collaboration-note">${escapeHtml(t("detail.reader_collaboration_note"))}</p>
+    <section class="reader-activity-host" data-reader-activity-host="/api/${encodeURIComponent(provider)}/session/${encodeURIComponent(sessionId)}/reader/activity" data-loading-label="${escapeHtml(t("detail.activity_loading"))}" data-error-label="${escapeHtml(t("detail.activity_error"))}" aria-label="${escapeHtml(t("detail.activity_title"))}"><p data-reader-activity-status role="status">${escapeHtml(t("detail.activity_loading"))}</p><button type="button" data-reader-activity-retry hidden>${escapeHtml(t("progressive.retry"))}</button><div data-reader-activity-view></div></section>
     ${branches}
     ${evidenceMarkup}
     ${relationships ? `<ul class="reader-relationship-list">${relationships}</ul>` : ""}

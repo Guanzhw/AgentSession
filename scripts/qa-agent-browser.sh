@@ -427,6 +427,12 @@ for sidebar_entry in '[data-reader-collaboration-toggle]' '.reader-collaboration
   ab "open task sidebar with keyboard" press Enter >/dev/null
   sidebar_focus="$(read_ab "verify task sidebar entry focus" eval "document.querySelector('[data-reader-collaboration-overview]').open && document.activeElement.matches('[data-reader-collaboration-close]')")"
   assert_contains "task sidebar entry focus" "$sidebar_focus" 'true'
+  ab "wait for recorded activity window" wait --fn "document.querySelector('[data-reader-activity-window]')?.dataset.activityEnhanced === 'true' && !document.querySelector('[data-reader-activity-view]').hasAttribute('aria-busy')" >/dev/null
+  activity_state="$(read_ab "verify bounded recorded activity" eval "(() => { const view = document.querySelector('[data-reader-activity-window]'); const records = [...view.querySelectorAll('[data-reader-activity-records] li')]; return JSON.stringify({ bounded: records.length > 0 && records.length <= 100 && view.querySelectorAll('[data-reader-activity-lane]').length <= 20, sources: records.every(item => !!item.querySelector('a[data-reader-source], a[data-reader-event-source]')), plotted: view.querySelectorAll('[data-reader-activity-cluster]').length > 0, chooserClosed: !document.querySelector('[data-reader-task-map]').open }); })()" | tr -d '[:space:]')"
+  assert_contains "recorded activity" "$activity_state" '"bounded":true'
+  assert_contains "recorded activity" "$activity_state" '"sources":true'
+  assert_contains "recorded activity" "$activity_state" '"plotted":true'
+  assert_contains "recorded activity" "$activity_state" '"chooserClosed":true'
   ab "tab within task sidebar" press Tab >/dev/null
   sidebar_tab="$(read_ab "verify task sidebar Tab target" eval "!!document.activeElement.closest('[data-reader-collaboration-overview]')")"
   assert_contains "task sidebar Tab target" "$sidebar_tab" 'true'

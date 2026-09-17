@@ -1,8 +1,21 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
-import { renderSessionReaderPane, renderReaderProcessChunk } from '../dist/src/views/session.js';
-import { registerSessionDetail } from '../dist/src/routes/session-detail.js';
-import { buildMessageSessionTree } from '../dist/src/providers/shared/message-session.js';
+
+const processTemp = mkdtempSync(path.join(os.tmpdir(), 'agentsession-reader-process-'));
+process.env.AGENTSESSION_META_PATH = path.join(processTemp, 'meta.db');
+const { initConfig } = await import('../dist/src/config.js');
+initConfig(['--config', path.join(processTemp, 'config.json')]);
+const { closeMetaDb } = await import('../dist/src/meta.js');
+const { renderSessionReaderPane, renderReaderProcessChunk } = await import('../dist/src/views/session.js');
+const { registerSessionDetail } = await import('../dist/src/routes/session-detail.js');
+const { buildMessageSessionTree } = await import('../dist/src/providers/shared/message-session.js');
+test.after(() => {
+  closeMetaDb();
+  rmSync(processTemp, { recursive: true, force: true });
+});
 
 function fixture(count = 43) {
   const session = { id: 'root', provider: 'fixture', title: 'Process fixture', timeCreated: 1, timeUpdated: 100 };

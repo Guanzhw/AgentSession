@@ -45,8 +45,11 @@ appear inline. A local connected strip links each to the previous or next key
 record of the same task, in recorded source order. Ordinary coordination messages
 fold into their owning process and remain reachable through expansion and exact
 source links. The on-demand Tasks &
-collaboration panel shows a compact task map followed by the selected task's
-initial request and latest reply excerpts. Exchanges and complete child history
+collaboration panel aligns main-session text and task records in ten-minute
+windows. Selecting a point shows each record's exact time and source; nearby
+points cluster visually while keeping separate identities. Dotted spans join
+records and may include waiting or pauses. The all-task chooser, selected task's
+initial request and latest reply excerpts, exchanges and complete child history
 remain expandable. Per-message model and token details live under Usage & model;
 tools and reasoning stay independently expandable. Canonically identified tool
 input/output and reasoning bodies load when opened, with local retry and

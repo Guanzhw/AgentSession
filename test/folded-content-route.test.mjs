@@ -2,12 +2,25 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createServer, get } from 'node:http';
 import { once } from 'node:events';
-import { Router } from '../dist/src/router.js';
-import { registerSessionDetail } from '../dist/src/routes/session-detail.js';
-import { renderSessionReaderPane, renderReaderProcessChunk } from '../dist/src/views/session.js';
-import { buildPartsFromProviderMessages } from '../dist/src/session-queries.js';
-import { buildMessageSessionTree } from '../dist/src/providers/shared/message-session.js';
-import { renderProgressiveContent } from '../dist/src/views/components.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const foldedTemp = mkdtempSync(path.join(os.tmpdir(), 'agentsession-folded-content-'));
+process.env.AGENTSESSION_META_PATH = path.join(foldedTemp, 'meta.db');
+const { initConfig } = await import('../dist/src/config.js');
+initConfig(['--config', path.join(foldedTemp, 'config.json')]);
+const { closeMetaDb } = await import('../dist/src/meta.js');
+const { Router } = await import('../dist/src/router.js');
+const { registerSessionDetail } = await import('../dist/src/routes/session-detail.js');
+const { renderSessionReaderPane, renderReaderProcessChunk } = await import('../dist/src/views/session.js');
+const { buildPartsFromProviderMessages } = await import('../dist/src/session-queries.js');
+const { buildMessageSessionTree } = await import('../dist/src/providers/shared/message-session.js');
+const { renderProgressiveContent } = await import('../dist/src/views/components.js');
+test.after(() => {
+  closeMetaDb();
+  rmSync(foldedTemp, { recursive: true, force: true });
+});
 
 test('folded fields read their exact first and final pages through the registered content route', async (t) => {
   const output = `output-start\n${'payload line\n'.repeat(720)}output-final needle`;

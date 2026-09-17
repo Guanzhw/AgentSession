@@ -1,3 +1,5 @@
+import { loadReaderActivity } from "./reader-activity.js";
+
 /*
  * Reader relations are local annotations, not a second graph view. The
  * server places each recorded milestone beside its owning message; this
@@ -164,7 +166,8 @@ export function initReaderRelations() {
     const overview = overviewFor(context.pane);
     if (!overview) return;
     overviewOrigins.set(overview, origin);
-    openOverview(overview);
+    const observationId = origin.closest('[data-reader-milestone]')?.dataset.readerObservationId;
+    openOverview(overview, observationId ? { anchor: observationId } : null);
     const detail = [...overview.querySelectorAll("[data-reader-task-lane]")]
       .find((candidate) => candidate.dataset.readerTaskLane === lane);
     if (detail) {
@@ -174,11 +177,12 @@ export function initReaderRelations() {
     overview.querySelector("[data-reader-collaboration-close]")?.focus({ preventScroll: true });
   }
 
-  function openOverview(overview) {
+  function openOverview(overview, activityQuery = null) {
     for (const other of workbench.querySelectorAll("[data-reader-collaboration-overview]")) {
       if (other !== overview) other.open = false;
     }
     overview.open = true;
+    loadReaderActivity(overview, activityQuery);
   }
 
   function closeOverview(overview) {
@@ -200,7 +204,7 @@ export function initReaderRelations() {
     overviewOrigins.set(overview, toggle);
     if (overview.open) closeOverview(overview);
     else {
-      openOverview(overview);
+      openOverview(overview, {});
       ensureSelectedTask(pane);
       overview.querySelector("[data-reader-collaboration-close]")?.focus({ preventScroll: true });
     }
@@ -252,7 +256,7 @@ export function initReaderRelations() {
       event.preventDefault();
       const overview = summary.closest("[data-reader-collaboration-overview]");
       overviewOrigins.set(overview, summary);
-      openOverview(overview);
+      openOverview(overview, {});
       ensureSelectedTask(overview.closest("[data-reader-pane]"));
       overview.querySelector("[data-reader-collaboration-close]")?.focus({ preventScroll: true });
       return;
@@ -268,6 +272,9 @@ export function initReaderRelations() {
       const detail = ownedElements(pane, "[data-reader-branch]")
         .find((branch) => branch.dataset.readerBranchKey === task.dataset.readerTaskSelect);
       selectTask(pane, detail);
+      const milestone = ownedElements(pane, '[data-reader-milestone]')
+        .find((item) => item.dataset.readerLane === detail.dataset.readerTaskLane);
+      if (milestone?.dataset.readerObservationId) loadReaderActivity(overviewFor(pane), { anchor: milestone.dataset.readerObservationId });
       return;
     }
     const close = event.target.closest?.("[data-reader-collaboration-close]");

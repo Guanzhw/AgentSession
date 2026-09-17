@@ -498,7 +498,7 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
 .session-workbench[data-session-reader] .reader-collaboration-heading {
   position: sticky;
   top: -24px;
-  z-index: 1;
+  z-index: 2;
   background: var(--reader-surface);
   display: flex;
   align-items: center;
@@ -526,7 +526,48 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
 .session-workbench[data-session-reader] .reader-collaboration-close:hover { color: var(--reader-ink); background: var(--reader-accent-soft); }
 .session-workbench[data-session-reader] .reader-collaboration-close .ui-icon { width: 16px; height: 16px; }
 .session-workbench[data-session-reader] .reader-collaboration-note,
-.session-workbench[data-session-reader] .reader-task-map { margin: 24px 0; }
+.session-workbench[data-session-reader] .reader-task-map { margin: 16px 0; }
+.session-workbench[data-session-reader] .reader-task-map > summary { cursor: pointer; font-size: 14px; }
+
+.session-workbench[data-session-reader] .reader-activity-host { margin: 16px 0 18px; min-width: 0; }
+.session-workbench[data-session-reader] .reader-activity-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; }
+.session-workbench[data-session-reader] .reader-activity-header h3 { margin: 0; font-size: 16px; }
+.session-workbench[data-session-reader] .reader-activity-window-nav { display: flex; align-items: center; gap: 6px; font-size: 12px; line-height: 1.5; text-align: center; font-variant-numeric: tabular-nums; }
+.session-workbench[data-session-reader] .reader-activity-window-nav button { display: grid; place-items: center; width: 28px; height: 32px; padding: 0; border: 0; border-radius: 4px; color: var(--reader-ink); background: transparent; cursor: pointer; }
+.session-workbench[data-session-reader] .reader-activity-window-nav button:disabled { opacity: .35; cursor: default; }
+.session-workbench[data-session-reader] .reader-activity-window-nav button:not(:disabled):hover { background: var(--reader-accent-soft); }
+.session-workbench[data-session-reader] .reader-activity-window-nav button .ui-icon { width: 15px; height: 15px; transform: rotate(90deg); }
+.session-workbench[data-session-reader] .reader-activity-window-nav button:last-child .ui-icon { transform: rotate(-90deg); }
+.session-workbench[data-session-reader] .reader-activity-note { margin: 12px 0 18px; color: var(--reader-muted); font-size: 12px; line-height: 1.6; }
+.session-workbench[data-session-reader] .reader-activity-axis { display: flex; justify-content: space-between; margin: 0 14px 10px; color: var(--reader-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.session-workbench[data-session-reader] .reader-activity-axis span:first-child { transform: translateX(-50%); }
+.session-workbench[data-session-reader] .reader-activity-axis span:last-child { transform: translateX(50%); }
+.session-workbench[data-session-reader] .reader-activity-lanes { padding: 0 14px; }
+.session-workbench[data-session-reader] .reader-activity-lane { position: relative; padding: 4px 0 0; border-top: 1px solid var(--reader-line); }
+.session-workbench[data-session-reader] .reader-activity-lane-name { display: block; color: var(--reader-ink); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.session-workbench[data-session-reader] .reader-activity-track { position: relative; height: 28px; }
+.session-workbench[data-session-reader] .reader-activity-track::before { content: ""; position: absolute; inset: 0; border-left: 1px solid var(--reader-line); border-right: 1px solid var(--reader-line); background: linear-gradient(to right, transparent calc(50% - .5px), var(--reader-line) calc(50% - .5px), var(--reader-line) calc(50% + .5px), transparent calc(50% + .5px)); opacity: .4; pointer-events: none; }
+.session-workbench[data-session-reader] .reader-activity-span { position: absolute; top: 14px; border-top: 2px dotted var(--reader-muted); }
+.session-workbench[data-session-reader] .reader-activity-point { position: absolute; z-index: 1; top: 1px; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; transform: translateX(-50%); border: 1px solid var(--reader-accent); border-radius: 50%; background: var(--reader-surface); color: var(--reader-accent); font: inherit; font-size: 12px; font-weight: 600; line-height: 1; cursor: pointer; }
+.session-workbench[data-session-reader] .reader-activity-point:empty::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.session-workbench[data-session-reader] .reader-activity-point:is([data-point-kind="spawn"], [data-point-kind="delegate"]):empty::after { border-radius: 1px; transform: rotate(45deg); }
+.session-workbench[data-session-reader] .reader-activity-point[data-point-kind="child-turn-completed"]:empty::after { border-radius: 0; width: 7px; height: 4px; border: solid currentColor; border-width: 0 0 2px 2px; background: transparent; transform: rotate(-45deg); }
+.session-workbench[data-session-reader] .reader-activity-point[aria-pressed="true"] { background: var(--reader-accent); color: var(--reader-surface); box-shadow: 0 0 0 3px var(--reader-accent-soft); }
+.session-workbench[data-session-reader] [data-activity-enhanced="true"] [data-reader-activity-records] { display: none; }
+.session-workbench[data-session-reader] .reader-activity-selection { margin-top: 12px; padding: 12px 0; border-top: 1px solid var(--reader-line); border-bottom: 1px solid var(--reader-line); font-size: 14px; line-height: 1.6; }
+.session-workbench[data-session-reader] .reader-activity-selection > p { margin: 0; color: var(--reader-muted); }
+.session-workbench[data-session-reader] .reader-activity-selection ol { list-style: none; margin: 0; padding: 0; }
+.session-workbench[data-session-reader] .reader-activity-selection li + li { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--reader-line); }
+.session-workbench[data-session-reader] .reader-activity-selection time { display: block; color: var(--reader-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.session-workbench[data-session-reader] .reader-activity-selection p { margin: 6px 0; overflow-wrap: anywhere; }
+.session-workbench[data-session-reader] .reader-activity-selection a { color: var(--reader-accent); }
+.session-workbench[data-session-reader] .reader-activity-coverage { margin-top: 10px; color: var(--reader-muted); font-size: 12px; line-height: 1.6; }
+.session-workbench[data-session-reader] .reader-activity-coverage summary { cursor: pointer; }
+.session-workbench[data-session-reader] .reader-activity-coverage p { margin: 6px 0; }
+.session-workbench[data-session-reader] .reader-activity-pages { display: flex; flex-wrap: wrap; gap: 8px; }
+.session-workbench[data-session-reader] .reader-activity-pages button,
+.session-workbench[data-session-reader] [data-reader-activity-retry] { margin-top: 10px; padding: 6px 9px; border: 1px solid var(--reader-line); border-radius: 4px; background: var(--reader-surface); color: var(--reader-accent); font: inherit; font-size: 13px; cursor: pointer; }
+.session-workbench[data-session-reader] .reader-activity-host :is(button, a, summary, [tabindex]):focus-visible { outline: 2px solid var(--reader-accent); outline-offset: 3px; }
 .session-workbench[data-session-reader] .reader-branch-root { font-size: 14px; font-weight: 650; }
 .session-workbench[data-session-reader] .reader-task-nodes { display: grid; gap: 4px; margin-left: 8px; padding: 12px 0 0 16px; border-left: 1px solid var(--reader-line); max-height: 290px; overflow-y: auto; }
 .session-workbench[data-session-reader] .reader-task-node { position: relative; display: flex; width: 100%; min-width: 0; gap: 10px; padding: 11px 12px; text-align: left; border: 0; border-radius: 7px; background: transparent; color: var(--reader-ink); font: inherit; cursor: pointer; }

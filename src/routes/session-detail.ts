@@ -45,6 +45,8 @@ import type { ProjectionOptions, RunPage, V3Projection } from "../protocol-runti
 import type { SessionProtocolV3 } from "../providers/shared/session-protocol-v3.js";
 import { deriveConversationView } from "../conversation-view-model.js";
 import { deriveReaderRelations } from "../reader-relations.js";
+import { parseReaderActivityQuery, projectReaderActivity, ReaderActivityError } from "../reader-activity.js";
+import { renderReaderActivity } from "../views/reader-activity.js";
 import { streamJson } from "../json-stream.js";
 
 export function registerSessionDetail(
@@ -133,6 +135,19 @@ export function registerSessionDetail(
     }
   };
 
+  const prepareReaderSources = (adapter: any, sessionId: string, document: any, protocol: SessionProtocolV3 | null) => {
+    const ownedReader = typeof adapter.getOwnedReaderProjection === "function"
+      ? adapter.getOwnedReaderProjection(sessionId, protocol ? {
+          tasks: protocol.tasks, agentRuns: protocol.agentRuns, relationships: protocol.relationships
+        } : undefined)
+      : undefined;
+    return {
+      sessionTree: ownedReader === undefined ? adapter.getSessionTree?.(sessionId) || null : null,
+      ownedReader,
+      readerRelations: protocol ? deriveReaderRelations(protocol, document) : null
+    };
+  };
+
   // Shared preparation for the HTML shell and page-shell-free reader route.
   // Keeping the normalized tree, runtime compactions, inherited context and
   // conversation projection together makes both consumers render the same
@@ -148,23 +163,15 @@ export function registerSessionDetail(
           context: runtime.projections.context
         })
       : null;
-    const ownedReader = typeof adapter.getOwnedReaderProjection === "function"
-      ? adapter.getOwnedReaderProjection(sessionId, runtime.v3 ? {
-          tasks: runtime.v3.tasks,
-          agentRuns: runtime.v3.agentRuns,
-          relationships: runtime.v3.relationships
-        } : undefined)
-      : undefined;
+    const sources = prepareReaderSources(adapter, sessionId, document, runtime.v3);
     const readerInput = {
       session: document.session,
-      sessionTree: ownedReader === undefined ? adapter.getSessionTree?.(sessionId) || null : null,
-      ownedReader,
+      ...sources,
       messages: document.messages,
       partsByMessage: document.partsByMessage,
       provider: providerId,
       conversationCompactions: collectConversationCompactions(runtime.protocol),
       conversationView,
-      readerRelations: runtime.v3 ? deriveReaderRelations(runtime.v3, document) : null,
       // An unavailable runtime still permits direct reading; keep those tools
       // rendered because a later process request cannot reproduce its boundaries.
       deferExecution: !supportsSessionProtocol(adapter) || Boolean(runtime.v3),
@@ -339,15 +346,8 @@ export function registerSessionDetail(
       const document = getSessionDocument(adapter, providerId, sessionId);
       if (!document) return json(res, { ok: false, error: "Process not found", code: "process_not_found" }, 404);
       const protocol = supportsSessionProtocol(adapter) ? getRuntimeProtocolV3(adapter, sessionId) : null;
-      const ownedReader = typeof adapter.getOwnedReaderProjection === "function"
-        ? adapter.getOwnedReaderProjection(sessionId, protocol ? {
-            tasks: protocol.tasks, agentRuns: protocol.agentRuns, relationships: protocol.relationships
-          } : undefined)
-        : undefined;
       const fragment = renderReaderProcessChunk({
-        sessionTree: ownedReader === undefined ? adapter.getSessionTree?.(sessionId) || null : null,
-        ownedReader,
-        readerRelations: protocol ? deriveReaderRelations(protocol, document) : null,
+        ...prepareReaderSources(adapter, sessionId, document, protocol),
         messageId, firstPartId, lastPartId
       });
       if (!fragment) return json(res, { ok: false, error: "Process not found", code: "process_not_found" }, 404);
@@ -355,6 +355,35 @@ export function registerSessionDetail(
     } catch (error) {
       console.error(`Process route error: ${error instanceof Error ? error.message : String(error)}`);
       return json(res, { ok: false, error: "Unable to load process", code: "process_failed" }, 500);
+    }
+  });
+
+  app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/reader\/activity$/, async (req: any, res: any, match: RegExpMatchArray) => {
+    const providerId = match[1];
+    const sessionId = safeDecodeId(match[2]);
+    const adapter = providerMap.get(providerId);
+    if (!adapter) {
+      const missing = missingProviderResponse(providerId);
+      return json(res, missing.body, missing.status);
+    }
+    if (!sessionId) return json(res, { ok: false, error: "Invalid session id", code: "invalid_input" }, 400);
+    try {
+      const query = parseReaderActivityQuery(new URL(req.url || "/", `http://localhost:${appConfig.port}`).searchParams);
+      const document = getSessionDocument(adapter, providerId, sessionId);
+      if (!document) return json(res, { ok: false, error: "Session not found", code: "session_not_found" }, 404);
+      const protocol = supportsSessionProtocol(adapter) ? getRuntimeProtocolV3(adapter, sessionId, document.session) : null;
+      const sources = prepareReaderSources(adapter, sessionId, document, protocol);
+      const projection = projectReaderActivity({
+        provider: providerId, sessionId,
+        tree: sources.ownedReader?.rootTree || sources.sessionTree,
+        relations: sources.readerRelations
+      }, query);
+      return json(res, { ok: true, ...projection, html: renderReaderActivity(projection) });
+    } catch (error) {
+      if (error instanceof ReaderActivityError) {
+        return json(res, { ok: false, error: error.message, code: error.code }, error.code === "stale_page" ? 409 : 400);
+      }
+      return runtimeError(res, error, { protocolInvalid: true });
     }
   });
 
