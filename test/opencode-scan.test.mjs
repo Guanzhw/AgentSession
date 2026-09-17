@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -85,6 +86,24 @@ test('OpenCode scan retains available session metadata when the message table is
   assert.equal(scanned.length, 4);
   assert.ok(scanned.every(({ messageCount, tokenCount }) => messageCount === 0 && tokenCount === null));
   assert.equal(scanned.find(({ id }) => id === 'child').parentId, 'root');
+});
+
+test('OpenCode scan survives garbage collection between asynchronous yields', (t) => {
+  const { dbPath } = fixture(t);
+  const script = `
+    import assert from 'node:assert/strict';
+    import { createOpenCodeSqliteAdapter } from './dist/src/providers/opencode/sqlite-adapter.js';
+    const adapter = createOpenCodeSqliteAdapter({ id: 'opencode', name: 'Fixture', defaultDataPath: () => process.argv[1] });
+    const ids = [];
+    for await (const row of adapter.scan()) {
+      ids.push(row.id);
+      global.gc();
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    assert.deepEqual(ids, ['orphan', 'grandchild', 'child', 'root']);
+  `;
+  const result = spawnSync(process.execPath, ['--expose-gc', '--input-type=module', '-e', script, dbPath], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
 });
 
 test('OpenCode live Library snapshot reads session metadata without message or usage queries', (t) => {

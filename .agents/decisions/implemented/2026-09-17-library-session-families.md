@@ -60,3 +60,7 @@ Real Codex three-level browsing, child search, 20/40 child paging, 60 root entri
 restored after reading, focus/position recovery, desktop/390px and light/dark
 checks passed. DSH request failure/retry passed. See
 [presentation evidence](../../../docs/design/library-session-families.md).
+Minimum-version CI exposed a SQLite statement finalized between async scan
+yields on Node 22.15.0. The scan now materializes its metadata query before
+yielding, matching the indexer's full-batch consumption. An explicit-GC regression
+reproduces the old failure and verifies the fix on the minimum runtime.

@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { getConfig } from "../../config.js";
 import { icons } from "../../icons.js";
 import {
-  iterateSessionsForIndex,
+  listSessionsForIndex,
   getDb,
   getSession as dbGetSession,
   getMessages as dbGetMessages,
@@ -81,7 +81,7 @@ export function createOpenCodeSqliteAdapter({
   },
 
   async *scan() {
-    for (const session of iterateSessionsForIndex(getAdapterDataPath())) {
+    for (const session of listSessionsForIndex(getAdapterDataPath())) {
       yield {
         ...librarySessionMetadata(session),
         messageCount: Number(session.message_count) || 0,

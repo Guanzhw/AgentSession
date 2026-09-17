@@ -67,7 +67,8 @@ light/dark, 390px, no-match and unavailable providers. See the
 
 ## Recorded verification
 
-- `npm test`: 820/820; full browser E2E passed with no browser errors. Legacy
+- Full tests: 820/820 before the minimum-runtime follow-up; the final Node 22.15.0
+  suite passes 821/821. Full browser E2E passed with no browser errors. Legacy
   list/API statistics remain covered independently of the Library view.
 - Seven installed providers passed live Library API/page checks. OpenCode live
   metadata contains 58 roots and 73 descendants; Codex, Hermes and DSH returned
@@ -88,6 +89,12 @@ light/dark, 390px, no-match and unavailable providers. See the
   this is not a whole-product accessibility audit.
 - Blocking a DSH child request produces a local error; unblocking and retrying
   loads the child and clears it. No-match content remains visible after startup.
+- Node 22.15.0 CI exposed a prematurely finalized SQLite iterator between async
+  scan yields. A forced-GC minimal reproduction confirmed the cause. Scans now
+  finish the metadata query before yielding; a dedicated subprocess regression
+  exercises the same GC boundary. Live Library metadata queries are unchanged.
+  A real Node 22.15.0 scan with forced GC returns all 131 OpenCode records,
+  including 73 descendants, matching the live metadata snapshot exactly.
 
 Private evidence stays in `tmp/library-families-*` and
 `tmp/library-family-*-20260917.*`; provider-owned data was not changed.

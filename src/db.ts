@@ -184,15 +184,16 @@ export function listSessions(limit = 50, offset = 0, search = "", timeRange = ""
 }
 
 /** Index independently readable descendants without changing root-only lists. */
-export function iterateSessionsForIndex(pathOverride: string | undefined = undefined) {
+export function listSessionsForIndex(pathOverride: string | undefined = undefined) {
   const db = getDb(pathOverride);
+  // Finish the query before async scan yields; Node 22 can finalize a detached iterator's statement.
   return db.prepare(`
     SELECT id, parent_id, slug, title, directory, time_created, time_updated,
            ${sessionListMetricColumns(db)}
     FROM session
     WHERE time_archived IS NULL
     ORDER BY time_updated DESC, time_created DESC, id ASC
-  `).iterate();
+  `).all();
 }
 
 export function listSessionProjects(search = "", timeRange = "", pathOverride: string | undefined = undefined, excludedIds: Set<string> | undefined = undefined, includedIds: string[] | undefined = undefined, titleOverrides: SessionTitleOverrides = undefined, hasSubagent = false) {
