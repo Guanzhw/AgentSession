@@ -59,7 +59,7 @@ test('folded field controls carry localized loading, retry and continuation labe
   setLocale('en');
 });
 
-function clientField(t, { field = 'output', session = 'child', scope = 'owned', owner = null } = {}) {
+function clientField(t, { field = 'output', session = 'child', scope = 'owned', artifactId = null, owner = null } = {}) {
   const events = [];
   const inserts = [];
   let status = null;
@@ -70,12 +70,16 @@ function clientField(t, { field = 'output', session = 'child', scope = 'owned', 
   };
   const container = {
     querySelector(selector) { assert.equal(selector, '[data-progressive-status]'); return status; },
-    insertBefore(chunk, before) { assert.equal(before, button); inserts.push(chunk); },
+    insertBefore(chunk, before) {
+      assert.equal(before, button);
+      if ('progressiveStatus' in chunk.dataset) status = chunk;
+      else inserts.push(chunk);
+    },
     append(node) { assert.equal(status, null, 'only one error status may be present'); status = node; }
   };
   const details = owner || {
     open: true,
-    matches(selector) { assert.equal(selector, 'details.tool-call, details.reasoning-block'); return true; },
+    matches(selector) { assert.equal(selector, 'details.tool-call, details.reasoning-block, details.reader-artifact-output'); return true; },
     querySelectorAll(selector) {
       assert.equal(selector, '.progressive-more[data-load-initial]');
       return 'loadInitial' in button.dataset && button.isConnected ? [button] : [];
@@ -83,8 +87,8 @@ function clientField(t, { field = 'output', session = 'child', scope = 'owned', 
   };
   const attributes = new Map();
   const button = {
-    dataset: { partId: 'part:1', field, nextOffset: '0', contentScope: scope, loadInitial: '',
-      loadingLabel: 'Loading content…', retryLabel: 'Retry loading', moreLabel: 'Show more', loadError: 'Unable to load content' },
+    dataset: { ...(artifactId ? { contextArtifactId: artifactId } : { partId: 'part:1' }), field, nextOffset: '0', contentScope: scope, loadInitial: '',
+      loadingLabel: 'Loading content…', retryLabel: 'Retry loading', moreLabel: 'Show more', loadError: 'Unable to load content', emptyLabel: 'The recorded content is empty.', staleLabel: 'This saved version changed.', refreshLabel: 'Refresh this history' },
     textContent: 'Load content', disabled: false, isConnected: true,
     closest(selector) {
       if (selector === '.progressive') return container;
@@ -107,17 +111,18 @@ function clientField(t, { field = 'output', session = 'child', scope = 'owned', 
     else delete globalThis.CustomEvent;
   });
   globalThis.document = { createElement: (tagName) => ({
-    tagName, className: '', innerHTML: '', textContent: '', dataset: {}, attributes: new Map(),
+    tagName, className: '', innerHTML: '', textContent: '', dataset: {}, attributes: new Map(), children: [],
     setAttribute(name, value) { this.attributes.set(name, value); },
     getAttribute(name) { return this.attributes.get(name) ?? null; },
+    append(...children) { this.children.push(...children); },
     remove() { if (status === this) status = null; }
   }) };
   globalThis.CustomEvent = class { constructor(type, options) { this.type = type; Object.assign(this, options); } };
   return { button, details, pane, get status() { return status; }, inserts, events, attributes };
 }
 
-function response(html, nextOffset = null) {
-  return { ok: true, json: async () => ({ ok: true, html, nextOffset }) };
+function response(html, nextOffset = null, totalLength = undefined) {
+  return { ok: true, json: async () => ({ ok: true, html, nextOffset, totalLength }) };
 }
 
 test('specific disclosure autoload, manual click and search share a request then continue exactly once', async (t) => {
@@ -225,6 +230,59 @@ test('a failed field stays visible and retries through the same loader', async (
   assert.equal(calls, 2);
   assert.equal(fixture.status, null, 'successful fields retain no empty status node');
   assert.equal(fixture.inserts.length, 1);
+});
+
+test('artifact disclosures page through their own identity and report an empty recorded body', async (t) => {
+  const fixture = clientField(t, { scope: 'context-artifact', artifactId: 'memory:child:version' });
+  const urls = [];
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    urls.push(url);
+    return urls.length === 1 ? response('<p>first memory</p>', 6000, 7000) : response('<p>last memory</p>', null, 7000);
+  });
+  await loadFoldedContent(fixture.details);
+  const first = new URL(urls[0], 'http://localhost').searchParams;
+  assert.equal(first.get('scope'), 'context-artifact');
+  assert.equal(first.get('artifact'), 'memory:child:version');
+  assert.equal(first.get('part'), null);
+  assert.equal(fixture.button.dataset.nextOffset, '6000');
+  await loadProgressiveContent(fixture.button);
+  assert.deepEqual(fixture.inserts.map((chunk) => chunk.innerHTML), ['<p>first memory</p>', '<p>last memory</p>']);
+  assert.equal(fixture.button.isConnected, false);
+
+  const empty = clientField(t, { scope: 'context-artifact', artifactId: 'summary:child:empty' });
+  globalThis.fetch.mock.mockImplementationOnce(async () => response('', null, 0));
+  await loadFoldedContent(empty.details);
+  assert.equal(empty.inserts[0].innerHTML, '');
+  assert.equal(empty.status.textContent, 'The recorded content is empty.');
+  assert.equal(empty.button.isConnected, false);
+});
+
+test('artifact continuation retries ordinary failures and replaces a stale control with the child Reader refresh link', async (t) => {
+  const retry = clientField(t, { scope: 'context-artifact', artifactId: 'memory:child:retry' });
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    calls += 1;
+    if (calls === 1) return { ok: false, status: 503, json: async () => ({ ok: false, error: 'Store unavailable' }) };
+    return response('<p>recovered</p>', null, 12);
+  });
+  const failed = await loadFoldedContent(retry.details);
+  assert.equal(failed[0].status, 'rejected');
+  assert.equal(retry.button.textContent, 'Retry loading');
+  await loadProgressiveContent(retry.button);
+  assert.equal(calls, 2);
+  assert.equal(retry.inserts[0].innerHTML, '<p>recovered</p>');
+
+  const stale = clientField(t, { scope: 'context-artifact', artifactId: 'memory:child:old' });
+  globalThis.fetch.mock.mockImplementationOnce(async () => response('<p>kept prior body</p>', 6000, 7000));
+  await loadFoldedContent(stale.details);
+  globalThis.fetch.mock.mockImplementationOnce(async () => ({ ok: false, status: 409, json: async () => ({ ok: false, code: 'artifact_stale', error: 'Changed' }) }));
+  await loadProgressiveContent(stale.button);
+  assert.equal(stale.inserts[0].innerHTML, '<p>kept prior body</p>');
+  assert.equal(stale.button.isConnected, false);
+  assert.equal(stale.status.textContent, 'This saved version changed.');
+  const refresh = stale.status.children.find((child) => typeof child === 'object' && child.tagName === 'a');
+  assert.equal(refresh.textContent, 'Refresh this history');
+  assert.equal(refresh.href, '/codex/session/child');
 });
 
 for (const failure of [false, true]) {

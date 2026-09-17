@@ -207,6 +207,10 @@ Every adapter implements `ProviderAdapter`:
 - optional `getContextChangeResult(sessionId, checkpointId)` for on-demand
   recorded context-change result bodies, using canonical protocol checkpoint
   IDs and the provider's owned-record boundary;
+- optional `getContextArtifactContent(sessionId, artifactId)` for a retained
+  artifact body. Keep body text out of protocol snapshots; bind content reads
+  to the exact versioned artifact ID and report stale versions explicitly.
+  This read must not prepare the input transcript or its complete family;
 - optional `exportSession()`, runtime-environment evidence, system-prompt evidence, structured conversation projections, and a provider-owned resume command;
 - optional `getOwnedReaderProjection()` for providers whose legacy structured
   tree loads a complete family. Return the complete selected session tree plus
@@ -299,6 +303,16 @@ uses this optional capability and the existing bounded runtime cache; providers
 must retain their independent accessors and must not retain raw preparation
 input solely for the pair. See the
 [paired preparation decision](../.agents/decisions/implemented/2026-09-17-atomic-reader-protocol-snapshots.md).
+Providers with independently changing context storage may implement
+`getProtocolRevision(sessionId)`. Runtime caches prefer it while token-stat
+caches keep `getStatsRevision()`. Codex includes the selected memory row's
+artifact/production-evidence identity, not every unrelated memory-store write.
+Its request-local Reader snapshot freezes the same metadata and revision.
+`ContextArtifact.contentSourceTime` identifies the saved input version;
+`productionEvidence` carries a matching recorded job and its times separately
+from producer run/event references. Optional `contextArtifactSourceState`
+reports availability of the additional readable store without replacing
+overall context coverage or suppressing recorded compaction evidence.
 Message remains the universal conversation projection; protocol v2 is the
 structured harness contract.
 

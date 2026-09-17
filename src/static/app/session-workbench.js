@@ -18,9 +18,11 @@ export function loadProgressiveContent(button, { dispatch = true } = {}) {
     const contentScope = button.dataset.contentScope || "owned";
     const contextTarget = button.dataset.contextResultTarget || "";
     const contextCheckpoint = button.dataset.contextResultCheckpoint || "";
+    const artifactId = button.dataset.contextArtifactId || "";
     const offset = button.dataset.nextOffset;
     const contextResult = contentScope === "context-result";
-    if (!provider || !sessionId || !field || offset == null || contextResult && (!contextTarget || !contextCheckpoint) || !contextResult && !partId) return null;
+    const contextArtifact = contentScope === "context-artifact";
+    if (!provider || !sessionId || !field || offset == null || contextResult && (!contextTarget || !contextCheckpoint) || contextArtifact && !artifactId || !contextResult && !contextArtifact && !partId) return null;
     container.querySelector("[data-progressive-status]")?.remove();
     const idleLabel = button.textContent;
     button.disabled = true;
@@ -33,12 +35,28 @@ export function loadProgressiveContent(button, { dispatch = true } = {}) {
         query.set("target", contextTarget);
         query.set("group", button.dataset.contextResultGroup || "-1");
         query.set("entry", button.dataset.contextResultEntry || "-1");
+      } else if (contextArtifact) {
+        query.set("artifact", artifactId);
       } else {
         query.set("part", partId);
       }
       const response = await fetch(`/api/${encodeURIComponent(provider)}/session/${encodeURIComponent(sessionId)}/content?${query}`);
       const data = await response.json();
       if (!response.ok || !data?.ok || typeof data.html !== "string") {
+        if (response.status === 409 && data?.code === "artifact_stale") {
+          const status = document.createElement("span");
+          status.dataset.progressiveStatus = "";
+          status.setAttribute("role", "status");
+          status.setAttribute("aria-live", "polite");
+          status.textContent = button.dataset.staleLabel || data.error;
+          container.append(status);
+          const refresh = document.createElement("a");
+          refresh.href = `/${encodeURIComponent(provider)}/session/${encodeURIComponent(sessionId)}`;
+          refresh.textContent = button.dataset.refreshLabel || "Refresh";
+          status.append(" ", refresh);
+          button.remove();
+          return null;
+        }
         throw new Error(data?.error || `HTTP ${response.status}`);
       }
       if (!button.isConnected || pane && !pane.isConnected) return null;
@@ -54,6 +72,13 @@ export function loadProgressiveContent(button, { dispatch = true } = {}) {
         }));
       }
       if (data.nextOffset == null) {
+        if (contextArtifact && Number(data.totalLength) === 0) {
+          const status = document.createElement("span");
+          status.dataset.progressiveStatus = "";
+          status.setAttribute("role", "status");
+          status.textContent = button.dataset.emptyLabel || "";
+          container.insertBefore(status, button);
+        }
         button.remove();
       } else {
         button.dataset.nextOffset = String(data.nextOffset);
@@ -91,7 +116,7 @@ export function loadProgressiveContent(button, { dispatch = true } = {}) {
 }
 
 export function loadFoldedContent(details) {
-  if (!details.open || !details.matches("details.tool-call, details.reasoning-block")) return Promise.resolve([]);
+  if (!details.open || !details.matches("details.tool-call, details.reasoning-block, details.reader-artifact-output")) return Promise.resolve([]);
   const buttons = [...details.querySelectorAll(".progressive-more[data-load-initial]")]
     .filter((button) => button.closest("details") === details);
   // First pages preserve the existing anchors. Do not restart a search that

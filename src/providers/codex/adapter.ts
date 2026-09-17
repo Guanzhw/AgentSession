@@ -23,6 +23,7 @@ import {
   codexProtocolChildFactsFromRecords
 } from "./protocol.js";
 import { normalizeCodexContextChangeResult } from "./context-result.js";
+import { readCodexMemoryContent, readCodexMemoryMetadata, type CodexMemoryMetadata } from "./memory.js";
 import { finalizeSessionProtocol, protocolRevision } from "../shared/session-protocol.js";
 import { finalizeSessionProtocolV3 } from "../shared/session-protocol-v3.js";
 import { icons } from "../../icons.js";
@@ -335,7 +336,7 @@ const codexProtocolCapabilities = {
   sessionRelationships: { support: "partial" as const, provenance: "derived" as const, details: "recorded incoming thread spawns plus derived outgoing edges and forks" },
   tasks: { support: "partial" as const, provenance: "derived" as const, details: "recorded NEW_TASK envelopes plus spawn tool-call derivations bound via sub_agent_activity and call-output evidence" },
   agentRuns: { support: "partial" as const, provenance: "derived" as const, details: "recorded session-owned turn runs plus child rollout sessions bound to spawn calls through recorded activity/call-output evidence" },
-  contextArtifacts: { support: "full" as const, provenance: "recorded" as const, details: "compaction records, metadata-only summaries" },
+  contextArtifacts: { support: "full" as const, provenance: "recorded" as const, details: "compaction records and metadata-first saved memory artifacts with on-demand content" },
   branches: { support: "none" as const, provenance: "derived" as const, details: "Codex fork lineage remains a session relationship" }
 };
 
@@ -345,7 +346,8 @@ function loadCodexProtocolInput(sessionId: string) {
   const canonicalId = String(root.session.id);
   // Freeze the provider revision before reading large bodies so finalization
   // cannot refresh the index and label an older payload with newer metadata.
-  const revision = protocolRevision(sessionFiles.getStatsRevision());
+  const memory = readCodexMemoryMetadata(getCodexDir(), canonicalId);
+  const revision = protocolRevision(`${sessionFiles.getStatsRevision()}:${memory.revision}`);
   // Capture the indexed family before reading a potentially
   // very large root body. This keeps the metadata selection on one refresh
   // even if parsing the root crosses the store refresh interval.
@@ -370,7 +372,7 @@ function loadCodexProtocolInput(sessionId: string) {
     revision,
     rootEntry,
     input: protocolInputFromCaptured(rootEntry, rootRecords, parentRecords, children,
-      (child) => ({ records: child.records, messages: child.messages }))
+      (child) => ({ records: child.records, messages: child.messages }), memory)
   };
 }
 
@@ -379,13 +381,15 @@ function protocolInputFromCaptured(
   rootRecords: any[],
   parentRecords: any[] | null,
   children: Array<NonNullable<ReturnType<typeof sessionFiles.get>>>,
-  readChild: (child: NonNullable<ReturnType<typeof sessionFiles.get>>) => { records: any[]; messages: Message[] }
+  readChild: (child: NonNullable<ReturnType<typeof sessionFiles.get>>) => { records: any[]; messages: Message[] },
+  memory: CodexMemoryMetadata
 ) {
   const recordProvenance = rootEntry.session.parentId
     ? classifyCodexRecordProvenance(rootRecords, parentRecords || []) : null;
   return {
     session: rootEntry.session,
     messages: rootEntry.messages,
+    memory,
     records: recordProvenance
       ? rootRecords.filter((record) => recordProvenance.get(record) === "session") : rootRecords,
     children: children.map((child) => {
@@ -434,12 +438,14 @@ function captureCodexReader(sessionId: string): SessionReaderSnapshot | null {
   const parentRecords = captured.parent && codexNeedsParentRecordsForProvenance(records)
     ? captured.readPayload(captured.parent).records : null;
   const rootEntry = resolveEntryPayload(entry, records, messages, parentRecords);
+  const memory = readCodexMemoryMetadata(getCodexDir(), rootEntry.session.id);
+  const revision = `${captured.revision}:${memory.revision}`;
   const inheritedMessages = rootEntry.session.parentId
     ? recordsToInheritedMessages(records, rootEntry.session.id, parentRecords || []) : [];
   return {
     session: rootEntry.session,
     messages: rootEntry.messages,
-    revision: captured.revision,
+    revision,
     inheritedContext: inheritedMessages.length ? {
       sourceSession: { provider: "codex", sessionId: String(rootEntry.session.parentId) },
       messages: inheritedMessages,
@@ -449,9 +455,9 @@ function captureCodexReader(sessionId: string): SessionReaderSnapshot | null {
     getProtocolSnapshots() {
       const loaded = {
         canonicalId: String(rootEntry.session.id),
-        revision: protocolRevision(captured.revision),
+        revision: protocolRevision(revision),
         rootEntry,
-        input: protocolInputFromCaptured(rootEntry, records, parentRecords, children, captured.readPayload)
+        input: protocolInputFromCaptured(rootEntry, records, parentRecords, children, captured.readPayload, memory)
       };
       const v2 = finalizeCodexV2Protocol(loaded);
       return { v2, v3: finalizeSessionProtocolV3(buildCodexSessionProtocolV3(loaded.input, v2)) };
@@ -637,6 +643,14 @@ const codex = {
 
   getSessionProtocolSnapshots(sessionId) {
     return buildCodexSessionProtocolSnapshotsFor(sessionId);
+  },
+
+  getProtocolRevision(sessionId) {
+    return `${sessionFiles.getStatsRevision()}:${readCodexMemoryMetadata(getCodexDir(), sessionId).revision}`;
+  },
+
+  getContextArtifactContent(sessionId, artifactId) {
+    return readCodexMemoryContent(getCodexDir(), sessionId, artifactId);
   },
 
   getContextChangeResult(sessionId, checkpointId) {

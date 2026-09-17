@@ -54,7 +54,8 @@ export function sessionRevision(adapter: ProviderAdapter, session: Record<string
   let providerRevision = capturedRevision === undefined ? "" : String(capturedRevision);
   if (capturedRevision === undefined) {
     try {
-      const value = adapter.getStatsRevision?.();
+      const value = adapter.getProtocolRevision
+        ? adapter.getProtocolRevision(String(session.id)) : adapter.getStatsRevision?.();
       providerRevision = value === undefined ? "" : String(value);
     } catch {
       // A revision is an optimization, never a reason to make the source unreadable.
@@ -186,7 +187,8 @@ export function getRuntimeProtocolV3(
     const key = `${adapter.id}\u0000${sessionId}`;
     let revision: string | number | null = null;
     try {
-      revision = adapter.getStatsRevision?.() ?? null;
+      revision = (adapter.getProtocolRevision
+        ? adapter.getProtocolRevision(sessionId) : adapter.getStatsRevision?.()) ?? null;
     } catch {
       // A revision is an optimization, never a reason to make the source unreadable.
     }

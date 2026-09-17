@@ -10,6 +10,8 @@ import { layout } from "./layout.js";
 import { readerEventHref, renderReaderEventSourceLink } from "./reader-coordination.js";
 import { readerRelationPositionKey, renderReaderRelations } from "./reader-relations.js";
 import { uiIcon } from "../ui-icons.js";
+import { renderReaderArtifacts, type ContextArtifactSourceState } from "./reader-artifacts.js";
+import type { ContextArtifact } from "../providers/shared/session-protocol.js";
 import type { ReaderRelationMarkup } from "./reader-relations.js";
 import type { ReaderRelations } from "../reader-relations.js";
 import type { SessionNavigationContext } from "../navigation-context.js";
@@ -1950,8 +1952,11 @@ export function renderSessionReaderPane({
   conversationView = null,
   readerRelations = null,
   inheritedContext = null,
+  contextArtifacts = [],
+  contextArtifactSourceState = null,
+  canReadContextArtifacts = false,
   deferExecution = true
-}: { session: any; sessionTree?: SessionTree | null; ownedReader?: OwnedReaderProjection | null; messages?: any[]; partsByMessage?: Map<any, any>; provider?: string; conversationCompactions?: ConversationCompaction[]; conversationView?: ConversationViewModel | null; readerRelations?: ReaderRelations | null; inheritedContext?: InheritedContextView | null; deferExecution?: boolean }) {
+}: { session: any; sessionTree?: SessionTree | null; ownedReader?: OwnedReaderProjection | null; messages?: any[]; partsByMessage?: Map<any, any>; provider?: string; conversationCompactions?: ConversationCompaction[]; conversationView?: ConversationViewModel | null; readerRelations?: ReaderRelations | null; inheritedContext?: InheritedContextView | null; contextArtifacts?: ContextArtifact[]; contextArtifactSourceState?: ContextArtifactSourceState | null; canReadContextArtifacts?: boolean; deferExecution?: boolean }) {
   const title = session.title || session.slug || session.id;
   const placedCardIds = new Set<string>();
   const relationMarkup = renderReaderRelations(readerRelations);
@@ -1979,6 +1984,7 @@ export function renderSessionReaderPane({
   const conversationMarkup = renderConversationPanel(conversationEntries, conversationCompactions, provider, String(session.id), detachedMarkup, renderedEntryCount, conversationView, placedCardIds, relationMarkup);
   const inheritedContextMarkup = renderInheritedContext(inheritedContext, provider);
   const sessionAnchor = anchorId("session", session.id);
+  const artifactMarkup = renderReaderArtifacts({ artifacts: contextArtifacts, sourceState: contextArtifactSourceState, canRead: canReadContextArtifacts, provider, sessionId: String(session.id), sessionAnchor });
   return `<div id="${escapeHtml(sessionAnchor)}" class="reader-pane" data-reader-pane data-reader-provider="${escapeHtml(provider)}" data-reader-session="${escapeHtml(session.id)}" data-reader-title="${escapeHtml(title)}">
     <div class="reader-pane-grid">
       <details class="reader-toc-disclosure" data-reader-toc>
@@ -1986,6 +1992,7 @@ export function renderSessionReaderPane({
         ${renderToc(effectiveTree, provider, ownedReader)}
       </details>
       <div class="reader-pane-main" data-reader-transcript>
+        ${artifactMarkup}
         ${conversationMarkup}
         ${inheritedContextMarkup}
         ${renderReaderRelationshipRail(conversationView, provider, String(session.id), effectiveTree, ownedReader, readerRelations)}

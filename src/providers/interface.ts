@@ -1,4 +1,4 @@
-import type { AgentRun, EventProvenance, ProtocolCapabilities, SessionProtocol, SessionRelationship, Task } from "./shared/session-protocol.js";
+import type { AgentRun, ContextArtifactSourceState, EventProvenance, ProtocolCapabilities, SessionProtocol, SessionRelationship, Task } from "./shared/session-protocol.js";
 import type { SessionProtocolV3 } from "./shared/session-protocol-v3.js";
 import type { SessionTree } from "./shared/session-tree.js";
 
@@ -232,6 +232,12 @@ export interface SessionProtocolSnapshots {
   v3: SessionProtocolV3;
 }
 
+export type ContextArtifactContentResult =
+  | { status: "readable"; artifactId: string; content: string; format: "markdown" | "plain" }
+  | { status: "stale" }
+  | { status: "not-found" }
+  | { status: "unavailable"; sourceState: ContextArtifactSourceState };
+
 /** Request-local Reader input. Lazy projections share this captured source extent. */
 export interface SessionReaderSnapshot {
   session: RawSession;
@@ -278,6 +284,10 @@ export interface ProviderAdapter {
    * retained. Existing single-version accessors remain independently usable.
    */
   getSessionProtocolSnapshots?(sessionId: string): SessionProtocolSnapshots | null;
+  /** Revision of protocol facts, including optional artifact stores; independent of usage stats. */
+  getProtocolRevision?(sessionId: string): string | number;
+  /** Read one exact saved artifact version without loading conversation history. */
+  getContextArtifactContent?(sessionId: string, artifactId: string): ContextArtifactContentResult;
   /**
    * Optional on-demand recorded context result. Null means the checkpoint is
    * unknown; a known checkpoint without readable content retains an explicit

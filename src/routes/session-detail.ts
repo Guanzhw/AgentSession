@@ -170,6 +170,9 @@ export function registerSessionDetail(
       provider: providerId,
       conversationCompactions: collectConversationCompactions(runtime.protocol),
       conversationView,
+      contextArtifacts: runtime.v3?.contextArtifacts || runtime.protocol?.contextArtifacts || [],
+      contextArtifactSourceState: runtime.v3?.contextArtifactSourceState || runtime.protocol?.contextArtifactSourceState,
+      canReadContextArtifacts: typeof adapter.getContextArtifactContent === "function",
       // An unavailable runtime still permits direct reading; keep those tools
       // rendered because a later process request cannot reproduce its boundaries.
       deferExecution: !supportsSessionProtocol(adapter) || Boolean(runtime.v3),
@@ -609,16 +612,38 @@ export function registerSessionDetail(
     const contextTarget = params.get("target") || "";
     const contextGroup = Number(params.get("group") || "-1");
     const contextEntry = Number(params.get("entry") || "-1");
+    const artifactId = params.get("artifact") || "";
+    const artifactRequest = contentScope === "context-artifact"
+      && artifactId.length > 0 && artifactId.length <= 2048 && field === "content";
     const standardRequest = Boolean(partId) && ["owned", "inherited-context"].includes(contentScope) && ["text", "reasoning", "input", "output", "question-answer"].includes(String(field));
     const contextRequest = contentScope === "context-result"
       && Boolean(checkpointId)
       && ((contextTarget === "summary" && field === "summary" && contextGroup === -1 && contextEntry === -1)
         || (contextTarget === "entry" && field === "content" && Number.isSafeInteger(contextGroup) && contextGroup >= 0 && Number.isSafeInteger(contextEntry) && contextEntry >= 0));
-    if ((!standardRequest && !contextRequest) || !Number.isSafeInteger(offset) || offset < 0) {
+    if ((!standardRequest && !contextRequest && !artifactRequest) || !Number.isSafeInteger(offset) || offset < 0) {
       return json(res, { ok: false, error: "Invalid content request" }, 400);
     }
 
     try {
+      if (artifactRequest) {
+        if (!adapter.getContextArtifactContent) {
+          return json(res, { ok: false, error: "Artifact content is not available", code: "content_unavailable" }, 404);
+        }
+        // Artifact identity and canonical source belong to the adapter. Reading
+        // a saved body must not prepare the source transcript or its family.
+        const result = adapter.getContextArtifactContent(sessionId, artifactId);
+        if (result.status === "stale") {
+          return json(res, { ok: false, error: "This saved output has changed. Reload its source history.", code: "artifact_stale" }, 409);
+        }
+        if (result.status === "not-found") {
+          return json(res, { ok: false, error: "Artifact not found", code: "content_unavailable" }, 404);
+        }
+        if (result.status === "unavailable") {
+          return json(res, { ok: false, error: "Artifact storage is unavailable", code: "artifact_unavailable", sourceState: result.sourceState }, 503);
+        }
+        const page = renderProgressiveContent(result.content, result.format, offset, 6000);
+        return json(res, { ok: true, scope: "context-artifact", provider: providerId, sessionId, artifactId: result.artifactId, field, ...page });
+      }
       if (contextRequest) {
         const document = getSessionDocument(adapter, providerId, sessionId);
         if (!document) return json(res, { ok: false, error: "Not found" }, 404);

@@ -320,7 +320,23 @@ export interface ContextArtifact {
   redacted: boolean;
   provenance: EventProvenance;
   timeCreated: number | null;
+  /** Updated time of the recorded input summarized by this saved artifact. */
+  contentSourceTime?: number | null;
+  productionEvidence?: {
+    provenance: EventProvenance;
+    startedAt: number | null;
+    completedAt: number;
+    inputUpdatedAt: number;
+  } | null;
   metadata?: Record<string, unknown> | null;
+}
+
+/** Availability of an additional readable artifact store, independent of compaction. */
+export interface ContextArtifactSourceState {
+  state: "available" | "unavailable" | "invalid";
+  code: null | "not-found" | "unsupported-schema" | "read-failed" | "invalid-record";
+  sourcePath: string | null;
+  provenance: EventProvenance;
 }
 
 export interface SessionBranch {
@@ -381,6 +397,7 @@ export interface SessionProtocol {
   tasks: Task[];
   agentRuns: AgentRun[];
   contextArtifacts: ContextArtifact[];
+  contextArtifactSourceState?: ContextArtifactSourceState;
   /** Builders may omit finalizer-owned v2 fields; every published snapshot includes them. */
   version?: 2;
   session?: SessionDescriptor;
@@ -1295,6 +1312,7 @@ export function finalizeSessionProtocol(
     tasks,
     agentRuns: runs,
     contextArtifacts: artifacts,
+    ...(protocol.contextArtifactSourceState ? { contextArtifactSourceState: protocol.contextArtifactSourceState } : {}),
     branches: (protocol.branches || []).map((branch) => ({ ...branch })),
     revision
   };

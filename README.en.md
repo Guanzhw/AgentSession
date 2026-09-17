@@ -77,6 +77,12 @@ pages of 40 messages with a source-session link. Readers can continue to the end
 of the disclosed background retained in the child file even when the parent file
 is missing. These messages stay outside the default ToC and do not increase child
 message counts or request usage.
+For Codex's saved memory notes and session summaries, a collapsed
+“Saved from this history” section connects the input history to those outputs.
+It shows the input version, generation time, and matching job evidence when
+recorded. The input history is not presented as the generating session, and a
+saved artifact does not imply later use. Long bodies remain readable to the
+end; changed versions require a refresh, and unavailable sources are explicit.
 Unsupported, unavailable, missing, and invalid evidence stays explicit rather
 than being rendered as observed zeroes.
 

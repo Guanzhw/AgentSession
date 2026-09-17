@@ -416,6 +416,7 @@ function v2Facts(protocol: SessionProtocol): Omit<SessionProtocolV3, "version" |
     tasks: protocol.tasks,
     agentRuns: protocol.agentRuns,
     contextArtifacts: protocol.contextArtifacts,
+    ...(protocol.contextArtifactSourceState ? { contextArtifactSourceState: protocol.contextArtifactSourceState } : {}),
     branches: protocol.branches,
     revision: protocol.revision
   };

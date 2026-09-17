@@ -39,6 +39,7 @@ import {
 } from "../shared/session-protocol-v3.js";
 import { isSubagentToolName } from "../shared/subagent-tools.js";
 import { codexOwnedTokenUsageRecords, codexUsagePayload } from "./parser.js";
+import type { CodexMemoryMetadata } from "./memory.js";
 
 type Row = Record<string, any>;
 
@@ -67,6 +68,7 @@ export interface CodexProtocolInput {
   records: Row[];
   /** Resolved direct child sessions (subagent rollouts/forked threads). */
   children: CodexProtocolChild[];
+  memory?: CodexMemoryMetadata;
 }
 
 function asNumber(value: unknown): number | null {
@@ -844,7 +846,8 @@ export function buildCodexSessionProtocol(input: CodexProtocolInput): SessionPro
     relationships,
     tasks,
     agentRuns: runs,
-    contextArtifacts: artifacts
+    contextArtifacts: [...artifacts, ...(input.memory?.artifacts || [])],
+    ...(input.memory ? { contextArtifactSourceState: input.memory.sourceState } : {})
   };
 }
 
@@ -1654,7 +1657,7 @@ export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: Ses
     work: protocolDomainCoverage(goals.length + base.tasks.length > 0 ? "observed" : "not-observed", "recorded thread_goal_updated goals plus normalized subagent tasks"),
     execution: protocolDomainCoverage(actors.length + base.agentRuns.length > 0 ? "observed" : "not-observed", "recorded agent-path actors plus normalized child agent runs"),
     coordination: protocolDomainCoverage(observations.length > 0 ? "observed" : "not-observed", "recorded collaboration calls and FINAL_ANSWER envelopes"),
-    context: protocolDomainCoverage(base.contextArtifacts.length + contextVersions.length + contextTransformations.length > 0 ? "observed" : "not-observed", "recorded compacted window lineage plus summary artifacts"),
+    context: protocolDomainCoverage(base.contextArtifacts.length + contextVersions.length + contextTransformations.length > 0 ? "observed" : "not-observed", "recorded compacted window lineage and available saved context artifacts"),
     usage: protocolDomainCoverage(usageRecords.length > 0 ? "observed" : "not-observed", "recorded Codex request usage records")
   });
 
@@ -1667,6 +1670,7 @@ export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: Ses
     tasks: base.tasks,
     agentRuns: [...base.agentRuns, ...turnRuns],
     contextArtifacts: base.contextArtifacts,
+    ...(base.contextArtifactSourceState ? { contextArtifactSourceState: base.contextArtifactSourceState } : {}),
     branches: base.branches,
     revision: base.revision,
     goals,
