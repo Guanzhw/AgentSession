@@ -24,6 +24,13 @@ return positions. Opening a child inserts its complete owned history there,
 keeping the parent mounted; closing returns to the original reading position.
 Search explicitly selects the root or an opened child and keeps each query and
 result position separately.
+
+Inline reading keeps the page URL's session, title, exports and management
+actions owned by the root. Location parameters reproduce the selected child
+history and source. Contents uses the same inline behavior; related history
+without a recorded position is labeled explicitly. “Read on its own” loads the
+complete child-owned page.
+
 Work and Events remain secondary evidence disclosures. Event paging, filters
 and existing `#tab-events` links are preserved.
 Conversation folds completed process using provider-recorded response phases;

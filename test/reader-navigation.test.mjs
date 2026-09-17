@@ -2,11 +2,21 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { initSessionReader } from '../src/static/app/session-reader.js';
 import { readerPaneAnchor } from '../src/static/app/reader-pane-dom.js';
+import { __I18N__ } from '../src/static/app/i18n.js';
+import { createReaderLocation, parseReaderLocation } from '../src/static/app/reader-location.js';
+
+test('unplaced inline history has browser-localized position labels', () => {
+  assert.equal(__I18N__.en['detail.reader_inline_unplaced'], 'No recorded position');
+  assert.equal(__I18N__.zh['detail.reader_inline_unplaced'], '未记录发生位置');
+});
 
 function readerHarness(t, initialHref = '/fixture/session/root?view=history#root-source', initialEvents = [], {
-  narrow = false, collaboration = false, browserSnapshot = null, initialRootSession = null
+  narrow = false, collaboration = false, browserSnapshot = null, initialRootSession = null, markup = null
 } = {}) {
   const location = new URL(initialHref, 'http://localhost');
+  const navigations = [];
+  location.assign = (href) => navigations.push({ type: 'assign', href: new URL(href, location).href });
+  location.reload = () => navigations.push({ type: 'reload', href: location.href });
   const frames = [];
   const requests = [];
   const panes = new Map();
@@ -106,6 +116,7 @@ function readerHarness(t, initialHref = '/fixture/session/root?view=history#root
   const documentRootSession = initialRootSession || location.pathname.split('/').at(-1);
   host.append(panes.get(documentRootSession));
   const back = new Element({ readerBack: '' });
+  const status = new Element({ readerStatus: '' });
   const workbench = new Element({ provider: 'fixture', sessionId: documentRootSession });
   const currentTitle = new Element({ readerCurrentTitle: '' }, 'H1');
   currentTitle.textContent = 'Root document title';
@@ -117,6 +128,7 @@ function readerHarness(t, initialHref = '/fixture/session/root?view=history#root
   workbench.append(currentTitle);
   workbench.append(host);
   workbench.append(back);
+  workbench.append(status);
   document = {
     activeElement: null,
     querySelector: () => workbench,
@@ -182,6 +194,14 @@ function readerHarness(t, initialHref = '/fixture/session/root?view=history#root
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
     t.after(() => original ? Object.defineProperty(globalThis, name, original) : delete globalThis[name]);
   }
+  const makeElement = (dataset, id) => new Element(dataset, id);
+  const addRecordedChild = (parent = root, session = 'child', href = `/fixture/session/${session}`) => {
+    const link = makeElement({ readerOpen: '', readerProvider: 'fixture', readerSession: session });
+    link.href = href;
+    parent.append(link);
+    return link;
+  };
+  const initialMarkup = markup?.({ root, child, makePane, makeElement, addRecordedChild });
   const reader = initSessionReader();
   const click = async (target) => {
     const event = { type: 'click', target, button: 0, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
@@ -198,8 +218,8 @@ function readerHarness(t, initialHref = '/fixture/session/root?view=history#root
     while (frames.length) frames.shift()();
   };
   return {
-    reader, root, child, back, currentTitle, location, window, document, requests, makePane, flush, eventResponses, inheritedResponses, paneResponses, swaps, anchorReveals,
-    makeElement: (dataset, id) => new Element(dataset, id),
+    reader, root, child, back, status, currentTitle, location, window, document, requests, makePane, flush, eventResponses, inheritedResponses, paneResponses, swaps, anchorReveals,
+    makeElement, addRecordedChild, navigations, initialMarkup,
     click,
     async resize(isNarrow) { media.matches = isNarrow; await media.dispatchEvent({ type: 'change' }); },
     browserBack: async () => { traverse(-1); await flush(); },
@@ -228,24 +248,33 @@ function readerHarness(t, initialHref = '/fixture/session/root?view=history#root
   };
 }
 
-test('reader browser Back/Forward then in-app Back restores the owning pane URL, scroll and focus', async (t) => {
+test('inline child Back/Forward restores the root URL, scroll, focus, and reading state', async (t) => {
   const h = readerHarness(t);
   const rootHref = h.href();
-  const childHref = '/fixture/session/child?view=tools#child-source';
+  const childHref = '/fixture/session/child';
+  h.addRecordedChild(h.root, 'child', childHref);
+  h.root.dataset.searchQuery = 'owned result';
+  h.root.children[0].open = true;
   await h.reader.openPane('fixture', 'child', { href: childHref });
   await h.flush();
   await h.browserBack();
   h.window.scrollY = 1300;
   h.root.children[0].focus();
   await h.browserForward();
-  assert.equal(h.cached('root').href, rootHref);
   assert.equal(h.cached('child').href, childHref);
+  assert.equal(h.reader.getActivePane(), h.root);
+  assert.deepEqual(h.reader.getInlinePanes(), [h.child]);
+  assert.equal(parseReaderLocation(h.location).source.pathname, '/fixture/session/child');
   await h.back.dispatchEvent({ type: 'click' });
   await h.flush();
   assert.equal(h.reader.getActivePane(), h.root);
   assert.equal(h.href(), rootHref);
   assert.equal(h.window.scrollY, 1300);
   assert.equal(h.document.activeElement, h.root.children[0]);
+  assert.equal(h.root.dataset.searchQuery, 'owned result');
+  assert.equal(h.root.children[0].open, true);
+  assert.deepEqual(h.navigations, []);
+  assert.deepEqual(h.swaps, []);
 });
 
 test('event deep links rebuild scalar evidence on reload without adding a Back entry', async (t) => {
@@ -259,46 +288,47 @@ test('event deep links rebuild scalar evidence on reload without adding a Back e
   assert.equal(h.back.disabled, true);
 });
 
-test('an uncached browser event destination loads its exact scalar evidence', async (t) => {
+test('browser traversal to a different event owner reloads its canonical document', async (t) => {
   const h = readerHarness(t);
   const eventId = 'event:child/completed:2';
   const href = `/fixture/session/child?readerEvent=${encodeURIComponent(eventId)}#reader-event-event-child-completed-2`;
   h.eventResponses.set(eventId, { ok: true, evidence: { eventId }, html: `event:${eventId}` });
   await h.pop(href);
-  assert.equal(h.reader.getActivePane(), h.child);
+  assert.equal(h.reader.getActivePane(), h.root);
   assert.equal(h.href(), href);
-  assert.equal(h.document.activeElement.dataset.readerEventId, eventId);
-  assert.equal(h.requests.length, 2, 'The target pane and exact event are loaded');
+  assert.deepEqual(h.navigations, [{ type: 'reload', href: `http://localhost${href}` }]);
+  assert.deepEqual(h.requests, [], 'The current document never fetches another owner after traversal');
 });
 
-test('uncached browser navigation preserves the outgoing pane URL and records the selected query and hash', async (t) => {
+test('an unrelated session opens its canonical document without changing the reader owner', async (t) => {
   const h = readerHarness(t);
   const rootHref = h.href();
-  const sibling = h.makePane('sibling');
   const siblingHref = '/fixture/session/sibling?view=events#sibling-source';
-  await h.pop(siblingHref);
-  assert.equal(h.reader.getActivePane(), sibling);
-  assert.equal(h.cached('root').href, rootHref);
-  assert.equal(h.cached('sibling').href, siblingHref);
-  await h.pop('/fixture/session/root?view=work#root-source');
-  await h.reader.openPane('fixture', 'child', { href: '/fixture/session/child' });
-  await h.back.dispatchEvent({ type: 'click' });
-  await h.flush();
-  assert.equal(h.href(), '/fixture/session/root?view=work#root-source');
+  const opened = await h.reader.openPane('fixture', 'sibling', { href: siblingHref });
+  assert.equal(opened, false);
+  assert.equal(h.reader.getActivePane(), h.root);
+  assert.equal(h.workbenchSession(), 'root');
+  assert.equal(h.href(), rootHref);
+  assert.deepEqual(h.navigations, [{ type: 'assign', href: `http://localhost${siblingHref}` }]);
+  assert.deepEqual(h.requests, []);
+  assert.deepEqual(h.reader.getInlinePanes(), []);
 });
 
 test('scalar event sources keep the exact event query and anchor for reload in the same or child pane', async (t) => {
   const h = readerHarness(t);
+  h.addRecordedChild();
   for (const [session, eventId] of [['root', 'event:run/completed:1'], ['child', 'event:delivery:2']]) {
     await h.source(session, eventId);
-    assert.equal(h.location.pathname, `/fixture/session/${session}`);
-    assert.equal(h.location.searchParams.get('readerEvent'), eventId);
-    assert.equal(h.location.hash, `#reader-event-${eventId.replace(/[^A-Za-z0-9_-]/g, '-')}`);
+    assert.equal(h.location.pathname, '/fixture/session/root');
+    const source = parseReaderLocation(h.location)?.source || h.location;
+    assert.equal(source.pathname, `/fixture/session/${session}`);
+    assert.equal(source.searchParams.get('readerEvent'), eventId);
+    assert.equal(source.hash, `#reader-event-${eventId.replace(/[^A-Za-z0-9_-]/g, '-')}`);
     assert.equal(h.document.activeElement.dataset.readerEventId, eventId);
   }
 });
 
-test('inline event source links keep the child owner URL for scalar and native evidence', async (t) => {
+test('inline scalar and native event sources encode the child owner under the root URL', async (t) => {
   const h = readerHarness(t);
   const open = h.makeElement({ readerOpen: '', readerProvider: 'fixture', readerSession: 'child' });
   open.href = '/fixture/session/child';
@@ -311,8 +341,10 @@ test('inline event source links keep the child owner URL for scalar and native e
   scalar.href = `/fixture/session/child?readerEvent=${encodeURIComponent(scalarId)}`;
   h.child.append(scalar);
   await h.click(scalar);
-  assert.equal(h.location.pathname, '/fixture/session/child');
-  assert.equal(h.location.searchParams.get('readerEvent'), scalarId);
+  assert.equal(h.location.pathname, '/fixture/session/root');
+  assert.equal(h.location.searchParams.has('readerEvent'), false);
+  assert.equal(parseReaderLocation(h.location).source.pathname, '/fixture/session/child');
+  assert.equal(parseReaderLocation(h.location).source.searchParams.get('readerEvent'), scalarId);
   assert.equal(h.reader.getActivePane(), h.root);
   assert.deepEqual(h.reader.getInlinePanes(), [h.child]);
 
@@ -323,9 +355,10 @@ test('inline event source links keep the child owner URL for scalar and native e
   native.href = `/fixture/session/child?readerEvent=${encodeURIComponent(nativeId)}`;
   h.child.append(native);
   await h.click(native);
-  assert.equal(h.location.pathname, '/fixture/session/child');
-  assert.equal(h.location.searchParams.get('readerEvent'), null);
-  assert.equal(h.location.hash, '#child-source');
+  assert.equal(h.location.pathname, '/fixture/session/root');
+  assert.equal(parseReaderLocation(h.location).source.searchParams.get('readerEvent'), null);
+  assert.equal(parseReaderLocation(h.location).source.hash, '#child-source');
+  assert.equal(h.location.hash, '');
   assert.equal(h.document.activeElement.parentElement, h.child);
 });
 
@@ -412,6 +445,7 @@ test('plain same-pane source anchors retain one-action Back to the prior reading
 
 test('a newer same-pane source selection cancels a pending child navigation', async (t) => {
   const h = readerHarness(t);
+  h.addRecordedChild();
   let resolveChild;
   h.paneResponses.set('child', new Promise((resolve) => { resolveChild = resolve; }));
   const pending = h.reader.openPane('fixture', 'child');
@@ -423,7 +457,7 @@ test('a newer same-pane source selection cancels a pending child navigation', as
   await pending;
   await h.flush();
   assert.equal(h.reader.getActivePane(), h.root);
-  assert.equal(h.href(), '/fixture/session/root#root-source');
+  assert.equal(h.href(), '/fixture/session/root?view=history#root-source');
   assert.equal(h.document.activeElement, h.root.children[0]);
 });
 
@@ -443,7 +477,10 @@ test('ordinary child links mount complete history inline and preserve the parent
   const scopedChildSource = h.child.querySelector('[data-reader-canonical-anchor="child-source"]');
   assert.equal(scopedChildSource.dataset.readerCanonicalAnchor, 'child-source');
   assert.equal(scopedChildSource.id, `reader-scope-${encodeURIComponent('fixture\0child')}--child-source`);
-  assert.equal(h.href(), '/fixture/session/root?view=history#root-source');
+  assert.equal(h.location.pathname, '/fixture/session/root');
+  assert.equal(h.location.searchParams.get('view'), 'history');
+  assert.equal(h.location.hash, '');
+  assert.equal(parseReaderLocation(h.location).source.href, 'http://localhost/fixture/session/child');
   const close = h.child.parentElement.querySelector('[data-reader-inline-close]');
   await close.dispatchEvent({ type: 'click', preventDefault() {} });
   await h.flush();
@@ -545,6 +582,38 @@ test('an unplaced collaboration child is appended at the conversation layout end
   assert.equal(h.child.parentElement.parentElement, layout);
 });
 
+test('a recorded child ToC control without a milestone opens inline at the transcript end', async (t) => {
+  const h = readerHarness(t);
+  const transcript = h.makeElement({ readerTranscript: '' });
+  const layout = h.makeElement({ conversationLayout: '' });
+  const prose = h.makeElement({}, 'last-prose');
+  layout.append(prose);
+  transcript.append(layout);
+  const toc = h.makeElement();
+  toc.className = 'session-toc';
+  const open = h.addRecordedChild(toc);
+  h.root.append(transcript, toc);
+  h.root.dataset.searchQuery = 'root reading';
+  h.window.scrollY = 1180;
+  open.focus();
+
+  await h.click(open);
+  await h.flush();
+
+  assert.equal(h.reader.getActivePane(), h.root);
+  assert.deepEqual(h.reader.getInlinePanes(), [h.child]);
+  assert.deepEqual(layout.children, [prose, h.child.parentElement]);
+  assert.equal(h.location.pathname, '/fixture/session/root');
+  assert.equal(parseReaderLocation(h.location).source.pathname, '/fixture/session/child');
+  assert.equal(h.child.parentElement.querySelector('.reader-inline-pane-placement').textContent, 'No recorded position');
+  assert.equal(h.root.dataset.searchQuery, 'root reading');
+  assert.deepEqual(h.navigations, []);
+  await h.child.parentElement.querySelector('[data-reader-inline-close]').dispatchEvent({ type: 'click', preventDefault() {} });
+  await h.flush();
+  assert.equal(h.window.scrollY, 1180);
+  assert.equal(h.document.activeElement, open);
+});
+
 test('reload keeps canonical collaboration origins for child insertion and close restoration', async (t) => {
   const addCollaborationMarkup = (h) => {
     const transcript = h.makeElement({ readerTranscript: '' });
@@ -586,9 +655,9 @@ test('reload keeps canonical collaboration origins for child insertion and close
   assert.match(serialized.originReturnAnchor, /^branch:/);
 
   const reloaded = readerHarness(t, snapshot.entries.at(-1).href, [], {
-    browserSnapshot: snapshot, initialRootSession: 'root'
+    browserSnapshot: snapshot, initialRootSession: 'root', markup: addCollaborationMarkup
   });
-  const reloadedMarkup = addCollaborationMarkup(reloaded);
+  const reloadedMarkup = reloaded.initialMarkup;
   await reloaded.flush();
   assert.equal(reloadedMarkup.threadColumn.children[1], reloaded.child.parentElement, 'Reload uses the canonical milestone anchor');
 
@@ -608,6 +677,8 @@ test('reload state restores inline children when the document root matches its s
   const open = first.makeElement({ readerOpen: '', readerProvider: 'fixture', readerSession: 'child' });
   open.href = '/fixture/session/child';
   first.root.append(open);
+  first.window.scrollY = 1540;
+  first.root.children[0].focus();
   await first.click(open);
   const source = first.makeElement({ readerEventSource: '', readerProvider: 'fixture', readerSession: 'child', readerEventId: eventId });
   source.href = `/fixture/session/child?readerEvent=${encodeURIComponent(eventId)}`;
@@ -617,35 +688,143 @@ test('reload state restores inline children when the document root matches its s
   assert.equal(snapshot.entries.at(-1).state.readerInlineRoot.session, 'root');
 
   const reloaded = readerHarness(t, snapshot.entries[1].href, [[eventId, event]], {
-    browserSnapshot: { entries: snapshot.entries, index: 1 }, initialRootSession: 'root'
+    browserSnapshot: { entries: snapshot.entries, index: 1 }, initialRootSession: 'root',
+    markup: ({ addRecordedChild }) => addRecordedChild()
   });
   await reloaded.flush();
   assert.equal(reloaded.reader.getActivePane(), reloaded.root, 'Reload keeps the document root owner');
   assert.deepEqual(reloaded.reader.getInlinePanes(), [reloaded.child], 'Reload reapplies the serialized child stack');
+  await reloaded.browserBack();
+  assert.deepEqual(reloaded.reader.getInlinePanes(), []);
+  assert.equal(reloaded.window.scrollY, 1540, 'Back after reload restores the serialized root position');
+  assert.equal(reloaded.document.activeElement, reloaded.root.children[0]);
 });
 
-test('Back from a child document asks the browser to reload the missing serialized root', async (t) => {
-  const eventId = 'event:reload-owner:1';
-  const event = { ok: true, evidence: { eventId }, html: `event:${eventId}` };
-  const first = readerHarness(t, undefined, [[eventId, event]]);
-  const open = first.makeElement({ readerOpen: '', readerProvider: 'fixture', readerSession: 'child' });
-  open.href = '/fixture/session/child';
-  first.root.append(open);
-  await first.click(open);
-  const source = first.makeElement({ readerEventSource: '', readerProvider: 'fixture', readerSession: 'child', readerEventId: eventId });
-  source.href = `/fixture/session/child?readerEvent=${encodeURIComponent(eventId)}`;
-  first.child.append(source);
-  await first.click(source);
-  const snapshot = first.snapshot();
-  const reloaded = readerHarness(t, first.location.href, [[eventId, event]], {
-    browserSnapshot: snapshot, initialRootSession: 'child'
+test('a copied child location rebuilds the recorded child without browser history state', async (t) => {
+  const markup = ({ addRecordedChild }) => ({ open: addRecordedChild() });
+  const first = readerHarness(t, undefined, [], { markup });
+  await first.click(first.initialMarkup.open);
+  const copiedHref = first.location.href;
+  assert.equal(parseReaderLocation(copiedHref).source.pathname, '/fixture/session/child');
+  const copied = readerHarness(t, copiedHref, [], { markup });
+  await copied.flush();
+  assert.equal(copied.reader.getActivePane(), copied.root);
+  assert.deepEqual(copied.reader.getInlinePanes(), [copied.child]);
+  assert.equal(copied.document.activeElement, copied.child);
+  assert.equal(copied.location.pathname, '/fixture/session/root');
+  assert.deepEqual(copied.requests, ['/api/fixture/session/child/reader']);
+  assert.equal(copied.snapshot().entries.length, 1, 'Restoring a copied location adds no history entry');
+  assert.deepEqual(copied.navigations, []);
+});
+
+test('copied grandchild native and scalar sources rebuild their recorded ancestor path', async (t) => {
+  for (const kind of ['native', 'scalar']) await t.test(kind, async (t) => {
+    const eventId = 'event:grandchild/completed:1';
+    const event = { ok: true, evidence: { eventId }, html: `event:${eventId}` };
+    const markup = ({ root, child, makePane, makeElement, addRecordedChild }) => {
+      const grandchild = makePane('grandchild');
+      const openChild = addRecordedChild();
+      const openGrandchild = addRecordedChild(child, 'grandchild');
+      const sourceLinks = [root, child, grandchild].map((pane) => {
+        pane.children[0].id = 'shared-source';
+        const source = makeElement({ readerSource: '' });
+        source.href = '#shared-source';
+        pane.append(source);
+        return source;
+      });
+      const scalar = makeElement({ readerEventSource: '', readerProvider: 'fixture', readerSession: 'grandchild', readerEventId: eventId });
+      scalar.href = `/fixture/session/grandchild?readerEvent=${encodeURIComponent(eventId)}`;
+      grandchild.append(scalar);
+      return { grandchild, openChild, openGrandchild, sourceLinks, scalar };
+    };
+    const first = readerHarness(t, undefined, [[eventId, event]], { markup });
+    await first.click(first.initialMarkup.openChild);
+    await first.click(first.initialMarkup.openGrandchild);
+    await first.click(kind === 'native' ? first.initialMarkup.sourceLinks[2] : first.initialMarkup.scalar);
+    const copiedHref = first.location.href;
+    const locator = parseReaderLocation(copiedHref);
+    assert.equal(locator.source.pathname, '/fixture/session/grandchild');
+    assert.deepEqual(locator.ancestors.map((ancestor) => ancestor.session), ['child']);
+
+    const copied = readerHarness(t, copiedHref, [[eventId, event]], { markup });
+    await copied.flush();
+    const { grandchild, sourceLinks } = copied.initialMarkup;
+    assert.equal(copied.reader.getActivePane(), copied.root);
+    assert.deepEqual(copied.reader.getInlinePanes(), [copied.child, grandchild]);
+    assert.equal(copied.location.pathname, '/fixture/session/root');
+    assert.equal(copied.location.hash, '', 'The native source fragment belongs inside the locator');
+    assert.equal(copied.document.activeElement.closest('[data-reader-pane]'), grandchild);
+    assert.equal(kind === 'native' ? copied.document.activeElement.dataset.readerCanonicalAnchor
+      : copied.document.activeElement.dataset.readerEventId, kind === 'native' ? 'shared-source' : eventId);
+    const ids = copied.document.querySelector().querySelectorAll('[id]').map((element) => element.id);
+    assert.equal(new Set(ids).size, ids.length, 'All mounted panes have unique DOM IDs');
+    assert.deepEqual(sourceLinks.map((link) => new URL(link.getAttribute('href'), copied.location).pathname), [
+      '/fixture/session/root', '/fixture/session/child', '/fixture/session/grandchild'
+    ], 'Source links keep canonical owner URLs for opening separately');
+    assert.ok(sourceLinks.every((link) => new URL(link.getAttribute('href'), copied.location).hash === '#shared-source'));
+    assert.deepEqual(copied.requests, [
+      '/api/fixture/session/child/reader', '/api/fixture/session/grandchild/reader',
+      ...(kind === 'scalar' ? [`/api/fixture/session/grandchild/reader/event/${encodeURIComponent(eventId)}`] : [])
+    ]);
+    assert.equal(copied.snapshot().entries.length, 1);
+    assert.deepEqual(copied.navigations, []);
   });
-  let reloads = 0;
-  reloaded.location.reload = () => { reloads += 1; };
+});
+
+test('a missing recorded control falls back to the canonical source document', async (t) => {
+  const source = 'http://localhost/fixture/session/child?readerEvent=event%3Amissing#recorded-source';
+  const href = createReaderLocation('http://localhost/fixture/session/root?view=history', source);
+  const h = readerHarness(t, href);
+  await h.flush();
+  assert.equal(h.reader.getActivePane(), h.root);
+  assert.deepEqual(h.reader.getInlinePanes(), []);
+  assert.deepEqual(h.requests, [], 'An unrecorded relation never triggers a pane or event fetch');
+  assert.deepEqual(h.navigations, [{ type: 'assign', href: source }]);
+});
+
+test('a missing recorded grandchild control stops reconstruction at its verified parent', async (t) => {
+  const source = 'http://localhost/fixture/session/grandchild#recorded-source';
+  const href = createReaderLocation('http://localhost/fixture/session/root', source, ['/fixture/session/child']);
+  const h = readerHarness(t, href, [], { markup: ({ addRecordedChild }) => addRecordedChild() });
+  await h.flush();
+  assert.deepEqual(h.requests, ['/api/fixture/session/child/reader']);
+  assert.deepEqual(h.reader.getInlinePanes(), [h.child]);
+  assert.deepEqual(h.navigations, [{ type: 'assign', href: source }]);
+});
+
+test('invalid or external reader locators do not fetch panes or navigate', async (t) => {
+  for (const source of [
+    'https://example.com/fixture/session/child',
+    'http://user@localhost/fixture/session/child',
+    '/fixture/session/child%',
+    '/fixture/session/child?readerSource=%2Ffixture%2Fsession%2Fgrandchild'
+  ]) await t.test(source, async (t) => {
+    const url = new URL('http://localhost/fixture/session/root');
+    url.searchParams.set('readerSource', source);
+    const h = readerHarness(t, url.href, [], { markup: ({ addRecordedChild }) => addRecordedChild() });
+    await h.flush();
+    assert.deepEqual(h.requests, []);
+    assert.deepEqual(h.navigations, []);
+    assert.deepEqual(h.reader.getInlinePanes(), []);
+    assert.equal(h.reader.getActivePane(), h.root);
+    assert.equal(h.status.dataset.readerStatus, 'error');
+  });
+});
+
+test('Back from a standalone child document reloads the earlier root document', async (t) => {
+  const rootHref = 'http://localhost/fixture/session/root?view=history#root-source';
+  const childHref = 'http://localhost/fixture/session/child';
+  const reloaded = readerHarness(t, childHref, [], {
+    browserSnapshot: {
+      entries: [{ href: rootHref, state: null }, { href: childHref, state: null }], index: 1
+    }
+  });
   await reloaded.flush();
   await reloaded.browserBack();
   assert.equal(reloaded.workbenchSession(), 'child');
-  assert.equal(reloads, 1, 'A cross-document root restoration delegates to a full page reload');
+  assert.equal(reloaded.reader.getActivePane(), reloaded.child);
+  assert.deepEqual(reloaded.navigations, [{ type: 'reload', href: rootHref }]);
+  assert.deepEqual(reloaded.requests, []);
 });
 
 test('nested inline children relocate cached panes and scoped source links stay in their child', async (t) => {
@@ -704,6 +883,37 @@ test('Back while an inline pane is loading prevents the stale response from moun
   await h.flush();
   assert.deepEqual(h.reader.getInlinePanes(), []);
   assert.equal(h.reader.getActivePane(), h.root);
+});
+
+test('repeated pending opens of the same child retain the mounted pane after an older response arrives', async (t) => {
+  const h = readerHarness(t);
+  const opener = h.addRecordedChild();
+  const stalePane = h.makePane('child-old-response');
+  const currentPane = h.makePane('child-current-response');
+  let resolveOlder;
+  let resolveCurrent;
+  h.paneResponses.set('child', new Promise((resolve) => { resolveOlder = resolve; }));
+  const older = h.click(opener);
+  h.paneResponses.set('child', new Promise((resolve) => { resolveCurrent = resolve; }));
+  const current = h.click(opener);
+  resolveCurrent({ ok: true, html: 'pane:child-current-response' });
+  await current;
+  await h.flush();
+  assert.deepEqual(h.reader.getInlinePanes(), [currentPane]);
+  assert.equal(h.cached('child').pane, currentPane);
+
+  resolveOlder({ ok: true, html: 'pane:child-old-response' });
+  await older;
+  await h.flush();
+  assert.deepEqual(h.reader.getInlinePanes(), [currentPane]);
+  assert.equal(h.cached('child').pane, currentPane, 'The late response must not replace the mounted pane cache');
+  assert.equal(stalePane.isConnected, false);
+  const source = h.makeElement({ readerSource: '', readerProvider: 'fixture', readerSession: 'child', readerAnchor: 'child-current-response-source' });
+  source.href = '/fixture/session/child#child-current-response-source';
+  currentPane.append(source);
+  await h.click(source);
+  assert.equal(h.document.activeElement, currentPane.children[0], 'Subsequent source links resolve through the same mounted pane');
+  assert.equal(parseReaderLocation(h.location).source.hash, '#child-current-response-source');
 });
 
 test('one cached child pane relocates when a second explicit origin opens it', async (t) => {
@@ -782,7 +992,7 @@ test('a root source action cancels a pending inline child before it can commit',
   await h.flush();
   assert.deepEqual(h.reader.getInlinePanes(), []);
   assert.equal(h.reader.getActivePane(), h.root);
-  assert.equal(h.href(), '/fixture/session/root#root-source');
+  assert.equal(h.href(), '/fixture/session/root?view=history#root-source');
 });
 
 test('a child ToC reveal reports and mutates only the child pane', async (t) => {
@@ -802,7 +1012,11 @@ test('a child ToC reveal reports and mutates only the child pane', async (t) => 
   await h.click(open);
   h.window.scrollY = 1800;
   await h.click(link);
-  assert.equal(h.location.pathname, '/fixture/session/child', 'Hash-only ToC links retain their pane owner in a real absolute href');
+  assert.equal(h.location.pathname, '/fixture/session/root');
+  assert.equal(parseReaderLocation(h.location).source.pathname, '/fixture/session/child');
+  assert.equal(parseReaderLocation(h.location).source.hash, '#child-source');
+  assert.equal(new URL(link.getAttribute('href'), h.location).pathname, '/fixture/session/child',
+    'The native source link retains its canonical owner for opening separately');
   assert.equal(h.document.activeElement.dataset.readerCanonicalAnchor, 'child-source');
   assert.equal(h.anchorReveals.at(-1).pane, h.child);
   await h.child.parentElement.querySelector('[data-reader-inline-close]').dispatchEvent({ type: 'click', preventDefault() {} });
@@ -886,17 +1100,18 @@ test('ToC A to B then browser Back and in-app Back restore exact reading locatio
   assert.equal(h.swaps.length, 0);
 });
 
-test('narrow collaboration expansion survives child navigation and Back per pane', async (t) => {
+test('narrow root collaboration expansion survives inline child navigation and Back', async (t) => {
   const h = readerHarness(t, undefined, [], { narrow: true, collaboration: true });
+  h.addRecordedChild();
   const rootPanel = h.root.querySelector('[data-reader-collaboration]');
   const rootToggle = h.root.querySelector('[data-reader-collaboration-toggle]');
-  const childPanel = h.child.querySelector('[data-reader-collaboration]');
   assert.equal(rootPanel.hidden, true);
   await h.click(rootToggle);
   assert.equal(rootPanel.hidden, false);
   await h.reader.openPane('fixture', 'child');
   await h.flush();
-  assert.equal(childPanel.hidden, true);
+  assert.equal(h.reader.getActivePane(), h.root);
+  assert.equal(rootPanel.hidden, false);
   await h.back.dispatchEvent({ type: 'click' });
   await h.flush();
   assert.equal(rootPanel.hidden, false);
@@ -911,19 +1126,24 @@ test('narrow collaboration expansion survives child navigation and Back per pane
   assert.equal(rootPanel.hidden, true, 'Returning to narrow retains this pane selection');
 });
 
-test('child pane updates the secondary pane label while the document owner title remains separate', async (t) => {
+test('inline child identifies itself inside its wrapper while the root keeps its document shell', async (t) => {
   const h = readerHarness(t);
+  h.addRecordedChild();
   assert.equal(h.currentTitle.hidden, true, 'root pane does not duplicate the document title');
   await h.reader.openPane('fixture', 'child');
   await h.flush();
-  assert.equal(h.currentTitle.textContent, 'child');
-  assert.equal(h.currentTitle.hidden, false, 'child identity is shown in the secondary reader shell label');
+  assert.equal(h.currentTitle.textContent, 'root');
+  assert.equal(h.currentTitle.hidden, true);
+  assert.equal(h.child.parentElement.querySelector('.reader-inline-pane-title').textContent, 'child');
+  assert.equal(h.workbenchSession(), 'root');
   await h.browserBack();
   assert.equal(h.currentTitle.hidden, true);
 });
 
 test('inherited continuation appends in its own disclosure and a detached response stays retryable', async (t) => {
   const h = readerHarness(t);
+  h.addRecordedChild();
+  await h.reader.openPane('fixture', 'child');
   const disclosure = h.makeElement({ inheritedContext: '' });
   const messages = h.makeElement({ inheritedContextMessages: '', messageCount: '40' });
   const count = h.makeElement();
@@ -932,12 +1152,14 @@ test('inherited continuation appends in its own disclosure and a detached respon
   disclosure.append(messages);
   disclosure.append(count);
   disclosure.append(button);
-  h.root.append(disclosure);
+  h.child.append(disclosure);
   let resolvePage;
   h.inheritedResponses.push(new Promise((resolve) => { resolvePage = resolve; }));
   const pending = h.click(button);
   assert.equal(button.disabled, true);
-  await h.reader.openPane('fixture', 'child');
+  await h.child.parentElement.querySelector('[data-reader-inline-close]').dispatchEvent({ type: 'click', preventDefault() {} });
+  await h.flush();
+  assert.deepEqual(h.reader.getInlinePanes(), []);
   resolvePage({ ok: true, html: 'event:inherited-page', shown: 80, nextOffset: 80, label: '80 of 81' });
   await pending;
   assert.equal(button.disabled, false);
@@ -957,13 +1179,15 @@ test('inherited continuation appends in its own disclosure and a detached respon
   assert.equal(messages.dataset.messageCount, '81');
   assert.equal(count.textContent, '81 of 81');
   assert.equal(disclosure.contains(button), false);
-  await h.reader.openPane('fixture', 'child');
+  await h.child.parentElement.querySelector('[data-reader-inline-close]').dispatchEvent({ type: 'click', preventDefault() {} });
+  await h.flush();
   await h.browserBack();
   assert.equal(h.reader.getActivePane(), h.root);
+  assert.deepEqual(h.reader.getInlinePanes(), [h.child]);
   assert.equal(messages.children.length, 2, 'Returning preserves loaded inherited content');
   assert.deepEqual(h.requests.filter((url) => url.includes('/inherited-context?')), [
-    '/api/fixture/session/root/inherited-context?offset=40',
-    '/api/fixture/session/root/inherited-context?offset=40',
-    '/api/fixture/session/root/inherited-context?offset=80'
+    '/api/fixture/session/child/inherited-context?offset=40',
+    '/api/fixture/session/child/inherited-context?offset=40',
+    '/api/fixture/session/child/inherited-context?offset=80'
   ]);
 });

@@ -163,6 +163,7 @@ export const zh = {
   "detail.reader_back": "返回上个阅读位置",
   "detail.reader_inline_close": "收起并返回",
   "detail.reader_inline_standalone": "单独阅读",
+  "detail.reader_inline_unplaced": "未记录发生位置",
   "detail.reader_open_child": "打开这条已记录的子会话",
   "detail.reader_toc_toggle": "目录",
   "detail.reader_collaboration": "协作",

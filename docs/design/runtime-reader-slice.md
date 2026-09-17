@@ -24,6 +24,10 @@ the origin; canonical standalone links also remain available. Reader navigation
 preserves expanded content, scroll, focus and search. Source data stays
 provider-owned and read-only.
 
+Contents follows the same inline path. If the related session has no recorded
+milestone position, its history opens after the transcript with an explicit
+unknown-position label. The root page is never partially replaced by a child.
+
 ## Server and rendering ownership
 
 Reuse `getSessionDocument`, normalized session trees, existing content
@@ -108,8 +112,10 @@ Inline child history includes its own canonical title and close/standalone actio
   it does not duplicate a second flat task list. Main turns alone create no panel.
 - Runtime source links use `data-reader-source`, `data-reader-provider`,
   `data-reader-session` and `data-reader-anchor` (DOM id without `#`). These
-  reveal the exact recorded anchor in an already mounted owning pane or open
-  that canonical reader when it is not mounted.
+  reveal the exact recorded anchor in the owning pane. An unmounted related
+  owner is opened through its recorded reader control; otherwise the link
+  performs a full canonical navigation. Source/Contents hrefs remain canonical
+  even when inline DOM IDs are scoped.
 - Keep `#tab-conversation` as a reading-entry anchor and `#tab-work` /
   `#tab-events` as secondary disclosure targets for existing deep links. Remove
   the two-primary-tab controls and their obsolete client behavior.
@@ -122,6 +128,15 @@ unvisited panes from the reader endpoint. Track navigation history explicitly,
 including direct sibling switches and nested child selection. Do not clone
 active DOM IDs or manufacture session relationships from message text.
 
+The pathname always identifies the root page and its global title, export,
+management and resume actions. Inline locations use `readerSource` for a
+same-origin canonical child/source URL and repeated `readerAncestor` values
+for the recorded nested path. Native message anchors and `readerEvent` remain
+inside that source URL. Existing root query parameters, including the Library
+return context, remain intact. A copied URL restores each level only through
+an existing normalized child control. Standalone links retain their own
+canonical pathname and load the complete owning page.
+
 Search queries the server's complete selected owned content, excluding inherited
 context and retained checkpoint results. Loaded DOM content does not define
 search coverage. Opening an inline child keeps the current search scope;
@@ -129,7 +144,7 @@ selecting its scope searches that child's owned history. Keep each pane's
 query/result selection when returning and invalidate pending requests on
 scope changes. Progressive content
 requests resolve the nearest pane's provider/session before the page root.
-Deep-link reveal, keyboard handling and ToC must work after pane swaps.
+Deep-link reveal, keyboard handling and ToC must work after inline mounting.
 
 Use a readable prose column and local collaboration inserts. The selected
 option-3 presentation moves the auxiliary overview to an on-demand right
@@ -148,6 +163,29 @@ continued content owned by the selected session, source-anchor jumps, and
 expanded narrow content. Run the full test/review suite, real provider/API and
 browser acceptance before publishing the production slice. The private
 prototype is evidence for composition, not a substitute for these checks.
+
+### Page-owner navigation checkpoint, 2026-09-17
+
+- `npm test` passes 745/745; focused navigation/location tests pass 58/58.
+  Independent review and main-agent diff inspection found no blocking issue.
+- Full live `qa:e2e` passes with no browser errors. Seven installed-provider
+  Reader/API samples pass, including four expected missing-resource 404s;
+  Pi and OpenClaw are installation smoke records. One initial API connection
+  reset was followed by a complete successful retry; the server stayed online.
+- Real parent search (196 matches), tool disclosures, exact scroll position and
+  opener focus survive related-child opening/closing and Back. Three-level
+  native source links reconstruct in a new tab and on reload without duplicate
+  IDs. A child scalar completion survives reload, then Back restores the parent
+  delivery. Global title/export/management/resume attributes match the root
+  pathname; standalone navigation changes all of them to the child.
+- Actual 390px checks pass containment and sequential close/focus restoration,
+  but the innermost prose is only 270px wide. Ancestor navigation/full-width
+  nested reading remain an explicit P6 product gap rather than a passed visual
+  criterion. The [page-owner decision](../../.agents/decisions/implemented/2026-09-17-reader-page-owner-location.md)
+  records the chosen navigation boundary and native-navigation counterexample.
+- A missing browser translation was corrected in both client catalogs and
+  tested. Local evidence is in ignored `tmp/reader-owner-*-20260917.log` and
+  `tmp/runtime-acceptance-20260917/`; private history is not committed.
 
 ### Current validation checkpoint
 

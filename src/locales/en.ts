@@ -162,6 +162,7 @@ export const en = {
   "detail.reader_back": "Back to previous history",
   "detail.reader_inline_close": "Close and return",
   "detail.reader_inline_standalone": "Read on its own",
+  "detail.reader_inline_unplaced": "No recorded position",
   "detail.reader_open_child": "Open this recorded child session",
   "detail.reader_toc_toggle": "Contents",
   "detail.reader_collaboration": "Collaboration",

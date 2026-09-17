@@ -1,9 +1,10 @@
 import { readerPaneAnchor, scopeReaderPane, unscopeReaderPane } from "./reader-pane-dom.js";
+import { createReaderLocation, parseReaderLocation, stripReaderLocation } from "./reader-location.js";
 
 /* Unified session reader navigation.
  *
- * The server owns pane markup and canonical links. This controller only swaps
- * those server-rendered panes, keeping detached DOM nodes as the local cache.
+ * The server owns the document and its actions. Related panes stay inline;
+ * canonical standalone links load a new document when its owner changes.
  */
 export function initSessionReader({ ft, showToast } = {}) {
   const workbench = document.querySelector(".session-workbench[data-session-reader]")
@@ -21,7 +22,6 @@ export function initSessionReader({ ft, showToast } = {}) {
   let historyIndex = -1;
   let swapRevision = 0;
   let eventSourceIntent = 0;
-  let pendingFocus = null;
   const inlinePanes = new Map();
   let inlineRevision = 0;
   let inlineRootState = null;
@@ -45,13 +45,13 @@ export function initSessionReader({ ft, showToast } = {}) {
       const session = link.dataset.readerSession || sessionOf(owner);
       if (provider && session) url.pathname = `/${encodeURIComponent(provider)}/session/${encodeURIComponent(session)}`;
     }
-    return url;
+    return stripReaderLocation(url);
   };
   const eventSourceUrlFor = (link) => {
     const url = sourceUrlFor(link);
     const current = new URL(location.href);
     for (const [name, value] of current.searchParams) {
-      if (name !== "readerEvent" && !url.searchParams.has(name)) url.searchParams.append(name, value);
+      if (!["readerEvent", "readerSource", "readerAncestor"].includes(name) && !url.searchParams.has(name)) url.searchParams.append(name, value);
     }
     return url;
   };
@@ -133,21 +133,20 @@ export function initSessionReader({ ft, showToast } = {}) {
     };
     entry.state = existing.state;
     cache.set(keyOf(pane), existing);
+    if (captureHref) history.replaceState({ ...history.state, readerPosition: paneStateForHistory(existing.state) }, "", entry.href);
   };
 
   const restorePaneState = (pane, savedState = null) => {
     const entry = historyEntries[historyIndex];
     const state = savedState || entry?.state;
     if (!state) {
-      pendingFocus = null;
       window.scrollTo({ top: 0, left: 0, behavior: "auto" });
       return;
     }
     requestAnimationFrame(() => {
       if (historyEntries[historyIndex] !== entry || host.querySelector("[data-reader-pane]") !== pane) return;
       window.scrollTo({ top: state.scrollY || 0, left: state.scrollX || 0, behavior: "auto" });
-      const focusTarget = findFocusable(pane, pendingFocus || state.focus);
-      pendingFocus = null;
+      const focusTarget = findFocusable(pane, state.focus);
       focusTarget?.focus?.({ preventScroll: true });
     });
   };
@@ -174,33 +173,6 @@ export function initSessionReader({ ft, showToast } = {}) {
 
   const dispatch = (name, detail) => workbench.dispatchEvent(new CustomEvent(name, { bubbles: true, detail }));
 
-  const attachPane = (pane, key, { restore = true } = {}) => {
-    if (!pane) return false;
-    bindContextResultDisclosures(pane);
-    swapRevision += 1;
-    // Attaching a cached or newly fetched pane cancels any in-flight reader
-    // navigation state. A stale fetch may still settle later, but it must not
-    // leave the shell reporting that an obsolete pane is loading.
-    setStatus("");
-    const previous = host.querySelector("[data-reader-pane]");
-    if (previous !== pane) {
-      if (previous) {
-        dispatch("session-reader:before-swap", {
-          provider: providerOf(previous), session: sessionOf(previous), key: keyOf(previous), pane: previous
-        });
-      }
-      host.replaceChildren(pane);
-    }
-    updateShell(pane);
-    if (previous !== pane) {
-      dispatch("session-reader:swapped", {
-        provider: providerOf(pane), session: sessionOf(pane), key, pane
-      });
-    }
-    if (restore) restorePaneState(pane);
-    return true;
-  };
-
   const fetchPane = async (provider, session, href = "") => {
     const key = canonicalKey(provider, session);
     const existing = paneFor(key);
@@ -211,6 +183,9 @@ export function initSessionReader({ ft, showToast } = {}) {
     if (!response.ok || !data?.ok || typeof data.html !== "string") {
       throw new Error(data?.error || `HTTP ${response.status}`);
     }
+    // Another click may finish loading this same owner while the request waits.
+    const loaded = paneFor(key);
+    if (loaded) return loaded;
     const wrapper = document.createElement("div");
     wrapper.innerHTML = data.html;
     const pane = wrapper.querySelector("[data-reader-pane]");
@@ -236,14 +211,13 @@ export function initSessionReader({ ft, showToast } = {}) {
   const readerTranscriptEnd = (pane) => {
     const transcript = pane?.querySelector("[data-reader-transcript]");
     const conversationLayout = transcript?.querySelector("[data-conversation-layout]");
-    return conversationLayout?.lastElementChild || conversationLayout || transcript?.lastElementChild || transcript || pane;
+    return conversationLayout?.lastElementChild || conversationLayout || transcript?.lastElementChild || transcript || pane?.lastElementChild || pane;
   };
 
   const inlineOriginFor = (link) => {
     const pane = link.closest("[data-reader-pane]");
-    if (link.closest(".session-toc")) return null;
     const branchBody = link.closest(".reader-branch-body");
-    if (branchBody && pane) {
+    if ((branchBody || link.closest(".session-toc")) && pane) {
       const provider = link.dataset.readerProvider || "";
       const session = link.dataset.readerSession || "";
       const milestone = [...pane.querySelectorAll("[data-reader-milestone]")]
@@ -257,6 +231,31 @@ export function initSessionReader({ ft, showToast } = {}) {
   };
 
   const inlineReturnOriginFor = (link) => link.closest(".reader-branch-body")?.querySelector("[data-reader-open]") || link;
+
+  const recordedOpener = (pane, provider, session) => [...pane.querySelectorAll("[data-reader-open]")]
+    .find((link) => link.closest("[data-reader-pane]") === pane
+      && link.dataset.readerProvider === provider && link.dataset.readerSession === session);
+
+  const inlineSourceHref = (sourceUrl, key) => {
+    const records = [...inlinePanes.values()];
+    const index = records.findIndex((record) => record.key === key);
+    const ancestors = records.slice(0, index).map((record) => `/${encodeURIComponent(record.provider)}/session/${encodeURIComponent(record.session)}`);
+    return createReaderLocation(location.href, sourceUrl.href, ancestors);
+  };
+
+  const preserveCanonicalSourceLinks = (pane) => {
+    pane.querySelectorAll("[data-reader-source], .session-toc a[href^='#']").forEach((link) => {
+      if (link.closest("[data-reader-pane]") !== pane) return;
+      const canonicalHref = link.dataset.readerCanonicalHref || link.getAttribute("href") || "";
+      if (!canonicalHref.startsWith("#")) return;
+      const anchor = decodeURIComponent(canonicalHref.slice(1));
+      link.dataset.readerSource = "true";
+      link.dataset.readerAnchor = anchor;
+      link.dataset.readerProvider = providerOf(pane);
+      link.dataset.readerSession = sessionOf(pane);
+      link.setAttribute("href", `/${encodeURIComponent(providerOf(pane))}/session/${encodeURIComponent(sessionOf(pane))}#${encodeURIComponent(anchor)}`);
+    });
+  };
 
   const closeReaderCollaboration = (link) => {
     const overview = link?.closest?.("[data-reader-collaboration-overview]");
@@ -330,6 +329,9 @@ export function initSessionReader({ ft, showToast } = {}) {
   };
 
   const closeInlinePane = async (key) => {
+    eventSourceIntent += 1;
+    swapRevision += 1;
+    setStatus("");
     const records = [...inlinePanes.values()];
     const index = records.findIndex((record) => record.key === key);
     if (index < 0) return false;
@@ -342,11 +344,9 @@ export function initSessionReader({ ft, showToast } = {}) {
         focus: record.originState.focus && { id: record.originState.focus.id, anchor: record.originState.focus.anchor } }
     }));
     const href = selected.originHref || historyEntries[historyIndex]?.href || location.pathname + location.search + location.hash;
-    const state = withInlineHistory(history.state, desired);
-    delete state.readerEventSession;
-    delete state.readerInlineAnchorSession;
-    history.pushState(state, "", href);
-    await applyInlineStack(desired, { restore: false });
+    savePaneState(activePane());
+    recordHistory(keyOf(activePane()), href, { inlineStack: desired });
+    await applyInlineStack(desired);
     restoreInlineOrigin(selected);
     return true;
   };
@@ -360,6 +360,7 @@ export function initSessionReader({ ft, showToast } = {}) {
     if (pane === parentPane) return false;
     unscopeReaderPane(pane);
     scopeReaderPane(pane, key);
+    preserveCanonicalSourceLinks(pane);
     const wrapper = document.createElement("section");
     wrapper.className = "reader-inline-pane";
     wrapper.dataset.readerInlinePane = "true";
@@ -379,6 +380,13 @@ export function initSessionReader({ ft, showToast } = {}) {
     standalone.href = entry.href || `/${encodeURIComponent(entry.provider)}/session/${encodeURIComponent(entry.session)}`;
     standalone.textContent = ft?.("detail.reader_inline_standalone") || ft?.("detail.reader_child_history") || "Open full child history";
     controls.append(title, standalone, close);
+    if (!origin?.matches?.("[data-reader-milestone], .reader-milestone")
+      && returnOrigin?.closest?.(".session-toc, .reader-branch-body")) {
+      const placement = document.createElement("span");
+      placement.className = "reader-inline-pane-placement";
+      placement.textContent = ft?.("detail.reader_inline_unplaced") || "No recorded position";
+      controls.append(placement);
+    }
     wrapper.append(controls, pane);
     const originState = entry.originState || {
       scrollX: window.scrollX,
@@ -403,24 +411,10 @@ export function initSessionReader({ ft, showToast } = {}) {
     return true;
   };
 
-  const ensureRootPane = async (identity, expectedRevision = swapRevision) => {
-    const current = activePane();
-    if (!identity?.provider || !identity?.session) return current;
-    const key = canonicalKey(identity.provider, identity.session);
-    if (current && keyOf(current) === key) return expectedRevision === swapRevision ? current : null;
-    const pane = paneFor(key);
-    if (!pane) return null;
-    if (expectedRevision !== swapRevision) return null;
-    unscopeReaderPane(pane);
-    attachPane(pane, key, { restore: false });
-    return pane;
-  };
-
-  const applyInlineStack = async (stack, { restore = true, origin = null, rootIdentity = null } = {}) => {
+  const applyInlineStack = async (stack, { origin = null, rootIdentity = null } = {}) => {
     const revision = ++inlineRevision;
-    const navigationRevision = swapRevision;
-    const root = await ensureRootPane(rootIdentity, navigationRevision);
-    if (!root || revision !== inlineRevision) return false;
+    const root = activePane();
+    if (!root || (rootIdentity && keyOf(root) !== canonicalKey(rootIdentity.provider, rootIdentity.session))) return false;
     const normalized = stack.filter((entry) => entry?.provider && entry?.session);
     if (rootIdentity?.provider && rootIdentity?.session) {
       inlineRootIdentity = {
@@ -441,26 +435,32 @@ export function initSessionReader({ ft, showToast } = {}) {
       if (revision !== inlineRevision) return false;
       const entry = normalized[index];
       const parent = index === 0 ? root : paneFor(canonicalKey(normalized[index - 1].provider, normalized[index - 1].session));
+      const opener = recordedOpener(parent, entry.provider, entry.session);
+      if (!opener) return false;
       const entryOrigin = index === normalized.length - 1 && origin
         ? origin
-        : entry.originAnchor ? originElementFor(parent, entry.originAnchor) || parent : parent;
+        : originElementFor(parent, entry.originAnchor) || inlineOriginFor(opener);
       const entryReturnOrigin = entry.originReturnAnchor
-        ? originElementFor(parent, entry.originReturnAnchor) || entryOrigin
-        : entryOrigin;
-      const mounted = await createInlinePane(entry, entryOrigin, parent, () => revision === inlineRevision, entryReturnOrigin);
-      if (mounted == null || !mounted) return false;
+        ? originElementFor(parent, entry.originReturnAnchor) || inlineReturnOriginFor(opener)
+        : inlineReturnOriginFor(opener);
+      try {
+        const mounted = await createInlinePane(entry, entryOrigin, parent, () => revision === inlineRevision, entryReturnOrigin);
+        if (!mounted) return false;
+      } catch (error) {
+        if (revision === inlineRevision) {
+          console.error("Unable to load reader child:", error);
+          setStatus(ft?.("detail.reader_load_failed") || "Unable to load child history", "error", entry.href);
+        }
+        return false;
+      }
     }
     updateShell(root);
-    if (!normalized.length && restore) {
-      const rootState = historyEntries[historyIndex]?.state;
-      if (rootState || inlineRootState) restorePaneState(root, inlineRootState || rootState);
-      inlineRootState = null;
-      inlineRootIdentity = null;
-    }
     return true;
   };
 
-  const openInlinePane = async (link, provider, session) => {
+  const openInlinePane = async (link, provider, session, { record: recordNavigation = true } = {}) => {
+    eventSourceIntent += 1;
+    setStatus("");
     const navigationRevision = ++swapRevision;
     const navigationInlineRevision = inlineRevision;
     const parent = link.closest("[data-reader-pane]");
@@ -470,6 +470,12 @@ export function initSessionReader({ ft, showToast } = {}) {
     if (existingPane?.isConnected && (existingPane === activePane() || existingPane.contains?.(parent))) {
       const href = link.href || link.getAttribute("href") || "";
       if (link.dataset.readerAnchor || new URL(href, location.href).hash) return revealSource(link);
+      if (recordNavigation) {
+        savePaneState(activePane());
+        const url = eventSourceUrlFor(link);
+        recordHistory(keyOf(activePane()), existingPane === activePane()
+          ? url.pathname + url.search : inlineSourceHref(url, key));
+      }
       closeReaderCollaboration(link);
       revealAnchor(existingPane);
       dispatch("session-reader:anchor-revealed", { pane: existingPane, target: existingPane });
@@ -478,8 +484,8 @@ export function initSessionReader({ ft, showToast } = {}) {
     const origin = inlineOriginFor(link);
     if (!origin) return false;
     const returnOrigin = inlineReturnOriginFor(link);
+    savePaneState(activePane());
     if (!inlinePanes.size) {
-      savePaneState(activePane());
       inlineRootState = cache.get(keyOf(activePane()))?.state || null;
       const root = activePane();
       inlineRootIdentity = {
@@ -493,6 +499,8 @@ export function initSessionReader({ ft, showToast } = {}) {
     if (existingIndex >= 0) {
       const existing = current[existingIndex];
       if (existing.origin === origin && existing.parentPane === parent) {
+        if (link.dataset.readerAnchor || new URL(link.href, location.href).hash) return revealSource(link);
+        if (recordNavigation) recordHistory(keyOf(activePane()), inlineSourceHref(sourceUrlFor(link), key));
         closeReaderCollaboration(link);
         revealAnchor(existing.pane);
         dispatch("session-reader:anchor-revealed", { pane: existing.pane, target: existing.pane });
@@ -528,12 +536,11 @@ export function initSessionReader({ ft, showToast } = {}) {
         focus: parentState.focus && { id: parentState.focus.id, anchor: parentState.focus.anchor } }
     });
     if (navigationRevision !== swapRevision || navigationInlineRevision !== inlineRevision) return false;
-    const href = inlineHref(stack);
-    const browserState = withInlineHistory(history.state, stack);
-    delete browserState.readerEventSession;
-    delete browserState.readerInlineAnchorSession;
-    history.pushState(browserState, "", href);
-    const result = await applyInlineStack(stack, { restore: false, origin });
+    const href = createReaderLocation(location.href, stack.at(-1).href,
+      stack.slice(0, -1).map((entry) => `/${encodeURIComponent(entry.provider)}/session/${encodeURIComponent(entry.session)}`));
+    if (recordNavigation) recordHistory(keyOf(activePane()), href, { inlineStack: stack });
+    const result = await applyInlineStack(stack, { origin });
+    if (!result || navigationRevision !== swapRevision) return false;
     const record = inlinePanes.get(key);
     if (record) {
       record.origin = origin;
@@ -541,7 +548,11 @@ export function initSessionReader({ ft, showToast } = {}) {
       record.originReturnAnchor = originIdentity(returnOrigin);
       record.originState = parentState;
     }
-    if (result && record && link.closest("[data-reader-collaboration-overview]")) {
+    if (result && record) {
+      if (link.dataset.readerAnchor || new URL(link.href, location.href).hash) {
+        await revealSource(link, { replay: true });
+        return true;
+      }
       closeReaderCollaboration(link);
       revealAnchor(record.pane);
       dispatch("session-reader:anchor-revealed", { pane: record.pane, target: record.pane });
@@ -624,7 +635,7 @@ export function initSessionReader({ ft, showToast } = {}) {
     if (target.matches("#tab-work") || target.querySelector("[data-reader-metrics]")) void loadReaderMetrics(target.querySelector("[data-reader-metrics]"));
   }, true);
 
-  const recordHistory = (key, href, { replace = false, state = null } = {}) => {
+  const recordHistory = (key, href, { replace = false, state = null, inlineStack = serializedInlineStack() } = {}) => {
     if (replace) {
       historyEntries[historyIndex].href = href;
     } else {
@@ -633,55 +644,34 @@ export function initSessionReader({ ft, showToast } = {}) {
       historyIndex = historyEntries.length - 1;
     }
     const browserState = { ...history.state, readerEntry: historyIndex };
+    if (!replace) delete browserState.readerPosition;
     delete browserState.readerInlineAnchorSession;
     delete browserState.readerEventSession;
     delete browserState.readerInline;
     delete browserState.readerInlineRoot;
-    if (inlinePanes.size) {
-      Object.assign(browserState, withInlineHistory(browserState, serializedInlineStack()));
-      browserState.readerInlineAnchorSession = key;
-      if (new URL(href, location.href).searchParams.has("readerEvent")) browserState.readerEventSession = key;
-    }
+    Object.assign(browserState, withInlineHistory(browserState, inlineStack));
     if (replace) history.replaceState(browserState, "", href);
     else history.pushState(browserState, "", href);
     cache.get(key).href = href;
   };
 
-  const openPane = async (provider, session, { href = "", focus = null, restore = true, invalidateSources = true } = {}) => {
+  const navigateCanonical = (href) => {
+    eventSourceIntent += 1;
+    swapRevision += 1;
+    inlineRevision += 1;
+    history.scrollRestoration = "auto";
+    location.assign(href);
+    return false;
+  };
+
+  const openPane = async (provider, session, { href = "", record = true } = {}) => {
     if (!provider || !session) return false;
     const key = canonicalKey(provider, session);
-    if (key === keyOf(host.querySelector("[data-reader-pane]"))) {
-      updateShell(host.querySelector("[data-reader-pane]"));
-      return true;
-    }
-    if (invalidateSources) eventSourceIntent += 1;
-    const revision = ++swapRevision;
-    inlineRevision += 1;
-    [...inlinePanes.values()].reverse().forEach((record) => removeInlinePane(record.key, { restore: false }));
-    inlineRootState = null;
-    inlineRootIdentity = null;
-    setStatus(ft?.("detail.reader_loading") || "", "loading");
-    try {
-      const pane = await fetchPane(provider, session, href);
-      if (revision !== swapRevision) return false;
-      unscopeReaderPane(pane);
-      savePaneState(host.querySelector("[data-reader-pane]"));
-      pendingFocus = focus;
-      recordHistory(key, href || `/${encodeURIComponent(provider)}/session/${encodeURIComponent(session)}`, {
-        state: restore ? cache.get(key)?.state : null
-      });
-      attachPane(pane, key, { restore });
-      updateShell(pane);
-      setStatus("");
-      return true;
-    } catch (error) {
-      if (revision === swapRevision) {
-        const message = ft?.("detail.reader_load_failed") || "";
-        setStatus(message, "error", href || `/${encodeURIComponent(provider)}/session/${encodeURIComponent(session)}`);
-        showToast?.(message, "error");
-      }
-      return false;
-    }
+    if (paneFor(key)?.isConnected) return true;
+    const parents = [activePane(), ...[...inlinePanes.values()].map((entry) => entry.pane)];
+    const opener = parents.map((pane) => recordedOpener(pane, provider, session)).find(Boolean);
+    return opener ? openInlinePane(opener, provider, session, { record })
+      : navigateCanonical(href || `/${encodeURIComponent(provider)}/session/${encodeURIComponent(session)}`);
   };
 
   const revealAnchor = (target) => {
@@ -701,7 +691,7 @@ export function initSessionReader({ ft, showToast } = {}) {
     window.setTimeout(() => target.classList.remove("anchor-flash"), 900);
   };
 
-  const revealSource = async (link) => {
+  const revealSource = async (link, { replay = false } = {}) => {
     eventSourceIntent += 1;
     swapRevision += 1;
     inlineRevision += 1;
@@ -709,43 +699,24 @@ export function initSessionReader({ ft, showToast } = {}) {
     const ownerPane = link.closest("[data-reader-pane]") || activePane();
     const provider = link.dataset.readerProvider || providerOf(ownerPane);
     const session = link.dataset.readerSession || sessionOf(ownerPane);
-    const sourceUrl = sourceUrlFor(link);
+    const sourceUrl = eventSourceUrlFor(link);
     const anchor = link.dataset.readerAnchor || decodeURIComponent(sourceUrl.hash.slice(1));
     sourceUrl.searchParams.delete("readerEvent");
     if (anchor && !sourceUrl.hash) sourceUrl.hash = anchor;
     const sourceHref = sourceUrl.pathname + sourceUrl.search + sourceUrl.hash;
-    const currentPane = ownerPane || activePane();
-    const targetPane = paneFor(canonicalKey(provider, session));
-    const samePane = targetPane === currentPane;
-    if (!samePane) {
-      if (targetPane?.isConnected) {
-        // A source link inside an inline child remains in that child; the
-        // parent reader must not be replaced to reveal its native anchor.
-      } else {
-        const opened = await openPane(provider, session, { href: sourceHref, restore: false });
-        if (!opened) return;
-      }
-    }
-    const pane = targetPane || (samePane ? currentPane : activePane());
+    const key = canonicalKey(provider, session);
+    if (!paneFor(key)?.isConnected && !await openPane(provider, session, { href: sourceHref, record: false })) return;
+    const pane = paneFor(key);
     const target = anchor ? readerPaneAnchor(pane, anchor) : null;
-    if (!target) return;
+    if (!target) {
+      setStatus(ft?.("detail.reader_source_missing") || "Source unavailable", "error", sourceHref);
+      return false;
+    }
     const canonicalTargetAnchor = target.dataset.readerCanonicalAnchor || anchor;
-    if (samePane || targetPane) {
-      const inlineOwned = inlinePanes.has(canonicalKey(provider, session));
-      if (samePane && !inlineOwned) {
-        savePaneState(pane);
-        recordHistory(keyOf(pane), sourceHref);
-      } else {
-        const record = inlinePanes.get(canonicalKey(provider, session));
-        if (record) {
-          const inlineUrl = new URL(sourceUrl.href);
-          inlineUrl.hash = canonicalTargetAnchor ? `#${canonicalTargetAnchor}` : "";
-          const browserState = withInlineHistory(history.state, serializedInlineStack());
-          browserState.readerInlineAnchorSession = canonicalKey(provider, session);
-          delete browserState.readerEventSession;
-          history.pushState(browserState, "", inlineUrl.pathname + inlineUrl.search + inlineUrl.hash);
-        }
-      }
+    if (!replay) {
+      sourceUrl.hash = canonicalTargetAnchor;
+      savePaneState(activePane());
+      recordHistory(keyOf(activePane()), inlinePanes.has(key) ? inlineSourceHref(sourceUrl, key) : sourceHref);
       updateShell(activePane());
     }
     closeReaderCollaboration(link);
@@ -788,21 +759,19 @@ export function initSessionReader({ ft, showToast } = {}) {
     const eventId = link.dataset.readerEventId || "";
     if (!provider || !session || !eventId) return false;
     const key = canonicalKey(provider, session);
-    const targetPane = paneFor(key);
-    const intent = { id: ++eventSourceIntent };
+    let intent = ++eventSourceIntent;
     swapRevision += 1;
     inlineRevision += 1;
-    let pane = targetPane;
+    let pane = paneFor(key);
     const promise = (async () => {
-      let openedPane = false;
       if (!pane?.isConnected) {
-        const opened = await openPane(provider, session, { href: `/${encodeURIComponent(provider)}/session/${encodeURIComponent(session)}`, restore: false, invalidateSources: false });
+        const opened = await openPane(provider, session, { href: eventSourceUrlFor(link).href, record: false });
         if (!opened) return false;
-        openedPane = true;
-        pane = host.querySelector("[data-reader-pane]");
+        intent = ++eventSourceIntent;
+        pane = paneFor(key);
       }
       if (!pane) return false;
-      const isCurrent = () => pane?.isConnected && intent.id === eventSourceIntent;
+      const isCurrent = () => pane?.isConnected && intent === eventSourceIntent;
       if (isCurrent()) setStatus(ft?.("detail.reader_event_loading") || "", "loading");
       const response = await fetch(`/api/${encodeURIComponent(provider)}/session/${encodeURIComponent(session)}/reader/event/${encodeURIComponent(eventId)}`);
       const data = await response.json().catch(() => null);
@@ -822,16 +791,11 @@ export function initSessionReader({ ft, showToast } = {}) {
           if (target) url.searchParams.delete("readerEvent");
           else url.searchParams.set("readerEvent", eventId);
           url.hash = source.dataset.readerCanonicalAnchor || source.id;
-          if (!openedPane && !replay && !inlinePanes.has(key)) savePaneState(pane);
-          if (inlinePanes.has(key)) {
-            const browserState = withInlineHistory(history.state, serializedInlineStack());
-            browserState.readerEventSession = key;
-            delete browserState.readerInlineAnchorSession;
-            history.pushState(browserState, "", url.pathname + url.search + url.hash);
-          } else {
-            recordHistory(key, url.pathname + url.search + url.hash, { replace: openedPane || replay });
+          if (!replay) savePaneState(activePane());
+          if (!replay || !inlinePanes.has(key)) {
+            recordHistory(keyOf(activePane()), inlinePanes.has(key) ? inlineSourceHref(url, key) : url.pathname + url.search + url.hash, { replace: replay });
           }
-          updateShell(pane);
+          updateShell(activePane());
           closeReaderCollaboration(link);
           revealAnchor(source);
           dispatch("session-reader:anchor-revealed", { pane, target: source });
@@ -841,7 +805,7 @@ export function initSessionReader({ ft, showToast } = {}) {
       return true;
     })().catch((error) => {
       console.error("Unable to load reader event source:", error);
-      if (pane?.isConnected && intent.id === eventSourceIntent) {
+      if (pane?.isConnected && intent === eventSourceIntent) {
         const messageKey = error?.code === "source_missing" ? "detail.reader_source_missing" : "detail.reader_event_failed";
         setStatus(ft?.(messageKey) || "", "error", link.href || "");
       }
@@ -1114,114 +1078,102 @@ export function initSessionReader({ ft, showToast } = {}) {
 
   backButton?.addEventListener("click", () => {
     if (historyIndex <= 0 && inlinePanes.size === 0) return;
+    if (historyIndex <= 0) {
+      void closeInlinePane(inlinePanes.keys().next().value);
+      return;
+    }
     history.back();
   });
 
-  window.addEventListener("popstate", async (event) => {
-    inlineRevision += 1;
-    const inlineState = inlineStackFrom(event.state);
-    const current = activePane();
-    const hadInline = inlinePanes.size > 0;
-    if (inlineState.length || hadInline) {
-      const currentPath = location.pathname;
-      const rootHref = historyEntries[historyIndex]?.href || "";
-      const rootPath = rootHref ? new URL(rootHref, location.href).pathname : currentPath;
-      if (inlineState.length || currentPath === rootPath) {
-        const savedIndex = event.state?.readerEntry;
-        const rootIdentity = event.state?.readerInlineRoot;
-        const rootKey = rootIdentity?.provider && rootIdentity?.session
-          ? canonicalKey(rootIdentity.provider, rootIdentity.session)
-          : "";
-        if (inlineState.length && rootKey && keyOf(current) !== rootKey && !paneFor(rootKey)) {
-          if (typeof location.reload === "function") location.reload();
-          return;
-        }
-        if (Number.isInteger(savedIndex)) {
-          if (!historyEntries[savedIndex]) {
-            historyEntries[savedIndex] = {
-              key: rootIdentity?.provider && rootIdentity?.session
-                ? canonicalKey(rootIdentity.provider, rootIdentity.session)
-                : keyOf(current),
-              href: inlineHref(),
-              state: rootIdentity?.state || null
-            };
-          }
-          historyIndex = savedIndex;
-        }
-        await applyInlineStack(inlineState, { rootIdentity: rootIdentity || null });
-        if (activePane()) {
-          updateShell(activePane());
-          const eventId = new URLSearchParams(location.search).get("readerEvent");
-          const eventKey = event.state?.readerEventSession || "";
-          if (eventId && eventKey) {
-            const [eventProvider, ...eventSessionParts] = String(eventKey).split("\u0000");
-            const source = document.createElement("a");
-            source.href = `/${encodeURIComponent(eventProvider)}/session/${encodeURIComponent(eventSessionParts.join("\u0000"))}?readerEvent=${encodeURIComponent(eventId)}`;
-            source.dataset.readerProvider = eventProvider;
-            source.dataset.readerSession = eventSessionParts.join("\u0000");
-            source.dataset.readerEventId = eventId;
-            await revealEventSource(source, { replay: true });
-          } else if (inlineState.length && location.hash) {
-            const hash = decodeURIComponent(location.hash.slice(1));
-            const pane = event.state?.readerInlineAnchorSession
-              ? paneFor(event.state.readerInlineAnchorSession)
-              : [...inlinePanes.values()].map((record) => record.pane).reverse().concat(current)
-                .find((candidate) => readerPaneAnchor(candidate, hash));
-            const target = readerPaneAnchor(pane, hash);
-            if (target) requestAnimationFrame(() => {
-              revealAnchor(target);
-              dispatch("session-reader:anchor-revealed", { pane, target });
-            });
-          }
-        }
-        return;
-      }
+  const replayLocation = async () => {
+    const revision = swapRevision;
+    const locator = parseReaderLocation(location.href, location.href);
+    if (new URLSearchParams(location.search).has("readerSource") && !locator) {
+      setStatus(ft?.("detail.reader_source_missing") || "Source unavailable", "error");
+      return false;
     }
-    const match = location.pathname.match(/^\/([^/]+)\/session\/(.+)$/);
-    if (!match) return;
-    const provider = decodeURIComponent(match[1]);
-    const session = decodeURIComponent(match[2]);
+    const url = locator?.source || new URL(location.href);
+    const [, encodedProvider, encodedSession] = url.pathname.match(/^\/([^/]+)\/session\/([^/]+)$/) || [];
+    if (!encodedProvider || !encodedSession) return false;
+    const provider = decodeURIComponent(encodedProvider);
+    const session = decodeURIComponent(encodedSession);
     const key = canonicalKey(provider, session);
-    const href = location.pathname + location.search + location.hash;
-    eventSourceIntent += 1;
-    const revision = ++swapRevision;
-    [...inlinePanes.values()].reverse().forEach((record) => removeInlinePane(record.key, { restore: false }));
-    savePaneState(activePane(), { captureHref: false });
-    try {
-      const pane = await fetchPane(provider, session, href);
-      if (revision !== swapRevision) return;
-      const savedIndex = event.state?.readerEntry;
-      if (Number.isInteger(savedIndex) && historyEntries[savedIndex]?.key === key) {
-        historyIndex = savedIndex;
-        historyEntries[historyIndex].href = href;
-      } else {
-        historyEntries[historyIndex] = { key, href, state: cache.get(key)?.state };
-        history.replaceState({ ...history.state, readerEntry: historyIndex }, "", href);
+    if (locator && key !== keyOf(activePane()) && !paneFor(key)?.isConnected) {
+      if (!inlineRootIdentity) {
+        const rootUrl = stripReaderLocation(new URL(location.href));
+        inlineRootIdentity = { provider: providerOf(activePane()), session: sessionOf(activePane()), href: rootUrl.pathname + rootUrl.search };
       }
-      cache.get(key).href = href;
-      const entry = historyEntries[historyIndex];
-      attachPane(pane, key);
-      const eventId = new URLSearchParams(location.search).get("readerEvent");
-      const hash = location.hash ? decodeURIComponent(location.hash.slice(1)) : "";
-      if (eventId && (!hash || !document.getElementById(hash))) {
-        const source = document.createElement("a");
-        source.href = href;
-        source.dataset.readerProvider = provider;
-        source.dataset.readerSession = session;
-        source.dataset.readerEventId = eventId;
-        await revealEventSource(source, { replay: true });
-        if (historyEntries[historyIndex] === entry && entry.state) restorePaneState(pane);
-      } else if (hash && !historyEntries[historyIndex]?.state) {
-        requestAnimationFrame(() => {
-          const target = readerPaneAnchor(pane, hash);
-          if (target) revealAnchor(target);
-        });
+      const path = [...locator.ancestors, { provider, session, href: url.href }];
+      const stack = [];
+      for (const entry of path) {
+        if (revision !== swapRevision) return false;
+        const parent = stack.length ? paneFor(canonicalKey(stack.at(-1).provider, stack.at(-1).session)) : activePane();
+        const opener = recordedOpener(parent, entry.provider, entry.session);
+        if (!opener) return navigateCanonical(url.href);
+        const origin = inlineOriginFor(opener);
+        const parentHref = stack.length
+          ? createReaderLocation(location.href, stack.at(-1).href, stack.slice(0, -1).map((item) => item.href))
+          : inlineRootIdentity.href;
+        stack.push({ ...entry, originHref: parentHref, originAnchor: originIdentity(origin), originReturnAnchor: originIdentity(inlineReturnOriginFor(opener)) });
+        if (!await applyInlineStack(stack)) return false;
       }
-    } catch (error) {
-      if (revision === swapRevision) {
-        setStatus(ft?.("detail.reader_load_failed") || "", "error", href);
+      if (revision !== swapRevision) return false;
+      history.replaceState(withInlineHistory(history.state, serializedInlineStack()), "", inlineHref());
+    }
+    if (revision !== swapRevision) return false;
+    const source = document.createElement("a");
+    source.href = url.href;
+    source.dataset.readerProvider = provider;
+    source.dataset.readerSession = session;
+    const eventId = url.searchParams.get("readerEvent");
+    if (eventId) {
+      const cachedSource = url.hash && readerPaneAnchor(paneFor(key), decodeURIComponent(url.hash.slice(1)));
+      if (cachedSource?.dataset.readerEventId === eventId) {
+        revealAnchor(cachedSource);
+        dispatch("session-reader:anchor-revealed", { pane: paneFor(key), target: cachedSource });
+        return true;
+      }
+      source.dataset.readerEventId = eventId;
+      return revealEventSource(source, { replay: true });
+    }
+    if (url.hash) return revealSource(source, { replay: true });
+    if (locator) {
+      const pane = paneFor(key);
+      if (pane?.isConnected) {
+        revealAnchor(pane);
+        dispatch("session-reader:anchor-revealed", { pane, target: pane });
       }
     }
+    return true;
+  };
+
+  window.addEventListener("popstate", async (event) => {
+    eventSourceIntent += 1;
+    setStatus("");
+    const revision = ++swapRevision;
+    inlineRevision += 1;
+    const root = activePane();
+    const rootPath = `/${encodeURIComponent(providerOf(root))}/session/${encodeURIComponent(sessionOf(root))}`;
+    if (location.pathname !== rootPath) {
+      history.scrollRestoration = "auto";
+      location.reload();
+      return;
+    }
+    savePaneState(root, { captureHref: false });
+    const savedIndex = event.state?.readerEntry;
+    historyIndex = Number.isInteger(savedIndex) ? savedIndex : 0;
+    if (!historyEntries[historyIndex]) historyEntries[historyIndex] = { key: keyOf(root), href: inlineHref(), state: event.state?.readerPosition || null };
+    const entry = historyEntries[historyIndex];
+    const targetStack = inlineStackFrom(event.state);
+    const leaving = [...inlinePanes.values()][targetStack.length];
+    await applyInlineStack(targetStack, { rootIdentity: event.state?.readerInlineRoot });
+    if (revision !== swapRevision) return;
+    await replayLocation();
+    if (historyEntries[historyIndex] === entry) {
+      if (entry.state) restorePaneState(root, entry.state);
+      else if (leaving && !inlinePanes.has(leaving.key)) restoreInlineOrigin(leaving);
+    }
+    updateShell(root);
   });
 
   const initial = host.querySelector("[data-reader-pane]");
@@ -1229,30 +1181,22 @@ export function initSessionReader({ ft, showToast } = {}) {
     const key = keyOf(initial);
     normalizeOwnedEvidenceLinks(initial, providerOf(initial), sessionOf(initial));
     cache.set(key, { pane: initial, state: null, href: location.pathname + location.search + location.hash });
-    historyEntries.push({ key, href: location.pathname + location.search + location.hash, state: null });
-    historyIndex = 0;
-    history.scrollRestoration = "manual";
+    historyIndex = Number.isInteger(history.state?.readerEntry) ? history.state.readerEntry : 0;
+    historyEntries[historyIndex] = { key, href: location.pathname + location.search + location.hash, state: history.state?.readerPosition || null };
+    history.scrollRestoration = "auto";
     history.replaceState({ ...history.state, readerEntry: historyIndex }, "", historyEntries[historyIndex].href);
     updateShell(initial);
     setStatus("");
   }
   bindContextResultDisclosures(initial);
   syncCollaborationLayout();
-  const initialInlineState = inlineStackFrom(history.state);
-  const initialInlineRoot = history.state?.readerInlineRoot || null;
-  if (initial && initialInlineState.length && initialInlineRoot?.provider && initialInlineRoot?.session
-    && keyOf(initial) === canonicalKey(initialInlineRoot.provider, initialInlineRoot.session)) {
-    queueMicrotask(() => void applyInlineStack(initialInlineState, { rootIdentity: initialInlineRoot }));
-  }
-  const initialEventId = new URLSearchParams(location.search).get("readerEvent");
-  if (initialEventId && initial) {
-    const sourceLocator = document.createElement("a");
-    sourceLocator.href = location.href;
-    sourceLocator.dataset.readerProvider = providerOf(initial);
-    sourceLocator.dataset.readerSession = sessionOf(initial);
-    sourceLocator.dataset.readerEventId = initialEventId;
-    queueMicrotask(() => void revealEventSource(sourceLocator, { replay: true }));
-  }
+  const initialRevision = swapRevision;
+  if (initial && (inlineStackFrom(history.state).length || new URLSearchParams(location.search).has("readerSource")
+    || new URLSearchParams(location.search).has("readerEvent"))) queueMicrotask(async () => {
+    if (initialRevision !== swapRevision) return;
+    await applyInlineStack(inlineStackFrom(history.state), { rootIdentity: history.state?.readerInlineRoot });
+    if (initialRevision === swapRevision) await replayLocation();
+  });
 
   return {
     openPane,

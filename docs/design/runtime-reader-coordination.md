@@ -194,9 +194,11 @@ deliveries focus separately owned event evidence. API pagination returned all
 
 The expanded sequence was inspected at desktop and actual 390px widths;
 keyboard source activation and focus worked, with no full-page horizontal
-overflow. The source-navigation owner mismatch identified by P10 remains a
-separate defect, including when opening an unmounted child event; correct
-event resolution is not a claim that all page controls have switched owners.
+overflow. This check also identified the separate P10 source-navigation owner
+mismatch. The subsequent root-owned inline navigation correction now verifies
+an unmounted child completion, reload and Back to the exact parent delivery;
+standalone navigation changes the entire page owner. See the
+[navigation decision](../../.agents/decisions/implemented/2026-09-17-reader-page-owner-location.md).
 
 Verification: 720/720 full tests, 35/35 focused tests, independent review,
 governance/typecheck, the full live E2E suite without browser errors, and
