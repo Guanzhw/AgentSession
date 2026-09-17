@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createServer } from 'node:http';
+import { createServer, get } from 'node:http';
 import { once } from 'node:events';
 import { Router } from '../dist/src/router.js';
 import { registerSessionDetail } from '../dist/src/routes/session-detail.js';
@@ -56,11 +56,23 @@ test('folded fields read their exact first and final pages through the registere
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const base = `http://127.0.0.1:${server.address().port}`;
+  // The OS can assign a valid ephemeral port that browser-style fetch blocks.
+  const getJson = (path) => new Promise((resolve, reject) => {
+    get(base + path, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('error', reject);
+      response.on('end', () => {
+        try {
+          assert.equal(response.statusCode, 200);
+          resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+        } catch (error) { reject(error); }
+      });
+    }).on('error', reject);
+  });
   const content = async (part, field, offset, scope = 'owned') => {
     const params = new URLSearchParams({ part, field, offset: String(offset), scope });
-    const response = await fetch(`${base}/api/codex/session/child/content?${params}`);
-    assert.equal(response.status, 200);
-    return response.json();
+    return getJson(`/api/codex/session/child/content?${params}`);
   };
   for (const [part, field, value, format, limit] of [
     ['tool:1:tool', 'input', input, 'plain', 3000],
@@ -90,9 +102,7 @@ test('folded fields read their exact first and final pages through the registere
   assert.match(inherited.html, /inherited reasoning/);
   assert.equal(inherited.nextOffset, null);
 
-  const search = await fetch(`${base}/api/codex/session/child/search?q=needle`);
-  assert.equal(search.status, 200);
-  const matches = await search.json();
+  const matches = await getJson('/api/codex/session/child/search?q=needle');
   assert.equal(matches.total, 2, 'full-source search sees unloaded final reasoning and output');
   assert.deepEqual(matches.matches.map(({ partId, field }) => [partId, field]), [
     ['assistant:1:reasoning', 'reasoning'], ['tool:1:tool', 'output']

@@ -155,7 +155,7 @@ test("Codex scan, search and parent ownership survive eviction and a disappearin
   assert.equal(warnings.mock.calls[0].arguments[1], missingFile);
 });
 
-test("Codex protocol loading reads only direct children from an evicting family", async (t) => {
+test("Codex protocol snapshot pair prepares only once from an evicting family", async (t) => {
   const temp = mkdtempSync(path.join(os.tmpdir(), "agentsession-codex-protocol-family-"));
   t.after(() => rmSync(temp, { recursive: true, force: true }));
   const sessions = path.join(temp, "sessions");
@@ -221,6 +221,8 @@ test("Codex protocol loading reads only direct children from an evicting family"
   const fsModule = fs;
   const originalOpenSync = fsModule.openSync;
   const openCounts = new Map();
+  const now = Date.now();
+  t.mock.method(Date, "now", () => now);
   t.mock.method(fsModule, "openSync", (...args) => {
     const fd = originalOpenSync(...args);
     const filePath = path.resolve(String(args[0]));
@@ -231,8 +233,20 @@ test("Codex protocol loading reads only direct children from an evicting family"
   t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
   const { default: codex } = await import("../dist/src/providers/codex/adapter.js?protocol-family-test");
 
-  const protocol = codex.getSessionProtocolV3("root");
+  const originalFreeze = Object.freeze;
+  const finalizedVersions = [];
+  t.mock.method(Object, "freeze", (value) => {
+    if (value?.sessionId === "root" && value?.validation && value?.version) finalizedVersions.push(value.version);
+    return originalFreeze(value);
+  });
+  const pair = codex.getSessionProtocolSnapshots("01-root");
+  assert.deepEqual(finalizedVersions, [2, 3], "the pair finalizes one base and one native v3 snapshot");
+  const protocol = pair.v3;
   assert.ok(protocol);
+  assert.equal(pair.v2.sessionId, "root");
+  assert.deepEqual(protocol.revision, pair.v2.revision);
+  assert.ok(Object.isFrozen(pair.v2));
+  assert.ok(Object.isFrozen(protocol));
   const childRelationships = protocol.relationships
     .filter((relationship) => relationship.fromSessionId === "root")
     .map((relationship) => relationship.toSessionId);
@@ -251,4 +265,97 @@ test("Codex protocol loading reads only direct children from an evicting family"
   assert.ok(opened("02-child") <= 2);
   assert.ok(opened("03-sibling") <= 2);
   assert.equal(opened("04-grandchild"), 1);
+  assert.deepEqual(pair.v2, codex.getSessionProtocol("root"));
+  assert.deepEqual(pair.v3, codex.getSessionProtocolV3("root"));
+  assert.equal(codex.getSessionProtocolSnapshots("missing"), null);
+
+  const failure = Object.assign(new Error("Rollout became unreadable"), { code: "EACCES" });
+  t.mock.method(fsModule, "openSync", (...args) => {
+    if (path.resolve(String(args[0])) === path.resolve(rootFile)) throw failure;
+    return originalOpenSync(...args);
+  });
+  syncBuiltinESMExports();
+  assert.throws(() => codex.getSessionProtocolSnapshots("root"), (error) => error === failure);
+});
+
+test("Codex protocol snapshot pair preserves ownership and the captured revision while rollouts grow", async (t) => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "agentsession-codex-protocol-pair-"));
+  t.after(() => rmSync(temp, { recursive: true, force: true }));
+  const sessions = path.join(temp, "sessions");
+  mkdirSync(sessions);
+  const row = (type, payload) => ({ type, payload, timestamp: "2026-09-15T00:00:00.000Z" });
+  const token = (total) => row("event_msg", {
+    type: "token_count", info: { last_token_usage: { input_tokens: total, total_tokens: total } }
+  });
+  const writeRollout = (name, records) => {
+    const file = path.join(sessions, `${name}.jsonl`);
+    writeFileSync(file, records.map((record) => JSON.stringify(record)).join("\n") + "\n");
+    return file;
+  };
+  writeRollout("parent-alias", [row("session_meta", { id: "parent" }), token(500)]);
+  const rootFile = writeRollout("root-alias", [
+    row("session_meta", { id: "root", parent_thread_id: "parent" }),
+    row("event_msg", { type: "user_message", message: "Inherited parent request" }),
+    token(500),
+    row("response_item", { type: "agent_message", content: [{ type: "output_text", text: "Message Type: NEW_TASK\nTask name: worker" }] }),
+    row("event_msg", { type: "user_message", message: "Owned request" }),
+    token(7),
+    row("compacted", { summary: "Owned context" })
+  ]);
+  const childFile = writeRollout("child-alias", [
+    row("session_meta", { id: "child", parent_thread_id: "root", agent_path: "worker" }),
+    row("event_msg", { type: "task_started", turn_id: "child-turn" })
+  ]);
+  const before = [rootFile, childFile].map((file) => statSync(file));
+  let now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  const { initConfig } = await import("../dist/src/config.js");
+  initConfig(["--codex-dir", temp]);
+  const { default: codex } = await import("../dist/src/providers/codex/adapter.js?protocol-pair-growth-test");
+  const original = codex.getSessionProtocolSnapshots("root-alias");
+  assert.deepEqual(original.v3.usageRecords.map((record) => record.tokens.total), [7]);
+  assert.equal(original.v2.events.filter((event) => event.kind === "context.compaction").length, 1);
+  assert.deepEqual(original.v2, codex.getSessionProtocol("root"));
+  assert.deepEqual(original.v3, codex.getSessionProtocolV3("root"));
+  for (let index = 0; index < before.length; index++) {
+    const after = statSync([rootFile, childFile][index]);
+    assert.equal(after.size, before[index].size);
+    assert.equal(after.mtimeMs, before[index].mtimeMs);
+  }
+
+  // Append after v2 finalization, before v3 reads the prepared input. Crossing
+  // the index refresh interval cannot relabel or expand the held snapshot.
+  const freeze = Object.freeze;
+  let appended = false;
+  const freezeMock = t.mock.method(Object, "freeze", (value) => {
+    if (!appended && value?.version === 2 && value?.sessionId === "root" && value?.validation) {
+      appended = true;
+      fs.appendFileSync(rootFile, JSON.stringify(token(11)) + "\n");
+      fs.appendFileSync(childFile, JSON.stringify(row("event_msg", { type: "task_complete", turn_id: "child-turn" })) + "\n");
+      now += 2000;
+    }
+    return freeze(value);
+  });
+  const held = codex.getSessionProtocolSnapshots("root");
+  freezeMock.mock.restore();
+  assert.equal(appended, true);
+  assert.deepEqual(held, original);
+  const current = codex.getSessionProtocolSnapshots("root-alias");
+  assert.notDeepEqual(current.v2.revision, original.v2.revision);
+  assert.deepEqual(current.v2.revision, current.v3.revision);
+  assert.deepEqual(current.v3.usageRecords.map((record) => record.tokens.total), [7, 11]);
+  assert.equal(original.v3.coordination.some((item) => item.kind === "child-turn-completed"), false);
+  assert.equal(current.v3.coordination.some((item) => item.kind === "child-turn-completed"), true);
+  assert.deepEqual(held, original, "later preparation leaves already returned facts unchanged");
+
+  writeRollout("new-child-alias", [row("session_meta", { id: "new-child", parent_thread_id: "root" })]);
+  now += 2000;
+  const expanded = codex.getSessionProtocolSnapshots("root");
+  assert.notDeepEqual(expanded.v2.revision, current.v2.revision);
+  assert.equal(expanded.v2.relationships.some((item) => item.toSessionId === "new-child"), true);
+  assert.equal(expanded.v3.relationships.some((item) => item.toSessionId === "new-child"), true);
+  rmSync(rootFile);
+  now += 2000;
+  assert.equal(codex.getSessionProtocolSnapshots("root"), null);
+  assert.equal(codex.getSessionProtocolSnapshots("root-alias"), null);
 });

@@ -223,6 +223,12 @@ export interface RuntimeEnvironmentView {
   extensions: RuntimeExtensionReference[];
 }
 
+/** Finalized protocol versions built from one provider-owned source snapshot. */
+export interface SessionProtocolSnapshots {
+  v2: SessionProtocol;
+  v3: SessionProtocolV3;
+}
+
 export interface ProviderAdapter {
   id: ProviderId;
   name: string;
@@ -253,6 +259,12 @@ export interface ProviderAdapter {
    * unknown.
    */
   getSessionProtocolV3?(sessionId: string): SessionProtocolV3 | null;
+  /**
+   * Optional atomic preparation for consumers of both versions. Both finalized
+   * snapshots share source revision and canonical identity; raw input is not
+   * retained. Existing single-version accessors remain independently usable.
+   */
+  getSessionProtocolSnapshots?(sessionId: string): SessionProtocolSnapshots | null;
   /**
    * Optional on-demand recorded context result. Null means the checkpoint is
    * unknown; a known checkpoint without readable content retains an explicit

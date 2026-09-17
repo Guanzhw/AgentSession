@@ -404,6 +404,19 @@ if [[ "$detail_copy_id_count" != "1" ]]; then
   exit 1
 fi
 
+for sidebar_entry in '[data-reader-collaboration-toggle]' '.reader-collaboration-overview-summary'; do
+  ab "focus task sidebar entry" focus "$sidebar_entry" >/dev/null
+  ab "open task sidebar with keyboard" press Enter >/dev/null
+  sidebar_focus="$(read_ab "verify task sidebar entry focus" eval "document.querySelector('[data-reader-collaboration-overview]').open && document.activeElement.matches('[data-reader-collaboration-close]')")"
+  assert_contains "task sidebar entry focus" "$sidebar_focus" 'true'
+  ab "tab within task sidebar" press Tab >/dev/null
+  sidebar_tab="$(read_ab "verify task sidebar Tab target" eval "!!document.activeElement.closest('[data-reader-collaboration-overview]')")"
+  assert_contains "task sidebar Tab target" "$sidebar_tab" 'true'
+  ab "close task sidebar with Escape" press Escape >/dev/null
+  sidebar_return="$(read_ab "verify task sidebar focus restoration" eval "!document.querySelector('[data-reader-collaboration-overview]').open && document.activeElement.matches('$sidebar_entry')")"
+  assert_contains "task sidebar focus restoration" "$sidebar_return" 'true'
+done
+
 child_link_state="$(read_ab "verify canonical child reader links" eval "(() => { const links = [...document.querySelectorAll('[data-reader-pane] .subagent-reader-link [data-reader-open][data-reader-session]')]; const link = links[0]; window.__qaChildSessionId = link?.dataset.readerSession || ''; return JSON.stringify({ count: links.length, selected: window.__qaChildSessionId, canonical: links.every((item) => /^\\/[a-z][a-z0-9-]*\\/session\\//.test(item.getAttribute('href') || '') && item.dataset.readerProvider && item.dataset.readerSession), state: link?.dataset.readerChildState || '' }); })()" | tr -d '[:space:]')"
 assert_positive_count "canonical child reader links" "$(printf '%s' "$child_link_state" | grep -o '"count":[0-9]*' | cut -d: -f2)"
 assert_contains "canonical child reader links" "$child_link_state" '"canonical":true'
@@ -835,6 +848,12 @@ fi
 
 ab "open narrow detail" open "$BASE/opencode/session/$SAMPLE_SESSION_ID" >/dev/null
 ab "wait for narrow detail" wait --load networkidle >/dev/null
+reduced_motion_state="$(read_ab "verify reduced-motion styles" eval "(() => { const host = document.createElement('div'); host.innerHTML = '<div class=anchor-flash></div><div class=toast></div><div class=scroll-loading></div>'; document.body.append(host); const anchor = getComputedStyle(host.children[0]); const toast = getComputedStyle(host.children[1]); const loading = getComputedStyle(host.children[2], '::before'); const result = { preference: matchMedia('(prefers-reduced-motion: reduce)').matches, anchorAnimation: anchor.animationName, anchorEmphasis: anchor.boxShadow !== 'none', toastAnimation: toast.animationName, loadingAnimation: loading.animationName }; host.remove(); return JSON.stringify(result); })()" | tr -d '[:space:]')"
+assert_contains "reduced motion" "$reduced_motion_state" '"preference":true'
+assert_contains "reduced motion" "$reduced_motion_state" '"anchorAnimation":"none"'
+assert_contains "reduced motion" "$reduced_motion_state" '"anchorEmphasis":true'
+assert_contains "reduced motion" "$reduced_motion_state" '"toastAnimation":"none"'
+assert_contains "reduced motion" "$reduced_motion_state" '"loadingAnimation":"none"'
 ab "open narrow transcript search" click "[data-session-search-toggle]" >/dev/null
 narrow_search_state="$(read_ab "verify narrow transcript search containment" eval "(() => { const panel = document.querySelector('.session-search-panel'); const input = document.querySelector('[data-session-search-input]'); const navigation = document.querySelector('.session-search-navigation'); const buttons = [...document.querySelectorAll('.session-search-nav-btn')]; const rect = (node) => { const r = node?.getBoundingClientRect(); return r ? { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height } : null; }; const p = rect(panel); const inside = (r) => Boolean(p && r && r.left >= p.left && r.right <= p.right && r.top >= p.top && r.bottom <= p.bottom); return JSON.stringify({ panel: p, input: rect(input), navigation: rect(navigation), buttons: buttons.map(rect), contained: inside(rect(input)) && inside(rect(navigation)) && buttons.every((button) => inside(rect(button))), visible: Boolean(input && navigation && buttons.length === 3 && input.getBoundingClientRect().width > 0 && navigation.getBoundingClientRect().height > 0), documentOverflow: document.documentElement.scrollWidth <= document.documentElement.clientWidth }); })()")"
 if ! printf '%s' "$narrow_search_state" | grep -Eq 'contained[^a-z]*true' || ! printf '%s' "$narrow_search_state" | grep -Eq 'visible[^a-z]*true' || ! printf '%s' "$narrow_search_state" | grep -Eq 'documentOverflow[^a-z]*true'; then

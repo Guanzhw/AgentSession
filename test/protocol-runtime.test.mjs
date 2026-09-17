@@ -7,6 +7,7 @@ import {
   collectConversationCompactions,
   getRuntimeProtocol,
   getRuntimeProtocolV3,
+  getRuntimeProtocolSnapshots,
   ProtocolRuntimeError,
   publicEvent,
   queryRuntimeEvents,
@@ -103,6 +104,73 @@ test("runtime v3 projections reuse one explicit upgrade of the cached v2 snapsho
   clearProtocolRuntimeCache();
   assert.notEqual(getRuntimeProtocolV3(adapter, "root"), first);
   assert.equal(getBuilds(), 2);
+});
+
+test("paired reader protocols use one atomic accessor and the existing revision-bounded cache", () => {
+  clearProtocolRuntimeCache();
+  const { adapter } = adapterFixture();
+  const v2 = getRuntimeProtocol(adapter, "root");
+  const pair = { v2, v3: upgradeSessionProtocolV2(v2) };
+  clearProtocolRuntimeCache();
+  let revision = 1;
+  let builds = 0;
+  adapter.getStatsRevision = () => revision;
+  adapter.getSessionProtocol = () => { throw new Error("separate v2 preparation must not run"); };
+  adapter.getSessionProtocolV3 = () => { throw new Error("separate v3 preparation must not run"); };
+  adapter.getSessionProtocolSnapshots = () => { builds++; return pair; };
+  assert.equal(getRuntimeProtocolSnapshots(adapter, "root"), pair);
+  const reused = getRuntimeProtocolSnapshots(adapter, "root");
+  assert.equal(reused.v2, pair.v2);
+  assert.equal(reused.v3, pair.v3);
+  assert.equal(builds, 1);
+  assert.equal(getRuntimeProtocol(adapter, "root"), pair.v2, "single-version consumer reuses the finalized base");
+  revision++;
+  getRuntimeProtocolSnapshots(adapter, "root");
+  assert.equal(builds, 2);
+  clearProtocolRuntimeCache();
+  getRuntimeProtocolSnapshots(adapter, "root");
+  assert.equal(builds, 3);
+});
+
+test("paired reader protocols keep an active preparation coherent and refresh on the next request", () => {
+  clearProtocolRuntimeCache();
+  const { adapter } = adapterFixture();
+  const v2 = getRuntimeProtocol(adapter, "root");
+  const pair = { v2, v3: upgradeSessionProtocolV2(v2) };
+  clearProtocolRuntimeCache();
+  let revision = 1;
+  let builds = 0;
+  adapter.getStatsRevision = () => revision;
+  adapter.getSessionProtocolSnapshots = () => {
+    if (++builds === 1) revision++;
+    return pair;
+  };
+  assert.equal(getRuntimeProtocolSnapshots(adapter, "root"), pair);
+  assert.equal(builds, 1, "source activity does not repeat the current preparation");
+  getRuntimeProtocolSnapshots(adapter, "root");
+  assert.equal(builds, 2, "the captured cache key does not label old facts as the new revision");
+  getRuntimeProtocolSnapshots(adapter, "root");
+  assert.equal(builds, 2);
+});
+
+test("paired reader protocols preserve existing accessors and explicit unavailable references", () => {
+  clearProtocolRuntimeCache();
+  const { adapter, getBuilds } = adapterFixture();
+  const pair = getRuntimeProtocolSnapshots(adapter, "root");
+  assert.equal(pair.v2.version, 2);
+  assert.equal(pair.v3.version, 3);
+  assert.equal(getBuilds(), 1);
+  assert.deepEqual(pair.v3.events, pair.v2.events);
+  clearProtocolRuntimeCache();
+  let builds = 0;
+  adapter.getSessionProtocolSnapshots = () => { builds++; return null; };
+  assert.throws(() => getRuntimeProtocolSnapshots(adapter, "missing"), { code: "session_not_found" });
+  assert.equal(builds, 0);
+  assert.throws(() => getRuntimeProtocolSnapshots(adapter, "root"), { code: "session_not_found" });
+  adapter.getSessionProtocolSnapshots = () => ({ ...pair, v3: { ...pair.v3, sessionId: "child" } });
+  assert.throws(() => getRuntimeProtocolSnapshots(adapter, "root"), { code: "protocol_invalid" });
+  adapter.getSessionProtocolSnapshots = () => { throw new Error("unreadable source"); };
+  assert.throws(() => getRuntimeProtocolSnapshots(adapter, "root"), /unreadable source/);
 });
 
 test("native v3 cache falls back to the canonical session revision when getStatsRevision is absent", () => {

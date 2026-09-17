@@ -27,6 +27,7 @@ import {
   collectConversationCompactions,
   getRuntimeProtocol,
   getRuntimeProtocolV3,
+  getRuntimeProtocolSnapshots,
   ProtocolRuntimeError,
   queryRuntimeEvents,
   summarizeRuntimeProtocol
@@ -58,10 +59,10 @@ export function registerSessionDetail(
 
   const runtimeRenderData = (adapter: any, sessionId: string, session: Record<string, unknown>, runPageOptions: { cursor?: string | null; limit?: string | null } = {}) => {
     try {
-      const protocol = getRuntimeProtocol(adapter, sessionId, session);
+      let protocol: SessionProtocol;
       let v3: SessionProtocolV3;
       try {
-        v3 = getRuntimeProtocolV3(adapter, sessionId);
+        ({ v2: protocol, v3 } = getRuntimeProtocolSnapshots(adapter, sessionId, session));
       } catch (error) {
         if (error instanceof TypeError) {
           throw new ProtocolRuntimeError("protocol_invalid", "Runtime protocol is invalid for this session.");

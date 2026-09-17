@@ -2,7 +2,7 @@ import { closeSync, existsSync, lstatSync, openSync, readSync, readdirSync } fro
 import path from "node:path";
 import { getConfig } from "../../config.js";
 import { icons } from "../../icons.js";
-import type { Message, ProviderAdapter, RawSession } from "../interface.js";
+import type { InheritedContextView, Message, ProviderAdapter, RawSession } from "../interface.js";
 import { buildLinkedMessageSessionViews } from "../shared/linked-message-session.js";
 import { buildResolvedSystemPromptEvidence } from "../shared/system-prompt-evidence.js";
 import {
@@ -21,6 +21,7 @@ import {
   parseDshSession,
   dshGenerationFromPath,
   dshRecordsToMessages,
+  dshRecordsToInheritedMessages,
   dshStoredSystemPrompt,
   type DshRecord
 } from "./parser.js";
@@ -300,6 +301,19 @@ const deepseekHarness = {
 
   getMessages(sessionId) {
     return sessionFiles.get(sessionId)?.messages || [];
+  },
+
+  getInheritedContext(sessionId): InheritedContextView | null {
+    const entry = sessionFiles.get(sessionId);
+    if (!entry?.session.parentId) return null;
+    const messages = dshRecordsToInheritedMessages(entry.records, String(entry.session.id));
+    if (!messages.length) return null;
+    return {
+      sourceSession: { provider: "deepseek-harness", sessionId: String(entry.session.parentId) },
+      messages,
+      total: messages.length,
+      truncated: false
+    };
   },
 
   getSessionProtocol(sessionId) {

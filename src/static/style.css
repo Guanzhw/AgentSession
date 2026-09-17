@@ -4960,6 +4960,18 @@ pre code.hljs {
   to { transform: rotate(360deg); }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .anchor-flash {
+    animation: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 45%, transparent);
+  }
+
+  .toast,
+  .scroll-loading::before {
+    animation: none;
+  }
+}
+
 .scroll-done {
   color: var(--text-muted);
   font-size: 14px;

@@ -1,4 +1,4 @@
-import type { ProviderAdapter } from "./providers/interface.js";
+import type { ProviderAdapter, SessionProtocolSnapshots } from "./providers/interface.js";
 import {
   finalizeSessionProtocol,
   type EventCategory,
@@ -24,6 +24,7 @@ const MAX_CACHE_ENTRIES = 256;
 interface CachedProtocol {
   revision: string;
   protocol: SessionProtocol;
+  v3?: SessionProtocolV3;
 }
 
 const protocolCache = new Map<string, CachedProtocol>();
@@ -132,6 +133,44 @@ export function getRuntimeProtocol(
   }
   touchCache(key, { revision, protocol });
   return protocol;
+}
+
+/** Prepare both reader protocols without rereading an active provider snapshot. */
+export function getRuntimeProtocolSnapshots(
+  adapter: ProviderAdapter,
+  sessionId: string,
+  knownSession?: Record<string, unknown> | null
+): SessionProtocolSnapshots {
+  if (!adapter.getSessionProtocolSnapshots) {
+    return {
+      v2: getRuntimeProtocol(adapter, sessionId, knownSession),
+      v3: getRuntimeProtocolV3(adapter, sessionId, knownSession)
+    };
+  }
+  const session = knownSession === undefined
+    ? adapter.getSession(sessionId) as Record<string, unknown> | null
+    : knownSession;
+  if (!session || String(session.id || "") !== sessionId) {
+    throw new ProtocolRuntimeError("session_not_found", "No provider-stored session matches this reference.");
+  }
+  const revision = sessionRevision(adapter, session);
+  const key = `${adapter.id}\u0000${sessionId}`;
+  const cached = protocolCache.get(key);
+  if (cached?.revision === revision && cached.v3) {
+    touchCache(key, cached);
+    return { v2: cached.protocol, v3: cached.v3 };
+  }
+  const snapshots = adapter.getSessionProtocolSnapshots(sessionId);
+  if (!snapshots) {
+    throw new ProtocolRuntimeError("session_not_found", "No provider-stored protocol matches this session.");
+  }
+  if (snapshots.v2.sessionId !== sessionId || snapshots.v3.sessionId !== sessionId) {
+    throw new ProtocolRuntimeError("protocol_invalid", "Protocol snapshots do not belong to the requested session.");
+  }
+  // Keep only finalized facts in the existing bounded cache. A source change
+  // during preparation invalidates the next request, not this coherent pair.
+  touchCache(key, { revision, protocol: snapshots.v2, v3: snapshots.v3 });
+  return snapshots;
 }
 
 /** Resolve a v3 snapshot, preserving v2 facts and leaving new domains explicit. */

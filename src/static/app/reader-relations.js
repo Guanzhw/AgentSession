@@ -164,6 +164,7 @@ export function initReaderRelations() {
       detail.open = true;
       selectTask(context.pane, detail);
     }
+    overview.querySelector("[data-reader-collaboration-close]")?.focus({ preventScroll: true });
   }
 
   function openOverview(overview) {
@@ -194,9 +195,19 @@ export function initReaderRelations() {
     else {
       openOverview(overview);
       ensureSelectedTask(pane);
+      overview.querySelector("[data-reader-collaboration-close]")?.focus({ preventScroll: true });
     }
     toggle.setAttribute("aria-expanded", String(overview.open));
   }, true);
+
+  workbench.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    const overview = event.target.closest?.("[data-reader-collaboration-overview]");
+    if (!overview?.open) return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeOverview(overview);
+  });
 
   workbench.addEventListener("toggle", (event) => {
     const branch = event.target;
@@ -229,6 +240,16 @@ export function initReaderRelations() {
     if (context?.select === event.target) schedule();
   });
   workbench.addEventListener("click", (event) => {
+    const summary = event.target.closest?.(".reader-collaboration-overview-summary");
+    if (summary && workbench.contains(summary)) {
+      event.preventDefault();
+      const overview = summary.closest("[data-reader-collaboration-overview]");
+      overviewOrigins.set(overview, summary);
+      openOverview(overview);
+      ensureSelectedTask(overview.closest("[data-reader-pane]"));
+      overview.querySelector("[data-reader-collaboration-close]")?.focus({ preventScroll: true });
+      return;
+    }
     const retry = event.target.closest?.("[data-reader-preview-retry]");
     if (retry && workbench.contains(retry)) {
       loadPreview(retry.closest("[data-reader-branch]"));

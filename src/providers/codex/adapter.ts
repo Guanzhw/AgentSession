@@ -404,11 +404,12 @@ function buildCodexSessionProtocolFor(sessionId: string) {
   return loaded ? finalizeCodexV2Protocol(loaded) : null;
 }
 
-function buildCodexSessionProtocolV3For(sessionId: string) {
+function buildCodexSessionProtocolSnapshotsFor(sessionId: string) {
   const loaded = loadCodexProtocolInput(sessionId);
   if (!loaded) return null;
-  const base = finalizeCodexV2Protocol(loaded);
-  return finalizeSessionProtocolV3(buildCodexSessionProtocolV3(loaded.input, base));
+  const v2 = finalizeCodexV2Protocol(loaded);
+  const v3 = finalizeSessionProtocolV3(buildCodexSessionProtocolV3(loaded.input, v2));
+  return { v2, v3 };
 }
 
 const getCodexViews = createStructuredViewCache(generateCodexViews);
@@ -577,7 +578,11 @@ const codex = {
   },
 
   getSessionProtocolV3(sessionId) {
-    return buildCodexSessionProtocolV3For(sessionId);
+    return buildCodexSessionProtocolSnapshotsFor(sessionId)?.v3 ?? null;
+  },
+
+  getSessionProtocolSnapshots(sessionId) {
+    return buildCodexSessionProtocolSnapshotsFor(sessionId);
   },
 
   getContextChangeResult(sessionId, checkpointId) {

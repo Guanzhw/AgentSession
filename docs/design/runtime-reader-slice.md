@@ -63,6 +63,21 @@ recorded observations, not a live process-health claim. Missing time evidence
 produces an untimed relation, not a fabricated duration. Bounded projections
 must disclose omitted navigation records and retain access to their evidence.
 
+Providers may supply finalized v2/v3 through `getSessionProtocolSnapshots()`
+when the Reader needs both. Codex captures its input once for the pair; the
+shared bounded runtime cache retains their captured revision, and a later
+append invalidates the next request. Independent version accessors remain
+available. See the [paired-snapshot decision](../../.agents/decisions/implemented/2026-09-17-atomic-reader-protocol-snapshots.md).
+
+DSH exposes its readable recorded inherited prefix through the existing
+`getInheritedContext()` projection when the header includes a canonical parent
+reference. Its generation-specific message normalization, source IDs and seed
+boundary stay provider-owned. The full prefix supports shared 40-message pages
+and long-field continuation while owned history and usage remain separate.
+Missing parent files do not erase the recorded source; unknown parent IDs
+remain outside this existing accessor contract. See the
+[DSH disclosure decision](../../.agents/decisions/implemented/2026-09-17-dsh-inherited-context-reader.md).
+
 ### Selected-task excerpts
 
 `GET /api/:provider/session/:id/reader/preview` reads one selected session's
@@ -165,6 +180,12 @@ dispatch, exchanges and returns. The panel closes back to the same reading
 position. Contents navigation also opens on demand. Expanded
 code/tables/context stay within their reading region in both locales and themes.
 
+Opening Tasks & collaboration moves keyboard focus into the panel; Escape
+closes it and returns focus to its recorded opener. Native summary, header and
+passage controls retain their own return targets. Reduced-motion keeps source
+location visible through static emphasis while disabling its animation, toast
+motion and loading rotation.
+
 ## Verification
 
 Add focused SSR/route tests for default history, no competing tab bar, identical
@@ -175,6 +196,41 @@ continued content owned by the selected session, source-anchor jumps, and
 expanded narrow content. Run the full test/review suite, real provider/API and
 browser acceptance before publishing the production slice. The private
 prototype is evidence for composition, not a substitute for these checks.
+
+### Paired protocols and DSH background checkpoint, 2026-09-17
+
+- Stable real Codex v2, v3, owned-reader, message and metric fingerprints match
+  before/after; both finalized protocols validate without errors or warnings.
+  The active huge route reads about 2.00 GB in separate protocol preparation
+  before the change and 0.78 GB in one paired call after it. Complete HTML
+  route observations are 20.40 and 14.27 seconds. The active input grew between
+  measurements, so these are observed costs rather than a fixed-input
+  benchmark. Initial reading performance remains P9 work.
+- A real DSH session exposes all 39 inherited messages at its recorded
+  sequence-117 boundary and retains two owned messages. The normalized prefix
+  matches source, source bytes are unchanged, and the live messages, tree,
+  container and metrics API fingerprints remain identical. Desktop and 390px
+  checks verify the collapsed disclosure and readable contained expansion.
+  Over-40-message paging and a final-page long field are fixture-backed; the
+  real 39-message sample does not establish real multi-page acceptance.
+- Reduced-motion is verified through real computed styles: source-location,
+  toast and loading animations are `none`, with static source emphasis kept.
+  Header, native-summary and passage entry/Escape focus behavior pass real
+  Codex browser checks; 390px native entry, Tab and Escape retain focus without
+  page overflow. Scoped Escape prevents global blur of the restored opener.
+  Complete keyboard,
+  contrast and locale/theme/viewport combinations remain part of P11.
+- Final `npm test` passes 806/806; the seven installed-provider checks, full
+  E2E (including header/native-summary keyboard paths, no browser errors),
+  review and final Windows binary smoke pass. Independent source review
+  identified the native-summary gap, now covered by real-page verification.
+- Remaining product work includes Library family grouping, a real P4 reading
+  exercise showing parallel child work while the parent continues, P7
+  memory/dream generation provenance, full P11 and user visual acceptance.
+  Detailed boundaries are tracked in the [acceptance record](runtime-acceptance-evidence.md).
+  Private evidence stays in ignored `tmp/dsh-inherited-{before,after}.log`,
+  `tmp/reader-protocol-fingerprint-{before,after}.log` and
+  `tmp/reader-protocol-reuse-{before,after}.log`.
 
 ### Deferred tool-process checkpoint, 2026-09-17
 

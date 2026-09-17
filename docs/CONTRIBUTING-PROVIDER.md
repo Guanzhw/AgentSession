@@ -279,6 +279,13 @@ source stays explicit rather than becoming a nearby message or inferred edge.
 ## Session Protocol v2
 
 Every registered provider must expose a protocol for every readable session.
+Providers that otherwise reread the same input for v2 and native v3 may expose
+`getSessionProtocolSnapshots(sessionId)`. It returns finalized `{ v2, v3 }`
+from one source snapshot/revision, or null for an unknown session. The Reader
+uses this optional capability and the existing bounded runtime cache; providers
+must retain their independent accessors and must not retain raw preparation
+input solely for the pair. See the
+[paired preparation decision](../.agents/decisions/implemented/2026-09-17-atomic-reader-protocol-snapshots.md).
 Message remains the universal conversation projection; protocol v2 is the
 structured harness contract.
 
@@ -376,6 +383,20 @@ tools to AgentSession-MCP.
    is untrusted input.
 
 ## DeepSeek Harness requirements
+
+`getInheritedContext()` discloses readable copied transcript messages when the
+header records a canonical `parentSession` and the stored seed boundary proves
+the prefix. It reuses the generation's append-origin message normalization,
+retains source message/call IDs and sequence metadata, and leaves inherited
+usage unattached. The accessor returns the full prefix for the shared reader's
+40-message pages and long-field continuation; a missing parent file does not
+erase the recorded reference. Seed markers without a parent ID do not invent
+a source, and lineage without copied messages does not create a disclosure.
+Owned messages, search, exports, ToC, protocol and token aggregation keep their
+existing selection. System/plugin context and replacement surfaces retain
+their existing system-prompt/protocol evidence paths.
+See the [inherited-background decision](../.agents/decisions/implemented/2026-09-17-dsh-inherited-context-reader.md)
+for source ownership and the verified real-sample boundary.
 
 For DSH, keep compatibility metadata synchronized with the checked-in snapshot:
 

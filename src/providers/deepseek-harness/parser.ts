@@ -924,7 +924,7 @@ function createToolMessage({
  * out of the user chat surface; it remains available as recorded protocol and
  * stored system-prompt evidence instead.
  */
-function dshRecordsToMessagesLegacy(records: DshRecord[], sessionId: string): Message[] {
+function dshRecordsToMessagesLegacy(records: DshRecord[], sessionId: string, events: DshRecord[]): Message[] {
   const messages: Message[] = [];
   const calls = new Map<string, Message>();
   const chunks = new Map<number, DshRecord>();
@@ -959,7 +959,7 @@ function dshRecordsToMessagesLegacy(records: DshRecord[], sessionId: string): Me
     return tool;
   };
 
-  for (const event of dshOwnedEvents(records)) {
+  for (const event of events) {
     const data = isRecord(event.data) ? event.data : {};
     if (event.type === "user/message" && !isReplacementSurfaceEvent(event)) {
       const source = isRecord(data.source) ? data.source : {};
@@ -1080,7 +1080,7 @@ function assistantMessageContent(source: DshRecord): DshRecord[] {
 }
 
 /** Human transcript projection: replacement copies stay model-only. */
-function dshRecordsToMessagesV2AppendOrigin(records: DshRecord[], sessionId: string): Message[] {
+function dshRecordsToMessagesV2AppendOrigin(events: DshRecord[], sessionId: string): Message[] {
   const messages: Message[] = [];
   const calls = new Map<string, Message>();
   const rememberTool = (callId: string, tool: Message, append: boolean) => {
@@ -1093,7 +1093,7 @@ function dshRecordsToMessagesV2AppendOrigin(records: DshRecord[], sessionId: str
     if (append) messages.push(tool);
     return tool;
   };
-  for (const event of dshOwnedEvents(records)) {
+  for (const event of events) {
     const data = isRecord(event.data) ? event.data : {};
     if (event.type === "user/message" && event.surfaceOp === "append") {
       const source = isRecord(data.source) ? data.source : {};
@@ -1149,7 +1149,22 @@ function dshRecordsToMessagesV2AppendOrigin(records: DshRecord[], sessionId: str
 }
 
 export function dshRecordsToMessages(records: DshRecord[], sessionId: string): Message[] {
-  return (dshHeader(records)?.version || 0) >= 2 ? dshRecordsToMessagesV2AppendOrigin(records, sessionId) : dshRecordsToMessagesLegacy(records, sessionId);
+  const events = dshOwnedEvents(records);
+  return (dshHeader(records)?.version || 0) >= 2 ? dshRecordsToMessagesV2AppendOrigin(events, sessionId) : dshRecordsToMessagesLegacy(records, sessionId, events);
+}
+
+/** Read the recorded copied prefix without changing the owned transcript. */
+export function dshRecordsToInheritedMessages(records: DshRecord[], sessionId: string): Message[] {
+  const boundary = dshInheritedEventCount(records);
+  const events = records.slice(1).filter((event) => numberOrZero(event.seq) < boundary);
+  const messages = (dshHeader(records)?.version || 0) >= 2
+    ? dshRecordsToMessagesV2AppendOrigin(events, sessionId)
+    : dshRecordsToMessagesLegacy(records, sessionId, events);
+  for (const message of messages) {
+    message.tokens = null;
+    message.metadata = { ...message.metadata, provenance: "inherited-parent-context" };
+  }
+  return messages;
 }
 
 function latestEvent(records: DshRecord[], type: string): DshRecord | null {

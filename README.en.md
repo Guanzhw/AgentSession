@@ -52,13 +52,19 @@ continuation to the end. Search still covers the complete available source.
 Ordinary tool processes load in chunks of up to 20 tools. Search and source
 links open the matching chunk directly; prose, collaboration entries and
 attention summaries stay in their recorded positions.
+The collaboration panel supports keyboard opening and navigation through tasks
+and sources. Opening moves focus into the panel; Escape or its close button
+closes it and returns focus to the opener. With reduced motion enabled, source
+highlighting stays static and toast/loading animations stop.
 Library titles prefer viewer custom titles or readable provider titles. When
 neither exists, Untitled plus a short ID identifies the entry without changing
 its canonical ID.
-Recorded inherited background in Codex child sessions has a separate collapsed
-disclosure, loaded in pages of 40 messages with a source-session link. All
-recorded background remains reachable even when the parent file is missing. It stays outside
-the default ToC and does not increase child message counts or request usage.
+Inherited background with a recorded parent-session reference in Codex and
+DeepSeek Harness child sessions has a separate collapsed disclosure, loaded in
+pages of 40 messages with a source-session link. Readers can continue to the end
+of the disclosed background retained in the child file even when the parent file
+is missing. These messages stay outside the default ToC and do not increase child
+message counts or request usage.
 Unsupported, unavailable, missing, and invalid evidence stays explicit rather
 than being rendered as observed zeroes.
 

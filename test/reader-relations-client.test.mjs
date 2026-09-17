@@ -73,8 +73,11 @@ function relationHarness(t, entries, { narrow = false, selected = '', enabled = 
     }
     const close = new Element({ readerCollaborationClose: '' }, 'button');
     overview.append(close);
+    const summary = new Element({}, 'summary');
+    summary.classes.add('reader-collaboration-overview-summary');
+    overview.append(summary);
     pane.append(overview);
-    return { pane, section, select, milestones, overview, close };
+    return { pane, section, select, milestones, overview, close, summary };
   };
   const original = makeSection(entries, selected);
   const workbench = new Element();
@@ -258,6 +261,39 @@ test('milestone focus opens the owning collaboration detail and the header trigg
   h.workbench.dispatchEvent({ type: 'click', target: h.toggle, preventDefault() {}, stopPropagation() {} });
   assert.equal(h.overview.open, false);
   assert.equal(h.toggle.attributes.get('aria-expanded'), 'false');
+});
+
+test('opening the task sidebar places keyboard focus inside and Escape returns to its trigger', (t) => {
+  const h = relationHarness(t, entries);
+  h.workbench.dispatchEvent({ type: 'click', target: h.toggle });
+  assert.equal(h.overview.open, true);
+  assert.deepEqual(h.close.focusOptions, { preventScroll: true });
+  let prevented = false;
+  let stopped = false;
+  h.workbench.dispatchEvent({ type: 'keydown', target: h.close, key: 'Escape', preventDefault() { prevented = true; }, stopPropagation() { stopped = true; } });
+  assert.equal(prevented, true);
+  assert.equal(stopped, true, 'the global Escape handler must not blur the restored trigger');
+  assert.equal(h.overview.open, false);
+  assert.deepEqual(h.toggle.focusOptions, { preventScroll: true });
+
+  h.workbench.dispatchEvent({ type: 'click', target: h.milestones[1].button });
+  assert.equal(h.overview.open, true);
+  h.workbench.dispatchEvent({ type: 'keydown', target: h.close, key: 'Escape', preventDefault() {}, stopPropagation() {} });
+  assert.deepEqual(h.milestones[1].button.focusOptions, { preventScroll: true });
+});
+
+test('native summary opens with keyboard focus and replaces the previous return target', (t) => {
+  const h = relationHarness(t, entries);
+  h.workbench.dispatchEvent({ type: 'click', target: h.toggle });
+  h.workbench.dispatchEvent({ type: 'click', target: h.close });
+  let prevented = false;
+  h.workbench.dispatchEvent({ type: 'click', target: h.summary, preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(h.overview.open, true);
+  assert.deepEqual(h.close.focusOptions, { preventScroll: true });
+  h.workbench.dispatchEvent({ type: 'keydown', target: h.close, key: 'Escape', preventDefault() {}, stopPropagation() {} });
+  assert.equal(h.overview.open, false);
+  assert.deepEqual(h.summary.focusOptions, { preventScroll: true });
 });
 
 test('task selection loads only its own preview, caches it and isolates late responses', async (t) => {
