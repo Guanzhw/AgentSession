@@ -1198,7 +1198,7 @@ function renderRawMessageEntries(messages: any, partsByMessage: any, provider: a
 }
 
 export function renderInheritedContextPage(view: InheritedContextView, provider: string, offset = 0) {
-  const mapped = buildPartsFromProviderMessages(view.messages, `inherited-${view.sourceSession.sessionId}-`, "inherited-context");
+  const mapped = buildPartsFromProviderMessages(view.messages, `inherited-${view.sourceSession?.sessionId ?? ""}-`, "inherited-context");
   const end = Math.min(offset + 40, mapped.messages.length);
   const entries = renderRawMessageEntries(mapped.messages.slice(offset, end), mapped.partsByMessage, provider, "inherited-msg");
   const label = end < view.total
@@ -1214,18 +1214,20 @@ export function renderInheritedContextPage(view: InheritedContextView, provider:
 }
 
 function renderInheritedContext(view: InheritedContextView | null, provider: string) {
-  if (!view?.messages?.length || !view.sourceSession?.sessionId) {
+  if (!view || !view.messages.length) {
     return "";
   }
   const page = renderInheritedContextPage(view, provider);
   const sourceHref = conversationSessionHref(view.sourceSession);
   if (!page.html) return "";
-  const sourceProvider = view.sourceSession.provider || provider;
-  const sourceAnchor = anchorId("session", view.sourceSession.sessionId);
+  const source = view.sourceSession;
+  const sourceLink = source
+    ? `<a data-reader-open data-reader-provider="${escapeHtml(source.provider)}" data-reader-session="${escapeHtml(source.sessionId)}" data-reader-anchor="${escapeHtml(anchorId("session", source.sessionId))}" href="${escapeHtml(sourceHref)}">${escapeHtml(t("detail.inherited_context_source"))}</a>`
+    : escapeHtml(t("detail.inherited_context_source_unknown"));
   return `<details class="inherited-context-disclosure" data-disclosure data-inherited-context>
     <summary class="inherited-context-summary">${escapeHtml(t("detail.inherited_context_title"))}<span class="inherited-context-count">${escapeHtml(page.label)}</span></summary>
     <div class="inherited-context-body">
-      <p class="inherited-context-note">${escapeHtml(t("detail.inherited_context_note"))} ${sourceHref ? `<a data-reader-open data-reader-provider="${escapeHtml(sourceProvider)}" data-reader-session="${escapeHtml(view.sourceSession.sessionId)}" data-reader-anchor="${escapeHtml(sourceAnchor)}" href="${escapeHtml(sourceHref)}">${escapeHtml(t("detail.inherited_context_source"))}</a>` : ""}</p>
+      <p class="inherited-context-note">${escapeHtml(t("detail.inherited_context_note"))} ${sourceLink}</p>
       <div class="messages inherited-context-messages" data-inherited-context-messages data-message-count="${page.shown}">
         ${page.html}
       </div>

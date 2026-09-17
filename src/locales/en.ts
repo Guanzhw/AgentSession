@@ -313,6 +313,7 @@ export const en = {
   "detail.inherited_context_title": "Recorded inherited context",
   "detail.inherited_context_note": "Background copied into this session; it is not an additional request or token total.",
   "detail.inherited_context_source": "Open recorded parent session",
+  "detail.inherited_context_source_unknown": "The source session was not recorded.",
   "detail.inherited_context_count": "{count} recorded messages",
   "detail.inherited_context_truncated": "Showing {shown} of {total} recorded messages",
   "detail.inherited_context_more": "More inherited messages",

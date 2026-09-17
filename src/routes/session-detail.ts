@@ -669,7 +669,7 @@ export function registerSessionDetail(
         if (inherited) {
           const raw = buildPartsFromProviderMessages(
             inherited.messages,
-            `inherited-${inherited.sourceSession.sessionId}-`,
+            `inherited-${inherited.sourceSession?.sessionId ?? ""}-`,
             "inherited-context"
           );
           part = [...raw.partsByMessage.values()].flat().find((candidate: any) => String(candidate.id) === partId) || null;

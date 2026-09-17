@@ -305,11 +305,12 @@ const deepseekHarness = {
 
   getInheritedContext(sessionId): InheritedContextView | null {
     const entry = sessionFiles.get(sessionId);
-    if (!entry?.session.parentId) return null;
+    if (!entry) return null;
     const messages = dshRecordsToInheritedMessages(entry.records, String(entry.session.id));
     if (!messages.length) return null;
     return {
-      sourceSession: { provider: "deepseek-harness", sessionId: String(entry.session.parentId) },
+      sourceSession: entry.session.parentId
+        ? { provider: "deepseek-harness", sessionId: String(entry.session.parentId) } : null,
       messages,
       total: messages.length,
       truncated: false

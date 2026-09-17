@@ -30,10 +30,21 @@ it must remain excluded from the child's owned history and owned search.
 The 2026-09-16 acceptance audit found that this previously covered long fields
 only within the first 40 inherited messages. The reader now pages the complete
 recorded background in batches of 40, including when the parent file is absent.
-Late-page field continuation and owned-scope exclusion have focused regression
-coverage. The real browser case has four inherited messages: its long-field
-continuation and owned-scope exclusion pass, while multi-page inherited
-acceptance relies on the 51-message fixture rather than a real local sample.
+`InheritedContextView.sourceSession` may also be null: a provider-recorded
+inherited boundary keeps its content readable, with an unknown-source label
+instead of an invented link. A recorded source ID retains its link even if its
+file is missing. Late-loaded pages use the mounted Reader's existing pane
+namespace; field continuation and owned-scope exclusion retain their scopes.
+
+Earlier real-browser acceptance covers four Codex inherited messages and 39
+DSH inherited messages. The latest DSH API regression returns all 39, with two
+owned messages unchanged. The current suite passes 883/883 and focused checks
+67/67. No real over-40 or unknown-source sample was found in the bounded local
+inspection. An isolated 85-message fixture passes browser continuation
+40 → 80 → 85, failed-request retry, complete late-field reading and scoped IDs
+after sibling switching. English/dark desktop and narrow, plus Chinese/light
+390 px checks pass. The real 39-message DSH browser regression remains separate
+from those fixture-backed boundaries.
 
 ## A. Search complete owned content
 

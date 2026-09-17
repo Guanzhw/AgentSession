@@ -1,4 +1,4 @@
-import { readerPaneAnchor, scopeReaderPane, unscopeReaderPane } from "./reader-pane-dom.js";
+import { readerPaneAnchor, scopeReaderFragment, scopeReaderPane, unscopeReaderPane } from "./reader-pane-dom.js";
 import { createReaderLocation, parseReaderLocation, stripReaderLocation } from "./reader-location.js";
 import { ensureReaderAnchor } from "./reader-process.js";
 
@@ -1000,7 +1000,12 @@ export function initSessionReader({ ft, showToast } = {}) {
       if (!button.isConnected || !pane.isConnected) return false;
       const wrapper = document.createElement("div");
       wrapper.innerHTML = data.html;
+      // The fragment must be mounted before scoping so its owned elements can
+      // resolve this inline pane rather than the document-wide ID namespace.
+      messages.append(wrapper);
+      scopeReaderFragment(pane, wrapper);
       [...wrapper.childNodes].forEach((message) => messages.append(message));
+      wrapper.remove();
       messages.dataset.messageCount = String(data.shown);
       const count = disclosure.querySelector(".inherited-context-count");
       if (count) count.textContent = data.label;

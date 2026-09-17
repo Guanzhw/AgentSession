@@ -203,7 +203,11 @@ Every adapter implements `ProviderAdapter`:
   diagnostic boundary; the finalized runtime cache does not retain the
   snapshot's raw-input closures. Codex implements this capability; other
   providers keep their existing accessors;
-- optional bounded `getInheritedContext()` disclosure when the provider records copied parent messages separately from the owned transcript;
+- optional `getInheritedContext()` disclosure when the provider records an
+  inherited boundary separately from the owned transcript. Return the complete
+  normalized prefix for shared bounded rendering. `sourceSession` may be null
+  when its canonical identity was not recorded; readable background must not
+  depend on knowing that identity;
 - optional `getContextChangeResult(sessionId, checkpointId)` for on-demand
   recorded context-change result bodies, using canonical protocol checkpoint
   IDs and the provider's owned-record boundary;
@@ -412,13 +416,16 @@ tools to AgentSession-MCP.
 ## DeepSeek Harness requirements
 
 `getInheritedContext()` discloses readable copied transcript messages when the
-header records a canonical `parentSession` and the stored seed boundary proves
-the prefix. It reuses the generation's append-origin message normalization,
+stored seed boundary proves the prefix. The optional header `parentSession`
+provides its source identity independently. It reuses the generation's append-origin message normalization,
 retains source message/call IDs and sequence metadata, and leaves inherited
 usage unattached. The accessor returns the full prefix for the shared reader's
 40-message pages and long-field continuation; a missing parent file does not
-erase the recorded reference. Seed markers without a parent ID do not invent
-a source, and lineage without copied messages does not create a disclosure.
+erase the recorded reference. When the parent ID is absent, return
+`sourceSession: null`: the Reader labels the source as unknown and still reads
+the prefix without inventing a link. Lineage without copied messages does not
+create a disclosure. Late-loaded pages reuse the mounted Reader's existing
+pane namespace, so copied message IDs remain local to that history.
 Owned messages, search, exports, ToC, protocol and token aggregation keep their
 existing selection. System/plugin context and replacement surfaces retain
 their existing system-prompt/protocol evidence paths.

@@ -71,12 +71,13 @@ or hidden parents do not hide their children. Returning from standalone reading
 restores filters, loaded branches, position and focus. Library reads session
 metadata; usage details remain in Usage and Reader. OpenCode Library metadata
 is read live on each request.
-Inherited background with a recorded parent-session reference in Codex and
-DeepSeek Harness child sessions has a separate collapsed disclosure, loaded in
-pages of 40 messages with a source-session link. Readers can continue to the end
-of the disclosed background retained in the child file even when the parent file
-is missing. These messages stay outside the default ToC and do not increase child
-message counts or request usage.
+Inherited background with a confirmed boundary in Codex and DeepSeek Harness
+child sessions has a separate collapsed disclosure, loaded in pages of 40
+messages to the end. Recorded source-session IDs retain their links even when
+the parent file is missing. DSH seeded background without a source ID remains
+readable and is labeled as having an unknown source. Later pages remain scoped
+to their mounted reader pane. These messages stay outside the default ToC and
+do not increase child message counts or request usage.
 For Codex's saved memory notes and session summaries, a collapsed
 “Saved from this history” section connects the input history to those outputs.
 It shows the input version, generation time, and matching job evidence when

@@ -312,6 +312,7 @@ export const zh = {
   "detail.inherited_context_title": "已记录的继承上下文",
   "detail.inherited_context_note": "复制到本会话的背景内容；不计为额外请求或 Token 总量。",
   "detail.inherited_context_source": "打开已记录的父会话",
+  "detail.inherited_context_source_unknown": "未记录来源会话。",
   "detail.inherited_context_count": "{count} 条已记录消息",
   "detail.inherited_context_truncated": "显示 {total} 条已记录消息中的 {shown} 条",
   "detail.inherited_context_more": "更多继承消息",

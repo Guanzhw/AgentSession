@@ -141,20 +141,44 @@ for (const version of [0, 1, 2, 3]) {
   });
 }
 
-test("DSH inherited disclosure needs recorded lineage and a readable prefix", async () => {
+test("DSH inherited disclosure needs a recorded prefix but not a source session identity", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "agentsession-dsh-inherited-missing-"));
   try {
-    const noParent = seededRecords(3, "without-parent", 2).records;
-    delete noParent[0].parentSession;
-    writeFixture(root, 3, "without-parent", noParent);
+    for (const version of [0, 1, 2, 3]) {
+      const id = `without-parent-v${version}`;
+      const noParent = seededRecords(version, id, 43).records;
+      delete noParent[0].parentSession;
+      writeFixture(root, version, id, noParent);
+    }
     const unseeded = seededRecords(0, "without-prefix", 2).records;
     unseeded[0].seedLength = 0;
     writeFixture(root, 0, "without-prefix", unseeded);
     initConfig(["--dsh-dir", root]);
     const { default: dsh } = await import("../dist/src/providers/deepseek-harness/adapter.js?inherited-missing");
-    assert.ok(dsh.getSession("without-parent"));
+    for (const version of [0, 1, 2, 3]) {
+      const id = `without-parent-v${version}`;
+      assert.equal(dsh.getSession(id).parentId, null);
+      const owned = structuredClone(dsh.getMessages(id));
+      const metrics = structuredClone(dsh.getSessionMetrics(id));
+      const protocol = structuredClone(dsh.getSessionProtocol(id));
+      const inherited = dsh.getInheritedContext(id);
+      assert.equal(inherited.sourceSession, null, "recorded seed boundaries do not invent a source session");
+      assert.equal(inherited.total, 45);
+      assert.deepEqual(inherited.messages, dshRecordsToInheritedMessages(parseDshSession(
+        path.join(root, "sessions", "fixture", id, version ? `session.v${version}.jsonl` : "session.jsonl")
+      ), id));
+      const first = renderInheritedContextPage(inherited, "deepseek-harness");
+      assert.equal(first.nextOffset, 40);
+      const last = renderInheritedContextPage(inherited, "deepseek-harness", first.nextOffset);
+      assert.equal(last.nextOffset, null);
+      assert.equal(last.shown, 45);
+      assert.match(last.html, /data-part-id="inherited--background-42:text"/);
+      assert.deepEqual(dsh.getMessages(id), owned);
+      assert.deepEqual(dsh.getSessionMetrics(id), metrics);
+      assert.deepEqual(dsh.getSessionProtocol(id), protocol);
+      assert.deepEqual(owned.map((message) => message.id), ["owned-user", "owned-assistant"]);
+    }
     assert.ok(dsh.getSession("without-prefix"));
-    assert.equal(dsh.getInheritedContext("without-parent"), null, "seed markers cannot invent a source session");
     assert.equal(dsh.getInheritedContext("without-prefix"), null, "parent lineage alone does not prove copied content");
     assert.equal(dsh.getInheritedContext("absent"), null);
   } finally {

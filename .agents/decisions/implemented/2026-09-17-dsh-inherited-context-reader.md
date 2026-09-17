@@ -14,6 +14,10 @@ recorded prefix through the shared disclosure and continuation path.
 
 ## Decision
 
+The later [unknown-source decision](2026-09-17-inherited-background-without-source.md)
+supersedes this record's source-ID prerequisite while preserving its prefix
+selection and owned-history isolation.
+
 Expose `ProviderAdapter.getInheritedContext()` from the DSH adapter without
 changing the shared schema. The header's recorded `parentSession` supplies the
 canonical source reference; no parent file or generation link is inferred.

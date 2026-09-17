@@ -80,10 +80,11 @@ export interface Message {
  * projections.
  */
 export interface InheritedContextView {
+  /** The prefix can be recorded even when its source session identity is absent. */
   sourceSession: {
     provider: ProviderId;
     sessionId: string;
-  };
+  } | null;
   messages: Message[];
   total: number;
   truncated: boolean;

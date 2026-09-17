@@ -97,9 +97,19 @@ function readerHarness(t, initialHref = '/fixture/session/root?view=history#root
     get firstElementChild() { return this.children[0] || null; }
     get lastElementChild() { return this.children.at(-1) || null; }
     set innerHTML(html) {
-      this.replaceChildren(html.startsWith('pane:')
-        ? panes.get(html.slice('pane:'.length))
-        : new Element({ readerEventEvidence: '', readerEventId: html.slice('event:'.length) }));
+      if (html.startsWith('pane:')) {
+        this.replaceChildren(panes.get(html.slice('pane:'.length)));
+      } else if (html.startsWith('inherited:')) {
+        const message = new Element({ partId: 'parent-message:text', contentScope: 'inherited-context' }, 'parent-message');
+        const known = new Element();
+        known.setAttribute('aria-labelledby', 'parent-message unknown-source');
+        const source = new Element();
+        source.setAttribute('href', '#parent-message');
+        message.append(known, source);
+        this.replaceChildren(message);
+      } else {
+        this.replaceChildren(new Element({ readerEventEvidence: '', readerEventId: html.slice('event:'.length) }));
+      }
     }
   }
 
@@ -1390,4 +1400,28 @@ test('inherited continuation appends in its own disclosure and a detached respon
     '/api/fixture/session/child/inherited-context?offset=40',
     '/api/fixture/session/child/inherited-context?offset=80'
   ]);
+});
+
+test('mounted inherited pages scope copied IDs and IDREFs to their inline pane without rewriting unknown references', async (t) => {
+  const h = readerHarness(t);
+  h.root.append(h.makeElement({}, 'parent-message'));
+  h.addRecordedChild();
+  await h.reader.openPane('fixture', 'child');
+  const disclosure = h.makeElement({ inheritedContext: '' });
+  const messages = h.makeElement({ inheritedContextMessages: '', messageCount: '40' });
+  const button = h.makeElement({ inheritedContextMore: '', nextOffset: '40' });
+  disclosure.append(messages, button);
+  h.child.append(disclosure);
+  h.inheritedResponses.push({ ok: true, html: 'inherited:page', shown: 41, nextOffset: null, label: '41 of 41' });
+  await h.click(button);
+  const message = messages.querySelector('[data-part-id="parent-message:text"]');
+  const known = message.children[0];
+  const source = message.children[1];
+  const scoped = `reader-scope-${encodeURIComponent('fixture\0child')}--parent-message`;
+  assert.equal(message.id, scoped);
+  assert.equal(message.dataset.readerCanonicalAnchor, 'parent-message');
+  assert.equal(known.getAttribute('aria-labelledby'), `${scoped} unknown-source`);
+  assert.equal(decodeURIComponent(source.getAttribute('href').slice(1)), scoped);
+  assert.equal(h.root.querySelector('#parent-message').id, 'parent-message');
+  assert.equal(message.closest('[data-reader-pane]'), h.child);
 });
