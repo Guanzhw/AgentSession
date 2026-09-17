@@ -47,7 +47,7 @@ function loopEventToPart(event: AgentLoopEvent, turnId: string, sessionId: strin
       sessionId,
       type: "text",
       tool: null,
-      data: { type: "text", text: event.text },
+      data: { type: "text", text: event.text, ...(event.questionAnswers ? { questionAnswers: event.questionAnswers } : {}) },
       timeStart: event.timeStart,
       timeEnd: event.timeEnd,
       childSessions: []

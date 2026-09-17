@@ -47,6 +47,13 @@ export type MessageRole = "user" | "assistant" | "system" | "tool";
  */
 export type MessagePresentationPhase = "commentary" | "final";
 
+/** Recorded user question-answer content, presented beside unchanged raw text. */
+export interface QuestionAnswer {
+  id: string;
+  question: string;
+  answer: string;
+}
+
 export interface Message {
   id: string;
   sessionId: string;
@@ -60,6 +67,7 @@ export interface Message {
   tokens: TokenUsage | null;
   metadata: Record<string, unknown> | null;
   presentationPhase?: MessagePresentationPhase;
+  questionAnswers?: QuestionAnswer[];
 }
 
 /**

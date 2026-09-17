@@ -2,7 +2,7 @@ import { closeSync, fstatSync, openSync, readFileSync, readSync } from "node:fs"
 import { createHash } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import { zstdDecompressSync } from "node:zlib";
-import type { Message, RawSession } from "../interface.js";
+import type { Message, QuestionAnswer, RawSession } from "../interface.js";
 import { asNumber } from "../shared/parser.js";
 
 export const CODEX_MAX_DECOMPRESSED_ROLLOUT_BYTES = 64 * 1024 * 1024;
@@ -38,6 +38,22 @@ function codexPresentationPhase(payload: any): Message["presentationPhase"] {
   if (payload?.phase === "commentary") return "commentary";
   if (payload?.phase === "final_answer") return "final";
   return undefined;
+}
+
+function codexQuestionAnswers(text: string): QuestionAnswer[] | undefined {
+  const envelope = /^\s*<send_user_message_question_reply>\s*([\s\S]*?)\s*<\/send_user_message_question_reply>\s*$/.exec(text);
+  if (!envelope) return undefined;
+  let value: unknown;
+  try {
+    value = JSON.parse(envelope[1]);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(value) || !value.length || !value.every((item) => item
+    && typeof item.questionItemId === "string"
+    && typeof item.question === "string"
+    && typeof item.answer === "string")) return undefined;
+  return value.map((item) => ({ id: item.questionItemId, question: item.question, answer: item.answer }));
 }
 
 type CodexMessageProvenance = "session" | "inherited-parent-context";
@@ -759,6 +775,7 @@ function recordsToMessagesBySelection(
         sessionId,
         role: "user",
         content: responseUserText,
+        questionAnswers: codexQuestionAnswers(responseUserText),
         thinking: null,
         toolName: null,
         toolInput: null,

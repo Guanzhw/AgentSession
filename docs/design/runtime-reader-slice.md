@@ -1,8 +1,9 @@
 # Unified reader: first production slice
 
 Status: first prose-first production preview implemented and its inline
-reading flow verified on real data; user visual acceptance and complete
-site-wide regression remain open, updated 2026-09-17. This is the concrete interface
+reading flow verified on real data. The latest site-wide regression passed;
+user visual acceptance and remaining scenario checks stay open, updated
+2026-09-17. This is the concrete interface
 contract for Stage 2 of the [reading roadmap](runtime-reading-model.md).
 The [product presentation specification](runtime-presentation-contract.md)
 defines the current content and interaction target; this document owns the
@@ -69,7 +70,8 @@ normalized owned document, never its family. It returns `provider`, `sessionId`,
 `request`, `reply` and an escaped, localized `html` fragment. Each slot contains
 availability, text (at most 400 characters), phase, canonical source reference
 and an explicit `no-readable-content` reason when absent. Only text parts are
-eligible; tools, reasoning and inherited background are excluded. The request
+eligible; recorded question-answer presentations use their readable text.
+Tools, reasoning and inherited background are excluded. The request
 is the first recorded owned user text, not an inferred task purpose. The reply
 is the latest recorded final text, otherwise the latest assistant text, with
 that distinction visible. An excerpt is not evidence of parent-side delivery.
@@ -164,7 +166,33 @@ expanded narrow content. Run the full test/review suite, real provider/API and
 browser acceptance before publishing the production slice. The private
 prototype is evidence for composition, not a substitute for these checks.
 
-### Page-owner navigation checkpoint, 2026-09-17
+### Nested reading and recorded question-answer checkpoint, 2026-09-17
+
+- Final `npm test`: 758/758. Navigation/location tests: 59/59. Independent
+  review, main-agent diff inspection, `npm run review`, full live `qa:e2e`
+  (no browser errors), and Windows binary build/smoke passed.
+- Seven installed-provider Reader/page/preview/API samples passed with no
+  protocol validation errors or warnings; four missing-resource checks returned
+  404. OpenClaw and Pi samples are local installation smoke records.
+- Real root/child/grandchild at 390px now share 314.67px prose width. Ancestor
+  return preserves scroll, focus and disclosures; copied URLs without a saved
+  position return to the visible opener. Back restores all panes without
+  duplicate DOM IDs. Desktop document/client width is 1265px at 1280px.
+- A real two-question reply displays readable questions and answers in one
+  user message and its ToC. The original 440-character record remains intact;
+  its 146-character presentation has stable source IDs and content/search
+  offsets. Opening raw text does not duplicate search hits. Desktop, 390px and
+  refresh passed. Long question-answer continuation and bounded task previews
+  are regression-tested; they lack corresponding real long-reply acceptance.
+- Source ownership is recorded in the [question-answer decision](../../.agents/decisions/implemented/2026-09-17-recorded-question-answer-presentation.md)
+  and [nested-reading decision](../../.agents/decisions/implemented/2026-09-17-reader-nested-width.md).
+  Private screenshots and logs remain under ignored `tmp/`.
+- A separate huge active Codex history exposed minute-level API/page loading.
+  P9 remains open: measure source parsing, family construction and protocol
+  rendering, then verify large-history latency and process responsiveness.
+  Smaller-history success does not close that gap or final visual acceptance.
+
+### Earlier page-owner navigation checkpoint, 2026-09-17
 
 - `npm test` passes 745/745; focused navigation/location tests pass 58/58.
   Independent review and main-agent diff inspection found no blocking issue.
@@ -187,7 +215,7 @@ prototype is evidence for composition, not a substitute for these checks.
   tested. Local evidence is in ignored `tmp/reader-owner-*-20260917.log` and
   `tmp/runtime-acceptance-20260917/`; private history is not committed.
 
-### Current validation checkpoint
+### Earlier compact-task validation checkpoint
 
 - The compact-task integrated suite passed 715 tests on 2026-09-17. This count is
   engineering verification, not final acceptance of the selected visual option. Governance/typechecking and

@@ -1,5 +1,6 @@
 import { escapeHtml, renderMarkdown } from "./markdown.js";
-import { resolveProgressiveField } from "./views/components.js";
+import { questionAnswersText } from "./providers/shared/question-answers.js";
+import type { QuestionAnswer } from "./providers/interface.js";
 import { anchorId } from "./views/anchors.js";
 import { t } from "./i18n.js";
 
@@ -49,6 +50,7 @@ interface ReaderPreviewPart {
   data: {
     type: string;
     text?: unknown;
+    questionAnswers?: QuestionAnswer[];
   };
 }
 
@@ -92,8 +94,7 @@ function readablePart(document: ReaderPreviewDocument, message: ReaderPreviewMes
     const partScope = part.contentScope || messageScope;
     if (partScope !== "owned") continue;
     if (part.data.type !== "text") continue;
-    const resolved = resolveProgressiveField(part.data, "text", "owned");
-    const text = boundedText(resolved?.value);
+    const text = boundedText(part.data.questionAnswers ? questionAnswersText(part.data.questionAnswers) : part.data.text);
     if (text) return { partId, text };
   }
   return null;

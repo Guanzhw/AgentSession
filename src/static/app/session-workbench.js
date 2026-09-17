@@ -171,6 +171,7 @@ if (sessionWorkbench) {
         if (parent?.closest("[data-reader-pane]") === getSearchPane()
           && parent?.closest(".message-turn") === turn
           && !parent.closest("[data-inherited-context]")
+          && !parent.closest("[data-search-exclude]")
           && !parent.closest("mark[data-session-search-highlight]")
           && !["SCRIPT", "STYLE"].includes(parent.tagName)) {
           nodes.push(node);

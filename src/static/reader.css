@@ -1,3 +1,12 @@
+/* Recorded question-answer presentation; raw provider text remains available. */
+.question-answers .question-answer-chunk { margin: 0; }
+.question-answers .question-answer-chunk dt { margin: 1rem 0 .35rem; color: var(--text-secondary); font-size: .8rem; font-weight: 600; }
+.question-answers .question-answer-chunk dt:first-child { margin-top: 0; }
+.question-answers .question-answer-value { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
+.question-answer-raw { margin-top: 1rem; color: var(--text-secondary); font-size: .85rem; }
+.question-answer-raw summary { cursor: pointer; }
+.question-answer-raw pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+
 /* Reader presentation: a continuous document with evidence kept close to
    the passage that names it.  This file is loaded only for reader pages. */
 body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary); }
@@ -27,6 +36,9 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
 .session-workbench[data-session-reader] [data-reader-pane] {
   min-width: 0;
 }
+
+/* Reader contents follow the prose width instead of a resizable sidebar. */
+.session-workbench[data-session-reader] .toc-resize-handle { display: none; }
 
 .session-workbench[data-session-reader] .reader-back {
   padding: 6px 10px;
@@ -552,6 +564,42 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
   font-size: 12px;
 }
 
+.session-workbench[data-session-reader] .reader-ancestor-path {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  padding: 6px 0;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--reader-line);
+  background: var(--reader-surface);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.session-workbench[data-session-reader] .reader-ancestor-path > button {
+  max-width: 18ch;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 1px solid var(--reader-line);
+  border-radius: 5px;
+  background: var(--reader-surface);
+  color: var(--reader-accent);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+.session-workbench[data-session-reader] .reader-ancestor-path > [aria-current] {
+  flex: 1 1 14ch;
+  min-width: 0;
+  padding: 6px 0;
+  color: var(--reader-muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
 .session-workbench[data-session-reader] .reader-inline-pane-close {
   padding: 5px 9px;
   border: 1px solid var(--reader-line);
@@ -563,6 +611,7 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
 }
 .session-workbench[data-session-reader] .reader-inline-pane-title { flex: 1 1 100%; margin: 0 0 4px; font-size: 16px; line-height: 1.5; color: var(--reader-ink); overflow-wrap: anywhere; }
 .session-workbench[data-session-reader] .reader-inline-pane-standalone { color: var(--reader-accent); }
+.session-workbench[data-session-reader] [data-reader-open] { scroll-margin-top: var(--session-anchor-offset); }
 .session-workbench[data-session-reader] .reader-inline-pane > [data-reader-pane] > .reader-pane-grid { display: block; }
 .session-workbench[data-session-reader] .reader-inline-pane > [data-reader-pane] > .reader-pane-grid > .session-toc {
   position: static;
@@ -581,7 +630,7 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
   overflow: auto;
 }
 
-.session-workbench[data-session-reader] :is(.reader-collaboration-overview-summary, [data-reader-lane-select], [data-reader-lane-focus], [data-reader-task-select], .message-usage summary, .reader-inline-pane-close, .reader-collaboration-close, .reader-branch summary, .reader-observations-expanded summary, .reader-inspector-disclosure summary):focus-visible {
+.session-workbench[data-session-reader] :is(.reader-collaboration-overview-summary, [data-reader-lane-select], [data-reader-lane-focus], [data-reader-task-select], [data-reader-ancestor-return], .message-usage summary, .reader-inline-pane-close, .reader-collaboration-close, .reader-branch summary, .reader-observations-expanded summary, .reader-inspector-disclosure summary):focus-visible {
   outline: 2px solid var(--reader-accent);
   outline-offset: 3px;
 }
@@ -591,6 +640,15 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
   .session-workbench[data-session-reader] [data-reader-pane] > .reader-pane-grid > .reader-toc-disclosure { position: static; order: -1; width: 100%; max-height: none; }
   .session-workbench[data-session-reader] [data-reader-pane] > .reader-pane-grid > .session-toc { position: static; order: -1; width: 100%; max-height: 92px; }
   .session-workbench[data-session-reader] [data-reader-pane] > .reader-pane-grid > .reader-pane-main { order: 0; width: 100%; max-width: 74ch; }
+  .session-workbench[data-session-reader] [data-reader-pane] .conversation-thread { padding-left: 0; }
+  .session-workbench[data-session-reader] .reader-inline-pane {
+    margin-inline: 0;
+    padding-inline: 0;
+    border-inline: 0;
+    border-radius: 0;
+    background: var(--reader-surface);
+  }
+  .session-workbench[data-session-reader] .reader-ancestor-path > button { max-width: 14ch; }
 }
 
 @media (max-width: 1099px) {
@@ -610,7 +668,6 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
   .session-workbench[data-session-reader] .reader-milestone-body { grid-template-columns: minmax(0, 1fr); padding: 7px 8px; }
   .session-workbench[data-session-reader] .reader-milestone-links { justify-content: flex-start; }
   .session-workbench[data-session-reader] .reader-collaboration { width: 100%; }
-  .session-workbench[data-session-reader] .reader-inline-pane { margin-inline: -4px; padding-inline: 9px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

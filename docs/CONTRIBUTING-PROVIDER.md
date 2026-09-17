@@ -216,6 +216,15 @@ tool name/input/result, tokens, metadata) explicitly, and keep reasoning,
 assistant text, tool calls, and tool results inside their source response
 boundary.
 
+Recorded question replies can attach optional `Message.questionAnswers`
+(`id`, `question`, `answer`) after provider-owned recognition. Codex recognizes
+complete `send_user_message_question_reply` envelopes in recorded `user.text`
+messages. Raw `content`, text parts, and source IDs remain unchanged; tree,
+document, and JSON export may include the additive typed projection. Reader
+body, ToC, and search use the readable presentation, with a `question-answer`
+continuation field; `text` still resolves the original record. Unknown shapes
+stay ordinary text, and question IDs alone do not establish a tool relationship.
+
 ## Choose a reference adapter
 
 | Source shape | Reference | Boundary to preserve |

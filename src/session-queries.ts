@@ -164,7 +164,8 @@ export function buildPartsFromProviderMessages(providerMessages: any[] = [], idP
       }
       : {
         type: "text",
-        text: source.content || ""
+        text: source.content || "",
+        ...(source.questionAnswers ? { questionAnswers: source.questionAnswers } : {})
       };
 
     const parts = [];

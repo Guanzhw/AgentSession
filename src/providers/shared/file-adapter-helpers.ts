@@ -2,6 +2,7 @@ import { statSync } from "node:fs";
 import path from "node:path";
 import type { ProviderAdapter, DailyTokenStat, Message, SearchResult } from "../interface.js";
 import { createSnippet, matchesSearchQuery } from "./parser.js";
+import { questionAnswersText } from "./question-answers.js";
 
 export interface SessionFileDescriptor {
   sessionId: string;
@@ -332,12 +333,13 @@ export function searchNormalizedMessages(
     for (const message of entry.messages) {
       if (results.length >= limit) break;
       if (message.role !== "user" && message.role !== "assistant") continue;
-      if (!matchesSearchQuery(message.content, query)) continue;
+      const content = message.questionAnswers ? questionAnswersText(message.questionAnswers) : message.content;
+      if (!matchesSearchQuery(content, query)) continue;
       results.push({
         sessionId: entry.session.id,
         messageId: message.id,
         role: message.role,
-        snippet: createSnippet(message.content, query),
+        snippet: createSnippet(content, query),
         timestamp: message.timestamp
       });
     }

@@ -1,6 +1,7 @@
 import { t } from "../i18n.js";
 import { escapeHtml } from "../markdown.js";
 import { buildPartsFromProviderMessages } from "../session-queries.js";
+import { questionAnswersText } from "../providers/shared/question-answers.js";
 import type { SessionPartNode, SessionTree } from "../providers/opencode/session-tree.js";
 import { isSubagentTool, mergeToolMetadata } from "../providers/shared/subagent-tools.js";
 import { formatDuration, formatLocalizedDurationMs, formatTime, formatTokens, messageBubble, messageHeader, reasoningBlock, todoList, toolCallBlock } from "./components.js";
@@ -195,12 +196,12 @@ function messageToolName(message: any) {
 
 function messageText(message: any) {
   const textPart = message.parts.find((part: any) => part.type === "text" && part.data?.text);
-  return compactText(textPart?.data?.text || message.data?.summary || messageToolName(message) || message.id, 86);
+  return compactText((textPart?.data?.questionAnswers ? questionAnswersText(textPart.data.questionAnswers) : textPart?.data?.text) || message.data?.summary || messageToolName(message) || message.id, 86);
 }
 
 function tocMessageText(message: any) {
   const textPart = message.parts.find((part: any) => part.type === "text" && compactText(part.data?.text));
-  return compactText(textPart?.data?.text || "", 86);
+  return compactText(textPart?.data?.questionAnswers ? questionAnswersText(textPart.data.questionAnswers) : textPart?.data?.text || "", 86);
 }
 
 function hasVisibleMessagePart(message: any) {
@@ -654,6 +655,7 @@ function renderPart(messageData: any, partData: any, partId: any, reasoningMarku
     }
     return messageBubble(messageData.role, partData.text, {
       partId,
+      questionAnswers: partData.questionAnswers,
       model: messageModelLabel(messageData),
       tokens: messageData.tokens,
       tokenRequests: messageData.tokenRequests,

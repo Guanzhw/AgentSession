@@ -314,8 +314,11 @@ export function initSessionReader({ ft, showToast } = {}) {
   };
 
   const restoreInlineOrigin = (record) => {
-    if (!record?.originState) return;
     const opener = record.returnOrigin || record.origin;
+    if (!record.originState) {
+      revealAnchor(opener);
+      return;
+    }
     let openerDetails = opener?.closest?.("details");
     while (openerDetails) {
       openerDetails.open = true;
@@ -365,6 +368,31 @@ export function initSessionReader({ ft, showToast } = {}) {
     wrapper.className = "reader-inline-pane";
     wrapper.dataset.readerInlinePane = "true";
     wrapper.dataset.readerInlineKey = key;
+    const path = document.createElement("nav");
+    path.className = "reader-ancestor-path";
+    path.setAttribute("aria-label", ft?.("detail.reader_history_path") || "History path");
+    const ancestors = [];
+    for (let ancestor = parentPane, descendantKey = key; ancestor;) {
+      ancestors.unshift({ pane: ancestor, closeKey: descendantKey });
+      descendantKey = keyOf(ancestor);
+      ancestor = inlinePanes.get(descendantKey)?.parentPane;
+    }
+    ancestors.forEach(({ pane: ancestor, closeKey }) => {
+      const back = document.createElement("button");
+      back.type = "button";
+      back.dataset.readerAncestorReturn = closeKey;
+      back.textContent = ancestor.dataset.readerTitle;
+      back.title = ancestor.dataset.readerTitle;
+      back.setAttribute("aria-label", (ft?.("detail.reader_return_to") || "Return to {title}")
+        .replace("{title}", ancestor.dataset.readerTitle));
+      back.addEventListener("click", () => closeInlinePane(closeKey));
+      path.append(back);
+    });
+    const current = document.createElement("span");
+    current.setAttribute("aria-current", "location");
+    current.textContent = pane.dataset.readerTitle;
+    current.title = pane.dataset.readerTitle;
+    path.append(current);
     const controls = document.createElement("div");
     controls.className = "reader-inline-pane-controls";
     const title = document.createElement("h3");
@@ -387,12 +415,9 @@ export function initSessionReader({ ft, showToast } = {}) {
       placement.textContent = ft?.("detail.reader_inline_unplaced") || "No recorded position";
       controls.append(placement);
     }
-    wrapper.append(controls, pane);
-    const originState = entry.originState || {
-      scrollX: window.scrollX,
-      scrollY: window.scrollY,
-      focus: focusIdentity(document.activeElement, parentPane)
-    };
+    wrapper.append(path, controls, pane);
+    // Copied URLs carry the recorded path, not a previous reading position.
+    const originState = entry.originState || null;
     if (origin?.after) origin.after(wrapper);
     else parentPane?.append?.(wrapper);
     bindContextResultDisclosures(pane);

@@ -2,7 +2,9 @@ import { escapeHtml, renderMarkdown } from "../markdown.js";
 import { t, getLocale } from "../i18n.js";
 import { anchorId } from "./anchors.js";
 import { resolveLibraryTitle } from "../session-title.js";
+import { questionAnswerFields, questionAnswersText } from "../providers/shared/question-answers.js";
 import type {
+  QuestionAnswer,
   ContextChangeResult,
   ContextChangeRetainedEntry,
   ContextChangeRetainedGroup
@@ -45,9 +47,13 @@ const TOOL_CHUNK_LIMIT = 3000;
 const REASONING_CHUNK_LIMIT = 6000;
 const MESSAGE_CHUNK_LIMIT = 12000;
 
-type ProgressiveFormat = "markdown" | "plain" | "auto";
+type ProgressiveFormat = "markdown" | "plain" | "auto" | "question-answer";
 
-export type ProgressiveField = "text" | "reasoning" | "input" | "output";
+export type ProgressiveField = "text" | "reasoning" | "input" | "output" | "question-answer";
+
+export function progressiveText(value: any, format: ProgressiveFormat): string {
+  return format === "question-answer" ? questionAnswersText(value) : stringifyProgressiveValue(value);
+}
 
 export interface ContextResultContentIdentity {
   provider: string;
@@ -60,10 +66,13 @@ export interface ContextResultContentIdentity {
 
 export function resolveProgressiveField(data: any, field: ProgressiveField, contentScope = "owned", messageRole = "") {
   if (!data || typeof data !== "object") return null;
+  if (field === "question-answer" && data.type === "text" && data.questionAnswers) {
+    return { value: data.questionAnswers, format: "question-answer" as const, limit: MESSAGE_CHUNK_LIMIT };
+  }
   if (field === "text" && data.type === "text") {
     return {
       value: data.text || "",
-      format: contentScope === "inherited-context" && messageRole === "system" ? "plain" as const : "markdown" as const,
+      format: data.questionAnswers || (contentScope === "inherited-context" && messageRole === "system") ? "plain" as const : "markdown" as const,
       limit: MESSAGE_CHUNK_LIMIT
     };
   }
@@ -117,10 +126,19 @@ function renderProgressiveHtml(text: string, format: ProgressiveFormat, sourceWa
 
 /** Resolve the exact format used by bounded content rendering for search/UI correspondence. */
 export function resolveProgressiveRenderFormat(value: any, format: ProgressiveFormat): "markdown" | "plain" {
-  const text = stringifyProgressiveValue(value);
+  const text = progressiveText(value, format);
   return format === "markdown" || (format === "auto" && typeof value === "string" && looksLikeMarkdown(text))
     ? "markdown"
     : "plain";
+}
+
+function renderQuestionAnswerChunk(questionAnswers: QuestionAnswer[], start: number, end: number): string {
+  return `<dl class="question-answer-chunk">${questionAnswerFields(questionAnswers).map((field) => {
+    const fieldEnd = field.offset + field.text.length;
+    if (fieldEnd < start || field.offset >= end || (fieldEnd === start && field.text)) return "";
+    const text = field.text.slice(Math.max(0, start - field.offset), end - field.offset);
+    return `<dt data-search-exclude>${escapeHtml(t(field.kind === "question" ? "detail.question_answer_question" : "detail.question_answer_answer"))}</dt><dd class="question-answer-value">${escapeHtml(text)}</dd>`;
+  }).join("")}</dl>`;
 }
 
 export function renderProgressiveContent(
@@ -129,10 +147,12 @@ export function renderProgressiveContent(
   offset = 0,
   limit = TOOL_CHUNK_LIMIT
 ) {
-  const text = stringifyProgressiveValue(value);
+  const text = progressiveText(value, format);
   const page = takeChunk(text, offset, limit);
   return {
-    html: renderProgressiveHtml(text, format, typeof value === "string", page.chunk),
+    html: format === "question-answer"
+      ? renderQuestionAnswerChunk(value, offset, page.nextOffset ?? text.length)
+      : renderProgressiveHtml(text, format, typeof value === "string", page.chunk),
     nextOffset: page.nextOffset,
     totalLength: text.length
   };
@@ -240,7 +260,7 @@ function progressiveContainer(
   limit: number,
   label: string,
   partId: string,
-  field: "text" | "reasoning" | "input" | "output",
+  field: ProgressiveField,
   contentScope = ""
 ) {
   const page = renderProgressiveContent(value, format, 0, limit);
@@ -686,7 +706,15 @@ export function messageBubble(role: any, content: any, meta: any = {}) {
   const normalizedRole = String(role || "").toLowerCase();
   const humanRole = ["user", "agent", "assistant"].includes(normalizedRole);
   const progressiveSystem = normalizedRole === "system" && Boolean(meta.partId);
-  const body = humanRole
+  const body = meta.questionAnswers
+    ? `<div class="message-body question-answers" data-content-field="question-answer">${progressiveContainer(
+      meta.questionAnswers, "question-answer", MESSAGE_CHUNK_LIMIT, t("progressive.show_more"),
+      meta.partId || "", "question-answer", meta.contentScope || ""
+    )}</div><details class="question-answer-raw" data-search-exclude><summary>${escapeHtml(t("detail.question_answer_raw"))}</summary>${progressiveContainer(
+      content || "", "plain", MESSAGE_CHUNK_LIMIT, t("progressive.show_more"),
+      meta.partId || "", "text", meta.contentScope || ""
+    )}</details>`
+    : humanRole
     ? `<div class="message-body markdown">${progressiveContainer(
       content || "",
       "markdown",

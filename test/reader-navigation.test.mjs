@@ -8,6 +8,8 @@ import { createReaderLocation, parseReaderLocation } from '../src/static/app/rea
 test('unplaced inline history has browser-localized position labels', () => {
   assert.equal(__I18N__.en['detail.reader_inline_unplaced'], 'No recorded position');
   assert.equal(__I18N__.zh['detail.reader_inline_unplaced'], '未记录发生位置');
+  assert.equal(__I18N__.en['detail.reader_history_path'], 'History path');
+  assert.equal(__I18N__.zh['detail.reader_return_to'], '返回 {title}');
 });
 
 function readerHarness(t, initialHref = '/fixture/session/root?view=history#root-source', initialEvents = [], {
@@ -715,6 +717,12 @@ test('a copied child location rebuilds the recorded child without browser histor
   assert.deepEqual(copied.requests, ['/api/fixture/session/child/reader']);
   assert.equal(copied.snapshot().entries.length, 1, 'Restoring a copied location adds no history entry');
   assert.deepEqual(copied.navigations, []);
+  const ancestorReturn = copied.child.parentElement.querySelector('[data-reader-ancestor-return]');
+  await ancestorReturn.dispatchEvent({ type: 'click' });
+  await copied.flush();
+  assert.deepEqual(copied.reader.getInlinePanes(), []);
+  assert.equal(copied.document.activeElement, copied.initialMarkup.open);
+  assert.equal(copied.window.scrollY, 50, 'Without a saved position, return reveals the recorded opener');
 });
 
 test('copied grandchild native and scalar sources rebuild their recorded ancestor path', async (t) => {
@@ -849,6 +857,54 @@ test('nested inline children relocate cached panes and scoped source links stay 
   assert.equal(h.reader.getActivePane(), h.root);
   assert.equal(h.document.activeElement.dataset.readerCanonicalAnchor, 'child-source');
   assert.equal(h.document.activeElement.parentElement, h.child);
+});
+
+test('ancestor paths close descendants and restore each opener without losing retained history', async (t) => {
+  const h = readerHarness(t, undefined, [], { narrow: true });
+  const openChild = h.addRecordedChild();
+  h.window.scrollY = 240;
+  openChild.focus();
+  await h.click(openChild);
+  await h.flush();
+  const openGrandchild = h.addRecordedChild(h.child, 'grandchild');
+  const grandchild = h.makePane('grandchild');
+  const retainedTool = h.makeElement({});
+  retainedTool.tagName = 'DETAILS';
+  retainedTool.open = true;
+  h.child.append(retainedTool);
+  h.window.scrollY = 860;
+  openGrandchild.focus();
+  await h.click(openGrandchild);
+  await h.flush();
+
+  const path = grandchild.parentElement.querySelector('.reader-ancestor-path');
+  const returns = path.querySelectorAll('[data-reader-ancestor-return]');
+  assert.equal(path.getAttribute('aria-label'), 'History path');
+  assert.deepEqual(returns.map((button) => button.textContent), ['root', 'child']);
+  assert.equal(path.lastElementChild.getAttribute('aria-current'), 'location');
+  assert.equal(path.lastElementChild.textContent, 'grandchild');
+  await returns[1].dispatchEvent({ type: 'click' });
+  await h.flush();
+  assert.deepEqual(h.reader.getInlinePanes(), [h.child]);
+  assert.equal(h.document.activeElement, openGrandchild);
+  assert.equal(h.window.scrollY, 860);
+  assert.equal(retainedTool.open, true);
+  assert.equal(h.location.pathname, '/fixture/session/root');
+
+  await h.browserBack();
+  assert.deepEqual(h.reader.getInlinePanes(), [h.child, grandchild]);
+  const rootReturn = grandchild.parentElement.querySelector('[data-reader-ancestor-return]');
+  await rootReturn.dispatchEvent({ type: 'click' });
+  await h.flush();
+  assert.deepEqual(h.reader.getInlinePanes(), []);
+  assert.equal(h.document.activeElement, openChild);
+  assert.equal(h.window.scrollY, 240);
+  await h.browserBack();
+  assert.deepEqual(h.reader.getInlinePanes(), [h.child, grandchild]);
+  assert.equal(retainedTool.open, true);
+  await h.browserForward();
+  assert.deepEqual(h.reader.getInlinePanes(), []);
+  assert.deepEqual(h.requests, ['/api/fixture/session/child/reader', '/api/fixture/session/grandchild/reader']);
 });
 
 test('inline scoping rewrites no-id local links, IDREFs, and the pane self-anchor', async (t) => {

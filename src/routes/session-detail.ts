@@ -18,7 +18,7 @@ import { renderSessionPage, renderSessionReaderPane, renderInheritedContextPage,
 import type { SessionProtocol } from "../providers/shared/session-protocol.js";
 import type { ContextChangeResult } from "../providers/interface.js";
 import { decorateRuntimeTransformationEvidence, projectRuntimeLanePresentation, renderRuntimeEvents, renderRuntimeRunPage, renderRuntimeWorkbench } from "../views/runtime-workbench.js";
-import { renderContextChangeResult, renderProgressiveContent, resolveProgressiveField, resolveProgressiveRenderFormat, stringifyProgressiveValue } from "../views/components.js";
+import { renderContextChangeResult, renderProgressiveContent, resolveProgressiveField, resolveProgressiveRenderFormat, progressiveText, type ProgressiveField } from "../views/components.js";
 import { providerRenderContext } from "./provider-context.js";
 import { parseSessionNavigationContext } from "../navigation-context.js";
 import { t } from "../i18n.js";
@@ -213,15 +213,15 @@ export function registerSessionDetail(
     const normalizedQuery = query.toLocaleLowerCase();
     const matches: any[] = [];
     let total = 0;
-    const fields = ["text", "reasoning", "input", "output"] as const;
     for (const message of document.messages || []) {
       const parts = document.partsByMessage?.get(message.id) || [];
       for (const part of parts) {
         if (part.contentScope && part.contentScope !== "owned") continue;
+        const fields: ProgressiveField[] = [part.data.questionAnswers ? "question-answer" : "text", "reasoning", "input", "output"];
         for (const field of fields) {
           const resolved = resolveProgressiveField(part.data, field, "owned");
           if (!resolved) continue;
-          const source = stringifyProgressiveValue(resolved.value);
+          const source = progressiveText(resolved.value, resolved.format);
           const searchable = source.toLocaleLowerCase();
           let fieldMatchIndex = 0;
           let matchOffset = searchable.indexOf(normalizedQuery);
@@ -529,7 +529,7 @@ export function registerSessionDetail(
     const contextTarget = params.get("target") || "";
     const contextGroup = Number(params.get("group") || "-1");
     const contextEntry = Number(params.get("entry") || "-1");
-    const standardRequest = Boolean(partId) && ["owned", "inherited-context"].includes(contentScope) && ["text", "reasoning", "input", "output"].includes(String(field));
+    const standardRequest = Boolean(partId) && ["owned", "inherited-context"].includes(contentScope) && ["text", "reasoning", "input", "output", "question-answer"].includes(String(field));
     const contextRequest = contentScope === "context-result"
       && Boolean(checkpointId)
       && ((contextTarget === "summary" && field === "summary" && contextGroup === -1 && contextEntry === -1)
@@ -575,7 +575,7 @@ export function registerSessionDetail(
         return json(res, { ok: false, error: "Content not found" }, 404);
       }
 
-      const resolved = resolveProgressiveField(data, field as "text" | "reasoning" | "input" | "output", contentScope, part.messageRole || "");
+      const resolved = resolveProgressiveField(data, field as ProgressiveField, contentScope, part.messageRole || "");
       if (!resolved) {
         return json(res, { ok: false, error: "Content not found" }, 404);
       }

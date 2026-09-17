@@ -1,4 +1,4 @@
-import type { Message, TokenUsage } from "../interface.js";
+import type { Message, QuestionAnswer, TokenUsage } from "../interface.js";
 import { asNumber } from "./parser.js";
 import { cloneTokenUsage, sumTokenUsage } from "./token-usage.js";
 
@@ -17,6 +17,7 @@ export interface AgentLoopEvent {
   kind: AgentLoopEventKind;
   tool: string | null;
   text: string;
+  questionAnswers?: QuestionAnswer[];
   input: unknown;
   output: unknown;
   status: string | null;
@@ -120,6 +121,7 @@ function messageEvents(message: Message, index: number): AgentLoopEvent[] {
       kind: "text",
       tool: null,
       text: message.content,
+      questionAnswers: message.questionAnswers,
       input: null,
       output: null,
       status: null,

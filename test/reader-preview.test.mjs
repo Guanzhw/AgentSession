@@ -18,7 +18,7 @@ function documentFor(messages) {
     partsByMessage: new Map(normalized.map((message, index) => [message.id, [{
       id: `${message.id}:text`,
       contentScope: messages[index].contentScope || "owned",
-      data: { type: messages[index].partType || "text", text: messages[index].content }
+      data: { type: messages[index].partType || "text", text: messages[index].content, questionAnswers: messages[index].questionAnswers }
     }]]))
   };
 }
@@ -94,6 +94,40 @@ test("reader preview is bounded and HTML escaped", () => {
   assert.ok(!html.includes("<script>alert"));
   assert.match(html, /&lt;script&gt;alert/);
   assert.match(html, /data-reader-source[^>]*data-reader-source-id="reply:text"[^>]*data-reader-anchor="part-reply-text"/);
+});
+
+test("reader preview uses bounded question answer presentation and retains the original source identity", () => {
+  const questionAnswers = [{ id: "question-item", question: "Choose <script>safe</script>?", answer: "Yes, safely." }];
+  const raw = `<send_user_message_question_reply>${JSON.stringify(questionAnswers)}</send_user_message_question_reply>`;
+  const document = documentFor([{ id: "request", role: "user", content: raw, questionAnswers }]);
+  const preview = buildReaderPreview(document, "fixture", "child");
+  assert.equal(preview.request.text, "Choose <script>safe</script>?\n\nYes, safely.");
+  assert.equal(preview.request.source.partId, "request:text");
+  assert.equal(preview.request.source.href, "/fixture/session/child#part-request-text");
+  assert.equal(document.partsByMessage.get("request")[0].data.text, raw);
+  const html = renderReaderPreviewHtml(preview);
+  assert.match(html, /Choose &lt;script&gt;safe&lt;\/script&gt;/);
+  assert.match(html, /Yes, safely\./);
+  assert.doesNotMatch(html, /send_user_message_question_reply|question-item|<script>/);
+  questionAnswers[0].answer = "Long answer ".repeat(100);
+  const bounded = buildReaderPreview(document, "fixture", "child");
+  assert.equal(bounded.request.text.length, READER_PREVIEW_CHARS);
+  assert.ok(bounded.request.text.endsWith("…"));
+});
+
+test("preview route preserves typed question answers through normalized document mapping", async () => {
+  const questionAnswers = [{ id: "question-item", question: "Which option?", answer: "Recorded choice" }];
+  const raw = `<send_user_message_question_reply>${JSON.stringify(questionAnswers.map(({ id, ...item }) => ({ questionItemId: id, ...item })))}</send_user_message_question_reply>`;
+  const adapter = {
+    id: "fixture",
+    getSession(id) { return { id, title: "Child" }; },
+    getMessages(id) { return [{ id: "request", sessionId: id, role: "user", content: raw, questionAnswers }]; }
+  };
+  const response = await captureRoute(adapter)("/api/fixture/session/child/reader/preview");
+  assert.equal(response.status, 200);
+  assert.equal(response.data.request.text, "Which option?\n\nRecorded choice");
+  assert.equal(response.data.request.source.sourceId, "request:text");
+  assert.doesNotMatch(response.data.html, /send_user_message_question_reply|questionItemId/);
 });
 
 test("preview route reads only the selected canonical session", async () => {

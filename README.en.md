@@ -30,6 +30,10 @@ actions owned by the root. Location parameters reproduce the selected child
 history and source. Contents uses the same inline behavior; related history
 without a recorded position is labeled explicitly. “Read on its own” loads the
 complete child-owned page.
+Each child entry shows an ancestor path for returning directly to a parent;
+narrow layouts keep every level at the same reading width. Recorded Codex
+question replies display as questions and answers, with the original record
+available in a disclosure.
 
 Work and Events remain secondary evidence disclosures. Event paging, filters
 and existing `#tab-events` links are preserved.
