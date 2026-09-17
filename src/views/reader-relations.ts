@@ -1,6 +1,6 @@
 import { t } from "../i18n.js";
 import { escapeHtml } from "../markdown.js";
-import type { ReaderRelations } from "../reader-relations.js";
+import type { ReaderRelationMilestone, ReaderRelations } from "../reader-relations.js";
 import { anchorId } from "./anchors.js";
 import { renderReaderEventSourceLink } from "./reader-coordination.js";
 
@@ -8,6 +8,7 @@ import { renderReaderEventSourceLink } from "./reader-coordination.js";
 export interface ReaderRelationMarkup {
   parts: Map<string, string>;
   messages: Map<string, string>;
+  processPositions: Set<string>;
   toolbar: string;
 }
 
@@ -22,6 +23,32 @@ export function renderReaderRelations(relations: ReaderRelations | null): Reader
   const visibleLanes = relations.lanes.filter((lane) => visibleLaneIds.has(lane.id));
   const parts = new Map<string, string>();
   const messages = new Map<string, string>();
+  const processPositions = new Set<string>();
+  const visiblePositions = new Set<string>();
+  const stepsByLane = new Map<string, ReaderRelationMilestone[]>();
+  for (const item of relations.milestones) {
+    const key = readerRelationPositionKey(item.position.partId || item.position.messageId, item.position.side);
+    (item.kind === "message" ? processPositions : visiblePositions).add(key);
+    if (item.kind === "message") continue;
+    const steps = stepsByLane.get(item.laneId) || [];
+    steps.push(item);
+    stepsByLane.set(item.laneId, steps);
+  }
+  for (const key of visiblePositions) processPositions.delete(key);
+  const neighbours = new Map<string, { previous?: ReaderRelationMilestone; next?: ReaderRelationMilestone }>();
+  for (const steps of stepsByLane.values()) {
+    steps.forEach((item, index) => neighbours.set(item.id, { previous: steps[index - 1], next: steps[index + 1] }));
+  }
+  const stepLink = (item: ReaderRelationMilestone | undefined, direction: "previous" | "next") => {
+    if (!item) return "";
+    const owner = item.sourceEventRef.session;
+    const anchor = anchorId("milestone", item.id);
+    const label = t(`conversation.channel_${item.kind.replace(/-/g, "_")}`);
+    const position = t(`detail.reader_step_${direction}`);
+    const time = item.timestamp === null ? "" : new Date(item.timestamp).toISOString().slice(11, 16) + " UTC";
+    const href = `/${encodeURIComponent(owner.provider)}/session/${encodeURIComponent(owner.sessionId)}#${encodeURIComponent(anchor)}`;
+    return `<a class="reader-step-link reader-step-${direction}" data-reader-source data-reader-provider="${escapeHtml(owner.provider)}" data-reader-session="${escapeHtml(owner.sessionId)}" data-reader-anchor="${escapeHtml(anchor)}" href="${escapeHtml(href)}" aria-label="${escapeHtml([position, label, time].filter(Boolean).join(" · "))}"><small>${escapeHtml(position)}</small><span>${escapeHtml(label)}${time ? ` <time>${escapeHtml(time)}</time>` : ""}</span></a>`;
+  };
   for (const item of relations.milestones) {
     const lane = lanes.get(item.laneId)!;
     const name = lane.name || lane.childSession?.sessionId || lane.id;
@@ -36,8 +63,12 @@ export function renderReaderRelations(relations: ReaderRelations | null): Reader
       ? `<time datetime="${new Date(item.timestamp).toISOString()}">${escapeHtml(new Date(item.timestamp).toISOString().replace("T", " ").replace("Z", " UTC"))}</time>`
       : "";
     const sourceLink = renderReaderEventSourceLink(source.session.provider, source.session.sessionId, source.eventId, t("detail.reader_observation_source"), "reader-milestone-source");
+    const adjacent = neighbours.get(item.id);
+    const trace = adjacent && (adjacent.previous || adjacent.next)
+      ? `<div class="reader-milestone-trace" role="group" aria-label="${escapeHtml(t("detail.reader_step_sequence"))}">${stepLink(adjacent.previous, "previous")}<span class="reader-step-current">${escapeHtml(t("detail.reader_step_current"))}</span>${stepLink(adjacent.next, "next")}</div>`
+      : "";
     const description = `${name} · ${label}`;
-    const markup = `<aside id="${escapeHtml(anchorId("milestone", item.id))}" class="reader-milestone reader-collaboration-insert" data-reader-milestone data-reader-lane="${escapeHtml(item.laneId)}" data-reader-kind="${escapeHtml(item.kind)}" data-reader-sequence="${item.sequence}" data-reader-run="${escapeHtml(item.runId || "")}" data-reader-event-id="${escapeHtml(item.eventId)}" aria-label="${escapeHtml(description)}"><span class="reader-milestone-mark reader-milestone-mark-${direction}" aria-hidden="true"></span><div class="reader-milestone-body"><div class="reader-milestone-main"><button type="button" data-reader-lane-focus value="${escapeHtml(item.laneId)}" aria-pressed="false"><strong>${escapeHtml(name)}</strong><span>${escapeHtml(label)}</span></button>${timestamp}</div><span class="reader-milestone-links">${sourceLink}${history}</span></div></aside>`;
+    const markup = `<aside id="${escapeHtml(anchorId("milestone", item.id))}" class="reader-milestone reader-collaboration-insert" data-reader-milestone data-reader-lane="${escapeHtml(item.laneId)}" data-reader-kind="${escapeHtml(item.kind)}" data-reader-sequence="${item.sequence}" data-reader-run="${escapeHtml(item.runId || "")}" data-reader-event-id="${escapeHtml(item.eventId)}" aria-label="${escapeHtml(description)}"><span class="reader-milestone-mark reader-milestone-mark-${direction}" aria-hidden="true"></span><div class="reader-milestone-body"><div class="reader-milestone-main"><button type="button" data-reader-lane-focus value="${escapeHtml(item.laneId)}" aria-pressed="false"><strong>${escapeHtml(name)}</strong><span>${escapeHtml(label)}</span></button>${timestamp}</div><span class="reader-milestone-links">${sourceLink}${history}</span>${trace}</div></aside>`;
     const index = item.position.partId ? parts : messages;
     const key = readerRelationPositionKey(item.position.partId || item.position.messageId, item.position.side);
     index.set(key, (index.get(key) || "") + markup);
@@ -58,5 +89,5 @@ export function renderReaderRelations(relations: ReaderRelations | null): Reader
     ? `<span class="reader-relations-label">${escapeHtml(t("detail.reader_relation_focus"))}</span><label class="reader-relations-select-label"><span class="sr-only">${escapeHtml(t("detail.reader_relation_focus"))}</span><select data-reader-lane-select>${visibleLanes.length <= 3 ? `<option value="">${escapeHtml(t("detail.reader_relation_all"))}</option>` : ""}${options}</select></label><small class="reader-relations-note">${escapeHtml(t("detail.reader_relation_axis"))}</small>`
     : "";
   const toolbar = `<details class="reader-relations-toolbar" data-reader-relations-controls><summary>${escapeHtml(t("detail.reader_relation_navigation"))}</summary><div class="reader-relations-options">${focusMarkup}${unplaced}</div></details>`;
-  return { parts, messages, toolbar };
+  return { parts, messages, processPositions, toolbar };
 }

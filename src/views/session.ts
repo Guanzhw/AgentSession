@@ -805,6 +805,7 @@ interface ReaderProcessTool {
 interface ReaderProcessChunk {
   messageId: string;
   tools: ReaderProcessTool[];
+  parts: SessionPartNode[];
 }
 
 const READER_PROCESS_CHUNK_SIZE = 20;
@@ -817,14 +818,20 @@ function processAttentionCount(parts: SessionPartNode[]): number {
 /** Same source boundaries as execution disclosures, before any tool HTML is built. */
 function readerProcessChunks(message: SessionMessageNode, relations: ReaderRelationMarkup | null, ownedChildParts: Set<string>): ReaderProcessChunk[] {
   const chunks: ReaderProcessChunk[] = [];
+  const partIndexes = new Map(message.parts.map((part, index) => [part, index]));
   let tools: ReaderProcessTool[] = [];
   let reasoning: SessionPartNode[] = [];
   const flush = () => {
-    if (tools.length) chunks.push({ messageId: message.id, tools });
+    if (tools.length) {
+      const first = tools[0].reasoning[0] || tools[0].part;
+      const last = tools[tools.length - 1].part;
+      chunks.push({ messageId: message.id, tools, parts: message.parts.slice(partIndexes.get(first), partIndexes.get(last)! + 1) });
+    }
     tools = [];
   };
   const boundary = (part: SessionPartNode, side: "before" | "after") => {
-    if (!relations?.parts.has(readerRelationPositionKey(part.id, side))) return;
+    const key = readerRelationPositionKey(part.id, side);
+    if (!relations?.parts.has(key) || relations.processPositions.has(key)) return;
     flush();
     reasoning = [];
   };
@@ -846,14 +853,23 @@ function readerProcessChunks(message: SessionMessageNode, relations: ReaderRelat
   return chunks;
 }
 
-function renderReaderProcessPlaceholder(chunk: ReaderProcessChunk, provider: string, sessionId: string): string {
+function processPartRelation(relations: ReaderRelationMarkup | null, partId: string, side: "before" | "after") {
+  const key = readerRelationPositionKey(partId, side);
+  return relations?.processPositions.has(key) ? relations.parts.get(key) || "" : "";
+}
+
+function renderReaderProcessPlaceholder(chunk: ReaderProcessChunk, provider: string, sessionId: string, relations: ReaderRelationMarkup | null): string {
   const firstPartId = chunk.tools[0].part.id;
   const lastPartId = chunk.tools[chunk.tools.length - 1].part.id;
   const count = String(chunk.tools.length);
   const query = new URLSearchParams({ messageId: chunk.messageId, firstPartId, lastPartId });
   const url = `/api/${encodeURIComponent(provider)}/session/${encodeURIComponent(sessionId)}/reader/process?${query}`;
-  const anchors = chunk.tools.flatMap(({ part, reasoning }) => [...reasoning, part])
-    .map((part) => `<span id="${escapeHtml(anchorId("part", part.id))}" data-part-id="${escapeHtml(part.id)}" data-reader-process-anchor aria-hidden="true"></span>`).join("");
+  const anchoredParts = new Set(chunk.tools.flatMap(({ part, reasoning }) => [...reasoning, part]));
+  const anchors = chunk.parts.map((part) => {
+    const anchor = anchoredParts.has(part)
+      ? `<span id="${escapeHtml(anchorId("part", part.id))}" data-part-id="${escapeHtml(part.id)}" data-reader-process-anchor aria-hidden="true"></span>` : "";
+    return processPartRelation(relations, part.id, "before") + anchor + processPartRelation(relations, part.id, "after");
+  }).join("");
   return `<div data-reader-process-chunk class="reader-process-chunk" data-reader-process-state="unloaded" data-reader-message-id="${escapeHtml(chunk.messageId)}" data-reader-first-part-id="${escapeHtml(firstPartId)}" data-reader-last-part-id="${escapeHtml(lastPartId)}" data-reader-process-count="${count}" data-reader-process-url="${escapeHtml(url)}">${anchors}<button type="button" class="reader-process-load" data-reader-process-load data-loading-label="${escapeHtml(t("progressive.loading"))}" data-retry-label="${escapeHtml(t("progressive.retry"))}" data-load-error="${escapeHtml(t("progressive.load_failed"))}">${escapeHtml(t("conversation.process_load", { count }))}</button><span class="reader-process-status" data-reader-process-status role="status" aria-live="polite"></span></div>`;
 }
 
@@ -869,7 +885,8 @@ export function renderReaderProcessChunk(input: {
   const message = tree?.messages.find((candidate) => candidate.id === input.messageId);
   if (!message) return null;
   const children = new Set((input.ownedReader?.children || []).flatMap((child) => child.parentPartId ? [child.parentPartId] : []));
-  const chunks = readerProcessChunks(message, renderReaderRelations(input.readerRelations || null), children);
+  const relations = renderReaderRelations(input.readerRelations || null);
+  const chunks = readerProcessChunks(message, relations, children);
   const chunk = chunks.find(({ tools }) => tools[0].part.id === input.firstPartId);
   if (!chunk) return null;
   const lastIndex = chunk.tools.findIndex(({ part }) => part.id === input.lastPartId);
@@ -877,11 +894,15 @@ export function renderReaderProcessChunk(input: {
   // A partially filled chunk can grow while the reader remains open. Honor
   // the recorded endpoint in its existing URL instead of including new tools.
   const tools = chunk.tools.slice(0, lastIndex + 1);
+  const parts = chunk.parts.slice(0, chunk.parts.indexOf(tools[tools.length - 1].part) + 1);
+  const reasoning = new Set(tools.flatMap((tool) => tool.reasoning));
+  const toolParts = new Set(tools.map((tool) => tool.part));
   return {
     count: tools.length,
-    html: tools.map(({ part, reasoning }) => {
-      const reasoningMarkup = reasoning.map((item) => renderReasoningPart(item.data, item.id)).join("\n");
-      return `${renderTurnReasoning(reasoningMarkup)}${renderPartNode(message.data, part)}`;
+    html: parts.map((part) => {
+      const rendered = reasoning.has(part) ? renderTurnReasoning(renderReasoningPart(part.data, part.id))
+        : toolParts.has(part) ? renderPartNode(message.data, part) : "";
+      return processPartRelation(relations, part.id, "before") + rendered + processPartRelation(relations, part.id, "after");
     }).join("\n")
   };
 }
@@ -895,14 +916,28 @@ function renderMessagePartsResult(message: any, depth = 0, provider = "opencode"
   const chunks = deferExecution ? readerProcessChunks(message, relations, new Set(ownedChildrenByPart?.keys() || [])) : [];
   const chunksByTool = new Map(chunks.flatMap((chunk) => chunk.tools.map(({ part }) => [part.id, chunk] as const)));
   const deferredReasoning = new Set(chunks.flatMap((chunk) => chunk.tools.flatMap(({ reasoning }) => reasoning.map((part) => part.id))));
+  const deferredParts = new Set(chunks.flatMap((chunk) => chunk.parts.map((part) => part.id)));
   const flushExecution = () => {
     if (!executionParts.length) return;
     renderedParts.push(renderConversationProcessDisclosure(executionParts, "data-reader-execution"));
     executionParts = [];
   };
-  const milestone = (partId: string, side: "before" | "after") => {
-    const markup = relations?.parts.get(readerRelationPositionKey(partId, side));
+  const milestone = (partId: string, side: "before" | "after", messagePosition = false) => {
+    const key = readerRelationPositionKey(partId, side);
+    const markup = (messagePosition ? relations?.messages : relations?.parts)?.get(key);
     if (!markup) return;
+    if (relations?.processPositions.has(key)) {
+      if (!messagePosition && deferredParts.has(partId)) return;
+      if (pendingReasoning.length) {
+        executionParts.push({ kind: "block", role: "assistant", processOnly: true,
+          html: renderTurnReasoning(pendingReasoning.join("\n")), itemCount: 0 });
+        pendingReasoning.length = 0;
+      }
+      executionParts.push({ kind: "block", role: "assistant", processOnly: true, html: markup, itemCount: 0 });
+      visibleCount += 1;
+      return;
+    }
+    if (messagePosition) return;
     flushExecution();
     attachPendingReasoning(renderedParts, pendingReasoning);
     renderedParts.push(markup);
@@ -910,6 +945,7 @@ function renderMessagePartsResult(message: any, depth = 0, provider = "opencode"
     hasMilestones = true;
   };
 
+  milestone(message.id, "before", true);
   for (const part of message.parts) {
     milestone(part.id, "before");
     if (part.type === "reasoning") {
@@ -926,7 +962,7 @@ function renderMessagePartsResult(message: any, depth = 0, provider = "opencode"
       if (chunk.tools[0].part.id === part.id) {
         executionParts.push({
           kind: "block", role: "assistant", processOnly: true,
-          html: renderReaderProcessPlaceholder(chunk, provider, message.sessionId),
+          html: renderReaderProcessPlaceholder(chunk, provider, message.sessionId, relations),
           itemCount: chunk.tools.length,
           attentionCount: processAttentionCount(chunk.tools.map(({ part }) => part)),
           deferredProcess: true
@@ -966,6 +1002,7 @@ function renderMessagePartsResult(message: any, depth = 0, provider = "opencode"
     }
     milestone(part.id, "after");
   }
+  milestone(message.id, "after", true);
   flushExecution();
 
   return {
@@ -1019,8 +1056,10 @@ function renderSessionMessageEntries(tree: SessionTree, depth = 0, provider = "o
       const messageAnchor = escapeHtml(anchorId("msg", message.id));
       markup = `<span id="${messageAnchor}" class="session-event-anchor" aria-hidden="true"></span>`;
     }
-    const before = relations?.messages.get(readerRelationPositionKey(message.id, "before")) || "";
-    const after = relations?.messages.get(readerRelationPositionKey(message.id, "after")) || "";
+    const beforeKey = readerRelationPositionKey(message.id, "before");
+    const afterKey = readerRelationPositionKey(message.id, "after");
+    const before = relations?.processPositions.has(beforeKey) ? "" : relations?.messages.get(beforeKey) || "";
+    const after = relations?.processPositions.has(afterKey) ? "" : relations?.messages.get(afterKey) || "";
     entries.push({
       messageId: String(message.id || ""),
       role: messageTurnRole(message.role),
@@ -1036,16 +1075,35 @@ function renderSessionMessageEntries(tree: SessionTree, depth = 0, provider = "o
   return entries;
 }
 
-function renderRawParts(messageData: any, parts: any[] = [], relations: ReaderRelationMarkup | null = null) {
+function renderRawParts(messageData: any, parts: any[] = [], relations: ReaderRelationMarkup | null = null, messageId = "") {
   const renderedParts: string[] = [];
   const pendingReasoning: string[] = [];
-  const milestone = (id: string, side: "before" | "after") => {
-    const markup = relations?.parts.get(readerRelationPositionKey(id, side));
+  let executionParts: ConversationItem[] = [];
+  const flushExecution = () => {
+    if (!executionParts.length) return;
+    renderedParts.push(renderConversationProcessDisclosure(executionParts, "data-reader-execution"));
+    executionParts = [];
+  };
+  const milestone = (id: string, side: "before" | "after", messagePosition = false) => {
+    const key = readerRelationPositionKey(id, side);
+    const markup = (messagePosition ? relations?.messages : relations?.parts)?.get(key);
     if (!markup) return;
+    if (relations?.processPositions.has(key)) {
+      if (pendingReasoning.length) {
+        executionParts.push({ kind: "block", role: "assistant", processOnly: true,
+          html: renderTurnReasoning(pendingReasoning.join("\n")), itemCount: 0 });
+        pendingReasoning.length = 0;
+      }
+      executionParts.push({ kind: "block", role: "assistant", processOnly: true, html: markup, itemCount: 0 });
+      return;
+    }
+    if (messagePosition) return;
+    flushExecution();
     attachPendingReasoning(renderedParts, pendingReasoning);
     renderedParts.push(markup);
   };
 
+  milestone(messageId, "before", true);
   for (const part of parts) {
     milestone(part.id, "before");
     const partData = safeParse(part.data);
@@ -1064,12 +1122,20 @@ function renderRawParts(messageData: any, parts: any[] = [], relations: ReaderRe
       ? `${renderTurnReasoning(reasoningMarkup)}\n${renderedPart}`
       : renderedPart;
     if (rendered) {
-      renderedParts.push(rendered);
+      if (partData.type === "tool" && relations?.processPositions.size) {
+        executionParts.push({ kind: "block", role: "assistant", html: rendered, processOnly: true,
+          attentionCount: processAttentionCount([{ ...part, type: partData.type, data: partData }]) });
+      } else {
+        flushExecution();
+        renderedParts.push(rendered);
+      }
       pendingReasoning.length = 0;
     }
     milestone(part.id, "after");
   }
 
+  milestone(messageId, "after", true);
+  flushExecution();
   attachPendingReasoning(renderedParts, pendingReasoning);
 
   return renderedParts.filter(Boolean).join("\n");
@@ -1090,10 +1156,15 @@ function renderRawMessageEntries(messages: any, partsByMessage: any, provider: a
       previousCacheUsage = annotated.usage;
     }
     const parts = partsByMessage.get(message.id) || [];
-    const before = relations?.messages.get(readerRelationPositionKey(message.id, "before")) || "";
-    const after = relations?.messages.get(readerRelationPositionKey(message.id, "after")) || "";
-    const renderedParts = before + renderRawParts(messageData, parts, relations) + after;
-    const hasMilestones = Boolean(before || after) || parts.some((part: any) => relations?.parts.has(readerRelationPositionKey(part.id, "before")) || relations?.parts.has(readerRelationPositionKey(part.id, "after")));
+    const beforeKey = readerRelationPositionKey(message.id, "before");
+    const afterKey = readerRelationPositionKey(message.id, "after");
+    const before = relations?.processPositions.has(beforeKey) ? "" : relations?.messages.get(beforeKey) || "";
+    const after = relations?.processPositions.has(afterKey) ? "" : relations?.messages.get(afterKey) || "";
+    const renderedParts = before + renderRawParts(messageData, parts, relations, message.id) + after;
+    const hasMilestones = Boolean(before || after) || parts.some((part: any) => (["before", "after"] as const).some((side) => {
+      const key = readerRelationPositionKey(part.id, side);
+      return relations?.parts.has(key) && !relations.processPositions.has(key);
+    }));
     if (!renderedParts) {
       continue;
     }
@@ -1561,7 +1632,7 @@ function renderCompactionCheckpoint(compaction: any, provider: string, sessionId
 }
 
 function renderConversationProcessDisclosure(items: ConversationItem[], attribute = "data-conversation-process") {
-  const count = String(items.reduce((sum, item) => sum + (item.itemCount || 1), 0));
+  const count = String(Math.max(1, items.reduce((sum, item) => sum + (item.itemCount ?? 1), 0)));
   const attentionCount = items.reduce((sum, item) => sum + (item.attentionCount || 0), 0);
   return `<details class="conversation-process-disclosure" ${attribute} ${attribute}-count="${escapeHtml(count)}"${items.some((item) => item.deferredProcess) ? " data-reader-process-group" : ""}>
     <summary class="conversation-process-summary"><span class="conversation-process-kicker">${escapeHtml(t("conversation.process_kicker"))}</span><span class="conversation-process-count">${escapeHtml(t("conversation.process_items", { count }))}</span>${attentionCount ? `<span class="conversation-process-attention">${escapeHtml(t("conversation.process_attention", { count: String(attentionCount) }))}</span>` : ""}</summary>

@@ -188,6 +188,9 @@ Provider 负责语义和证据归一化；共享阅读投影负责身份、归�
 - **会话库家族已实现并验证**：记录中的父子关系形成可展开分支，子会话标题可搜索，父路径保留；
   真实三层、20/40 条子级分页、60 个主条目返回恢复、焦点与窄屏已验证。见
   [会话库分组规范与证据](library-session-families.md)。
+- **正文中的任务追踪切片**：普通往来收入所属执行过程，关键节点增加同一任务的上一步/下一步连接。
+  真实并行审查片段已逐条核对派发、主任务继续、返回和再次跟进来源；此改进的交互证据及
+  并行概览仍需完成的验收见 [局部任务步骤](runtime-inline-task-steps.md)。
 - **明确剩余实现与验收**：P4 仍需真实
   并行工作阅读验收，P7 尚缺 memory / dream 产物的生成历史与因果证据。完整 P11 的键盘、对比度
   和中英/明暗/窄屏组合、真实超过 40 条继承背景续页，以及 P9 首载性能继续开放。继续检查高密度
@@ -205,4 +208,5 @@ Provider 负责语义和证据归一化；共享阅读投影负责身份、归�
 - [完整内容与上下文续读](runtime-reader-completeness.md)
 - [协作来源与精确定位](runtime-reader-coordination.md)
 - [局部关系位置和历史原型](runtime-inline-relations.md)
+- [正文中的任务步骤与普通往来折叠](runtime-inline-task-steps.md)
 - [产品定位决策](../../.agents/decisions/implemented/2026-09-13-runtime-reading-model.md)

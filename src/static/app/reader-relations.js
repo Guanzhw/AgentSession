@@ -128,6 +128,17 @@ export function initReaderRelations() {
     schedule();
   }
 
+  function refreshMilestones(context) {
+    const { pane, section, lanes } = context;
+    context.milestones = [...section.querySelectorAll("[data-reader-milestone]")]
+      .filter((milestone) => milestone.closest("[data-reader-pane]") === pane);
+    for (const milestone of context.milestones) {
+      const index = Math.max(0, lanes.indexOf(milestone.dataset.readerLane));
+      milestone.style.setProperty("--reader-lane-color", `var(${LANE_COLORS[index % LANE_COLORS.length]})`);
+      milestone.dataset.readerLaneIndex = String(index);
+    }
+  }
+
   function attachPane(pane) {
     if (!pane) return;
     const section = paneRelationSection(pane);
@@ -139,11 +150,7 @@ export function initReaderRelations() {
       : [...new Set(milestones.map((milestone) => milestone.dataset.readerLane).filter(Boolean))];
     const context = { pane, section, milestones, select, lanes };
     contexts.set(section, context);
-    for (const milestone of milestones) {
-      const index = Math.max(0, lanes.indexOf(milestone.dataset.readerLane));
-      milestone.style.setProperty("--reader-lane-color", `var(${LANE_COLORS[index % LANE_COLORS.length]})`);
-      milestone.dataset.readerLaneIndex = String(index);
-    }
+    refreshMilestones(context);
     observer.observe(section);
     schedule();
   }
@@ -290,7 +297,12 @@ export function initReaderRelations() {
     if (pane) attachPane(pane);
     schedule();
   });
-  workbench.addEventListener("session-reader:process-loaded", schedule);
+  workbench.addEventListener("session-reader:process-loaded", (event) => {
+    const section = paneRelationSection(event.detail.pane);
+    const context = contexts.get(section);
+    if (context) refreshMilestones(context);
+    schedule();
+  });
   workbench.addEventListener("session-reader:inline-opened", (event) => attachPane(event.detail?.pane));
   workbench.addEventListener("session-reader:inline-closed", (event) => detachPane(event.detail?.pane));
   workbench.addEventListener("session-reader:before-swap", detachAll);

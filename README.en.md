@@ -41,8 +41,10 @@ Conversation folds completed process using provider-recorded response phases;
 final replies, unclassified communication, and unfinished tail updates remain
 visible. Expansion, search, and anchors retain access to process content.
 Dispatches, follow-ups, and result deliveries with resolved source positions
-appear inline with local branch connections and exact source links. Vertical
-distance represents reading position, not elapsed time. The on-demand Tasks &
+appear inline. A local connected strip links each to the previous or next key
+record of the same task, in recorded source order. Ordinary coordination messages
+fold into their owning process and remain reachable through expansion and exact
+source links. The on-demand Tasks &
 collaboration panel shows a compact task map followed by the selected task's
 initial request and latest reply excerpts. Exchanges and complete child history
 remain expandable. Per-message model and token details live under Usage & model;

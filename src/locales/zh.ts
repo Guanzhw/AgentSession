@@ -373,6 +373,10 @@ export const zh = {
   "detail.reader_relation_focus": "跟随任务",
   "detail.reader_relation_all": "全部任务",
   "detail.reader_relation_axis": "选择任务以突出正文中的已记录标记。",
+  "detail.reader_step_sequence": "同一任务，按来源中的记录顺序",
+  "detail.reader_step_previous": "上一条关键记录",
+  "detail.reader_step_next": "下一条关键记录",
+  "detail.reader_step_current": "此处",
   "conversation.channel_result_delivery": "结果交付",
   "conversation.channel_result_acknowledgement": "结果已确认",
 

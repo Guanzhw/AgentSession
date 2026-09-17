@@ -4,6 +4,7 @@ import { renderSessionReaderPane, renderReaderProcessChunk } from "../dist/src/v
 import { buildMessageSessionTree } from "../dist/src/providers/shared/message-session.js";
 import { buildPartsFromProviderMessages } from "../dist/src/session-queries.js";
 import { renderProgressiveContent, resolveProgressiveField } from "../dist/src/views/components.js";
+import { renderReaderRelations, readerRelationPositionKey } from "../dist/src/views/reader-relations.js";
 
 const messages = [
   { id: "u", sessionId: "root", role: "user", content: "Please implement", timestamp: 1 },
@@ -114,4 +115,39 @@ test("history with no located relationships keeps the full ordinary reading surf
   const html = renderSessionReaderPane({ ...input(), readerRelations: { lanes: [], milestones: [], unplaced: [] } });
   assert.doesNotMatch(html, /data-reader-relations|data-reader-relation-canvas/);
   for (const text of ["Please implement", "Working on it", "Final answer"]) assert.ok(html.includes(text));
+});
+
+test("inline step links connect key observations of the canonical task in source order", () => {
+  const other = { ...lane, id: "fixture:other", childSession: { provider: "fixture", sessionId: "other" } };
+  const value = { ...relations, lanes: [lane, other], milestones: [
+    relations.milestones[0],
+    { ...milestone("ordinary", 3.5, "message", "dispatch:tool"), timestamp: null },
+    { ...milestone("different-task", 3.8, "spawn", "dispatch:tool"), laneId: other.id },
+    { ...relations.milestones[1], timestamp: 1 },
+    { ...relations.milestones[2], timestamp: null },
+    relations.milestones[3]
+  ] };
+  const source = JSON.stringify(value);
+  const rendered = renderReaderRelations(value);
+  const at = (item) => rendered.parts.get(readerRelationPositionKey(item.position.partId, item.position.side));
+  const dispatch = at(value.milestones[0]);
+  assert.match(dispatch, /reader-step-next[^>]*data-reader-anchor="milestone-returned-1"/);
+  assert.match(dispatch, /href="\/fixture\/session\/root#milestone-returned-1"/);
+  assert.doesNotMatch(dispatch, /reader-step-previous|data-reader-anchor="milestone-(ordinary|different-task)"/);
+  const returned = at(value.milestones[3]);
+  assert.match(returned, /reader-step-previous[^>]*data-reader-anchor="milestone-dispatch-event"/);
+  assert.match(returned, /reader-step-next[^>]*data-reader-anchor="milestone-followup"/);
+  const final = at(value.milestones[5]);
+  assert.match(final, /reader-step-previous[^>]*data-reader-anchor="milestone-followup"/);
+  assert.doesNotMatch(final, /reader-step-next/);
+  assert.equal(JSON.stringify(value), source);
+});
+
+test("only wholly ordinary positions are marked for process folding", () => {
+  const ordinary = milestone("ordinary", 10, "message", "ordinary:tool");
+  const mixed = milestone("mixed-message", 11, "message", "mixed:tool");
+  const key = milestone("mixed-return", 12, "result-delivery", "mixed:tool");
+  const value = renderReaderRelations({ lanes: [lane], unplaced: [], milestones: [ordinary, mixed, key] });
+  assert.deepEqual([...value.processPositions], [readerRelationPositionKey("ordinary:tool", "after")]);
+  assert.match(value.parts.get(readerRelationPositionKey("ordinary:tool", "after")), /id="milestone-ordinary"/);
 });

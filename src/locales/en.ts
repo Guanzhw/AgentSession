@@ -374,6 +374,10 @@ export const en = {
   "detail.reader_relation_focus": "Follow a task",
   "detail.reader_relation_all": "All tasks",
   "detail.reader_relation_axis": "Select a task to emphasize its recorded local marks.",
+  "detail.reader_step_sequence": "Steps in this task, in recorded source order",
+  "detail.reader_step_previous": "Previous step",
+  "detail.reader_step_next": "Next step",
+  "detail.reader_step_current": "Here",
   "conversation.channel_result_delivery": "Result delivery",
   "conversation.channel_result_acknowledgement": "Result acknowledged",
 

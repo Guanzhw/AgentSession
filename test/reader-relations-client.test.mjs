@@ -145,6 +145,27 @@ const entries = [
   { lane: 'child:implementation', kind: 'result-delivery', sequence: 144, run: 'run:two' }
 ];
 
+test('loaded process milestones receive the current task emphasis without changing nested panes', (t) => {
+  const h = relationHarness(t, entries);
+  h.selectLane('child:implementation');
+  const old = h.milestones[0].milestone;
+  old.remove();
+  const replacement = h.makeSection([{ lane: 'child:implementation', kind: 'message', sequence: 46 }]).milestones[0];
+  h.section.append(replacement.milestone);
+  const child = h.makeSection([{ lane: 'child:review', kind: 'message', sequence: 1 }]);
+  h.section.append(child.pane);
+  h.workbench.dispatchEvent({ type: 'session-reader:process-loaded', detail: { pane: h.pane } });
+  h.flush();
+  assert.equal(h.select.value, 'child:implementation');
+  assert.equal(replacement.milestone.classes.has('reader-milestone-focused'), true);
+  assert.equal(replacement.button.attributes.get('aria-pressed'), 'true');
+  assert.equal(replacement.milestone.style['--reader-lane-color'], 'var(--accent-color)');
+  assert.equal(child.milestones[0].milestone.dataset.readerLaneIndex, undefined);
+  h.selectLane('child:review');
+  assert.equal(replacement.milestone.classes.has('reader-milestone-focused'), false);
+  assert.equal(replacement.button.attributes.get('aria-pressed'), 'false');
+});
+
 test('local relation focus keeps every recorded milestone and has no graph canvas', (t) => {
   const h = relationHarness(t, entries);
   h.flush();

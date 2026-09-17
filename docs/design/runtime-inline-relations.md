@@ -1,9 +1,9 @@
 # Inline runtime relationships
 
-Status: source-binding implementation in progress; its initial visual presentation
-was rejected on 2026-09-16. The user has approved implementing the subsequent
-prose-first/local-insert direction for a working first version. Revised
-presentation and real-history acceptance are pending.
+Status: prose-first/local-insert implementation, updated 2026-09-17. Its initial
+full-height lane presentation was rejected on 2026-09-16. The selected option 3
+uses local collaboration inserts and an on-demand sidebar; overall visual
+acceptance remains open.
 Extends the [work-history reader](runtime-reading-model.md), not a separate page.
 The [product presentation specification](runtime-presentation-contract.md)
 supersedes this prototype's visual layout choices; source binding and exact
@@ -39,22 +39,23 @@ speculative connecting line.
 
 ## Presentation
 
-The following describes the implemented relationship mechanics, not an accepted
-visual treatment. The next candidate groups routine execution and introduces
-local collaboration inserts within a prose-first reader. Its illustrative
-interaction sketch does not replace real-history acceptance. Keep exact source
-anchors reusable while evaluating that composition.
+The primary reading surface retains prose and key collaboration inserts. The
+sidebar is an optional route into the same canonical tasks and their evidence.
 
 - Keep dispatch, follow-up and delivery milestones visible when surrounding
   tools/reasoning are folded. Complete execution detail remains expandable.
-- Draw adjacent lanes joining real DOM anchors. The browser lays out supplied
-  relationships and does not infer provider semantics.
+- Ordinary coordination messages share the owning execution disclosure. Their
+  source position and content remain available on expansion and exact navigation.
+- Each key insert connects to the preceding and following key insert in the
+  same canonical task. The small line represents recorded source order, not a
+  duration or a request/result pairing. Controls jump directly to the relevant
+  position in the complete history.
 - Selecting a lane or milestone emphasizes the associated records, supports
   exact source reading and a single-action return to the prior reading place.
 - Dense views emphasize a selected branch while preserving other entry points.
   Narrow layouts keep prose readable and offer local connections/expansion.
-- Recompute geometry after disclosure, content continuation, resize and pane
-  changes, coalescing layout work rather than polling or rescanning on scroll.
+- Native flow layout keeps connections local when tools or child histories
+  expand. No document-height graph or scroll-position inference is required.
 
 ## Acceptance
 
@@ -73,15 +74,17 @@ the spatial reading idea, not source binding or production readiness.
 `src/reader-relations.ts` joins full finalized coordination to the owned
 document and resolves source-order part positions. `src/views/reader-relations.ts`
 renders those milestones; the normal tree and raw-message renderers insert
-them beside the matching parts. Milestones keep their surrounding message
-outside the outer intermediate-message fold, while tool and reasoning
-disclosures remain independently collapsed. No source body is removed.
+them beside the matching parts. Key milestones keep their surrounding message
+outside the outer intermediate-message fold. Ordinary-message-only positions
+join the owning execution process; mixed positions containing key events stay
+visible. Tool and reasoning disclosures remain independently expandable.
 
-`src/static/app/reader-relations.js` draws DOM-anchored branch lines and retains
-the selected task in the cached reader pane. Up to six tracks can be shown
-together; dense and narrow layouts follow one selectable task while keeping
-all other milestones and full prose accessible. The vertical axis remains
-reading position. Repeated results share a track without fabricated pairing.
+`src/views/reader-relations.ts` builds adjacent-step links from the normalized
+canonical lane and local source order. `src/static/app/reader-relations.js`
+emphasizes the selected task and opens the optional collaboration sidebar.
+`src/static/app/session-reader.js` owns exact step navigation, scoped inline
+child anchors and Back/Forward restoration. Repeated results retain one task
+identity without fabricated pairing.
 
 The prior turn-ID-to-message-ID reference rows are being retired: execution
 identity does not establish a text position. Exact scalar source evidence

@@ -398,6 +398,48 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
   background: transparent;
 }
 
+.session-workbench[data-session-reader] .reader-milestone-trace {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
+  padding: 8px 0 2px;
+  color: var(--reader-muted);
+  font-size: 12px;
+}
+.session-workbench[data-session-reader] .reader-step-link {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  color: var(--reader-accent);
+  text-decoration: none;
+}
+.session-workbench[data-session-reader] .reader-step-link small {
+  color: var(--reader-muted);
+  font-size: 11px;
+}
+.session-workbench[data-session-reader] .reader-step-link:hover > span { text-decoration: underline; }
+.session-workbench[data-session-reader] .reader-step-current {
+  display: flex;
+  align-items: center;
+  flex: 1 0 88px;
+  gap: 8px;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+.session-workbench[data-session-reader] .reader-step-current::before,
+.session-workbench[data-session-reader] .reader-step-current::after {
+  content: "";
+  flex: 1;
+  min-width: 12px;
+  border-top: 1px solid var(--reader-line);
+}
+.session-workbench[data-session-reader] .reader-step-current:first-child::before,
+.session-workbench[data-session-reader] .reader-step-current:last-child::after { display: none; }
+.session-workbench[data-session-reader] .reader-step-current:first-child { padding-left: 0; }
+.session-workbench[data-session-reader] .reader-step-current:last-child { padding-right: 0; }
+
 /* Collaboration is a native disclosure. It is absent entirely when the
    normalized view has no recorded collaboration facts. */
 .session-workbench[data-session-reader] .reader-collaboration-overview {
