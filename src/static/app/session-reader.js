@@ -665,7 +665,7 @@ export function initSessionReader({ ft, showToast } = {}) {
     if (replace) {
       historyEntries[historyIndex].href = href;
     } else {
-      historyEntries.splice(historyIndex + 1);
+      // Entries can be claimed out of browser order; keep their IDs stable.
       historyEntries.push({ key, href, state });
       historyIndex = historyEntries.length - 1;
     }
@@ -1206,15 +1206,19 @@ export function initSessionReader({ ft, showToast } = {}) {
     }
     savePaneState(root, { captureHref: false });
     const savedIndex = event.state?.readerEntry;
-    historyIndex = Number.isInteger(savedIndex) ? savedIndex : 0;
-    if (!historyEntries[historyIndex]) historyEntries[historyIndex] = { key: keyOf(root), href: inlineHref(), state: event.state?.readerPosition || null };
+    const managedEntry = Number.isInteger(savedIndex);
+    historyIndex = managedEntry ? savedIndex : historyEntries.length;
+    if (!historyEntries[historyIndex]) historyEntries[historyIndex] = {
+      key: keyOf(root), href: inlineHref(), state: managedEntry ? event.state?.readerPosition || null : null
+    };
+    if (!managedEntry) history.replaceState({ ...event.state, readerEntry: historyIndex }, "", inlineHref());
     const entry = historyEntries[historyIndex];
     const targetStack = inlineStackFrom(event.state);
     const leaving = [...inlinePanes.values()][targetStack.length];
     await applyInlineStack(targetStack, { rootIdentity: event.state?.readerInlineRoot });
     if (revision !== swapRevision) return;
     await replayLocation();
-    if (historyEntries[historyIndex] === entry) {
+    if (managedEntry && historyEntries[historyIndex] === entry) {
       if (entry.state) restorePaneState(root, entry.state);
       else if (leaving && !inlinePanes.has(leaving.key)) restoreInlineOrigin(leaving);
     }

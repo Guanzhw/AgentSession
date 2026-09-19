@@ -242,6 +242,14 @@ function readerHarness(t, initialHref = '/fixture/session/root?view=history#root
     async resize(isNarrow) { media.matches = isNarrow; await media.dispatchEvent({ type: 'change' }); },
     browserBack: async () => { traverse(-1); await flush(); },
     browserForward: async () => { traverse(1); await flush(); },
+    async nativeFragment(href) {
+      // A native same-document navigation creates a null-state browser entry,
+      // emits popstate, and performs fragment scrolling while replay may await.
+      globals.history.pushState(null, '', href);
+      pendingTraversal = window.dispatchEvent({ type: 'popstate', state: null });
+      document.getElementById(decodeURIComponent(location.hash.slice(1)))?.scrollIntoView();
+      await flush();
+    },
     href: () => location.pathname + location.search + location.hash,
     cached: (session) => reader.cache.get(`fixture\0${session}`),
     historyState: () => browserEntries[browserIndex].state,
@@ -298,6 +306,131 @@ test('an initial raw process hash materializes its source before revealing it', 
   assert.equal(h.location.hash, '#deferred-tool');
   assert.equal(h.anchorReveals.at(-1).target, h.initialMarkup.target);
   assert.equal(h.historyState().readerEntry, 0, 'Reload does not create a new reading location');
+});
+
+test('native same-document fragments keep their targets and distinct Back/Forward reading positions', async (t) => {
+  const h = readerHarness(t, '/fixture/session/root?view=history');
+  const targets = ['native-A', 'native-B'].map((id) => h.makeElement({}, id));
+  h.root.append(...targets);
+  h.window.scrollY = 800;
+  h.root.children[0].focus();
+
+  await h.nativeFragment('#native-A');
+  assert.equal(h.window.scrollY, 50, 'The target remains revealed after asynchronous location replay');
+  assert.equal(h.document.activeElement, targets[0]);
+  assert.equal(h.snapshot().entries.length, 2, 'Claiming a native entry adds no browser entry');
+  h.window.scrollY = 1700;
+  await h.nativeFragment('#native-B');
+  assert.equal(h.window.scrollY, 50);
+  assert.equal(h.document.activeElement, targets[1]);
+  h.window.scrollY = 2800;
+
+  await h.browserBack();
+  assert.equal(h.location.hash, '#native-A');
+  assert.equal(h.window.scrollY, 1700);
+  assert.equal(h.document.activeElement, targets[0]);
+  await h.browserBack();
+  assert.equal(h.location.hash, '');
+  assert.equal(h.window.scrollY, 800);
+  assert.equal(h.document.activeElement, h.root.children[0]);
+  await h.browserForward();
+  assert.equal(h.window.scrollY, 1700);
+  assert.equal(h.document.activeElement, targets[0]);
+  await h.browserForward();
+  assert.equal(h.window.scrollY, 2800);
+  assert.equal(h.document.activeElement, targets[1]);
+  assert.equal(new Set(h.snapshot().entries.map((entry) => entry.state.readerEntry)).size, 3);
+  assert.equal(h.swaps.length, 0);
+});
+
+test('an older unmanaged browser entry keeps its identity after a later history branch', async (t) => {
+  const rootHref = 'http://localhost/fixture/session/root#root-source';
+  const olderHref = 'http://localhost/fixture/session/root#older-source';
+  const h = readerHarness(t, rootHref, [], { browserSnapshot: {
+    entries: [{ href: olderHref, state: null }, { href: rootHref, state: { readerEntry: 0 } }], index: 1
+  } });
+  const older = h.makeElement({}, 'older-source');
+  h.root.append(older);
+  await h.flush();
+  h.window.scrollY = 700;
+  await h.source('root', 'first-source');
+  await h.browserBack();
+  await h.browserBack();
+  assert.equal(h.href(), '/fixture/session/root#older-source');
+  assert.equal(h.document.activeElement, older);
+  assert.equal(h.window.scrollY, 50);
+  const olderEntry = h.historyState().readerEntry;
+  h.window.scrollY = 320;
+
+  await h.browserForward();
+  assert.equal(h.window.scrollY, 700);
+  await h.source('root', 'new-branch');
+  assert.notEqual(h.historyState().readerEntry, olderEntry, 'Entry IDs describe identity, not browser order');
+  await h.browserBack();
+  await h.browserBack();
+  assert.equal(h.historyState().readerEntry, olderEntry);
+  assert.equal(h.document.activeElement, older);
+  assert.equal(h.window.scrollY, 320, 'Branching must retain this still-reachable earlier entry');
+  assert.equal(h.snapshot().entries.length, 3);
+});
+
+test('a native root fragment returns to the managed inline reading position on Back', async (t) => {
+  const h = readerHarness(t, '/fixture/session/root?view=history');
+  const milestone = h.makeElement({ readerMilestone: '' }, 'child-milestone');
+  const open = h.addRecordedChild(milestone);
+  const target = h.makeElement({}, 'native-root-target');
+  h.root.append(milestone, target);
+  h.window.scrollY = 730;
+  open.focus();
+  await h.click(open);
+  const rootSource = h.makeElement({ readerSource: '' });
+  rootSource.href = '#root-source';
+  h.root.append(rootSource);
+  await h.click(rootSource);
+  h.window.scrollY = 2100;
+  h.child.children[0].focus();
+  h.child.dataset.searchQuery = 'child result';
+  h.child.children[0].open = true;
+
+  await h.nativeFragment('#native-root-target');
+  assert.equal(h.window.scrollY, 50, 'Closing the inline stack must not restore its opener over the new target');
+  assert.equal(h.document.activeElement, target);
+  assert.deepEqual(h.reader.getInlinePanes(), []);
+  h.window.scrollY = 2900;
+  await h.browserBack();
+  assert.deepEqual(h.reader.getInlinePanes(), [h.child]);
+  assert.equal(h.window.scrollY, 2100);
+  assert.equal(h.document.activeElement, h.child.children[0]);
+  assert.equal(h.child.dataset.searchQuery, 'child result');
+  assert.equal(h.child.children[0].open, true);
+  await h.browserForward();
+  assert.deepEqual(h.reader.getInlinePanes(), []);
+  assert.equal(h.window.scrollY, 2900);
+  assert.equal(h.document.activeElement, target);
+});
+
+test('a native deferred fragment is registered before replay and cannot override later navigation', async (t) => {
+  const h = readerHarness(t, '/fixture/session/root');
+  const process = addDeferredProcess(h, h.root);
+  h.window.scrollY = 820;
+  h.root.children[0].focus();
+  let resolveProcess;
+  h.processResponses.push(new Promise((resolve) => { resolveProcess = resolve; }));
+  const pending = h.nativeFragment('#deferred-tool');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(process.chunk.dataset.readerProcessState, 'loading');
+  assert.notEqual(h.historyState()?.readerEntry, 0);
+  assert.ok(Number.isInteger(h.historyState()?.readerEntry), 'The browser entry is claimed before source loading completes');
+  await h.browserBack();
+  assert.equal(h.window.scrollY, 820);
+  await h.nativeFragment('#root-source');
+  h.window.scrollY = 1900;
+  resolveProcess({ ok: true, html: 'process:tool' });
+  await pending;
+  assert.equal(h.location.hash, '#root-source');
+  assert.equal(h.document.activeElement, h.root.children[0]);
+  assert.equal(h.window.scrollY, 1900);
+  assert.equal(h.anchorReveals.at(-1).target, h.root.children[0]);
 });
 
 test('a deferred source response preserves a newer same-pane navigation', async (t) => {

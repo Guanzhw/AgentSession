@@ -473,6 +473,16 @@ assert_contains "parent reader restoration" "$parent_restore_state" '"anchorRest
 assert_contains "parent reader restoration" "$parent_restore_state" '"positionRestored":true'
 assert_contains "parent reader restoration" "$parent_restore_state" '"focusRestored":true'
 
+# Native fragment navigation creates an unclaimed browser entry, unlike Reader links.
+ab "navigate to a native message fragment" eval "(() => { const link = [...document.querySelectorAll('.session-toc .toc-assistant')].findLast((item) => item.getAttribute('href')?.startsWith('#')); const target = link && document.getElementById(decodeURIComponent(link.getAttribute('href').slice(1))); if (!target) throw new Error('Native history QA requires a recorded assistant anchor'); window.__qaNativeHistory = { href: location.href, entry: history.state.readerEntry, scrollY, focus: document.activeElement, target }; location.hash = link.getAttribute('href'); })()" >/dev/null
+ab "wait for native fragment adoption and positioning" wait --fn "Number.isInteger(history.state?.readerEntry) && history.state.readerEntry !== window.__qaNativeHistory.entry && document.activeElement === window.__qaNativeHistory.target && window.__qaNativeHistory.target.getBoundingClientRect().top >= 0 && window.__qaNativeHistory.target.getBoundingClientRect().top < innerHeight" >/dev/null
+ab "go Back from the native fragment" back >/dev/null
+ab "wait for native fragment origin restoration" wait --fn "location.href === window.__qaNativeHistory.href && Math.abs(scrollY - window.__qaNativeHistory.scrollY) < 12 && document.activeElement === window.__qaNativeHistory.focus" >/dev/null
+ab "go Forward to the native fragment" forward >/dev/null
+ab "wait for native fragment Forward restoration" wait --fn "document.activeElement === window.__qaNativeHistory.target && window.__qaNativeHistory.target.getBoundingClientRect().top >= 0 && window.__qaNativeHistory.target.getBoundingClientRect().top < innerHeight" >/dev/null
+ab "return to the retained parent reading position" back >/dev/null
+ab "wait for retained parent reading position" wait --fn "location.href === window.__qaNativeHistory.href && Math.abs(scrollY - window.__qaNativeHistory.scrollY) < 12 && document.activeElement === window.__qaNativeHistory.focus" >/dev/null
+
 ab "set wide reader search viewport" set viewport 1360 980 >/dev/null
 ab "open active reader search" click "[data-session-search-toggle]" >/dev/null
 ab "search transcript" fill "[data-session-search-input]" "tool" >/dev/null
