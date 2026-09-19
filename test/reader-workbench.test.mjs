@@ -92,6 +92,7 @@ class FakeElement {
     const alternatives = selector.split(",").map((part) => part.trim());
     return alternatives.some((part) => {
       if (part === "*") return true;
+      if (part === "[id]") return Boolean(this.id);
       if (part === ":scope > .toc-group-summary > .toc-link") return this.classList.contains("toc-link");
       if (part === "[data-reader-pane]") return this.dataset.readerPane != null;
       if (part === "[data-session-search]") return this.dataset.sessionSearch != null;
@@ -179,7 +180,7 @@ class FakeSelect extends FakeElement {
   get selectedOptions() { return this.options.filter((option) => option.value === this._value); }
 }
 
-function workbenchHarness(t) {
+function workbenchHarness(t, { tocSize = 0 } = {}) {
   const original = new Map();
   const install = (name, value) => {
     original.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
@@ -200,9 +201,23 @@ function workbenchHarness(t) {
   childLink.href = "#child-target";
   rootToc.append(rootLink);
   childToc.append(childLink);
+  for (let index = 0; index < tocSize; index += 1) {
+    const target = new FakeElement({ id: `bulk-target-${index}` });
+    target.rect = { top: 4_000 + index * 20, bottom: 4_010 + index * 20 };
+    const link = new FakeElement({ tagName: "a", className: "toc-link" });
+    link.href = `#bulk-target-${index}`;
+    rootToc.append(link);
+    root.append(target);
+  }
   root.append(rootToc, rootTarget);
   child.append(childToc, childTarget);
   root.append(child);
+  const rootQueries = new Map();
+  const rootQuerySelectorAll = root.querySelectorAll.bind(root);
+  root.querySelectorAll = (selector) => {
+    rootQueries.set(selector, (rootQueries.get(selector) || 0) + 1);
+    return rootQuerySelectorAll(selector);
+  };
   const search = new FakeElement({ dataset: { sessionSearch: "true" } });
   const panel = new FakeElement({ className: "session-search-panel" });
   const scope = new FakeSelect();
@@ -261,7 +276,7 @@ function workbenchHarness(t) {
     }
   };
   t.after(cleanup);
-  return { workbench, root, child, rootLink, childLink, scope, input, window, requests, setPendingChild(value) { pendingChild = value; } };
+  return { workbench, root, child, rootLink, childLink, scope, input, window, requests, rootQueries, setPendingChild(value) { pendingChild = value; } };
 }
 
 test("workbench updates active ToC independently for root and inline child scroll", async (t) => {
@@ -269,6 +284,35 @@ test("workbench updates active ToC independently for root and inline child scrol
   await h.window?.dispatchEvent?.({ type: "scroll" });
   assert.equal(h.rootLink.classList.contains("active"), true);
   assert.equal(h.childLink.classList.contains("active"), true);
+});
+
+test("large ToC resolves owned anchors in one pane pass rather than once per link", (t) => {
+  const h = workbenchHarness(t, { tocSize: 400 });
+  assert.equal(h.rootQueries.get("[id], [data-reader-canonical-anchor]"), 1);
+  assert.equal(h.rootQueries.get(".session-toc a[href^='#']"), 1);
+  assert.equal(h.rootLink.classList.contains("active"), true);
+});
+
+test("ToC cache rebuild keeps scoped child anchors and ignores nested-pane targets", async (t) => {
+  const h = workbenchHarness(t);
+  h.childTarget = h.child.querySelector("#child-target");
+  h.childTarget.id = "reader-scope-fixture-child--child-target";
+  h.childTarget.dataset.readerCanonicalAnchor = "child-target";
+  h.childLink.href = "#reader-scope-fixture-child--child-target";
+  const canonicalChildLink = new FakeElement({ tagName: "a", className: "toc-link" });
+  canonicalChildLink.href = "#child-target";
+  h.child.querySelector(".session-toc").append(canonicalChildLink);
+  await h.workbench.dispatchEvent({ type: "session-reader:inline-opened", detail: { pane: h.child } });
+  await h.window.dispatchEvent({ type: "scroll" });
+  assert.equal(h.childLink.classList.contains("active"), true);
+  assert.equal(canonicalChildLink.classList.contains("active"), false, "a canonical alias resolves to the same scoped target without becoming the selected URL");
+  const replacement = new FakeElement({ id: "root-replacement" });
+  replacement.rect = { top: 85, bottom: 105 };
+  h.root.append(replacement);
+  h.rootLink.href = "#root-replacement";
+  await h.workbench.dispatchEvent({ type: "session-reader:content-updated", detail: { pane: h.root } });
+  await h.window.dispatchEvent({ type: "scroll" });
+  assert.equal(h.rootLink.classList.contains("active"), true);
 });
 
 test("search scope switches request ownership and restores root after closing child", async (t) => {

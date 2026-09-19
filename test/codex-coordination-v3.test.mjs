@@ -15,6 +15,28 @@ const terminal = (ordinal, turnId, completedAt) => ({
   payload: { type: "task_complete", turn_id: turnId, completed_at: completedAt }
 });
 
+test("Codex coordination joins interleaved outputs by exact call identity and recorded order", () => {
+  const call = (id, name = "spawn_agent") => ({ type: "response_item", payload: {
+    type: "function_call", call_id: id, name, namespace: "multi_agent_v1", arguments: "{}"
+  } });
+  const output = (id, value, type = "function_call_output") => ({ type: "response_item", payload: {
+    type, call_id: id, output: value
+  } });
+  const records = [
+    call("requested"), call("started"), call("closed", "close_agent"),
+    output("unrelated", "{}"), output("started", "{}", "custom_tool_call_output"),
+    output("closed", '{"success":true}'), output("closed", '{"success":false}'),
+    call("id-only"), { type: "response_item", payload: { type: "function_call_output", id: "id-only", output: "{}" } },
+    call("different-call-id"), { type: "response_item", payload: { type: "function_call_output", id: "different-call-id", call_id: "another-call", output: "{}" } }
+  ];
+  const input = { session: session("root"), messages: [], records, children: [] };
+  const protocol = buildCodexSessionProtocolV3(input, buildCodexSessionProtocol(input));
+  assert.deepEqual(protocol.coordination.map(item => [item.correlationId, item.state]), [
+    ["requested", "requested"], ["started", "started"], ["closed", "completed"],
+    ["id-only", "started"], ["different-call-id", "requested"]
+  ]);
+});
+
 test("Codex binds repeated follow-ups to exact tool events and keeps child completions distinct", () => {
   const parentRecords = [
     { type: "session_meta", payload: { id: "root" } },

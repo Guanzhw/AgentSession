@@ -700,7 +700,22 @@ if (sessionWorkbench) {
     if (!state || state.dirty) {
       const links = [...pane.querySelectorAll(".session-toc a[href^='#']")]
         .filter((link) => link.closest("[data-reader-pane]") === pane);
-      state = { links, targets: [...new Set(links.map(targetFromLink).filter(Boolean))], dirty: false };
+      // Resolve every target from one owned-element pass. Calling
+      // readerPaneAnchor for every ToC link turns a long Reader into
+      // links × pane-DOM selector work before its first scroll.
+      const anchors = new Map();
+      const candidates = [pane, ...pane.querySelectorAll("[id], [data-reader-canonical-anchor]")];
+      for (const candidate of candidates) {
+        if (candidate.closest?.("[data-reader-pane]") !== pane) continue;
+        if (candidate.id) anchors.set(candidate.id, candidate);
+        if (candidate.dataset.readerCanonicalAnchor) anchors.set(candidate.dataset.readerCanonicalAnchor, candidate);
+      }
+      const targetForLink = (link) => {
+        const href = link.getAttribute("href") || "";
+        if (!href.startsWith("#")) return null;
+        try { return anchors.get(decodeURIComponent(href.slice(1))) || null; } catch { return null; }
+      };
+      state = { links, targets: [...new Set(links.map(targetForLink).filter(Boolean))], dirty: false };
       navigationStates.set(pane, state);
     }
     return state;
@@ -727,17 +742,6 @@ if (sessionWorkbench) {
       navigationStates.delete(pane);
     }
   };
-  const targetFromLink = (link) => {
-    const href = link.getAttribute("href") || "";
-    if (!href.startsWith("#")) return null;
-    try {
-      const pane = link.closest("[data-reader-pane]") || getReaderPane();
-      return readerPaneAnchor(pane, decodeURIComponent(href.slice(1)));
-    } catch {
-      return null;
-    }
-  };
-
   try {
     const storedTocWidth = Number(localStorage.getItem("agentsession.tocWidth"));
     if (storedTocWidth) {

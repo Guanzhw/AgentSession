@@ -898,12 +898,7 @@ function callArgumentsOf(record: Row): Row {
   return raw && typeof raw === "object" ? raw : {};
 }
 
-function closeAgentOutputState(records: Row[], callId: string): CoordinationState | null {
-  const outputRecord = records.find((candidate) => (
-    candidate.type === "response_item"
-      && (candidate.payload?.type === "function_call_output" || candidate.payload?.type === "custom_tool_call_output")
-      && firstString(candidate.payload?.call_id, candidate.payload?.id) === callId
-  ));
+function closeAgentOutputState(outputRecord: Row | undefined): CoordinationState | null {
   if (!outputRecord) return null;
   let output = outputRecord.payload?.output;
   if (typeof output === "string") {
@@ -1234,6 +1229,14 @@ export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: Ses
     ? eventIdByToolCall.get(callId) ?? null
     : null;
   const resultSourceEvents = [] as ReturnType<typeof sessionEvent>[];
+  const outputByCallId = new Map<string, Row>();
+  for (const record of input.records) {
+    if (record.type !== "response_item"
+      || (record.payload?.type !== "function_call_output" && record.payload?.type !== "custom_tool_call_output")) continue;
+    const callId = firstString(record.payload?.call_id, record.payload?.id);
+    // Keep the same first recorded output as the former per-call lookup.
+    if (callId && !outputByCallId.has(callId)) outputByCallId.set(callId, record);
+  }
 
   for (const [index, record] of input.records.entries()) {
     if (record.type !== "response_item") continue;
@@ -1249,18 +1252,14 @@ export function buildCodexSessionProtocolV3(input: CodexProtocolInput, base: Ses
     const argumentsValue = callArgumentsOf(record);
     const target = firstString(argumentsValue.target, argumentsValue.task_name, argumentsValue.taskName);
     const bound = bindTarget(target, callId);
-    const hasOutput = input.records.some((candidate) => (
-      candidate.type === "response_item"
-      && (candidate.payload?.type === "function_call_output" || candidate.payload?.type === "custom_tool_call_output")
-      && firstString(candidate.payload?.call_id, candidate.payload?.id) === callId
-    ));
-    const closeState = name === "close_agent" ? closeAgentOutputState(input.records, callId) : null;
+    const output = outputByCallId.get(callId);
+    const closeState = name === "close_agent" ? closeAgentOutputState(output) : null;
     observations.push(coordinationObservation({
       id: `coord:${kind}:${callId}`,
       sessionId,
       kind,
       state: kind === "spawn"
-        ? (bound.toSessionRef || hasOutput ? "started" : "requested")
+        ? (bound.toSessionRef || output ? "started" : "requested")
         : name === "close_agent"
           ? (closeState ?? "requested")
           : "unknown",

@@ -395,14 +395,13 @@ function protocolInputFromCaptured(
     children: children.map((child) => {
       // A direct child always inherits from this root. Capture its body once
       // and classify against the same root record objects held above.
-      const { records: childRecords, messages: childMessages } = readChild(child);
-      const childEntry = resolveEntryPayload(child, childRecords, childMessages, rootRecords);
+      const { records: childRecords } = readChild(child);
       const childProvenance = classifyCodexRecordProvenance(childRecords, rootRecords);
       const ownedChildRecords = childRecords.filter((record) => (
         childProvenance.get(record) === "session"
       ));
       return {
-        session: childEntry.session,
+        session: child.session,
         facts: codexProtocolChildFactsFromRecords(ownedChildRecords)
       };
     })
