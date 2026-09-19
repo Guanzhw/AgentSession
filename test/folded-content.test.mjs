@@ -59,7 +59,7 @@ test('folded field controls carry localized loading, retry and continuation labe
   setLocale('en');
 });
 
-function clientField(t, { field = 'output', session = 'child', scope = 'owned', artifactId = null, owner = null } = {}) {
+function clientField(t, { field = 'output', session = 'child', scope = 'owned', artifactId = null, recordId = null, owner = null } = {}) {
   const events = [];
   const inserts = [];
   let status = null;
@@ -79,7 +79,7 @@ function clientField(t, { field = 'output', session = 'child', scope = 'owned', 
   };
   const details = owner || {
     open: true,
-    matches(selector) { assert.equal(selector, 'details.tool-call, details.reasoning-block, details.reader-artifact-output'); return true; },
+    matches(selector) { assert.equal(selector, 'details.tool-call, details.reasoning-block, details.reader-artifact-output, details.reader-artifact-followup-record'); return true; },
     querySelectorAll(selector) {
       assert.equal(selector, '.progressive-more[data-load-initial]');
       return 'loadInitial' in button.dataset && button.isConnected ? [button] : [];
@@ -87,7 +87,7 @@ function clientField(t, { field = 'output', session = 'child', scope = 'owned', 
   };
   const attributes = new Map();
   const button = {
-    dataset: { ...(artifactId ? { contextArtifactId: artifactId } : { partId: 'part:1' }), field, nextOffset: '0', contentScope: scope, loadInitial: '',
+    dataset: { ...(artifactId ? { contextArtifactId: artifactId } : { partId: 'part:1' }), ...(recordId ? { artifactEvidenceRecordId: recordId } : {}), field, nextOffset: '0', contentScope: scope, loadInitial: '',
       loadingLabel: 'Loading content…', retryLabel: 'Retry loading', moreLabel: 'Show more', loadError: 'Unable to load content', emptyLabel: 'The recorded content is empty.', staleLabel: 'This saved version changed.', refreshLabel: 'Refresh this history' },
     textContent: 'Load content', disabled: false, isConnected: true,
     closest(selector) {
@@ -112,6 +112,7 @@ function clientField(t, { field = 'output', session = 'child', scope = 'owned', 
   });
   globalThis.document = { createElement: (tagName) => ({
     tagName, className: '', innerHTML: '', textContent: '', dataset: {}, attributes: new Map(), children: [],
+    firstElementChild: { tabIndex: -1 },
     setAttribute(name, value) { this.attributes.set(name, value); },
     getAttribute(name) { return this.attributes.get(name) ?? null; },
     append(...children) { this.children.push(...children); },
@@ -314,3 +315,37 @@ for (const failure of [false, true]) {
     assert.equal(fixture.events[0].detail.session, 'child');
   });
 }
+
+test('evidence source continuation stays with its child artifact and record identity', async (t) => {
+  const fixture = clientField(t, { field: 'content', scope: 'artifact-evidence', artifactId: 'summary:version', recordId: 'record:version' });
+  const urls = [];
+  t.mock.method(globalThis, 'fetch', async (url) => { urls.push(url); return response('<pre>request text</pre>', urls.length === 1 ? 6000 : null); });
+  await loadFoldedContent(fixture.details);
+  await loadProgressiveContent(fixture.button);
+  const first = new URL(urls[0], 'http://localhost');
+  assert.equal(first.pathname, '/api/codex/session/child/content');
+  assert.equal(first.searchParams.get('scope'), 'artifact-evidence');
+  assert.equal(first.searchParams.get('artifact'), 'summary:version');
+  assert.equal(first.searchParams.get('record'), 'record:version');
+  assert.equal(new URL(urls[1], 'http://localhost').searchParams.get('offset'), '6000');
+  assert.equal(fixture.inserts.length, 2);
+  assert.ok(fixture.inserts.every(chunk => chunk.firstElementChild.tabIndex === 0), 'each source page can scroll with the keyboard');
+});
+
+test('a detached evidence source ignores a stale response and remains retryable', async (t) => {
+  const fixture = clientField(t, { field: 'content', scope: 'artifact-evidence', artifactId: 'summary:version', recordId: 'record:version' });
+  let resolve;
+  t.mock.method(globalThis, 'fetch', () => new Promise((done) => { resolve = done; }));
+  const pending = loadProgressiveContent(fixture.button);
+  fixture.pane.isConnected = false;
+  resolve({ ok: false, status: 409, json: async () => ({ ok: false, code: 'artifact_stale' }) });
+  await pending;
+  assert.equal(fixture.button.isConnected, true);
+  assert.equal(fixture.button.disabled, false);
+  assert.equal(fixture.status, null);
+  fixture.pane.isConnected = true;
+  const retry = loadProgressiveContent(fixture.button);
+  resolve(response('<pre>retained</pre>'));
+  await retry;
+  assert.equal(fixture.inserts.length, 1);
+});

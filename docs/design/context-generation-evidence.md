@@ -5,6 +5,10 @@ Codex memory 生成活动及其输入文件证据，尚未实现 Viewer 呈现�
 产品验收。本文补充[验收记录](runtime-acceptance-evidence.md)的证据范围，
 不改变[呈现契约](runtime-presentation-contract.md)。
 
+后续进展（2026-09-19）：[stage1 产物阅读](reader-memory-artifacts.md)和
+[后续整理记录](reader-memory-followups.md)现已实现。以下是当时的调查快照；
+当前实现与验收范围以这两个专题及验收记录为准。
+
 ## 结论
 
 1. 本地 `memories_1.sqlite` 的 52 条 `stage1_outputs` 均能与

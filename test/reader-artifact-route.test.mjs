@@ -13,14 +13,14 @@ const { registerSessionDetail } = await import('../dist/src/routes/session-detai
 const { renderProgressiveContent } = await import('../dist/src/views/components.js');
 test.after(() => { closeMetaDb(); rmSync(directory, { recursive: true, force: true }); });
 
-function contentRoute(adapter) {
+function contentRoute(adapter, suffix = 'content') {
   const routes = [];
   registerSessionDetail({ get(pattern, handler) { routes.push({ pattern, handler }); } }, {
     appConfig: { port: 0, projectPaths: {}, resumeCommands: {}, allowTerminalLaunch: false },
     providerMap: new Map([[adapter.id, adapter]]), providerInfo: []
   });
   return async (query, provider = adapter.id, sessionId = 'input-session') => {
-    const pathname = `/api/${provider}/session/${encodeURIComponent(sessionId)}/content`;
+    const pathname = `/api/${provider}/session/${encodeURIComponent(sessionId)}/${suffix}`;
     const route = routes.find(({ pattern }) => pattern instanceof RegExp && pattern.test(pathname));
     const response = { status: 0, body: '', writeHead(status) { this.status = status; }, end(body) { this.body = body; } };
     await route.handler({ url: `${pathname}?${new URLSearchParams(query)}` }, response, pathname.match(route.pattern));
@@ -94,4 +94,73 @@ test('artifact content validates HTTP identity and continuation fields before ca
   assert.equal((await request(query, 'not-installed')).status, 404);
   assert.equal(calls, 0);
   assert.equal((await contentRoute({ id: 'fixture' })(query)).status, 404);
+});
+
+test('artifact evidence pages use the exact artifact and bounded selector without preparing history', async () => {
+  const calls = [];
+  const noTranscript = () => { throw new Error('Evidence must not load transcript or protocol'); };
+  const coverage = { from: 1700000000000, to: 1700003600000, scannedRecords: 45, readBytes: 8200, complete: false, issues: ['metadata-budget'] };
+  const provenance = { fidelity: 'recorded', sourceType: 'fixture.log', sourceId: 'r1' };
+  const activity = { id: 'activity-one', sessionId: 'generation', turnId: 'turn', timeCreated: coverage.from + 1000, provenance, historyAvailability: 'unavailable',
+    binding: { sourcePath: 'C:\\memories\\summary.md', fileHash: 'abc', checkedAt: coverage.to, sourceSessionId: 'input-session', sourceUpdatedAt: coverage.from, provenance: { fidelity: 'derived', sourceType: 'fixture.file-match' } },
+    records: [{ id: 'record-one', kind: 'modification-request', targetPath: '/memories/MEMORY.md', timeCreated: coverage.from + 2000, provenance, contentLength: 30000 }] };
+  const page = { status: 'page', artifactId: 'summary-version', revision: 'evidence-r1', coverage, activities: [activity], nextCursor: 'next-page' };
+  const request = contentRoute({ id: 'codex', getSession: noTranscript, getMessages: noTranscript, getSessionReaderSnapshot: noTranscript, getSessionProtocol: noTranscript,
+    getContextArtifactContent: noTranscript,
+    getContextArtifactEvidence(sessionId, artifactId, selector) { calls.push({ sessionId, artifactId, selector }); return page; }
+  }, 'artifact-evidence');
+  const result = await request({ artifact: 'summary-version', from: String(coverage.from), to: String(coverage.to) });
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.activities, [activity]);
+  assert.equal(result.body.revision, 'evidence-r1');
+  assert.match(result.body.html, /Request to modify/);
+  assert.match(result.body.html, /data-content-scope="artifact-evidence"/);
+  assert.match(result.body.coverageHtml, /has not been fully checked/);
+  assert.deepEqual(calls[0], { sessionId: 'input-session', artifactId: 'summary-version', selector: { mode: 'page', from: coverage.from, to: coverage.to } });
+  await request({ artifact: 'summary-version', cursor: 'next-page' });
+  assert.deepEqual(calls[1].selector, { mode: 'page', cursor: 'next-page' });
+});
+
+test('artifact evidence validates HTTP selectors and preserves explicit failure states', async () => {
+  let calls = 0;
+  let result = { status: 'invalid' };
+  const request = contentRoute({ id: 'fixture', getContextArtifactEvidence() { calls++; return result; } }, 'artifact-evidence');
+  const query = { artifact: 'summary-version' };
+  for (const change of [{ artifact: '' }, { artifact: 'x'.repeat(2049) }, { cursor: '' }, { cursor: 'x'.repeat(16385) }, { from: '' }, { to: 'NaN' }, { from: '-1' }, { from: '1.5' }, { from: '2', to: '1' }, { cursor: 'next', from: '1' }]) {
+    assert.equal((await request({ ...query, ...change })).status, 400);
+  }
+  assert.equal(calls, 0);
+  assert.equal((await request(query)).body.code, 'evidence_invalid');
+  result = { status: 'stale' };
+  assert.equal((await request(query)).status, 409);
+  result = { status: 'not-found' };
+  assert.equal((await request(query)).status, 404);
+  result = { status: 'unavailable', sourceState: { state: 'invalid', code: 'unsupported-schema', sourcePath: 'logs.sqlite', provenance: { fidelity: 'recorded', sourceType: 'fixture.logs' } } };
+  const unavailable = await request(query);
+  assert.equal(unavailable.status, 503);
+  assert.deepEqual(unavailable.body.sourceState, result.sourceState);
+  assert.equal((await contentRoute({ id: 'fixture' }, 'artifact-evidence')(query)).status, 404);
+});
+
+test('retained evidence commands page as plain text with their own version-bound record selector', async () => {
+  const content = `${'A long request with 中文 🧭\n'.repeat(500)}<script>private()</script>`;
+  const calls = [];
+  let result = { status: 'content', artifactId: 'summary-version', recordId: 'record-version', content };
+  const request = contentRoute({ id: 'fixture', getContextArtifactEvidence(sessionId, artifactId, selector) { calls.push({ sessionId, artifactId, selector }); return result; } });
+  const query = { scope: 'artifact-evidence', artifact: 'summary-version', record: 'record-version', field: 'content' };
+  let offset = 0;
+  do {
+    const response = await request({ ...query, offset: String(offset) });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, { ok: true, scope: 'artifact-evidence', provider: 'fixture', sessionId: 'input-session', artifactId: 'summary-version', recordId: 'record-version', field: 'content', ...renderProgressiveContent(content, 'plain', offset, 6000) });
+    assert.doesNotMatch(response.body.html, /<script>/);
+    offset = response.body.nextOffset;
+  } while (offset !== null);
+  assert.ok(calls.length > 1);
+  assert.ok(calls.every(({ selector }) => selector.mode === 'content' && selector.recordId === 'record-version'));
+  const priorCalls = calls.length;
+  for (const change of [{ record: '' }, { record: 'x'.repeat(16385) }, { offset: '-1' }]) assert.equal((await request({ ...query, ...change })).status, 400);
+  assert.equal(calls.length, priorCalls);
+  result = { status: 'stale' };
+  assert.equal((await request({ ...query, offset: '6000' })).status, 409);
 });

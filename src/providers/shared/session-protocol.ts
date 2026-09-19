@@ -300,6 +300,8 @@ export interface ContextArtifact {
   scope: ContextArtifactScope;
   origin: ContextArtifactOrigin;
   contentAccess: ContentAccess;
+  /** Supports an on-demand evidence lookup; does not assert a known relationship. */
+  evidenceAccess?: "on-demand";
   title: string | null;
   /** Short non-sensitive note. Never transcript or compaction text. */
   summary: string | null;
@@ -338,6 +340,65 @@ export interface ContextArtifactSourceState {
   sourcePath: string | null;
   provenance: EventProvenance;
 }
+
+/** On-demand evidence extends one exact protocol artifact, independently of its body. */
+export type ContextArtifactEvidenceRequest =
+  | { mode: "page"; cursor?: string; from?: number; to?: number }
+  | { mode: "content"; recordId: string };
+
+export interface ContextArtifactEvidenceRecord {
+  id: string;
+  kind: "read-request" | "modification-request";
+  targetPath: string;
+  timeCreated: number;
+  provenance: EventProvenance;
+  contentLength: number;
+}
+
+export interface ContextArtifactEvidenceActivity {
+  id: string;
+  sessionId: string;
+  turnId: string;
+  timeCreated: number;
+  provenance: EventProvenance;
+  historyAvailability: "unavailable";
+  binding: {
+    sourcePath: string;
+    fileHash: string;
+    checkedAt: number;
+    sourceSessionId: string;
+    sourceUpdatedAt: number;
+    provenance: EventProvenance;
+  };
+  records: ContextArtifactEvidenceRecord[];
+}
+
+export interface ContextArtifactEvidenceCoverage {
+  from: number;
+  to: number;
+  scannedRecords: number;
+  readBytes: number;
+  /** Complete within this requested range; never a claim about all history. */
+  complete: boolean;
+  issues: string[];
+}
+
+export interface ContextArtifactEvidencePage {
+  status: "page";
+  artifactId: string;
+  revision: string;
+  coverage: ContextArtifactEvidenceCoverage;
+  activities: ContextArtifactEvidenceActivity[];
+  nextCursor: string | null;
+}
+
+export type ContextArtifactEvidenceResult =
+  | ContextArtifactEvidencePage
+  | { status: "content"; artifactId: string; recordId: string; content: string }
+  | { status: "stale" }
+  | { status: "not-found" }
+  | { status: "unavailable"; sourceState: ContextArtifactSourceState }
+  | { status: "invalid" };
 
 export interface SessionBranch {
   id: string;

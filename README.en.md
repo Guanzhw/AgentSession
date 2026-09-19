@@ -84,6 +84,14 @@ It shows the input version, generation time, and matching job evidence when
 recorded. The input history is not presented as the generating session, and a
 saved artifact does not imply later use. Long bodies remain readable to the
 end; changed versions require a refresh, and unavailable sources are explicit.
+
+“Later consolidation” beside a summary checks retained logs on demand. A local
+branch connects the summary, consolidation activity, and its read/modification
+requests; each request opens its full, progressively loaded source. The checked
+range can be changed. Missing outcomes and full generating history are stated
+explicitly. This supports the verified Codex V1 artifact and diagnostic forms;
+see the [presentation contract](docs/design/reader-memory-followups.md).
+
 Unsupported, unavailable, missing, and invalid evidence stays explicit rather
 than being rendered as observed zeroes.
 

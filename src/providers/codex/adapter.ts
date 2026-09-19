@@ -24,6 +24,7 @@ import {
 } from "./protocol.js";
 import { normalizeCodexContextChangeResult } from "./context-result.js";
 import { readCodexMemoryContent, readCodexMemoryMetadata, type CodexMemoryMetadata } from "./memory.js";
+import { readCodexMemoryEvidence } from "./memory-evidence.js";
 import { finalizeSessionProtocol, protocolRevision } from "../shared/session-protocol.js";
 import { finalizeSessionProtocolV3 } from "../shared/session-protocol-v3.js";
 import { icons } from "../../icons.js";
@@ -650,6 +651,10 @@ const codex = {
 
   getContextArtifactContent(sessionId, artifactId) {
     return readCodexMemoryContent(getCodexDir(), sessionId, artifactId);
+  },
+
+  getContextArtifactEvidence(sessionId, artifactId, request) {
+    return readCodexMemoryEvidence(getCodexDir(), sessionId, artifactId, request);
   },
 
   getContextChangeResult(sessionId, checkpointId) {

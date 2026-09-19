@@ -1957,8 +1957,9 @@ export function renderSessionReaderPane({
   contextArtifacts = [],
   contextArtifactSourceState = null,
   canReadContextArtifacts = false,
+  canReadContextArtifactEvidence = false,
   deferExecution = true
-}: { session: any; sessionTree?: SessionTree | null; ownedReader?: OwnedReaderProjection | null; messages?: any[]; partsByMessage?: Map<any, any>; provider?: string; conversationCompactions?: ConversationCompaction[]; conversationView?: ConversationViewModel | null; readerRelations?: ReaderRelations | null; inheritedContext?: InheritedContextView | null; contextArtifacts?: ContextArtifact[]; contextArtifactSourceState?: ContextArtifactSourceState | null; canReadContextArtifacts?: boolean; deferExecution?: boolean }) {
+}: { session: any; sessionTree?: SessionTree | null; ownedReader?: OwnedReaderProjection | null; messages?: any[]; partsByMessage?: Map<any, any>; provider?: string; conversationCompactions?: ConversationCompaction[]; conversationView?: ConversationViewModel | null; readerRelations?: ReaderRelations | null; inheritedContext?: InheritedContextView | null; contextArtifacts?: ContextArtifact[]; contextArtifactSourceState?: ContextArtifactSourceState | null; canReadContextArtifacts?: boolean; canReadContextArtifactEvidence?: boolean; deferExecution?: boolean }) {
   const title = session.title || session.slug || session.id;
   const placedCardIds = new Set<string>();
   const relationMarkup = renderReaderRelations(readerRelations);
@@ -1986,7 +1987,7 @@ export function renderSessionReaderPane({
   const conversationMarkup = renderConversationPanel(conversationEntries, conversationCompactions, provider, String(session.id), detachedMarkup, renderedEntryCount, conversationView, placedCardIds, relationMarkup);
   const inheritedContextMarkup = renderInheritedContext(inheritedContext, provider);
   const sessionAnchor = anchorId("session", session.id);
-  const artifactMarkup = renderReaderArtifacts({ artifacts: contextArtifacts, sourceState: contextArtifactSourceState, canRead: canReadContextArtifacts, provider, sessionId: String(session.id), sessionAnchor });
+  const artifactMarkup = renderReaderArtifacts({ artifacts: contextArtifacts, sourceState: contextArtifactSourceState, canRead: canReadContextArtifacts, canReadEvidence: canReadContextArtifactEvidence, provider, sessionId: String(session.id), sessionAnchor });
   return `<div id="${escapeHtml(sessionAnchor)}" class="reader-pane" data-reader-pane data-reader-provider="${escapeHtml(provider)}" data-reader-session="${escapeHtml(session.id)}" data-reader-title="${escapeHtml(title)}">
     <div class="reader-pane-grid">
       <details class="reader-toc-disclosure" data-reader-toc>

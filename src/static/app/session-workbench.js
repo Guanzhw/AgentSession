@@ -1,5 +1,6 @@
 import { readerPaneAnchor } from "./reader-pane-dom.js";
 import { ensureReaderAnchor, initReaderProcesses } from "./reader-process.js";
+import { initArtifactEvidence } from "./artifact-evidence.js";
 
 const progressiveContentLoads = new WeakMap();
 
@@ -19,10 +20,12 @@ export function loadProgressiveContent(button, { dispatch = true } = {}) {
     const contextTarget = button.dataset.contextResultTarget || "";
     const contextCheckpoint = button.dataset.contextResultCheckpoint || "";
     const artifactId = button.dataset.contextArtifactId || "";
+    const evidenceRecordId = button.dataset.artifactEvidenceRecordId || "";
     const offset = button.dataset.nextOffset;
     const contextResult = contentScope === "context-result";
     const contextArtifact = contentScope === "context-artifact";
-    if (!provider || !sessionId || !field || offset == null || contextResult && (!contextTarget || !contextCheckpoint) || contextArtifact && !artifactId || !contextResult && !contextArtifact && !partId) return null;
+    const artifactEvidence = contentScope === "artifact-evidence";
+    if (!provider || !sessionId || !field || offset == null || contextResult && (!contextTarget || !contextCheckpoint) || contextArtifact && !artifactId || artifactEvidence && (!artifactId || !evidenceRecordId) || !contextResult && !contextArtifact && !artifactEvidence && !partId) return null;
     container.querySelector("[data-progressive-status]")?.remove();
     const idleLabel = button.textContent;
     button.disabled = true;
@@ -35,13 +38,15 @@ export function loadProgressiveContent(button, { dispatch = true } = {}) {
         query.set("target", contextTarget);
         query.set("group", button.dataset.contextResultGroup || "-1");
         query.set("entry", button.dataset.contextResultEntry || "-1");
-      } else if (contextArtifact) {
+      } else if (contextArtifact || artifactEvidence) {
         query.set("artifact", artifactId);
+        if (artifactEvidence) query.set("record", evidenceRecordId);
       } else {
         query.set("part", partId);
       }
       const response = await fetch(`/api/${encodeURIComponent(provider)}/session/${encodeURIComponent(sessionId)}/content?${query}`);
       const data = await response.json();
+      if (!button.isConnected || pane && !pane.isConnected) return null;
       if (!response.ok || !data?.ok || typeof data.html !== "string") {
         if (response.status === 409 && data?.code === "artifact_stale") {
           const status = document.createElement("span");
@@ -59,10 +64,10 @@ export function loadProgressiveContent(button, { dispatch = true } = {}) {
         }
         throw new Error(data?.error || `HTTP ${response.status}`);
       }
-      if (!button.isConnected || pane && !pane.isConnected) return null;
       const chunk = document.createElement("div");
       chunk.className = "progressive-chunk";
       chunk.innerHTML = data.html;
+      if (artifactEvidence) chunk.firstElementChild.tabIndex = 0;
       container.insertBefore(chunk, button);
       delete button.dataset.loadInitial;
       if (dispatch && button.dataset.searchRevealPending !== "true") {
@@ -72,7 +77,7 @@ export function loadProgressiveContent(button, { dispatch = true } = {}) {
         }));
       }
       if (data.nextOffset == null) {
-        if (contextArtifact && Number(data.totalLength) === 0) {
+        if ((contextArtifact || artifactEvidence) && Number(data.totalLength) === 0) {
           const status = document.createElement("span");
           status.dataset.progressiveStatus = "";
           status.setAttribute("role", "status");
@@ -116,7 +121,7 @@ export function loadProgressiveContent(button, { dispatch = true } = {}) {
 }
 
 export function loadFoldedContent(details) {
-  if (!details.open || !details.matches("details.tool-call, details.reasoning-block, details.reader-artifact-output")) return Promise.resolve([]);
+  if (!details.open || !details.matches("details.tool-call, details.reasoning-block, details.reader-artifact-output, details.reader-artifact-followup-record")) return Promise.resolve([]);
   const buttons = [...details.querySelectorAll(".progressive-more[data-load-initial]")]
     .filter((button) => button.closest("details") === details);
   // First pages preserve the existing anchors. Do not restart a search that
@@ -132,6 +137,7 @@ export function selectVisibleSearchHit(match, visibleHits) {
 export function initSessionWorkbench({ ft, formatText, showToast }) {
 const sessionWorkbench = document.querySelector(".session-workbench");
 if (sessionWorkbench) {
+  initArtifactEvidence(sessionWorkbench);
   initReaderProcesses(sessionWorkbench);
   sessionWorkbench.addEventListener("toggle", (event) => {
     void loadFoldedContent(event.target);

@@ -86,6 +86,19 @@ live capture. Cumulative
 only the recorded per-response `usage` is used. Child lineage still requires
 recorded parent/session metadata or a matching child rollout.
 
+### Codex memory evidence snapshot (2026-09-19)
+
+The retained V1 `stage1_outputs` / `memories/rollout_summaries` sample supports
+an on-demand diagnostic lookup for later consolidation. The installed CLI is
+`0.155.0-alpha.9.2` and Desktop is `26.915.4065.0`; these versions are not
+attributed retrospectively to the September 17 sample. Current upstream also
+has a separately stored V2 pipeline; this change does not advertise its
+unverified artifact/diagnostic grammar. The checked official commits, links,
+observed request forms and retention boundary are recorded in the
+[artifact evidence snapshot](design/reader-memory-followups.md#provider-evidence-freshness).
+Use recorded request identity and a derived current-file binding, not a time
+match, a mutable global job row or a worker ID, to associate downstream work.
+
 ### Claude Code evidence snapshot (2026-09-08)
 
 The installed CLI is `2.1.207` (`claude --version`). The npm package currently
@@ -215,6 +228,16 @@ Every adapter implements `ProviderAdapter`:
   artifact body. Keep body text out of protocol snapshots; bind content reads
   to the exact versioned artifact ID and report stale versions explicitly.
   This read must not prepare the input transcript or its complete family;
+- optional `getContextArtifactEvidence(sessionId, artifactId, request)` for
+  on-demand retained operations associated with that exact artifact. Advertise
+  it using `evidenceAccess: "on-demand"`, independently of body access. The
+  provider owns discovery, source parsing, artifact binding and bounded cursor
+  coverage; shared routes and Reader code consume typed activities and request
+  records. Keep current-file bindings derived and request outcomes unknown
+  unless the source records them. Diagnostic evidence does not become a
+  discovered session, a local producer run, or conversation token usage. Closed
+  Reader rendering, body reads and normal protocol revisions must not inspect
+  diagnostic logs. See the [artifact evidence contract](design/reader-memory-followups.md);
 - optional `exportSession()`, runtime-environment evidence, system-prompt evidence, structured conversation projections, and a provider-owned resume command;
 - optional `getOwnedReaderProjection()` for providers whose legacy structured
   tree loads a complete family. Return the complete selected session tree plus

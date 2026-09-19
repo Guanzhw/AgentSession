@@ -67,7 +67,9 @@ the SQLite body, and confirm generation/source identity remains distinct.
 Check current job matching and mismatch, missing/invalid storage, empty bodies,
 WAL changes, stale continuation, transient failure/retry, keyboard expansion,
 390px and light/dark themes. Preserve seven-provider Reader behavior. Phase2
-log history, dream evidence and full product acceptance remain separate work.
+diagnostic requests are now an [on-demand followup slice](reader-memory-followups.md);
+full generating history, dream evidence and product acceptance retain their
+separate evidence boundaries.
 
 ## Verified checkpoint
 

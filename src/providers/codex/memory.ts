@@ -108,7 +108,8 @@ function readMetadata(databasePath: string, sessionId: string): CodexMemoryMetad
         sourceSessionIds: [row.thread_id], hash: digest, redacted: false,
         provenance: { fidelity: "recorded", sourceType: "codex.memories.stage1_outputs", sourceId: `${row.thread_id}:${field}` },
         timeCreated: row.generated_at * 1000, contentSourceTime: row.source_updated_at * 1000,
-        productionEvidence: evidence
+        productionEvidence: evidence,
+        ...(field === "rollout_summary" ? { evidenceAccess: "on-demand" as const } : {})
       });
     });
     return metadata(artifacts, sourceState(databasePath, "available", null));

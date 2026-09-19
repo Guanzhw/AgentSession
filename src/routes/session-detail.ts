@@ -15,7 +15,7 @@ import {
 } from "../providers/kinds.js";
 import { getResumeCommand } from "../resume.js";
 import { renderSessionPage, renderSessionReaderPane, renderReaderProcessChunk, renderInheritedContextPage, renderSessionMetricsPanel } from "../views/session.js";
-import type { SessionProtocol } from "../providers/shared/session-protocol.js";
+import type { ContextArtifactEvidenceRequest, ContextArtifactEvidenceResult, SessionProtocol } from "../providers/shared/session-protocol.js";
 import type { ContextChangeResult, SessionReaderSnapshot } from "../providers/interface.js";
 import { decorateRuntimeTransformationEvidence, projectRuntimeLanePresentation, renderRuntimeEvents, renderRuntimeRunPage, renderRuntimeWorkbench } from "../views/runtime-workbench.js";
 import { renderContextChangeResult, renderProgressiveContent, resolveProgressiveField, resolveProgressiveRenderFormat, progressiveText, type ProgressiveField } from "../views/components.js";
@@ -48,6 +48,7 @@ import { deriveReaderRelations } from "../reader-relations.js";
 import { parseReaderActivityQuery, projectReaderActivity, ReaderActivityError } from "../reader-activity.js";
 import { renderReaderActivity } from "../views/reader-activity.js";
 import { streamJson } from "../json-stream.js";
+import { renderArtifactEvidenceActivity, renderArtifactEvidenceCoverage } from "../views/reader-artifacts.js";
 
 export function registerSessionDetail(
   app: any,
@@ -173,6 +174,7 @@ export function registerSessionDetail(
       contextArtifacts: runtime.v3?.contextArtifacts || runtime.protocol?.contextArtifacts || [],
       contextArtifactSourceState: runtime.v3?.contextArtifactSourceState || runtime.protocol?.contextArtifactSourceState,
       canReadContextArtifacts: typeof adapter.getContextArtifactContent === "function",
+      canReadContextArtifactEvidence: typeof adapter.getContextArtifactEvidence === "function",
       // An unavailable runtime still permits direct reading; keep those tools
       // rendered because a later process request cannot reproduce its boundaries.
       deferExecution: !supportsSessionProtocol(adapter) || Boolean(runtime.v3),
@@ -588,6 +590,51 @@ export function registerSessionDetail(
     }
   });
 
+  const artifactEvidenceFailure = (res: any, result: ContextArtifactEvidenceResult) => {
+    const failures = {
+      stale: { status: 409, code: "artifact_stale", error: "This artifact or retained record changed. Refresh its source history." },
+      "not-found": { status: 404, code: "evidence_unavailable", error: "Artifact evidence was not found." },
+      unavailable: { status: 503, code: "evidence_unavailable", error: "Artifact evidence storage is unavailable." },
+      invalid: { status: 400, code: "evidence_invalid", error: "Invalid artifact evidence range or continuation." }
+    };
+    const failure = failures[result.status as keyof typeof failures];
+    return json(res, { ok: false, code: failure.code, error: failure.error,
+      ...(result.status === "unavailable" ? { sourceState: result.sourceState } : {}) }, failure.status);
+  };
+
+  app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/artifact-evidence$/, async (req: any, res: any, match: RegExpMatchArray) => {
+    const providerId = match[1];
+    const sessionId = safeDecodeId(match[2]);
+    const adapter = providerMap.get(providerId);
+    if (!adapter) {
+      const missing = missingProviderResponse(providerId);
+      return json(res, missing.body, missing.status);
+    }
+    if (!sessionId) return json(res, { ok: false, error: "Invalid session id" }, 404);
+    const params = new URL(req.url || "/", `http://localhost:${appConfig.port}`).searchParams;
+    const artifactId = params.get("artifact") || "";
+    const cursor = params.get("cursor");
+    const from = params.has("from") ? Number(params.get("from")) : undefined;
+    const to = params.has("to") ? Number(params.get("to")) : undefined;
+    const validTime = (value: number | undefined) => value === undefined || Number.isSafeInteger(value) && value >= 0 && value <= 8.64e15;
+    if (!artifactId || artifactId.length > 2048 || cursor !== null && (!cursor || cursor.length > 16384)
+      || !validTime(from) || !validTime(to) || params.has("from") && params.get("from") === "" || params.has("to") && params.get("to") === ""
+      || cursor !== null && (from !== undefined || to !== undefined) || from !== undefined && to !== undefined && from >= to) {
+      return json(res, { ok: false, code: "evidence_invalid", error: "Invalid artifact evidence request" }, 400);
+    }
+    if (!adapter.getContextArtifactEvidence) return json(res, { ok: false, code: "evidence_unavailable", error: "Artifact evidence is not available" }, 404);
+    try {
+      const request: ContextArtifactEvidenceRequest = { mode: "page", ...(cursor === null ? {} : { cursor }), ...(from === undefined ? {} : { from }), ...(to === undefined ? {} : { to }) };
+      const result: ContextArtifactEvidenceResult = adapter.getContextArtifactEvidence(sessionId, artifactId, request);
+      if (result.status !== "page") return artifactEvidenceFailure(res, result);
+      return json(res, { ok: true, ...result, coverageHtml: renderArtifactEvidenceCoverage(result.coverage),
+        html: result.activities.map((activity) => renderArtifactEvidenceActivity(activity, result.artifactId)).join("") });
+    } catch (error) {
+      console.error(`Artifact evidence route error: ${error instanceof Error ? error.message : String(error)}`);
+      return json(res, { ok: false, error: "Internal server error" }, 500);
+    }
+  });
+
   // API: one bounded continuation chunk for reasoning or tool content.
   // The initial HTML never embeds the remainder, keeping long sessions
   // bounded while the user can still retrieve the complete source value.
@@ -613,6 +660,9 @@ export function registerSessionDetail(
     const contextGroup = Number(params.get("group") || "-1");
     const contextEntry = Number(params.get("entry") || "-1");
     const artifactId = params.get("artifact") || "";
+    const evidenceRecordId = params.get("record") || "";
+    const evidenceRequest = contentScope === "artifact-evidence" && artifactId.length > 0 && artifactId.length <= 2048
+      && evidenceRecordId.length > 0 && evidenceRecordId.length <= 16384 && field === "content";
     const artifactRequest = contentScope === "context-artifact"
       && artifactId.length > 0 && artifactId.length <= 2048 && field === "content";
     const standardRequest = Boolean(partId) && ["owned", "inherited-context"].includes(contentScope) && ["text", "reasoning", "input", "output", "question-answer"].includes(String(field));
@@ -620,11 +670,18 @@ export function registerSessionDetail(
       && Boolean(checkpointId)
       && ((contextTarget === "summary" && field === "summary" && contextGroup === -1 && contextEntry === -1)
         || (contextTarget === "entry" && field === "content" && Number.isSafeInteger(contextGroup) && contextGroup >= 0 && Number.isSafeInteger(contextEntry) && contextEntry >= 0));
-    if ((!standardRequest && !contextRequest && !artifactRequest) || !Number.isSafeInteger(offset) || offset < 0) {
+    if ((!standardRequest && !contextRequest && !artifactRequest && !evidenceRequest) || !Number.isSafeInteger(offset) || offset < 0) {
       return json(res, { ok: false, error: "Invalid content request" }, 400);
     }
 
     try {
+      if (evidenceRequest) {
+        if (!adapter.getContextArtifactEvidence) return json(res, { ok: false, code: "evidence_unavailable", error: "Artifact evidence is not available" }, 404);
+        const result: ContextArtifactEvidenceResult = adapter.getContextArtifactEvidence(sessionId, artifactId, { mode: "content", recordId: evidenceRecordId });
+        if (result.status !== "content") return artifactEvidenceFailure(res, result);
+        return json(res, { ok: true, scope: "artifact-evidence", provider: providerId, sessionId, artifactId: result.artifactId,
+          recordId: result.recordId, field, ...renderProgressiveContent(result.content, "plain", offset, 6000) });
+      }
       if (artifactRequest) {
         if (!adapter.getContextArtifactContent) {
           return json(res, { ok: false, error: "Artifact content is not available", code: "content_unavailable" }, 404);

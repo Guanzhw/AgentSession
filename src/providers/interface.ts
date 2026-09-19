@@ -1,4 +1,4 @@
-import type { AgentRun, ContextArtifactSourceState, EventProvenance, ProtocolCapabilities, SessionProtocol, SessionRelationship, Task } from "./shared/session-protocol.js";
+import type { AgentRun, ContextArtifactEvidenceRequest, ContextArtifactEvidenceResult, ContextArtifactSourceState, EventProvenance, ProtocolCapabilities, SessionProtocol, SessionRelationship, Task } from "./shared/session-protocol.js";
 import type { SessionProtocolV3 } from "./shared/session-protocol-v3.js";
 import type { SessionTree } from "./shared/session-tree.js";
 
@@ -289,6 +289,8 @@ export interface ProviderAdapter {
   getProtocolRevision?(sessionId: string): string | number;
   /** Read one exact saved artifact version without loading conversation history. */
   getContextArtifactContent?(sessionId: string, artifactId: string): ContextArtifactContentResult;
+  /** Inspect retained evidence for one exact artifact without preparing its source history. */
+  getContextArtifactEvidence?(sessionId: string, artifactId: string, request: ContextArtifactEvidenceRequest): ContextArtifactEvidenceResult;
   /**
    * Optional on-demand recorded context result. Null means the checkpoint is
    * unknown; a known checkpoint without readable content retains an explicit
