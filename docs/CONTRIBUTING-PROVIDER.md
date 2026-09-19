@@ -320,6 +320,21 @@ Validate reference shape and ownership locally. Only the owning session can
 establish whether a referenced external event is currently readable. A missing
 source stays explicit rather than becoming a nearby message or inferred edge.
 
+Use optional `getReaderCoordinationContent(sessionId, observation)` when an
+exchange body lives in a provider-specific tool argument or delivery envelope.
+It returns the exact `{ text, format }` for that observation; `null` means no
+readable body and is authoritative. Adapters without the hook use exact
+normalized message text. Keep opaque/encrypted payloads out of this readable
+body without hiding them from existing technical source views.
+
+The content route loads on disclosure and paginates at 6000 characters using a
+content hash. Optional `getReaderCoordinationContentRevision` identifies only
+the selected source and required ownership evidence, freshly checked around the
+captured read. Unrelated session activity must not invalidate this content.
+Changed or deleted content returns 409 on continuation. Codex implements both
+hooks for recorded collaboration calls, communications, parent result delivery,
+and exact child completion events, including turn identity when recorded.
+
 ## Session Protocol v2
 
 Every registered provider must expose a protocol for every readable session.
@@ -529,8 +544,9 @@ npm run build
 ```
 
 For user-visible changes, restart the loopback server, inspect `/api/providers`
-and representative protocol/runtime responses, then run `npm run qa:e2e` at
-desktop and 390px widths. Review `git diff --check`, confirm provider data was
+and representative protocol/runtime responses, then run desktop `npm run qa:e2e`.
+Existing responsive improvements remain; narrow-screen validation is outside
+the current product scope. Review `git diff --check`, confirm provider data was
 not changed, and update both READMEs when public capabilities change.
 
 ## Related source

@@ -11,6 +11,18 @@ sessions. It reads provider-owned session data, builds a cross-provider index,
 renders server-side HTML, exposes JSON APIs, and stores viewer-only metadata
 such as stars, custom titles, and deletion state in a separate local database.
 
+The Web UI serves people revisiting complete conversations and understanding
+how agents worked. Default to readable requests, replies, and meaningful
+turning points; progressively reveal the full execution and child history.
+Explain assignments, team collaboration, and asynchronous/background work from
+dispatch or separation to returned results. Evidence is a data-quality
+requirement; raw records and diagnostics belong in technical details. The MCP
+retains its separate machine-oriented interface. Product requirements and
+acceptance criteria live in the
+[presentation contract](docs/design/runtime-presentation-contract.md); the
+[delivery plan](docs/design/runtime-delivery-plan.md) owns the finite stages,
+current progress and next action.
+
 The package is intentionally small:
 
 - Node.js 22.15 or newer.
@@ -235,7 +247,10 @@ adapter before copying a pattern because provider capabilities differ.
 - Add or update both `src/locales/en.ts` and `src/locales/zh.ts` for user-facing
   strings.
 - For detail-page changes, test long sessions, tool-only assistant turns,
-  reasoning placement, nested subagents, and narrow viewport behavior.
+  reasoning placement, nested subagents, and desktop keyboard/theme behavior.
+  Product scope is desktop: preserve existing responsive improvements, but do
+  not add narrow-screen work or validation. See the current
+  [presentation contract](docs/design/runtime-presentation-contract.md).
 
 ### Runtime protocol subsystem
 

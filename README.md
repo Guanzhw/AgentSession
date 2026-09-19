@@ -235,7 +235,7 @@ npm test
 npm run build
 ```
 
-真实数据验证应检查 `/api/providers`、一个代表性 session 的 `/protocol` 和四个 Runtime API，并在桌面与 390px viewport 运行 `npm run qa:e2e`。请使用 [provider contribution guide](./docs/CONTRIBUTING-PROVIDER.md) 添加 Provider；协议规格位于 [`docs/specs/runtime-protocol-workbench/`](./docs/specs/runtime-protocol-workbench/)。
+真实数据验证应检查 `/api/providers`、一个代表性 session 的 `/protocol` 和四个 Runtime API，并运行桌面验收 `npm run qa:e2e`。产品面向桌面，已有响应式改进保留，窄屏不再是开发和验收范围。请使用 [provider contribution guide](./docs/CONTRIBUTING-PROVIDER.md) 添加 Provider；协议规格位于 [`docs/specs/runtime-protocol-workbench/`](./docs/specs/runtime-protocol-workbench/)。
 
 ## License
 

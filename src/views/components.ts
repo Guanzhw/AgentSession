@@ -109,6 +109,8 @@ function takeChunk(text: string, offset: number, limit: number) {
     cut += 2;
   }
   if (cut <= start) cut = target;
+  // Keep a non-BMP character intact across HTTP-rendered continuation chunks.
+  if (cut > start && /[\uD800-\uDBFF]/.test(text[cut - 1]) && /[\uDC00-\uDFFF]/.test(text[cut])) cut--;
   return { chunk: text.slice(start, cut), nextOffset: cut };
 }
 
@@ -192,7 +194,7 @@ function contextResultEntryMarkup(
   return `<article class="context-result-entry" data-context-result-entry data-context-result-group="${identity.groupIndex}" data-context-result-entry-index="${identity.entryIndex}">
     <header class="context-result-entry-header"><strong>${escapeHtml(role)}</strong><span>${escapeHtml(entry.kind)}</span></header>
     ${entry.content ? renderContextResultBody(entry.content, identity, t("progressive.show_more")) : `<p class="context-result-empty">${escapeHtml(t("conversation.context_result_entry_empty"))}</p>`}
-    <div class="context-result-entry-meta"><span>${escapeHtml(source)}</span>${entry.fields.length ? `<span>${escapeHtml(t("conversation.context_result_fields"))}: ${escapeHtml(entry.fields.map((field) => field.label).join(", "))}</span>` : ""}</div>
+    <details class="context-result-entry-meta"><summary>${escapeHtml(t("conversation.checkpoint_details"))}</summary><span>${escapeHtml(source)}</span>${entry.fields.length ? `<span>${escapeHtml(t("conversation.context_result_fields"))}: ${escapeHtml(entry.fields.map((field) => field.label).join(", "))}</span>` : ""}</details>
     ${attachments ? `<div class="context-result-attachments">${attachments}</div>` : ""}
     ${omitted}
   </article>`;
@@ -235,7 +237,7 @@ export function renderContextChangeResult(
       checkpointId: result.checkpointId,
       target: "summary"
     }, t("progressive.show_more"))}</section>`
-    : `<p class="context-result-availability context-result-availability-${escapeHtml(result.summary.availability)}">${escapeHtml(result.summary.availability === "recorded-empty" ? t("conversation.context_result_recorded_empty") : t("conversation.context_result_unavailable"))}</p>`;
+    : allEntries.length ? "" : `<p class="context-result-availability context-result-availability-${escapeHtml(result.summary.availability)}">${escapeHtml(result.summary.availability === "recorded-empty" ? t("conversation.context_result_recorded_empty") : t("conversation.context_result_unavailable"))}</p>`;
   const source = result.source;
   const sourceDetails = `<details class="context-result-source"><summary>${escapeHtml(t("conversation.context_result_source"))}</summary><dl>
     <dt>${escapeHtml(t("conversation.context_result_source_type"))}</dt><dd>${escapeHtml(source.sourceType)}</dd>
@@ -248,8 +250,8 @@ export function renderContextChangeResult(
     : "";
   return { html: `<div class="context-result-rendered" data-context-result-rendered data-context-result-checkpoint="${escapeHtml(result.checkpointId)}">
     ${summaryMarkup}
-    ${sourceDetails}
     <section class="context-result-groups"><h4>${escapeHtml(t("conversation.context_result_retained"))}</h4>${pageMarkup}</section>
+    ${sourceDetails}
     ${omitted}
   </div>`, nextOffset: offset + page.length < allEntries.length ? offset + page.length : null, totalEntries: allEntries.length };
 }

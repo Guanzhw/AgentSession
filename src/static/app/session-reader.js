@@ -2,6 +2,71 @@ import { readerPaneAnchor, scopeReaderFragment, scopeReaderPane, unscopeReaderPa
 import { createReaderLocation, parseReaderLocation, stripReaderLocation } from "./reader-location.js";
 import { ensureReaderAnchor } from "./reader-process.js";
 
+const coordinationContentLoads = new WeakMap();
+
+/** Read one selected exchange, keeping continuation bound to the same recorded content. */
+export function loadReaderCoordinationContent(disclosure, { offset = 0, reload = false, ft } = {}) {
+  if (!reload && offset === 0 && disclosure.dataset.readerCoordinationContentLoaded === "true") return Promise.resolve(true);
+  const pending = coordinationContentLoads.get(disclosure);
+  if (pending) return pending;
+  const panel = disclosure.querySelector("[data-reader-coordination-content-panel]");
+  const more = panel.querySelector("[data-reader-coordination-content-more]");
+  const message = (key, retryOffset = null) => {
+    panel.querySelector("[data-reader-coordination-content-state]")?.remove();
+    const state = document.createElement("div");
+    state.className = "reader-coordination-content-state";
+    state.dataset.readerCoordinationContentState = "";
+    const text = document.createElement("span");
+    text.textContent = ft?.(key) || key;
+    state.append(text);
+    if (retryOffset !== null) {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.dataset.readerCoordinationContentRetry = "";
+      retry.dataset.nextOffset = String(retryOffset);
+      retry.textContent = ft?.("detail.reader_coordination_content_retry") || "Retry";
+      state.append(retry);
+    }
+    panel.append(state);
+  };
+  const promise = (async () => {
+    if (offset === 0) panel.replaceChildren();
+    if (more) more.disabled = true;
+    disclosure.setAttribute("aria-busy", "true");
+    message("detail.reader_coordination_content_loading");
+    try {
+      const query = new URLSearchParams({ offset: String(offset) });
+      if (offset > 0) query.set("revision", disclosure.dataset.readerCoordinationContentRevision);
+      const response = await fetch(`${disclosure.dataset.readerCoordinationContentUrl}?${query}`, { headers: { Accept: "application/json" } });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.ok || typeof data.html !== "string") {
+        const error = new Error(data?.error || `HTTP ${response.status}`);
+        error.code = data?.code;
+        throw error;
+      }
+      panel.querySelector("[data-reader-coordination-content-state]")?.remove();
+      more?.remove();
+      panel.insertAdjacentHTML("beforeend", data.html);
+      disclosure.dataset.readerCoordinationContentLoaded = "true";
+      disclosure.dataset.readerCoordinationContentRevision = data.revision || "";
+      return true;
+    } catch (error) {
+      console.error("Unable to load exchange content:", error);
+      const stale = error.code === "stale_content";
+      const missing = error.code === "observation_not_found";
+      if (stale || missing) more?.remove();
+      else if (more) more.disabled = false;
+      message(missing ? "detail.reader_coordination_content_unavailable"
+        : stale ? "detail.reader_coordination_content_changed" : "detail.reader_coordination_content_failed", missing ? null : stale ? 0 : offset);
+      return false;
+    } finally {
+      disclosure.removeAttribute("aria-busy");
+    }
+  })();
+  coordinationContentLoads.set(disclosure, promise);
+  return promise.finally(() => coordinationContentLoads.delete(disclosure));
+}
+
 /* Unified session reader navigation.
  *
  * The server owns the document and its actions. Related panes stay inline;
@@ -658,6 +723,7 @@ export function initSessionReader({ ft, showToast } = {}) {
     const target = event.target;
     if (!(target instanceof HTMLDetailsElement) || !target.open) return;
     if (target.matches("[data-reader-child-disclosure]")) void loadChildDisclosure(target);
+    if (target.matches("[data-reader-coordination-content]")) void loadReaderCoordinationContent(target, { ft });
     if (target.matches("#tab-work") || target.querySelector("[data-reader-metrics]")) void loadReaderMetrics(target.querySelector("[data-reader-metrics]"));
   }, true);
 
@@ -1023,6 +1089,14 @@ export function initSessionReader({ ft, showToast } = {}) {
   };
 
   workbench.addEventListener("click", async (event) => {
+    const exchangeContent = event.target.closest("[data-reader-coordination-content-more], [data-reader-coordination-content-retry]");
+    if (exchangeContent && workbench.contains(exchangeContent)) {
+      event.preventDefault();
+      await loadReaderCoordinationContent(exchangeContent.closest("[data-reader-coordination-content]"), {
+        offset: Number(exchangeContent.dataset.nextOffset || 0), reload: true, ft
+      });
+      return;
+    }
     const eventSource = event.target.closest("[data-reader-event-source], [data-reader-coordination-source]");
     if (eventSource && workbench.contains(eventSource) && eventSource.matches("a[href]")) {
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;

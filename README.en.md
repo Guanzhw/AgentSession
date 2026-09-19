@@ -407,8 +407,10 @@ npm run build
 ```
 
 For real-data verification, inspect `/api/providers`, one representative
-session's `/protocol`, all four Runtime APIs, and the desktop plus 390px
-viewport through `npm run qa:e2e`. See the [provider contribution guide](./docs/CONTRIBUTING-PROVIDER.md) and the [Runtime Workbench specification](./docs/specs/runtime-protocol-workbench/).
+session's `/protocol`, all four Runtime APIs, and the desktop UI through
+`npm run qa:e2e`. The product targets desktop use; existing responsive improvements
+remain, but narrow screens are outside ongoing development and acceptance scope.
+See the [provider contribution guide](./docs/CONTRIBUTING-PROVIDER.md) and the [Runtime Workbench specification](./docs/specs/runtime-protocol-workbench/).
 
 ## License
 

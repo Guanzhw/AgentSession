@@ -300,8 +300,10 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.key === "Escape") {
     const transcriptSearch = document.querySelector("[data-session-search]");
-    if (transcriptSearch?.open) transcriptSearch.open = false;
-    document.activeElement.blur();
+    if (transcriptSearch?.open) {
+      e.preventDefault();
+      transcriptSearch.querySelector("[data-session-search-close]").click();
+    }
   }
 });
 

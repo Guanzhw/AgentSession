@@ -8,6 +8,7 @@ import {
 } from "../dist/src/providers/codex/protocol.js";
 import { normalizeCodexContextChangeResult } from "../dist/src/providers/codex/context-result.js";
 import { classifyCodexRecordProvenance } from "../dist/src/providers/codex/parser.js";
+import { renderContextChangeResult } from "../dist/src/views/components.js";
 
 function compactionRecords({ summary = "", replacement = [], guardian = [] } = {}) {
   return [
@@ -23,6 +24,20 @@ function compactionRecords({ summary = "", replacement = [], guardian = [] } = {
     }
   ];
 }
+
+test("context result leads with retained content and folds source fields into technical details", () => {
+  const result = normalizeCodexContextChangeResult(compactionRecords({
+    replacement: [{ type: "message", role: "user", content: [{ type: "text", text: "Keep this readable request" }] }]
+  }), "event:compaction:0");
+  const identity = { provider: "codex", sessionId: "root" };
+  const { html } = renderContextChangeResult(result, identity);
+  assert.match(html, /Keep this readable request/);
+  assert.match(html, /<details class="context-result-entry-meta"><summary>/);
+  assert.ok(html.indexOf("Keep this readable request") < html.indexOf('class="context-result-source"'));
+  assert.doesNotMatch(html, /class="context-result-availability/);
+  const empty = normalizeCodexContextChangeResult(compactionRecords(), "event:compaction:0");
+  assert.match(renderContextChangeResult(empty, identity).html, /context-result-availability-recorded-empty/);
+});
 
 test("Codex context result uses one canonical source-order checkpoint for paired records", () => {
   const records = Array.from({ length: 416 }, () => ({ type: "turn_context" }));

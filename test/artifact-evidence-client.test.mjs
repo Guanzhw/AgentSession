@@ -12,6 +12,8 @@ function fixture(t) {
   const submit = { disabled: false };
   const status = { textContent: '', children: [], append(...nodes) { this.children.push(...nodes); } };
   const coverage = { innerHTML: '' };
+  const notice = { textContent: '', hidden: true };
+  const diagnostic = { textContent: '', hidden: true };
   const lineage = { hidden: true };
   const form = { querySelectorAll: () => [from, to, submit], elements: { namedItem: (name) => name === 'from' ? from : to }, matches: () => true, closest: () => details };
   const activities = {
@@ -22,10 +24,10 @@ function fixture(t) {
   };
   const workbench = { dataset: { provider: 'root-provider', sessionId: 'root' }, addEventListener(name, callback) { events.set(name, callback); } };
   const pane = { dataset: { readerProvider: 'fixture', readerSession: 'child' }, isConnected: true };
-  const nodes = { '[data-artifact-evidence-load]': button, '[data-artifact-evidence-status]': status, '[data-artifact-evidence-range]': form, '[data-artifact-evidence-activities]': activities, '[data-artifact-evidence-lineage]': lineage, '[data-artifact-evidence-coverage]': coverage };
+  const nodes = { '[data-artifact-evidence-load]': button, '[data-artifact-evidence-status]': status, '[data-artifact-evidence-range]': form, '[data-artifact-evidence-activities]': activities, '[data-artifact-evidence-lineage]': lineage, '[data-artifact-evidence-coverage]': coverage, '[data-artifact-evidence-notice]': notice, '[data-artifact-evidence-diagnostic]': diagnostic };
   const attributes = new Map();
   const details = {
-    dataset: { contextArtifactId: 'summary-version', loadingLabel: 'Checking', loadLabel: 'Check', moreLabel: 'More', retryLabel: 'Retry', errorLabel: 'Unable to check', invalidLabel: 'Check range again', emptyLabel: 'None in checked records', staleLabel: 'Evidence changed', refreshLabel: 'Refresh history' },
+    dataset: { contextArtifactId: 'summary-version', loadingLabel: 'Checking', loadLabel: 'Check', moreLabel: 'More', retryLabel: 'Retry', errorLabel: 'Unable to check', invalidLabel: 'Check range again', emptyLabel: 'None in checked records', incompleteLabel: 'Some records remain unchecked.', staleLabel: 'Evidence changed', refreshLabel: 'Refresh history' },
     open: true, isConnected: true,
     querySelector: (selector) => nodes[selector],
     closest: (selector) => selector === '[data-reader-pane]' ? pane : workbench,
@@ -52,7 +54,7 @@ function fixture(t) {
     return { ok: true, status: 200, json: async () => ({ ok: true, html: name, coverageHtml: 'Checked range', nextCursor,
       coverage: { from: fromTime, to: toTime, complete: nextCursor === null, scannedRecords: 15, readBytes: 9000, issues: [] } }) };
   }
-  return { details, button, form, from, to, status, coverage, lineage, activities, activityNodes, workbench, pane, events, attributes, html, activity, page };
+  return { details, button, form, from, to, status, coverage, notice, diagnostic, lineage, activities, activityNodes, workbench, pane, events, attributes, html, activity, page };
 }
 
 test('evidence loads only from its own disclosure and merges cursor pages without replacing expanded records', async (t) => {
@@ -66,6 +68,7 @@ test('evidence loads only from its own disclosure and merges cursor pages withou
   initArtifactEvidence(ui.workbench);
   ui.events.get('toggle')({ target: { matches: () => false, open: true } });
   assert.equal(urls.length, 0, 'opening the saved summary must not inspect logs');
+  ui.events.get('toggle')({ target: ui.details });
   const firstLoad = loadArtifactEvidence(ui.details);
   assert.equal(loadArtifactEvidence(ui.details), firstLoad, 'parallel clicks share one request');
   const firstUrl = new URL(urls[0], 'http://localhost');
@@ -75,6 +78,8 @@ test('evidence loads only from its own disclosure and merges cursor pages withou
   assert.equal(ui.button.disabled, true);
   pending.shift()(ui.page(first, { nextCursor: 'cursor-two' }));
   await firstLoad;
+  assert.equal(ui.notice.hidden, false, 'partial coverage stays visible outside inspection details');
+  assert.equal(ui.notice.textContent, 'Some records remain unchecked.');
   firstActivity.records[0].open = true;
   const nextLoad = loadArtifactEvidence(ui.details);
   assert.equal(new URL(urls[1], 'http://localhost').searchParams.get('cursor'), 'cursor-two');
@@ -87,6 +92,8 @@ test('evidence loads only from its own disclosure and merges cursor pages withou
   assert.equal(ui.button.hidden, true);
   assert.equal(ui.lineage.hidden, false);
   assert.equal(ui.status.textContent, '');
+  assert.equal(ui.notice.hidden, true, 'complete coverage removes the partial-reading notice');
+  assert.equal(ui.notice.textContent, '');
   await loadArtifactEvidence(ui.details);
   assert.equal(urls.length, 2, 'reopening completed evidence does not restart discovery');
 });
@@ -152,4 +159,50 @@ test('stale artifact evidence offers the owning child history and prevents mixed
   assert.equal(ui.button.disabled, true);
   await loadArtifactEvidence(ui.details, { from: 1700000000000, to: 1700003600000 });
   assert.equal(calls, 1);
+});
+
+test('changing the time range stays an explicit action and uses the selected bounds', async (t) => {
+  const ui = fixture(t);
+  const first = ui.html('first', [ui.activity('prior-turn', ['read'])]);
+  const changed = ui.html('changed', [ui.activity('selected-turn', ['modify'])]);
+  const urls = [];
+  const from = new Date(1700100000000);
+  const to = new Date(1700103600000);
+  const localValue = (date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    urls.push(new URL(url, 'http://localhost'));
+    return urls.length === 1 ? ui.page(first) : ui.page(changed, { from: from.getTime(), to: to.getTime() });
+  });
+  initArtifactEvidence(ui.workbench);
+  await loadArtifactEvidence(ui.details);
+  ui.events.get('toggle')({ target: { matches: () => false, open: true } });
+  assert.equal(urls.length, 1, 'opening inspection details does not start another lookup');
+  ui.from.value = localValue(from);
+  ui.to.value = localValue(to);
+  let prevented = false;
+  ui.events.get('submit')({ target: ui.form, preventDefault() { prevented = true; } });
+  await loadArtifactEvidence(ui.details);
+  assert.equal(prevented, true);
+  assert.equal(urls.length, 2);
+  assert.equal(urls[1].searchParams.get('from'), String(from.getTime()));
+  assert.equal(urls[1].searchParams.get('to'), String(to.getTime()));
+  assert.deepEqual(ui.activityNodes.map((activity) => activity.dataset.artifactActivityId), ['selected-turn']);
+});
+
+test('lookup failures keep the retry instruction readable and the diagnostic in inspection details', async (t) => {
+  const ui = fixture(t);
+  const empty = ui.html('empty', []);
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => ++calls === 1
+    ? { ok: false, status: 503, json: async () => ({ ok: false, code: 'evidence_unavailable', sourceState: { code: 'database-unavailable' } }) }
+    : ui.page(empty));
+  await loadArtifactEvidence(ui.details);
+  assert.equal(ui.status.textContent, 'Unable to check');
+  assert.deepEqual(ui.status.children, []);
+  assert.equal(ui.diagnostic.textContent, 'database-unavailable');
+  assert.equal(ui.diagnostic.hidden, false);
+  await loadArtifactEvidence(ui.details);
+  assert.equal(ui.diagnostic.textContent, '');
+  assert.equal(ui.diagnostic.hidden, true);
+  assert.equal(ui.status.textContent, 'None in checked records');
 });

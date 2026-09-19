@@ -16,6 +16,7 @@ export function initReaderRelations() {
   const narrow = window.matchMedia("(max-width: 600px)");
   const contexts = new Map();
   const overviewOrigins = new WeakMap();
+  const activityQueries = new WeakMap();
   let frame = null;
   const observer = new ResizeObserver(() => schedule());
 
@@ -177,12 +178,20 @@ export function initReaderRelations() {
     overview.querySelector("[data-reader-collaboration-close]")?.focus({ preventScroll: true });
   }
 
+  function loadOverviewActivity(overview, activityQuery = null) {
+    if (activityQuery !== null) activityQueries.set(overview, activityQuery);
+    if (!overview.querySelector('[data-reader-activity-disclosure]').open) return;
+    const query = activityQueries.get(overview) ?? null;
+    activityQueries.delete(overview);
+    loadReaderActivity(overview, query);
+  }
+
   function openOverview(overview, activityQuery = null) {
     for (const other of workbench.querySelectorAll("[data-reader-collaboration-overview]")) {
       if (other !== overview) other.open = false;
     }
     overview.open = true;
-    loadReaderActivity(overview, activityQuery);
+    loadOverviewActivity(overview, activityQuery);
   }
 
   function closeOverview(overview) {
@@ -222,6 +231,10 @@ export function initReaderRelations() {
 
   workbench.addEventListener("toggle", (event) => {
     const branch = event.target;
+    if (branch?.dataset?.readerActivityDisclosure !== undefined) {
+      if (branch.open) loadOverviewActivity(branch.closest('[data-reader-collaboration-overview]'));
+      return;
+    }
     if (branch?.dataset?.readerBranch !== undefined) {
       const pane = branch.closest("[data-reader-pane]");
       if (branch.open) selectTask(pane, branch);
@@ -274,7 +287,7 @@ export function initReaderRelations() {
       selectTask(pane, detail);
       const milestone = ownedElements(pane, '[data-reader-milestone]')
         .find((item) => item.dataset.readerLane === detail.dataset.readerTaskLane);
-      if (milestone?.dataset.readerObservationId) loadReaderActivity(overviewFor(pane), { anchor: milestone.dataset.readerObservationId });
+      if (milestone?.dataset.readerObservationId) loadOverviewActivity(overviewFor(pane), { anchor: milestone.dataset.readerObservationId });
       return;
     }
     const close = event.target.closest?.("[data-reader-collaboration-close]");

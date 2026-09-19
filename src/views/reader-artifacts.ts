@@ -45,7 +45,7 @@ function renderEvidence(artifact: ContextArtifact) {
   const history = !artifact.producerRunId && !artifact.producerEventId
     ? `<dt>${escapeHtml(t("detail.reader_artifact_generation"))}</dt><dd>${escapeHtml(t("detail.reader_artifact_generation_unavailable"))}</dd>`
     : "";
-  return `<details class="reader-artifact-evidence" data-search-exclude><summary>${escapeHtml(t("detail.reader_artifact_evidence"))}</summary><dl>${generation}${history}${identity}</dl></details>`;
+  return `<details class="reader-artifact-evidence" data-search-exclude><summary>${escapeHtml(t("detail.reader_artifact_evidence"))}</summary><dl><dt>${escapeHtml(t("detail.reader_artifact_generated"))}</dt><dd>${recordedTime(artifact.timeCreated)}</dd>${generation}${history}${identity}</dl></details>`;
 }
 
 function contentControl(artifactId: string, recordId?: string) {
@@ -58,23 +58,27 @@ function contentControl(artifactId: string, recordId?: string) {
 
 function renderFollowups(artifact: ContextArtifact) {
   return `<details class="reader-artifact-followups" data-artifact-evidence data-context-artifact-id="${escapeHtml(artifact.id)}" data-search-exclude
-      data-loading-label="${escapeHtml(t("detail.artifact_followups_loading"))}" data-load-label="${escapeHtml(t("detail.artifact_followups_load"))}" data-more-label="${escapeHtml(t("detail.artifact_followups_more"))}" data-retry-label="${escapeHtml(t("detail.artifact_followups_retry"))}" data-error-label="${escapeHtml(t("detail.artifact_followups_failed"))}" data-invalid-label="${escapeHtml(t("detail.artifact_followups_invalid"))}" data-empty-label="${escapeHtml(t("detail.artifact_followups_empty"))}" data-stale-label="${escapeHtml(t("detail.artifact_followups_stale"))}" data-refresh-label="${escapeHtml(t("detail.reader_artifact_refresh"))}">
+      data-loading-label="${escapeHtml(t("detail.artifact_followups_loading"))}" data-load-label="${escapeHtml(t("detail.artifact_followups_load"))}" data-more-label="${escapeHtml(t("detail.artifact_followups_more"))}" data-retry-label="${escapeHtml(t("detail.artifact_followups_retry"))}" data-error-label="${escapeHtml(t("detail.artifact_followups_failed"))}" data-invalid-label="${escapeHtml(t("detail.artifact_followups_invalid"))}" data-empty-label="${escapeHtml(t("detail.artifact_followups_empty"))}" data-incomplete-label="${escapeHtml(t("detail.artifact_followups_incomplete"))}" data-stale-label="${escapeHtml(t("detail.artifact_followups_stale"))}" data-refresh-label="${escapeHtml(t("detail.reader_artifact_refresh"))}">
     <summary>${escapeHtml(t("detail.artifact_followups"))}</summary>
     <div class="reader-artifact-followups-body">
-      <details class="reader-artifact-followups-range"><summary>${escapeHtml(t("detail.artifact_followups_range"))}</summary>
-        <form data-artifact-evidence-range>
-          <label>${escapeHtml(t("detail.artifact_followups_from"))}<input type="datetime-local" step="1" required name="from"></label>
-          <label>${escapeHtml(t("detail.artifact_followups_to"))}<input type="datetime-local" step="1" required name="to"></label>
-          <button type="submit">${escapeHtml(t("detail.artifact_followups_check"))}</button>
-        </form>
-      </details>
-      <div data-artifact-evidence-coverage></div>
       <div class="reader-artifact-followups-lineage" data-artifact-evidence-lineage hidden>
         <p class="reader-artifact-followups-source">${escapeHtml(t("detail.artifact_followups_source"))}</p>
         <div data-artifact-evidence-activities></div>
       </div>
+      <p class="reader-artifact-followups-notice" data-artifact-evidence-notice hidden></p>
       <p data-artifact-evidence-status role="status" aria-live="polite"></p>
       <button type="button" data-artifact-evidence-load>${escapeHtml(t("detail.artifact_followups_load"))}</button>
+      <details class="reader-artifact-evidence reader-artifact-followups-inspection"><summary>${escapeHtml(t("detail.artifact_followups_inspection"))}</summary>
+        <div data-artifact-evidence-coverage></div>
+        <p data-artifact-evidence-diagnostic hidden></p>
+        <details class="reader-artifact-followups-range"><summary>${escapeHtml(t("detail.artifact_followups_range"))}</summary>
+          <form data-artifact-evidence-range>
+            <label>${escapeHtml(t("detail.artifact_followups_from"))}<input type="datetime-local" step="1" required name="from"></label>
+            <label>${escapeHtml(t("detail.artifact_followups_to"))}<input type="datetime-local" step="1" required name="to"></label>
+            <button type="submit">${escapeHtml(t("detail.artifact_followups_check"))}</button>
+          </form>
+        </details>
+      </details>
     </div>
   </details>`;
 }
@@ -94,9 +98,12 @@ export function renderArtifactEvidenceActivity(activity: ContextArtifactEvidence
   const records = activity.records.map((record) => `<details class="reader-artifact-followup-record" data-artifact-evidence-record data-artifact-record-id="${escapeHtml(record.id)}" data-search-exclude>
     <summary><span>${escapeHtml(t(record.kind === "read-request" ? "detail.artifact_followups_read" : "detail.artifact_followups_modify"))} <code title="${escapeHtml(record.targetPath)}">${escapeHtml(path.win32.basename(path.posix.basename(record.targetPath)))}</code></span><small title="${escapeHtml(t("detail.artifact_followups_record"))}">${recordedTime(record.timeCreated)}</small></summary>
     <div class="reader-artifact-followup-record-body">
-      <p class="reader-artifact-followup-path"><code>${escapeHtml(record.targetPath)}</code></p>
-      <p class="reader-artifact-date">${recordedTime(record.timeCreated)} · <code>${escapeHtml(record.provenance.sourceType)}${record.provenance.sourceId ? ` / ${escapeHtml(record.provenance.sourceId)}` : ""}</code></p>
       ${contentControl(artifactId, record.id)}
+      <details class="reader-artifact-evidence"><summary>${escapeHtml(t("detail.artifact_followups_details"))}</summary>
+        <dl><dt>${escapeHtml(t("detail.reader_artifact_source_path"))}</dt><dd><code>${escapeHtml(record.targetPath)}</code></dd>
+          <dt>${escapeHtml(t("detail.reader_artifact_evidence_provenance"))}</dt><dd><code>${escapeHtml(record.provenance.sourceType)}${record.provenance.sourceId ? ` / ${escapeHtml(record.provenance.sourceId)}` : ""}</code></dd>
+        </dl>
+      </details>
     </div>
   </details>`).join("");
   return `<section class="reader-artifact-followup-activity" data-artifact-activity-id="${escapeHtml(activity.id)}" data-search-exclude>
@@ -120,12 +127,11 @@ export function renderArtifactEvidenceActivity(activity: ContextArtifactEvidence
 
 function renderArtifact(artifact: ContextArtifact, canReadEvidence: boolean) {
   return `<details class="reader-artifact-output" data-reader-artifact data-search-exclude>
-    <summary><span>${escapeHtml(artifactLabel(artifact))}</span><small>${escapeHtml(t("detail.reader_artifact_read"))}</small></summary>
+    <summary><span>${escapeHtml(artifactLabel(artifact))}</span></summary>
     <div class="reader-artifact-output-body">
-      <p class="reader-artifact-date">${escapeHtml(t("detail.reader_artifact_generated"))}: ${recordedTime(artifact.timeCreated)}</p>
       ${contentControl(artifact.id)}
-      ${renderEvidence(artifact)}
       ${canReadEvidence && artifact.evidenceAccess === "on-demand" ? renderFollowups(artifact) : ""}
+      ${renderEvidence(artifact)}
     </div>
   </details>`;
 }
@@ -153,7 +159,7 @@ export function renderReaderArtifacts({
          ${sourceState?.sourcePath ? `<dt>${escapeHtml(t("detail.reader_artifact_source_path"))}</dt><dd><code>${escapeHtml(sourceState.sourcePath)}</code></dd>` : ""}
          ${sourceState?.provenance ? `<dt>${escapeHtml(t("detail.reader_artifact_evidence_provenance"))}</dt><dd>${escapeHtml(sourceState.provenance.sourceType)}</dd>` : ""}
        </dl></details>`
-    : `<div class="reader-artifact-lineage"><div class="reader-artifact-source"><strong>${escapeHtml(t("detail.reader_artifact_source"))}</strong><span>${sourceLinks(readable[0], provider, sessionId, sessionAnchor)}</span><small>${escapeHtml(t("detail.reader_artifact_captured"))}: ${recordedTime(readable[0].contentSourceTime)}</small></div><div class="reader-artifact-branches">${readable.map((artifact) => renderArtifact(artifact, canReadEvidence)).join("")}</div></div>`;
+    : `<div class="reader-artifact-lineage"><div class="reader-artifact-branches">${readable.map((artifact) => renderArtifact(artifact, canReadEvidence)).join("")}</div><details class="reader-artifact-evidence reader-artifact-source-evidence"><summary>${escapeHtml(t("detail.reader_artifact_source"))}</summary><div class="reader-artifact-source"><span>${sourceLinks(readable[0], provider, sessionId, sessionAnchor)}</span><small>${escapeHtml(t("detail.reader_artifact_captured"))}: ${recordedTime(readable[0].contentSourceTime)}</small></div></details></div>`;
   return `<details class="reader-artifacts-disclosure" data-reader-artifacts data-search-exclude>
     <summary><span>${escapeHtml(t("detail.reader_artifacts_title"))}</span>${readable.length ? `<small>${escapeHtml(readable.map(artifactLabel).join(", "))}</small>` : ""}</summary>
     <div class="reader-artifacts-body">${unavailable}</div>

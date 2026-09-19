@@ -528,6 +528,7 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
 .session-workbench[data-session-reader] .reader-collaboration-note,
 .session-workbench[data-session-reader] .reader-task-map { margin: 16px 0; }
 .session-workbench[data-session-reader] .reader-task-map > summary { cursor: pointer; font-size: 14px; }
+.session-workbench[data-session-reader] .reader-activity-disclosure > summary { padding: 12px 0; border-top: 1px solid var(--reader-line); color: var(--reader-muted); font-size: 13px; cursor: pointer; }
 
 .session-workbench[data-session-reader] .reader-activity-host { margin: 16px 0 18px; min-width: 0; }
 .session-workbench[data-session-reader] .reader-activity-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; }
@@ -577,6 +578,7 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
 .session-workbench[data-session-reader] .reader-task-node:hover { background: var(--reader-accent-soft); }
 .session-workbench[data-session-reader] .reader-task-node-copy { min-width: 0; flex: 1; }
 .session-workbench[data-session-reader] .reader-task-node-copy strong { display: block; font-size: 14px; overflow-wrap: anywhere; }
+.session-workbench[data-session-reader] .reader-task-node-purpose { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin-top: 6px; font-size: 13px; line-height: 1.6; color: var(--reader-ink); }
 .session-workbench[data-session-reader] .reader-task-node-state, .session-workbench[data-session-reader] .reader-task-node-moments { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 4px; font-size: 11px; color: var(--reader-muted); }
 .session-workbench[data-session-reader] .reader-branches { margin-top: 20px; border-top: 1px solid var(--reader-line); }
 .session-workbench[data-session-reader] .reader-branch { min-width: 0; border: 0; border-radius: 0; padding: 16px 0 0; }
@@ -591,6 +593,17 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
 .session-workbench[data-session-reader] .reader-branch .agent-channel-item { position: relative; display: flex; flex-wrap: wrap; gap: 4px 8px; border: 0; padding: 6px 0; font-size: 12px; }
 .session-workbench[data-session-reader] .reader-branch .agent-channel-item::before { content: ""; position: absolute; left: -16px; top: 11px; width: 7px; height: 7px; border-radius: 50%; background: var(--reader-accent); }
 .session-workbench[data-session-reader] .reader-branch .agent-channel-time { width: 100%; color: var(--reader-muted); font-size: 11px; }
+.session-workbench[data-session-reader] .reader-coordination-exchange { width: 100%; min-width: 0; }
+.session-workbench[data-session-reader] .reader-coordination-exchange > summary { display: list-item; padding: 7px 0; font-size: 13px; font-weight: 500; line-height: 1.6; }
+.session-workbench[data-session-reader] .reader-coordination-exchange > summary .agent-channel-time { display: block; }
+.session-workbench[data-session-reader] .reader-coordination-exchange > summary .agent-channel-state { margin-inline-start: 8px; font-size: 11px; color: var(--reader-muted); }
+.session-workbench[data-session-reader] .reader-coordination-content-panel { min-width: 0; font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.session-workbench[data-session-reader] .reader-coordination-content-panel pre { max-width: 100%; max-height: none; overflow: auto; font-size: 12px; }
+.session-workbench[data-session-reader] .reader-coordination-content-state { color: var(--reader-muted); }
+.session-workbench[data-session-reader] .reader-coordination-content-actions { margin: 10px 0; font-size: 12px; }
+.session-workbench[data-session-reader] .reader-coordination-content-actions a { text-decoration: underline; }
+.session-workbench[data-session-reader] :is(.reader-coordination-content-panel, .reader-coordination-exchange) :is(summary, button, a):focus-visible { outline: 2px solid var(--reader-accent); outline-offset: 3px; }
+.session-workbench[data-session-reader] .reader-coordination-content-panel button { padding: 6px 9px; border: 1px solid var(--reader-line); border-radius: 4px; background: var(--reader-surface); color: var(--reader-accent); font: inherit; cursor: pointer; }
 .session-workbench[data-session-reader] .reader-channel-group { list-style: none; }
 .session-workbench[data-session-reader] .reader-channel-group > details > summary { color: var(--reader-muted); font-size: 12px; font-weight: 400; }
 .session-workbench[data-session-reader] .reader-channel-group ol { margin: 0; padding: 0; }
@@ -713,7 +726,7 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
   overflow: auto;
 }
 
-.session-workbench[data-session-reader] :is(.reader-collaboration-overview-summary, [data-reader-lane-select], [data-reader-lane-focus], [data-reader-task-select], [data-reader-ancestor-return], .message-usage summary, .reader-inline-pane-close, .reader-collaboration-close, .reader-branch summary, .reader-observations-expanded summary, .reader-inspector-disclosure summary):focus-visible {
+.session-workbench[data-session-reader] :is(.reader-collaboration-overview-summary, [data-reader-lane-select], [data-reader-lane-focus], [data-reader-task-select], [data-reader-ancestor-return], .message-usage summary, .reader-inline-pane-close, .reader-collaboration-close, .reader-branch summary, .reader-activity-disclosure > summary, .reader-observations-expanded summary, .reader-inspector-disclosure summary):focus-visible {
   outline: 2px solid var(--reader-accent);
   outline-offset: 3px;
 }

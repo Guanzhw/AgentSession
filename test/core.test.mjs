@@ -3571,6 +3571,37 @@ test("stats page uses the Usage navigation label", () => {
   assert.doesNotMatch(html, />Token</);
 });
 
+test("Escape uses the search close action without blurring unrelated focus", () => {
+  const source = readFileSync(path.join(process.cwd(), "src", "static", "app.js"), "utf8");
+  const start = source.indexOf('document.addEventListener("keydown", (e) => {');
+  const end = source.indexOf('\nif (typeof hljs', start);
+  assert.ok(start >= 0 && end > start);
+  let listener;
+  let clicks = 0;
+  let prevented = 0;
+  const focused = {};
+  const search = { open: true, querySelector: () => ({ click() { clicks++; search.open = false; } }) };
+  const document = {
+    activeElement: focused,
+    querySelector: () => search,
+    addEventListener: (_, callback) => { listener = callback; }
+  };
+  runInNewContext(source.slice(start, end), { document });
+  listener({ key: "Escape", preventDefault() { prevented++; } });
+  assert.equal(clicks, 1);
+  assert.equal(prevented, 1);
+  listener({ key: "Escape", preventDefault() { prevented++; } });
+  assert.equal(clicks, 1, "a closed search does not consume Escape");
+  assert.equal(prevented, 1);
+  assert.equal(document.activeElement, focused);
+});
+
+test("Reader links and reasoning labels use readable non-color-only cues", () => {
+  const style = readFileSync(path.join(process.cwd(), "src", "static", "style.css"), "utf8");
+  assert.match(style, /\.message-body\.markdown a \{[^}]*text-decoration: underline;/);
+  assert.match(style, /\.reasoning-title \{[^}]*color: var\(--text-primary\);/);
+});
+
 test("global search shortcut ignores editable targets", () => {
   const bundle = readFileSync(path.join(process.cwd(), "dist", "src", "static", "app.js"), "utf-8");
   const appSource = readFileSync(path.join(process.cwd(), "src", "static", "app.js"), "utf-8");
@@ -4144,8 +4175,10 @@ test("conversation renders one recorded compaction checkpoint at its causal posi
   assert.ok(checkpoint < thread.indexOf("user u2"), "checkpoint precedes the next user turn");
   assert.match(html, /compaction-checkpoint-kicker[^>]*>Context compacted</);
   assert.match(html, /compaction-checkpoint-meta[^>]*>before 120 · after 45 ·/);
-  assert.match(html, /compaction-checkpoint-result-label[^>]*>Post-compaction context</);
-  assert.match(html, /compaction-checkpoint-result-placeholder[^>]*>Open to load the recorded context result\.</);
+  assert.match(html, /context-result-disclosure[^>]*><summary>Read the context kept after compaction<\/summary>/);
+  assert.doesNotMatch(html, /compaction-checkpoint-result-label|compaction-checkpoint-result-placeholder/);
+  assert.ok(html.indexOf('data-context-result-checkpoint="cp-1"') < html.indexOf('class="compaction-checkpoint-details"'));
+  assert.match(html, /compaction-checkpoint-details"><summary>Technical details<\/summary><p class="compaction-checkpoint-meta">before 120/);
   assert.doesNotMatch(html, /compaction-checkpoint-summary[^>]*>Kept the session goal\.</);
   assert.match(html, /data-context-result[^>]*data-context-result-checkpoint="cp-1"/);
   assert.match(html, /Trigger<\/dt><dd>automatic<\/dd>/);
@@ -4181,8 +4214,9 @@ test("conversation checkpoints render only recorded fields with a derived placem
   assert.match(html, /data-compaction-placement="timestamp"/);
   assert.match(html, /class="compaction-checkpoint-meta">[^<]*position derived[^<]*</);
   assert.match(html, /data-compaction-fidelity="recorded"/);
-  assert.match(html, /compaction-checkpoint-result-label[^>]*>Post-compaction context</);
-  assert.match(html, /compaction-checkpoint-result-placeholder[^>]*>Open to load the recorded context result\.</);
+  assert.match(html, /context-result-disclosure[^>]*><summary>Read the context kept after compaction<\/summary>/);
+  assert.doesNotMatch(html, /compaction-checkpoint-result-label|compaction-checkpoint-result-placeholder/);
+  assert.match(html, /compaction-checkpoint-details"><summary>Technical details<\/summary><p class="compaction-checkpoint-meta">[^<]*position derived/);
   assert.doesNotMatch(html, /compaction-checkpoint-facts/);
   assert.doesNotMatch(html, /before 120|after 45/);
 });

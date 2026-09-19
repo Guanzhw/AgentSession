@@ -46,6 +46,7 @@ export function loadArtifactEvidence(details, requested) {
   const sessionId = pane?.dataset.readerSession || workbench.dataset.sessionId;
   const button = details.querySelector("[data-artifact-evidence-load]");
   const status = details.querySelector("[data-artifact-evidence-status]");
+  const diagnostic = details.querySelector("[data-artifact-evidence-diagnostic]");
   const form = details.querySelector("[data-artifact-evidence-range]");
   const activities = details.querySelector("[data-artifact-evidence-activities]");
   const controls = [button, ...form.querySelectorAll("input, button")];
@@ -55,6 +56,8 @@ export function loadArtifactEvidence(details, requested) {
     button.textContent = details.dataset.loadingLabel;
     details.setAttribute("aria-busy", "true");
     status.textContent = details.dataset.loadingLabel;
+    diagnostic.textContent = "";
+    diagnostic.hidden = true;
     try {
       const query = new URLSearchParams({ artifact: details.dataset.contextArtifactId });
       for (const [key, value] of Object.entries(request)) query.set(key, String(value));
@@ -74,11 +77,17 @@ export function loadArtifactEvidence(details, requested) {
         }
         state.retry = data.code === "evidence_invalid" ? state.range || {} : request;
         status.textContent = data.code === "evidence_invalid" ? details.dataset.invalidLabel : details.dataset.errorLabel;
-        if (data.sourceState?.code) status.append(` (${data.sourceState.code})`);
+        if (data.sourceState?.code) {
+          diagnostic.textContent = data.sourceState.code;
+          diagnostic.hidden = false;
+        }
         return null;
       }
       mergeArtifactEvidence(activities, data.html, reset);
       details.querySelector("[data-artifact-evidence-coverage]").innerHTML = data.coverageHtml;
+      const notice = details.querySelector("[data-artifact-evidence-notice]");
+      notice.textContent = data.coverage.complete ? "" : details.dataset.incompleteLabel;
+      notice.hidden = data.coverage.complete;
       details.querySelector("[data-artifact-evidence-lineage]").hidden = !activities.childElementCount;
       form.elements.namedItem("from").value = localInputTime(data.coverage.from);
       form.elements.namedItem("to").value = localInputTime(data.coverage.to);

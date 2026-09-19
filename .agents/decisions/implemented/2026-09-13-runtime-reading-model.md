@@ -106,5 +106,9 @@ close, exact source navigation and restoration of the selected canonical task
 and trigger focus. Independent review corrections preserve separate run states
 and prevent overlapping nested panels. Selected excerpts, folded metadata and
 Library title presentation are implemented; complete history remains primary.
-The product presentation contract owns the remaining P1–P12 acceptance work
-and open user visual acceptance.
+The product presentation contract owns the current acceptance work and open
+user visual acceptance. On 2026-09-20 the user clarified that human reading,
+progressive disclosure, complete collaboration, and asynchronous work are the
+product outcome. The updated contract records that clarification, the desktop
+scope, and P13/P14 for teams/background work; those presentation outcomes are
+still pending, not implied by the earlier engineering checks.

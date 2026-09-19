@@ -167,9 +167,12 @@ test("one canonical task contains distinct followups and returns with owning sou
   }
   assert.match(branch, /data-reader-session="child" data-reader-event-id="event:return-1"/);
   assert.match(branch, /reader\/coordination\?size=50&amp;runId=first&amp;cursor=cursor%3Anext/);
-  const channels = [...branch.matchAll(/<details[^>]*data-agent-channel[^>]*>/g)].map((match) => match[0]);
+  const channels = [...branch.matchAll(/<section[^>]*data-agent-channel[^>]*>/g)].map((match) => match[0]);
   assert.equal(channels.length, 2);
-  channels.forEach((openingTag) => assert.doesNotMatch(openingTag, /\sopen(?:\s|>)/));
+  const exchanges = [...branch.matchAll(/<details[^>]*data-reader-coordination-content[^>]*>/g)].map((match) => match[0]);
+  assert.equal(exchanges.length, 4);
+  exchanges.forEach((openingTag) => assert.doesNotMatch(openingTag, /\sopen(?:\s|>)/));
+  assert.ok(branch.indexOf('data-agent-channel') < branch.indexOf('class="reader-task-overview"'));
 });
 
 test("canonical branch identity includes provider and uses attached as well as detached children", () => {
@@ -213,7 +216,7 @@ test("initial page and lazy reader fragment render one preview target in both lo
       const page = renderSessionPage(input);
       assert.equal(rail(page), rail(pane));
       assert.equal((rail(pane).match(/data-reader-task-preview/g) || []).length, 1);
-      assert.match(rail(pane), locale === "zh" ? /派发/ : /Dispatch/);
+      assert.match(rail(pane), locale === "zh" ? /分派任务/ : /Task assigned/);
     }
   } finally {
     setLocale("en");

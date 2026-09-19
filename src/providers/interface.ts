@@ -1,5 +1,5 @@
 import type { AgentRun, ContextArtifactEvidenceRequest, ContextArtifactEvidenceResult, ContextArtifactSourceState, EventProvenance, ProtocolCapabilities, SessionProtocol, SessionRelationship, Task } from "./shared/session-protocol.js";
-import type { SessionProtocolV3 } from "./shared/session-protocol-v3.js";
+import type { CoordinationObservation, SessionProtocolV3 } from "./shared/session-protocol-v3.js";
 import type { SessionTree } from "./shared/session-tree.js";
 
 export type ProviderId = "opencode" | "claude-code" | "codex" | "openclaw" | "hermes" | "pi" | "deepseek-harness";
@@ -249,6 +249,11 @@ export interface SessionReaderSnapshot {
   getOwnedReaderProjection(evidence?: OwnedReaderLinkEvidence): OwnedReaderProjection;
 }
 
+export interface ReaderCoordinationContent {
+  text: string;
+  format: "markdown" | "plain";
+}
+
 export interface ProviderAdapter {
   id: ProviderId;
   name: string;
@@ -311,6 +316,10 @@ export interface ProviderAdapter {
   getMessages(sessionId: string): Message[];
   /** Optional single preparation for the HTML Reader and its pane endpoint. */
   getSessionReaderSnapshot?(sessionId: string): SessionReaderSnapshot | null;
+  /** Read one exact observation body from a captured source extent. Null is authoritative unavailable content. */
+  getReaderCoordinationContent?(sessionId: string, observation: CoordinationObservation): ReaderCoordinationContent | null;
+  /** Fresh revision of only this observation's source and required ownership evidence, not the provider-wide index. */
+  getReaderCoordinationContentRevision?(sessionId: string, observation: CoordinationObservation): string;
   /** Explicitly recorded inherited context; readers paginate separately from owned history. */
   getInheritedContext?(sessionId: string): InheritedContextView | null;
   /** Optional bounded reader projection; child bodies remain on-demand. */

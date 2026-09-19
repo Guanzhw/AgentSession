@@ -7,7 +7,7 @@ import { isSubagentTool, mergeToolMetadata } from "../providers/shared/subagent-
 import { formatDuration, formatLocalizedDurationMs, formatTime, formatTokens, messageBubble, messageHeader, reasoningBlock, todoList, toolCallBlock } from "./components.js";
 import { anchorId } from "./anchors.js";
 import { layout } from "./layout.js";
-import { readerEventHref, renderReaderEventSourceLink } from "./reader-coordination.js";
+import { readerEventHref, renderReaderEventSourceLink, renderReaderCoordinationItem } from "./reader-coordination.js";
 import { readerRelationPositionKey, renderReaderRelations } from "./reader-relations.js";
 import { uiIcon } from "../ui-icons.js";
 import { renderReaderArtifacts, type ContextArtifactSourceState } from "./reader-artifacts.js";
@@ -1261,15 +1261,6 @@ function conversationStateLabel(state: string | null) {
   return label === `conversation.state_${state}` ? state : label;
 }
 
-function coordinationStateLabel(state: string) {
-  if (!state) {
-    return null;
-  }
-  const normalized = String(state).replace(/[^a-z0-9_-]/gi, "-").toLowerCase();
-  const label = t(`conversation.coordination_state_${normalized}`);
-  return label === `conversation.coordination_state_${normalized}` ? state : label;
-}
-
 function coordinationKindLabel(kind: string) {
   const normalized = kind.replace(/[^a-z0-9_]/gi, "_").toLowerCase();
   const label = t(`conversation.channel_${normalized}`);
@@ -1305,27 +1296,7 @@ function readerCoordinationUrl(provider: string, sessionId: string, card: Conver
 }
 
 function renderAgentChannel(channel: ConversationChannelItem[], truncated: boolean, card: ConversationAgentCard, provider: string, sessionId: string, disclosure = true) {
-  const itemMarkup = channel.map((item) => {
-    const direction = [
-      item.senderName ? escapeHtml(item.senderName) : "",
-      item.recipientName ? escapeHtml(item.recipientName) : ""
-    ];
-    const directionLabel = item.senderName || item.recipientName
-      ? `<span class="agent-channel-direction">${direction.filter(Boolean).join(" → ")}</span>`
-      : "";
-    const stateLabel = coordinationStateLabel(item.state);
-    const source = readerEventSource(item, provider, sessionId);
-    const time = channelTimeLabel(item.timestamp);
-    const kindMarkup = source
-      ? renderReaderEventSourceLink(source.provider, source.sessionId, source.eventId, coordinationKindLabel(item.kind), "agent-channel-kind agent-channel-source")
-      : `<span class="agent-channel-kind">${escapeHtml(coordinationKindLabel(item.kind))}</span>`;
-    return `<li class="agent-channel-item" data-channel-kind="${escapeHtml(item.kind)}" data-channel-id="${escapeHtml(item.id)}">
-      ${kindMarkup}
-      ${stateLabel && item.state !== "unknown" ? `<span class="agent-channel-state">${escapeHtml(stateLabel)}</span>` : ""}
-      ${time ? `<time class="agent-channel-time">${escapeHtml(time)}</time>` : `<small class="agent-channel-time agent-channel-time-unknown">${escapeHtml(t("detail.reader_time_unknown"))}</small>`}
-      ${directionLabel}
-    </li>`;
-  });
+  const itemMarkup = channel.map((item) => renderReaderCoordinationItem(item, provider, sessionId));
   const groups: string[] = [];
   for (let index = 0; index < channel.length;) {
     let end = index + 1;
@@ -1623,13 +1594,12 @@ function renderCompactionCheckpoint(compaction: any, provider: string, sessionId
     const encoded = encodeURIComponent(compaction.continuationSessionId);
     facts.push(`<dt>${escapeHtml(t("conversation.checkpoint_continuation"))}</dt><dd><a data-reader-open data-reader-provider="${escapeHtml(provider)}" data-reader-session="${escapeHtml(compaction.continuationSessionId)}" href="/${escapeHtml(provider)}/session/${encoded}">${escapeHtml(compaction.continuationSessionId)}</a></dd>`);
   }
-  const result = `<div class="compaction-checkpoint-result"><span class="compaction-checkpoint-result-label">${escapeHtml(t("conversation.checkpoint_result_label"))}</span><span class="compaction-checkpoint-result-placeholder">${escapeHtml(t("conversation.context_result_load_prompt"))}</span><details class="context-result-disclosure" data-context-result data-context-result-provider="${escapeHtml(provider)}" data-context-result-session="${escapeHtml(sessionId)}" data-context-result-checkpoint="${escapeHtml(compaction.id)}"><summary>${escapeHtml(t("conversation.context_result_disclosure"))}</summary><div class="context-result-panel" data-context-result-panel><span class="context-result-state">${escapeHtml(t("conversation.context_result_load_prompt"))}</span></div></details></div>`;
-  const evidence = facts.length
-    ? `<details class="compaction-checkpoint-details"><summary>${escapeHtml(t("conversation.checkpoint_details"))}</summary><dl class="compaction-checkpoint-facts">${facts.join("")}</dl></details>`
+  const result = `<div class="compaction-checkpoint-result"><details class="context-result-disclosure" data-context-result data-context-result-provider="${escapeHtml(provider)}" data-context-result-session="${escapeHtml(sessionId)}" data-context-result-checkpoint="${escapeHtml(compaction.id)}"><summary>${escapeHtml(t("conversation.context_result_disclosure"))}</summary><div class="context-result-panel" data-context-result-panel><span class="context-result-state">${escapeHtml(t("conversation.context_result_load_prompt"))}</span></div></details></div>`;
+  const evidence = facts.length || meta
+    ? `<details class="compaction-checkpoint-details"><summary>${escapeHtml(t("conversation.checkpoint_details"))}</summary>${meta ? `<p class="compaction-checkpoint-meta">${escapeHtml(meta)}</p>` : ""}${facts.length ? `<dl class="compaction-checkpoint-facts">${facts.join("")}</dl>` : ""}</details>`
     : "";
   return `<section id="${escapeHtml(anchorId("checkpoint", compaction.id))}" class="compaction-checkpoint" data-compaction-checkpoint="${escapeHtml(compaction.id)}" data-compaction-placement="${placement}" data-compaction-fidelity="${escapeHtml(compaction.fidelity || "")}">
     <span class="compaction-checkpoint-kicker">${escapeHtml(t("conversation.checkpoint_kicker"))}</span>
-    ${meta ? `<span class="compaction-checkpoint-meta">${escapeHtml(meta)}</span>` : ""}
     ${result}
     ${evidence}
   </section>`;
@@ -1856,22 +1826,18 @@ function renderReaderBranches(cards: ConversationAgentCard[], tree: SessionTree 
     const events = runs.flatMap((run) => run.channel);
     const dispatch = events.find((item) => item.kind === "spawn" || item.kind === "delegate");
     const dispatchSource = dispatch && readerEventSource(dispatch, provider, sessionId);
-    const returns = events.filter((item) => item.kind === "result-delivery" || item.kind === "mailbox-delivery");
-    const returnCountLabel = runs.some((run) => run.channelTruncated) ? "detail.reader_task_returns_partial" : "detail.reader_task_returns";
-    const lastReturn = returns.at(-1);
-    const compactTime = (item: ConversationChannelItem | undefined) => item?.timestamp != null
-      ? `<time datetime="${new Date(item.timestamp).toISOString()}" title="${escapeHtml(channelTimeLabel(item.timestamp) || "")}">${escapeHtml(new Date(item.timestamp).toISOString().slice(11, 16))} UTC</time>` : "";
+    const responsibility = runs.find((run) => run.responsibility && run.responsibility !== name)?.responsibility;
     taskNodes.push(`<button type="button" class="reader-task-node" data-reader-task-select="${escapeHtml(taskKey)}" aria-controls="${escapeHtml(detailId)}" aria-pressed="false">
       ${uiIcon("network")}<span class="reader-task-node-copy"><strong>${escapeHtml(name)}</strong>
       <span class="reader-task-node-state">${escapeHtml(states.join(" · "))}</span>
-      <span class="reader-task-node-moments">${dispatch ? `<span>${escapeHtml(t("conversation.channel_spawn"))} ${compactTime(dispatch)}</span>` : ""}${returns.length ? `<span>${escapeHtml(t(returnCountLabel, { count: String(returns.length) }))} ${compactTime(lastReturn)}</span>` : ""}</span></span>
+      ${responsibility ? `<span class="reader-task-node-purpose">${escapeHtml(responsibility)}</span>` : ""}</span>
     </button>`);
     const runMarkup = runs.map((run) => {
       return `<div class="reader-branch-run" data-reader-branch-run="${escapeHtml(run.id)}">
         ${runs.length > 1 && run.name ? `<strong>${escapeHtml(run.name)}</strong>` : ""}
         ${run.responsibility && run.responsibility !== run.name ? `<p class="reader-branch-purpose">${escapeHtml(run.responsibility)}</p>` : ""}
         ${runs.length > 1 && conversationStateLabel(run.state) ? `<p class="reader-branch-state">${escapeHtml(t("detail.reader_branch_state"))}: ${escapeHtml(conversationStateLabel(run.state)!)}</p>` : ""}
-        ${renderAgentChannel(run.channel, run.channelTruncated, run, provider, sessionId)}
+        ${renderAgentChannel(run.channel, run.channelTruncated, run, provider, sessionId, false)}
       </div>`;
     }).join("");
     return `<details id="${escapeHtml(detailId)}" class="reader-branch" data-reader-branch data-reader-branch-key="${escapeHtml(taskKey)}" data-reader-task-lane="${escapeHtml(lane?.id || "")}"${child ? ` data-reader-branch-provider="${escapeHtml(child.provider)}" data-reader-branch-session="${escapeHtml(child.sessionId)}"` : ""}>
@@ -1879,13 +1845,12 @@ function renderReaderBranches(cards: ConversationAgentCard[], tree: SessionTree 
       <div class="reader-branch-body">
         ${child && !available ? `<p class="reader-relationship-empty">${escapeHtml(t("conversation.agent_child_unavailable"))}</p>` : ""}
         ${available ? `<a class="reader-child-history-link" data-reader-open data-reader-provider="${escapeHtml(child!.provider)}" data-reader-session="${escapeHtml(child!.sessionId)}" href="${escapeHtml(href)}">${escapeHtml(t("detail.reader_child_history"))}</a>${childTarget && isOwnedReaderChild(childTarget) && childTarget.link === "inferred" ? `<small>${escapeHtml(t("detail.inferred_link"))}</small>` : ""}` : ""}
-        ${available ? `<section class="reader-task-preview" data-reader-task-preview data-reader-provider="${escapeHtml(child!.provider)}" data-reader-session="${escapeHtml(child!.sessionId)}" data-loading-label="${escapeHtml(t("detail.reader_preview_loading"))}" data-error-label="${escapeHtml(t("detail.reader_preview_error"))}"><p data-reader-preview-status role="status">${escapeHtml(t("detail.reader_preview_loading"))}</p><div data-reader-preview-content></div><button type="button" data-reader-preview-retry hidden>${escapeHtml(t("detail.reader_preview_retry"))}</button></section>` : ""}
-        ${dispatchSource ? `<div class="reader-task-dispatch-source">${renderReaderEventSourceLink(dispatchSource.provider, dispatchSource.sessionId, dispatchSource.eventId, t("detail.reader_dispatch_source"))}</div>` : ""}
         ${runMarkup}
+        ${available ? `<details class="reader-task-overview"><summary>${escapeHtml(t("detail.reader_task_overview"))}</summary><section class="reader-task-preview" data-reader-task-preview data-reader-provider="${escapeHtml(child!.provider)}" data-reader-session="${escapeHtml(child!.sessionId)}" data-loading-label="${escapeHtml(t("detail.reader_preview_loading"))}" data-error-label="${escapeHtml(t("detail.reader_preview_error"))}"><p data-reader-preview-status role="status">${escapeHtml(t("detail.reader_preview_loading"))}</p><div data-reader-preview-content></div><button type="button" data-reader-preview-retry hidden>${escapeHtml(t("detail.reader_preview_retry"))}</button></section>${dispatchSource ? `<div class="reader-task-dispatch-source">${renderReaderEventSourceLink(dispatchSource.provider, dispatchSource.sessionId, dispatchSource.eventId, t("detail.reader_dispatch_source"))}</div>` : ""}</details>` : ""}
       </div>
     </details>`;
   }).join("");
-  return `<details class="reader-task-map" data-reader-task-map><summary>${escapeHtml(t("detail.activity_all_tasks", { count: String(branches.size) }))}</summary><div class="reader-task-nodes">${taskNodes.join("")}</div></details><div class="reader-branches">${taskDetails}</div>`;
+  return `<details class="reader-task-map" data-reader-task-map open><summary>${escapeHtml(t("detail.activity_all_tasks", { count: String(branches.size) }))}</summary><div class="reader-task-nodes">${taskNodes.join("")}</div></details><div class="reader-branches">${taskDetails}</div>`;
 }
 
 function renderReaderRelationshipRail(view: ConversationViewModel | null, provider: string, sessionId: string, tree: SessionTree | null, ownedReader: OwnedReaderProjection | null = null, readerRelations: ReaderRelations | null = null) {
@@ -1927,12 +1892,12 @@ function renderReaderRelationshipRail(view: ConversationViewModel | null, provid
     : "";
   const overview = `<aside class="reader-collaboration" data-reader-collaboration aria-label="${escapeHtml(t("detail.reader_collaboration"))}">
     <div class="reader-collaboration-heading"><h2>${escapeHtml(t("detail.reader_collaboration_title"))}</h2><button type="button" class="reader-collaboration-close" data-reader-collaboration-close aria-label="${escapeHtml(t("detail.reader_collaboration_close"))}">${uiIcon("x")}</button></div>
-    <section class="reader-activity-host" data-reader-activity-host="/api/${encodeURIComponent(provider)}/session/${encodeURIComponent(sessionId)}/reader/activity" data-loading-label="${escapeHtml(t("detail.activity_loading"))}" data-error-label="${escapeHtml(t("detail.activity_error"))}" aria-label="${escapeHtml(t("detail.activity_title"))}"><p data-reader-activity-status role="status">${escapeHtml(t("detail.activity_loading"))}</p><button type="button" data-reader-activity-retry hidden>${escapeHtml(t("progressive.retry"))}</button><div data-reader-activity-view></div></section>
     ${branches}
-    ${evidenceMarkup}
-    ${relationships ? `<ul class="reader-relationship-list">${relationships}</ul>` : ""}
+    <details class="reader-activity-disclosure" data-reader-activity-disclosure><summary>${escapeHtml(t("detail.activity_disclosure"))}</summary><section class="reader-activity-host" data-reader-activity-host="/api/${encodeURIComponent(provider)}/session/${encodeURIComponent(sessionId)}/reader/activity" data-loading-label="${escapeHtml(t("detail.activity_loading"))}" data-error-label="${escapeHtml(t("detail.activity_error"))}" aria-label="${escapeHtml(t("detail.activity_title"))}"><p data-reader-activity-status role="status">${escapeHtml(t("detail.activity_loading"))}</p><button type="button" data-reader-activity-retry hidden>${escapeHtml(t("progressive.retry"))}</button><div data-reader-activity-view></div></section></details>
     <details class="reader-inspector-disclosure" data-reader-inspector>
       <summary>${escapeHtml(t("conversation.inspector_title"))}</summary>
+      ${evidenceMarkup}
+      ${relationships ? `<ul class="reader-relationship-list">${relationships}</ul>` : ""}
       ${renderConversationInspector(view?.inspector ?? null, provider, sessionId)}
     </details>
   </aside>`;

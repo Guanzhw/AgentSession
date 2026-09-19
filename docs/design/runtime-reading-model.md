@@ -1,6 +1,23 @@
 # Agent work history reader: product presentation roadmap
 
-Status: product positioning confirmed; staged goal active, 2026-09-13.
+Current scope, confirmed by the user on 2026-09-20: desktop use. Preserve the
+responsive improvements recorded below, but do not add narrow-screen work or
+acceptance checks. The [presentation contract](runtime-presentation-contract.md)
+owns the current completion criteria; older narrow-screen evidence is historical.
+
+Product clarification, 2026-09-20: the Web UI serves people revisiting complete
+conversations. Keep requests, replies and meaningful turning points readable by
+default; progressively reveal the full work behind them. Explain assignments,
+team collaboration, repeated exchanges, and asynchronous/background work from
+launch or separation through return and follow-up. Evidence is an engineering
+quality requirement, not the product's primary navigation or vocabulary. The
+MCP retains its separate machine-oriented interface. The
+[product direction](runtime-presentation-contract.md#当前产品方向) owns the
+requirements and P13/P14 acceptance scenarios. On 2026-09-20 the user removed
+the automatic long-term goal. The [delivery plan](runtime-delivery-plan.md) now
+owns the finite stages, current status, visible handoffs and next action.
+
+Status: historical roadmap; current execution follows the delivery plan above.
 The [product presentation contract](runtime-presentation-contract.md) is the
 current specification for what to show and how to read it; the
 [visual direction](runtime-visual-direction.md) records reference research and

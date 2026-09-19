@@ -20,9 +20,11 @@ import {
 import {
   buildCodexSessionProtocol,
   buildCodexSessionProtocolV3,
-  codexProtocolChildFactsFromRecords
+  codexProtocolChildFactsFromRecords,
+  type CodexProtocolChildFacts
 } from "./protocol.js";
 import { normalizeCodexContextChangeResult } from "./context-result.js";
+import { codexCoordinationContentFromRecords } from "./coordination-content.js";
 import { readCodexMemoryContent, readCodexMemoryMetadata, type CodexMemoryMetadata } from "./memory.js";
 import { readCodexMemoryEvidence } from "./memory-evidence.js";
 import { finalizeSessionProtocol, protocolRevision } from "../shared/session-protocol.js";
@@ -90,6 +92,8 @@ function readSnapshotPayload(filePath: string, canonicalId: string, snapshot: Co
   return { records, messages: recordsToMessages(records, canonicalId) };
 }
 
+const indexedChildFacts = new WeakMap<RawSession, CodexProtocolChildFacts>();
+
 const sessionFiles = createSessionFileStore({
   discoverFiles: discoverSessionFiles,
   // Keep the full canonical index while bounding retained transcript bodies.
@@ -101,6 +105,12 @@ const sessionFiles = createSessionFileStore({
     const canonicalId = extractCodexSessionId(records, entry.sessionId);
     const messages = recordsToMessages(records, canonicalId);
     const session = extractMeta(records, entry.sessionId, messages);
+    if (session.parentId && !codexNeedsParentRecordsForProvenance(records)) {
+      const provenance = classifyCodexRecordProvenance(records);
+      indexedChildFacts.set(session, codexProtocolChildFactsFromRecords(
+        records.filter((record) => provenance.get(record) === "session")
+      ));
+    }
     return {
       records,
       session,
@@ -373,7 +383,7 @@ function loadCodexProtocolInput(sessionId: string) {
     revision,
     rootEntry,
     input: protocolInputFromCaptured(rootEntry, rootRecords, parentRecords, children,
-      (child) => ({ records: child.records, messages: child.messages }), memory)
+      (child) => ({ records: child.records }), memory)
   };
 }
 
@@ -382,7 +392,7 @@ function protocolInputFromCaptured(
   rootRecords: any[],
   parentRecords: any[] | null,
   children: Array<NonNullable<ReturnType<typeof sessionFiles.get>>>,
-  readChild: (child: NonNullable<ReturnType<typeof sessionFiles.get>>) => { records: any[]; messages: Message[] },
+  readChild: (child: NonNullable<ReturnType<typeof sessionFiles.get>>) => { records: any[] },
   memory: CodexMemoryMetadata
 ) {
   const recordProvenance = rootEntry.session.parentId
@@ -394,6 +404,8 @@ function protocolInputFromCaptured(
     records: recordProvenance
       ? rootRecords.filter((record) => recordProvenance.get(record) === "session") : rootRecords,
     children: children.map((child) => {
+      const facts = indexedChildFacts.get(child.session);
+      if (facts) return { session: child.session, facts };
       // A direct child always inherits from this root. Capture its body once
       // and classify against the same root record objects held above.
       const { records: childRecords } = readChild(child);
@@ -626,6 +638,39 @@ const codex = {
 
   getSessionReaderSnapshot(sessionId) {
     return captureCodexReader(sessionId);
+  },
+
+  getReaderCoordinationContent(sessionId, observation) {
+    if (!["spawn", "follow-up", "message", "result-delivery", "child-turn-completed"].includes(observation.kind)) return null;
+    const sourceSessionId = observation.sourceEventRef?.session.sessionId ?? sessionId;
+    const captured = sessionFiles.captureSession(sourceSessionId);
+    if (!captured) return null;
+    const { entry, records } = captured;
+    const parent = captured.parent && codexNeedsParentRecordsForProvenance(records) ? captured.parent : null;
+    const parentRecords = parent ? captured.readPayload(parent).records : [];
+    const provenance = entry.session.parentId
+      ? classifyCodexRecordProvenance(records, parentRecords) : null;
+    return codexCoordinationContentFromRecords(provenance
+      ? records.filter((record) => provenance.get(record) === "session") : records, observation);
+  },
+
+  getReaderCoordinationContentRevision(sessionId, observation) {
+    const sourceSessionId = observation.sourceEventRef?.session.sessionId ?? sessionId;
+    const entry = sessionFiles.get(sourceSessionId);
+    if (!entry) return `${sourceSessionId}:missing`;
+    const signatureOf = (filePath: string) => {
+      try {
+        return sessionFileSignature(filePath, lstatSync(filePath));
+      } catch (error: any) {
+        if (error?.code === "ENOENT") return `${path.resolve(filePath)}:missing`;
+        throw error;
+      }
+    };
+    const parent = codexNeedsParentRecordsForProvenance(entry.records) ? parentEntryFor(entry) : null;
+    return JSON.stringify([
+      signatureOf(entry.filePath),
+      parent ? signatureOf(parent.filePath) : null
+    ]);
   },
 
   getInheritedContext(sessionId) {

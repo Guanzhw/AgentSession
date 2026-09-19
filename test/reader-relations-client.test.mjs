@@ -34,6 +34,7 @@ function relationHarness(t, entries, { narrow = false, selected = '', enabled = 
     }
     closest(selector) { return this.matches(selector) ? this : this.parentElement?.closest(selector) || null; }
     setAttribute(name, value) { this.attributes.set(name, value); }
+    removeAttribute(name) { this.attributes.delete(name); }
     focus(options) { this.focusOptions = options; }
     addEventListener(type, callback) { this.listeners.set(type, [...this.listeners.get(type) || [], callback]); }
     dispatchEvent(event) { (this.listeners.get(event.type) || []).forEach((listener) => listener(event)); }
@@ -66,6 +67,9 @@ function relationHarness(t, entries, { narrow = false, selected = '', enabled = 
     pane.append(section);
     const overview = new Element({ readerCollaborationOverview: '' }, 'details');
     overview.open = false;
+    const activityDisclosure = new Element({ readerActivityDisclosure: '' }, 'details');
+    activityDisclosure.open = false;
+    overview.append(activityDisclosure);
     for (const lane of lanes) {
       const detail = new Element({ readerBranch: '', readerBranchKey: lane, readerTaskLane: lane }, 'details');
       detail.open = false;
@@ -77,7 +81,7 @@ function relationHarness(t, entries, { narrow = false, selected = '', enabled = 
     summary.classes.add('reader-collaboration-overview-summary');
     overview.append(summary);
     pane.append(overview);
-    return { pane, section, select, milestones, overview, close, summary };
+    return { pane, section, select, milestones, overview, close, summary, activityDisclosure };
   };
   const original = makeSection(entries, selected);
   const workbench = new Element();
@@ -144,6 +148,36 @@ const entries = [
   { lane: 'child:implementation', kind: 'follow-up', sequence: 140, run: 'run:two' },
   { lane: 'child:implementation', kind: 'result-delivery', sequence: 144, run: 'run:two' }
 ];
+
+test('opening collaboration prioritizes task reading and loads the activity view only on demand', async (t) => {
+  const h = relationHarness(t, entries);
+  const host = new h.Element({ readerActivityHost: '/reader/activity', loadingLabel: 'Loading', errorLabel: 'Failed' });
+  const status = new h.Element({ readerActivityStatus: '' });
+  const content = new h.Element({ readerActivityView: '' });
+  const retry = new h.Element({ readerActivityRetry: '' });
+  for (const child of [status, content, retry]) host.append(child);
+  h.activityDisclosure.append(host);
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    requests.push(url);
+    return { ok: true, json: async () => ({ html: '' }) };
+  });
+  h.workbench.dispatchEvent({ type: 'click', target: h.toggle });
+  assert.equal(h.overview.open, true);
+  assert.equal(h.activityDisclosure.open, false);
+  assert.equal(requests.length, 0);
+  h.activityDisclosure.open = true;
+  h.workbench.dispatchEvent({ type: 'toggle', target: h.activityDisclosure });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(requests, ['/reader/activity?']);
+  assert.equal(status.hidden, true);
+  h.activityDisclosure.open = false;
+  h.workbench.dispatchEvent({ type: 'toggle', target: h.activityDisclosure });
+  h.activityDisclosure.open = true;
+  h.workbench.dispatchEvent({ type: 'toggle', target: h.activityDisclosure });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(requests.length, 1);
+});
 
 test('loaded process milestones receive the current task emphasis without changing nested panes', (t) => {
   const h = relationHarness(t, entries);
@@ -264,7 +298,7 @@ test('nested panes do not inherit parent task selection or close focus', (t) => 
   h.workbench.dispatchEvent({ type: 'session-reader:inline-opened', detail: { pane: child.pane } });
   h.selectPaneLane(child, 'child:review');
   h.selectLane('child:implementation');
-  assert.equal(child.overview.children[0].dataset.readerTaskSelected, 'true');
+  assert.equal(child.overview.querySelector('[data-reader-branch]').dataset.readerTaskSelected, 'true');
   h.workbench.dispatchEvent({ type: 'click', target: h.milestones[1].button });
   h.workbench.dispatchEvent({ type: 'click', target: h.close });
   assert.equal(h.overview.open, false);

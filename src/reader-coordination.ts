@@ -55,6 +55,8 @@ export interface ReaderCoordinationItem {
   timestamp: number | null;
   senderActorId: string | null;
   recipientActorId: string | null;
+  senderName: string | null;
+  recipientName: string | null;
   taskId: string | null;
   runId: string | null;
   eventId: string | null;
@@ -262,7 +264,7 @@ export function decodeReaderCoordinationCursor(value: string | null | undefined)
   }
 }
 
-function itemOf(observation: CoordinationObservation): ReaderCoordinationItem {
+function itemOf(observation: CoordinationObservation, actorNames: ReadonlyMap<string, string | null>): ReaderCoordinationItem {
   return {
     id: String(observation.id),
     kind: observation.kind,
@@ -270,6 +272,8 @@ function itemOf(observation: CoordinationObservation): ReaderCoordinationItem {
     timestamp: typeof observation.timestamp === "number" && Number.isFinite(observation.timestamp) ? observation.timestamp : null,
     senderActorId: optionalId(observation.senderActorId),
     recipientActorId: optionalId(observation.recipientActorId),
+    senderName: observation.senderActorId ? actorNames.get(observation.senderActorId) || null : null,
+    recipientName: observation.recipientActorId ? actorNames.get(observation.recipientActorId) || null : null,
     taskId: optionalId(observation.taskId),
     runId: optionalId(observation.runId),
     eventId: optionalId(observation.eventId),
@@ -344,7 +348,8 @@ export function deriveReaderCoordinationPage(
       offset = lastIndex + 1;
     }
   }
-  const items = observations.slice(offset, offset + size).map(itemOf);
+  const actorNames = new Map(protocol.actors.map((actor) => [actor.id, actor.name]));
+  const items = observations.slice(offset, offset + size).map((observation) => itemOf(observation, actorNames));
   const nextOffset = offset + items.length;
   return {
     ok: true,

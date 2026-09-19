@@ -427,12 +427,17 @@ for sidebar_entry in '[data-reader-collaboration-toggle]' '.reader-collaboration
   ab "open task sidebar with keyboard" press Enter >/dev/null
   sidebar_focus="$(read_ab "verify task sidebar entry focus" eval "document.querySelector('[data-reader-collaboration-overview]').open && document.activeElement.matches('[data-reader-collaboration-close]')")"
   assert_contains "task sidebar entry focus" "$sidebar_focus" 'true'
+  sidebar_default="$(read_ab "verify task reading comes before activity details" eval "document.querySelector('[data-reader-task-map]').open && !document.querySelector('[data-reader-activity-disclosure]').open")"
+  assert_contains "task reading first" "$sidebar_default" 'true'
+  ab "focus concurrent work disclosure" focus '[data-reader-activity-disclosure] > summary' >/dev/null
+  ab "expand concurrent work on demand" press Enter >/dev/null
   ab "wait for recorded activity window" wait --fn "document.querySelector('[data-reader-activity-window]')?.dataset.activityEnhanced === 'true' && !document.querySelector('[data-reader-activity-view]').hasAttribute('aria-busy')" >/dev/null
-  activity_state="$(read_ab "verify bounded recorded activity" eval "(() => { const view = document.querySelector('[data-reader-activity-window]'); const records = [...view.querySelectorAll('[data-reader-activity-records] li')]; return JSON.stringify({ bounded: records.length > 0 && records.length <= 100 && view.querySelectorAll('[data-reader-activity-lane]').length <= 20, sources: records.every(item => !!item.querySelector('a[data-reader-source], a[data-reader-event-source]')), plotted: view.querySelectorAll('[data-reader-activity-cluster]').length > 0, chooserClosed: !document.querySelector('[data-reader-task-map]').open }); })()" | tr -d '[:space:]')"
+  activity_state="$(read_ab "verify bounded recorded activity" eval "(() => { const view = document.querySelector('[data-reader-activity-window]'); const records = [...view.querySelectorAll('[data-reader-activity-records] li')]; return JSON.stringify({ bounded: records.length > 0 && records.length <= 100 && view.querySelectorAll('[data-reader-activity-lane]').length <= 20, sources: records.every(item => !!item.querySelector('a[data-reader-source], a[data-reader-event-source]')), plotted: view.querySelectorAll('[data-reader-activity-cluster]').length > 0 }); })()" | tr -d '[:space:]')"
   assert_contains "recorded activity" "$activity_state" '"bounded":true'
   assert_contains "recorded activity" "$activity_state" '"sources":true'
   assert_contains "recorded activity" "$activity_state" '"plotted":true'
-  assert_contains "recorded activity" "$activity_state" '"chooserClosed":true'
+  ab "focus concurrent work disclosure again" focus '[data-reader-activity-disclosure] > summary' >/dev/null
+  ab "close concurrent work details" press Enter >/dev/null
   ab "tab within task sidebar" press Tab >/dev/null
   sidebar_tab="$(read_ab "verify task sidebar Tab target" eval "!!document.activeElement.closest('[data-reader-collaboration-overview]')")"
   assert_contains "task sidebar Tab target" "$sidebar_tab" 'true'
@@ -505,17 +510,6 @@ if [[ "$transcript_search_close_state" != "true" ]]; then
   echo "Closing transcript search should preserve the current result scroll position" >&2
   exit 1
 fi
-ab "set narrow reader search viewport" set viewport 390 844 >/dev/null
-ab "reopen narrow reader search" click "[data-session-search-toggle]" >/dev/null
-ab "search narrow transcript" fill "[data-session-search-input]" "tool" >/dev/null
-ab "wait for narrow transcript results" wait --fn "document.querySelector('[data-session-search-status]')?.textContent.includes('hits')" >/dev/null
-narrow_reader_search_bounds="$(read_ab "verify narrow reader search bounds" eval "(() => { const panel = document.querySelector('.session-search-panel'); const close = document.querySelector('[data-session-search-close]'); const status = document.querySelector('[data-session-search-status]'); const p = panel?.getBoundingClientRect(); const c = close?.getBoundingClientRect(); return JSON.stringify({ statusLong: (status?.textContent || '').length >= 40, closeInPanel: !!p && !!c && c.left >= p.left && c.right <= p.right && c.top >= p.top && c.bottom <= p.bottom, closeInViewport: !!c && c.left >= 0 && c.right <= innerWidth && c.top >= 0 && c.bottom <= innerHeight }); })()" | tr -d '[:space:]')"
-assert_contains "narrow reader search bounds" "$narrow_reader_search_bounds" '"statusLong":true'
-assert_contains "narrow reader search bounds" "$narrow_reader_search_bounds" '"closeInPanel":true'
-assert_contains "narrow reader search bounds" "$narrow_reader_search_bounds" '"closeInViewport":true'
-ab "close narrow reader search" click "[data-session-search-close]" >/dev/null
-ab "wait for narrow reader search close" wait --fn "!document.querySelector('[data-session-search]').open" >/dev/null
-ab "restore desktop reader search viewport" set viewport 1280 900 >/dev/null
 echo "[qa] agent-browser: reopen transcript search with shortcut" >&2
 MSYS2_ARG_CONV_EXCL='*' browser --session "$SESSION_NAME" press / >/dev/null
 # A browser-side wait here can wedge the Windows agent-browser transport after
@@ -527,7 +521,13 @@ if [[ "$transcript_search_shortcut_state" != "true" ]]; then
   echo "The slash shortcut should open transcript search and focus its input" >&2
   exit 1
 fi
+read_ab "remember search position before Escape" eval "window.__qaTranscriptSearchScrollY = window.scrollY; true" >/dev/null
 ab "close transcript search after shortcut" press Escape >/dev/null
+ab "wait for transcript search close" wait --fn "!document.querySelector('[data-session-search]').open" >/dev/null
+search_escape_state="$(read_ab "verify Escape returns to the current match" eval "JSON.stringify({ focused: document.activeElement === document.querySelector('.session-search-current'), position: Math.abs(window.scrollY - window.__qaTranscriptSearchScrollY) < 2, query: document.querySelector('[data-session-search-input]').value === 'tool' })" | tr -d '[:space:]')"
+assert_contains "search Escape focus" "$search_escape_state" '"focused":true'
+assert_contains "search Escape position" "$search_escape_state" '"position":true'
+assert_contains "search Escape query" "$search_escape_state" '"query":true'
 
 resume_preview_count="$(read_ab "count resume command previews" get count ".resume-command-preview")"
 resume_copy_count="$(read_ab "count resume command copy buttons" get count ".resume-command-preview [data-action='copy-resume-command']")"
@@ -833,16 +833,17 @@ if [[ "$runtime_work_drawer_open" != "true" ]]; then
 fi
 ab "close Work evidence drawer" press Escape >/dev/null
 
-ab "set narrow run restoration viewport" set viewport 320 900 >/dev/null
+ab "set desktop run restoration viewport" set viewport 1280 900 >/dev/null
 ab "focus recorded lane run" focus "#tab-work [data-runtime-run-list] [data-runtime-select-kind='run']" >/dev/null
 ab "select recorded lane run" press Enter >/dev/null
 ab "refresh selected recorded run" click "#tab-work [data-runtime-runs-refresh]" >/dev/null
 ab "wait for restored run inspector" wait --fn "Boolean(document.querySelector('#tab-work [data-runtime-inspector]:not([hidden])'))" >/dev/null
-restored_run_state="$(read_ab "verify exact narrow run restoration" eval "(() => { const id = new URLSearchParams(location.search).get('runtimeRun'); const selected = document.querySelector('#tab-work [data-runtime-run-list] .runtime-selected[data-runtime-entity-kind=run]'); const inspector = document.querySelector('#tab-work [data-runtime-inspector]'); const rect = inspector.getBoundingClientRect(); return { exact: !!id && selected?.dataset.runtimeEntityId === id, inspectorVisible: !inspector.hidden && rect.top >= 0 && rect.top < innerHeight, focus: document.activeElement.hasAttribute('data-runtime-inspector-close'), bounded: document.documentElement.scrollWidth <= innerWidth }; })()" | tr -d '[:space:]')"
+restored_run_state="$(read_ab "verify exact desktop run restoration" eval "(() => { const id = new URLSearchParams(location.search).get('runtimeRun'); const selected = document.querySelector('#tab-work [data-runtime-run-list] .runtime-selected[data-runtime-entity-kind=run]'); const inspector = document.querySelector('#tab-work [data-runtime-inspector]'); const rect = inspector.getBoundingClientRect(); return { exact: !!id && selected?.dataset.runtimeEntityId === id, inspectorVisible: !inspector.hidden && rect.top >= 0 && rect.top < innerHeight, focus: document.activeElement.hasAttribute('data-runtime-inspector-close'), bounded: document.documentElement.scrollWidth <= innerWidth }; })()" | tr -d '[:space:]')"
 assert_contains "restored exact run" "$restored_run_state" '"exact":true'
-assert_contains "restored narrow inspector visibility" "$restored_run_state" '"inspectorVisible":true'
-assert_contains "restored narrow inspector focus" "$restored_run_state" '"focus":true'
+assert_contains "restored desktop inspector visibility" "$restored_run_state" '"inspectorVisible":true'
 assert_contains "restored page containment" "$restored_run_state" '"bounded":true'
+# The desktop inspector is non-modal; enter it explicitly before testing Escape.
+ab "focus restored run inspector" focus "#tab-work [data-runtime-inspector-close]" >/dev/null
 ab "close restored run inspector" press Escape >/dev/null
 restored_run_focus="$(read_ab "verify restored run Escape target" eval "document.activeElement.dataset.runtimeSelectId === new URLSearchParams(location.search).get('runtimeRun') && !!document.activeElement.closest('[data-runtime-run-list]')")"
 assert_contains "restored run focus return" "$restored_run_focus" 'true'
@@ -870,30 +871,15 @@ md_export="$(curl -fsS "$BASE/api/opencode/session/$SAMPLE_SESSION_ID/export?for
 assert_contains "markdown export" "$md_export" "### Reasoning"
 assert_not_contains "markdown export" "$md_export" "System Prompts"
 
-ab "set narrow P4c viewport" set viewport 320 768 >/dev/null
-ab "set narrow P4c media" set media dark reduced-motion >/dev/null
-ab "open narrow Library" open "$BASE/sessions" >/dev/null
-ab "wait for narrow Library" wait --text "Library" >/dev/null
-narrow_batch_state="$(read_ab "verify narrow batch touch targets" eval "(() => { const list = document.querySelector('#session-list'); const manage = document.querySelector('#toggle-batch'); manage?.click(); const card = document.querySelector('.session-card'); const hit = card?.querySelector('.card-checkbox-hit-area'); const checkbox = card?.querySelector('.card-checkbox'); const title = card?.querySelector('.session-card-title-link'); const selectAll = document.querySelector('.batch-select-all'); const rect = (node) => { const r = node?.getBoundingClientRect(); return r ? { width: r.width, height: r.height, right: r.right } : null; }; return JSON.stringify({ batch: list?.classList.contains('batch-mode'), overflow: document.documentElement.scrollWidth <= document.documentElement.clientWidth, checkbox: rect(checkbox), checkboxName: checkbox?.getAttribute('aria-label') || '', hit: rect(hit), title: rect(title), selectAll: rect(selectAll), padding: getComputedStyle(card?.querySelector('.session-card-content')).paddingLeft }); })()")"
-if ! printf '%s' "$narrow_batch_state" | grep -Eq 'batch[^a-z]*true' || ! printf '%s' "$narrow_batch_state" | grep -Eq 'overflow[^a-z]*true' || ! printf '%s' "$narrow_batch_state" | grep -Eq 'checkbox[^}]*height[^0-9]*1[5-9]|checkbox[^}]*width[^0-9]*1[5-9]' || ! printf '%s' "$narrow_batch_state" | grep -Eq 'checkboxName[^:]*:[^,}]*[^" ]' || ! printf '%s' "$narrow_batch_state" | grep -Eq 'hit[^}]*width[^0-9]*(4[4-9]|[5-9][0-9])' || ! printf '%s' "$narrow_batch_state" | grep -Eq 'selectAll[^}]*height[^0-9]*(4[4-9]|[5-9][0-9])'; then
-  echo "Narrow Library batch mode should preserve the native checkbox and provide bounded 44px hit areas, got $narrow_batch_state" >&2
-  exit 1
-fi
-
-ab "open narrow detail" open "$BASE/opencode/session/$SAMPLE_SESSION_ID" >/dev/null
-ab "wait for narrow detail" wait --load networkidle >/dev/null
+ab "set desktop reduced-motion media" set media dark reduced-motion >/dev/null
+ab "open desktop detail" open "$BASE/opencode/session/$SAMPLE_SESSION_ID" >/dev/null
+ab "wait for desktop detail" wait --load networkidle >/dev/null
 reduced_motion_state="$(read_ab "verify reduced-motion styles" eval "(() => { const host = document.createElement('div'); host.innerHTML = '<div class=anchor-flash></div><div class=toast></div><div class=scroll-loading></div>'; document.body.append(host); const anchor = getComputedStyle(host.children[0]); const toast = getComputedStyle(host.children[1]); const loading = getComputedStyle(host.children[2], '::before'); const result = { preference: matchMedia('(prefers-reduced-motion: reduce)').matches, anchorAnimation: anchor.animationName, anchorEmphasis: anchor.boxShadow !== 'none', toastAnimation: toast.animationName, loadingAnimation: loading.animationName }; host.remove(); return JSON.stringify(result); })()" | tr -d '[:space:]')"
 assert_contains "reduced motion" "$reduced_motion_state" '"preference":true'
 assert_contains "reduced motion" "$reduced_motion_state" '"anchorAnimation":"none"'
 assert_contains "reduced motion" "$reduced_motion_state" '"anchorEmphasis":true'
 assert_contains "reduced motion" "$reduced_motion_state" '"toastAnimation":"none"'
 assert_contains "reduced motion" "$reduced_motion_state" '"loadingAnimation":"none"'
-ab "open narrow transcript search" click "[data-session-search-toggle]" >/dev/null
-narrow_search_state="$(read_ab "verify narrow transcript search containment" eval "(() => { const panel = document.querySelector('.session-search-panel'); const input = document.querySelector('[data-session-search-input]'); const navigation = document.querySelector('.session-search-navigation'); const buttons = [...document.querySelectorAll('.session-search-nav-btn')]; const rect = (node) => { const r = node?.getBoundingClientRect(); return r ? { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height } : null; }; const p = rect(panel); const inside = (r) => Boolean(p && r && r.left >= p.left && r.right <= p.right && r.top >= p.top && r.bottom <= p.bottom); return JSON.stringify({ panel: p, input: rect(input), navigation: rect(navigation), buttons: buttons.map(rect), contained: inside(rect(input)) && inside(rect(navigation)) && buttons.every((button) => inside(rect(button))), visible: Boolean(input && navigation && buttons.length === 3 && input.getBoundingClientRect().width > 0 && navigation.getBoundingClientRect().height > 0), documentOverflow: document.documentElement.scrollWidth <= document.documentElement.clientWidth }); })()")"
-if ! printf '%s' "$narrow_search_state" | grep -Eq 'contained[^a-z]*true' || ! printf '%s' "$narrow_search_state" | grep -Eq 'visible[^a-z]*true' || ! printf '%s' "$narrow_search_state" | grep -Eq 'documentOverflow[^a-z]*true'; then
-  echo "Narrow transcript search should keep its input and three navigation controls inside the fixed panel, got $narrow_search_state" >&2
-  exit 1
-fi
 
 browser_errors="$(read_ab "collect browser errors" errors)"
 ab "close session" close >/dev/null

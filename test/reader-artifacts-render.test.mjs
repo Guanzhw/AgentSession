@@ -4,7 +4,7 @@ import test from "node:test";
 
 const { renderSessionReaderPane } = await import("../dist/src/views/session.js");
 const { setLocale } = await import("../dist/src/i18n.js");
-const { renderArtifactEvidenceActivity, renderArtifactEvidenceCoverage } = await import("../dist/src/views/reader-artifacts.js");
+const { renderReaderArtifacts, renderArtifactEvidenceActivity, renderArtifactEvidenceCoverage } = await import("../dist/src/views/reader-artifacts.js");
 
 const provenance = { fidelity: "recorded", sourceType: "codex.memory_stage1", sourceId: "job-1" };
 const artifacts = [
@@ -21,7 +21,7 @@ test("saved-output grid tracks keep long request sources inside their own scroll
 
 test("reader artifacts stay outside the transcript and preserve source versus generation evidence", () => {
   const html = renderSessionReaderPane({ session: { id: "source", title: "Source" }, provider: "fixture", contextArtifacts: artifacts, canReadContextArtifacts: true });
-  assert.match(html, /Saved from this history/);
+  assert.match(html, /Saved from this conversation/);
   assert.match(html, /href="#session-source" data-reader-artifact-current-source/);
   assert.match(html, /data-content-scope="context-artifact"/);
   assert.match(html, /data-context-artifact-id="memory:source:1"/);
@@ -44,7 +44,7 @@ test("available empty storage has no disclosure while a failed store remains exp
   setLocale("zh");
   t.after(() => setLocale("en"));
   const html = renderSessionReaderPane({ ...common, contextArtifactSourceState: { state: "invalid", code: "invalid-record", sourcePath: "db", provenance } });
-  assert.match(html, /从这段历史保存的内容/);
+  assert.match(html, /本次会话保存的内容/);
   assert.match(html, /invalid-record/);
 });
 
@@ -58,6 +58,22 @@ test('later consolidation is advertised per artifact and leaves its records unlo
   assert.match(html, /data-artifact-evidence data-context-artifact-id="summary:source:1" data-search-exclude/);
   assert.doesNotMatch(html, /data-artifact-activity-id|data-artifact-record-id/);
   assert.equal((html.match(/data-load-initial/g) || []).length, 2, 'summary expansion loads only saved bodies');
+  const body = html.indexOf('data-context-artifact-id="summary:source:1" data-content-scope="context-artifact"');
+  assert.ok(body >= 0);
+  assert.ok(body < html.indexOf('class="reader-artifact-followups"'), 'saved text precedes later consolidation');
+  assert.ok(html.indexOf('data-artifact-evidence-activities') < html.indexOf('data-artifact-evidence-coverage'), 'request records precede inspection information');
+  assert.match(html, /<details class="reader-artifact-evidence reader-artifact-followups-inspection"><summary>Inspection details<\/summary>\s*<div data-artifact-evidence-coverage>/);
+  assert.match(html, /data-artifact-evidence-notice hidden/);
+  assert.match(html, /<details class="reader-artifact-followups-range">[\s\S]*<form data-artifact-evidence-range>/);
+});
+
+test('saved artifact bodies are the first content inside their own disclosure', () => {
+  const html = renderReaderArtifacts({ artifacts, canRead: true, provider: 'fixture', sessionId: 'source', sessionAnchor: 'session-source' });
+  assert.equal((html.match(/<div class="reader-artifact-output-body">\s*<div class="progressive reader-artifact-content"/g) || []).length, 2);
+  assert.equal((html.match(/<summary><span>(?:Memory notes|Session summary)<\/span><\/summary>/g) || []).length, 2, 'native disclosure names the saved content directly');
+  assert.doesNotMatch(html, /<small>Read<\/small>/);
+  assert.ok(html.indexOf('reader-artifact-branches') < html.indexOf('reader-artifact-source-evidence'));
+  assert.match(html, /<details class="reader-artifact-evidence" data-search-exclude><summary>Technical details<\/summary><dl><dt>Generated<\/dt>/);
 });
 
 test('followup rendering retains request semantics, derived binding and unavailable generation history', (context) => {
@@ -73,7 +89,9 @@ test('followup rendering retains request semantics, derived binding and unavaila
   assert.match(html, />source\.md<\/code>/);
   assert.match(html, /<small title="Recorded source"><time datetime="2023-11-14T22:13:22.000Z">/);
   assert.match(html, /<small title="Recorded source"><time datetime="2023-11-14T22:13:23.000Z">/);
-  assert.match(html, /<p class="reader-artifact-followup-path"><code>C:\\memories\\summaries\\source\.md<\/code>/);
+  assert.match(html, /<dt>Source path<\/dt><dd><code>C:\\memories\\summaries\\source\.md<\/code>/);
+  assert.equal((html.match(/<div class="reader-artifact-followup-record-body">\s*<div class="progressive reader-artifact-content"/g) || []).length, 2, 'opening each request loads its text before source diagnostics');
+  assert.equal((html.match(/<details class="reader-artifact-evidence"><summary>Technical details<\/summary>\s*<dl><dt>Source path<\/dt>/g) || []).length, 2);
   assert.match(html, /currently matches this summary/);
   assert.match(html, /full generating history is unavailable/);
   assert.match(html, /Modification outcomes are not recorded/);
