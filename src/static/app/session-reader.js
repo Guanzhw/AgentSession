@@ -186,6 +186,14 @@ export function initSessionReader({ ft, showToast } = {}) {
     };
   };
 
+  const openFocusAncestors = (target) => {
+    let detail = target?.closest?.("details");
+    while (detail) {
+      detail.open = true;
+      detail = detail.parentElement?.closest("details") || null;
+    }
+  };
+
   const savePaneState = (pane, { captureHref = true } = {}) => {
     if (!pane) return;
     const existing = cache.get(keyOf(pane)) || { pane };
@@ -211,8 +219,9 @@ export function initSessionReader({ ft, showToast } = {}) {
     }
     requestAnimationFrame(() => {
       if (historyEntries[historyIndex] !== entry || host.querySelector("[data-reader-pane]") !== pane) return;
-      window.scrollTo({ top: state.scrollY || 0, left: state.scrollX || 0, behavior: "auto" });
       const focusTarget = findFocusable(pane, state.focus);
+      openFocusAncestors(focusTarget);
+      window.scrollTo({ top: state.scrollY || 0, left: state.scrollX || 0, behavior: "auto" });
       focusTarget?.focus?.({ preventScroll: true });
     });
   };
@@ -385,11 +394,7 @@ export function initSessionReader({ ft, showToast } = {}) {
       revealAnchor(opener);
       return;
     }
-    let openerDetails = opener?.closest?.("details");
-    while (openerDetails) {
-      openerDetails.open = true;
-      openerDetails = openerDetails.parentElement?.closest("details");
-    }
+    openFocusAncestors(opener);
     window.scrollTo({ top: record.originState.scrollY || 0, left: record.originState.scrollX || 0, behavior: "auto" });
     const target = findFocusable(opener, record.originState.focus);
     if (target?.focus) target.focus({ preventScroll: true });

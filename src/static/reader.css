@@ -11,7 +11,7 @@
    the passage that names it.  This file is loaded only for reader pages. */
 body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary); }
 .session-workbench[data-session-reader] {
-  --reader-panel-width: clamp(360px, 28vw, 430px);
+  --reader-panel-width: clamp(400px, 36vw, 560px);
   --reader-ink: var(--text-primary);
   --reader-muted: var(--text-muted, var(--text-secondary));
   --reader-line: var(--border-color);
@@ -576,6 +576,40 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
 .session-workbench[data-session-reader] .reader-task-node .ui-icon { width: 17px; height: 17px; margin-top: 2px; }
 .session-workbench[data-session-reader] .reader-task-node[aria-pressed="true"] { color: var(--reader-accent); background: var(--reader-accent-soft); }
 .session-workbench[data-session-reader] .reader-task-node:hover { background: var(--reader-accent-soft); }
+.session-workbench[data-session-reader] .reader-task-graph { margin: 16px 0 22px; padding-bottom: 12px; border-bottom: 1px solid var(--reader-line); }
+.session-workbench[data-session-reader] .reader-task-graph-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.session-workbench[data-session-reader] .reader-task-graph-heading h3 { margin: 0; font-size: 14px; font-weight: 650; }
+.session-workbench[data-session-reader] .reader-task-graph-paging { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--reader-muted); }
+.session-workbench[data-session-reader] .reader-task-graph-paging button { min-width: 28px; min-height: 28px; border: 1px solid var(--reader-line); border-radius: 4px; color: var(--reader-ink); background: var(--reader-surface); font-size: 18px; cursor: pointer; }
+.session-workbench[data-session-reader] .reader-task-graph-paging button:disabled { opacity: .4; cursor: default; }
+.session-workbench[data-session-reader] .reader-task-graph-legend { display: flex; gap: 18px; margin: 9px 0 0; color: var(--reader-muted); font-size: 11px; }
+.session-workbench[data-session-reader] .reader-task-graph-assignment-legend::before { content: '→'; margin-right: 6px; color: var(--reader-accent); }
+.session-workbench[data-session-reader] .reader-task-graph-return-legend::before { content: '←'; margin-right: 6px; }
+.session-workbench[data-session-reader] .reader-task-graph-canvas { position: relative; margin-top: 10px; }
+.session-workbench[data-session-reader] .reader-task-graph-canvas svg { position: absolute; width: 100%; height: 100%; inset: 0; overflow: visible; }
+.session-workbench[data-session-reader] .reader-task-graph-canvas path { fill: none; stroke-width: 1.25; vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
+.session-workbench[data-session-reader] .reader-task-graph-assignment { stroke: var(--reader-accent); }
+.session-workbench[data-session-reader] .reader-task-graph-return { stroke: var(--reader-muted); }
+.session-workbench[data-session-reader] .reader-task-graph-edge-selected path { stroke-width: 2.25; }
+.session-workbench[data-session-reader] .reader-task-graph-origin, .session-workbench[data-session-reader] .reader-task-graph-node { position: absolute; box-sizing: border-box; min-width: 0; height: 64px; border: 1px solid var(--reader-line); border-radius: 6px; padding: 8px 10px; color: var(--reader-ink); background: var(--reader-surface); font: inherit; font-size: 13px; text-align: left; overflow-wrap: anywhere; }
+.session-workbench[data-session-reader] .reader-task-graph-origin { left: 0; width: 24.5833%; display: flex; align-items: center; color: var(--reader-muted); font-size: 12px; }
+.session-workbench[data-session-reader] .reader-task-graph-origin span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.session-workbench[data-session-reader] .reader-task-graph-node { left: 60.8333%; width: 39.1667%; cursor: pointer; }
+.session-workbench[data-session-reader] .reader-task-graph-node strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: 12px; line-height: 1.4; }
+.session-workbench[data-session-reader] .reader-task-graph-node > span { display: block; margin-top: 3px; font-size: 11px; color: var(--reader-muted); }
+.session-workbench[data-session-reader] .reader-task-graph-node[aria-pressed="true"] { border-color: var(--reader-accent); background: var(--reader-accent-soft); }
+.session-workbench[data-session-reader] .reader-task-graph-edge-label { position: absolute; left: 26%; width: 33%; padding: 2px; border: 0; background: var(--reader-surface); color: var(--reader-muted); font: inherit; font-size: 10px; line-height: 1.4; cursor: pointer; }
+.session-workbench[data-session-reader] .reader-task-graph-edge-label:hover { color: var(--reader-accent); text-decoration: underline; }
+.session-workbench[data-session-reader] .reader-task-graph button:focus-visible { outline: 2px solid var(--reader-accent); outline-offset: 3px; }
+.session-workbench[data-session-reader] [data-reader-task-directory-search] { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.session-workbench[data-session-reader] [data-reader-task-directory-query] { min-width: 0; flex: 1 1 180px; border: 1px solid var(--reader-line); border-radius: 5px; padding: 8px 10px; color: var(--reader-ink); background: var(--reader-surface); font: inherit; font-size: 13px; }
+.session-workbench[data-session-reader] [data-reader-task-directory-search] > button { padding: 8px 12px; border: 1px solid var(--reader-line); border-radius: 5px; background: var(--reader-surface); color: var(--reader-ink); font: inherit; font-size: 13px; cursor: pointer; }
+.session-workbench[data-session-reader] [data-reader-task-directory-status] { flex-basis: 100%; font-size: 12px; color: var(--reader-muted); }
+.session-workbench[data-session-reader] [data-reader-task-directory-status]:empty { display: none; }
+.session-workbench[data-session-reader] [data-reader-task-directory-pages] { max-height: 380px; overflow: auto; overscroll-behavior: contain; }
+.session-workbench[data-session-reader] [data-reader-task-directory-pages] .reader-task-nodes { max-height: none; overflow: visible; }
+.session-workbench[data-session-reader] [data-reader-task-directory-more] { margin: 10px 0; }
+.session-workbench[data-session-reader] [data-reader-task-directory] :is(input, button):focus-visible { outline: 2px solid var(--reader-accent); outline-offset: 3px; }
 .session-workbench[data-session-reader] .reader-task-node-copy { min-width: 0; flex: 1; }
 .session-workbench[data-session-reader] .reader-task-node-copy strong { display: block; font-size: 14px; overflow-wrap: anywhere; }
 .session-workbench[data-session-reader] .reader-task-node-purpose { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin-top: 6px; font-size: 13px; line-height: 1.6; color: var(--reader-ink); }

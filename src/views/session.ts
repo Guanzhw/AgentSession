@@ -9,6 +9,7 @@ import { anchorId } from "./anchors.js";
 import { layout } from "./layout.js";
 import { readerEventHref, renderReaderEventSourceLink, renderReaderCoordinationItem } from "./reader-coordination.js";
 import { readerRelationPositionKey, renderReaderRelations } from "./reader-relations.js";
+import { renderReaderTaskGraph } from "./reader-task-graph.js";
 import { uiIcon } from "../ui-icons.js";
 import { renderReaderArtifacts, type ContextArtifactSourceState } from "./reader-artifacts.js";
 import type { ContextArtifact } from "../providers/shared/session-protocol.js";
@@ -21,9 +22,12 @@ import type {
   ConversationAgentCard,
   ConversationChannelItem,
   ConversationInspectorView,
+  ConversationTaskDirectoryPage,
+  ConversationTaskGroup,
   ConversationTurnBoundary,
   ConversationViewModel
 } from "../conversation-view-model.js";
+import { groupConversationCards } from "../conversation-view-model.js";
 
 function safeParse(value: any) {
   if (typeof value !== "string") {
@@ -1790,7 +1794,7 @@ function renderConversationPanel(entries: ConversationEntry[], compactions: any[
     </div>`;
 }
 
-function renderReaderBranches(cards: ConversationAgentCard[], tree: SessionTree | null, provider: string, sessionId: string, ownedReader: OwnedReaderProjection | null, readerRelations: ReaderRelations | null) {
+function readerChildTargets(tree: SessionTree | null, provider: string, ownedReader: OwnedReaderProjection | null) {
   const children = new Map<string, ReaderChildTarget>();
   if (tree) {
     for (const child of [
@@ -1803,54 +1807,102 @@ function renderReaderBranches(cards: ConversationAgentCard[], tree: SessionTree 
   for (const child of ownedReader?.children || []) {
     children.set(conversationSessionHref({ provider: child.provider, sessionId: child.sessionId }), child);
   }
-  const branches = new Map<string, ConversationAgentCard[]>();
-  for (const card of cards) {
-    const key = card.childSession ? conversationSessionHref(card.childSession) : card.id;
-    const branch = branches.get(key) || [];
-    branch.push(card);
-    branches.set(key, branch);
-  }
-  const taskNodes: string[] = [];
-  const taskDetails = [...branches].map(([href, runs]) => {
+  return children;
+}
+
+function readerTaskDirectoryUrl(provider: string, sessionId: string, query = "", cursor: string | null = null, size = 50) {
+  const params = new URLSearchParams({ size: String(size) });
+  if (query) params.set("q", query);
+  if (cursor) params.set("cursor", cursor);
+  return `/api/${encodeURIComponent(provider)}/session/${encodeURIComponent(sessionId)}/reader/tasks?${params}`;
+}
+
+function renderReaderTaskNode(group: ConversationTaskGroup, provider: string, sessionId: string, relations: ReaderRelations | null = null) {
+  const runs = group.cards;
+  const first = runs[0];
+  const child = group.childSession;
+  const lane = relations?.lanes.find((candidate) => candidate.id === group.laneId);
+  const name = first.responsibility || first.name || lane?.name || child?.sessionId || t("conversation.agent_unknown");
+  const states = [...new Set(runs.map((run) => conversationStateLabel(run.state)).filter(Boolean))];
+  const responsibility = runs.find((run) => run.responsibility && run.responsibility !== name)?.responsibility;
+  const detailId = anchorId("reader-task", group.key);
+  const detailUrl = `/api/${encodeURIComponent(provider)}/session/${encodeURIComponent(sessionId)}/reader/task?key=${encodeURIComponent(group.key)}`;
+  return `<button type="button" class="reader-task-node" data-reader-task-select="${escapeHtml(group.key)}" data-reader-task-lane="${escapeHtml(group.laneId)}" data-reader-task-detail-url="${escapeHtml(detailUrl)}" aria-controls="${escapeHtml(detailId)}" aria-pressed="false">
+    ${uiIcon("network")}<span class="reader-task-node-copy"><strong>${escapeHtml(name)}</strong>
+    <span class="reader-task-node-state">${escapeHtml(states.join(" · "))}</span>
+    ${responsibility ? `<span class="reader-task-node-purpose">${escapeHtml(responsibility)}</span>` : ""}</span>
+  </button>`;
+}
+
+export function renderReaderTaskDetail(
+  group: ConversationTaskGroup,
+  provider: string,
+  sessionId: string,
+  options: {
+    tree?: SessionTree | null;
+    ownedReader?: OwnedReaderProjection | null;
+    readerRelations?: ReaderRelations | null;
+  } = {}
+) {
+    const { tree = null, ownedReader = null, readerRelations = null } = options;
+    const children = readerChildTargets(tree, provider, ownedReader);
+    const runs = group.cards;
     const first = runs[0];
-    const child = first.childSession;
+    const child = group.childSession;
+    const href = child ? conversationSessionHref(child) : "";
     const available = child && runs.some((run) => run.childSessionAvailable !== false);
     const childTarget = available ? children.get(href) : null;
-    const name = first.name || first.responsibility || (childTarget ? (isOwnedReaderChild(childTarget) ? childTarget.title : childTarget.session.title) : null) || t("conversation.agent_unknown");
+    const name = first.responsibility || first.name || (childTarget ? (isOwnedReaderChild(childTarget) ? childTarget.title : childTarget.session.title) : null) || t("conversation.agent_unknown");
     const states = [...new Set(runs.map((run) => conversationStateLabel(run.state)).filter(Boolean))];
     const lane = readerRelations?.lanes.find((candidate) => child
       ? candidate.childSession?.provider === child.provider && candidate.childSession.sessionId === child.sessionId
-      : candidate.id === `${encodeURIComponent(provider)}:${encodeURIComponent(sessionId)}:${first.id}`);
-    const taskKey = first.id;
-    const detailId = anchorId("reader-task", taskKey);
+      : candidate.id === group.laneId);
+    const taskKey = group.key;
+    const detailId = anchorId("reader-task", group.key);
     const events = runs.flatMap((run) => run.channel);
     const dispatch = events.find((item) => item.kind === "spawn" || item.kind === "delegate");
     const dispatchSource = dispatch && readerEventSource(dispatch, provider, sessionId);
-    const responsibility = runs.find((run) => run.responsibility && run.responsibility !== name)?.responsibility;
-    taskNodes.push(`<button type="button" class="reader-task-node" data-reader-task-select="${escapeHtml(taskKey)}" aria-controls="${escapeHtml(detailId)}" aria-pressed="false">
-      ${uiIcon("network")}<span class="reader-task-node-copy"><strong>${escapeHtml(name)}</strong>
-      <span class="reader-task-node-state">${escapeHtml(states.join(" · "))}</span>
-      ${responsibility ? `<span class="reader-task-node-purpose">${escapeHtml(responsibility)}</span>` : ""}</span>
-    </button>`);
-    const runMarkup = runs.map((run) => {
-      return `<div class="reader-branch-run" data-reader-branch-run="${escapeHtml(run.id)}">
-        ${runs.length > 1 && run.name ? `<strong>${escapeHtml(run.name)}</strong>` : ""}
-        ${run.responsibility && run.responsibility !== run.name ? `<p class="reader-branch-purpose">${escapeHtml(run.responsibility)}</p>` : ""}
-        ${runs.length > 1 && conversationStateLabel(run.state) ? `<p class="reader-branch-state">${escapeHtml(t("detail.reader_branch_state"))}: ${escapeHtml(conversationStateLabel(run.state)!)}</p>` : ""}
-        ${renderAgentChannel(run.channel, run.channelTruncated, run, provider, sessionId, false)}
-      </div>`;
-    }).join("");
-    return `<details id="${escapeHtml(detailId)}" class="reader-branch" data-reader-branch data-reader-branch-key="${escapeHtml(taskKey)}" data-reader-task-lane="${escapeHtml(lane?.id || "")}"${child ? ` data-reader-branch-provider="${escapeHtml(child.provider)}" data-reader-branch-session="${escapeHtml(child.sessionId)}"` : ""}>
+    return `<details id="${escapeHtml(detailId)}" class="reader-branch" data-reader-branch data-reader-branch-key="${escapeHtml(taskKey)}" data-reader-task-lane="${escapeHtml(lane?.id || group.laneId)}"${child ? ` data-reader-branch-provider="${escapeHtml(child.provider)}" data-reader-branch-session="${escapeHtml(child.sessionId)}"` : ""}>
       <summary><span class="reader-branch-name">${escapeHtml(name)}</span>${states.length ? `<span class="reader-branch-state" title="${escapeHtml(t("detail.reader_branch_state"))}">${escapeHtml(states.join(" · "))}</span>` : ""}</summary>
       <div class="reader-branch-body">
         ${child && !available ? `<p class="reader-relationship-empty">${escapeHtml(t("conversation.agent_child_unavailable"))}</p>` : ""}
         ${available ? `<a class="reader-child-history-link" data-reader-open data-reader-provider="${escapeHtml(child!.provider)}" data-reader-session="${escapeHtml(child!.sessionId)}" href="${escapeHtml(href)}">${escapeHtml(t("detail.reader_child_history"))}</a>${childTarget && isOwnedReaderChild(childTarget) && childTarget.link === "inferred" ? `<small>${escapeHtml(t("detail.inferred_link"))}</small>` : ""}` : ""}
-        ${runMarkup}
+        <div data-reader-task-runs>${renderReaderTaskRuns(group, provider, sessionId)}</div>
         ${available ? `<details class="reader-task-overview"><summary>${escapeHtml(t("detail.reader_task_overview"))}</summary><section class="reader-task-preview" data-reader-task-preview data-reader-provider="${escapeHtml(child!.provider)}" data-reader-session="${escapeHtml(child!.sessionId)}" data-loading-label="${escapeHtml(t("detail.reader_preview_loading"))}" data-error-label="${escapeHtml(t("detail.reader_preview_error"))}"><p data-reader-preview-status role="status">${escapeHtml(t("detail.reader_preview_loading"))}</p><div data-reader-preview-content></div><button type="button" data-reader-preview-retry hidden>${escapeHtml(t("detail.reader_preview_retry"))}</button></section>${dispatchSource ? `<div class="reader-task-dispatch-source">${renderReaderEventSourceLink(dispatchSource.provider, dispatchSource.sessionId, dispatchSource.eventId, t("detail.reader_dispatch_source"))}</div>` : ""}</details>` : ""}
       </div>
     </details>`;
-  }).join("");
-  return `<details class="reader-task-map" data-reader-task-map open><summary>${escapeHtml(t("detail.activity_all_tasks", { count: String(branches.size) }))}</summary><div class="reader-task-nodes">${taskNodes.join("")}</div></details><div class="reader-branches">${taskDetails}</div>`;
+}
+
+export function renderReaderTaskRuns(group: ConversationTaskGroup, provider: string, sessionId: string) {
+  const multipleRuns = group.runCount > 1;
+  const runMarkup = group.cards.map((run) => `<div class="reader-branch-run" data-reader-branch-run="${escapeHtml(run.bindings.runId || run.id.replace(/^run:/, ""))}">
+      ${multipleRuns && run.name ? `<strong>${escapeHtml(run.name)}</strong>` : ""}
+      ${run.responsibility && run.responsibility !== run.name ? `<p class="reader-branch-purpose">${escapeHtml(run.responsibility)}</p>` : ""}
+      ${multipleRuns && conversationStateLabel(run.state) ? `<p class="reader-branch-state">${escapeHtml(t("detail.reader_branch_state"))}: ${escapeHtml(conversationStateLabel(run.state)!)}</p>` : ""}
+      ${renderAgentChannel(run.channel, run.channelTruncated, run, provider, sessionId, false)}
+    </div>`).join("");
+  const params = new URLSearchParams({ key: group.key, runsSize: String(group.runsPageSize) });
+  if (group.runsNextCursor) params.set("runsCursor", group.runsNextCursor);
+  const moreUrl = group.runsNextCursor
+    ? `/api/${encodeURIComponent(provider)}/session/${encodeURIComponent(sessionId)}/reader/task?${params}`
+    : "";
+  return `<div data-reader-task-runs-page data-reader-task-runs-offset="${group.runsOffset}">${runMarkup}</div>${moreUrl ? `<button type="button" class="agent-channel-more" data-reader-task-runs-more data-reader-task-runs-url="${escapeHtml(moreUrl)}">${escapeHtml(t("progressive.show_more"))}</button><span data-reader-task-runs-status role="status"></span>` : ""}`;
+}
+
+export function renderReaderTaskDirectoryPage(page: ConversationTaskDirectoryPage, readerRelations: ReaderRelations | null = null) {
+  const nodes = page.items.map((group) => renderReaderTaskNode(group, page.provider, page.sessionId, readerRelations)).join("");
+  const moreUrl = page.nextCursor
+    ? readerTaskDirectoryUrl(page.provider, page.sessionId, page.query, page.nextCursor, page.size)
+    : "";
+  return `<div data-reader-task-directory-page data-reader-task-directory-offset="${page.offset}"><div class="reader-task-nodes">${nodes || `<p data-reader-task-directory-empty>${escapeHtml(t("detail.reader_tasks_empty"))}</p>`}</div>${moreUrl ? `<button type="button" class="agent-channel-more" data-reader-task-directory-more data-reader-task-directory-url="${escapeHtml(moreUrl)}">${escapeHtml(t("progressive.show_more"))}</button>` : ""}</div>`;
+}
+
+function renderReaderBranches(initialPage: ConversationTaskDirectoryPage, tree: SessionTree | null, provider: string, sessionId: string, ownedReader: OwnedReaderProjection | null, readerRelations: ReaderRelations | null) {
+  const groups = initialPage.items;
+  const directoryPage = renderReaderTaskDirectoryPage(initialPage, readerRelations);
+  const taskDetails = groups.map((group) => renderReaderTaskDetail(group, provider, sessionId, { tree, ownedReader, readerRelations })).join("");
+  const graph = renderReaderTaskGraph(groups, provider, sessionId);
+  return `<div data-reader-task-graph-host>${graph}</div><div data-reader-task-status role="status"></div><details class="reader-task-map" data-reader-task-map${graph ? "" : " open"}><summary>${escapeHtml(t("detail.activity_all_tasks", { count: String(initialPage.total) }))}</summary><section data-reader-task-directory data-reader-task-directory-url="${escapeHtml(readerTaskDirectoryUrl(provider, sessionId))}"><form data-reader-task-directory-search><input type="search" data-reader-task-directory-query aria-label="${escapeHtml(t("detail.reader_tasks_search"))}" placeholder="${escapeHtml(t("detail.reader_tasks_search"))}"><button type="submit">${escapeHtml(t("library.search_action"))}</button><span data-reader-task-directory-status role="status"></span></form><div data-reader-task-directory-pages>${directoryPage}</div></section></details><div class="reader-branches" data-reader-task-details>${taskDetails}</div>`;
 }
 
 function renderReaderRelationshipRail(view: ConversationViewModel | null, provider: string, sessionId: string, tree: SessionTree | null, ownedReader: OwnedReaderProjection | null = null, readerRelations: ReaderRelations | null = null) {
@@ -1872,7 +1924,11 @@ function renderReaderRelationshipRail(view: ConversationViewModel | null, provid
   };
   const detailSequence = observations.map(({ card, item }) => `<li class="reader-observation-sequence-item" data-reader-observation-id="${escapeHtml(item.id)}"><span class="reader-observation-sequence-label">${escapeHtml(observationLabel(card, item))}</span>${channelTimeLabel(item.timestamp) ? `<time>${escapeHtml(channelTimeLabel(item.timestamp)!)}</time>` : `<small>${escapeHtml(t("detail.reader_time_unknown"))}</small>`}${sourceMarkup(item)}</li>`).join("");
   const turnSequence = turnBoundaries.map((boundary) => `<li class="reader-observation-sequence-item reader-main-turn-sequence-item" data-reader-turn-boundary data-reader-turn-number="${boundary.displayNumber}"><span class="reader-observation-sequence-label">${escapeHtml(turnLabel(boundary))}</span>${channelTimeLabel(boundary.timestamp) ? `<time>${escapeHtml(channelTimeLabel(boundary.timestamp)!)}</time>` : `<small>${escapeHtml(t("detail.reader_time_unknown"))}</small>`}${renderReaderEventSourceLink(provider, sessionId, boundary.eventId)}</li>`).join("");
-  const branches = renderReaderBranches(cards, tree, provider, sessionId, ownedReader, readerRelations);
+  const initialDirectory = view?.taskDirectory || {
+    ok: true as const, provider, sessionId, query: "", size: 50, offset: 0,
+    total: cards.length, items: groupConversationCards(cards, provider, sessionId), nextCursor: null
+  };
+  const branches = renderReaderBranches(initialDirectory, tree, provider, sessionId, ownedReader, readerRelations);
   const relationshipRecords = (view?.inspector?.relationships || []).filter((relationship) => relationship.otherSession);
   const relationships = relationshipRecords.map((relationship) => {
     const target = relationship.otherSession;
@@ -1890,7 +1946,7 @@ function renderReaderRelationshipRail(view: ConversationViewModel | null, provid
   const evidenceMarkup = recorded
     ? `<details class="reader-observations-expanded" data-reader-observations-expanded><summary>${escapeHtml(t("detail.reader_timeline_expand"))}</summary><ol class="reader-observation-sequence" data-reader-observation-sequence>${turnSequence}${detailSequence}</ol></details>`
     : "";
-  const overview = `<aside class="reader-collaboration" data-reader-collaboration aria-label="${escapeHtml(t("detail.reader_collaboration"))}">
+  const overview = `<aside class="reader-collaboration" data-reader-collaboration data-reader-task-error-label="${escapeHtml(t("progressive.load_failed"))}" data-reader-task-retry-label="${escapeHtml(t("progressive.retry"))}" aria-label="${escapeHtml(t("detail.reader_collaboration"))}">
     <div class="reader-collaboration-heading"><h2>${escapeHtml(t("detail.reader_collaboration_title"))}</h2><button type="button" class="reader-collaboration-close" data-reader-collaboration-close aria-label="${escapeHtml(t("detail.reader_collaboration_close"))}">${uiIcon("x")}</button></div>
     ${branches}
     <details class="reader-activity-disclosure" data-reader-activity-disclosure><summary>${escapeHtml(t("detail.activity_disclosure"))}</summary><section class="reader-activity-host" data-reader-activity-host="/api/${encodeURIComponent(provider)}/session/${encodeURIComponent(sessionId)}/reader/activity" data-loading-label="${escapeHtml(t("detail.activity_loading"))}" data-error-label="${escapeHtml(t("detail.activity_error"))}" aria-label="${escapeHtml(t("detail.activity_title"))}"><p data-reader-activity-status role="status">${escapeHtml(t("detail.activity_loading"))}</p><button type="button" data-reader-activity-retry hidden>${escapeHtml(t("progressive.retry"))}</button><div data-reader-activity-view></div></section></details>

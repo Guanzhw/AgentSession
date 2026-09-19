@@ -44,13 +44,14 @@ Dispatches, follow-ups, and result deliveries with resolved source positions
 appear inline. A local connected strip links each to the previous or next key
 record of the same task, in recorded source order. Ordinary coordination messages
 fold into their owning process and remain reachable through expansion and exact
-source links. The on-demand Tasks &
-collaboration panel aligns main-session text and task records in ten-minute
-windows. Selecting a point shows each record's exact time and source; nearby
-points cluster visually while keeping separate identities. Dotted spans join
-records and may include waiting or pauses. The all-task chooser, selected task's
-initial request and latest reply excerpts, exchanges and complete child history
-remain expandable. Per-message model and token details live under Usage & model;
+source links. The on-demand Tasks & collaboration panel starts with a directed
+relationship map of assignments and returned results. Select a task or connection
+to read its individual exchanges. Each visual group contains up to four actor-task
+relationships; a searchable, paged directory reaches every task. Repeated runs of
+one child history share a task, with run and message continuation kept separate.
+Initial requests, latest replies and complete child histories remain expandable.
+A separate optional activity window shows work occurring at the same time.
+Per-message model and token details live under Usage & model;
 tools and reasoning stay independently expandable. Canonically identified tool
 input/output and reasoning bodies load when opened, with local retry and
 continuation to the end. Search still covers the complete available source.

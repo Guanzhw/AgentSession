@@ -11,6 +11,10 @@ import type {
 
 export const READER_COORDINATION_DEFAULT_SIZE = 50;
 export const READER_COORDINATION_MAX_SIZE = 50;
+export const READER_TASK_DIRECTORY_DEFAULT_SIZE = 50;
+export const READER_TASK_DIRECTORY_MAX_SIZE = 50;
+export const READER_TASK_RUNS_DEFAULT_SIZE = 50;
+export const READER_TASK_RUNS_MAX_SIZE = 50;
 /** Observation kinds mirrored by the compact conversation channel and its reader continuation. */
 export const READER_COORDINATION_CHANNEL_KINDS = [
   "spawn", "delegate", "follow-up", "message", "mailbox-delivery", "interrupt",
@@ -46,6 +50,34 @@ export interface ReaderCoordinationCursor {
 export interface ReaderCoordinationCursorItem {
   id: string;
   timestamp: number | null;
+}
+
+export interface ReaderTaskDirectoryIdentity {
+  provider: string;
+  sessionId: string;
+  query: string;
+  size: number;
+}
+
+export interface ReaderTaskDirectoryCursor {
+  identity: ReaderTaskDirectoryIdentity;
+  lastKey: string;
+  prefixHash: string;
+  prefixCount: number;
+}
+
+export interface ReaderTaskRunsIdentity {
+  provider: string;
+  sessionId: string;
+  taskKey: string;
+  size: number;
+}
+
+export interface ReaderTaskRunsCursor {
+  identity: ReaderTaskRunsIdentity;
+  lastKey: string;
+  prefixHash: string;
+  prefixCount: number;
 }
 
 export interface ReaderCoordinationItem {
@@ -226,6 +258,92 @@ export function readerCoordinationPrefixSummary(
     prefixHash: createHash("sha256").update(canonical, "utf8").digest("hex"),
     prefixCount: prefix.length
   };
+}
+
+/** Cursor identity for an append-safe page over canonical task presentation keys. */
+export function encodeReaderTaskDirectoryCursor(
+  identity: ReaderTaskDirectoryIdentity,
+  prefixKeys: readonly string[]
+): string {
+  const prefixHash = createHash("sha256").update(JSON.stringify(prefixKeys), "utf8").digest("hex");
+  return Buffer.from(JSON.stringify({
+    identity,
+    lastKey: prefixKeys.at(-1),
+    prefixHash,
+    prefixCount: prefixKeys.length
+  }), "utf8").toString("base64url");
+}
+
+export function decodeReaderTaskDirectoryCursor(value: string | null | undefined): ReaderTaskDirectoryCursor | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+    const identity = parsed?.identity;
+    if (!identity
+      || typeof identity.provider !== "string"
+      || typeof identity.sessionId !== "string"
+      || typeof identity.query !== "string"
+      || !Number.isSafeInteger(identity.size) || identity.size < 1 || identity.size > READER_TASK_DIRECTORY_MAX_SIZE
+      || typeof parsed.lastKey !== "string" || !parsed.lastKey
+      || typeof parsed.prefixHash !== "string" || !/^[0-9a-f]{64}$/i.test(parsed.prefixHash)
+      || !Number.isSafeInteger(parsed.prefixCount) || parsed.prefixCount < 1) return null;
+    return {
+      identity: {
+        provider: identity.provider,
+        sessionId: identity.sessionId,
+        query: identity.query,
+        size: identity.size
+      },
+      lastKey: parsed.lastKey,
+      prefixHash: parsed.prefixHash,
+      prefixCount: parsed.prefixCount
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function readerTaskDirectoryPrefixHash(prefixKeys: readonly string[]): string {
+  return createHash("sha256").update(JSON.stringify(prefixKeys), "utf8").digest("hex");
+}
+
+export function encodeReaderTaskRunsCursor(identity: ReaderTaskRunsIdentity, prefixKeys: readonly string[]): string {
+  const prefixHash = readerTaskDirectoryPrefixHash(prefixKeys);
+  return Buffer.from(JSON.stringify({
+    identity,
+    lastKey: prefixKeys.at(-1),
+    prefixHash,
+    prefixCount: prefixKeys.length
+  }), "utf8").toString("base64url");
+}
+
+export function decodeReaderTaskRunsCursor(value: string | null | undefined): ReaderTaskRunsCursor | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+    const identity = parsed?.identity;
+    if (!identity
+      || typeof identity.provider !== "string"
+      || typeof identity.sessionId !== "string"
+      || typeof identity.taskKey !== "string" || !identity.taskKey
+      || !Number.isSafeInteger(identity.size) || identity.size < 1 || identity.size > READER_TASK_RUNS_MAX_SIZE
+      || typeof parsed.lastKey !== "string" || !parsed.lastKey
+      || typeof parsed.prefixHash !== "string" || !/^[0-9a-f]{64}$/i.test(parsed.prefixHash)
+      || !Number.isSafeInteger(parsed.prefixCount) || parsed.prefixCount < 1) return null;
+    return {
+      identity: {
+        provider: identity.provider,
+        sessionId: identity.sessionId,
+        taskKey: identity.taskKey,
+        size: identity.size
+      },
+      lastKey: parsed.lastKey,
+      prefixHash: parsed.prefixHash,
+      prefixCount: parsed.prefixCount
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function decodeReaderCoordinationCursor(value: string | null | undefined): ReaderCoordinationCursor | null {

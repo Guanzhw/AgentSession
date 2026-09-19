@@ -74,7 +74,7 @@ test("branch renders one lazy preview target despite later commentary", () => {
   assert.doesNotMatch(branch, /state: completed|in_progress/);
   assert.match(branch, /Review the implementation/);
   assert.match(branch, /data-reader-task-lane=[\s\S]*data-channel-id="dispatch"[\s\S]*data-reader-event-id="event:dispatch"/);
-  assert.doesNotMatch(rail(html), /reader-task-details/);
+  assert.doesNotMatch(rail(html), /class="reader-task-details"/);
   assert.doesNotMatch(rail(html), /data-reader-time-axis|reader-timeline-legend|reader-time-lane/);
   assert.doesNotMatch(branch.match(/<details[^>]*>/)[0], /\sopen(?:\s|>)/);
 });
@@ -144,8 +144,8 @@ test("multiple run cards share one lazy preview target and retain separate run s
   const [branch] = output;
   assert.equal((branch.match(/data-reader-task-preview/g) || []).length, 1);
   assert.match(branch, /data-reader-open data-reader-provider="fixture" data-reader-session="child"/);
-  assert.match(branch, /data-reader-branch-run="run:first"[\s\S]*First assignment[\s\S]*Recorded state: completed/);
-  assert.match(branch, /data-reader-branch-run="run:second"[\s\S]*Follow-up assignment[\s\S]*Recorded state: active/);
+  assert.match(branch, /data-reader-branch-run="first"[\s\S]*First assignment[\s\S]*Recorded state: completed/);
+  assert.match(branch, /data-reader-branch-run="second"[\s\S]*Follow-up assignment[\s\S]*Recorded state: active/);
   assert.doesNotMatch(branch, /One child final/);
 });
 

@@ -1,10 +1,12 @@
 import { loadReaderActivity } from "./reader-activity.js";
+import { focusReaderTaskGraph, initReaderTaskGraphs, replaceReaderTaskGraph } from "./reader-task-graph.js";
+import { ft } from "./i18n.js";
+import { scopeReaderFragment } from "./reader-pane-dom.js";
 
 /*
- * Reader relations are local annotations, not a second graph view. The
- * server places each recorded milestone beside its owning message; this
- * controller only scopes focus, lane emphasis and responsive spacing to the
- * pane that owns the annotation.
+ * The server owns relationship meaning and places every recorded milestone.
+ * This controller synchronizes task graph, directory, detail and lane focus
+ * inside the pane that owns them.
  */
 const LANE_COLORS = ["--accent-color", "--trace-lsp", "--warning-color", "--trace-reasoning", "--trace-agent", "--trace-tool"];
 const MAX_VISIBLE_LANES = 3;
@@ -17,6 +19,9 @@ export function initReaderRelations() {
   const contexts = new Map();
   const overviewOrigins = new WeakMap();
   const activityQueries = new WeakMap();
+  const taskDetailLoads = new Map();
+  const taskSelectionTokens = new WeakMap();
+  const taskDirectoryRequests = new WeakMap();
   let frame = null;
   const observer = new ResizeObserver(() => schedule());
 
@@ -27,6 +32,15 @@ export function initReaderRelations() {
   const ownedElements = (pane, selector) => [...pane.querySelectorAll(selector)]
     .filter((element) => element.closest("[data-reader-pane]") === pane);
   const overviewFor = (pane) => ownedElements(pane, "[data-reader-collaboration-overview]")[0];
+
+  function mountReaderFragment(pane, host, html, append = true) {
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = html;
+    if (append) host.append(wrapper);
+    else host.replaceChildren(wrapper);
+    scopeReaderFragment(pane, wrapper);
+    wrapper.replaceWith(...wrapper.childNodes);
+  }
 
   async function loadPreview(detail) {
     const preview = detail.querySelector("[data-reader-task-preview]");
@@ -63,8 +77,165 @@ export function initReaderRelations() {
     const section = paneRelationSection(pane);
     const context = section && contexts.get(section);
     if (context?.select && detail.dataset.readerTaskLane) context.select.value = detail.dataset.readerTaskLane;
+    focusReaderTaskGraph(overview, detail.dataset.readerBranchKey);
     loadPreview(detail);
     schedule();
+  }
+
+  async function loadTaskDetail(pane, selection) {
+    const overview = overviewFor(pane);
+    if (!overview) return null;
+    const existing = selection.key
+      ? ownedElements(pane, "[data-reader-branch]").find((branch) => branch.dataset.readerBranchKey === selection.key)
+      : ownedElements(pane, "[data-reader-branch]").find((branch) => branch.dataset.readerTaskLane === selection.lane);
+    if (existing) return { detail: existing, graphHtml: null };
+    const provider = pane.dataset.readerProvider;
+    const session = pane.dataset.readerSession;
+    if (!provider || !session) return null;
+    const identity = selection.key ? `key:${selection.key}` : `lane:${selection.lane}`;
+    const loadKey = `${provider}\u0000${session}\u0000${identity}`;
+    if (!taskDetailLoads.has(loadKey)) {
+      const params = new URLSearchParams(selection.key ? { key: selection.key } : { lane: selection.lane });
+      taskDetailLoads.set(loadKey, fetch(`/api/${encodeURIComponent(provider)}/session/${encodeURIComponent(session)}/reader/task?${params}`, {
+        headers: { Accept: "application/json" }
+      }).then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const result = await response.json();
+        const host = ownedElements(pane, "[data-reader-task-details]")[0];
+        if (!host) return { detail: null, graphHtml: null };
+        const duplicate = ownedElements(pane, "[data-reader-branch]").find((branch) => branch.dataset.readerBranchKey === result.key);
+        if (!duplicate) mountReaderFragment(pane, host, result.html);
+        return {
+          detail: ownedElements(pane, "[data-reader-branch]").find((branch) => branch.dataset.readerBranchKey === result.key) || null,
+          graphHtml: result.graphHtml || null
+        };
+      }).finally(() => taskDetailLoads.delete(loadKey)));
+    }
+    return taskDetailLoads.get(loadKey);
+  }
+
+  async function selectTaskControl(pane, control) {
+    const token = (taskSelectionTokens.get(pane) || 0) + 1;
+    taskSelectionTokens.set(pane, token);
+    const existing = ownedElements(pane, "[data-reader-branch]")
+      .find((branch) => branch.dataset.readerBranchKey === control.dataset.readerTaskSelect);
+    if (existing) {
+      taskSelectionError(pane, null);
+      selectTask(pane, existing);
+      const milestone = ownedElements(pane, "[data-reader-milestone]")
+        .find((item) => item.dataset.readerLane === existing.dataset.readerTaskLane);
+      if (milestone?.dataset.readerObservationId) loadOverviewActivity(overviewFor(pane), { anchor: milestone.dataset.readerObservationId });
+      return;
+    }
+    taskSelectionStatus(pane, ft("detail.reader_task_loading"));
+    try {
+      const loaded = await loadTaskDetail(pane, { key: control.dataset.readerTaskSelect });
+      if (!loaded?.detail || taskSelectionTokens.get(pane) !== token) return;
+      const { detail, graphHtml } = loaded;
+      if (graphHtml) {
+        const graphHost = ownedElements(pane, "[data-reader-task-graph-host]")[0];
+        if (graphHost) replaceReaderTaskGraph(graphHost, graphHtml);
+      }
+      taskSelectionError(pane, null);
+      selectTask(pane, detail);
+      const milestone = ownedElements(pane, "[data-reader-milestone]")
+        .find((item) => item.dataset.readerLane === detail.dataset.readerTaskLane);
+      if (milestone?.dataset.readerObservationId) loadOverviewActivity(overviewFor(pane), { anchor: milestone.dataset.readerObservationId });
+    } catch (error) {
+      if (taskSelectionTokens.get(pane) === token) taskSelectionError(pane, { key: control.dataset.readerTaskSelect }, error);
+    }
+  }
+
+  function taskSelectionStatus(pane, message) {
+    const status = ownedElements(pane, "[data-reader-task-status]")[0];
+    if (status) status.textContent = message || "";
+    return status;
+  }
+
+  function taskSelectionError(pane, selection, error = null) {
+    const status = taskSelectionStatus(pane, "");
+    if (!status) return;
+    if (!selection) {
+      status.textContent = "";
+      return;
+    }
+    const overview = overviewFor(pane);
+    const label = ft("detail.reader_task_failed");
+    const retry = overview?.querySelector("[data-reader-collaboration]")?.dataset.readerTaskRetryLabel || "Retry";
+    status.textContent = `${label} `;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = retry;
+    button.dataset.readerTaskDetailRetry = "";
+    if (selection.key) button.dataset.readerTaskKey = selection.key;
+    if (selection.lane) button.dataset.readerTaskLane = selection.lane;
+    status.append(button);
+  }
+
+  async function loadTaskDirectory(directory, url, append) {
+    const pages = directory.querySelector("[data-reader-task-directory-pages]");
+    const status = directory.querySelector("[data-reader-task-directory-status]");
+    if (!pages) return;
+    const previous = taskDirectoryRequests.get(directory);
+    previous?.controller.abort();
+    const token = (previous?.token || 0) + 1;
+    const controller = new AbortController();
+    taskDirectoryRequests.set(directory, { token, controller });
+    directory.dataset.readerTaskDirectoryLoading = "true";
+    if (status) status.textContent = ft("detail.reader_tasks_loading");
+    try {
+      const response = await fetch(url, { headers: { Accept: "application/json" }, signal: controller.signal });
+      if (taskDirectoryRequests.get(directory)?.token !== token) return;
+      if (!response.ok) {
+        const error = new Error(response.status === 409 ? ft("detail.reader_tasks_changed") : ft("detail.reader_tasks_failed"));
+        error.status = response.status;
+        throw error;
+      }
+      const result = await response.json();
+      if (taskDirectoryRequests.get(directory)?.token !== token) return;
+      const pane = directory.closest("[data-reader-pane]");
+      if (!pane) return;
+      if (append) {
+        pages.querySelector("[data-reader-task-directory-more]")?.remove();
+        mountReaderFragment(pane, pages, result.html);
+      } else {
+        mountReaderFragment(pane, pages, result.html, false);
+      }
+      if (status) status.textContent = "";
+    } catch (error) {
+      if (error.name !== "AbortError" && taskDirectoryRequests.get(directory)?.token === token && status) {
+        status.textContent = error.message || ft("detail.reader_tasks_failed");
+      }
+    } finally {
+      if (taskDirectoryRequests.get(directory)?.token === token) {
+        taskDirectoryRequests.delete(directory);
+        delete directory.dataset.readerTaskDirectoryLoading;
+      }
+    }
+  }
+
+  async function loadTaskRuns(button) {
+    if (button.dataset.readerTaskRunsLoading) return;
+    const pane = button.closest("[data-reader-pane]");
+    const runs = button.closest("[data-reader-task-runs]");
+    const status = runs?.querySelector("[data-reader-task-runs-status]");
+    if (!pane || !runs) return;
+    button.dataset.readerTaskRunsLoading = "true";
+    button.disabled = true;
+    if (status) status.textContent = ft("detail.reader_task_loading");
+    try {
+      const response = await fetch(button.dataset.readerTaskRunsUrl, { headers: { Accept: "application/json" } });
+      if (!response.ok) throw new Error(response.status === 409 ? ft("detail.reader_tasks_changed") : ft("detail.reader_task_failed"));
+      const result = await response.json();
+      if (!button.isConnected) return;
+      button.remove();
+      status?.remove();
+      mountReaderFragment(pane, runs, result.runsHtml);
+    } catch (error) {
+      if (status) status.textContent = error.message || ft("detail.reader_task_failed");
+      button.disabled = false;
+      delete button.dataset.readerTaskRunsLoading;
+    }
   }
 
   function ensureSelectedTask(pane) {
@@ -163,17 +334,35 @@ export function initReaderRelations() {
     return section ? contexts.get(section) || null : null;
   }
 
-  function openTask(context, lane, origin) {
+  async function openTask(context, lane, origin) {
     const overview = overviewFor(context.pane);
     if (!overview) return;
     overviewOrigins.set(overview, origin);
     const observationId = origin.closest('[data-reader-milestone]')?.dataset.readerObservationId;
     openOverview(overview, observationId ? { anchor: observationId } : null);
-    const detail = [...overview.querySelectorAll("[data-reader-task-lane]")]
-      .find((candidate) => candidate.dataset.readerTaskLane === lane);
-    if (detail) {
-      detail.open = true;
-      selectTask(context.pane, detail);
+    const token = (taskSelectionTokens.get(context.pane) || 0) + 1;
+    taskSelectionTokens.set(context.pane, token);
+    taskSelectionStatus(context.pane, ft("detail.reader_task_loading"));
+    try {
+      let detail = [...overview.querySelectorAll("[data-reader-task-lane]")]
+        .find((candidate) => candidate.dataset.readerTaskLane === lane);
+      let graphHtml = null;
+      if (!detail) {
+        const loaded = await loadTaskDetail(context.pane, { lane });
+        detail = loaded?.detail || null;
+        graphHtml = loaded?.graphHtml || null;
+      }
+      if (detail && taskSelectionTokens.get(context.pane) === token) {
+        if (graphHtml) {
+          const graphHost = ownedElements(context.pane, "[data-reader-task-graph-host]")[0];
+          if (graphHost) replaceReaderTaskGraph(graphHost, graphHtml);
+        }
+        taskSelectionError(context.pane, null);
+        detail.open = true;
+        selectTask(context.pane, detail);
+      }
+    } catch (error) {
+      if (taskSelectionTokens.get(context.pane) === token) taskSelectionError(context.pane, { lane }, error);
     }
     overview.querySelector("[data-reader-collaboration-close]")?.focus({ preventScroll: true });
   }
@@ -282,12 +471,29 @@ export function initReaderRelations() {
     const task = event.target.closest?.("[data-reader-task-select]");
     if (task && workbench.contains(task)) {
       const pane = task.closest("[data-reader-pane]");
-      const detail = ownedElements(pane, "[data-reader-branch]")
-        .find((branch) => branch.dataset.readerBranchKey === task.dataset.readerTaskSelect);
-      selectTask(pane, detail);
-      const milestone = ownedElements(pane, '[data-reader-milestone]')
-        .find((item) => item.dataset.readerLane === detail.dataset.readerTaskLane);
-      if (milestone?.dataset.readerObservationId) loadOverviewActivity(overviewFor(pane), { anchor: milestone.dataset.readerObservationId });
+      void selectTaskControl(pane, task);
+      return;
+    }
+    const taskRetry = event.target.closest?.("[data-reader-task-detail-retry]");
+    if (taskRetry && workbench.contains(taskRetry)) {
+      const pane = taskRetry.closest("[data-reader-pane]");
+      if (taskRetry.dataset.readerTaskKey) {
+        void selectTaskControl(pane, { dataset: { readerTaskSelect: taskRetry.dataset.readerTaskKey } });
+      } else if (taskRetry.dataset.readerTaskLane) {
+        const context = contexts.get(paneRelationSection(pane));
+        if (context) void openTask(context, taskRetry.dataset.readerTaskLane, taskRetry);
+      }
+      return;
+    }
+    const taskRunsMore = event.target.closest?.("[data-reader-task-runs-more]");
+    if (taskRunsMore && workbench.contains(taskRunsMore)) {
+      void loadTaskRuns(taskRunsMore);
+      return;
+    }
+    const directoryMore = event.target.closest?.("[data-reader-task-directory-more]");
+    if (directoryMore && workbench.contains(directoryMore)) {
+      const directory = directoryMore.closest("[data-reader-task-directory]");
+      void loadTaskDirectory(directory, directoryMore.dataset.readerTaskDirectoryUrl, true);
       return;
     }
     const close = event.target.closest?.("[data-reader-collaboration-close]");
@@ -310,6 +516,18 @@ export function initReaderRelations() {
     milestoneContext.select.value = milestone.dataset.readerLane || "";
     openTask(milestoneContext, milestone.dataset.readerLane || "", milestone.querySelector("[data-reader-lane-focus]"));
     schedule();
+  });
+  workbench.addEventListener("submit", (event) => {
+    const form = event.target.closest?.("[data-reader-task-directory-search]");
+    if (!form || !workbench.contains(form)) return;
+    event.preventDefault();
+    const directory = form.closest("[data-reader-task-directory]");
+    const url = new URL(directory.dataset.readerTaskDirectoryUrl, window.location.href);
+    const query = form.querySelector("[data-reader-task-directory-query]")?.value?.trim() || "";
+    if (query) url.searchParams.set("q", query);
+    else url.searchParams.delete("q");
+    url.searchParams.delete("cursor");
+    void loadTaskDirectory(directory, `${url.pathname}${url.search}`, false);
   });
   workbench.addEventListener("toggle", schedule, true);
   workbench.addEventListener("session-reader:content-updated", (event) => {
@@ -335,5 +553,6 @@ export function initReaderRelations() {
     schedule();
   }
 
+  initReaderTaskGraphs(workbench);
   attachAll();
 }

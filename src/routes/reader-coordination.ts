@@ -4,6 +4,10 @@ import { json, missingProviderResponse, safeDecodeId } from "../server-helpers.j
 import { getSessionDocument } from "../session-queries.js";
 import { createReaderNativeSourceResolver } from "../reader-relations.js";
 import {
+  deriveConversationTaskGroupPage,
+  deriveConversationTaskDirectoryPage
+} from "../conversation-view-model.js";
+import {
   deriveReaderCoordinationPage,
   readerEventEvidence
 } from "../reader-coordination.js";
@@ -11,6 +15,8 @@ import type { ReaderEventEvidence } from "../reader-coordination.js";
 import { questionAnswersText } from "../providers/shared/question-answers.js";
 import type { QuestionAnswer, ReaderCoordinationContent } from "../providers/interface.js";
 import { renderReaderCoordinationPage, renderReaderCoordinationContentPage, renderReaderEventEvidence } from "../views/reader-coordination.js";
+import { renderReaderTaskDetail, renderReaderTaskDirectoryPage, renderReaderTaskRuns } from "../views/session.js";
+import { renderReaderTaskGraph } from "../views/reader-task-graph.js";
 import { anchorId } from "../views/anchors.js";
 import type { ProviderRouteDeps } from "./route-deps.js";
 
@@ -57,6 +63,73 @@ export function readerCoordinationDocumentContent(
 
 export function registerReaderCoordinationRoutes(app: any, deps: ProviderRouteDeps): void {
   const { providerMap } = deps;
+  app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/reader\/tasks$/, async (req: any, res: any, match: RegExpMatchArray) => {
+    const provider = match[1];
+    const sessionId = safeDecodeId(match[2]);
+    const adapter = providerMap.get(provider);
+    if (!adapter) {
+      const missing = missingProviderResponse(provider);
+      return json(res, missing.body, missing.status);
+    }
+    if (!sessionId) return json(res, { ok: false, error: "Invalid session id", code: "invalid_input" }, 400);
+    try {
+      const params = new URL(req.url || "/", "http://localhost").searchParams;
+      const parsedSize = params.get("size");
+      const page = deriveConversationTaskDirectoryPage(getRuntimeProtocolV3(adapter, sessionId), {
+        provider,
+        sessionId,
+        query: params.get("q"),
+        size: parsedSize === null ? undefined : Number(parsedSize),
+        cursor: params.get("cursor")
+      });
+      if (!page.ok) return json(res, page, page.code === "stale_cursor" ? 409 : 400);
+      return json(res, { ...page, html: renderReaderTaskDirectoryPage(page) });
+    } catch (error) {
+      return runtimeError(res, error);
+    }
+  });
+
+  app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/reader\/task$/, async (req: any, res: any, match: RegExpMatchArray) => {
+    const provider = match[1];
+    const sessionId = safeDecodeId(match[2]);
+    const adapter = providerMap.get(provider);
+    if (!adapter) {
+      const missing = missingProviderResponse(provider);
+      return json(res, missing.body, missing.status);
+    }
+    if (!sessionId) return json(res, { ok: false, error: "Invalid session id", code: "invalid_input" }, 400);
+    try {
+      const params = new URL(req.url || "/", "http://localhost").searchParams;
+      const key = params.get("key");
+      const lane = params.get("lane");
+      if ((!key && !lane) || (key && lane)) {
+        return json(res, { ok: false, error: "Select one canonical task key or reader lane", code: "invalid_input" }, 400);
+      }
+      const protocol = getRuntimeProtocolV3(adapter, sessionId);
+      const parsedSize = params.get("runsSize");
+      const page = deriveConversationTaskGroupPage(protocol, {
+        provider,
+        sessionId,
+        key,
+        lane,
+        size: parsedSize === null ? undefined : Number(parsedSize),
+        cursor: params.get("runsCursor")
+      });
+      if (!page) return json(res, { ok: false, error: "Reader task not found", code: "task_not_found" }, 404);
+      if (!page.ok) return json(res, page, page.code === "stale_cursor" ? 409 : 400);
+      const { group, ...pagination } = page;
+      return json(res, {
+        ...pagination,
+        cards: group.cards,
+        html: page.offset === 0 ? renderReaderTaskDetail(group, provider, sessionId) : "",
+        runsHtml: page.offset > 0 ? renderReaderTaskRuns(group, provider, sessionId) : "",
+        graphHtml: page.offset === 0 ? renderReaderTaskGraph([group], provider, sessionId, group.key) : ""
+      });
+    } catch (error) {
+      return runtimeError(res, error);
+    }
+  });
+
   app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/reader\/coordination\/([^/]+)\/content$/, async (req: any, res: any, match: RegExpMatchArray) => {
     const provider = match[1];
     const sessionId = safeDecodeId(match[2]);

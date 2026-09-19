@@ -123,6 +123,33 @@ test("Codex v3 mapping validates with zero errors and preserves v2 facts", () =>
   assert.equal(v3.contextArtifacts.length, base.contextArtifacts.length);
   assert.equal(v3.upgrade, undefined);
 });
+
+test("Codex collaboration spawn task names become recorded Task titles", () => {
+  const { input } = buildFixture();
+  const base = buildCodexSessionProtocol(input);
+  const named = base.tasks.find((task) => task.toolCallId === "call-1");
+  const unbound = base.tasks.find((task) => task.toolCallId === "call-10");
+
+  assert.equal(named?.title, "reviewer");
+  assert.equal(named?.agentPath, "/root/reviewer");
+  assert.equal(unbound?.title, "fresher");
+  assert.equal(unbound?.agentPath, "spawn_agent");
+
+  const absentName = {
+    ...input,
+    records: input.records.map((record) => (
+      record.payload?.type === "function_call" && record.payload.call_id === "call-10"
+        ? { ...record, payload: { ...record.payload, arguments: "{}" } }
+        : record
+    ))
+  };
+  const absentBase = buildCodexSessionProtocol(absentName);
+  const absent = absentBase.tasks.find((task) => task.toolCallId === "call-10");
+  assert.equal(absent?.title, null);
+  assert.equal(absent?.agentPath, unbound.agentPath);
+  assert.equal(absent?.id, "call-10");
+});
+
 test("Codex v3 maps recorded goals with honest paused handling", () => {
   const { v3 } = finalizedPair();
   assert.equal(v3.goals.length, 1);

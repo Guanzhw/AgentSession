@@ -427,7 +427,7 @@ for sidebar_entry in '[data-reader-collaboration-toggle]' '.reader-collaboration
   ab "open task sidebar with keyboard" press Enter >/dev/null
   sidebar_focus="$(read_ab "verify task sidebar entry focus" eval "document.querySelector('[data-reader-collaboration-overview]').open && document.activeElement.matches('[data-reader-collaboration-close]')")"
   assert_contains "task sidebar entry focus" "$sidebar_focus" 'true'
-  sidebar_default="$(read_ab "verify task reading comes before activity details" eval "document.querySelector('[data-reader-task-map]').open && !document.querySelector('[data-reader-activity-disclosure]').open")"
+  sidebar_default="$(read_ab "verify task reading comes before activity details" eval "(() => { const graph = document.querySelector('[data-reader-task-graph]'); const map = document.querySelector('[data-reader-task-map]'); return (graph ? !map.open && graph.querySelector('[data-reader-task-graph-page]:not([hidden])').querySelectorAll('.reader-task-graph-node').length <= 4 : map.open) && !document.querySelector('[data-reader-activity-disclosure]').open; })()")"
   assert_contains "task reading first" "$sidebar_default" 'true'
   ab "focus concurrent work disclosure" focus '[data-reader-activity-disclosure] > summary' >/dev/null
   ab "expand concurrent work on demand" press Enter >/dev/null

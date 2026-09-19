@@ -829,6 +829,39 @@ test('collaboration child links mount after their canonical transcript milestone
   assert.equal(h.document.activeElement, opener, 'Closing the child restores opener focus');
 });
 
+test('browser Back reopens saved focus ancestors before restoring the collaboration opener', async (t) => {
+  const h = readerHarness(t);
+  const overview = h.makeElement({ readerCollaborationOverview: '' });
+  overview.tagName = 'DETAILS';
+  overview.open = true;
+  const branch = h.makeElement({}, 'child-branch');
+  branch.className = 'reader-branch';
+  branch.tagName = 'DETAILS';
+  branch.open = true;
+  const body = h.makeElement({});
+  body.className = 'reader-branch-body';
+  const opener = h.makeElement({ readerOpen: '', readerProvider: 'fixture', readerSession: 'child' }, 'child-opener');
+  opener.href = '/fixture/session/child';
+  body.append(opener);
+  branch.append(body);
+  overview.append(branch);
+  h.root.append(overview);
+  h.window.scrollY = 640;
+  opener.focus();
+
+  await h.click(opener);
+  await h.flush();
+  assert.equal(overview.open, false, 'opening the child closes the collaboration overview');
+
+  branch.open = false;
+  await h.browserBack();
+
+  assert.equal(h.window.scrollY, 640);
+  assert.equal(h.document.activeElement, opener, 'Back restores the exact saved opener focus');
+  assert.equal(overview.open, true, 'Back reopens the saved overview ancestor');
+  assert.equal(branch.open, true, 'Back reopens nested disclosure ancestors');
+});
+
 test('source reveal closes an open collaboration overview before exposing prose', async (t) => {
   const h = readerHarness(t);
   const overview = h.makeElement({ readerCollaborationOverview: '' });

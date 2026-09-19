@@ -1,7 +1,21 @@
 import type { SessionRef } from "./providers/shared/session-protocol.js";
 import type { SessionEventRef, SessionProtocolV3 } from "./providers/shared/session-protocol-v3.js";
-import { READER_COORDINATION_CHANNEL_KINDS, encodeReaderCoordinationCursor, readerCoordinationAssignment, sortReaderCoordinationByRecordedTime } from "./reader-coordination.js";
-import type { ReaderCoordinationCursorItem } from "./reader-coordination.js";
+import {
+  READER_COORDINATION_CHANNEL_KINDS,
+  READER_TASK_DIRECTORY_DEFAULT_SIZE,
+  READER_TASK_DIRECTORY_MAX_SIZE,
+  READER_TASK_RUNS_DEFAULT_SIZE,
+  READER_TASK_RUNS_MAX_SIZE,
+  decodeReaderTaskDirectoryCursor,
+  decodeReaderTaskRunsCursor,
+  encodeReaderCoordinationCursor,
+  encodeReaderTaskDirectoryCursor,
+  encodeReaderTaskRunsCursor,
+  readerCoordinationAssignment,
+  readerCoordinationCards,
+  readerTaskDirectoryPrefixHash,
+  sortReaderCoordinationByRecordedTime
+} from "./reader-coordination.js";
 import type { CoordinationObservation } from "./providers/shared/session-protocol-v3.js";
 import type {
   ContextProjection,
@@ -40,6 +54,8 @@ export interface ConversationChannelItem {
   kind: ConversationChannelKind;
   state: string;
   timestamp: number | null;
+  senderActorId: string | null;
+  recipientActorId: string | null;
   senderName: string | null;
   recipientName: string | null;
   eventId: string | null;
@@ -48,6 +64,8 @@ export interface ConversationChannelItem {
 }
 
 export interface ConversationCardBinding {
+  taskId: string | null;
+  runId: string | null;
   taskToolCallId: string | null;
   childSessionId: string | null;
   turnId: string | null;
@@ -164,8 +182,78 @@ export interface ConversationTurnBoundary {
 
 export interface ConversationViewModel {
   cards: ConversationAgentCard[];
+  taskCount: number;
+  taskDirectory: ConversationTaskDirectoryPage;
   turnBoundaries: ConversationTurnBoundary[];
   inspector: ConversationInspectorView | null;
+}
+
+export interface ConversationGraphOrigin {
+  key: string;
+  name: string | null;
+  outgoing: boolean;
+  incoming: boolean;
+}
+
+export interface ConversationTaskGroup {
+  /** Stable presentation key already used by existing task selection controls. */
+  key: string;
+  cards: ConversationAgentCard[];
+  childSession: SessionRef | null;
+  laneId: string;
+  runCount: number;
+  runsPageSize: number;
+  runsOffset: number;
+  runsNextCursor: string | null;
+  graphOrigins: ConversationGraphOrigin[];
+}
+
+export interface ConversationTaskDirectoryQuery {
+  provider: string;
+  sessionId: string;
+  query?: string | null;
+  size?: number;
+  cursor?: string | null;
+}
+
+export interface ConversationTaskDirectoryPage {
+  ok: true;
+  provider: string;
+  sessionId: string;
+  query: string;
+  size: number;
+  offset: number;
+  total: number;
+  items: ConversationTaskGroup[];
+  nextCursor: string | null;
+}
+
+export interface ConversationTaskDirectoryError {
+  ok: false;
+  code: "invalid_input" | "stale_cursor";
+  error: string;
+}
+
+export interface ConversationTaskGroupQuery {
+  provider: string;
+  sessionId: string;
+  key?: string | null;
+  lane?: string | null;
+  size?: number;
+  cursor?: string | null;
+}
+
+export interface ConversationTaskGroupPage {
+  ok: true;
+  provider: string;
+  sessionId: string;
+  key: string;
+  lane: string;
+  size: number;
+  offset: number;
+  total: number;
+  group: ConversationTaskGroup;
+  nextCursor: string | null;
 }
 
 export interface ConversationViewInput {
@@ -289,84 +377,31 @@ function compareReference(a: SessionRef | null, provider: string, sessionId: str
   return Boolean(a && a.provider === provider && a.sessionId === sessionId);
 }
 
-/** Bound one card's channel after applying its recorded-time display order. */
-function channelOf(card: CardState, observations: CoordinationObservation[], assignments: Array<CardState | null>, nameFor: (actorId: string) => string | null): { channel: ConversationChannelItem[]; count: number; truncated: boolean; cursorPrefix: ReaderCoordinationCursorItem[]; interrupted: boolean; lastActivity: number | null } {
-  const matching = sortReaderCoordinationByRecordedTime(observations.filter((observation, index): observation is ConversationChannelObservation => (
-    observation.kind
-    && (CONVERSATION_CHANNEL_KINDS as readonly string[]).includes(observation.kind)
-    && assignments[index] === card
-  )));
-  const count = matching.length;
-  const truncated = count > CONVERSATION_MAX_CHANNEL_ITEMS;
-  const channel = matching.slice(0, CONVERSATION_MAX_CHANNEL_ITEMS).map((observation) => ({
-    id: String(observation.id || ""),
-    kind: observation.kind,
-    state: observation.state || "unknown",
-    timestamp: finiteTime(observation.timestamp),
-    senderName: observation.senderActorId ? nameFor(observation.senderActorId) ?? null : null,
-    recipientName: observation.recipientActorId ? nameFor(observation.recipientActorId) ?? null : null,
-    eventId: observation.eventId ?? null,
-    turnId: observation.turnId ?? null,
-    sourceEventRef: observation.sourceEventRef ?? null
-  }));
-  return {
-    channel,
-    count,
-    truncated,
-    cursorPrefix: channel.map((observation) => ({ id: observation.id, timestamp: observation.timestamp })),
-    interrupted: matching.some((observation) => observation.kind === "interrupt"),
-    lastActivity: matching.reduce<number | null>((latest, observation) => maxTime(latest, observation.timestamp), null)
-  };
-}
-
-export function deriveConversationView(input: ConversationViewInput): ConversationViewModel {
-  const { protocol, work, execution, coordination, context } = input;
-  const focus = execution.focus || (protocol.session?.ref ?? null);
+/** Build the cheap canonical card universe; channels are materialized only after paging or selection. */
+function conversationCardStates(protocol: SessionProtocolV3): CardState[] {
+  const focus = protocol.session!.ref;
   const provider = focus.provider;
   const sessionId = focus.sessionId;
-
-  const actorsById = new Map<string, { id: string; name: string | null; kind: string }>();
-  for (const entry of execution.actors || []) {
-    actorsById.set(entry.actor.id, {
-      id: entry.actor.id,
-      name: entry.actor.name,
-      kind: entry.actor.kind || "unknown"
-    });
-  }
-  const nameFor = (actorId: string) => {
-    const actor = actorsById.get(actorId);
-    return actor?.name ?? null;
-  };
-
-  const tasksById = new Map<string, any>();
-  for (const entry of work.tasks || []) tasksById.set(entry.task.id, entry.task);
-  const readerAssignment = readerCoordinationAssignment(protocol);
-  const readerCardsByKey = new Map(readerAssignment.cards.map((card) => [card.key, card]));
-  const runIdsWithTask = new Set<string>();
-  for (const card of readerAssignment.cards) {
-    if (card.runId && card.taskId) runIdsWithTask.add(card.taskId);
-  }
-  // One card per run, plus one per task that has no run, in deterministic
-  // source order. Cards are bounded: beyond the limit the remaining evidence
-  // stays in Work/Coordination and is not mirrored into the conversation.
+  const actorsById = new Map((protocol.actors || []).map((actor) => [actor.id, actor]));
+  const tasksById = new Map((protocol.tasks || []).map((task) => [task.id, task]));
+  const readerCards = readerCoordinationCards(protocol);
+  const readerCardsByKey = new Map(readerCards.map((card) => [card.key, card]));
+  const taskIdsWithRuns = new Set(readerCards
+    .filter((card) => card.runId && card.taskId)
+    .map((card) => card.taskId!));
   const cards: CardState[] = [];
-  const addCard = (state: CardState) => {
-    if (cards.length >= CONVERSATION_MAX_CARDS) return;
-    cards.push(state);
-  };
-  for (const entry of execution.runs || []) {
-    const run = entry.run;
+
+  for (const run of protocol.agentRuns || []) {
     if (run.kind === "session-turn") continue;
     const task = run.taskId ? tasksById.get(run.taskId) : null;
     const readerCard = readerCardsByKey.get(`run:${run.id}`);
     if (!readerCard) continue;
-    const linkedActorIds = new Set(readerCard?.actorIds || []);
+    const linkedActorIds = new Set(readerCard.actorIds || []);
     const linkedActors = [...linkedActorIds].map((actorId) => actorsById.get(actorId)).filter(Boolean);
-    const name = linkedActors[0]?.name ?? run.agent ?? (task ? assigneeOf(task) || null : null) ?? null;
-    addCard({
+    cards.push({
       view: {
         id: `run:${run.id}`,
-        name,
+        name: linkedActors[0]?.name ?? run.agent ?? (task ? assigneeOf(task) : null) ?? null,
         actorKind: linkedActors[0]?.kind ?? null,
         responsibility: task ? taskTitleOf(task) ?? taskAgentPathOf(task) : null,
         state: null,
@@ -377,13 +412,11 @@ export function deriveConversationView(input: ConversationViewInput): Conversati
         channelTruncated: false,
         channelNextCursor: null,
         channel: [],
-        childSession: refOf(
-          run.childSessionId ? { provider, sessionId: run.childSessionId } : null,
-          provider,
-          sessionId
-        ),
+        childSession: refOf(run.childSessionId ? { provider, sessionId: run.childSessionId } : null, provider, sessionId),
         childSessionAvailable: typeof run.childSessionAvailable === "boolean" ? run.childSessionAvailable : null,
         bindings: {
+          taskId: run.taskId ?? null,
+          runId: run.id,
           taskToolCallId: task?.toolCallId ?? null,
           childSessionId: run.childSessionId ?? null,
           turnId: null,
@@ -397,19 +430,18 @@ export function deriveConversationView(input: ConversationViewInput): Conversati
       sortIndex: cards.length
     });
   }
-  for (const entry of work.tasks || []) {
-    if (runIdsWithTask.has(entry.task.id)) continue;
-    if (!readerCardsByKey.has(`task:${entry.task.id}`)) continue;
-    addCard({
+  for (const task of protocol.tasks || []) {
+    if (taskIdsWithRuns.has(task.id) || !readerCardsByKey.has(`task:${task.id}`)) continue;
+    cards.push({
       view: {
-        id: `task:${entry.task.id}`,
-        name: assigneeOf(entry.task),
+        id: `task:${task.id}`,
+        name: assigneeOf(task),
         actorKind: null,
-        responsibility: taskTitleOf(entry.task) ?? taskAgentPathOf(entry.task),
+        responsibility: taskTitleOf(task) ?? taskAgentPathOf(task),
         state: null,
-        rawStatus: entry.task.status || null,
+        rawStatus: task.status || null,
         interrupted: false,
-        lastActivity: maxTime(entry.task.timeCreated, entry.task.timeUpdated),
+        lastActivity: maxTime(task.timeCreated, task.timeUpdated),
         observationCount: 0,
         channelTruncated: false,
         channelNextCursor: null,
@@ -417,48 +449,75 @@ export function deriveConversationView(input: ConversationViewInput): Conversati
         childSession: null,
         childSessionAvailable: null,
         bindings: {
-          taskToolCallId: entry.task.toolCallId ?? null,
+          taskId: task.id,
+          runId: null,
+          taskToolCallId: task.toolCallId ?? null,
           childSessionId: null,
           turnId: null,
           actorIds: []
         }
       },
       runId: null,
-      taskId: entry.task.id,
+      taskId: task.id,
       linkedActorIds: new Set(),
       dispatchTurnId: null,
       sortIndex: cards.length
     });
   }
 
-  // Dispatch turn anchors come from recorded spawn/delegate observations.
-  // The embedded coordination projection is intentionally bounded for the
-  // workbench. Conversation cards use the finalized collection so a reader
-  // continuation can reach every assigned observation without losing source
-  // identity to that overview bound.
-  const observations = protocol.coordination || [];
-  const cardStatesByKey = new Map(cards.map((card) => [card.view.id, card]));
-  const assignments = readerAssignment.byObservation.map((card) => card ? cardStatesByKey.get(card.key) || null : null);
-  for (let observationIndex = 0; observationIndex < observations.length; observationIndex += 1) {
-    const observation = observations[observationIndex];
-    if (!DISPATCH_KINDS.has(observation.kind)) continue;
-    const card = assignments[observationIndex] || null;
-    if (!card || !observation.turnId || card.dispatchTurnId) continue;
-    card.dispatchTurnId = observation.turnId;
-    card.view.bindings.turnId = observation.turnId;
-  }
+  return cards;
+}
 
-  // Channels and observation counts. `interrupted` is a recorded-fact
-  // presentation: only an interrupt observation for this card may set it.
+function materializeConversationCardStates(protocol: SessionProtocolV3, cards: CardState[]): ConversationAgentCard[] {
+  if (!cards.length) return [];
+  const focus = protocol.session!.ref;
+  const actorNames = new Map((protocol.actors || []).map((actor) => [actor.id, actor.name]));
+  const readerAssignment = readerCoordinationAssignment(protocol);
+  const readerCardsByKey = new Map(readerAssignment.cards.map((card) => [card.key, card]));
+  const selectedByKey = new Map(cards.map((card) => [card.view.id, card]));
+  const buckets = new Map<CardState, ConversationChannelObservation[]>();
+  for (const card of cards) buckets.set(card, []);
+  for (let index = 0; index < (protocol.coordination || []).length; index += 1) {
+    const observation = protocol.coordination[index];
+    const assigned = readerAssignment.byObservation[index];
+    const card = assigned ? selectedByKey.get(assigned.key) : undefined;
+    if (!card || !(CONVERSATION_CHANNEL_KINDS as readonly string[]).includes(observation.kind)) continue;
+    buckets.get(card)!.push(observation as ConversationChannelObservation);
+    if (DISPATCH_KINDS.has(observation.kind) && observation.turnId && !card.dispatchTurnId) {
+      card.dispatchTurnId = observation.turnId;
+      card.view.bindings.turnId = observation.turnId;
+    }
+  }
   for (const card of cards) {
-    const channelResult = channelOf(card, observations, assignments, nameFor);
+    const matching = sortReaderCoordinationByRecordedTime(buckets.get(card) || []);
+    const channel = matching.slice(0, CONVERSATION_MAX_CHANNEL_ITEMS).map((observation) => ({
+      id: String(observation.id || ""),
+      kind: observation.kind,
+      state: observation.state || "unknown",
+      timestamp: finiteTime(observation.timestamp),
+      senderActorId: observation.senderActorId ?? null,
+      recipientActorId: observation.recipientActorId ?? null,
+      senderName: observation.senderActorId ? actorNames.get(observation.senderActorId) ?? null : null,
+      recipientName: observation.recipientActorId ? actorNames.get(observation.recipientActorId) ?? null : null,
+      eventId: observation.eventId ?? null,
+      turnId: observation.turnId ?? null,
+      sourceEventRef: observation.sourceEventRef ?? null
+    }));
+    const channelResult = {
+      channel,
+      count: matching.length,
+      truncated: matching.length > CONVERSATION_MAX_CHANNEL_ITEMS,
+      cursorPrefix: channel.map((observation) => ({ id: observation.id, timestamp: observation.timestamp })),
+      interrupted: matching.some((observation) => observation.kind === "interrupt"),
+      lastActivity: matching.reduce<number | null>((latest, observation) => maxTime(latest, observation.timestamp), null)
+    };
     card.view.channel = channelResult.channel;
     card.view.observationCount = channelResult.count;
     card.view.channelTruncated = channelResult.truncated;
     const canonicalCard = readerCardsByKey.get(card.view.id)!;
     card.view.channelNextCursor = channelResult.truncated
       ? encodeReaderCoordinationCursor({
-          provider, sessionId, taskId: canonicalCard.taskId, runId: canonicalCard.runId,
+          provider: focus.provider, sessionId: focus.sessionId, taskId: canonicalCard.taskId, runId: canonicalCard.runId,
           anchor: null, size: CONVERSATION_MAX_CHANNEL_ITEMS
         }, channelResult.channel.at(-1)!.id, channelResult.cursorPrefix)
       : null;
@@ -466,6 +525,253 @@ export function deriveConversationView(input: ConversationViewInput): Conversati
     card.view.state = conversationCardState(card.view.rawStatus, channelResult.interrupted);
     card.view.lastActivity = maxTime(card.view.lastActivity, channelResult.lastActivity);
   }
+  return cards.map((card) => card.view);
+}
+
+function childGroupIdentity(card: ConversationAgentCard): string | null {
+  return card.childSession
+    ? `child:${encodeURIComponent(card.childSession.provider)}:${encodeURIComponent(card.childSession.sessionId)}`
+    : null;
+}
+
+/** Match the grouping already used by the Reader: one child history, otherwise one canonical card. */
+export function groupConversationCards(cards: readonly ConversationAgentCard[], provider: string, sessionId: string): ConversationTaskGroup[] {
+  const groups = new Map<string, ConversationTaskGroup>();
+  for (const card of cards) {
+    const childIdentity = childGroupIdentity(card);
+    const taskIdentity = !childIdentity && card.bindings.taskId ? `task:${card.bindings.taskId}` : null;
+    const identity = childIdentity || taskIdentity || card.id;
+    let group = groups.get(identity);
+    if (!group) {
+      group = {
+        key: card.id,
+        cards: [],
+        childSession: card.childSession,
+        laneId: childIdentity || `${encodeURIComponent(provider)}:${encodeURIComponent(sessionId)}:${card.id}`,
+        runCount: 0,
+        runsPageSize: READER_TASK_RUNS_DEFAULT_SIZE,
+        runsOffset: 0,
+        runsNextCursor: null,
+        graphOrigins: []
+      };
+      groups.set(identity, group);
+    }
+    group.cards.push(card);
+    group.runCount += 1;
+    for (const item of card.channel) addGraphOrigin(group, item);
+  }
+  return [...groups.values()];
+}
+
+function addGraphOrigin(group: ConversationTaskGroup, item: Pick<ConversationChannelItem,
+  "id" | "kind" | "senderActorId" | "recipientActorId" | "senderName" | "recipientName">) {
+  const outgoing = item.kind === "spawn" || item.kind === "delegate";
+  const incoming = item.kind === "result-delivery";
+  if (!outgoing && !incoming) return;
+  const key = (outgoing ? item.senderActorId : item.recipientActorId) || `unknown:${item.id}`;
+  const existing = group.graphOrigins.find((origin) => origin.key === key);
+  if (existing) {
+    existing.outgoing ||= outgoing;
+    existing.incoming ||= incoming;
+  } else group.graphOrigins.push({ key, name: outgoing ? item.senderName : item.recipientName, outgoing, incoming });
+}
+
+/** Relationship summaries do not depend on which run/channel body page is loaded. */
+function populateTaskGraphOrigins(protocol: SessionProtocolV3, groups: ConversationTaskGroup[]) {
+  if (!groups.length) return;
+  const byCard = new Map(groups.flatMap((group) => group.cards.map((card) => [card.id, group] as const)));
+  const assignment = readerCoordinationAssignment(protocol);
+  const names = new Map(protocol.actors.map((actor) => [actor.id, actor.name]));
+  for (let index = 0; index < protocol.coordination.length; index++) {
+    const owner = assignment.byObservation[index];
+    const group = owner && byCard.get(owner.key);
+    if (!group) continue;
+    const item = protocol.coordination[index];
+    if (item.kind !== "spawn" && item.kind !== "delegate" && item.kind !== "result-delivery") continue;
+    addGraphOrigin(group, {
+      id: item.id, kind: item.kind,
+      senderActorId: item.senderActorId ?? null, recipientActorId: item.recipientActorId ?? null,
+      senderName: item.senderActorId ? names.get(item.senderActorId) ?? null : null,
+      recipientName: item.recipientActorId ? names.get(item.recipientActorId) ?? null : null
+    });
+  }
+}
+
+function taskGroupSearchText(group: ConversationTaskGroup): string {
+  return group.cards.flatMap((card) => [
+    card.id,
+    card.name,
+    card.responsibility,
+    card.bindings.taskId,
+    card.bindings.runId,
+    card.childSession?.sessionId
+  ]).filter(Boolean).join("\n").toLocaleLowerCase();
+}
+
+function conversationTaskGroupStates(protocol: SessionProtocolV3) {
+  const focus = protocol.session!.ref;
+  const states = conversationCardStates(protocol);
+  const groups = groupConversationCards(states.map((state) => state.view), focus.provider, focus.sessionId);
+  return { states, groups };
+}
+
+function materializeTaskGroups(protocol: SessionProtocolV3, states: CardState[], groups: ConversationTaskGroup[]) {
+  const selectedIds = new Set(groups.flatMap((group) => group.cards.map((card) => card.id)));
+  materializeConversationCardStates(protocol, states.filter((state) => selectedIds.has(state.view.id)));
+  return groups;
+}
+
+function materializeTaskGroupHeads(
+  protocol: SessionProtocolV3,
+  states: CardState[],
+  groups: ConversationTaskGroup[]
+): ConversationTaskGroup[] {
+  const provider = protocol.session!.ref.provider;
+  const sessionId = protocol.sessionId;
+  populateTaskGraphOrigins(protocol, groups);
+  const heads = groups.map((group) => {
+    const cards = group.cards.slice(0, 1);
+    const identity = { provider, sessionId, taskKey: group.key, size: READER_TASK_RUNS_DEFAULT_SIZE };
+    return {
+      ...group,
+      cards,
+      runCount: group.cards.length,
+      runsPageSize: identity.size,
+      runsOffset: 0,
+      runsNextCursor: group.cards.length > cards.length
+        ? encodeReaderTaskRunsCursor(identity, cards.map((card) => card.id))
+        : null
+    };
+  });
+  return materializeTaskGroups(protocol, states, heads);
+}
+
+export function deriveConversationTaskDirectoryPage(
+  protocol: SessionProtocolV3,
+  request: ConversationTaskDirectoryQuery
+): ConversationTaskDirectoryPage | ConversationTaskDirectoryError {
+  const size = request.size ?? READER_TASK_DIRECTORY_DEFAULT_SIZE;
+  const query = (request.query || "").trim().toLocaleLowerCase();
+  const canonical = protocol.session?.ref;
+  if (!canonical || canonical.provider !== request.provider || canonical.sessionId !== request.sessionId
+    || !Number.isSafeInteger(size) || size < 1 || size > READER_TASK_DIRECTORY_MAX_SIZE) {
+    return { ok: false, code: "invalid_input", error: `Task directory size must be between 1 and ${READER_TASK_DIRECTORY_MAX_SIZE}.` };
+  }
+  const universe = conversationTaskGroupStates(protocol);
+  const groups = universe.groups
+    .filter((group) => !query || taskGroupSearchText(group).includes(query));
+  const identity = { provider: request.provider, sessionId: request.sessionId, query, size };
+  let offset = 0;
+  if (request.cursor) {
+    const cursor = decodeReaderTaskDirectoryCursor(request.cursor);
+    if (!cursor) return { ok: false, code: "invalid_input", error: "The task directory cursor is invalid." };
+    if (cursor.identity.provider !== identity.provider || cursor.identity.sessionId !== identity.sessionId
+      || cursor.identity.query !== identity.query || cursor.identity.size !== identity.size) {
+      return { ok: false, code: "stale_cursor", error: "The task directory changed; refresh the directory." };
+    }
+    const prefixKeys = groups.slice(0, cursor.prefixCount).map((group) => group.key);
+    if (prefixKeys.length !== cursor.prefixCount || prefixKeys.at(-1) !== cursor.lastKey
+      || readerTaskDirectoryPrefixHash(prefixKeys) !== cursor.prefixHash) {
+      return { ok: false, code: "stale_cursor", error: "The task directory changed; refresh the directory." };
+    }
+    offset = cursor.prefixCount;
+  }
+  const items = materializeTaskGroupHeads(protocol, universe.states, groups.slice(offset, offset + size));
+  const nextOffset = offset + items.length;
+  return {
+    ok: true,
+    provider: request.provider,
+    sessionId: request.sessionId,
+    query,
+    size,
+    offset,
+    total: groups.length,
+    items,
+    nextCursor: nextOffset < groups.length
+      ? encodeReaderTaskDirectoryCursor(identity, groups.slice(0, nextOffset).map((group) => group.key))
+      : null
+  };
+}
+
+export function deriveConversationTaskGroupPage(
+  protocol: SessionProtocolV3,
+  selection: ConversationTaskGroupQuery
+): ConversationTaskGroupPage | ConversationTaskDirectoryError | null {
+  const canonical = protocol.session?.ref;
+  const size = selection.size ?? READER_TASK_RUNS_DEFAULT_SIZE;
+  if (!canonical || canonical.provider !== selection.provider || canonical.sessionId !== selection.sessionId
+    || !Number.isSafeInteger(size) || size < 1 || size > READER_TASK_RUNS_MAX_SIZE
+    || (!selection.key && !selection.lane) || Boolean(selection.key && selection.lane)) {
+    return { ok: false, code: "invalid_input", error: `Task run size must be between 1 and ${READER_TASK_RUNS_MAX_SIZE}.` };
+  }
+  const universe = conversationTaskGroupStates(protocol);
+  const group = selection.key
+    ? universe.groups.find((candidate) => candidate.key === selection.key)
+    : selection.lane
+      ? universe.groups.find((candidate) => candidate.laneId === selection.lane)
+      : null;
+  if (!group) {
+    return selection.cursor
+      ? { ok: false, code: "stale_cursor", error: "The task run continuation is stale; reload this task." }
+      : null;
+  }
+  const identity = { provider: selection.provider, sessionId: selection.sessionId, taskKey: group.key, size };
+  let offset = 0;
+  if (selection.cursor) {
+    const cursor = decodeReaderTaskRunsCursor(selection.cursor);
+    if (!cursor) return { ok: false, code: "invalid_input", error: "The task run cursor is invalid." };
+    if (cursor.identity.provider !== identity.provider || cursor.identity.sessionId !== identity.sessionId
+      || cursor.identity.taskKey !== identity.taskKey || cursor.identity.size !== identity.size) {
+      return { ok: false, code: "stale_cursor", error: "The task runs changed; reload this task." };
+    }
+    const prefixKeys = group.cards.slice(0, cursor.prefixCount).map((card) => card.id);
+    if (prefixKeys.length !== cursor.prefixCount || prefixKeys.at(-1) !== cursor.lastKey
+      || readerTaskDirectoryPrefixHash(prefixKeys) !== cursor.prefixHash) {
+      return { ok: false, code: "stale_cursor", error: "The task runs changed; reload this task." };
+    }
+    offset = cursor.prefixCount;
+  }
+  const cards = group.cards.slice(offset, offset + size);
+  populateTaskGraphOrigins(protocol, [group]);
+  const nextOffset = offset + cards.length;
+  const nextCursor = nextOffset < group.cards.length
+    ? encodeReaderTaskRunsCursor(identity, group.cards.slice(0, nextOffset).map((card) => card.id))
+    : null;
+  const pagedGroup = materializeTaskGroups(protocol, universe.states, [{
+    ...group,
+    cards,
+    runCount: group.cards.length,
+    runsPageSize: size,
+    runsOffset: offset,
+    runsNextCursor: nextCursor
+  }])[0];
+  return {
+    ok: true,
+    provider: selection.provider,
+    sessionId: selection.sessionId,
+    key: group.key,
+    lane: group.laneId,
+    size,
+    offset,
+    total: group.cards.length,
+    group: pagedGroup,
+    nextCursor
+  };
+}
+
+export function deriveConversationView(input: ConversationViewInput): ConversationViewModel {
+  const { protocol, work, execution, coordination, context } = input;
+  const focus = execution.focus || (protocol.session?.ref ?? null);
+  const provider = focus.provider;
+  const sessionId = focus.sessionId;
+
+  const taskDirectory = deriveConversationTaskDirectoryPage(protocol, {
+    provider,
+    sessionId,
+    size: CONVERSATION_MAX_CARDS
+  });
+  if (!taskDirectory.ok) throw new TypeError(taskDirectory.error);
+  const cards = taskDirectory.items.flatMap((group) => group.cards);
 
   // ── Inspector ────────────────────────────────────────────────────────────
   const coverageDomains = ["work", "execution", "coordination", "context", "usage"] as const;
@@ -596,7 +902,9 @@ export function deriveConversationView(input: ConversationViewInput): Conversati
     : null;
 
   return {
-    cards: cards.map((card) => card.view),
+    cards,
+    taskCount: taskDirectory.total,
+    taskDirectory,
     turnBoundaries: deriveTurnBoundaries(protocol),
     inspector
   };

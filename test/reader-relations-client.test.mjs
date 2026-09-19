@@ -16,6 +16,27 @@ function relationHarness(t, entries, { narrow = false, selected = '', enabled = 
     }
     append(child) { child.parentElement = this; this.children.push(child); }
     replaceChildren(...children) { this.children = []; children.forEach((child) => this.append(child)); }
+    replaceWith(...children) {
+      if (!this.parentElement) return;
+      const parent = this.parentElement;
+      const index = parent.children.indexOf(this);
+      parent.lastMountedHtml = this._innerHTML;
+      parent.children.splice(index, 1, ...children);
+      children.forEach((child) => { child.parentElement = parent; });
+      this.parentElement = null;
+    }
+    get childNodes() { return this.children; }
+    set innerHTML(value) {
+      this._innerHTML = value;
+      this.children = [];
+      const key = value.match(/data-reader-branch-key="([^"]+)"/)?.[1];
+      if (key) {
+        const detail = new Element({ readerBranch: '', readerBranchKey: key, readerTaskLane: `lane:${key}` }, 'details');
+        detail.id = value.match(/id="([^"]+)"/)?.[1] || `reader-task-${key}`;
+        this.append(detail);
+      }
+    }
+    get innerHTML() { return this._innerHTML || ''; }
     remove() {
       if (!this.parentElement) return;
       this.parentElement.children = this.parentElement.children.filter((child) => child !== this);
@@ -23,6 +44,7 @@ function relationHarness(t, entries, { narrow = false, selected = '', enabled = 
     }
     contains(child) { return child === this || this.children.some((entry) => entry.contains(child)); }
     matches(selector) {
+      if (selector === '*') return true;
       if (selector === 'option[value=""]') return this.tagName === 'option' && this.value === '';
       if (selector.startsWith('.')) return this.classes.has(selector.slice(1));
       const attribute = selector.match(/\[data-([a-z-]+)\]/)?.[1];
@@ -34,6 +56,7 @@ function relationHarness(t, entries, { narrow = false, selected = '', enabled = 
     }
     closest(selector) { return this.matches(selector) ? this : this.parentElement?.closest(selector) || null; }
     setAttribute(name, value) { this.attributes.set(name, value); }
+    getAttribute(name) { return this.attributes.get(name) || null; }
     removeAttribute(name) { this.attributes.delete(name); }
     focus(options) { this.focusOptions = options; }
     addEventListener(type, callback) { this.listeners.set(type, [...this.listeners.get(type) || [], callback]); }
@@ -93,11 +116,12 @@ function relationHarness(t, entries, { narrow = false, selected = '', enabled = 
   const media = new Element();
   media.matches = narrow;
   window.matchMedia = () => media;
+  window.location = { href: 'http://localhost/' };
   const observers = [];
   const frames = new Map();
   let frameId = 0;
   const globals = {
-    document: { querySelector: () => workbench },
+    document: { querySelector: () => workbench, createElement: (tagName) => new Element({}, tagName) },
     window,
     requestAnimationFrame(callback) { frames.set(++frameId, callback); return frameId; },
     cancelAnimationFrame(id) { frames.delete(id); },
@@ -433,4 +457,78 @@ test('native nested overview selection is exclusive and collapsed task is no lon
   branch.open = false;
   h.workbench.dispatchEvent({ type: 'toggle', target: branch });
   assert.equal(button.attributes.get('aria-pressed'), 'false');
+});
+
+test('late task detail uses the owning pane namespace and reports loading or retry outside the closed directory', async (t) => {
+  const h = relationHarness(t, entries);
+  h.pane.dataset.readerProvider = 'fixture';
+  h.pane.dataset.readerSession = 'root';
+  h.pane.dataset.readerDomScope = 'reader-scope-test';
+  const taskStatus = new h.Element({ readerTaskStatus: '' });
+  const directory = new h.Element({ readerTaskDirectory: '' }, 'details');
+  directory.open = false;
+  const directoryStatus = new h.Element({ readerTaskDirectoryStatus: '' });
+  directory.append(directoryStatus);
+  const detailHost = new h.Element({ readerTaskDetails: '' });
+  const late = new h.Element({ readerTaskSelect: 'run:late' }, 'button');
+  h.overview.append(taskStatus);
+  h.overview.append(directory);
+  h.overview.append(detailHost);
+  h.overview.append(late);
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', (url) => new Promise((resolve) => requests.push({ url, resolve })));
+
+  h.workbench.dispatchEvent({ type: 'click', target: late });
+  assert.equal(taskStatus.textContent, 'Loading this task…');
+  assert.equal(directoryStatus.textContent, undefined);
+  assert.equal(directory.open, false);
+  requests[0].resolve({ ok: true, json: async () => ({
+    key: 'run:late', graphHtml: '',
+    html: '<details id="reader-task-run-late" data-reader-branch data-reader-branch-key="run:late"></details>'
+  }) });
+  await new Promise(setImmediate);
+  const loaded = detailHost.querySelector('[data-reader-branch]');
+  assert.equal(loaded.id, 'reader-scope-test--reader-task-run-late');
+  assert.equal(loaded.dataset.readerCanonicalAnchor, 'reader-task-run-late');
+  assert.equal(taskStatus.textContent, '');
+
+  const missing = new h.Element({ readerTaskSelect: 'run:missing' }, 'button');
+  h.overview.append(missing);
+  h.workbench.dispatchEvent({ type: 'click', target: missing });
+  assert.equal(taskStatus.textContent, 'Loading this task…');
+  requests[1].resolve({ ok: false, status: 503 });
+  await new Promise(setImmediate);
+  assert.match(taskStatus.textContent, /Could not open this task/);
+  assert.ok(taskStatus.querySelector('[data-reader-task-detail-retry]'));
+  assert.equal(directoryStatus.textContent, undefined);
+});
+
+test('rapid task searches abort the old request and only mount the latest response', async (t) => {
+  const h = relationHarness(t, entries);
+  const directory = new h.Element({ readerTaskDirectory: '', readerTaskDirectoryUrl: '/api/fixture/session/root/reader/tasks?size=50' });
+  const form = new h.Element({ readerTaskDirectorySearch: '' }, 'form');
+  const query = new h.Element({ readerTaskDirectoryQuery: '' }, 'input');
+  const status = new h.Element({ readerTaskDirectoryStatus: '' });
+  const pages = new h.Element({ readerTaskDirectoryPages: '' });
+  form.append(query);
+  form.append(status);
+  directory.append(form);
+  directory.append(pages);
+  h.overview.append(directory);
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', (url, options) => new Promise((resolve) => requests.push({ url, options, resolve })));
+
+  query.value = 'A';
+  h.workbench.dispatchEvent({ type: 'submit', target: form, preventDefault() {} });
+  query.value = 'B';
+  h.workbench.dispatchEvent({ type: 'submit', target: form, preventDefault() {} });
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].options.signal.aborted, true);
+  requests[1].resolve({ ok: true, json: async () => ({ html: '<div data-page="B">B</div>' }) });
+  await new Promise(setImmediate);
+  assert.equal(pages.lastMountedHtml, '<div data-page="B">B</div>');
+  requests[0].resolve({ ok: true, json: async () => ({ html: '<div data-page="A">A</div>' }) });
+  await new Promise(setImmediate);
+  assert.equal(pages.lastMountedHtml, '<div data-page="B">B</div>');
+  assert.equal(status.textContent, '');
 });

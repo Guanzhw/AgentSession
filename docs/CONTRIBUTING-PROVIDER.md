@@ -85,6 +85,11 @@ live capture. Cumulative
 `turn_token_usage`/`thread_token_usage` fields are not counted as requests;
 only the recorded per-response `usage` is used. Child lineage still requires
 recorded parent/session metadata or a matching child rollout.
+For the recorded v3 collaboration dispatch shape, a `response_item` function
+call with `namespace: "collaboration"`, `name: "spawn_agent"`, and JSON
+`arguments.task_name` supplies the normalized Task title verbatim. Missing
+`task_name` remains a null title; the task ID and recorded agent path stay
+independent fields.
 
 ### Codex memory evidence snapshot (2026-09-19)
 

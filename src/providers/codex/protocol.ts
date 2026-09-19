@@ -699,6 +699,10 @@ export function buildCodexSessionProtocol(input: CodexProtocolInput): SessionPro
     if (run && runs.some((candidate) => candidate.childSessionId === String(run.session.id))) continue;
     const terminalMessageTime = run ? terminalAgentMessageTime(run) : null;
     const completionTime = activity?.terminalTimestamp || terminalMessageTime;
+    const taskTitle = record.payload?.namespace === "collaboration"
+      && record.payload?.name === "spawn_agent"
+      ? firstString(callArgumentsOf(record).task_name)
+      : null;
     // A spawn call's immediate function_call_output only proves that launch
     // returned. Completion requires a terminal activity or FINAL_ANSWER.
     const completed = Boolean(completionTime);
@@ -707,7 +711,7 @@ export function buildCodexSessionProtocol(input: CodexProtocolInput): SessionPro
       sessionId,
       kind: "subagent-task",
       status: completed ? "completed" : "running",
-      title: null,
+      title: taskTitle,
       toolCallId: callId,
       correlationId: callId,
       agentPath: run
