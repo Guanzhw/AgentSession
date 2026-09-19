@@ -10,6 +10,8 @@ import { layout } from "./layout.js";
 import { readerEventHref, renderReaderEventSourceLink, renderReaderCoordinationItem } from "./reader-coordination.js";
 import { readerRelationPositionKey, renderReaderRelations } from "./reader-relations.js";
 import { renderReaderTaskGraph } from "./reader-task-graph.js";
+import { appendReaderExecutionMarkers } from "./reader-executions.js";
+import type { ReaderExecutions } from "../reader-executions.js";
 import { uiIcon } from "../ui-icons.js";
 import { renderReaderArtifacts, type ContextArtifactSourceState } from "./reader-artifacts.js";
 import type { ContextArtifact } from "../providers/shared/session-protocol.js";
@@ -883,6 +885,7 @@ export function renderReaderProcessChunk(input: {
   sessionTree?: SessionTree | null;
   ownedReader?: OwnedReaderProjection | null;
   readerRelations?: ReaderRelations | null;
+  readerExecutions?: ReaderExecutions | null;
   messageId: string;
   firstPartId: string;
   lastPartId: string;
@@ -891,7 +894,7 @@ export function renderReaderProcessChunk(input: {
   const message = tree?.messages.find((candidate) => candidate.id === input.messageId);
   if (!message) return null;
   const children = new Set((input.ownedReader?.children || []).flatMap((child) => child.parentPartId ? [child.parentPartId] : []));
-  const relations = renderReaderRelations(input.readerRelations || null);
+  const relations = appendReaderExecutionMarkers(renderReaderRelations(input.readerRelations || null), input.readerExecutions || null);
   const chunks = readerProcessChunks(message, relations, children);
   const chunk = chunks.find(({ tools }) => tools[0].part.id === input.firstPartId);
   if (!chunk) return null;
@@ -1974,16 +1977,17 @@ export function renderSessionReaderPane({
   conversationCompactions = [],
   conversationView = null,
   readerRelations = null,
+  readerExecutions = null,
   inheritedContext = null,
   contextArtifacts = [],
   contextArtifactSourceState = null,
   canReadContextArtifacts = false,
   canReadContextArtifactEvidence = false,
   deferExecution = true
-}: { session: any; sessionTree?: SessionTree | null; ownedReader?: OwnedReaderProjection | null; messages?: any[]; partsByMessage?: Map<any, any>; provider?: string; conversationCompactions?: ConversationCompaction[]; conversationView?: ConversationViewModel | null; readerRelations?: ReaderRelations | null; inheritedContext?: InheritedContextView | null; contextArtifacts?: ContextArtifact[]; contextArtifactSourceState?: ContextArtifactSourceState | null; canReadContextArtifacts?: boolean; canReadContextArtifactEvidence?: boolean; deferExecution?: boolean }) {
+}: { session: any; sessionTree?: SessionTree | null; ownedReader?: OwnedReaderProjection | null; messages?: any[]; partsByMessage?: Map<any, any>; provider?: string; conversationCompactions?: ConversationCompaction[]; conversationView?: ConversationViewModel | null; readerRelations?: ReaderRelations | null; readerExecutions?: ReaderExecutions | null; inheritedContext?: InheritedContextView | null; contextArtifacts?: ContextArtifact[]; contextArtifactSourceState?: ContextArtifactSourceState | null; canReadContextArtifacts?: boolean; canReadContextArtifactEvidence?: boolean; deferExecution?: boolean }) {
   const title = session.title || session.slug || session.id;
   const placedCardIds = new Set<string>();
-  const relationMarkup = renderReaderRelations(readerRelations);
+  const relationMarkup = appendReaderExecutionMarkers(renderReaderRelations(readerRelations), readerExecutions);
   const effectiveTree = ownedReader?.rootTree || sessionTree;
   const ownedChildrenByPart = new Map<string, OwnedReaderChildDescriptor[]>();
   for (const child of ownedReader?.children || []) {

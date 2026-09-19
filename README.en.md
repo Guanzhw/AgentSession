@@ -58,6 +58,12 @@ continuation to the end. Search still covers the complete available source.
 Ordinary tool processes load in chunks of up to 20 tools. Search and source
 links open the matching chunk directly; prose, collaboration entries and
 attention summaries stay in their recorded positions.
+Correlated async calls link their separation and return positions. Opening an
+execution shows main/background time lanes and overlapping calls; all wait steps
+continue in pages of 50 and link to complete commands and outputs. Current real
+coverage is Codex outer `exec` / `wait` calls. Nested terminal processes are not
+correlated by interpreting script text. Missing returns show the last observation;
+a stop request is distinct from an observed ending.
 The collaboration panel supports keyboard opening and navigation through tasks
 and sources. Opening moves focus into the panel; Escape or its close button
 closes it and returns focus to the opener. With reduced motion enabled, source

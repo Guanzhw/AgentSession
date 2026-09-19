@@ -2,6 +2,7 @@ import { initSessionWorkbench, loadProgressiveContent } from "./app/session-work
 import { initSessionReader } from "./app/session-reader.js";
 import { initReaderRelations } from "./app/reader-relations.js";
 import { initReaderActivity } from "./app/reader-activity.js";
+import { initReaderExecutions } from "./app/reader-executions.js";
 import { initEnhancements } from "./app/enhancements.js";
 import { initRuntimeWorkbench } from "./app/runtime-workbench.js";
 import { initRuntimeEvents } from "./app/runtime-events.js";
@@ -735,6 +736,7 @@ if (scrollSentinel && sessionList) {
 initSessionReader({ ft, showToast });
 initReaderRelations();
 initReaderActivity();
+initReaderExecutions();
 initSessionWorkbench({ ft, formatText, showToast });
 initEnhancements({ ft, formatText, showToast, escapeHtmlClient });
 initRuntimeWorkbench({ ft, formatText });

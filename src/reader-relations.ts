@@ -56,6 +56,7 @@ interface NativePart {
   order: number;
   type: string;
   callId: string | null;
+  text: string | null;
 }
 
 function sameSession(left: SessionRef, right: SessionRef): boolean {
@@ -103,7 +104,8 @@ export function createReaderNativeSourceResolver(document: ReaderDocument) {
         position: { messageId: message.id, partId: part.id, side: "before" },
         order: byPart.size,
         type,
-        callId: part.data.callID || null
+        callId: part.data.callID || null,
+        text: type === "text" ? part.data.text : null
       };
       byPart.set(part.id, native);
       parts.push(native);
@@ -115,8 +117,8 @@ export function createReaderNativeSourceResolver(document: ReaderDocument) {
   );
 }
 
-function sourcePositions(events: SessionEventEnvelope[], document: ReaderDocument): Map<string, ReaderRelationPosition> {
-  const nativeParts = events.map(createReaderNativeSourceResolver(document));
+function sourcePositions(events: SessionEventEnvelope[], resolve: ReturnType<typeof createReaderNativeSourceResolver>): Map<string, ReaderRelationPosition> {
+  const nativeParts = events.map(resolve);
   const nextParts: Array<NativePart | null> = new Array(events.length);
   let next: NativePart | null = null;
   for (let index = events.length - 1; index >= 0; index -= 1) {
@@ -144,7 +146,7 @@ function sourcePositions(events: SessionEventEnvelope[], document: ReaderDocumen
 }
 
 /** Reading positions over finalized protocol facts and the already-loaded owned document. */
-export function deriveReaderRelations(protocol: SessionProtocolV3, document: ReaderDocument): ReaderRelations {
+export function deriveReaderRelations(protocol: SessionProtocolV3, document: ReaderDocument, resolve = createReaderNativeSourceResolver(document)): ReaderRelations {
   const owner = protocol.session!.ref;
   const assignment = readerCoordinationAssignment(protocol);
   const runs = new Map(protocol.agentRuns.map((run) => [run.id, run]));
@@ -177,7 +179,7 @@ export function deriveReaderRelations(protocol: SessionProtocolV3, document: Rea
   const events = protocol.events.filter((event) => event.sessionId === owner.sessionId)
     .sort((left, right) => left.sequence - right.sequence);
   const eventsById = new Map(events.map((event) => [event.id, event]));
-  const positions = sourcePositions(events, document);
+  const positions = sourcePositions(events, resolve);
   const milestones: ReaderRelationMilestone[] = [];
   const unplaced: ReaderRelationUnplaced[] = [];
   protocol.coordination.forEach((observation, index) => {

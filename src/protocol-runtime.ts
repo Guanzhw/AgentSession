@@ -346,6 +346,7 @@ export function publicEvent(event: SessionEventEnvelope) {
     correlationId: event.correlationId || null,
     compaction: event.compaction || null,
     approval: event.approval || null,
+    ...(event.execution ? { execution: event.execution } : {}),
     summary: summarizeEvent(event),
     provenance: event.provenance
   };

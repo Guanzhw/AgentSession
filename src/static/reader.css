@@ -800,6 +800,36 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
   .session-workbench[data-session-reader] .reader-collaboration { width: 100%; }
 }
 
+.reader-execution-insert { margin: 14px 0; padding: 12px 0 12px 14px; border-left: 2px solid var(--accent-color); font-size: 13px; scroll-margin-top: var(--session-anchor-offset); }
+.reader-execution-insert > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
+.reader-execution-insert time { color: var(--text-secondary); font-size: 11px; }
+.reader-execution-actions { display: flex; gap: 16px; margin: 8px 0; }
+.reader-execution-insert details > summary { cursor: pointer; padding: 7px 0; }
+.reader-execution-time-view { margin: 14px 0; padding: 14px; background: var(--reader-surface); border: 1px solid var(--border-color); }
+.reader-execution-time-view figcaption { margin-bottom: 16px; font-size: 14px; font-weight: 600; }
+.reader-execution-time-axis { display: flex; justify-content: space-between; margin-left: 140px; }
+.reader-execution-time-lanes { position: relative; }
+.reader-execution-time-row { display: grid; grid-template-columns: 140px minmax(0, 1fr); min-height: 60px; align-items: center; }
+.reader-execution-lane-label { font-size: 12px; padding-right: 16px; min-width: 0; }
+.reader-execution-lane-label > span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary); margin-top: 4px; }
+.reader-execution-time-track { position: relative; height: 2px; background: var(--border-color); }
+.reader-execution-time-span { position: absolute; top: -3px; height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--accent-color) 35%, var(--reader-surface)); }
+.reader-execution-time-row.is-selected .reader-execution-time-span { background: var(--accent-color); }
+.reader-execution-time-row.is-open .reader-execution-time-span { height: 0; top: 0; border-bottom: 2px dashed var(--accent-color); border-radius: 0; background: none; }
+.reader-execution-dot { position: absolute; top: -5px; width: 12px; height: 12px; border-radius: 50%; background: var(--reader-surface); border: 2px solid var(--accent-color); transform: translateX(-50%); overflow: hidden; font-size: 0; z-index: 2; }
+.reader-execution-dot:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 4px; }
+.reader-execution-connectors { position: absolute; left: 140px; top: 0; width: calc(100% - 140px); height: 120px; overflow: visible; pointer-events: none; }
+.reader-execution-connectors path { fill: none; stroke: var(--accent-color); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.reader-execution-boundary-labels { position: absolute; left: 140px; top: 0; width: calc(100% - 140px); z-index: 1; pointer-events: none; }
+.reader-execution-boundary-labels span { position: absolute; transform: translateX(-50%); background: var(--reader-surface); padding: 2px 5px; font-size: 11px; white-space: nowrap; }
+.reader-execution-time-note { color: var(--text-secondary); font-size: 11px; line-height: 1.6; margin: 12px 0 0; }
+.reader-execution-step-details ol, .reader-execution-main-excerpts ol { margin: 8px 0; padding: 0 0 0 18px; }
+.reader-execution-step-details li { padding: 6px 0; display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; }
+.reader-execution-main-excerpts li { margin: 10px 0; }
+.reader-execution-main-excerpts time { display: block; }
+[data-reader-execution-status] { font-size: 12px; }
+[data-reader-execution-status] button { margin-left: 8px; }
+
 @media (prefers-reduced-motion: reduce) {
   .session-workbench[data-session-reader] *,
   .session-workbench[data-session-reader] *::before,

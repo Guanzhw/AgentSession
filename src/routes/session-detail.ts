@@ -44,9 +44,11 @@ import {
 import type { ProjectionOptions, RunPage, V3Projection } from "../protocol-runtime-v3.js";
 import type { SessionProtocolV3 } from "../providers/shared/session-protocol-v3.js";
 import { deriveConversationView } from "../conversation-view-model.js";
-import { deriveReaderRelations } from "../reader-relations.js";
+import { createReaderNativeSourceResolver, deriveReaderRelations } from "../reader-relations.js";
 import { parseReaderActivityQuery, projectReaderActivity, ReaderActivityError } from "../reader-activity.js";
 import { renderReaderActivity } from "../views/reader-activity.js";
+import { deriveReaderExecutions, readerExecutionPage, ReaderExecutionError } from "../reader-executions.js";
+import { renderReaderExecutionPage } from "../views/reader-executions.js";
 import { streamJson } from "../json-stream.js";
 import { renderArtifactEvidenceActivity, renderArtifactEvidenceCoverage } from "../views/reader-artifacts.js";
 
@@ -140,10 +142,12 @@ export function registerSessionDetail(
     const evidence = protocol ? { tasks: protocol.tasks, agentRuns: protocol.agentRuns, relationships: protocol.relationships } : undefined;
     const ownedReader = captured ? captured.getOwnedReaderProjection(evidence)
       : typeof adapter.getOwnedReaderProjection === "function" ? adapter.getOwnedReaderProjection(sessionId, evidence) : undefined;
+    const resolve = protocol ? createReaderNativeSourceResolver(document) : undefined;
     return {
       sessionTree: ownedReader === undefined ? adapter.getSessionTree?.(sessionId) || null : null,
       ownedReader,
-      readerRelations: protocol ? deriveReaderRelations(protocol, document) : null
+      readerRelations: protocol ? deriveReaderRelations(protocol, document, resolve) : null,
+      readerExecutions: protocol ? deriveReaderExecutions(protocol, document, resolve) : null
     };
   };
 
@@ -360,6 +364,32 @@ export function registerSessionDetail(
     } catch (error) {
       console.error(`Process route error: ${error instanceof Error ? error.message : String(error)}`);
       return json(res, { ok: false, error: "Unable to load process", code: "process_failed" }, 500);
+    }
+  });
+
+  app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/reader\/execution$/, async (req: any, res: any, match: RegExpMatchArray) => {
+    const providerId = match[1];
+    const sessionId = safeDecodeId(match[2]);
+    const adapter = providerMap.get(providerId);
+    if (!adapter) {
+      const missing = missingProviderResponse(providerId);
+      return json(res, missing.body, missing.status);
+    }
+    const params = new URL(req.url || "/", `http://localhost:${appConfig.port}`).searchParams;
+    const id = params.get("id");
+    if (!sessionId || !id) return json(res, { ok: false, code: "invalid_input" }, 400);
+    try {
+      const document = getSessionDocument(adapter, providerId, sessionId);
+      if (!document) return json(res, { ok: false, code: "execution_not_found" }, 404);
+      const protocol = supportsSessionProtocol(adapter) ? getRuntimeProtocolV3(adapter, sessionId, document.session) : null;
+      if (!protocol) return json(res, { ok: false, code: "execution_not_found" }, 404);
+      const page = readerExecutionPage(deriveReaderExecutions(protocol, document), id, params.get("cursor"));
+      return json(res, { ok: true, provider: providerId, sessionId, id, offset: page.offset,
+        total: page.execution.steps.length, nextCursor: page.nextCursor, html: renderReaderExecutionPage(page) });
+    } catch (error) {
+      if (error instanceof ReaderExecutionError) return json(res, { ok: false, code: error.code, error: error.message },
+        error.code === "invalid_input" ? 400 : error.code === "stale_page" ? 409 : 404);
+      return runtimeError(res, error, { protocolInvalid: true });
     }
   });
 

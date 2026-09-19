@@ -134,7 +134,28 @@ export interface SessionEventEnvelope {
   compaction?: ContextCompactionEvent | null;
   /** Provider-recorded approval audit detail; approvals are not surface messages. */
   approval?: ApprovalEventDetail | null;
+  /** Provider-normalized lifecycle detail for one safely correlated tool execution. */
+  execution?: ToolExecutionObservation | null;
   providerData?: Record<string, unknown> | null;
+}
+
+export type ToolExecutionKind = "async-tool";
+export type ToolExecutionPhase =
+  | "started"
+  | "yielded"
+  | "polled"
+  | "interruption-requested"
+  | "completed"
+  | "failed";
+
+export interface ToolExecutionObservation {
+  /** Stable identity for this occurrence, anchored to provider evidence. */
+  id: string;
+  kind: ToolExecutionKind;
+  phase: ToolExecutionPhase;
+  /** Provider handle used by later continuation calls. */
+  handle: string;
+  toolName: string;
 }
 
 export type ApprovalEventState = "asked" | "decided";
@@ -478,6 +499,10 @@ const TASK_STATUSES = new Set<TaskStatus>([
 const RUN_STATUSES = new Set<RunStatus>([...TASK_STATUSES, "unknown"]);
 const EXECUTION_MODES = new Set<ExecutionMode>([
   "foreground", "background", "subagent", "scheduled", "team", "unknown"
+]);
+const TOOL_EXECUTION_KINDS = new Set<ToolExecutionKind>(["async-tool"]);
+const TOOL_EXECUTION_PHASES = new Set<ToolExecutionPhase>([
+  "started", "yielded", "polled", "interruption-requested", "completed", "failed"
 ]);
 const ARTIFACT_KINDS = new Set<ContextArtifactKind>([
   "memory", "instruction", "skill", "rule", "summary", "experience", "user-info"
@@ -1039,6 +1064,15 @@ export function validateSessionProtocol(
       if (!APPROVAL_EVENT_STATES.has(approval.state)) error("APPROVAL_STATE_INVALID", "Approval detail state is invalid", ref, event.provenance);
       if (approval.state === "asked" && (!approval.toolName || approval.outcome !== null)) error("APPROVAL_ASK_INVALID", "Approval ask must carry a tool name and no outcome", ref, event.provenance);
       if (approval.state === "decided" && (!approval.outcome || !APPROVAL_OUTCOMES.has(approval.outcome) || approval.toolName !== null || approval.callId !== null || approval.reason !== null)) error("APPROVAL_DECISION_INVALID", "Approval decision must carry a known outcome and no ask-only fields", ref, event.provenance);
+    }
+    if (event?.execution) {
+      const execution = event.execution;
+      if (typeof execution.id !== "string" || !execution.id.trim()) error("TOOL_EXECUTION_ID_INVALID", "Tool execution identity must be a non-empty string", ref, event.provenance);
+      if (!TOOL_EXECUTION_KINDS.has(execution.kind)) error("TOOL_EXECUTION_KIND_INVALID", "Tool execution kind is invalid", ref, event.provenance);
+      if (!TOOL_EXECUTION_PHASES.has(execution.phase)) error("TOOL_EXECUTION_PHASE_INVALID", "Tool execution phase is invalid", ref, event.provenance);
+      if (typeof execution.handle !== "string" || !execution.handle.trim()) error("TOOL_EXECUTION_HANDLE_INVALID", "Tool execution handle must be a non-empty string", ref, event.provenance);
+      if (typeof execution.toolName !== "string" || !execution.toolName.trim()) error("TOOL_EXECUTION_TOOL_INVALID", "Tool execution tool name must be a non-empty string", ref, event.provenance);
+      if (typeof event.toolCallId !== "string" || !event.toolCallId.trim()) error("TOOL_EXECUTION_CALL_ID_INVALID", "Tool execution events require a non-empty tool-call identity", ref, event.provenance);
     }
   }
   for (const event of protocol.events || []) {

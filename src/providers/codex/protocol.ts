@@ -40,6 +40,7 @@ import {
 import { isSubagentToolName } from "../shared/subagent-tools.js";
 import { codexOwnedTokenUsageRecords, codexUsagePayload } from "./parser.js";
 import type { CodexMemoryMetadata } from "./memory.js";
+import { codexToolExecutionEvents } from "./tool-execution.js";
 
 type Row = Record<string, any>;
 
@@ -440,6 +441,10 @@ export function buildCodexSessionProtocol(input: CodexProtocolInput): SessionPro
       }
     }
   });
+
+  for (const execution of codexToolExecutionEvents(input.records, sessionId)) {
+    pushAnchored(execution.event, execution.recordIndex);
+  }
 
   // Derived message envelopes, interleaved at their producing record.
   const messagesById = new Map(input.messages.map((message) => [message.id, message]));

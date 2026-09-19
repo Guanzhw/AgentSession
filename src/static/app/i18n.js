@@ -2,6 +2,9 @@ export const __LOCALE__ = globalThis.window?.__LOCALE__ || "en";
 
 export const __I18N__ = {
   en: {
+    "detail.execution_loading": "Loading execution…",
+    "detail.execution_load_failed": "Execution could not be loaded. ",
+    "detail.execution_changed": "Earlier steps changed. Reload this execution. ",
     rename_title: "Rename session",
     rename_label: "Session title",
     rename_save: "Save",
@@ -265,6 +268,9 @@ export const __I18N__ = {
     saved_views_cancel: "Cancel"
   },
   zh: {
+    "detail.execution_loading": "正在读取执行经过…",
+    "detail.execution_load_failed": "执行经过读取失败。",
+    "detail.execution_changed": "前面的步骤已更新，请重新读取这次执行。",
     rename_title: "重命名会话",
     rename_label: "会话标题",
     rename_save: "保存",

@@ -91,6 +91,33 @@ call with `namespace: "collaboration"`, `name: "spawn_agent"`, and JSON
 `task_name` remains a null title; the task ID and recorded agent path stay
 independent fields.
 
+### Codex asynchronous tool evidence snapshot (2026-09-20)
+
+Real local rollouts record an outer namespace-free `custom_tool_call` named
+`exec`, a first output block headed `Script running with cell ID …`, and later
+`function_call` records named `wait` with `arguments.cell_id`. Matching output
+uses the exact `call_id`; the first output block's `Script completed` or
+`Script failed` header closes that occurrence. Array and serialized-array output
+forms were observed. The starting call ID, not the reusable cell handle, is the
+normalized execution ID. Only owned records enter this extraction.
+
+`src/providers/codex/tool-execution.ts` owns this grammar. It emits additive
+`SessionEventEnvelope.execution` observations (`async-tool`: started, yielded,
+polled, interruption-requested, completed, failed), preserved by v3 and public
+event paging. `terminate: true` is a request, not proof of cancellation. An
+ordinary synchronous call does not gain a background lifecycle. Nested script
+outputs lack the binding needed to identify their terminal processes separately.
+
+The shared Reader consumes these observations without provider branches. Its
+`/api/:provider/session/:id/reader/execution?id=…` route returns an on-demand
+time view and at most 50 steps, with a prefix-bound continuation cursor. Each
+step links to the original complete command/output. Unknown timestamps retain
+ordered steps; pending work uses the last saved observation, not a live timer.
+Normal completion and failure were checked against local source and actual pages;
+concurrency, repeated handles, stop requests, and long pagination have focused
+fixtures. See the [acceptance record](design/runtime-acceptance-evidence.md).
+This is a dated local transcript-shape check, not an upstream version refresh.
+
 ### Codex memory evidence snapshot (2026-09-19)
 
 The retained V1 `stage1_outputs` / `memories/rollout_summaries` sample supports
