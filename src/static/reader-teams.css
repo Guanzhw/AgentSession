@@ -1,0 +1,367 @@
+.session-workbench[data-session-reader] .reader-teams {
+  margin: 0 0 18px;
+  border: 1px solid var(--reader-line, var(--border-color));
+  border-radius: 8px;
+  background: var(--reader-surface, var(--bg-primary));
+}
+
+.session-workbench[data-session-reader] .reader-teams > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+  color: var(--reader-ink, var(--text-primary));
+  font-weight: 600;
+}
+
+.session-workbench[data-session-reader] .reader-teams > summary small {
+  color: var(--reader-muted, var(--text-muted));
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.session-workbench[data-session-reader] .reader-teams-body {
+  padding: 0 14px 14px;
+}
+
+.session-workbench[data-session-reader] .reader-team-graph {
+  margin: 2px 0 14px;
+  padding: 12px;
+  border: 1px solid var(--reader-line, var(--border-color));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--reader-surface, var(--bg-primary)) 88%, var(--bg-secondary));
+}
+
+.session-workbench[data-session-reader] .reader-team-graph figcaption {
+  margin-bottom: 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.session-workbench[data-session-reader] .reader-team-graph figcaption small {
+  display: block;
+  margin-top: 4px;
+  color: var(--reader-muted, var(--text-muted));
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.session-workbench[data-session-reader] .reader-team-graph-group + .reader-team-graph-group {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--reader-line, var(--border-color));
+}
+
+.session-workbench[data-session-reader] .reader-team-graph-group h3 {
+  margin: 0 0 8px;
+  color: var(--reader-muted, var(--text-muted));
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.session-workbench[data-session-reader] .reader-team-graph-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(110px, .8fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+}
+
+.session-workbench[data-session-reader] .reader-team-topology {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(90px, .7fr) minmax(0, 2fr);
+  gap: 18px;
+  align-items: center;
+}
+
+.session-workbench[data-session-reader] .reader-team-topology + .reader-team-topology {
+  margin-top: 12px;
+}
+
+.session-workbench[data-session-reader] .reader-team-topology-branches {
+  position: relative;
+  display: grid;
+  gap: 6px;
+}
+
+.session-workbench[data-session-reader] .reader-team-topology-branches::before {
+  content: "";
+  position: absolute;
+  top: 18px;
+  bottom: 18px;
+  left: -10px;
+  border-left: 1px solid var(--reader-accent, var(--accent-color));
+}
+
+.session-workbench[data-session-reader] .reader-team-topology-branch {
+  display: grid;
+  grid-template-columns: minmax(90px, .8fr) minmax(0, 1fr);
+  align-items: center;
+  min-height: 38px;
+}
+
+.session-workbench[data-session-reader] .reader-team-topology-branch > .reader-team-graph-edge::before {
+  left: -10px;
+}
+
+.session-workbench[data-session-reader] .reader-team-graph-node,
+.session-workbench[data-session-reader] .reader-team-graph-edge {
+  min-width: 0;
+  font: inherit;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.session-workbench[data-session-reader] button.reader-team-graph-node {
+  padding: 7px 9px;
+  border: 1px solid var(--reader-line, var(--border-color));
+  border-radius: 5px;
+  background: var(--reader-surface, var(--bg-primary));
+  color: var(--reader-ink, var(--text-primary));
+  cursor: pointer;
+}
+
+.session-workbench[data-session-reader] .reader-team-graph-team {
+  padding: 7px 9px;
+  border-left: 3px solid var(--reader-accent, var(--accent-color));
+  font-weight: 600;
+  align-self: center;
+}
+
+.session-workbench[data-session-reader] .reader-team-graph-edge {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 3px;
+  padding: 5px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--reader-muted, var(--text-muted));
+  text-align: center;
+}
+
+.session-workbench[data-session-reader] .reader-team-graph-edge::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 2px;
+  left: 2px;
+  border-top: 1px solid var(--reader-accent, var(--accent-color));
+}
+
+.session-workbench[data-session-reader] .reader-team-graph-edge::after {
+  content: "";
+  position: absolute;
+  top: calc(50% - 3px);
+  right: 2px;
+  width: 6px;
+  height: 6px;
+  border-top: 1px solid var(--reader-accent, var(--accent-color));
+  border-right: 1px solid var(--reader-accent, var(--accent-color));
+  transform: rotate(45deg);
+}
+
+.session-workbench[data-session-reader] .reader-team-graph-edge > span {
+  position: relative;
+  z-index: 1;
+  padding: 1px 5px;
+  background: color-mix(in srgb, var(--reader-surface, var(--bg-primary)) 92%, var(--bg-secondary));
+}
+
+.session-workbench[data-session-reader] button.reader-team-graph-edge {
+  cursor: pointer;
+}
+
+.session-workbench[data-session-reader] :is(.reader-team-graph-node, .reader-team-graph-edge)[aria-pressed="true"] {
+  color: var(--reader-accent, var(--accent-color));
+  font-weight: 600;
+}
+
+.session-workbench[data-session-reader] .reader-team-directory {
+  border-top: 1px solid var(--reader-line, var(--border-color));
+  padding-top: 8px;
+}
+
+.session-workbench[data-session-reader] .reader-team-directory > summary {
+  padding: 7px 0;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.session-workbench[data-session-reader] [data-reader-team-search] {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0 10px;
+}
+
+.session-workbench[data-session-reader] [data-reader-team-search] input {
+  min-width: 0;
+  flex: 1;
+  padding: 7px 9px;
+  border: 1px solid var(--reader-line, var(--border-color));
+  border-radius: 5px;
+  background: var(--reader-surface, var(--bg-primary));
+  color: var(--reader-ink, var(--text-primary));
+}
+
+.session-workbench[data-session-reader] [data-reader-team-search] button,
+.session-workbench[data-session-reader] [data-reader-team-directory-more],
+.session-workbench[data-session-reader] [data-reader-team-exchanges-more],
+.session-workbench[data-session-reader] [data-reader-team-tasks-more],
+.session-workbench[data-session-reader] [data-reader-team-back] {
+  padding: 7px 10px;
+  border: 1px solid var(--reader-line, var(--border-color));
+  border-radius: 5px;
+  background: var(--reader-surface, var(--bg-primary));
+  color: var(--reader-accent, var(--accent-color));
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.session-workbench[data-session-reader] .reader-team-directory-page > ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session-workbench[data-session-reader] .reader-team-directory-page li > button {
+  display: grid;
+  width: 100%;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--reader-ink, var(--text-primary));
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-workbench[data-session-reader] .reader-team-directory-page li > button:hover,
+.session-workbench[data-session-reader] .reader-team-directory-page li > button[aria-pressed="true"] {
+  border-color: var(--reader-line, var(--border-color));
+  background: var(--reader-accent-soft, color-mix(in srgb, var(--accent-color) 10%, transparent));
+}
+
+.session-workbench[data-session-reader] .reader-team-directory-page li > button :is(span, small) {
+  color: var(--reader-muted, var(--text-muted));
+  font-size: 11px;
+}
+
+.session-workbench[data-session-reader] .reader-team-detail > header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--reader-line, var(--border-color));
+}
+
+.session-workbench[data-session-reader] .reader-team-detail > header p,
+.session-workbench[data-session-reader] .reader-team-detail > header h3 {
+  margin: 0;
+}
+
+.session-workbench[data-session-reader] .reader-team-detail > header p {
+  color: var(--reader-muted, var(--text-muted));
+  font-size: 11px;
+}
+
+.session-workbench[data-session-reader] .reader-team-detail > header h3 {
+  margin-top: 3px;
+  font-size: 15px;
+}
+
+.session-workbench[data-session-reader] .reader-team-history-link,
+.session-workbench[data-session-reader] .reader-team-history-note,
+.session-workbench[data-session-reader] .reader-team-member-description {
+  display: block;
+  margin: 12px 0;
+  font-size: 12px;
+}
+
+.session-workbench[data-session-reader] .reader-team-member-description > summary {
+  cursor: pointer;
+}
+
+.session-workbench[data-session-reader] .reader-team-history-note,
+.session-workbench[data-session-reader] .reader-team-empty,
+.session-workbench[data-session-reader] [data-reader-team-status] {
+  color: var(--reader-muted, var(--text-muted));
+}
+
+.session-workbench[data-session-reader] .reader-team-assignments,
+.session-workbench[data-session-reader] .reader-team-exchanges {
+  margin-top: 14px;
+}
+
+.session-workbench[data-session-reader] :is(.reader-team-assignments, .reader-team-exchanges) > h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.session-workbench[data-session-reader] .reader-team-assignments ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.session-workbench[data-session-reader] .reader-team-assignments li {
+  font-size: 12px;
+}
+
+.session-workbench[data-session-reader] .reader-team-task-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.session-workbench[data-session-reader] .reader-team-task-description {
+  width: 100%;
+}
+
+.session-workbench[data-session-reader] .reader-team-task-description > summary {
+  cursor: pointer;
+}
+
+.session-workbench[data-session-reader] .reader-team-task-description > summary .reader-team-task-row {
+  display: inline-flex;
+  width: calc(100% - 150px);
+  margin-right: 10px;
+}
+
+.session-workbench[data-session-reader] .reader-team-task-description > summary small {
+  color: var(--reader-muted, var(--text-muted));
+}
+
+.session-workbench[data-session-reader] .reader-team-exchange-page > ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session-workbench[data-session-reader] :is(.reader-coordination-time, .reader-coordination-delivered-at) {
+  display: inline-flex;
+  gap: 4px;
+  color: var(--reader-muted, var(--text-muted));
+  font-size: 11px;
+}
+
+.session-workbench[data-session-reader] [data-reader-team-status] {
+  min-height: 1.4em;
+  margin: 8px 0 0;
+  font-size: 11px;
+}
+
+.session-workbench[data-session-reader] .reader-teams :is(button, input, summary, a):focus-visible {
+  outline: 2px solid var(--reader-accent, var(--accent-color));
+  outline-offset: 3px;
+}

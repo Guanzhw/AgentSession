@@ -51,6 +51,7 @@ import { deriveReaderExecutions, readerExecutionPage, ReaderExecutionError } fro
 import { renderReaderExecutionPage } from "../views/reader-executions.js";
 import { streamJson } from "../json-stream.js";
 import { renderArtifactEvidenceActivity, renderArtifactEvidenceCoverage } from "../views/reader-artifacts.js";
+import { deriveReaderTeamDirectoryPage, hasReaderTeams } from "../reader-teams.js";
 
 export function registerSessionDetail(
   app: any,
@@ -167,6 +168,9 @@ export function registerSessionDetail(
         })
       : null;
     const sources = prepareReaderSources(adapter, sessionId, document, runtime.v3, captured);
+    const readerTeams = runtime.v3 && hasReaderTeams(runtime.v3)
+      ? deriveReaderTeamDirectoryPage(runtime.v3, { provider: providerId, sessionId })
+      : null;
     const readerInput = {
       session: document.session,
       ...sources,
@@ -175,6 +179,7 @@ export function registerSessionDetail(
       provider: providerId,
       conversationCompactions: collectConversationCompactions(runtime.protocol),
       conversationView,
+      readerTeams: readerTeams?.ok ? readerTeams : null,
       contextArtifacts: runtime.v3?.contextArtifacts || runtime.protocol?.contextArtifacts || [],
       contextArtifactSourceState: runtime.v3?.contextArtifactSourceState || runtime.protocol?.contextArtifactSourceState,
       canReadContextArtifacts: typeof adapter.getContextArtifactContent === "function",

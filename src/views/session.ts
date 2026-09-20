@@ -12,11 +12,13 @@ import { readerRelationPositionKey, renderReaderRelations } from "./reader-relat
 import { renderReaderTaskGraph } from "./reader-task-graph.js";
 import { appendReaderExecutionMarkers } from "./reader-executions.js";
 import type { ReaderExecutions } from "../reader-executions.js";
+import type { ReaderTeamDirectoryPage } from "../reader-teams.js";
 import { uiIcon } from "../ui-icons.js";
 import { renderReaderArtifacts, type ContextArtifactSourceState } from "./reader-artifacts.js";
 import type { ContextArtifact } from "../providers/shared/session-protocol.js";
 import type { ReaderRelationMarkup } from "./reader-relations.js";
 import type { ReaderRelations } from "../reader-relations.js";
+import { renderReaderTeams } from "./reader-teams.js";
 import type { SessionNavigationContext } from "../navigation-context.js";
 import type { ConversationCompaction } from "../protocol-runtime.js";
 import type { InheritedContextView, MessagePresentationPhase, OwnedReaderChildDescriptor, OwnedReaderProjection } from "../providers/interface.js";
@@ -317,13 +319,13 @@ function renderChildReaderLink(child: ReaderChildTarget, provider = "opencode", 
   const href = `/${escapeHtml(childProvider)}/session/${encodeURIComponent(childId)}`;
   if (isOwnedReaderChild(child)) {
     return `<details class="subagent-reader-link subagent-reader-link-disclosure${childInferred ? " subagent-reader-link-inferred" : ""}" data-reader-child-disclosure data-reader-child-provider="${escapeHtml(childProvider)}" data-reader-child-session="${escapeHtml(childId)}" data-reader-child-state="${child.available ? "recorded" : "unavailable"}">
-      <summary class="subagent-existing-link"><span class="subsession-kicker">${escapeHtml(childInferred ? t("detail.inferred_link") : t("detail.subsession"))}</span><span class="subsession-title">${escapeHtml(title)}</span><span class="subsession-meta">${escapeHtml(t("detail.reader_open_child"))}</span></summary>
+      <summary class="subagent-existing-link"><span class="subsession-kicker">${escapeHtml(childInferred ? t("detail.related_history") : t("detail.subsession"))}</span><span class="subsession-title">${escapeHtml(title)}</span><span class="subsession-meta">${escapeHtml(t("detail.reader_open_child"))}</span></summary>
       <div class="reader-child-disclosure-body"><div data-reader-child-preview-state>${escapeHtml(child.available ? t("detail.reader_open_child") : t("conversation.inspector_session_unavailable"))}</div><div data-reader-child-token-state></div><a class="reader-child-history-link" data-reader-open data-reader-provider="${escapeHtml(childProvider)}" data-reader-session="${escapeHtml(childId)}" href="${href}">${escapeHtml(t("detail.reader_child_history"))}</a></div>
     </details>`;
   }
   return `<p class="subagent-reader-link${inferred ? " subagent-reader-link-inferred" : ""}" data-session-id="${escapeHtml(childId)}" data-reader-child-state="${child.session.available === false ? "unavailable" : "recorded"}">
     <a class="subagent-existing-link" data-reader-open data-reader-provider="${escapeHtml(childProvider)}" data-reader-session="${escapeHtml(childId)}" href="${href}">
-      <span class="subsession-kicker">${escapeHtml(inferred ? t("detail.inferred_link") : t("detail.subsession"))}</span>
+      <span class="subsession-kicker">${escapeHtml(inferred ? t("detail.related_history") : t("detail.subsession"))}</span>
       <span class="subsession-title">${escapeHtml(title)}</span>
       <span class="subsession-meta">${escapeHtml(t("detail.reader_open_child"))}</span>
     </a>
@@ -1869,7 +1871,7 @@ export function renderReaderTaskDetail(
       <summary><span class="reader-branch-name">${escapeHtml(name)}</span>${states.length ? `<span class="reader-branch-state" title="${escapeHtml(t("detail.reader_branch_state"))}">${escapeHtml(states.join(" · "))}</span>` : ""}</summary>
       <div class="reader-branch-body">
         ${child && !available ? `<p class="reader-relationship-empty">${escapeHtml(t("conversation.agent_child_unavailable"))}</p>` : ""}
-        ${available ? `<a class="reader-child-history-link" data-reader-open data-reader-provider="${escapeHtml(child!.provider)}" data-reader-session="${escapeHtml(child!.sessionId)}" href="${escapeHtml(href)}">${escapeHtml(t("detail.reader_child_history"))}</a>${childTarget && isOwnedReaderChild(childTarget) && childTarget.link === "inferred" ? `<small>${escapeHtml(t("detail.inferred_link"))}</small>` : ""}` : ""}
+        ${available ? `<a class="reader-child-history-link" data-reader-open data-reader-provider="${escapeHtml(child!.provider)}" data-reader-session="${escapeHtml(child!.sessionId)}" href="${escapeHtml(href)}">${escapeHtml(t("detail.reader_child_history"))}</a>${childTarget && isOwnedReaderChild(childTarget) && childTarget.link === "inferred" ? `<small>${escapeHtml(t("detail.related_history"))}</small>` : ""}` : ""}
         <div data-reader-task-runs>${renderReaderTaskRuns(group, provider, sessionId)}</div>
         ${available ? `<details class="reader-task-overview"><summary>${escapeHtml(t("detail.reader_task_overview"))}</summary><section class="reader-task-preview" data-reader-task-preview data-reader-provider="${escapeHtml(child!.provider)}" data-reader-session="${escapeHtml(child!.sessionId)}" data-loading-label="${escapeHtml(t("detail.reader_preview_loading"))}" data-error-label="${escapeHtml(t("detail.reader_preview_error"))}"><p data-reader-preview-status role="status">${escapeHtml(t("detail.reader_preview_loading"))}</p><div data-reader-preview-content></div><button type="button" data-reader-preview-retry hidden>${escapeHtml(t("detail.reader_preview_retry"))}</button></section>${dispatchSource ? `<div class="reader-task-dispatch-source">${renderReaderEventSourceLink(dispatchSource.provider, dispatchSource.sessionId, dispatchSource.eventId, t("detail.reader_dispatch_source"))}</div>` : ""}</details>` : ""}
       </div>
@@ -1908,7 +1910,7 @@ function renderReaderBranches(initialPage: ConversationTaskDirectoryPage, tree: 
   return `<div data-reader-task-graph-host>${graph}</div><div data-reader-task-status role="status"></div><details class="reader-task-map" data-reader-task-map${graph ? "" : " open"}><summary>${escapeHtml(t("detail.activity_all_tasks", { count: String(initialPage.total) }))}</summary><section data-reader-task-directory data-reader-task-directory-url="${escapeHtml(readerTaskDirectoryUrl(provider, sessionId))}"><form data-reader-task-directory-search><input type="search" data-reader-task-directory-query aria-label="${escapeHtml(t("detail.reader_tasks_search"))}" placeholder="${escapeHtml(t("detail.reader_tasks_search"))}"><button type="submit">${escapeHtml(t("library.search_action"))}</button><span data-reader-task-directory-status role="status"></span></form><div data-reader-task-directory-pages>${directoryPage}</div></section></details><div class="reader-branches" data-reader-task-details>${taskDetails}</div>`;
 }
 
-function renderReaderRelationshipRail(view: ConversationViewModel | null, provider: string, sessionId: string, tree: SessionTree | null, ownedReader: OwnedReaderProjection | null = null, readerRelations: ReaderRelations | null = null) {
+function renderReaderRelationshipRail(view: ConversationViewModel | null, provider: string, sessionId: string, tree: SessionTree | null, ownedReader: OwnedReaderProjection | null = null, readerRelations: ReaderRelations | null = null, readerTeams: ReaderTeamDirectoryPage | null = null) {
   const cards = view?.cards || [];
   const observations = cards.flatMap((card) => (card.channel || []).map((item) => ({ card, item })));
   const turnBoundaries = view?.turnBoundaries || [];
@@ -1931,7 +1933,7 @@ function renderReaderRelationshipRail(view: ConversationViewModel | null, provid
     ok: true as const, provider, sessionId, query: "", size: 50, offset: 0,
     total: cards.length, items: groupConversationCards(cards, provider, sessionId), nextCursor: null
   };
-  const branches = renderReaderBranches(initialDirectory, tree, provider, sessionId, ownedReader, readerRelations);
+  const branches = cards.length ? renderReaderBranches(initialDirectory, tree, provider, sessionId, ownedReader, readerRelations) : "";
   const relationshipRecords = (view?.inspector?.relationships || []).filter((relationship) => relationship.otherSession);
   const relationships = relationshipRecords.map((relationship) => {
     const target = relationship.otherSession;
@@ -1943,7 +1945,7 @@ function renderReaderRelationshipRail(view: ConversationViewModel | null, provid
       : `<span data-reader-source data-reader-provider="${escapeHtml(target.provider)}" data-reader-session="${escapeHtml(target.sessionId)}" data-reader-anchor="${escapeHtml(targetAnchor)}">${escapeHtml(relationship.otherSessionAvailable === false ? t("conversation.inspector_session_unavailable") : t("conversation.inspector_not_recorded"))}</span>`;
     return `<li data-reader-relationship data-reader-time-known="${relationship.timestamp !== null ? "true" : "false"}"><span>${escapeHtml(t(`conversation.relationship_${relationship.type}`))}</span> ${link}${relationship.timestamp !== null ? `<time>${escapeHtml(formatTime(relationship.timestamp))}</time>` : `<small>${escapeHtml(t("detail.reader_time_unknown"))}</small>`}</li>`;
   }).join("\n");
-  const hasFacts = cards.length > 0 || relationshipRecords.length > 0;
+  const hasFacts = cards.length > 0 || relationshipRecords.length > 0 || Boolean(readerTeams?.total);
   if (!hasFacts) return "";
   const recorded = observations.length + turnBoundaries.length;
   const evidenceMarkup = recorded
@@ -1951,6 +1953,7 @@ function renderReaderRelationshipRail(view: ConversationViewModel | null, provid
     : "";
   const overview = `<aside class="reader-collaboration" data-reader-collaboration data-reader-task-error-label="${escapeHtml(t("progressive.load_failed"))}" data-reader-task-retry-label="${escapeHtml(t("progressive.retry"))}" aria-label="${escapeHtml(t("detail.reader_collaboration"))}">
     <div class="reader-collaboration-heading"><h2>${escapeHtml(t("detail.reader_collaboration_title"))}</h2><button type="button" class="reader-collaboration-close" data-reader-collaboration-close aria-label="${escapeHtml(t("detail.reader_collaboration_close"))}">${uiIcon("x")}</button></div>
+    ${readerTeams ? renderReaderTeams(readerTeams) : ""}
     ${branches}
     <details class="reader-activity-disclosure" data-reader-activity-disclosure><summary>${escapeHtml(t("detail.activity_disclosure"))}</summary><section class="reader-activity-host" data-reader-activity-host="/api/${encodeURIComponent(provider)}/session/${encodeURIComponent(sessionId)}/reader/activity" data-loading-label="${escapeHtml(t("detail.activity_loading"))}" data-error-label="${escapeHtml(t("detail.activity_error"))}" aria-label="${escapeHtml(t("detail.activity_title"))}"><p data-reader-activity-status role="status">${escapeHtml(t("detail.activity_loading"))}</p><button type="button" data-reader-activity-retry hidden>${escapeHtml(t("progressive.retry"))}</button><div data-reader-activity-view></div></section></details>
     <details class="reader-inspector-disclosure" data-reader-inspector>
@@ -1976,6 +1979,7 @@ export function renderSessionReaderPane({
   provider = "opencode",
   conversationCompactions = [],
   conversationView = null,
+  readerTeams = null,
   readerRelations = null,
   readerExecutions = null,
   inheritedContext = null,
@@ -1984,7 +1988,7 @@ export function renderSessionReaderPane({
   canReadContextArtifacts = false,
   canReadContextArtifactEvidence = false,
   deferExecution = true
-}: { session: any; sessionTree?: SessionTree | null; ownedReader?: OwnedReaderProjection | null; messages?: any[]; partsByMessage?: Map<any, any>; provider?: string; conversationCompactions?: ConversationCompaction[]; conversationView?: ConversationViewModel | null; readerRelations?: ReaderRelations | null; readerExecutions?: ReaderExecutions | null; inheritedContext?: InheritedContextView | null; contextArtifacts?: ContextArtifact[]; contextArtifactSourceState?: ContextArtifactSourceState | null; canReadContextArtifacts?: boolean; canReadContextArtifactEvidence?: boolean; deferExecution?: boolean }) {
+}: { session: any; sessionTree?: SessionTree | null; ownedReader?: OwnedReaderProjection | null; messages?: any[]; partsByMessage?: Map<any, any>; provider?: string; conversationCompactions?: ConversationCompaction[]; conversationView?: ConversationViewModel | null; readerTeams?: ReaderTeamDirectoryPage | null; readerRelations?: ReaderRelations | null; readerExecutions?: ReaderExecutions | null; inheritedContext?: InheritedContextView | null; contextArtifacts?: ContextArtifact[]; contextArtifactSourceState?: ContextArtifactSourceState | null; canReadContextArtifacts?: boolean; canReadContextArtifactEvidence?: boolean; deferExecution?: boolean }) {
   const title = session.title || session.slug || session.id;
   const placedCardIds = new Set<string>();
   const relationMarkup = appendReaderExecutionMarkers(renderReaderRelations(readerRelations), readerExecutions);
@@ -2023,7 +2027,7 @@ export function renderSessionReaderPane({
         ${artifactMarkup}
         ${conversationMarkup}
         ${inheritedContextMarkup}
-        ${renderReaderRelationshipRail(conversationView, provider, String(session.id), effectiveTree, ownedReader, readerRelations)}
+        ${renderReaderRelationshipRail(conversationView, provider, String(session.id), effectiveTree, ownedReader, readerRelations, readerTeams)}
       </div>
     </div>
   </div>`;

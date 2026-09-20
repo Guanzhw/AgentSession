@@ -54,6 +54,8 @@ export interface Actor {
   id: string;
   kind: ActorKind;
   name: string | null;
+  /** Provider-recorded human-readable role or responsibility. */
+  description?: string | null;
   providerActorId?: string | null;
   teamId?: string | null;
   memberActorIds?: string[];

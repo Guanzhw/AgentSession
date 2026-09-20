@@ -520,6 +520,32 @@ For DSH, keep compatibility metadata synchronized with the checked-in snapshot:
 - session format `3` (with frozen readable v0/v1/v2 historical generations);
   current SQLite schema `null`, legacy schema `17`.
 
+Teams Reader field refresh, verified 2026-09-20: the local Windows installation
+is `0.1.5-rc.1`; official HEAD/tag `dsh-v0.1.6-alpha.2` is
+`ddefc45fbc7f8e46dd73185e68295696d1297887`. npm `latest`/`next` are `0.1.5-rc.2`
+and `alpha` is `0.1.6-alpha.2`. This is a check of the fields consumed below, not
+a replacement of the full compatibility snapshot above.
+[Official Teams types](https://github.com/deepseek-ai/deepseek-harness/blob/ddefc45fbc7f8e46dd73185e68295696d1297887/packages/experimental/agent-team/src/types.ts)
+retain full member/task descriptions and message content blocks in version-2
+payloads. The [mailbox](https://github.com/deepseek-ai/deepseek-harness/blob/ddefc45fbc7f8e46dd73185e68295696d1297887/packages/experimental/agent-team/src/mailbox.ts)
+records enqueue before delivery; delivered means the target saved the message,
+not that its task completed.
+
+`getReaderCoordinationContent()` resolves a queued body by owned source sequence
+and message ID; fresh file revision checks protect continued reading. Typed Task
+and Actor descriptions feed separate lazy content routes. `src/reader-teams.ts`
+uses explicit normalized team membership, member-owned assignments, directed
+messages and delivery timestamps. Its directory defaults to 8 items (maximum
+24), assignments to 12 (maximum 50), and exchanges to 50; each has continuation.
+The existing normalized `team-member:<id>` run is bound to its member actor so
+the ordinary task view omits that duplicate representation. Native source anchors
+and ordinary workflow tasks remain intact.
+
+The current local installation has no experimental Team component or real team
+transcript. Schema-shaped fixtures pass through the actual DSH parser, routes and
+desktop browser; native cooperative inference remains a separate acceptance item
+in the [delivery plan](design/runtime-delivery-plan.md#6-第-4-阶段交付团队协作).
+
 JSONL is the primary backend. Test raw and multi-frame `.jsonl.zstd`, packed
 `text-chunks`/`reasoning-chunks`/`tool-call-chunks`, zero-based upstream
 sequence, range-encoded `sourceEventSeqs`, header identity, `request/header` and

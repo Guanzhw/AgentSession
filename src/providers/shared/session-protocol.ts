@@ -244,6 +244,8 @@ export interface Task {
   kind: string;
   status: TaskStatus;
   title: string | null;
+  /** Provider-recorded human-readable task instructions. */
+  description?: string | null;
   parentTaskId?: string | null;
   /** Native spawn tool call id when the task was launched through a tool. */
   toolCallId?: string | null;

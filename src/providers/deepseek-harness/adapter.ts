@@ -10,6 +10,7 @@ import {
   createSessionFileStore,
   createStructuredViewCache,
   createStructuredViewMethods,
+  sessionFileSignature,
   searchNormalizedMessages,
   type TokenFieldMapping
 } from "../shared/file-adapter-helpers.js";
@@ -28,6 +29,7 @@ import {
 import { buildDshSessionProtocol, buildDshSessionProtocolV3, type DshProtocolChild } from "./protocol.js";
 import { finalizeSessionProtocolV3 } from "../shared/session-protocol-v3.js";
 import { buildDshRuntimeEnvironment } from "./runtime-environment.js";
+import { dshTeamCoordinationContent } from "./coordination-content.js";
 
 function getDshDir() {
   return getConfig().dshDir;
@@ -301,6 +303,22 @@ const deepseekHarness = {
 
   getMessages(sessionId) {
     return sessionFiles.get(sessionId)?.messages || [];
+  },
+
+  getReaderCoordinationContent(sessionId, observation) {
+    const captured = sessionFiles.captureSession(sessionId);
+    return captured ? dshTeamCoordinationContent(captured.records, observation) : null;
+  },
+
+  getReaderCoordinationContentRevision(sessionId) {
+    const entry = sessionFiles.get(sessionId);
+    if (!entry) return `${sessionId}:missing`;
+    try {
+      return sessionFileSignature(entry.filePath, lstatSync(entry.filePath));
+    } catch (error: any) {
+      if (error?.code === "ENOENT") return `${path.resolve(entry.filePath)}:missing`;
+      throw error;
+    }
   },
 
   getInheritedContext(sessionId): InheritedContextView | null {

@@ -39,7 +39,8 @@ export function readerCoordinationContentPath(provider: string, sessionId: strin
 export function renderReaderCoordinationItem(
   item: Omit<ConversationChannelItem, "kind"> & { kind: string },
   provider: string,
-  sessionId: string
+  sessionId: string,
+  timing?: { timestampLabel: string; deliveredAt?: number | null }
 ): string {
   const owner = item.sourceEventRef?.session || { provider, sessionId };
   const eventId = item.sourceEventRef?.eventId || item.eventId;
@@ -47,7 +48,16 @@ export function renderReaderCoordinationItem(
     ? renderReaderEventSourceLink(owner.provider, owner.sessionId, eventId, t("detail.reader_coordination_content_source"))
     : "";
   const direction = [item.senderName, item.recipientName].filter(Boolean).join(" → ");
-  const time = item.timestamp === null ? t("detail.reader_time_unknown") : new Date(item.timestamp).toISOString().replace("T", " ").replace("Z", " UTC");
+  const formatTime = (value: number | null) => value === null
+    ? t("detail.reader_time_unknown")
+    : new Date(value).toISOString().replace("T", " ").replace("Z", " UTC");
+  const time = formatTime(item.timestamp);
+  const timestampMarkup = timing
+    ? `<span class="reader-coordination-time"><span>${escapeHtml(timing.timestampLabel)}</span><time class="agent-channel-time">${escapeHtml(time)}</time></span>`
+    : `<time class="agent-channel-time">${escapeHtml(time)}</time>`;
+  const deliveredMarkup = timing?.deliveredAt === undefined
+    ? ""
+    : `<span class="reader-coordination-delivered-at">${escapeHtml(t("detail.reader_team_delivered_at", { time: formatTime(timing.deliveredAt) }))}</span>`;
   const stateKey = `conversation.coordination_state_${item.state}`;
   const state = t(stateKey);
   const impliedState = { spawn: "started", "child-turn-completed": "completed", "result-delivery": "delivered" }[item.kind];
@@ -55,7 +65,7 @@ export function renderReaderCoordinationItem(
     ? ` <span class="agent-channel-state">${escapeHtml(state === stateKey ? item.state : state)}</span>` : "";
   return `<li class="agent-channel-item reader-coordination-item" data-reader-coordination-item data-reader-observation-id="${escapeHtml(item.id)}" data-reader-kind="${escapeHtml(item.kind)}" data-reader-state="${escapeHtml(item.state)}" data-channel-kind="${escapeHtml(item.kind)}" data-channel-id="${escapeHtml(item.id)}">
     <details class="reader-coordination-exchange" data-reader-coordination-content data-reader-coordination-content-url="${escapeHtml(readerCoordinationContentPath(provider, sessionId, item.id))}">
-      <summary><span class="agent-channel-kind reader-coordination-kind">${escapeHtml(readerCoordinationKindLabel(item.kind))}</span>${stateMarkup}<time class="agent-channel-time">${escapeHtml(time)}</time>${direction ? `<span class="agent-channel-direction">${escapeHtml(direction)}</span>` : ""}</summary>
+      <summary><span class="agent-channel-kind reader-coordination-kind">${escapeHtml(readerCoordinationKindLabel(item.kind))}</span>${stateMarkup}${timestampMarkup}${deliveredMarkup}${direction ? `<span class="agent-channel-direction">${escapeHtml(direction)}</span>` : ""}</summary>
       <div class="reader-coordination-content-panel" data-reader-coordination-content-panel aria-live="polite"></div>
       ${source ? `<div class="reader-coordination-content-actions">${source}</div>` : ""}
     </details>

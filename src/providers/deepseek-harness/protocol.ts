@@ -834,6 +834,7 @@ export function buildDshSessionProtocol(input: DshProtocolInput): SessionProtoco
       kind: "team-task",
       status: native.status,
       title: native.subject,
+      description: native.description,
       assignee: native.ownerId,
       owner: native.ownerId,
       correlationId: native.id,
@@ -1257,7 +1258,12 @@ export function buildDshSessionProtocolV3(
       existingTeam.memberActorIds = [...(existingTeam.memberActorIds || []), memberActor.id];
       memberActor.teamId = existingTeam.id;
     }
+    const memberRunId = `team-member:${memberId}`;
+    if (base.agentRuns.some((run) => run.id === memberRunId) && !memberActor.runIds?.includes(memberRunId)) {
+      memberActor.runIds = [...(memberActor.runIds || []), memberRunId];
+    }
     memberActor.name = firstString(member.name, memberId);
+    memberActor.description = firstString(member.description);
   }
 
   // Parent-owned catalog facts are complete direct-child discovery evidence.

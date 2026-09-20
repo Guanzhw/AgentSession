@@ -61,9 +61,16 @@ attention summaries stay in their recorded positions.
 Correlated async calls link their separation and return positions. Opening an
 execution shows main/background time lanes and overlapping calls; all wait steps
 continue in pages of 50 and link to complete commands and outputs. Current real
-coverage is Codex outer `exec` / `wait` calls. Nested terminal processes are not
-correlated by interpreting script text. Missing returns show the last observation;
-a stop request is distinct from an observed ending.
+coverage includes Codex outer `exec` / `wait` calls and independently identified
+`exec_command` / `write_stdin` background commands. Nested terminal processes are
+not correlated by interpreting script text. Missing returns show the last observation;
+sent input, stop requests and observed endings remain distinct.
+Explicit team records add a shared team/member graph and directed communication
+links in the same panel. Select a member to read assignments and exchanges, or a
+link to read messages in that direction. Assignments and messages have separate
+continuations and expandable full content. Ordinary parent/child tasks retain
+their meaning. Native Teams and isolated format-fixture verification are tracked
+separately in the [delivery plan](docs/design/runtime-delivery-plan.md).
 The collaboration panel supports keyboard opening and navigation through tasks
 and sources. Opening moves focus into the panel; Escape or its close button
 closes it and returns focus to the opener. With reduced motion enabled, source
@@ -284,6 +291,12 @@ records the separately audited upstream HEAD `0140d656…`:
   local SQLite v3 validation was not completed (recorded explicitly).
 
 ## DeepSeek Harness compatibility
+
+On 2026-09-20, the member, assignment and message-body fields used by Teams Reader
+were checked against official `dsh-v0.1.6-alpha.2`; the local installation is
+`0.1.5-rc.1`. Isolated format fixtures pass the actual Reader path, while native
+team-session acceptance remains open. This targeted check is separate from the
+full provider snapshot below; see the [provider guide](docs/CONTRIBUTING-PROVIDER.md#deepseek-harness-requirements).
 
 The DSH adapter follows official `dsh-v0.1.5-alpha.2` (commit
 `b2e3b2a0125854567a4a5fcba75782e42fe84901`, package

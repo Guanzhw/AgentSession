@@ -22,6 +22,7 @@ export function layout(title: string, body: string, page = "home", { provider = 
   <link rel="stylesheet" href="/static/app-shell.css">
   ${!reader && (page === "home" || page === "search") ? '<link rel="stylesheet" href="/static/library.css">' : ""}
   ${reader ? '<link rel="stylesheet" href="/static/reader.css">' : ""}
+  ${reader ? '<link rel="stylesheet" href="/static/reader-teams.css">' : ""}
   <link rel="stylesheet" href="/static/vendor/highlight.js/github.min.css">
 </head>
 <body data-page="${escapeHtml(page)}" data-provider="${escapeHtml(provider || "")}" data-manageable="${manageable ? "true" : "false"}">

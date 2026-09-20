@@ -53,7 +53,7 @@ export function loadReaderCoordinationContent(disclosure, { offset = 0, reload =
     } catch (error) {
       console.error("Unable to load exchange content:", error);
       const stale = error.code === "stale_content";
-      const missing = error.code === "observation_not_found";
+      const missing = error.code === "observation_not_found" || error.code === "selection_not_found";
       if (stale || missing) more?.remove();
       else if (more) more.disabled = false;
       message(missing ? "detail.reader_coordination_content_unavailable"
@@ -793,6 +793,7 @@ export function initSessionReader({ ft, showToast } = {}) {
     swapRevision += 1;
     inlineRevision += 1;
     setStatus("");
+    if (!replay) savePaneState(activePane());
     const ownerPane = link.closest("[data-reader-pane]") || activePane();
     const provider = link.dataset.readerProvider || providerOf(ownerPane);
     const session = link.dataset.readerSession || sessionOf(ownerPane);
@@ -823,7 +824,6 @@ export function initSessionReader({ ft, showToast } = {}) {
     const canonicalTargetAnchor = target.dataset.readerCanonicalAnchor || anchor;
     if (!replay) {
       sourceUrl.hash = canonicalTargetAnchor;
-      savePaneState(activePane());
       recordHistory(keyOf(activePane()), inlinePanes.has(key) ? inlineSourceHref(sourceUrl, key) : sourceHref);
       updateShell(activePane());
     }

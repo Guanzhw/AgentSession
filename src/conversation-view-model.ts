@@ -17,6 +17,7 @@ import {
   sortReaderCoordinationByRecordedTime
 } from "./reader-coordination.js";
 import type { CoordinationObservation } from "./providers/shared/session-protocol-v3.js";
+import { readerTeamCoveredRunIds, readerTeamCoveredTaskIds } from "./reader-teams.js";
 import type {
   ContextProjection,
   CoordinationProjection,
@@ -610,7 +611,11 @@ function taskGroupSearchText(group: ConversationTaskGroup): string {
 
 function conversationTaskGroupStates(protocol: SessionProtocolV3) {
   const focus = protocol.session!.ref;
-  const states = conversationCardStates(protocol);
+  const coveredTaskIds = readerTeamCoveredTaskIds(protocol);
+  const coveredRunIds = readerTeamCoveredRunIds(protocol);
+  const states = conversationCardStates(protocol)
+    .filter((state) => (!state.taskId || !coveredTaskIds.has(state.taskId))
+      && (!state.runId || !coveredRunIds.has(state.runId)));
   const groups = groupConversationCards(states.map((state) => state.view), focus.provider, focus.sessionId);
   return { states, groups };
 }

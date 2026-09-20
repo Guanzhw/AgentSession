@@ -1,5 +1,5 @@
 /**
- * Checked-in compatibility evidence for the newest official DSH release.
+ * Checked-in compatibility evidence for the dated official DSH snapshot below.
  *
  * Refresh 2026-09-10: tag `dsh-v0.1.5-alpha.2`, commit
  * `b2e3b2a0125854567a4a5fcba75782e42fe84901`. Native Session format v3 keeps
