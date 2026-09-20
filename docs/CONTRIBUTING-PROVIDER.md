@@ -531,6 +531,17 @@ payloads. The [mailbox](https://github.com/deepseek-ai/deepseek-harness/blob/dde
 records enqueue before delivery; delivered means the target saved the message,
 not that its task completed.
 
+Native Teams sample, 2026-09-20: an isolated Windows `0.1.6-alpha.2` CLI and
+`@deepseek-ai/dsh-experimental-agent-team-profile` generated one lead and two fresh
+member sessions using only `deepseek-flash`. The durable lead log contains two
+member-owned completed tasks, writer-to-reviewer mail and reviewer-to-lead mail,
+with separate delivery receipts. Reader loads their full assignment/message
+bodies and both child histories. Default DSH settings and credentials are unchanged.
+This release defaults to Messages at `https://api.deepseek.com/anthropic`; the
+old explicit Chat root caused one 404 during setup, then the same session resumed
+successfully with the correct Messages root. Detailed run and UI checks live in
+the [acceptance ledger](design/runtime-acceptance-evidence.md).
+
 `getReaderCoordinationContent()` resolves a queued body by owned source sequence
 and message ID; fresh file revision checks protect continued reading. Typed Task
 and Actor descriptions feed separate lazy content routes. `src/reader-teams.ts`

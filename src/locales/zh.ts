@@ -298,6 +298,7 @@ export const zh = {
   "detail.reader_team_members_and_assignments": "成员与分工",
   "detail.reader_team_communication": "成员间通信",
   "detail.reader_team_membership": "团队成员",
+  "detail.reader_team_session_agent": "本会话 Agent",
   "detail.reader_team_assignments": "{count} 项分工",
   "detail.reader_team_messages": "{count} 次往来",
   "detail.reader_team_member_counts": "{tasks} 项分工 · {messages} 次往来",

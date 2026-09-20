@@ -89,6 +89,50 @@ test("team provider identity cannot shadow a member actor that shares the root p
   assert.equal(lead.member.assignmentCount, 1);
 });
 
+test("native Team ids remain technical while unnamed Team and current-session labels are localized", () => {
+  const teamHeader = { ...header };
+  delete teamHeader.agentPreset;
+  const records = [teamHeader,
+    event("team/member", 0, { version: 2, teamId: rootId, member: {
+      id: "reviewer-id", name: "Reviewer", description: "Review the draft", provider: "spawn", context: "fresh", phase: "active"
+    } }),
+    event("team/message/queued", 1, { version: 2, teamId: rootId, message: {
+      id: "review-to-lead", senderId: "reviewer-id", senderName: "Reviewer", targetId: rootId,
+      delivery: "quiet", content: [{ type: "text", text: "The review is complete." }]
+    } })
+  ];
+  const input = { session: extractDshMeta(records, rootId), records, messages: [], children: [] };
+  const protocol = finalizeSessionProtocolV3(buildDshSessionProtocolV3(input, buildDshSessionProtocol(input)));
+  const team = protocol.actors.find((actor) => actor.kind === "team");
+  const lead = protocol.actors.find((actor) => actor.id === `actor:dsh:session:${rootId}`);
+  assert.equal(team.name, null);
+  assert.equal(team.providerActorId, rootId);
+  assert.equal(lead.name, null);
+  assert.equal(lead.providerActorId, rootId);
+
+  setLocale("en");
+  const english = readerTeamDirectory(protocol);
+  assert.deepEqual(english.map((item) => item.teamName), ["Team", "Team"]);
+  assert.equal(english.find((item) => item.kind === "member").member.name, "Reviewer");
+  const englishEdge = english.find((item) => item.kind === "communication");
+  assert.equal(englishEdge.communication.recipientName, "This session's agent");
+  const englishDetail = deriveReaderTeamDetailPage(protocol, {
+    provider: "deepseek-harness", sessionId: rootId, key: englishEdge.key
+  });
+  assert.equal(englishDetail.exchanges[0].recipientName, "This session's agent");
+
+  setLocale("zh");
+  const chinese = readerTeamDirectory(protocol);
+  assert.deepEqual(chinese.map((item) => item.teamName), ["团队", "团队"]);
+  assert.equal(chinese.find((item) => item.kind === "communication").communication.recipientName, "本会话 Agent");
+  setLocale("en");
+
+  const unrelated = [teamHeader, event("plugin/team-note", 0, { teamId: rootId })];
+  const unrelatedInput = { session: extractDshMeta(unrelated, rootId), records: unrelated, messages: [], children: [] };
+  const unrelatedProtocol = finalizeSessionProtocolV3(buildDshSessionProtocolV3(unrelatedInput, buildDshSessionProtocol(unrelatedInput)));
+  assert.equal(unrelatedProtocol.actors.find((actor) => actor.id === `actor:dsh:session:${rootId}`).name, rootId);
+});
+
 test("team directory and exchange cursors page every item and bind continuations to the same selection", () => {
   const protocol = teamProtocol();
   const firstDirectory = deriveReaderTeamDirectoryPage(protocol, { provider: "deepseek-harness", sessionId: rootId, size: 2 });

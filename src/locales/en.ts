@@ -297,6 +297,7 @@ export const en = {
   "detail.reader_team_members_and_assignments": "Membership and assignments",
   "detail.reader_team_communication": "Member communication",
   "detail.reader_team_membership": "team member",
+  "detail.reader_team_session_agent": "This session's agent",
   "detail.reader_team_assignments": "{count} assignments",
   "detail.reader_team_messages": "{count} messages",
   "detail.reader_team_member_counts": "{tasks} assignments · {messages} messages",

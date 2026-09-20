@@ -63,6 +63,14 @@ export interface DshProtocolInput {
   children: DshProtocolChild[];
 }
 
+const DSH_NATIVE_TEAM_EVENT_TYPES = new Set([
+  "team/member", "team/task", "team/message/queued", "team/message/delivered"
+]);
+
+function isDshNativeTeamEvent(event: DshRecord): boolean {
+  return DSH_NATIVE_TEAM_EVENT_TYPES.has(event.type);
+}
+
 function asNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
@@ -1199,10 +1207,17 @@ export function buildDshSessionProtocolV3(
     }));
   };
   const parentHeader = dshHeader(input.records) || {};
+  const rootOwnsNativeTeam = owned.some((event) => {
+    if (!isDshNativeTeamEvent(event)) return false;
+    const data = eventData(event);
+    return firstString(data.teamId) === sessionId;
+  });
   const parent = addActor(actor({
     id: `actor:dsh:session:${sessionId}`,
     kind: "agent",
-    name: firstString(parentHeader.agentPreset, sessionId),
+    // The root session owns the native Team, but its session id remains
+    // provider identity rather than a display name.
+    name: firstString(parentHeader.agentPreset) || (rootOwnsNativeTeam ? null : sessionId),
     providerActorId: sessionId,
     sessionRef: ownRef,
     runIds: [],
@@ -1230,7 +1245,7 @@ export function buildDshSessionProtocolV3(
 
   const teamActorById = new Map<string, Actor>();
   for (const event of owned) {
-    if (event.type !== "team/member" && event.type !== "team/task" && event.type !== "team/message/queued" && event.type !== "team/message/delivered") continue;
+    if (!isDshNativeTeamEvent(event)) continue;
     const data = eventData(event);
     const teamId = firstString(data.teamId);
     if (!teamId || teamActorById.has(teamId)) continue;
@@ -1239,7 +1254,10 @@ export function buildDshSessionProtocolV3(
     const team = actor({
       id: `actor:dsh:team:${teamId}`,
       kind: "team",
-      name: teamId,
+      // DSH records a canonical Team id but no separate human Team name.
+      // Keep that id in providerActorId and let the Reader present the
+      // generic localized Team label.
+      name: null,
       providerActorId: teamId,
       sessionRef: null,
       runIds: [],

@@ -134,7 +134,8 @@ OpenClaw 自 2026.7.2-beta.1 起把 session/transcript 主存储迁入每 agent 
 ## DeepSeek Harness compatibility
 
 2026-09-20 已针对最新官方 `dsh-v0.1.6-alpha.2` 局部复核团队成员、分工与消息正文格式，
-本机安装为 `0.1.5-rc.1`；Teams 阅读已通过隔离格式样例实页验证，尚无原生团队合作实录。
+默认本机安装仍为 `0.1.5-rc.1`；另在独立 `0.1.6-alpha.2` 环境取得两成员原生 Teams 实录，
+仅使用 `deepseek-flash`，已在 Reader 读取各自分工、成员间交接及返回主 Agent 的完整正文。
 这次字段核验与下方完整 provider 快照分别维护，详见[provider 说明](docs/CONTRIBUTING-PROVIDER.md#deepseek-harness-requirements)。
 
 DSH 适配器当前跟随官方 `dsh-v0.1.5-alpha.2`（commit

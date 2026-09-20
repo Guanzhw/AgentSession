@@ -29,10 +29,48 @@
 | P10 来源和历史归属 | 统一内联相关历史，root-owned URL 可复现子来源；实测父搜索 196 条、工具展开、关闭后准确位置与焦点保留；三层新页/刷新及 native/scalar 来源通过；单独阅读时所有页面操作一致切换 owner。9 月 19 日修复原生 hash 复用旧位置，真实主/子历史的跳转、Back/Forward 和窄屏刷新通过 | 来源定位缺陷已修复；初始化前未登记历史的工具栏可返回提示仍是近似判断，全产品视觉验收继续开放 |
 | P11 视觉与可访问性 | 桌面 EN/ZH、明暗主题的 Library/Usage/Settings 与 Reader；子历史返回、侧栏键盘进入/Escape、可见焦点、长代码局部滚动、reduced-motion 通过；早期窄屏记录保留 | 用户整体视觉反馈开放；原始 Markdown 的标题跳级是已知语义问题，本轮保留原文结构，未声明全站 WCAG 认证 |
 | P12 Provider 与缺失证据 | 七个已安装 provider 的 Reader/API 数据样本；不存在会话的 404；规范化诊断。OpenClaw 使用本地 smoke transcript | 样本通过不代表每个 provider 的所有演进特性均已覆盖；逐场景注明实际来源 |
-| P13 团队成员合作 | 显式团队分支图与双向通信关系进入 Reader；原生格式隔离 fixture 经过真实 DSH adapter/server/browser，15 项分工、53 次往来、长正文末尾、无独立子文件及 11 成员目录续页可读；路由与客户端覆盖错误/修订重试 | 缺少原生两成员合作→结果汇入主线的真实记录；没有将合成 fixture 或七 provider API 通过当作原生 Teams 验收 |
+| P13 团队成员合作 | 显式成员图和通信方向；格式 fixture 覆盖大目录、长正文及缺少子文件；另以 DSH 0.1.6-alpha.2 / deepseek-flash 原生双成员记录验证完整分工、成员间交接、结果汇入主线及两份子历史 | 原生阅读路径通过；显式关闭及 Back 恢复成员侧栏和焦点。用户的整体视觉反馈另行收集 |
 | P14 后台程序与异步执行 | 真实 Codex 外层 exec/wait 成功与失败；独立终端 3 个程序/14 步，正常结束、轮询、Ctrl-C 请求后 exit 0；正文分离/返回、时间泳道、全日志、明暗主题及 Back 已检查 | 取消终态、尚未返回、多后台并行以明确 fixture 覆盖为主；未从停止请求推断已取消 |
 
 ## P 编号之外的明确剩余项
+
+### P13 原生 Teams 协作验收（2026-09-20）
+
+用户授权后，在 `tmp/native-team-acceptance/runtime` 安装独立 Windows DSH CLI 与
+experimental-agent-team-profile，均为 `0.1.6-alpha.2`。独立 `DSH_HOME`、成员工作目录、
+元数据库和 3466 Reader 服务不影响默认配置；生成后的 provider 文件只读。
+
+- 主会话：`session-bd76c197-d2d9-4fc0-9e8c-c430041b2759`。
+- reviewer：`348e24aa-4c9e-4568-bc18-9ed3bc84733a`；writer：
+  `73690e7f-b426-435b-8da0-7381a583d665`。均为 fresh 成员，保存独立完整历史。
+- 两项共享任务各自经过 pending → in_progress → completed，并由对应成员持有。
+  reviewer 任务依赖 writer。writer 将候选文案直发 reviewer，reviewer 核对字数并将结果
+  发回主 Agent；两条消息分别有排队和送达记录，目标会话也保存收到的正文。
+- 主 Agent 最后采用相同文案并说明交接过程，末行 `NATIVE_TEAM_ACCEPTANCE_DONE`；
+  当时两项任务已完成，两名成员已 idle。30 次实际工具调用均为 Teams 操作，工作目录为空。
+- 26 条成功 assistant 消息均使用 `deepseek-official / deepseek-flash`。成功主流程运行
+  20.07 秒。记录用量为未缓存输入 18,001、缓存读取 259,968、输出 4,721，合计 282,690。
+  初次因错误沿用 Chat 根地址返回 404，改用新版 Messages `/anthropic` 根地址后恢复同一
+  会话；该失败及一次标题请求未记录用量，不把以上合计当作完整账单。
+- 实页已从成员图打开两人的职责/完整任务，从方向边读完 writer → reviewer 和
+  reviewer → 主 Agent 两次消息，并进入两份子历史读到最终答复。
+  原生验收发现 ID 标签不易读，以及显式“收起并返回”没有回到成员侧栏；随本次验收修复。
+- 最终构建后，中文桌面 1440×1000 明暗主题均检查；图、方向边与正文统一使用
+  “团队 / 本会话 Agent”，成员的真实名称保留。打开 writer 子历史后，显式关闭和浏览器
+  Back 均返回原链接焦点（约 y=242px），成员详情及已展开消息保留。图和成员详情局部
+  axe 分别为 0 违规，浏览器错误为空。当前 Node 26.5.1 和最低 22.15.0 全套均为
+  1,010/1,010；最终整站桌面 `qa:e2e` 通过，浏览器错误为空；独立审查、
+  governance/typecheck 通过。截图在本地
+  `tmp/native-team-acceptance/graph-final-{dark,light}.png` 和 `close-return-final-dark.png`。
+
+默认 `C:/Users/QQ110/.dsh` 的 settings、credentials 和 `.env` 文件在运行前后 SHA-256
+一致；没有复制或提交密钥。原生日志、运行输出和截图仅保存在本机
+`tmp/native-team-acceptance/`，没有当作合成 fixture 写入测试。
+
+三份 native `session.v3.jsonl` 的 SHA-256：主会话
+`29c6d4b4a25d57715bd8be8c23f3fab3bf6618c21af24b1a2ed26427127dbb2f`；reviewer
+`9d55e2e2eabb1640f43af544c5ca7ed5233ba5098f395d713656dd7d706f06c6`；writer
+`d2b6a330edfc821bf10e1ca6b82aad69ad98943cc9435d4ea04fe2fa19e5c8f9`。
 
 ### 本轮增量验收：第 3B、4 与第 5 阶段（2026-09-20）
 
@@ -85,7 +123,7 @@
 第 2 阶段已补齐超过 50 项的任务目录，并由局部关系图进入往来及完整子历史。
 第 3B/4 阶段将后台程序与明确团队关系接入 Reader。实现不再以原始 Work 图作为主要入口。
 
-剩余实源边界是 P13 原生团队合作、P14 未观测终态，以及 provider 没有保存的完整 memory/dream
+剩余实源边界是 P14 未观测终态，以及 provider 没有保存的完整 memory/dream
 生成历史。已保存内容可完整阅读；缺失内容与用户的视觉反馈分别跟踪，见[交付计划](runtime-delivery-plan.md)。
 
 会话库现已按记录中的父子关系展示可展开家族。真实三层、子会话搜索路径、键盘展开、

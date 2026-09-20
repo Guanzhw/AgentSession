@@ -41,9 +41,10 @@ hide later assignments and exchanges.
 
 The existing protocol gains a human-facing consumer and DSH gains its existing
 optional coordination-content capability. Ordinary conversations have no empty
-Teams panel. Tests and clearly labeled isolated fixtures cover complete navigation;
-native experimental Teams installation and real cooperative inference require the
-separate user choice recorded in the delivery plan.
+Teams panel. Tests and clearly labeled isolated fixtures cover complete navigation.
+After explicit user authorization, an isolated DSH `0.1.6-alpha.2` run produced
+native two-member cooperation using only `deepseek-flash`, preserving default
+DSH configuration. The acceptance ledger records the native reading checks.
 
 ## Verification
 

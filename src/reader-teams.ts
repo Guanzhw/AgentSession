@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { t } from "./i18n.js";
 import type { Task, TaskStatus } from "./providers/shared/session-protocol.js";
 import type { Actor, CoordinationObservation, SessionProtocolV3 } from "./providers/shared/session-protocol-v3.js";
 
@@ -169,8 +170,21 @@ function validateSession(protocol: SessionProtocolV3, provider: string, sessionI
     && (!ref || (ref.provider === provider && ref.sessionId === sessionId)));
 }
 
-function actorName(actor: Actor | undefined): string {
+function isCurrentSessionAgent(actor: Actor | undefined, protocol: SessionProtocolV3): boolean {
+  const session = protocol.session?.ref;
+  return Boolean(actor && !actor.name
+    && actor.kind === "agent"
+    && actor.sessionRef?.provider === session?.provider
+    && actor.sessionRef?.sessionId === session?.sessionId);
+}
+
+function actorName(actor: Actor | undefined, protocol?: SessionProtocolV3): string {
+  if (protocol && isCurrentSessionAgent(actor, protocol)) return t("detail.reader_team_session_agent");
   return actor?.name || actor?.providerActorId || actor?.id || "";
+}
+
+function teamName(team: Actor): string {
+  return team.name || t("runtime.team");
 }
 
 function communicationKey(teamId: string, senderActorId: string, recipientActorId: string): string {
@@ -232,16 +246,16 @@ function buildReaderTeamIndex(protocol: SessionProtocolV3): ReaderTeamIndex {
 
   const directory: ReaderTeamDirectoryItem[] = [];
   for (const team of teams) {
-    const teamName = actorName(team);
+    const teamDisplayName = teamName(team);
     for (const memberId of team.memberActorIds || []) {
       const member = actors.get(memberId);
       if (!member) continue;
       const tasks = tasksByActor.get(member.id) || [];
       directory.push({
-        kind: "member", key: memberKey(team.id, member.id), teamId: team.id, teamName,
+        kind: "member", key: memberKey(team.id, member.id), teamId: team.id, teamName: teamDisplayName,
         member: {
           teamId: team.id, actorId: member.id, providerActorId: optionalString(member.providerActorId),
-          name: actorName(member), hasDescription: Boolean(optionalString(member.description)), sessionRef: member.sessionRef || null,
+          name: actorName(member, protocol), hasDescription: Boolean(optionalString(member.description)), sessionRef: member.sessionRef || null,
           assignmentCount: tasks.length, messageCount: (messagesByActor.get(member.id) || []).length,
           responsibility: readableSummary(optionalString(member.description)) || tasks.find((task) => task.title)?.title || null
         }
@@ -254,11 +268,11 @@ function buildReaderTeamIndex(protocol: SessionProtocolV3): ReaderTeamIndex {
       const recipient = actors.get(first.recipientActorId!);
       if (!sender || !recipient) continue;
       directory.push({
-        kind: "communication", key, teamId: team.id, teamName,
+        kind: "communication", key, teamId: team.id, teamName: teamDisplayName,
         communication: {
           teamId: team.id, key,
-          senderActorId: sender.id, senderName: actorName(sender),
-          recipientActorId: recipient.id, recipientName: actorName(recipient),
+          senderActorId: sender.id, senderName: actorName(sender, protocol),
+          recipientActorId: recipient.id, recipientName: actorName(recipient, protocol),
           messageCount: messages.length
         }
       });
@@ -446,8 +460,8 @@ export function deriveReaderTeamDetailPage(protocol: SessionProtocolV3, query: {
   const page = observations.slice(offset, offset + size);
   const exchanges = page.map((observation) => ({
     observation,
-    senderName: observation.senderActorId ? actorName(index.actors.get(observation.senderActorId)) || null : null,
-    recipientName: observation.recipientActorId ? actorName(index.actors.get(observation.recipientActorId)) || null : null,
+    senderName: observation.senderActorId ? actorName(index.actors.get(observation.senderActorId), protocol) || null : null,
+    recipientName: observation.recipientActorId ? actorName(index.actors.get(observation.recipientActorId), protocol) || null : null,
     delivered: Boolean(observation.correlationId && index.deliveredAt.has(observation.correlationId)),
     deliveredAt: observation.correlationId ? index.deliveredAt.get(observation.correlationId) ?? null : null
   }));

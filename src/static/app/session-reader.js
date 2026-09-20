@@ -793,8 +793,13 @@ export function initSessionReader({ ft, showToast } = {}) {
     swapRevision += 1;
     inlineRevision += 1;
     setStatus("");
-    if (!replay) savePaneState(activePane());
     const ownerPane = link.closest("[data-reader-pane]") || activePane();
+    const sourceOriginState = !replay && ownerPane?.isConnected ? {
+      scrollX: window.scrollX,
+      scrollY: window.scrollY,
+      focus: focusIdentity(link, ownerPane)
+    } : null;
+    if (!replay) savePaneState(activePane());
     const provider = link.dataset.readerProvider || providerOf(ownerPane);
     const session = link.dataset.readerSession || sessionOf(ownerPane);
     const sourceUrl = eventSourceUrlFor(link);
@@ -820,6 +825,12 @@ export function initSessionReader({ ft, showToast } = {}) {
     if (!target) {
       setStatus(ft?.("detail.reader_source_missing") || "Source unavailable", "error", sourceHref);
       return false;
+    }
+    const inlineRecord = inlinePanes.get(key);
+    if (sourceOriginState && inlineRecord && ownerPane !== pane && ownerPane.contains(link)) {
+      inlineRecord.returnOrigin = link;
+      inlineRecord.originReturnAnchor = originIdentity(link);
+      inlineRecord.originState = sourceOriginState;
     }
     const canonicalTargetAnchor = target.dataset.readerCanonicalAnchor || anchor;
     if (!replay) {

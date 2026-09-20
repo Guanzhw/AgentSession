@@ -293,9 +293,10 @@ records the separately audited upstream HEAD `0140d656…`:
 ## DeepSeek Harness compatibility
 
 On 2026-09-20, the member, assignment and message-body fields used by Teams Reader
-were checked against official `dsh-v0.1.6-alpha.2`; the local installation is
-`0.1.5-rc.1`. Isolated format fixtures pass the actual Reader path, while native
-team-session acceptance remains open. This targeted check is separate from the
+were checked against official `dsh-v0.1.6-alpha.2`; the default local installation
+remains `0.1.5-rc.1`. An isolated `0.1.6-alpha.2` run using only `deepseek-flash`
+produced a native two-member team. Reader checks cover assigned work, the peer
+handoff and the full result returned to the lead. This targeted check is separate from the
 full provider snapshot below; see the [provider guide](docs/CONTRIBUTING-PROVIDER.md#deepseek-harness-requirements).
 
 The DSH adapter follows official `dsh-v0.1.5-alpha.2` (commit

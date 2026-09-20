@@ -894,6 +894,41 @@ test('browser Back restores a collaboration source link after it opens recorded 
   assert.equal(team.open, true, 'Back reopens the nested team details containing the source link');
 });
 
+test('inline close restores the collaboration source that launched recorded child history', async (t) => {
+  const h = readerHarness(t);
+  h.addRecordedChild();
+  const overview = h.makeElement({ readerCollaborationOverview: '' });
+  overview.tagName = 'DETAILS';
+  overview.open = true;
+  const team = h.makeElement();
+  team.tagName = 'DETAILS';
+  team.open = true;
+  const source = h.makeElement({
+    readerSource: '', readerProvider: 'fixture', readerSession: 'child', readerAnchor: 'child-source'
+  }, 'team-history-child');
+  source.href = '/fixture/session/child#child-source';
+  team.append(source);
+  overview.append(team);
+  h.root.append(overview);
+  h.window.scrollY = 720;
+  source.focus();
+
+  await h.click(source);
+  await h.flush();
+  assert.deepEqual(h.reader.getInlinePanes(), [h.child]);
+  assert.equal(overview.open, false, 'Opening the child closes the collaboration overview');
+
+  team.open = false;
+  await h.child.parentElement.querySelector('[data-reader-inline-close]').dispatchEvent({ type: 'click', preventDefault() {} });
+  await h.flush();
+
+  assert.deepEqual(h.reader.getInlinePanes(), []);
+  assert.equal(h.window.scrollY, 720);
+  assert.equal(h.document.activeElement, source, 'Close restores the initiating Team history link, not the generic child opener');
+  assert.equal(overview.open, true, 'Close reopens the collaboration overview containing the Team detail');
+  assert.equal(team.open, true, 'Close reopens the Team detail containing the source link');
+});
+
 test('source reveal closes an open collaboration overview before exposing prose', async (t) => {
   const h = readerHarness(t);
   const overview = h.makeElement({ readerCollaborationOverview: '' });
