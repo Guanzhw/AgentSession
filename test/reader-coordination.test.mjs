@@ -226,6 +226,33 @@ test("conversation cards keep repeated task assignments explicit", () => {
   assert.equal(view.cards.find((card) => card.id === "run:run-2").observationCount, 1);
 });
 
+test("inline correspondence does not repeat in its card or create a false empty-channel notice", async () => {
+  const { renderSessionReaderPane } = await import("../dist/src/views/session.js");
+  for (const count of [1, 53]) {
+    const value = protocol();
+    value.coordination = value.coordination.slice(0, count);
+    const view = deriveConversationView({
+      protocol: value,
+      work: { tasks: [], truncated: false },
+      execution: { focus: value.session.ref, runs: value.agentRuns.map((run) => ({ run })), actors: [], actorRuns: [], usage: null, truncated: false },
+      coordination: { lineage: [], observations: [], truncated: false, focus: value.session.ref },
+      context: { artifacts: [], artifactSessions: [], artifactRuns: [], lineage: [], truncated: false }
+    });
+    const readerRelations = {
+      lanes: [{ id: "worker", name: "Worker", childSession: null, runIds: ["run-1"] }], unplaced: [],
+      milestones: view.cards[0].channel.map((item, index) => ({ ...item, laneId: "worker", sequence: index,
+        sourceEventRef: { session: value.session.ref, eventId: `event-${index}` },
+        position: { messageId: "message-1", partId: null, side: "before" }
+      }))
+    };
+    const html = renderSessionReaderPane({ session: { id: "root", title: "Reader" }, provider: "codex", conversationView: view, readerRelations });
+    const card = html.slice(html.indexOf('data-agent-cards-unplaced'), html.indexOf('data-reader-collaboration-overview'));
+    assert.doesNotMatch(card, /data-reader-coordination-content-url=|No recorded channel activity/);
+    if (count > 50) assert.match(card, /data-reader-coordination-url=/, "the remaining channel page stays reachable");
+    else assert.doesNotMatch(card, /data-reader-coordination-url=/);
+  }
+});
+
 test("coordination actor fallback assigns only a globally unique card", () => {
   const value = protocol();
   value.actors = [{

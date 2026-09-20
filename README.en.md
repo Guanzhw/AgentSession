@@ -35,23 +35,28 @@ narrow layouts keep every level at the same reading width. Recorded Codex
 question replies display as questions and answers, with the original record
 available in a disclosure.
 
-Work and Events remain secondary evidence disclosures. Event paging, filters
-and existing `#tab-events` links are preserved.
+Desktop contents stays beside the document. Model, request usage and the latest
+context length are visible inline. Adjacent process-only messages share one
+compact entry; expansion preserves every original message and tool detail.
+Group usage counts those messages' own requests, excluding child-session usage.
+Work and Events open from More → Technical details without default page-bottom
+placeholders. Event paging, filters and existing `#tab-events` links are preserved.
 Conversation folds completed process using provider-recorded response phases;
 final replies, unclassified communication, and unfinished tail updates remain
 visible. Expansion, search, and anchors retain access to process content.
 Dispatches, follow-ups, and result deliveries with resolved source positions
 appear inline. A local connected strip links each to the previous or next key
-record of the same task, in recorded source order. Ordinary coordination messages
-fold into their owning process and remain reachable through expansion and exact
-source links. The on-demand Tasks & collaboration panel starts with a directed
+record of the same task, in recorded source order. Team handoffs and parent
+follow-ups have distinct labels. Child completion, result sending and receipt
+remain separate events. Each entry opens that exchange's full content and links
+to complete child history. The on-demand Tasks & collaboration panel provides a directed
 relationship map of assignments and returned results. Select a task or connection
 to read its individual exchanges. Each visual group contains up to four actor-task
 relationships; a searchable, paged directory reaches every task. Repeated runs of
 one child history share a task, with run and message continuation kept separate.
 Initial requests, latest replies and complete child histories remain expandable.
 A separate optional activity window shows work occurring at the same time.
-Per-message model and token details live under Usage & model;
+Per-message model and token details are visible in the message header;
 tools and reasoning stay independently expandable. Canonically identified tool
 input/output and reasoning bodies load when opened, with local retry and
 continuation to the end. Search still covers the complete available source.

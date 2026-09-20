@@ -152,7 +152,8 @@ test("Conversation SSR keeps unfinished commentary visible and tool detail expan
     message("tool1", "tool", 1200, [tool])
   ]);
   const thread = threadOf(html);
-  assert.doesNotMatch(thread, /data-conversation-process-count=/);
+  assert.match(thread, /data-conversation-process-count="1"/);
+  assert.ok(thread.indexOf("open commentary") < thread.indexOf("data-conversation-process-count"), "unfinished prose stays outside the tool-only unit");
   assert.match(thread, /open commentary/);
   assert.match(thread, /id="msg-tool1"[\s\S]*id="part-tool1-tool-part"[^>]*data-reader-process-anchor/);
   assert.doesNotMatch(thread, /open tool result/);

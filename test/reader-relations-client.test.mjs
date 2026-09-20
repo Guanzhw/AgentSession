@@ -173,6 +173,23 @@ const entries = [
   { lane: 'child:implementation', kind: 'result-delivery', sequence: 144, run: 'run:two' }
 ];
 
+test('inline exchange summaries select their relationship without opening the global panel', async (t) => {
+  const h = relationHarness(t, entries);
+  const entry = h.milestones[0];
+  entry.button.remove();
+  const summary = new h.Element({}, 'summary');
+  entry.body.append(summary);
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async (url) => { requests.push(url); return { ok: true, json: async () => ({ html: '' }) }; });
+  h.workbench.dispatchEvent({ type: 'click', target: summary });
+  h.flush();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(h.select.value, 'child:implementation');
+  assert.equal(h.overview.open, false);
+  assert.equal(entry.milestone.classes.has('reader-milestone-focused'), true);
+  assert.deepEqual(requests, []);
+});
+
 test('opening collaboration prioritizes task reading and loads the activity view only on demand', async (t) => {
   const h = relationHarness(t, entries);
   const host = new h.Element({ readerActivityHost: '/reader/activity', loadingLabel: 'Loading', errorLabel: 'Failed' });

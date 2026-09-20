@@ -4563,7 +4563,8 @@ test("tool-only assistant turns still render assistant metadata", () => {
 
   assert.match(html, /message-turn-assistant/);
   assert.match(html, /message-role">Assistant<\/span>/);
-  assert.match(html, /<details class="message-usage"><summary>Usage &amp; model<\/summary>/);
+  assert.match(html, /<span class="message-usage message-usage-inline"><span class="message-usage-body">/);
+  assert.doesNotMatch(html, /<details class="message-usage"/);
   assert.match(html, /openai\/gpt-5/);
 });
 

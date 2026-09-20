@@ -19,6 +19,8 @@ export function initEnhancements({ ft, formatText, showToast, escapeHtmlClient }
       const detailTabLink = event.target.closest("[data-detail-tab]");
       if (detailTabLink) {
         event.preventDefault();
+        const menu = detailTabLink.closest(".more-actions");
+        if (menu) menu.open = false;
         openReaderTarget(detailTabLink.dataset.detailTab);
         return;
       }

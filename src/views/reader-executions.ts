@@ -15,7 +15,7 @@ const source = (view: ReaderExecutions, step: ReaderExecutionStep, label = t("de
 /** Add human-facing execution landmarks to the same source-position rendering path. */
 export function appendReaderExecutionMarkers(base: ReaderRelationMarkup | null, view: ReaderExecutions | null): ReaderRelationMarkup | null {
   if (!view?.items.length) return base;
-  const markup = base || { parts: new Map(), messages: new Map(), processPositions: new Set(), toolbar: "" };
+  const markup = base || { parts: new Map(), messages: new Map(), processPositions: new Set<string>(), placedObservationIds: new Set<string>(), toolbar: "" };
   for (const item of view.items) {
     const firstYield = item.steps.find((step) => step.observation.phase === "yielded");
     const last = item.steps[item.steps.length - 1];

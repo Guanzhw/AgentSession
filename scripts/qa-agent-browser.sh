@@ -380,7 +380,7 @@ if [[ "$process_chunk_count" -gt 0 ]]; then
   assert_contains "loaded process" "$process_loaded" '"uniqueIds":true'
   assert_contains "loaded process" "$process_loaded" '"fieldsUnloaded":true'
 fi
-reader_state="$(read_ab "verify unified history reader" eval "(() => { const workbench = document.querySelector('.session-workbench[data-session-reader]'); const host = workbench?.querySelector('[data-reader-host]'); const pane = host?.querySelector('[data-reader-pane]'); const work = document.getElementById('tab-work'); const events = document.getElementById('tab-events'); return JSON.stringify({ reader: !!workbench, rootSession: workbench?.dataset.sessionId || '', currentSession: workbench?.dataset.readerCurrentSession || '', onePane: host?.querySelectorAll('[data-reader-pane]').length === 1, paneAttrs: !!pane?.dataset.readerProvider && !!pane?.dataset.readerSession && !!pane?.dataset.readerTitle, messages: !!pane?.querySelector('#session-messages'), users: pane?.querySelectorAll('#session-messages .message-turn-user').length || 0, assistants: pane?.querySelectorAll('#session-messages .message-turn-assistant').length || 0, tools: pane?.querySelectorAll('#session-messages .tool-call').length || 0, reasoning: pane?.querySelectorAll('#session-messages .reasoning-block').length || 0, inheritedSeparate: !pane?.querySelector('#session-messages [data-inherited-context]'), noPrimaryTabs: !document.querySelector('.tab-bar [role=tab]'), conversationEntry: !!document.getElementById('tab-conversation'), workDisclosure: work?.tagName === 'DETAILS' && !work.open, eventsDisclosure: events?.tagName === 'DETAILS' && !events.open, backShell: !!workbench?.querySelector('[data-reader-back]'), statusShell: !!workbench?.querySelector('[data-reader-status]') }); })()" | tr -d '[:space:]')"
+reader_state="$(read_ab "verify unified history reader" eval "(() => { const workbench = document.querySelector('.session-workbench[data-session-reader]'); const host = workbench?.querySelector('[data-reader-host]'); const pane = host?.querySelector('[data-reader-pane]'); const work = document.getElementById('tab-work'); const events = document.getElementById('tab-events'); const toc = pane?.querySelector('.reader-toc-disclosure[data-reader-toc]'); const transcript = pane?.querySelector('[data-reader-transcript]'); const grid = pane?.querySelector('.reader-pane-grid'); const tocRect = toc?.getBoundingClientRect(); const transcriptRect = transcript?.getBoundingClientRect(); const desktopParallel = !!grid && getComputedStyle(grid).display === 'grid' && !!tocRect && !!transcriptRect && tocRect.left < transcriptRect.left && tocRect.top < transcriptRect.bottom && transcriptRect.top < tocRect.bottom; return JSON.stringify({ reader: !!workbench, rootSession: workbench?.dataset.sessionId || '', currentSession: workbench?.dataset.readerCurrentSession || '', onePane: host?.querySelectorAll('[data-reader-pane]').length === 1, paneAttrs: !!pane?.dataset.readerProvider && !!pane?.dataset.readerSession && !!pane?.dataset.readerTitle, messages: !!pane?.querySelector('#session-messages'), users: pane?.querySelectorAll('#session-messages .message-turn-user').length || 0, assistants: pane?.querySelectorAll('#session-messages .message-turn-assistant').length || 0, tools: pane?.querySelectorAll('#session-messages .tool-call').length || 0, reasoning: pane?.querySelectorAll('#session-messages .reasoning-block').length || 0, inheritedSeparate: !pane?.querySelector('#session-messages [data-inherited-context]'), noPrimaryTabs: !document.querySelector('.tab-bar [role=tab]'), conversationEntry: !!document.getElementById('tab-conversation'), workDisclosure: work?.tagName === 'DETAILS' && !work.open, eventsDisclosure: events?.tagName === 'DETAILS' && !events.open, tocDefaultOpen: !!pane?.querySelector('.reader-toc-disclosure[data-reader-toc][open]'), desktopParallel, backShell: !!workbench?.querySelector('[data-reader-back]'), statusShell: !!workbench?.querySelector('[data-reader-status]') }); })()" | tr -d '[:space:]')"
 assert_contains "unified history reader" "$reader_state" '"reader":true'
 assert_contains "unified history reader" "$reader_state" '"currentSession":"'$SAMPLE_SESSION_ID'"'
 assert_contains "unified history reader" "$reader_state" '"onePane":true'
@@ -391,6 +391,8 @@ assert_contains "unified history reader" "$reader_state" '"noPrimaryTabs":true'
 assert_contains "unified history reader" "$reader_state" '"conversationEntry":true'
 assert_contains "unified history reader" "$reader_state" '"workDisclosure":true'
 assert_contains "unified history reader" "$reader_state" '"eventsDisclosure":true'
+assert_contains "unified history reader" "$reader_state" '"tocDefaultOpen":true'
+assert_contains "unified history reader" "$reader_state" '"desktopParallel":true'
 assert_positive_count "recorded user history" "$(printf '%s' "$reader_state" | grep -o '"users":[0-9]*' | cut -d: -f2)"
 assert_positive_count "recorded assistant history" "$(printf '%s' "$reader_state" | grep -o '"assistants":[0-9]*' | cut -d: -f2)"
 assert_positive_count "recorded tool history" "$(printf '%s' "$reader_state" | grep -o '"tools":[0-9]*' | cut -d: -f2)"
@@ -421,6 +423,12 @@ if [[ "$detail_copy_id_count" != "1" ]]; then
   echo "Detail page should keep one copy-session-ID action in More, got $detail_copy_id_count" >&2
   exit 1
 fi
+detail_more_tabs_state="$(read_ab "verify More reader detail links" eval "(() => { const links = [...document.querySelectorAll('.session-actions [data-detail-tab]')]; const work = links.filter((link) => link.dataset.detailTab === 'tab-work'); const events = links.filter((link) => link.dataset.detailTab === 'tab-events'); return JSON.stringify({ work: work.length === 1, events: events.length === 1, targets: [...work, ...events].every((link) => document.getElementById(link.dataset.detailTab)?.classList.contains('reader-secondary-disclosure')) }); })()" | tr -d '[:space:]')"
+assert_contains "More reader detail links" "$detail_more_tabs_state" '"work":true'
+assert_contains "More reader detail links" "$detail_more_tabs_state" '"events":true'
+assert_contains "More reader detail links" "$detail_more_tabs_state" '"targets":true'
+more_tab_open_state="$(read_ab "verify More reader detail link behavior" eval "(() => { const workLink = document.querySelector('.session-actions [data-detail-tab=tab-work]'); const eventsLink = document.querySelector('.session-actions [data-detail-tab=tab-events]'); const work = document.getElementById('tab-work'); const events = document.getElementById('tab-events'); if (!workLink || !eventsLink || !work || !events) return false; work.open = false; events.open = false; workLink.click(); const workOpened = work.open; work.open = false; eventsLink.click(); const eventsOpened = events.open; events.open = false; return workOpened && eventsOpened; })()")"
+assert_contains "More reader detail link behavior" "$more_tab_open_state" 'true'
 
 for sidebar_entry in '[data-reader-collaboration-toggle]' '.reader-collaboration-overview-summary'; do
   ab "focus task sidebar entry" focus "$sidebar_entry" >/dev/null
@@ -544,12 +552,13 @@ else
   fi
 fi
 
-secondary_layout_state="$(read_ab "verify secondary reader disclosures" eval "(() => { const workbench = document.querySelector('.session-workbench[data-session-reader]'); const work = document.getElementById('tab-work'); const events = document.getElementById('tab-events'); return JSON.stringify({ noPrimaryTabs: !document.querySelector('.tab-bar [role=tab]'), workDetails: work?.tagName === 'DETAILS', eventsDetails: events?.tagName === 'DETAILS', workClosed: work ? !work.open : false, eventsClosed: events ? !events.open : false, conversationEntry: !!document.getElementById('tab-conversation'), currentPane: !!workbench?.querySelector('[data-reader-host] [data-reader-pane]') }); })()" | tr -d '[:space:]')"
+secondary_layout_state="$(read_ab "verify secondary reader disclosures" eval "(() => { const workbench = document.querySelector('.session-workbench[data-session-reader]'); const work = document.getElementById('tab-work'); const events = document.getElementById('tab-events'); return JSON.stringify({ noPrimaryTabs: !document.querySelector('.tab-bar [role=tab]'), workDetails: work?.tagName === 'DETAILS', eventsDetails: events?.tagName === 'DETAILS', workClosed: work ? !work.open : false, eventsClosed: events ? !events.open : false, hiddenSecondary: document.querySelectorAll('.reader-secondary-disclosure:not([open])').length === 2, conversationEntry: !!document.getElementById('tab-conversation'), currentPane: !!workbench?.querySelector('[data-reader-host] [data-reader-pane]') }); })()" | tr -d '[:space:]')"
 assert_contains "secondary reader disclosures" "$secondary_layout_state" '"noPrimaryTabs":true'
 assert_contains "secondary reader disclosures" "$secondary_layout_state" '"workDetails":true'
 assert_contains "secondary reader disclosures" "$secondary_layout_state" '"eventsDetails":true'
 assert_contains "secondary reader disclosures" "$secondary_layout_state" '"workClosed":true'
 assert_contains "secondary reader disclosures" "$secondary_layout_state" '"eventsClosed":true'
+assert_contains "secondary reader disclosures" "$secondary_layout_state" '"hiddenSecondary":true'
 assert_contains "secondary reader disclosures" "$secondary_layout_state" '"currentPane":true'
 
 deep_link_state="$(read_ab "verify Conversation deep link" eval "(() => { const target = document.querySelector('[data-reader-pane] #session-messages [id^=msg_]'); if (!target) return JSON.stringify({ ready: false }); location.assign(location.pathname + '?qa_deep_link=conversation#' + target.id); return JSON.stringify({ ready: true, id: target.id }); })()")"
@@ -663,6 +672,10 @@ fi
 
 token_chip_count="$(read_ab "count token chips" get count ".message-tokens .token-chip")"
 assert_positive_count "token chips" "$token_chip_count"
+
+reader_usage_state="$(read_ab "verify inline reader usage" eval "(() => { const pane = document.querySelector('[data-reader-pane]'); return JSON.stringify({ inline: pane?.querySelectorAll('.message-usage-inline').length || 0, details: pane?.querySelectorAll('details.message-usage').length || 0 }); })()" | tr -d '[:space:]')"
+assert_positive_count "inline reader usage" "$(printf '%s' "$reader_usage_state" | grep -o '"inline":[0-9]*' | cut -d: -f2)"
+assert_contains "inline reader usage" "$reader_usage_state" '"details":0'
 
 reasoning_token_chip_count="$(read_ab "count separate reasoning token chips" get count ".message-tokens .token-chip-label >> text=R")"
 if [[ "$reasoning_token_chip_count" != "0" ]]; then

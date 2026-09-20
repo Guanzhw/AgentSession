@@ -151,3 +151,50 @@ test("only wholly ordinary positions are marked for process folding", () => {
   assert.deepEqual([...value.processPositions], [readerRelationPositionKey("ordinary:tool", "after")]);
   assert.match(value.parts.get(readerRelationPositionKey("ordinary:tool", "after")), /id="milestone-ordinary"/);
 });
+
+test("Team peer handoffs and root follow-ups are visible, expandable reading nodes", () => {
+  const peer = {
+    ...milestone("peer-handoff", 13, "message", "peer:tool"),
+    position: { messageId: "peer", partId: "peer:tool", side: "before", withinExecution: true },
+    state: "delivered", turnId: "turn-peer", senderActorId: "writer", senderName: "Writer",
+    recipientActorId: "reviewer", recipientName: "Reviewer", teamPeerMessage: true, messageAction: "handoff"
+  };
+  const rootFollowup = {
+    ...milestone("root-followup", 14, "message", "root:tool"),
+    state: "unknown", turnId: "turn-root", senderActorId: "root", senderName: "Root",
+    recipientActorId: "writer", recipientName: "Writer", teamPeerMessage: false, messageAction: "follow-up"
+  };
+  const value = renderReaderRelations({ lanes: [{ ...lane, purpose: "Inspect the patch" }], unplaced: [], milestones: [peer, rootFollowup] });
+  const peerMarkup = value.parts.get(readerRelationPositionKey("peer:tool", "before"));
+  assert.match(peerMarkup, /Writer → Reviewer/);
+  assert.match(peerMarkup, /Inspect the patch/);
+  assert.match(peerMarkup, /data-reader-coordination-content/);
+  assert.match(peerMarkup, /data-reader-coordination-content-url="\/api\/fixture\/session\/root\/reader\/coordination\/peer-handoff\/content"/);
+  assert.match(peerMarkup, /reader-coordination-technical/);
+  assert.match(peerMarkup, /data-reader-open[^>]*data-reader-session="child\/a"/);
+  assert.ok(value.placedObservationIds.has("peer-handoff"));
+  assert.ok(value.placedObservationIds.has("root-followup"));
+  assert.deepEqual([...value.processPositions], []);
+  const rootMarkup = value.parts.get(readerRelationPositionKey("root:tool", "after"));
+  assert.match(rootMarkup, /Additional instructions/);
+  assert.match(peerMarkup, /Handoff/);
+  assert.match(peerMarkup, /During this execution/);
+  assert.doesNotMatch(peerMarkup, /reader-milestone-main/);
+  assert.doesNotMatch(peerMarkup, /data-reader-lane-focus/);
+  assert.match(peerMarkup, /<\/details><div class="reader-coordination-content-actions"><a[^>]*data-reader-open/);
+});
+
+test("many observations at one source position expand locally with complete anchors and step links", () => {
+  const milestones = Array.from({ length: 60 }, (_, index) => milestone(`batch-${index}`, index + 1, "spawn", "dispatch:tool"));
+  const value = renderReaderRelations({ lanes: [lane], unplaced: [], milestones });
+  const html = value.parts.get(readerRelationPositionKey("dispatch:tool", "after"));
+  const overflow = html.indexOf('<details class="reader-collaboration-overflow">');
+  assert.ok(overflow > 0);
+  assert.equal((html.slice(0, overflow).match(/data-reader-milestone /g) || []).length, 3);
+  assert.equal((html.slice(overflow).match(/data-reader-milestone /g) || []).length, 57);
+  assert.equal(new Set([...html.matchAll(/id="(milestone-batch-\d+)"/g)].map((match) => match[1])).size, 60);
+  assert.match(html.slice(0, overflow), /data-reader-anchor="milestone-batch-3"/);
+  assert.equal(value.placedObservationIds.size, 60);
+  assert.equal((html.match(/data-reader-coordination-content-url=/g) || []).length, 60);
+  assert.equal((html.match(/data-reader-open /g) || []).length, 60);
+});

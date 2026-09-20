@@ -203,6 +203,10 @@ test("session shell has one reader host and secondary evidence targets", () => {
   assert.match(html, /id="tab-conversation"/);
   assert.match(html, /id="tab-work"/);
   assert.match(html, /id="tab-events"/);
+  assert.match(html, /<details class="reader-toc-disclosure" data-reader-toc open>/, "contents are visible on first load");
+  assert.match(html, /<a href="#tab-work" data-detail-tab="tab-work">Technical details: work and usage<\/a>/);
+  assert.match(html, /<a href="#tab-events" data-detail-tab="tab-events">Technical details: event log<\/a>/);
+  assert.doesNotMatch(html, /<summary>(Work|Events)<\/summary>/, "technical targets no longer have unexplained page-bottom labels");
   assert.doesNotMatch(html, /id="tab-btn-work"/);
   assert.doesNotMatch(html, /id="tab-btn-conversation"/);
   assert.doesNotMatch(html, /child-owned body/);

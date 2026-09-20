@@ -679,8 +679,7 @@ export function sessionCard(s: any, active = false, { showCheckbox = false, prov
   </article>`;
 }
 
-export function messageHeader(role: any, meta: any = {}) {
-  const safeRole = escapeHtml(["user", "assistant", "agent"].includes(role) ? t(`detail.role_${role}`) : role || "unknown");
+export function messageUsage(meta: any = {}) {
   const model = meta.model ? `<span class="message-model">${escapeHtml(meta.model)}</span>` : "";
   const requestCount = Math.max(0, Number(meta.tokenRequestCount) || (meta.tokens ? 1 : 0));
   const requestCountText = formatCompactCount(requestCount);
@@ -696,12 +695,18 @@ export function messageHeader(role: any, meta: any = {}) {
     ? ` title="Total tokens${requestCount > 1 ? ` across ${escapeHtml(requestCountText)} model requests` : ""}: ${escapeHtml(formatCompactCount(meta.tokens.total))}"`
     : "";
   const tokenMarkup = tokens ? `<span class="message-tokens"${total}>${tokens}</span>` : "";
+  return [model, tokenMarkup, contextLabel, requestLabel].filter(Boolean).join("");
+}
+
+export function messageHeader(role: any, meta: any = {}) {
+  const safeRole = escapeHtml(["user", "assistant", "agent"].includes(role) ? t(`detail.role_${role}`) : role || "unknown");
+  const usage = messageUsage(meta);
   const time = meta.time ? `<time class="message-time">${escapeHtml(formatTime(meta.time))}</time>` : "";
 
   return `<header class="message-meta">
       <span class="message-role">${safeRole}</span>
       ${time}
-      ${model || tokenMarkup || contextLabel || requestLabel ? `<details class="message-usage"><summary>${escapeHtml(t("detail.usage_and_model"))}</summary><div class="message-usage-body">${model}${tokenMarkup}${contextLabel}${requestLabel}</div></details>` : ""}
+      ${usage ? `<span class="message-usage message-usage-inline"><span class="message-usage-body">${usage}</span></span>` : ""}
     </header>`;
 }
 

@@ -390,6 +390,8 @@ function recordedEvent(
 ): SessionEventEnvelope {
   const compaction = dshCompactionRecord(event);
   const approval = approvalDetail(event);
+  const messageId = durableMessageId(event);
+  const toolCallId = durableToolCallId(event);
   const fields = {
     id: `event:dsh:${event.seq}`,
     sessionId,
@@ -397,6 +399,8 @@ function recordedEvent(
     phase: eventPhase(event),
     turnId: asNumber(eventData(event).turn) != null ? String(eventData(event).turn) : null,
     correlationId: eventCorrelation(event),
+    ...(messageId ? { messageId } : {}),
+    ...(toolCallId ? { toolCallId } : {}),
     provenance: {
       fidelity: "recorded" as const,
       sourceType: `dsh.session-event:${String(event.type)}`,
@@ -972,6 +976,30 @@ function dshMessageSource(event: DshRecord): DshRecord | null {
   const data = eventData(event);
   const message = isRecord(data.message) ? data.message : null;
   return message && isRecord(message.source) ? message.source : null;
+}
+
+/** The Reader surface keeps durable append records only, never stream attempts or replacements. */
+function durableMessageId(event: DshRecord): string | null {
+  if (event.surfaceOp !== undefined && event.surfaceOp !== "append") return null;
+  const data = eventData(event);
+  if (event.type === "user/message") {
+    const source = isRecord(data.source) ? data.source : null;
+    return source?.kind === "user" ? firstString(data.id) : null;
+  }
+  if (event.type === "assistant/message") {
+    const message = isRecord(data.message) ? data.message : null;
+    return firstString(message?.id);
+  }
+  return null;
+}
+
+/** Tool calls are the normalized tool-message identity; durable results share that call. */
+function durableToolCallId(event: DshRecord): string | null {
+  if (event.type === "tool/call") return firstString(eventData(event).callId);
+  if (event.type === "tool/result" && (event.surfaceOp === undefined || event.surfaceOp === "append")) {
+    return eventCorrelation(event);
+  }
+  return null;
 }
 
 type DshGoalPhase = "active" | "paused" | "blocked" | "complete";

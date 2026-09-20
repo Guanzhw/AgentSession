@@ -1,6 +1,6 @@
 # Runtime Reader 验收记录
 
-更新：2026-09-20。依据 [产品呈现规范](runtime-presentation-contract.md) 的 P1–P14。
+更新：2026-09-21。依据 [产品呈现规范](runtime-presentation-contract.md) 的 P1–P14。
 
 当前阶段状态与下一动作统一记录在[分阶段交付计划](runtime-delivery-plan.md)；本文保存检查细节。
 
@@ -14,6 +14,34 @@
 
 这里区分自动化覆盖、真实记录验证和未完成的阅读体验验收。已完成的切片不等于整个产品目标达成。
 私人会话原文和截图仅保存在本地 QA 目录，不进入仓库。
+
+## 集中呈现修订：R1–R4（2026-09-21）
+
+当前状态：实现和最终桌面验收完成，待提交与远端 CI。本节记录正式 Reader 的检查，
+样稿静态检查和下方历史回归各自保留原范围。
+
+- R1：真实 DSH reviewer 子历史的 6 条相邻纯执行消息在正文中合为一个 6 项执行入口；6 项原文仍可展开，模型与用量直接显示，用量按各 owned 消息归属。
+- R2：桌面 Reader 的左侧目录默认打开、保持粘性并与正文并列；本轮不增加窄屏实现或测试。
+- R3：6 个 DSH 协作标记使用精确来源锚点放回正文；同一工具调用/结果区间标为“执行期间”。writer → reviewer 的交接与 reviewer → root 的“收到消息”保持不同语义，后者没有按语义猜成结果。
+- R4：More 中提供 Work/Events 技术入口，正文底部技术区默认收起。真实 Codex 父会话 `01a08b93-9674-7b90-acb3-6fde919efebf` 的派遣 `call_XNjru6XiSNXZs74BZH2eBTmn`（15:09:48 UTC）先于下一条用户消息 `msg_01a08bde-2e6a-7601-beca-39b22ab09976`；同一 child 的两个 receipt `amsg_01a08bf0-8bd2-78c1-9b6f-6778418b4a84`（15:29:52 UTC）与 `amsg_01a08bfc-9fa3-7950-abae-cb55804727ff`（15:43:04 UTC）可追溯，第一条 receipt 的正文完整可读，派遣内容明确为加密不可读。
+
+该 child 的完整历史已核对打开、关闭和 Back，重复 DOM ID 为 0。60 项结构测试只验证本地 3 项加溢出结构、全部 ID 与子链接，不替代真实几十名成员的视觉验收。
+
+最终构建的检查结果：
+
+- `npm test`：1,022/1,022，通过全部测试，0 跳过；`npm run pre-push` 的治理与类型检查通过。
+- 重启后的整站桌面 `npm run qa:e2e` 通过，浏览器错误为空。实际 DSH 页面另检查深色/浅色、键盘展开、目录、子历史关闭返回和 More；关闭后焦点回到原入口，事件记录标题位于顶栏下方约 88px。
+- DSH writer → reviewer 的交付原文保存候选的 25 字说法，reviewer → 本会话 Agent 的收到消息保存更正为 26 字的审校原文；分别按同一消息 ID 读取，不用后来的回复替代。最新页面 6 个协作节点、规范 child lane 及前后跳转通过；本轮检查浏览器错误为 0。
+- 七个本地 provider 的会话页、Reader API、Protocol API 均返回 200，协议 `validation.ok=true`；三个不存在的 provider/session 路径均为 404。OpenClaw/Pi 仍是安装 smoke 样本，不代表复杂工作覆盖。
+- 独立源码审查后，主线程复核最终改动与真实页面。`package-lock.json` 的无关修改保留；没有修改 provider 历史，没有重新产生付费模型样本，也未增加窄屏验证。
+
+最终本地日志：`logs/reader-concentrated-release-{tests,e2e,providers,review}.log`。
+本轮实际截图已在当前任务中展示：审校子历史合并后的执行行、浅色的完整审校原文、正文局部交接。
+入口为 `http://127.0.0.1:3466/deepseek-harness/session/session-bd76c197-d2d9-4fc0-9e8c-c430041b2759`：
+展开正文交接 → 读取当次原文 → 展开完整子会话 → 展开/收起 6 条执行 → 收起并返回。
+提交与远端 CI 结果在[交付计划](runtime-delivery-plan.md)补记；用户对正式页面的视觉反馈单独记录。
+
+## 历史场景覆盖表
 
 | 场景 | 已有证据 | 尚需完成 |
 | --- | --- | --- |

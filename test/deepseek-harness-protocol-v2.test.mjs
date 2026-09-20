@@ -103,6 +103,8 @@ test("DSH rc.8 protocol v2 maps recorded control/team facts without message proj
   assert.equal(event("request.header")?.category, "model");
   assert.equal(event("request.context")?.category, "model");
   assert.equal(event("tool.call")?.normalizedKind, "tool.called");
+  assert.equal(event("tool.call")?.toolCallId, "call-1");
+  assert.equal(event("tool.result")?.toolCallId, "call-1");
   assert.equal(event("context.compaction")?.category, "context");
   assert.equal(event("control.inbox.spliced")?.category, "control");
   assert.equal(event("team.member")?.category, "team");
@@ -110,6 +112,7 @@ test("DSH rc.8 protocol v2 maps recorded control/team facts without message proj
   assert.equal(event("team.message.queued")?.category, "team");
   assert.equal(event("team.message.delivered")?.category, "team");
   const assistantEvent = protocol.events.find((candidate) => candidate.providerData?.eventType === "assistant/message");
+  assert.equal(assistantEvent?.messageId, "assistant-1");
   assert.deepEqual(assistantEvent?.providerData?.usage, { input: 100, output: 20, reasoning: 10, total: 135, cache: { read: 5, write: 0 } });
   const turnEndEvent = protocol.events.find((candidate) => candidate.providerData?.eventType === "turn/end");
   assert.equal(turnEndEvent?.providerData?.reasonKind, "interrupted");
@@ -122,6 +125,27 @@ test("DSH rc.8 protocol v2 maps recorded control/team facts without message proj
   assert.equal(memberRun?.childSessionId, childId);
   assert.ok(protocol.relationships.some((relation) => relation.toSessionId === childId && relation.provenance.sourceType === "dsh.session-event:team/member"));
   assert.equal(protocol.events.some((candidate) => JSON.stringify(candidate).includes("do not project")), false);
+});
+
+test("DSH source fields bind only durable normalized message and tool records", () => {
+  const sessionId = "dsh-source-fields";
+  const recordsValue = records(sessionHeader(sessionId, { version: 2 }), [
+    { type: "user/message", surfaceOp: "append", data: { id: "user-1", source: { kind: "user" }, content: [{ type: "text", text: "Inspect" }] } },
+    { type: "assistant/attempt", data: { turn: 1, step: 1, stream: [{ type: "text", text: "partial" }] } },
+    { type: "assistant/message", surfaceOp: { startSeq: 0, endSeq: 1 }, data: { turn: 1, step: 1, message: { id: "replaced-answer", content: [{ type: "text", text: "old" }] } } },
+    { type: "assistant/message", surfaceOp: "append", data: { turn: 1, step: 1, message: { id: "answer-1", content: [{ type: "text", text: "final" }] } } },
+    { type: "tool/call", data: { turn: 1, step: 1, callId: "call-1", name: "read" } },
+    { type: "tool/result", surfaceOp: "append", data: { turn: 1, step: 1, message: { source: { kind: "tool", callId: "call-1" }, content: [{ type: "tool-result", toolCallId: "call-1" }] } } }
+  ]);
+  const protocol = buildDshSessionProtocol({ session: extractDshMeta(recordsValue), records: recordsValue,
+    messages: dshRecordsToMessages(recordsValue, sessionId), children: [] });
+  const source = (type) => protocol.events.find((entry) => entry.providerData?.eventType === type);
+  assert.equal(source("user/message")?.messageId, "user-1");
+  assert.equal(source("assistant/attempt")?.messageId, undefined);
+  const assistantEvents = protocol.events.filter((entry) => entry.providerData?.eventType === "assistant/message");
+  assert.deepEqual(assistantEvents.map((entry) => entry.messageId), [undefined, "answer-1"]);
+  assert.equal(source("tool/call")?.toolCallId, "call-1");
+  assert.equal(source("tool/result")?.toolCallId, "call-1");
 });
 
 test("DSH protocol preserves dangling workflow references without inventing a child session", () => {

@@ -14,23 +14,42 @@ function markdownBlock(value: unknown): string | null {
   return json ? `\`\`\`json\n${json}\n\`\`\`` : null;
 }
 
-/** Resolve the exact parent-owned mailbox enqueue; delivery rows carry no body. */
+function queuedMessageEvent(records: DshRecord[], correlationId: string, sourceId?: string): DshRecord | null {
+  const matches = dshOwnedEvents(records).filter((candidate) => {
+    if (candidate.type !== "team/message/queued") return false;
+    const message = record(record(candidate.data)?.message);
+    return message?.id === correlationId && (sourceId === undefined || String(candidate.seq) === sourceId);
+  });
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function deliveryMatches(records: DshRecord[], observation: CoordinationObservation): boolean {
+  const sourceId = observation.provenance.sourceId;
+  if (!sourceId || (observation.eventId && observation.eventId !== `event:dsh:${sourceId}`)) return false;
+  return dshOwnedEvents(records).some((candidate) => (
+    candidate.type === "team/message/delivered"
+    && String(candidate.seq) === sourceId
+    && record(candidate.data)?.messageId === observation.correlationId
+  ));
+}
+
+/** Resolve an exact owned enqueue; a delivery may read that same recorded message body. */
 export function dshTeamCoordinationContent(
   records: DshRecord[],
   observation: CoordinationObservation
 ): ReaderCoordinationContent | null {
-  if (observation.kind !== "message"
-    || observation.provenance.sourceType !== "dsh.session-event:team/message/queued"
-    || !observation.correlationId) return null;
-  const event = dshOwnedEvents(records).find((candidate) => {
-    if (candidate.type !== "team/message/queued") return false;
-    const data = record(candidate.data);
-    const message = record(data?.message);
-    const sourceId = String(candidate.seq);
-    return message?.id === observation.correlationId
-      && sourceId === observation.provenance.sourceId
-      && (!observation.eventId || observation.eventId === `event:dsh:${sourceId}`);
-  });
+  if (!observation.correlationId) return null;
+  const queued = observation.kind === "message"
+    && observation.provenance.sourceType === "dsh.session-event:team/message/queued"
+    && observation.provenance.sourceId
+    ? queuedMessageEvent(records, observation.correlationId, observation.provenance.sourceId)
+    : observation.kind === "mailbox-delivery"
+      && observation.provenance.sourceType === "dsh.session-event:team/message/delivered"
+      && deliveryMatches(records, observation)
+      ? queuedMessageEvent(records, observation.correlationId)
+      : null;
+  const event = queued && (observation.kind !== "message" || !observation.eventId || observation.eventId === `event:dsh:${queued.seq}`)
+    ? queued : null;
   const message = record(record(event?.data)?.message);
   if (!Array.isArray(message?.content)) return null;
   const text = message.content.map(markdownBlock).filter((value): value is string => value !== null).join("\n\n");

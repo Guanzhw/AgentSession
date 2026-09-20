@@ -2,9 +2,10 @@ import { t } from "../i18n.js";
 import { escapeHtml } from "../markdown.js";
 import { buildPartsFromProviderMessages } from "../session-queries.js";
 import { questionAnswersText } from "../providers/shared/question-answers.js";
+import { sumTokenUsage } from "../providers/shared/token-usage.js";
 import type { SessionMessageNode, SessionPartNode, SessionTree } from "../providers/opencode/session-tree.js";
 import { isSubagentTool, mergeToolMetadata } from "../providers/shared/subagent-tools.js";
-import { formatDuration, formatLocalizedDurationMs, formatTime, formatTokens, messageBubble, messageHeader, reasoningBlock, todoList, toolCallBlock } from "./components.js";
+import { formatDuration, formatLocalizedDurationMs, formatTime, formatTokens, messageBubble, messageHeader, messageUsage, reasoningBlock, todoList, toolCallBlock } from "./components.js";
 import { anchorId } from "./anchors.js";
 import { layout } from "./layout.js";
 import { readerEventHref, renderReaderEventSourceLink, renderReaderCoordinationItem } from "./reader-coordination.js";
@@ -21,7 +22,7 @@ import type { ReaderRelations } from "../reader-relations.js";
 import { renderReaderTeams } from "./reader-teams.js";
 import type { SessionNavigationContext } from "../navigation-context.js";
 import type { ConversationCompaction } from "../protocol-runtime.js";
-import type { InheritedContextView, MessagePresentationPhase, OwnedReaderChildDescriptor, OwnedReaderProjection } from "../providers/interface.js";
+import type { InheritedContextView, MessagePresentationPhase, OwnedReaderChildDescriptor, OwnedReaderProjection, TokenUsage } from "../providers/interface.js";
 import type {
   ConversationAgentCard,
   ConversationChannelItem,
@@ -311,10 +312,10 @@ function isOwnedReaderChild(child: ReaderChildTarget): child is OwnedReaderChild
   return !("session" in child);
 }
 
-function renderChildReaderLink(child: ReaderChildTarget, provider = "opencode", inferred = false) {
+function renderChildReaderLink(child: ReaderChildTarget, provider = "opencode", inferred = false, names?: Map<string, string>) {
   const childId = isOwnedReaderChild(child) ? child.sessionId : child.session.id;
-  const title = isOwnedReaderChild(child) ? (child.title || childId) : (child.session.title || child.session.slug || childId);
   const childProvider = isOwnedReaderChild(child) ? child.provider : (child.session.provider || provider);
+  const title = names?.get(`${childProvider}\u0000${childId}`) || (isOwnedReaderChild(child) ? (child.title || childId) : (child.session.title || child.session.slug || childId));
   const childInferred = isOwnedReaderChild(child) ? child.link === "inferred" : inferred;
   const href = `/${escapeHtml(childProvider)}/session/${encodeURIComponent(childId)}`;
   if (isOwnedReaderChild(child)) {
@@ -542,7 +543,8 @@ function collectTocNodes(tree: SessionTree, userDepth = 0, provider = "opencode"
   return nodes;
 }
 
-function renderTocNode(node: any) {
+function renderTocNode(node: any, childNames: Map<string, string>) {
+  const label = (node.readerSession && childNames.get(`${node.readerProvider}\u0000${node.readerSession}`)) || node.label;
   const children = Array.isArray(node.children) ? node.children : [];
   const normalizedType = String(node.type || "").toLowerCase();
   const typeName = normalizedType === "user"
@@ -553,7 +555,7 @@ function renderTocNode(node: any) {
         ? "Task"
         : normalizedType;
   const typeLabel = typeName.slice(0, 1).toUpperCase();
-  const linkTitle = [typeName, node.label, node.meta].filter(Boolean).join(" - ");
+  const linkTitle = [typeName, label, node.meta].filter(Boolean).join(" - ");
   const readerAttributes = node.readerSession
     ? ` data-reader-open data-reader-provider="${escapeHtml(node.readerProvider || "opencode")}" data-reader-session="${escapeHtml(node.readerSession)}"`
     : "";
@@ -562,7 +564,7 @@ function renderTocNode(node: any) {
     : `#${escapeHtml(node.id)}`;
   const link = `<a class="toc-link toc-${escapeHtml(node.type.toLowerCase())}" href="${escapeHtml(readerHref)}"${readerAttributes} title="${escapeHtml(linkTitle)}" style="--toc-depth:${Math.min(node.depth, 6)}">
       <span class="toc-type" title="${escapeHtml(typeName)}" aria-label="${escapeHtml(typeName)}">${escapeHtml(typeLabel)}</span>
-      <span class="toc-label">${escapeHtml(node.label)}</span>
+      <span class="toc-label">${escapeHtml(label)}</span>
       ${node.meta ? `<span class="toc-meta">${escapeHtml(node.meta)}</span>` : ""}
     </a>`;
 
@@ -573,12 +575,12 @@ function renderTocNode(node: any) {
   return `<details class="toc-group toc-group-${escapeHtml(node.type.toLowerCase())}" open>
     <summary class="toc-group-summary">${link}</summary>
     <div class="toc-children">
-      ${children.map(renderTocNode).join("\n")}
+      ${children.map((child: any) => renderTocNode(child, childNames)).join("\n")}
     </div>
   </details>`;
 }
 
-function renderToc(tree: SessionTree | null, provider = "opencode", ownedReader: OwnedReaderProjection | null = null) {
+function renderToc(tree: SessionTree | null, provider = "opencode", ownedReader: OwnedReaderProjection | null = null, childNames = new Map<string, string>()) {
   if (!tree) {
     return `<aside class="session-toc"><h2>${escapeHtml(t("detail.toc_navigate"))}</h2><p class="toc-empty">${escapeHtml(t("detail.toc_no_indexed_messages"))}</p><button class="toc-resize-handle" type="button" aria-label="${escapeHtml(t("detail.toc_resize"))}"></button></aside>`;
   }
@@ -592,7 +594,7 @@ function renderToc(tree: SessionTree | null, provider = "opencode", ownedReader:
     }
   }
   const nodes = collectTocNodes(tree, 0, provider, ownedChildrenByPart, (ownedReader?.children || []).filter((child) => child.detached));
-  const markup = nodes.map(renderTocNode).join("\n");
+  const markup = nodes.map((node) => renderTocNode(node, childNames)).join("\n");
 
   return `<aside class="session-toc">
     <div class="toc-header">
@@ -702,7 +704,7 @@ function renderPart(messageData: any, partData: any, partId: any, reasoningMarku
   return "";
 }
 
-function renderPartNode(messageData: any, part: SessionPartNode, depth = 0, provider = "opencode", reasoningMarkup = "", view: ConversationViewModel | null = null, placedCardIds: Set<string> | null = null, ownedChildren: OwnedReaderChildDescriptor[] = []): string {
+function renderPartNode(messageData: any, part: SessionPartNode, depth = 0, provider = "opencode", reasoningMarkup = "", view: ConversationViewModel | null = null, placedCardIds: Set<string> | null = null, ownedChildren: OwnedReaderChildDescriptor[] = [], placedObservationIds?: Set<string>): string {
   const isTaskPart = part.type === "tool" && isTaskTool(part.data);
   const childTargets: ReaderChildTarget[] = [...part.childSessions, ...ownedChildren];
   const isTaskWithSession = isTaskPart && childTargets.length > 0;
@@ -722,7 +724,7 @@ function renderPartNode(messageData: any, part: SessionPartNode, depth = 0, prov
     // Keep the tool's canonical part id on its native disclosure. The card's
     // wrapper therefore does not emit a second `part-*` id.
     const retainedMarkup = [taskMarkup, childMarkup].filter(Boolean).join("\n");
-    return renderAgentCard(boundCard, part, provider, retainedMarkup, String(part.sessionId || ""));
+    return renderAgentCard(boundCard, part, provider, retainedMarkup, String(part.sessionId || ""), placedObservationIds);
   }
   const renderedPart = isTaskPart
     ? renderPart(messageData, part.data, part.id, "")
@@ -987,7 +989,7 @@ function renderMessagePartsResult(message: any, depth = 0, provider = "opencode"
 
     const reasoningMarkup = pendingReasoning.join("\n");
     const isToolPart = part.type === "tool";
-    let rendered: any = renderPartNode(message.data, part, depth, provider, isToolPart ? "" : reasoningMarkup, view, placedCardIds, ownedChildrenByPart?.get(String(part.id)) || []);
+    let rendered: any = renderPartNode(message.data, part, depth, provider, isToolPart ? "" : reasoningMarkup, view, placedCardIds, ownedChildrenByPart?.get(String(part.id)) || [], relations?.placedObservationIds);
     if (rendered && reasoningMarkup && isToolPart) {
       rendered = `${renderTurnReasoning(reasoningMarkup)}\n${rendered}`;
     } else if (rendered && reasoningMarkup && !rendered.includes(reasoningMarkup) && !(part.type === "text" && !part.data?.text)) {
@@ -1033,6 +1035,59 @@ interface ConversationEntry {
   processOnly: boolean;
   hasMilestones?: boolean;
   attentionCount?: number;
+  usage?: ConversationUsage | null;
+}
+
+interface ConversationUsage {
+  model?: string;
+  tokens?: TokenUsage | null;
+  tokenRequests?: TokenUsage[];
+  tokenRequestCount?: number;
+  cacheWarning?: { previousRate: string } | null;
+  time?: number;
+}
+
+function ownedConversationUsage(data: any): ConversationUsage | null {
+  if (!data || (data.contentScope && data.contentScope !== "owned")) {
+    return null;
+  }
+  const tokenRequests = Array.isArray(data.tokenRequests)
+    ? data.tokenRequests.filter((tokens: any) => tokens && typeof tokens === "object")
+    : data.tokens && typeof data.tokens === "object" ? [data.tokens] : [];
+  const tokens = data.tokens && typeof data.tokens === "object" ? data.tokens : tokenRequests.length ? tokenRequests[0] : null;
+  if (!messageModelLabel(data) && !tokens && !data.time?.created) {
+    return null;
+  }
+  return {
+    model: messageModelLabel(data),
+    tokens,
+    tokenRequests,
+    tokenRequestCount: Number(data.tokenRequestCount) || tokenRequests.length || (tokens ? 1 : 0),
+    cacheWarning: data.cacheWarning,
+    time: data.time?.created
+  };
+}
+
+function aggregateConversationUsage(items: ConversationItem[]): ConversationUsage | null {
+  const usages = items.map((item) => item.usage).filter(Boolean) as ConversationUsage[];
+  if (!usages.length) {
+    return null;
+  }
+  const models = [...new Set(usages.map((usage) => usage.model).filter(Boolean))];
+  const requests = usages.flatMap((usage) => usage.tokenRequests || (usage.tokens ? [usage.tokens] : []));
+  const tokens = requests.length ? sumTokenUsage(requests) : null;
+  const last = usages.at(-1)!;
+  const requestCount = usages.reduce((sum, usage) => sum + (
+    usage.tokenRequests?.length || usage.tokenRequestCount || (usage.tokens ? 1 : 0)
+  ), 0);
+  return {
+    model: models.join(" · "),
+    tokens,
+    tokenRequests: requests,
+    tokenRequestCount: requestCount,
+    cacheWarning: usages.length === 1 ? last.cacheWarning : null,
+    time: usages.find((usage) => usage.time)?.time
+  };
 }
 
 /**
@@ -1079,7 +1134,8 @@ function renderSessionMessageEntries(tree: SessionTree, depth = 0, provider = "o
       attentionCount: processAttentionCount(message.parts),
       timeCreated: Number(message.timeCreated) || 0,
       presentationPhase: message.data?.presentationPhase,
-      processOnly: messageTurnRole(message.role) === "assistant" && !hasOwnMessageBubble(message)
+      processOnly: messageTurnRole(message.role) === "assistant" && !hasOwnMessageBubble(message),
+      usage: messageTurnRole(message.role) === "assistant" ? ownedConversationUsage(message.data) : null
     });
   }
 
@@ -1199,7 +1255,8 @@ function renderRawMessageEntries(messages: any, partsByMessage: any, provider: a
         parts: parts.map((part: any) => ({ id: part.id, data: safeParse(part.data), type: safeParse(part.data)?.type }))
       }, renderedParts, provider, anchorPrefix),
       timeCreated: Number(parsedData.time?.created) || Number(message.time_created) || 0,
-      processOnly: role === "assistant" && !parts.some((part: any) => safeParse(part.data)?.type === "text" && Boolean(safeParse(part.data)?.text))
+      processOnly: role === "assistant" && !parts.some((part: any) => safeParse(part.data)?.type === "text" && Boolean(safeParse(part.data)?.text)),
+      usage: role === "assistant" ? ownedConversationUsage(messageData) : null
     });
   }
 
@@ -1330,13 +1387,13 @@ function renderAgentChannel(channel: ConversationChannelItem[], truncated: boole
   return `<${wrapper} class="agent-channel" data-agent-channel data-reader-coordination-provider="${escapeHtml(provider)}" data-reader-coordination-session="${escapeHtml(sessionId)}"${disclosure ? " data-disclosure" : ""}>
     <${heading}><span>${escapeHtml(t("conversation.agent_channel"))}</span>${countLabel ? `<span class="agent-channel-count">${countLabel}</span>` : ""}</${disclosure ? "summary" : "h3"}>
     ${items ? `<p class="agent-channel-order-note">${escapeHtml(t("detail.reader_channel_order_note"))}</p>` : ""}
-    ${items
+    ${items || truncated
       ? `<ol class="agent-channel-list" data-reader-coordination-list>${items}</ol>${truncated ? `<button class="agent-channel-more" type="button" data-reader-coordination-more data-reader-coordination-url="${escapeHtml(readerCoordinationUrl(provider, sessionId, card))}">${escapeHtml(t("conversation.agent_channel_load_more"))}</button><span class="agent-channel-load-state" data-reader-coordination-state aria-live="polite"></span>` : ""}`
       : `<p class="agent-channel-empty">${escapeHtml(t("conversation.agent_no_channel"))}</p>`}
   </${wrapper}>`;
 }
 
-function renderAgentCard(card: ConversationAgentCard, part: SessionPartNode | null, provider: string, retainedMarkup = "", sessionId = "") {
+function renderAgentCard(card: ConversationAgentCard, part: SessionPartNode | null, provider: string, retainedMarkup = "", sessionId = "", placedObservationIds?: Set<string>) {
   const displayName = card.name || card.responsibility || t("conversation.agent_unknown");
   const stateLabel = conversationStateLabel(card.state);
   const meta = [];
@@ -1366,10 +1423,14 @@ function renderAgentCard(card: ConversationAgentCard, part: SessionPartNode | nu
         card.childSessionAvailable
       )
     : "";
+  const channel = placedObservationIds ? card.channel.filter((item) => !placedObservationIds.has(item.id)) : card.channel;
+  const channelMarkup = channel.length || card.channelTruncated || !card.channel.length
+    ? renderAgentChannel(channel, card.channelTruncated, card, provider, sessionId)
+    : "";
   const cardBody = `
     <div class="agent-card-body">
       ${retainedMarkup}
-      ${renderAgentChannel(card.channel, card.channelTruncated, card, provider, sessionId)}
+      ${channelMarkup}
     </div>`;
   const details = `<details class="agent-card" id="${escapeHtml(cardAnchor)}" data-agent-card data-agent-card-id="${escapeHtml(card.id)}" data-agent-name="${escapeHtml(card.name || "")}" data-agent-state="${escapeHtml(card.state || "")}" data-agent-child-session="${escapeHtml(childSession?.sessionId || "")}" data-disclosure>
       <summary class="agent-card-summary" aria-expanded="false">
@@ -1391,11 +1452,11 @@ function renderAgentCard(card: ConversationAgentCard, part: SessionPartNode | nu
   </div>`;
 }
 
-function renderUnplacedAgentSection(cards: ConversationAgentCard[], provider: string, sessionId: string) {
+function renderUnplacedAgentSection(cards: ConversationAgentCard[], provider: string, sessionId: string, placedObservationIds?: Set<string>) {
   if (!cards.length) {
     return "";
   }
-  const items = cards.map((card) => renderAgentCard(card, null, provider, "", sessionId)).join("\n");
+  const items = cards.map((card) => renderAgentCard(card, null, provider, "", sessionId, placedObservationIds)).join("\n");
   return `<section class="agent-cards-unplaced" data-agent-cards-unplaced>
     <h2 class="agent-cards-unplaced-title">${escapeHtml(t("conversation.agent_unplaced_title"))}</h2>
     <p class="agent-cards-unplaced-note">${escapeHtml(t("conversation.agent_unplaced_note"))}</p>
@@ -1617,8 +1678,13 @@ function renderCompactionCheckpoint(compaction: any, provider: string, sessionId
 function renderConversationProcessDisclosure(items: ConversationItem[], attribute = "data-conversation-process") {
   const count = String(Math.max(1, items.reduce((sum, item) => sum + (item.itemCount ?? 1), 0)));
   const attentionCount = items.reduce((sum, item) => sum + (item.attentionCount || 0), 0);
+  const usage = aggregateConversationUsage(items);
+  const usageContent = usage ? messageUsage(usage) : "";
+  const usageMarkup = usageContent
+    ? `<span class="conversation-process-usage message-usage message-usage-inline"><span class="message-usage-body">${usageContent}</span></span>`
+    : "";
   return `<details class="conversation-process-disclosure" ${attribute} ${attribute}-count="${escapeHtml(count)}"${items.some((item) => item.deferredProcess) ? " data-reader-process-group" : ""}>
-    <summary class="conversation-process-summary"><span class="conversation-process-kicker">${escapeHtml(t("conversation.process_kicker"))}</span><span class="conversation-process-count">${escapeHtml(t("conversation.process_items", { count }))}</span>${attentionCount ? `<span class="conversation-process-attention">${escapeHtml(t("conversation.process_attention", { count: String(attentionCount) }))}</span>` : ""}</summary>
+    <summary class="conversation-process-summary"><span class="conversation-process-kicker">${escapeHtml(t("conversation.process_kicker"))}</span><span class="conversation-process-count">${escapeHtml(t("conversation.process_items", { count }))}</span>${usageMarkup}${attentionCount ? `<span class="conversation-process-attention">${escapeHtml(t("conversation.process_attention", { count: String(attentionCount) }))}</span>` : ""}</summary>
     <div class="conversation-process-body">${items.map((item) => item.html).join("\n")}</div>
   </details>`;
 }
@@ -1633,6 +1699,7 @@ interface ConversationItem {
   itemCount?: number;
   attentionCount?: number;
   deferredProcess?: boolean;
+  usage?: ConversationUsage | null;
 }
 
 function isRecordedFinalItem(item: ConversationItem) {
@@ -1663,11 +1730,16 @@ function renderConversationSegmentItems(items: ConversationItem[]) {
 
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index];
-    const foldable = hasLaterFinal[index]
-      && item.kind === "block"
+    const pureProcess = item.processOnly === true
+      && (item.presentationPhase == null || item.presentationPhase === "commentary");
+    const commentary = item.processOnly !== true
+      && item.presentationPhase === "commentary"
+      && hasLaterFinal[index];
+    const foldable = item.kind === "block"
       && item.role === "assistant"
       && !item.hasMilestones
-      && (item.processOnly === true || item.presentationPhase === "commentary");
+      && !item.attentionCount
+      && (pureProcess || commentary);
     if (foldable) {
       processItems.push(item);
       continue;
@@ -1734,7 +1806,8 @@ function renderConversationThread(entries: ConversationEntry[], compactions: any
         presentationPhase: entry.presentationPhase,
         processOnly: entry.processOnly,
         hasMilestones: entry.hasMilestones,
-        attentionCount: entry.attentionCount
+        attentionCount: entry.attentionCount,
+        usage: entry.usage
       });
     }
     if (byEntryIndex.has(index)) {
@@ -1780,7 +1853,7 @@ function renderConversationPanel(entries: ConversationEntry[], compactions: any[
   const unplacedCards = view
     ? view.cards.filter((card) => !placedCardIds?.has(card.id))
     : [];
-  const unplacedMarkup = renderUnplacedAgentSection(unplacedCards, provider, sessionId);
+  const unplacedMarkup = renderUnplacedAgentSection(unplacedCards, provider, sessionId, relations?.placedObservationIds);
   if (!threadMarkup && !detachedMarkup && !unplacedMarkup) {
     return `<div class="conversation-layout" data-conversation-layout>
       <section id="session-messages" class="messages"><p class="empty-state">${escapeHtml(t("detail.no_messages"))}</p></section>
@@ -1991,6 +2064,8 @@ export function renderSessionReaderPane({
 }: { session: any; sessionTree?: SessionTree | null; ownedReader?: OwnedReaderProjection | null; messages?: any[]; partsByMessage?: Map<any, any>; provider?: string; conversationCompactions?: ConversationCompaction[]; conversationView?: ConversationViewModel | null; readerTeams?: ReaderTeamDirectoryPage | null; readerRelations?: ReaderRelations | null; readerExecutions?: ReaderExecutions | null; inheritedContext?: InheritedContextView | null; contextArtifacts?: ContextArtifact[]; contextArtifactSourceState?: ContextArtifactSourceState | null; canReadContextArtifacts?: boolean; canReadContextArtifactEvidence?: boolean; deferExecution?: boolean }) {
   const title = session.title || session.slug || session.id;
   const placedCardIds = new Set<string>();
+  const childNames = new Map((readerRelations?.lanes || []).filter((lane) => lane.childSession && lane.name)
+    .map((lane) => [`${lane.childSession!.provider}\u0000${lane.childSession!.sessionId}`, lane.name!]));
   const relationMarkup = appendReaderExecutionMarkers(renderReaderRelations(readerRelations), readerExecutions);
   const effectiveTree = ownedReader?.rootTree || sessionTree;
   const ownedChildrenByPart = new Map<string, OwnedReaderChildDescriptor[]>();
@@ -2007,8 +2082,8 @@ export function renderSessionReaderPane({
   const renderedEntryCount = conversationEntries.filter((entry) => entry.markup).length;
   const detachedMarkup = effectiveTree
     ? [
-      ...(effectiveTree.detachedChildren || []).map((child: SessionTree) => renderChildReaderLink(child, provider, true)),
-      ...(ownedReader?.children || []).filter((child) => child.detached).map((child) => renderChildReaderLink(child, provider, true))
+      ...(effectiveTree.detachedChildren || []).map((child: SessionTree) => renderChildReaderLink(child, provider, true, childNames)),
+      ...(ownedReader?.children || []).filter((child) => child.detached).map((child) => renderChildReaderLink(child, provider, true, childNames))
     ]
       .filter(Boolean)
       .join("\n")
@@ -2019,9 +2094,9 @@ export function renderSessionReaderPane({
   const artifactMarkup = renderReaderArtifacts({ artifacts: contextArtifacts, sourceState: contextArtifactSourceState, canRead: canReadContextArtifacts, canReadEvidence: canReadContextArtifactEvidence, provider, sessionId: String(session.id), sessionAnchor });
   return `<div id="${escapeHtml(sessionAnchor)}" class="reader-pane" data-reader-pane data-reader-provider="${escapeHtml(provider)}" data-reader-session="${escapeHtml(session.id)}" data-reader-title="${escapeHtml(title)}">
     <div class="reader-pane-grid">
-      <details class="reader-toc-disclosure" data-reader-toc>
+      <details class="reader-toc-disclosure" data-reader-toc open>
         <summary>${uiIcon("chevron-down")}<span>${escapeHtml(t("detail.reader_toc_toggle"))}</span></summary>
-        ${renderToc(effectiveTree, provider, ownedReader)}
+        ${renderToc(effectiveTree, provider, ownedReader, childNames)}
       </details>
       <div class="reader-pane-main" data-reader-transcript>
         ${artifactMarkup}
@@ -2135,6 +2210,8 @@ export function renderSessionPage({
             ${resumeCommand && terminalLaunchAllowed ? `<button type="button" data-action="resume-session" data-id="${escapeHtml(session.id)}" ${resumeCommand.available ? "" : "disabled"}>${escapeHtml(t("action.open_terminal"))}</button>` : `<span class="action-unavailable" aria-disabled="true">${escapeHtml(t("detail.resume_unavailable"))}</span>`}
             <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=md">${escapeHtml(t("action.export_md"))}</a>
             <a href="/api/${encodedProvider}/session/${encodedSessionId}/export?format=json">${escapeHtml(t("action.export_json"))}</a>
+            <a href="#tab-work" data-detail-tab="tab-work">${escapeHtml(t("detail.reader_technical_work"))}</a>
+            <a href="#tab-events" data-detail-tab="tab-events">${escapeHtml(t("detail.reader_technical_events"))}</a>
             ${resumePreview}
             ${manageable ? `<button type="button" data-action="rename" data-id="${escapeHtml(session.id)}">${escapeHtml(t("action.rename"))}</button>` : ""}
             ${manageable ? `<button type="button" data-action="copy-session-id" data-id="${escapeHtml(session.id)}">${escapeHtml(t("action.copy_session_id_menu"))}</button>` : ""}
@@ -2230,7 +2307,7 @@ ${actions}
       </div>
     </div>
     <details id="tab-work" class="reader-secondary-disclosure" data-detail-tab-panel>
-      <summary>${escapeHtml(t("detail.tab_work"))}</summary>
+      <summary>${escapeHtml(t("detail.reader_technical_work"))}</summary>
       <div class="reader-secondary-content">
         ${runtimeWorkbench || `<p class="empty-state">${t("runtime.unavailable")}</p>`}
       </div>
@@ -2239,7 +2316,7 @@ ${actions}
       ${todoList(todos)}
     </details>
     <details id="tab-events" class="reader-secondary-disclosure" data-detail-tab-panel>
-      <summary>${escapeHtml(t("detail.tab_events"))}</summary>
+      <summary>${escapeHtml(t("detail.reader_technical_events"))}</summary>
       <div class="reader-secondary-content">${runtimeEvents || `<p class="empty-state">${t("runtime.unavailable")}</p>`}</div>
     </details>
   </section>

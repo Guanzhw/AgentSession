@@ -514,7 +514,6 @@ export function initReaderRelations() {
     const milestoneContext = milestone ? contextForNode(milestone) : null;
     if (!milestoneContext?.select || event.target.closest?.("a,button")) return;
     milestoneContext.select.value = milestone.dataset.readerLane || "";
-    openTask(milestoneContext, milestone.dataset.readerLane || "", milestone.querySelector("[data-reader-lane-focus]"));
     schedule();
   });
   workbench.addEventListener("submit", (event) => {

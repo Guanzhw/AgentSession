@@ -134,6 +134,77 @@ test("multiple source-only observations in the same gap retain their separate se
   assert.equal(gap[0].position.partId, "after-return");
 });
 
+test("only explicit Team co-members promote a message to a peer handoff", () => {
+  const document = documentOf([
+    ["peer-message", [["peer-part", "text"]]],
+    ["root-followup", [["followup-part", "text"]]]
+  ]);
+  const value = protocol({
+    actors: [
+      { id: "team", kind: "team", name: "Review Team", memberActorIds: ["writer", "reviewer"], provenance },
+      { id: "writer", kind: "agent", name: "Writer", runIds: ["run-first"], sessionRef: { provider: "fixture", sessionId: "writer-child" }, provenance },
+      { id: "reviewer", kind: "agent", name: "Reviewer", runIds: [], provenance },
+      { id: "root", kind: "agent", name: "Root", runIds: [], sessionRef: { provider: "fixture", sessionId: "root" }, provenance }
+    ],
+    events: [
+      event(1, { messageId: "peer-message", partId: "peer-part" }),
+      event(2, { messageId: "root-followup", partId: "followup-part" })
+    ],
+    coordination: [
+      observation(1, "message", { senderActorId: "writer", recipientActorId: "reviewer" }),
+      observation(2, "message", { senderActorId: "root", recipientActorId: "writer" })
+    ]
+  });
+  const result = deriveReaderRelations(value, document);
+  assert.equal(result.milestones.length, 2);
+  assert.deepEqual(result.milestones.map((item) => item.teamPeerMessage), [true, false]);
+  assert.deepEqual(result.milestones[0].senderName, "Writer");
+  assert.deepEqual(result.milestones[0].recipientName, "Reviewer");
+  assert.equal(result.milestones[0].state, "unknown");
+  assert.equal(result.milestones[0].turnId, "not-a-message");
+  assert.deepEqual(result.milestones.map((item) => item.messageAction), ["handoff", "follow-up"]);
+});
+
+test("unassigned Team exchanges use their explicit member work lane, not an invented edge", () => {
+  const value = protocol({
+    agentRuns: [],
+    actors: [
+      { id: "team", kind: "team", name: "Review Team", memberActorIds: ["writer", "reviewer"], provenance },
+      { id: "writer", kind: "agent", name: "Writer", sessionRef: { provider: "fixture", sessionId: "writer-child" }, provenance },
+      { id: "reviewer", kind: "agent", name: "Reviewer", sessionRef: { provider: "fixture", sessionId: "reviewer-child" }, provenance },
+      { id: "root", kind: "agent", name: "Root", sessionRef: { provider: "fixture", sessionId: "root" }, provenance }
+    ],
+    tasks: [{ id: "writer-task", title: "Draft the patch", owner: "writer" }],
+    events: [event(1, { messageId: "root-request", partId: "root-part" }), event(2, { messageId: "peer", partId: "peer-part" }), event(3, { messageId: "return", partId: "return-part" })],
+    coordination: [
+      observation(1, "message", { runId: null, senderActorId: "root", recipientActorId: "writer" }),
+      observation(2, "mailbox-delivery", { runId: null, senderActorId: "writer", recipientActorId: "reviewer" }),
+      observation(3, "mailbox-delivery", { runId: null, senderActorId: "reviewer", recipientActorId: "root" })
+    ]
+  });
+  const result = deriveReaderRelations(value, documentOf([
+    ["root-request", [["root-part", "text"]]], ["peer", [["peer-part", "text"]]], ["return", [["return-part", "text"]]]
+  ]));
+  assert.equal(result.unplaced.length, 0);
+  assert.deepEqual(result.milestones.map((item) => item.laneId), [
+    "child:fixture:writer-child", "child:fixture:writer-child", "child:fixture:reviewer-child"
+  ]);
+  assert.equal(result.lanes.find((lane) => lane.id === "child:fixture:writer-child").purpose, "Draft the patch");
+  assert.ok(result.lanes.every((lane) => !lane.id.includes("communication:")));
+  assert.deepEqual(result.milestones.map((item) => item.messageAction), ["follow-up", "handoff", "received-message"]);
+  assert.deepEqual(result.milestones.map((item) => item.senderIsCurrentSession), [true, false, false]);
+  assert.deepEqual(result.milestones.map((item) => item.recipientIsCurrentSession), [false, false, true]);
+  value.agentRuns = [run("writer-run", "writer-child")];
+  value.coordination[0].runId = "writer-run";
+  value.coordination[0].kind = "spawn";
+  const withDispatch = deriveReaderRelations(value, documentOf([
+    ["root-request", [["root-part", "text"]]], ["peer", [["peer-part", "text"]]], ["return", [["return-part", "text"]]]
+  ]));
+  assert.equal(withDispatch.milestones[0].laneId, withDispatch.milestones[1].laneId,
+    "dispatch and a later unassigned Team exchange reuse the canonical child lane");
+  assert.equal(withDispatch.lanes.filter((lane) => lane.childSession?.sessionId === "writer-child").length, 1);
+});
+
 test("native source bindings accept document message IDs, exact part IDs and opaque tool part IDs", () => {
   const document = documentOf([
     ["native-message", [["opaque-native-part"]]],
@@ -229,6 +300,19 @@ test("a source event inside one coalesced native part has no invented between-pa
   const result = deriveReaderRelations(value, documentOf([["message", [["part", "text"]]]]));
   assert.equal(result.milestones.length, 0);
   assert.equal(result.unplaced[0].reason, "position_missing");
+});
+
+test("events within a coalesced tool retain their recorded interval and independent work identity", () => {
+  const value = protocol({
+    events: [event(1, { messageId: "tool", toolCallId: "tool" }), event(2), event(3), event(4, { messageId: "tool", toolCallId: "tool" })],
+    coordination: [observation(2, "spawn"), observation(3, "message")]
+  });
+  const result = deriveReaderRelations(value, documentOf([["tool", [["part", "tool"]]]]));
+  assert.equal(result.unplaced.length, 0);
+  assert.deepEqual(result.milestones.map((item) => item.sequence), [2, 3]);
+  assert.ok(result.milestones.every((item) => item.position.withinExecution === true));
+  assert.ok(result.milestones.every((item) => item.position.partId === "part"));
+  assert.ok(result.milestones.every((item) => item.runId === "run-first"));
 });
 
 test("source-only events before or after all bound content use the correct boundary side", () => {
