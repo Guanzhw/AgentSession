@@ -1,6 +1,6 @@
 /* Library: a calm, prose-first index for returning to recorded work. */
 .content:has(.session-list-library) {
-  max-width: 1040px;
+  max-width: calc(var(--site-page-width) + 64px);
 }
 
 .session-list-library {
