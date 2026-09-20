@@ -139,11 +139,12 @@ export interface SessionEventEnvelope {
   providerData?: Record<string, unknown> | null;
 }
 
-export type ToolExecutionKind = "async-tool";
+export type ToolExecutionKind = "async-tool" | "process";
 export type ToolExecutionPhase =
   | "started"
   | "yielded"
   | "polled"
+  | "input"
   | "interruption-requested"
   | "completed"
   | "failed";
@@ -156,6 +157,8 @@ export interface ToolExecutionObservation {
   /** Provider handle used by later continuation calls. */
   handle: string;
   toolName: string;
+  /** Provider-owned command excerpt, with whitespace normalized for a readable name. */
+  label?: string;
 }
 
 export type ApprovalEventState = "asked" | "decided";
@@ -500,9 +503,9 @@ const RUN_STATUSES = new Set<RunStatus>([...TASK_STATUSES, "unknown"]);
 const EXECUTION_MODES = new Set<ExecutionMode>([
   "foreground", "background", "subagent", "scheduled", "team", "unknown"
 ]);
-const TOOL_EXECUTION_KINDS = new Set<ToolExecutionKind>(["async-tool"]);
+const TOOL_EXECUTION_KINDS = new Set<ToolExecutionKind>(["async-tool", "process"]);
 const TOOL_EXECUTION_PHASES = new Set<ToolExecutionPhase>([
-  "started", "yielded", "polled", "interruption-requested", "completed", "failed"
+  "started", "yielded", "polled", "input", "interruption-requested", "completed", "failed"
 ]);
 const ARTIFACT_KINDS = new Set<ContextArtifactKind>([
   "memory", "instruction", "skill", "rule", "summary", "experience", "user-info"
@@ -1072,6 +1075,7 @@ export function validateSessionProtocol(
       if (!TOOL_EXECUTION_PHASES.has(execution.phase)) error("TOOL_EXECUTION_PHASE_INVALID", "Tool execution phase is invalid", ref, event.provenance);
       if (typeof execution.handle !== "string" || !execution.handle.trim()) error("TOOL_EXECUTION_HANDLE_INVALID", "Tool execution handle must be a non-empty string", ref, event.provenance);
       if (typeof execution.toolName !== "string" || !execution.toolName.trim()) error("TOOL_EXECUTION_TOOL_INVALID", "Tool execution tool name must be a non-empty string", ref, event.provenance);
+      if (execution.label !== undefined && (typeof execution.label !== "string" || !execution.label.trim())) error("TOOL_EXECUTION_LABEL_INVALID", "Tool execution label must be a non-empty string when present", ref, event.provenance);
       if (typeof event.toolCallId !== "string" || !event.toolCallId.trim()) error("TOOL_EXECUTION_CALL_ID_INVALID", "Tool execution events require a non-empty tool-call identity", ref, event.provenance);
     }
   }

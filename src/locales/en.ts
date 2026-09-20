@@ -1192,6 +1192,8 @@ export const en = {
   "js.select_first": "Please select sessions first",
 
   "detail.execution_kind_async_tool": "Asynchronous tool",
+  "detail.execution_kind_process": "Background command",
+  "detail.execution_input": "Sent input",
   "detail.execution_started": "Started",
   "detail.execution_split": "Separated",
   "detail.execution_return": "Returned",

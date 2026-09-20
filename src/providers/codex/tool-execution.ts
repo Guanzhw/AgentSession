@@ -124,8 +124,10 @@ function executionEvent(fields: {
   toolCallId: string;
   executionId: string;
   executionPhase: ToolExecutionObservation["phase"];
+  kind: ToolExecutionObservation["kind"];
   handle: string;
-  toolName: "exec" | "wait";
+  toolName: string;
+  label?: string;
   parentEventId: string | null;
 }): CodexToolExecutionEvent {
   const id = `event:tool-execution:${fields.executionId}:${fields.executionPhase}:${fields.toolCallId}`;
@@ -149,17 +151,18 @@ function executionEvent(fields: {
       },
       execution: {
         id: fields.executionId,
-        kind: "async-tool",
+        kind: fields.kind,
         phase: fields.executionPhase,
         handle: fields.handle,
-        toolName: fields.toolName
+        toolName: fields.toolName,
+        ...(fields.label ? { label: fields.label } : {})
       }
     })
   };
 }
 
 /**
- * Recover only Codex's recorded outer async-tool lifecycle. The wrapper's
+ * Recover Codex's recorded outer async-tool and direct terminal lifecycles. The wrapper's
  * JavaScript input is intentionally opaque: nested exec_command results are
  * not assigned to inner calls by array position or source inspection.
  */
@@ -202,6 +205,7 @@ export function codexToolExecutionEvents(records: Row[], sessionId: string): Cod
         waitExecutionByCallId.set(id, execution);
         const phase = call.interruptionRequested ? "interruption-requested" : "polled";
         const event = executionEvent({
+          kind: "async-tool",
           sessionId,
           recordIndex,
           sourceType: "codex.response_item:function_call:wait",
@@ -230,6 +234,7 @@ export function codexToolExecutionEvents(records: Row[], sessionId: string): Cod
       if (!handle || activeByHandle.has(handle)) continue;
       const execution: ActiveExecution = { id, handle, lastEventId: "" };
       const started = executionEvent({
+        kind: "async-tool",
         sessionId,
         recordIndex: call.recordIndex,
         sourceType: "codex.response_item:custom_tool_call:exec",
@@ -245,6 +250,7 @@ export function codexToolExecutionEvents(records: Row[], sessionId: string): Cod
       events.push(started);
       execution.lastEventId = started.event.id;
       const yielded = executionEvent({
+        kind: "async-tool",
         sessionId,
         recordIndex,
         sourceType: "codex.response_item:custom_tool_call_output:exec",
@@ -271,6 +277,7 @@ export function codexToolExecutionEvents(records: Row[], sessionId: string): Cod
     else if (header && FAILED_HEADER.test(header)) phase = "failed";
     if (!phase) continue;
     const result = executionEvent({
+      kind: "async-tool",
       sessionId,
       recordIndex,
       sourceType: "codex.response_item:function_call_output:wait",
@@ -286,5 +293,69 @@ export function codexToolExecutionEvents(records: Row[], sessionId: string): Cod
     if (phase === "completed" || phase === "failed") activeByHandle.delete(execution.handle);
   }
 
+  return [...events, ...codexProcessExecutionEvents(records, sessionId)];
+}
+
+const PROCESS_RUNNING = /^Chunk ID: [^\r\n]+\r?\nWall time: \d+(?:\.\d+)? seconds\r?\nProcess running with session ID (\d+)\r?\n/;
+const PROCESS_EXITED = /^Chunk ID: [^\r\n]+\r?\nWall time: \d+(?:\.\d+)? seconds\r?\nProcess exited with code (-?\d+)\r?\n/;
+
+/** Direct terminal calls carry their own identity; nested JavaScript stays opaque. */
+function codexProcessExecutionEvents(records: Row[], sessionId: string): CodexToolExecutionEvent[] {
+  const starts = new Map<string, { index: number; record: Row; label?: string }>();
+  const active = new Map<string, ActiveExecution>();
+  const continuations = new Map<string, ActiveExecution>();
+  const events: CodexToolExecutionEvent[] = [];
+  const append = (execution: ActiveExecution, record: Row, index: number, phase: ToolExecutionObservation["phase"], name: string, label?: string) => {
+    const id = callId(record)!;
+    const event = executionEvent({ sessionId, recordIndex: index, sourceType: `codex.response_item:${record.payload.type}:${name}`,
+      sourceId: id, toolCallId: id, executionId: execution.id, executionPhase: phase, kind: "process",
+      handle: execution.handle, toolName: name, label, parentEventId: execution.lastEventId || null });
+    event.event.timestamp = timestamp(record);
+    events.push(event);
+    execution.lastEventId = event.event.id;
+  };
+  for (const [index, record] of records.entries()) {
+    if (record.type !== "response_item") continue;
+    const payload = record.payload;
+    const id = callId(record);
+    if (!id) continue;
+    if (payload.type === "function_call" && nullNamespace(record)) {
+      if (payload.name !== "exec_command" && payload.name !== "write_stdin") continue;
+      const args = parseArguments(record);
+      if (!args) continue;
+      if (payload.name === "exec_command") {
+        const label = typeof args.cmd === "string" ? args.cmd.replace(/\s+/g, " ").trim().slice(0, 120) : "";
+        starts.set(id, { index, record, ...(label ? { label } : {}) });
+      } else {
+        const handle = typeof args.session_id === "number" || typeof args.session_id === "string" ? String(args.session_id) : "";
+        const execution = active.get(handle);
+        if (!execution) continue;
+        const chars = args.chars;
+        if (chars !== undefined && typeof chars !== "string") continue;
+        continuations.set(id, execution);
+        append(execution, record, index, chars?.includes("\u0003") ? "interruption-requested" : chars ? "input" : "polled", "write_stdin");
+      }
+    } else if (payload.type === "function_call_output") {
+      const header = firstHeader(record);
+      const handle = header?.match(PROCESS_RUNNING)?.[1];
+      const start = starts.get(id);
+      if (start && handle) {
+        if (active.has(handle)) continue;
+        const execution = { id, handle, lastEventId: "" };
+        append(execution, start.record, start.index, "started", "exec_command", start.label);
+        append(execution, record, index, "yielded", "exec_command");
+        active.set(handle, execution);
+      } else {
+        const execution = continuations.get(id);
+        if (!execution || active.get(execution.handle) !== execution) continue;
+        const exit = header?.match(PROCESS_EXITED);
+        if (handle === execution.handle) append(execution, record, index, "yielded", "write_stdin");
+        else if (exit) {
+          append(execution, record, index, Number(exit[1]) === 0 ? "completed" : "failed", "write_stdin");
+          active.delete(execution.handle);
+        }
+      }
+    }
+  }
   return events;
 }

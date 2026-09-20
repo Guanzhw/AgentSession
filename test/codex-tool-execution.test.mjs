@@ -28,6 +28,9 @@ const output = (type, id, value, second = 0) => ({
 const running = (handle, seconds = "31.0") => `Script running with cell ID ${handle}\nWall time ${seconds} seconds\nOutput:\n`;
 const completed = (seconds = "25.6") => `Script completed\nWall time ${seconds} seconds\nOutput:\n`;
 const failed = (seconds = "0.0") => `Script failed\nWall time ${seconds} seconds\nOutput:\nScript error:\nboom`;
+// Native exec_command/write_stdin headers observed in Codex Desktop 0.142.0.
+const processRunning = (handle) => `Chunk ID: 884062\nWall time: 10.0015 seconds\nProcess running with session ID ${handle}\nOriginal token count: 0\nOutput:\n`;
+const processExited = (code) => `Chunk ID: 272c54\nWall time: 0.0000 seconds\nProcess exited with code ${code}\nOriginal token count: 3\nOutput:\nfull output`;
 
 function protocolPairFor(records) {
   const session = {
@@ -189,4 +192,70 @@ test("Session Protocol rejects malformed tool execution details at the shared bo
   assert.equal(validateSessionProtocol(changed({ ...base, phase: "invented" })).errors.some((error) => error.code === "TOOL_EXECUTION_PHASE_INVALID"), true);
   assert.equal(validateSessionProtocol(changed({ ...base, handle: "" })).errors.some((error) => error.code === "TOOL_EXECUTION_HANDLE_INVALID"), true);
   assert.equal(validateSessionProtocol(changed(base, null)).errors.some((error) => error.code === "TOOL_EXECUTION_CALL_ID_INVALID"), true);
+});
+
+test("Codex direct terminal calls bind process handles and preserve poll, input, stop request and actual exit", () => {
+  const { v2, v3 } = protocolPairFor([
+    call("function_call", "command", "exec_command", { cmd: "npm run\n  build", yield_time_ms: 10000 }, undefined, 0),
+    output("function_call_output", "command", processRunning(97155), 1),
+    call("function_call", "poll", "write_stdin", { session_id: 97155, chars: "" }, undefined, 2),
+    output("function_call_output", "poll", processRunning(97155), 3),
+    call("function_call", "input", "write_stdin", { session_id: 97155, chars: "y\n" }, undefined, 4),
+    output("function_call_output", "input", processRunning(97155), 5),
+    call("function_call", "stop", "write_stdin", { session_id: 97155, chars: "\u0003" }, undefined, 6),
+    output("function_call_output", "stop", processExited(0), 7)
+  ]);
+  const events = v2.events.filter((item) => item.execution);
+  assert.deepEqual(events.map((item) => item.execution.phase), ["started", "yielded", "polled", "yielded", "input", "yielded", "interruption-requested", "completed"]);
+  assert.equal(events[0].execution.label, "npm run build");
+  assert.equal(events.every((item) => item.execution.kind === "process" && item.execution.handle === "97155" && item.execution.id === "command"), true);
+  assert.deepEqual(events.map((item) => item.sequence), events.map((_, index) => index + 1));
+  assert.deepEqual(events.map((item) => item.timestamp), events.map((_, index) => Date.parse(at(index))));
+  assert.equal(events.at(-1).toolCallId, "stop");
+  assert.equal(events.at(-1).execution.phase, "completed", "recorded exit 0 after Ctrl-C is not an inferred cancellation");
+  assert.equal(v2.validation.ok, true);
+  assert.equal(v3.validation.ok, true);
+  assert.deepEqual(v3.events.filter((item) => item.execution).map((item) => item.execution), events.map((item) => item.execution));
+});
+
+test("Codex process occurrences stay distinct across interleaving, reuse and equal outer cell handles", () => {
+  const events = protocolFor([
+    call("function_call", "a", "exec_command", { cmd: "first" }, undefined, 0),
+    output("function_call_output", "a", processRunning(65), 1),
+    call("function_call", "b", "exec_command", { cmd: "second" }, undefined, 2),
+    output("function_call_output", "b", processRunning(66), 3),
+    call("custom_tool_call", "outer", "exec", undefined, undefined, 4),
+    output("custom_tool_call_output", "outer", running("65"), 5),
+    call("function_call", "wait-b", "write_stdin", { session_id: 66 }, undefined, 6),
+    call("function_call", "wait-a", "write_stdin", { session_id: 65 }, undefined, 7),
+    output("function_call_output", "wait-a", processExited(1), 8),
+    output("function_call_output", "wait-b", processExited(0), 9),
+    call("function_call", "c", "exec_command", { cmd: "third" }, undefined, 10),
+    output("function_call_output", "c", processRunning(65), 11),
+    call("function_call", "wait-outer", "wait", { cell_id: "65" }, undefined, 12),
+    output("function_call_output", "wait-outer", completed(), 13)
+  ]).events.filter((item) => item.execution);
+  const steps = (id) => events.filter((item) => item.execution.id === id);
+  assert.deepEqual(steps("a").map((item) => item.execution.phase), ["started", "yielded", "polled", "failed"]);
+  assert.deepEqual(steps("b").map((item) => item.toolCallId), ["b", "b", "wait-b", "wait-b"]);
+  assert.deepEqual(steps("c").map((item) => item.execution.phase), ["started", "yielded"]);
+  assert.equal(steps("outer").every((item) => item.execution.kind === "async-tool"), true);
+  assert.equal(steps("outer").at(-1).execution.phase, "completed");
+  assert.deepEqual(events.map((item) => item.sequence), events.map((_, index) => index + 1));
+});
+
+test("Codex does not turn nested, synchronous or unmatched output into background process records", () => {
+  const events = protocolFor([
+    call("custom_tool_call", "nested", "exec"),
+    output("custom_tool_call_output", "nested", [{ type: "text", text: completed() }, { type: "text", text: processRunning(10) }]),
+    call("function_call", "synchronous", "exec_command", { cmd: "echo done" }),
+    output("function_call_output", "synchronous", processExited(0) + processRunning(11)),
+    call("function_call", "wrong-output", "exec_command", { cmd: "build" }),
+    output("function_call_output", "another-id", processRunning(12)),
+    call("function_call", "not-native", "exec_command", { cmd: "build" }, "some-other-tool"),
+    output("function_call_output", "not-native", processRunning(13)),
+    call("function_call", "orphan", "write_stdin", { session_id: 12 }),
+    output("function_call_output", "orphan", processExited(0))
+  ]).events.filter((item) => item.execution);
+  assert.deepEqual(events, []);
 });

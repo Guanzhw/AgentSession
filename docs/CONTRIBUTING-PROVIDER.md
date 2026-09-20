@@ -108,6 +108,15 @@ event paging. `terminate: true` is a request, not proof of cancellation. An
 ordinary synchronous call does not gain a background lifecycle. Nested script
 outputs lack the binding needed to identify their terminal processes separately.
 
+Historical native Codex Desktop 0.142.0 records also provide namespace-free
+`exec_command` / `write_stdin` function calls with exact `call_id` output binding.
+Their native headers contain a process/session handle or exit code. These yield
+the separate `process` kind, with the starting call as occurrence ID, a bounded
+command label, and an additional `input` phase for nonempty stdin. Ctrl-C is a stop
+request; the following recorded exit determines completion or failure. Session
+`019efac9-94f3-7b50-98c7-94fcce90c301` contains both normal exit and Ctrl-C followed
+by exit 0. Direct process handles and outer async cell handles have separate scopes.
+
 The shared Reader consumes these observations without provider branches. Its
 `/api/:provider/session/:id/reader/execution?id=…` route returns an on-demand
 time view and at most 50 steps, with a prefix-bound continuation cursor. Each

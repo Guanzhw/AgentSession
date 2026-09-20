@@ -98,6 +98,24 @@ test("runtime public events retain normalized execution details without raw outp
   assert.equal("providerData" in result, false);
 });
 
+test("background commands use normalized command labels and share the full execution reading path", () => {
+  const events = [event("start", "started", 1000), event("yield", "yielded", 2000, "start"),
+    event("input", "input", 3000), event("done", "completed", 4000, "input")].map((item, index) => ({
+      ...item, execution: { ...item.execution, kind: "process", toolName: index < 2 ? "exec_command" : "write_stdin",
+        ...(index === 0 ? { label: 'npm run build <untrusted>' } : {}) }
+    }));
+  const { view } = fixture(events);
+  assert.equal(view.items[0].name, "npm run build <untrusted>");
+  const html = renderReaderExecutionPage(readerExecutionPage(view, "start", null));
+  assert.match(html, /Background command/);
+  assert.match(html, /npm run build &lt;untrusted&gt;/);
+  assert.match(html, /Sent input/);
+  assert.match(html, /data-reader-event-id="input"/);
+  assert.equal((html.match(/data-reader-execution-step=/g) || []).length, 4);
+  assert.doesNotMatch(html, /<untrusted>/);
+  assert.match(appendReaderExecutionMarkers(null, view).parts.get("after\u0000part-start"), /Background command/);
+});
+
 test("an outer call overlapping before it yields is not drawn as parallel background work", () => {
   const { view } = fixture([
     event("start", "started", 1000), event("yield", "yielded", 2000, "start"), event("done", "completed", 5000, "poll"),

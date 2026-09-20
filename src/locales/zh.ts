@@ -1191,6 +1191,8 @@ export const zh = {
   "js.select_first": "请先选择会话",
 
   "detail.execution_kind_async_tool": "异步工具调用",
+  "detail.execution_kind_process": "后台命令",
+  "detail.execution_input": "发送输入",
   "detail.execution_started": "启动",
   "detail.execution_split": "分离",
   "detail.execution_return": "返回",

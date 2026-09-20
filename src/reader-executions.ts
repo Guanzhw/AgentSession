@@ -43,7 +43,7 @@ export function deriveReaderExecutions(protocol: SessionProtocolV3, document: {
       const observation = event.execution;
       let group = groups.get(observation.id);
       if (!group) {
-        group = { id: observation.id, kind: observation.kind, name: observation.toolName, steps: [] };
+        group = { id: observation.id, kind: observation.kind, name: observation.label || observation.toolName, steps: [] };
         groups.set(group.id, group);
       }
       const native = resolve(event);
