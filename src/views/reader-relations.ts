@@ -3,6 +3,7 @@ import { escapeHtml } from "../markdown.js";
 import type { ReaderRelationMilestone, ReaderRelations } from "../reader-relations.js";
 import { anchorId } from "./anchors.js";
 import { renderReaderEventSourceLink, renderReaderCoordinationItem } from "./reader-coordination.js";
+import { renderReaderMemberRails } from "./reader-member-rails.js";
 
 /** Prepared once per reader pane; positions are supplied by the source projection. */
 export interface ReaderRelationMarkup {
@@ -101,7 +102,7 @@ export function renderReaderRelations(relations: ReaderRelations | null): Reader
   const focusMarkup = visibleLanes.length
     ? `<span class="reader-relations-label">${escapeHtml(t("detail.reader_relation_focus"))}</span><label class="reader-relations-select-label"><span class="sr-only">${escapeHtml(t("detail.reader_relation_focus"))}</span><select data-reader-lane-select>${visibleLanes.length <= 3 ? `<option value="">${escapeHtml(t("detail.reader_relation_all"))}</option>` : ""}${options}</select></label><small class="reader-relations-note">${escapeHtml(t("detail.reader_relation_axis"))}</small>`
     : "";
-  const toolbar = `<details class="reader-relations-toolbar" data-reader-relations-controls><summary>${escapeHtml(t("detail.reader_relation_navigation"))}</summary><div class="reader-relations-options">${focusMarkup}${unplaced}</div></details>`;
+  const toolbar = renderReaderMemberRails(relations) + `<details class="reader-relations-toolbar" data-reader-relations-controls><summary>${escapeHtml(t("detail.reader_relation_navigation"))}</summary><div class="reader-relations-options">${focusMarkup}${unplaced}</div></details>`;
   const renderGroups = (groups: Map<string, string[]>) => new Map([...groups].map(([key, entries]) => [key,
     entries.slice(0, 3).join("") + (entries.length > 3
       ? `<details class="reader-collaboration-overflow"><summary>${escapeHtml(t("detail.reader_collaboration_more", { count: String(entries.length - 3) }))}</summary>${entries.slice(3).join("")}</details>`

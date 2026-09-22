@@ -1,4 +1,5 @@
 import { readerCoordinationAssignment } from "./reader-coordination.js";
+import { deriveReaderMemberRails, type ReaderMemberRails } from "./reader-member-rails.js";
 import type { SessionEventEnvelope, SessionRef } from "./providers/shared/session-protocol.js";
 import type { CoordinationKind, SessionEventRef, SessionProtocolV3 } from "./providers/shared/session-protocol-v3.js";
 
@@ -60,6 +61,7 @@ export interface ReaderRelations {
   lanes: ReaderRelationLane[];
   milestones: ReaderRelationMilestone[];
   unplaced: ReaderRelationUnplaced[];
+  memberRails?: ReaderMemberRails;
 }
 
 interface ReaderDocument {
@@ -368,5 +370,5 @@ export function deriveReaderRelations(protocol: SessionProtocolV3, document: Rea
   const lanes = [...lanesById.values()].sort((left, right) => (
     (firstSequenceByLane.get(left.id) ?? Infinity) - (firstSequenceByLane.get(right.id) ?? Infinity)
   ));
-  return { lanes, milestones, unplaced };
+  return { lanes, milestones, unplaced, memberRails: deriveReaderMemberRails(protocol, milestones) };
 }

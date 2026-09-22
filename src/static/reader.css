@@ -899,3 +899,143 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
   .session-workbench[data-session-reader] *::before,
   .session-workbench[data-session-reader] *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
 }
+
+/* Member rails are a narrow reading annotation, never another transcript column. */
+.session-workbench[data-session-reader] {
+  --reader-member-color-0: #44c2ce;
+  --reader-member-color-1: #b397ef;
+  --reader-member-color-2: #f0aa72;
+  --reader-member-color-3: #83cfae;
+  --reader-member-color-4: #e08fb1;
+  --reader-member-color-5: #91b8ef;
+}
+:root:not([data-theme="dark"]) .session-workbench[data-session-reader] {
+  --reader-member-color-0: #007987;
+  --reader-member-color-1: #7750b9;
+  --reader-member-color-2: #a45b25;
+  --reader-member-color-3: #287856;
+  --reader-member-color-4: #ad4776;
+  --reader-member-color-5: #3865a1;
+}
+.session-workbench[data-session-reader] .reader-member-rails-controls:not([hidden]) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 12px 0 20px;
+  color: var(--reader-muted);
+  font-size: 12px;
+}
+.session-workbench[data-session-reader] .reader-member-rails-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.session-workbench[data-session-reader] .reader-member-rails-controls input { accent-color: var(--reader-accent); }
+.session-workbench[data-session-reader] .reader-member-rails-controls select {
+  max-width: 210px;
+  padding: 4px 7px;
+  color: var(--reader-ink);
+  background: var(--reader-surface);
+  border: 1px solid var(--reader-line);
+  border-radius: 4px;
+  font: inherit;
+}
+.session-workbench[data-session-reader] .reader-member-rails-controls :is(input, select):focus-visible {
+  outline: 2px solid var(--reader-accent);
+  outline-offset: 3px;
+}
+.session-workbench[data-session-reader] .reader-member-rails-controls small { font-size: 11px; }
+@media (max-width: 1099px) {
+  .session-workbench[data-session-reader] .reader-member-rails-controls:not([hidden]) { display: none; }
+}
+
+@media (min-width: 1100px) {
+  .session-workbench[data-session-reader]:has([data-reader-member-rails-active="true"]) > .main-content { max-width: 1480px; }
+  .session-workbench[data-session-reader] [data-reader-pane] > .reader-pane-grid > [data-reader-transcript][data-reader-member-rails-active="true"] {
+    position: relative;
+    box-sizing: border-box;
+    width: min(100%, calc(80ch + 216px));
+    max-width: calc(80ch + 216px);
+    padding-right: 216px;
+  }
+}
+.session-workbench[data-session-reader] [data-reader-transcript] { position: relative; }
+.session-workbench[data-session-reader] .reader-member-rails-layer {
+  position: absolute;
+  right: 0;
+  width: 216px;
+  pointer-events: none;
+  z-index: 2;
+}
+.session-workbench[data-session-reader] [data-reader-member-rails-active="false"] > .reader-member-rails-layer { display: none; }
+.session-workbench[data-session-reader] .reader-member-rails-layer svg { display: block; width: 100%; height: 100%; overflow: hidden; }
+.session-workbench[data-session-reader] :is(.reader-member-rails-hit-layer, .reader-member-rails-label-layer) {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.session-workbench[data-session-reader] .reader-member-rails-track,
+.session-workbench[data-session-reader] .reader-member-rails-unknown,
+.session-workbench[data-session-reader] .reader-member-rails-connector { fill: none; vector-effect: non-scaling-stroke; }
+.session-workbench[data-session-reader] .reader-member-rails-track { stroke: currentColor; stroke-width: 2; opacity: .54; }
+.session-workbench[data-session-reader] .reader-member-rails-unknown { stroke: currentColor; stroke-width: 2; stroke-dasharray: 2 5; opacity: .54; }
+.session-workbench[data-session-reader] .reader-member-rails-connector { stroke: currentColor; stroke-width: 2; }
+.session-workbench[data-session-reader] .reader-member-rails-hit {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  transform: translate(-50%, -50%);
+  color: var(--member-rail-color);
+  pointer-events: auto;
+  cursor: pointer;
+}
+.session-workbench[data-session-reader] .reader-member-rails-hit::before {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  background: var(--reader-surface);
+}
+.session-workbench[data-session-reader] .reader-member-rails-hit.is-received::before { background: currentColor; }
+.session-workbench[data-session-reader] .reader-member-rails-hit:is(:hover, :focus-visible)::before { inset: 5px; border-width: 3px; }
+.session-workbench[data-session-reader] .reader-member-rails-hit:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 50%; }
+.session-workbench[data-session-reader] .reader-member-rails-label {
+  position: absolute;
+  width: 88px;
+  padding: 3px;
+  transform: translateX(-50%);
+  color: var(--member-rail-color);
+  background: var(--reader-surface);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: auto;
+}
+.session-workbench[data-session-reader] [data-reader-member-rails-active="true"] [data-reader-member-rails-event] .reader-milestone-body {
+  border-left-color: var(--member-rail-event-color);
+  background: color-mix(in srgb, var(--member-rail-event-color) 6%, var(--reader-surface));
+}
+.session-workbench[data-session-reader] [data-reader-member-rails-active="true"] [data-reader-member-rails-event] .reader-milestone-mark,
+.session-workbench[data-session-reader] [data-reader-member-rails-active="true"] [data-reader-member-rails-event] .reader-milestone-trace { display: none; }
+.session-workbench[data-session-reader] [data-reader-member-rails-active="true"] [data-reader-member-rails-event] .agent-channel-direction {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.session-workbench[data-session-reader] [data-reader-member-rails-active="true"] [data-reader-member-rails-event] .reader-coordination-kind { color: var(--member-rail-event-color); }
+.session-workbench[data-session-reader] [data-reader-member-rails-active="true"] [data-reader-member-rails-event].reader-member-rails-focused {
+  outline: 2px solid var(--member-rail-event-color);
+  outline-offset: 3px;
+}

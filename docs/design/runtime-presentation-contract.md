@@ -370,6 +370,7 @@ writer → reviewer → 主会话的完整阅读、子历史关闭及 Back 恢�
 
 实现与验证入口：
 
+- [正文旁的成员侧轨（R5）](reader-member-rails.md)：正文作为主 Agent 主线，成员创建、通信及返回用侧轨箭头连接；样稿已获认可，正式 Reader 已接入。
 - [Reader 路由、状态和搜索契约](runtime-reader-slice.md)
 - [完整内容与上下文续读](runtime-reader-completeness.md)
 - [协作来源与精确定位](runtime-reader-coordination.md)

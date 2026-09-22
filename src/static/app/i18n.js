@@ -2,6 +2,11 @@ export const __LOCALE__ = globalThis.window?.__LOCALE__ || "en";
 
 export const __I18N__ = {
   en: {
+    reader_rails_navigation: "Member creation and message direction",
+    reader_rails_main: "main agent",
+    reader_rails_created: "{to} created by {from}; open source",
+    reader_rails_sent: "{from} sent to {to}; open source",
+    reader_rails_received: "{to} received from {from}; open source",
     "detail.execution_loading": "Loading execution…",
     "detail.execution_load_failed": "Execution could not be loaded. ",
     "detail.execution_changed": "Earlier steps changed. Reload this execution. ",
@@ -270,6 +275,11 @@ export const __I18N__ = {
     saved_views_cancel: "Cancel"
   },
   zh: {
+    reader_rails_navigation: "成员创建与消息方向",
+    reader_rails_main: "主 Agent",
+    reader_rails_created: "{from} 创建 {to}；打开原文",
+    reader_rails_sent: "{from} 发送给 {to}；打开原文",
+    reader_rails_received: "{to} 收到 {from} 的消息；打开原文",
     "detail.execution_loading": "正在读取执行经过…",
     "detail.execution_load_failed": "执行经过读取失败。",
     "detail.execution_changed": "前面的步骤已更新，请重新读取这次执行。",

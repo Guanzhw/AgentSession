@@ -25,6 +25,13 @@ keeping the parent mounted; closing returns to the original reading position.
 Search explicitly selects the root or an opened child and keeps each query and
 result position separately.
 
+On desktop, colored member rails beside the prose connect creation, peer
+messages and returns to their recorded positions. The prose itself is the main
+agent's line. Nodes open the matching original content, and connections realign
+when execution details or child history expand. At most four nearby members
+are shown at once; a selector reaches the others. Contents and complete history
+remain available.
+
 Inline reading keeps the page URL's session, title, exports and management
 actions owned by the root. Location parameters reproduce the selected child
 history and source. Contents uses the same inline behavior; related history
