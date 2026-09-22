@@ -1,4 +1,4 @@
-# AgentSession 1.10.0
+# AgentSession 1.10.1
 
 ## 会话阅读与 Agent Runtime
 
@@ -19,11 +19,14 @@
 ## 安装
 
 ```sh
-npm install -g @acetamido/agentsession@1.10.0
-npm install -g @acetamido/agentsession-mcp@1.10.0
+npm install -g @acetamido/agentsession@1.10.1
+npm install -g @acetamido/agentsession-mcp@1.10.1
 ```
 
 也可使用 GitHub Release 中 Windows x64、Linux x64/arm64、macOS arm64 的独立可执行包。
 Node 安装方式要求 Node.js 22.15 或更高版本。原有 provider 历史保持只读。
+
+1.10.1 同时修正 Windows checkout 对上游 fixture 的换行转换，保持字节哈希校验一致。
+Reader 功能与 1.10.0 一致；1.10.1 提供统一验收的 npm 包及四平台独立程序。
 
 逐项反馈与验证结果见 [执行账本](https://github.com/Guanzhw/AgentSession/blob/main/docs/specs/reader-feedback-2026-09/tasks.md)。

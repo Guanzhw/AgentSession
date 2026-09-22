@@ -1,2 +1,6 @@
 # Bash scripts must retain LF endings for Git Bash, WSL, and POSIX CI.
 *.sh text eol=lf
+
+# Official snapshots are verified against upstream byte hashes.
+test/fixtures/dsh-alpha15-v3-preview-showcase.jsonl -text
+test/fixtures/dsh-alpha5-fresh-round-trip.jsonl -text

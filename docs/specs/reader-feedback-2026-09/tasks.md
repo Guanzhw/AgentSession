@@ -5,7 +5,7 @@
 
 ## 当前阶段
 
-S1–S3 实现及 S4 本地验收完成，正在提交与发布。发布版本：1.10.0。
+S1–S3 实现及 S4 本地验收完成，功能已提交至 `5572ec9`。统一发布版本：1.10.1。
 最终源码通过 1,070 项测试、230 个步骤的整站桌面 E2E、七类实际浏览器续读检查、
 双 npm 安装包及 Windows 独立程序验收。独立审查问题已关闭。
 
@@ -54,9 +54,19 @@ S1–S3 实现及 S4 本地验收完成，正在提交与发布。发布版本�
 
 - [x] 最终分页修复及浏览器续读验收。
 - [x] 最终全套测试、集中审查与打包验证。
-- [ ] 恢复正常服务、最终 pre-push、窄范围提交和推送。
-- [ ] 远端 main SHA 与 Node 22.15.0 / 26.5.0 CI 通过。
+- [x] 恢复正常服务、最终 pre-push、窄范围提交和推送。
+- [x] 功能提交 `5572ec9` 与远端 main 对齐；[双版本 CI 35767438636](https://github.com/Guanzhw/AgentSession/actions/runs/35767438636) 通过。
 - [ ] 版本标签、npm 两个包与四平台 binary 发布确认。
+
+### 发布中发现的 Windows checkout 问题
+
+1.10.0 两个 npm 包发布成功，并从官方 registry 实际安装验证 Viewer 与 MCP 五项工具。
+四平台 binary 流程中，Linux x64/arm64 与 macOS arm64 通过；Windows 仅两项上游 fixture
+哈希失败。独立复核确认失败哈希分别与原文件 LF→CRLF 的结果一致，属于 checkout 换行转换。
+`.gitattributes` 对这两份字节校验 fixture 增加 `-text`；没有改 fixture、预期哈希或 provider。
+模拟 `core.autocrlf=true` 的 checkout 后两项哈希均匹配上游。修正后本地全套仍为
+1,070/1,070（`logs/spec-feedback-1.10.1-test.log`），pre-push 通过。
+保留已发布的 1.10.0，以 1.10.1 完成修正后的统一发布。
 
 原 provider 历史只读。运行日志、截图与合成样本留在 `logs/`、`tmp/`，不提交原始会话。
 此前 lockfile 修改仅为五处版本行尾差异；本次发布只同步这五处版本值与包内依赖。

@@ -8,7 +8,8 @@ R5 发布后，用户继续指出来源重复、子历史断开、过程入口�
 辨认等问题。本次按 [Reader 反馈修订 spec](../specs/reader-feedback-2026-09/requirements.md)
 实施；[执行账本](../specs/reader-feedback-2026-09/tasks.md)是该批唯一逐项状态来源。
 当前 S1–S3 实现及 S4 本地验收完成：1,070 项测试、真实桌面页面、230 步整站 E2E、
-七类 Markdown/原文续读、npm 安装包和 Windows 独立程序均通过；正在提交并发布 1.10.0。
+七类 Markdown/原文续读、npm 安装包和 Windows 独立程序均通过；功能提交 `5572ec9` 已推送，
+双版本 CI 成功。发布中发现的 Windows fixture 换行转换已定点修正，正在统一发布 1.10.1。
 逐项结果以执行账本为准。
 下列 R5 及更早的完成记录为历史交付，不覆盖 R6。
 
