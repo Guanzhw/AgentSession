@@ -5,7 +5,9 @@
 
 ## 当前阶段
 
-S1–S3 实现及 S4 本地验收完成，功能已提交至 `5572ec9`。统一发布版本：1.10.1。
+S0–S4 全部完成。功能提交 `5572ec9`，Windows 发布修正 `4e4cf12`，均已推送且双版本 CI 通过。
+已正式发布 [1.10.1](https://github.com/Guanzhw/AgentSession/releases/tag/v1.10.1)：
+两个 npm 包和四平台独立程序均已确认可用。
 最终源码通过 1,070 项测试、230 个步骤的整站桌面 E2E、七类实际浏览器续读检查、
 双 npm 安装包及 Windows 独立程序验收。独立审查问题已关闭。
 
@@ -23,7 +25,7 @@ S1–S3 实现及 S4 本地验收完成，功能已提交至 `5572ec9`。统一�
 | S2 | F15 压缩目录 | 真实 Codex 两个 checkpoint 各有目录节点；点击展开实际保留内容，修正后标题 top=95 px，不被顶栏遮住；拥有关系与多次压缩自动回归通过 |
 | S3 | F01 正常库入口 | 3456 正常服务七 provider 均可用，交付重启时 843 条扫描记录；3466 是隔离 DSH Teams 验收样本，交付入口使用 3456 |
 | S3 | F02 同标题辨认 | 真实评测目录 41 个独立 ID、21 个问题组；保留各行，显示问题原文摘录、精确 UTC 和 ID。审查后改为最少共享文本优先，避免公共开场白遮住后续差异 |
-| S4 | 审查、完整验证、提交/推送、发布 | 本地验收完成，远端 CI 与发布确认中；最后结果追加在下方 |
+| S4 | 审查、完整验证、提交/推送、发布 | 全部完成；实现、修正已推送，双版本 CI、两个 npm 包实际安装及四平台 binary 发布均通过 |
 
 ## 实际验证记录
 
@@ -56,7 +58,7 @@ S1–S3 实现及 S4 本地验收完成，功能已提交至 `5572ec9`。统一�
 - [x] 最终全套测试、集中审查与打包验证。
 - [x] 恢复正常服务、最终 pre-push、窄范围提交和推送。
 - [x] 功能提交 `5572ec9` 与远端 main 对齐；[双版本 CI 35767438636](https://github.com/Guanzhw/AgentSession/actions/runs/35767438636) 通过。
-- [ ] 版本标签、npm 两个包与四平台 binary 发布确认。
+- [x] `v1.10.1` 标签与源码 `4e4cf12` 对齐；npm 两个包与四平台 binary 发布确认。
 
 ### 发布中发现的 Windows checkout 问题
 
@@ -67,6 +69,22 @@ S1–S3 实现及 S4 本地验收完成，功能已提交至 `5572ec9`。统一�
 模拟 `core.autocrlf=true` 的 checkout 后两项哈希均匹配上游。修正后本地全套仍为
 1,070/1,070（`logs/spec-feedback-1.10.1-test.log`），pre-push 通过。
 保留已发布的 1.10.0，以 1.10.1 完成修正后的统一发布。
+
+### 1.10.1 远端确认
+
+- 修正提交 `4e4cf12`：[双版本 CI 35768892777](https://github.com/Guanzhw/AgentSession/actions/runs/35768892777)
+  成功；Node 22.15.0 与 26.5.0 均通过。
+- [npm 发布流程 35769050068](https://github.com/Guanzhw/AgentSession/actions/runs/35769050068) 成功，
+  两个包的 `latest` 均为 1.10.1。由官方 registry 安装至隔离目录后，Viewer、内嵌资源、
+  七 provider 不可用路径与 MCP 五项工具均通过；没有修改本机默认 registry。
+- [四平台发布流程 35769050034](https://github.com/Guanzhw/AgentSession/actions/runs/35769050034)
+  全部成功：Windows x64、Linux x64、Linux arm64、macOS arm64 分别通过全量测试、
+  构建和独立程序 smoke。GitHub Release 已发布四个归档及 `SHA256SUMS`，逐项核对
+  manifest 与 GitHub 上传产物 digest 一致。
+- 本地 1.10.1 Windows x64 SEA 已再次构建并运行 Viewer/资源/MCP 检查，全部通过，
+  日志 `logs/spec-feedback-1.10.1-binary.log`。
+- 交付入口：[完整本地会话库](http://127.0.0.1:3456/sessions)。七 provider 均可用、
+  terminal launch 已恢复默认、错误日志为空；浏览器保留正式 Reader，临时视口已恢复。
 
 原 provider 历史只读。运行日志、截图与合成样本留在 `logs/`、`tmp/`，不提交原始会话。
 此前 lockfile 修改仅为五处版本行尾差异；本次发布只同步这五处版本值与包内依赖。
