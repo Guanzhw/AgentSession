@@ -26,6 +26,9 @@ A permanent lane per member consumes unbounded width. Browser inference from tas
 Missing endpoints retain their ordinary readable records. Unknown delivery is not drawn as confirmed receipt.
 Idle and single-turn completion do not terminate member rails. Nested/lazy history uses existing pane-owned anchors.
 
+The follow-up `2026-09-23-reader-continuity-and-navigation` decision changes the visual extent to the last
+recorded interaction and stabilizes lane slots and card geometry. Recorded Agent status is unchanged.
+
 ## Verification
 
 `npm test`: 1,033/1,033; `npm run review` and `git diff --check` passed.

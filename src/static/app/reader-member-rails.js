@@ -5,24 +5,37 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 const MAX_LANES = 4;
 const MAX_EDGES = 80;
 const RAIL_WIDTH = 216;
-const LANE_X = {
-  1: [108],
-  2: [60, 156],
-  3: [48, 108, 168],
-  4: [30, 82, 134, 186]
-};
+const LANE_X = [30, 82, 134, 186];
 
 export function readerRailIntersectsBand(start, end, top, bottom) {
   return Math.min(start, end) <= bottom && Math.max(start, end) >= top;
 }
 
 export function readerRailTrackSegments(first, last, top, bottom) {
-  if (first > bottom) return null;
-  const solidEnd = last + 28;
-  return {
-    solid: solidEnd >= top ? [Math.max(first, top), Math.min(solidEnd, bottom)] : null,
-    unknown: solidEnd < bottom ? [Math.max(solidEnd, top), bottom] : null
-  };
+  if (first > bottom || last < top) return null;
+  return [Math.max(first, top), Math.min(last, bottom)];
+}
+
+export function readerRailEdgePriority(start, end, top, bottom) {
+  const endpoints = [start, end].filter((value) => value !== undefined);
+  if (!endpoints.length) return Infinity;
+  if (endpoints.some((value) => value >= top && value <= bottom)) return 0;
+  if (endpoints.length === 2 && readerRailIntersectsBand(start, end, top, bottom)) return 1;
+  return 2 + Math.min(...endpoints.map((value) => Math.abs(value - (top + bottom) / 2)));
+}
+
+/** Existing members keep physical slots; only newcomers take a vacated slot. */
+export function readerRailSlots(candidates, previous = new Map()) {
+  const chosen = new Set(candidates.slice(0, MAX_LANES));
+  const slots = new Map([...previous].filter(([id]) => chosen.has(id)));
+  const occupied = new Set(slots.values());
+  for (const id of chosen) {
+    if (slots.has(id)) continue;
+    const slot = LANE_X.findIndex((_, index) => !occupied.has(index));
+    slots.set(id, slot);
+    occupied.add(slot);
+  }
+  return slots;
 }
 
 const owned = (pane, selector) => [...pane.querySelectorAll(selector)]
@@ -93,9 +106,11 @@ export function initReaderMemberRails() {
     surface.append(layer);
     const memberById = new Map(data.members.map((member) => [member.id, member]));
     const points = new Map(data.points.map((point) => [point.id, point]));
-    const context = { pane, surface, controls, toggle, select, layer, svg, hitLayer, labelLayer, data, points, memberById,
-      uid: ++nextRailId, geometry: null, intent: null, decorated: new Set(), linkNodes: new Map() };
+    const edgeById = new Map(data.edges.map((edge) => [edge.id, edge]));
+    const context = { pane, surface, controls, toggle, select, layer, svg, hitLayer, labelLayer, data, points, memberById, edgeById,
+      uid: ++nextRailId, geometry: null, intent: null, decorated: new Set(), focusButtons: new Map(), slots: new Map(), linkNodes: new Map() };
     contexts.set(pane, context);
+    decorate(context);
     controls.hidden = false;
     surface.dataset.readerMemberRailsActive = String(toggle.checked && wide.matches);
     resizeObserver.observe(surface);
@@ -110,8 +125,10 @@ export function initReaderMemberRails() {
     resizeObserver.unobserve(context.controls);
     for (const element of context.decorated) {
       delete element.dataset.readerMemberRailsEvent;
+      delete element.dataset.readerMemberRailsShown;
       element.style.removeProperty("--member-rail-event-color");
     }
+    for (const button of context.focusButtons.values()) button.remove();
     context.layer.remove();
     delete context.surface.dataset.readerMemberRailsActive;
     contexts.delete(pane);
@@ -129,9 +146,56 @@ export function initReaderMemberRails() {
     for (const pane of workbench.querySelectorAll("[data-reader-pane]")) attachPane(pane);
   }
 
+  function decorate(context) {
+    const milestones = new Map(owned(context.pane, "[data-reader-milestone][data-reader-observation-id]")
+      .filter((element) => context.surface.contains(element))
+      .map((element) => [element.dataset.readerObservationId, element]));
+    for (const [pointId, button] of context.focusButtons) {
+      if (milestones.get(pointId)?.contains(button)) continue;
+      button.remove();
+      context.focusButtons.delete(pointId);
+    }
+    const memberForPoint = new Map();
+    const edgeForPoint = new Map();
+    for (const edge of context.data.edges) {
+      memberForPoint.set(edge.start, edge.from === "main" ? edge.to : edge.from);
+      memberForPoint.set(edge.end, edge.to === "main" ? edge.from : edge.to);
+      edgeForPoint.set(edge.start, edge);
+      edgeForPoint.set(edge.end, edge);
+    }
+    for (const [pointId, memberId] of memberForPoint) {
+      const milestone = milestones.get(pointId);
+      const member = context.memberById.get(memberId);
+      if (!milestone || !member) continue;
+      milestone.dataset.readerMemberRailsEvent = "";
+      if (context.toggle.checked && wide.matches) milestone.dataset.readerMemberRailsShown = "";
+      else delete milestone.dataset.readerMemberRailsShown;
+      milestone.style.setProperty("--member-rail-event-color", `var(--reader-member-color-${member.color})`);
+      context.decorated.add(milestone);
+      if (context.focusButtons.has(pointId)) continue;
+      const body = milestone.querySelector(":scope > .reader-milestone-body");
+      if (!body) continue;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "reader-member-rails-focus";
+      button.dataset.readerMemberRailFocus = memberId;
+      button.dataset.readerMemberRailEdge = edgeForPoint.get(pointId).id;
+      button.textContent = ft("reader_rails_focus");
+      button.setAttribute("aria-label", formatText(ft("reader_rails_focus_member"), { member: member.name }));
+      button.hidden = true;
+      body.append(button);
+      context.focusButtons.set(pointId, button);
+    }
+    for (const milestone of context.decorated) {
+      if (context.surface.contains(milestone)) continue;
+      context.decorated.delete(milestone);
+    }
+  }
+
   // Only mounted milestone nodes are measured. The process placeholder owns
   // milestone anchors while its detail is still lazy, so absent anchors stay absent.
   function measure(context) {
+    decorate(context);
     const { pane, surface } = context;
     const surfaceRect = surface.getBoundingClientRect();
     const milestoneById = new Map(owned(pane, "[data-reader-milestone][data-reader-observation-id]")
@@ -190,9 +254,16 @@ export function initReaderMemberRails() {
     const active = String(toggle.checked && wide.matches);
     if (surface.dataset.readerMemberRailsActive !== active) {
       surface.dataset.readerMemberRailsActive = active;
+      for (const milestone of context.decorated) {
+        if (active === "true") milestone.dataset.readerMemberRailsShown = "";
+        else delete milestone.dataset.readerMemberRailsShown;
+      }
       context.geometry = null;
     }
-    if (!toggle.checked || !wide.matches) return;
+    if (!toggle.checked || !wide.matches) {
+      for (const button of context.focusButtons.values()) button.hidden = true;
+      return;
+    }
     if (!context.geometry) measure(context);
     let { positions, memberSpan, height } = context.geometry;
     let surfaceTop = surface.getBoundingClientRect().top;
@@ -200,50 +271,27 @@ export function initReaderMemberRails() {
     let bandBottom = Math.min(height, -surfaceTop + window.innerHeight * 1.65);
     if (bandBottom <= bandTop) return;
     const selected = select.value;
+    const focusedEdge = context.edgeById.get(context.focusEdge);
+    const pinned = focusedEdge ? [focusedEdge.from, focusedEdge.to].filter((id) => id !== "main") : selected ? [selected] : [];
     const scores = new Map();
+    const edgeScores = new Map();
+    const viewportTop = Math.max(0, -surfaceTop);
+    const viewportBottom = Math.min(height, viewportTop + window.innerHeight);
     for (const edge of data.edges) {
       const start = positions.get(edge.start)?.y;
       const end = positions.get(edge.end)?.y;
       if (start === undefined && end === undefined) continue;
-      const nearest = start !== undefined && end !== undefined && readerRailIntersectsBand(start, end, bandTop, bandBottom)
-        ? 0 : Math.min(Math.abs((start ?? end) - (bandTop + bandBottom) / 2), Math.abs((end ?? start) - (bandTop + bandBottom) / 2));
+      const nearest = readerRailEdgePriority(start, end, viewportTop, viewportBottom);
+      edgeScores.set(edge.id, nearest);
       for (const id of [edge.from, edge.to]) {
         if (id !== "main" && memberById.has(id) && (!scores.has(id) || nearest < scores.get(id))) scores.set(id, nearest);
       }
     }
     const nearby = [...scores].sort((a, b) => a[1] - b[1]).map(([id]) => id);
-    const visible = new Set((selected ? [selected, ...nearby.filter((id) => id !== selected)] : nearby).slice(0, MAX_LANES));
+    context.slots = readerRailSlots([...pinned, ...nearby.filter((id) => !pinned.includes(id))], context.slots);
+    const visible = new Set(context.slots.keys());
     const lanes = data.members.filter((member) => visible.has(member.id));
-    const laneX = new Map(lanes.map((member, index) => [member.id, LANE_X[lanes.length][index]]));
-    // Compact the selected members' cards before measuring. Scroll clipping
-    // changes only the overlay, never the height of the underlying transcript.
-    const decorated = new Set();
-    for (const edge of data.edges) {
-      if (!positions.has(edge.start) || !positions.has(edge.end)) continue;
-      if ((edge.from !== "main" && !visible.has(edge.from)) || (edge.to !== "main" && !visible.has(edge.to))) continue;
-      const member = memberById.get(edge.from === "main" ? edge.to : edge.from);
-      for (const pointId of [edge.start, edge.end]) {
-        const milestone = positions.get(pointId).element.closest("[data-reader-milestone]");
-        if (!milestone) continue;
-        milestone.dataset.readerMemberRailsEvent = "";
-        milestone.style.setProperty("--member-rail-event-color", `var(--reader-member-color-${member.color})`);
-        decorated.add(milestone);
-      }
-    }
-    const changed = decorated.size !== context.decorated.size || [...decorated].some((element) => !context.decorated.has(element));
-    for (const element of context.decorated) {
-      if (decorated.has(element)) continue;
-      delete element.dataset.readerMemberRailsEvent;
-      element.style.removeProperty("--member-rail-event-color");
-    }
-    context.decorated = decorated;
-    if (changed) {
-      measure(context);
-      ({ positions, memberSpan, height } = context.geometry);
-      surfaceTop = surface.getBoundingClientRect().top;
-      bandTop = Math.max(0, -surfaceTop - window.innerHeight * .65);
-      bandBottom = Math.min(height, -surfaceTop + window.innerHeight * 1.65);
-    }
+    const laneX = new Map([...context.slots].map(([id, slot]) => [id, LANE_X[slot]]));
     const svg = context.svg;
     svg.setAttribute("viewBox", `0 0 ${RAIL_WIDTH} ${bandBottom - bandTop}`);
     const defs = svgNode("defs");
@@ -256,7 +304,7 @@ export function initReaderMemberRails() {
     }
     const paths = [defs];
     const labels = [];
-    for (const [index, member] of lanes.entries()) {
+    for (const member of lanes) {
       const span = memberSpan.get(member.id);
       if (!span) continue;
       const segments = readerRailTrackSegments(span.first, span.last, bandTop, bandBottom);
@@ -264,26 +312,26 @@ export function initReaderMemberRails() {
       const x = laneX.get(member.id);
       const group = svgNode("g", { class: "reader-member-rails-lane" });
       group.style.color = `var(--reader-member-color-${member.color})`;
-      if (segments.solid) group.append(svgNode("path", {
-        d: `M ${x} ${segments.solid[0] - bandTop} V ${segments.solid[1] - bandTop}`,
+      group.append(svgNode("path", {
+        d: `M ${x} ${segments[0] - bandTop} V ${segments[1] - bandTop}`,
         class: "reader-member-rails-track" }));
-      if (segments.unknown) group.append(svgNode("path", {
-        d: `M ${x} ${segments.unknown[0] - bandTop} V ${segments.unknown[1] - bandTop}`,
-        class: "reader-member-rails-unknown"
-      }));
       paths.push(group);
       const label = document.createElement("div");
       label.className = "reader-member-rails-label";
       label.style.setProperty("--member-rail-color", `var(--reader-member-color-${member.color})`);
       label.style.left = `${x}px`;
-      label.style.top = `${Math.max(0, Math.max(span.first - bandTop - 42, -surfaceTop + 72 - bandTop) + (lanes.length >= 3 ? index % 2 * 24 : 0))}px`;
+      label.style.top = `${Math.max(0, Math.max(span.first - bandTop - 42, -surfaceTop + 72 - bandTop) + (context.slots.get(member.id) % 2 * 24))}px`;
       label.textContent = member.name.startsWith("/") ? member.name.split("/").filter(Boolean).at(-1) : member.name;
       label.title = member.purpose ? `${member.name}: ${member.purpose}` : member.name;
       labels.push(label);
     }
     let drawn = 0;
+    const drawnEdges = new Set();
     const hits = new Map();
-    for (const edge of data.edges) {
+    const prioritizedEdges = [...data.edges].sort((left, right) =>
+      (left.id === context.focusEdge ? -1 : edgeScores.get(left.id) ?? Infinity) -
+      (right.id === context.focusEdge ? -1 : edgeScores.get(right.id) ?? Infinity));
+    for (const edge of prioritizedEdges) {
       if (drawn >= MAX_EDGES) break;
       if ((edge.from !== "main" && !visible.has(edge.from)) || (edge.to !== "main" && !visible.has(edge.to))) continue;
       const start = positions.get(edge.start), end = positions.get(edge.end);
@@ -320,7 +368,12 @@ export function initReaderMemberRails() {
         }
       }
       paths.push(group);
+      drawnEdges.add(edge.id);
       drawn++;
+    }
+    for (const button of context.focusButtons.values()) {
+      const edge = context.edgeById.get(button.dataset.readerMemberRailEdge);
+      button.hidden = !edge || (drawnEdges.has(edge.id) && document.activeElement !== button);
     }
     layer.style.top = `${bandTop}px`;
     layer.style.height = `${bandBottom - bandTop}px`;
@@ -365,6 +418,16 @@ export function initReaderMemberRails() {
   }
 
   workbench.addEventListener("click", (event) => {
+    const focus = event.target.closest?.("[data-reader-member-rail-focus]");
+    if (focus) {
+      const context = contexts.get(focus.closest("[data-reader-pane]"));
+      if (context) {
+        context.select.value = focus.dataset.readerMemberRailFocus;
+        context.focusEdge = focus.dataset.readerMemberRailEdge;
+        schedule();
+      }
+      return;
+    }
     const link = event.target.closest?.("[data-reader-member-rail-point]");
     if (!link) return;
     const context = contexts.get(link.closest("[data-reader-pane]"));
@@ -374,12 +437,16 @@ export function initReaderMemberRails() {
     const controls = event.target.closest?.("[data-reader-member-rails-controls]");
     const context = contexts.get(controls?.closest("[data-reader-pane]"));
     if (!context) return;
+    if (event.target === context.select) context.focusEdge = null;
     if (event.target === context.select && context.select.value) {
       const first = context.data.points.find((point) => point.from === context.select.value || point.to === context.select.value);
       if (first) navigatePoint(context, first);
     }
     if (event.target === context.toggle) invalidate(context);
     else schedule();
+  });
+  workbench.addEventListener("focusout", (event) => {
+    if (event.target.matches?.("[data-reader-member-rail-focus]")) schedule();
   });
   workbench.addEventListener("session-reader:anchor-revealed", (event) => {
     const context = contexts.get(event.detail?.pane);

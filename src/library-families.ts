@@ -15,6 +15,7 @@ export interface LibrarySessionRow {
   directory: string | null;
   time_created: number;
   time_updated: number;
+  library_evidence: string | null;
 }
 
 export interface LibraryFamilyNode {
@@ -47,7 +48,7 @@ const identity = (provider: string, id: string) => JSON.stringify([provider, id]
 function prepareFamilies(query: LibraryFamilyQuery) {
   const indexedProviders = query.providers.filter((provider) => !query.liveSessions?.has(provider));
   const rows = getIndexDb().prepare(`
-    SELECT id, provider, parent_id, title, directory, time_created, time_updated
+    SELECT id, provider, parent_id, title, directory, time_created, time_updated, library_evidence
     FROM session_index WHERE provider IN (SELECT value FROM json_each(?))
   `).all(JSON.stringify(indexedProviders)) as LibrarySessionRow[];
   for (const provider of query.providers) {
@@ -56,6 +57,7 @@ function prepareFamilies(query: LibraryFamilyQuery) {
         id: session.id, provider: session.provider, parent_id: session.parentId,
         title: session.title, directory: session.directory,
         time_created: session.timeCreated, time_updated: session.timeUpdated,
+        library_evidence: null,
       });
     }
   }

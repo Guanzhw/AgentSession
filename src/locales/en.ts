@@ -375,7 +375,7 @@ export const en = {
   "detail.reader_coordination_content_unavailable": "The text of this exchange is not available in the local records.",
   "detail.reader_coordination_content_more": "Continue reading",
   "detail.reader_coordination_content_retry": "Retry",
-  "detail.reader_coordination_content_source": "View source record",
+  "detail.reader_coordination_content_source": "View event details",
   "detail.reader_coordination_content_changed": "This exchange has changed. Reload its content.",
   "detail.reader_event_evidence": "Recorded event evidence",
   "detail.reader_event_kind": "Kind",
@@ -397,6 +397,8 @@ export const en = {
   "detail.toc_expand_all": "Expand all",
   "detail.toc_no_indexed_messages": "No indexed messages.",
   "detail.toc_resize": "Resize table of contents",
+  "detail.toc_compaction": "Context compaction",
+  "detail.toc_compaction_number": "{current} / {total}",
 
   "detail.subsession": "Child session",
   "detail.linked_session": "Linked session",
@@ -1228,6 +1230,7 @@ export const en = {
   "progressive.loading": "Loading content…",
   "progressive.retry": "Retry loading",
   "progressive.load_failed": "Unable to load content",
+  "progressive.large_markdown_source": "Large Markdown block shown as source",
 
   // JS prompts/confirms
   "js.rename_prompt": "Enter new title:",
@@ -1237,6 +1240,8 @@ export const en = {
   "js.select_first": "Please select sessions first",
 
   "detail.execution_kind_async_tool": "Asynchronous tool",
+  "detail.execution_total_span": "Start to result: {time}",
+  "detail.execution_detached_span": "After separation: {time}",
   "detail.execution_kind_process": "Background command",
   "detail.execution_input": "Sent input",
   "detail.execution_started": "Started",

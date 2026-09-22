@@ -378,6 +378,26 @@ test('opening the task sidebar places keyboard focus inside and Escape returns t
   assert.deepEqual(h.milestones[1].button.focusOptions, { preventScroll: true });
 });
 
+test('the global launcher controls the active child panel and Escape restores launcher focus', (t) => {
+  const h = relationHarness(t, entries);
+  const child = h.makeSection([{ lane: 'grandchild', kind: 'spawn', sequence: 1 }]);
+  h.inlineOpen(child);
+  h.overview.open = false;
+  delete h.overview.dataset.readerPanelActive;
+  child.overview.dataset.readerPanelActive = 'true';
+
+  h.workbench.dispatchEvent({ type: 'click', target: h.toggle, preventDefault() {}, stopPropagation() {} });
+  assert.equal(h.overview.open, false);
+  assert.equal(child.overview.open, true);
+  assert.deepEqual(child.close.focusOptions, { preventScroll: true });
+
+  h.workbench.dispatchEvent({
+    type: 'keydown', target: child.close, key: 'Escape', preventDefault() {}, stopPropagation() {}
+  });
+  assert.equal(child.overview.open, false);
+  assert.deepEqual(h.toggle.focusOptions, { preventScroll: true });
+});
+
 test('native summary opens with keyboard focus and replaces the previous return target', (t) => {
   const h = relationHarness(t, entries);
   h.workbench.dispatchEvent({ type: 'click', target: h.toggle });

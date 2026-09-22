@@ -376,7 +376,7 @@ export const zh = {
   "detail.reader_coordination_content_unavailable": "这次往来的正文没有保存在可读取的本地记录中。",
   "detail.reader_coordination_content_more": "继续阅读",
   "detail.reader_coordination_content_retry": "重新读取",
-  "detail.reader_coordination_content_source": "查看原始记录",
+  "detail.reader_coordination_content_source": "查看事件详情",
   "detail.reader_coordination_content_changed": "这次往来的内容已更新，请重新读取。",
   "detail.reader_event_evidence": "已记录事件证据",
   "detail.reader_event_kind": "类型",
@@ -397,6 +397,8 @@ export const zh = {
   "detail.toc_expand_all": "全部展开",
   "detail.toc_no_indexed_messages": "没有已索引的消息。",
   "detail.toc_resize": "调整目录宽度",
+  "detail.toc_compaction": "上下文压缩",
+  "detail.toc_compaction_number": "第 {current} / {total} 次",
   "detail.subsession": "子会话",
   "detail.linked_session": "关联会话",
   "detail.inferred_link": "推断关联",
@@ -1227,6 +1229,7 @@ export const zh = {
   "progressive.loading": "正在加载内容…",
   "progressive.retry": "重试加载",
   "progressive.load_failed": "无法加载内容",
+  "progressive.large_markdown_source": "大型 Markdown 块以源码显示",
 
   // JS prompts/confirms
   "js.rename_prompt": "输入新标题：",
@@ -1236,6 +1239,8 @@ export const zh = {
   "js.select_first": "请先选择会话",
 
   "detail.execution_kind_async_tool": "异步工具调用",
+  "detail.execution_total_span": "启动至收到结果：{time}",
+  "detail.execution_detached_span": "分离后：{time}",
   "detail.execution_kind_process": "后台命令",
   "detail.execution_input": "发送输入",
   "detail.execution_started": "启动",

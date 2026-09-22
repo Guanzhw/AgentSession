@@ -1,4 +1,4 @@
-import { escapeHtml, renderMarkdown } from "../markdown.js";
+import { escapeHtml, planMarkdownChunk, renderMarkdown, renderMarkdownTableRows } from "../markdown.js";
 import { t, getLocale } from "../i18n.js";
 import { anchorId } from "./anchors.js";
 import { resolveLibraryTitle } from "../session-title.js";
@@ -119,11 +119,25 @@ function takeChunk(text: string, offset: number, limit: number) {
  * chunks have identical escaping and Markdown decisions without entering the
  * initial page HTML.
  */
-function renderProgressiveHtml(text: string, format: ProgressiveFormat, sourceWasString: boolean, chunk: string) {
-  const markdown = resolveProgressiveRenderFormat(sourceWasString ? text : null, format) === "markdown";
-  return markdown
-    ? `<div class="tool-output-body markdown">${renderMarkdown(chunk)}</div>`
-    : `<pre>${escapeHtml(chunk)}</pre>`;
+function renderProgressiveHtml(text: string, page: ReturnType<typeof planMarkdownChunk>, markdown: boolean) {
+  if (!markdown) return `<pre>${escapeHtml(page.chunk)}</pre>`;
+  if (page.sourceMode) {
+    return `<div class="tool-output-body markdown"><div class="markdown-source-block"><span class="markdown-source-note" role="note" data-search-exclude>${escapeHtml(t("progressive.large_markdown_source"))}</span><pre>${escapeHtml(page.chunk)}</pre></div></div>`;
+  }
+  let html = "";
+  if (page.continuation?.kind === "fence" && page.blockStart != null) {
+    const openerEnd = text.indexOf("\n", page.blockStart);
+    const opener = text.slice(page.blockStart, openerEnd < 0 ? text.length : openerEnd);
+    html = renderMarkdown(`${opener}\n${page.chunk}`);
+  } else if (page.continuation?.kind === "table" && page.blockStart != null) {
+    const headerEnd = text.indexOf("\n", page.blockStart);
+    const delimiterEnd = headerEnd < 0 ? -1 : text.indexOf("\n", headerEnd + 1);
+    const tableHeader = text.slice(page.blockStart, delimiterEnd < 0 ? text.length : delimiterEnd);
+    html = renderMarkdownTableRows(tableHeader, page.chunk);
+  } else {
+    html = renderMarkdown(page.chunk);
+  }
+  return `<div class="tool-output-body markdown">${html}</div>`;
 }
 
 /** Resolve the exact format used by bounded content rendering for search/UI correspondence. */
@@ -139,7 +153,8 @@ function renderQuestionAnswerChunk(questionAnswers: QuestionAnswer[], start: num
     const fieldEnd = field.offset + field.text.length;
     if (fieldEnd < start || field.offset >= end || (fieldEnd === start && field.text)) return "";
     const text = field.text.slice(Math.max(0, start - field.offset), end - field.offset);
-    return `<dt data-search-exclude>${escapeHtml(t(field.kind === "question" ? "detail.question_answer_question" : "detail.question_answer_answer"))}</dt><dd class="question-answer-value">${escapeHtml(text)}</dd>`;
+    const label = start > field.offset ? "" : `<dt data-search-exclude>${escapeHtml(t(field.kind === "question" ? "detail.question_answer_question" : "detail.question_answer_answer"))}</dt>`;
+    return `${label}<dd class="question-answer-value">${escapeHtml(text)}</dd>`;
   }).join("")}</dl>`;
 }
 
@@ -150,11 +165,15 @@ export function renderProgressiveContent(
   limit = TOOL_CHUNK_LIMIT
 ) {
   const text = progressiveText(value, format);
-  const page = takeChunk(text, offset, limit);
+  const markdown = format === "markdown" || (format === "auto" && typeof value === "string" && looksLikeMarkdown(text));
+  const page = markdown
+    ? planMarkdownChunk(text, offset, limit)
+    : { ...takeChunk(text, offset, limit), start: offset, end: 0, continuation: null, blockStart: null, sourceMode: false };
   return {
     html: format === "question-answer"
       ? renderQuestionAnswerChunk(value, offset, page.nextOffset ?? text.length)
-      : renderProgressiveHtml(text, format, typeof value === "string", page.chunk),
+      : renderProgressiveHtml(text, page, markdown),
+    continuation: page.continuation,
     nextOffset: page.nextOffset,
     totalLength: text.length
   };

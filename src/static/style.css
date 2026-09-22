@@ -779,6 +779,13 @@ body {
   background: color-mix(in srgb, var(--trace-agent) 7%, transparent);
 }
 
+.toc-compaction {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--trace-mcp) 10%, transparent);
+  border-color: color-mix(in srgb, var(--trace-mcp) 34%, var(--border-color));
+  box-shadow: inset 2px 0 0 var(--trace-mcp);
+}
+
 .toc-type {
   color: var(--accent-color);
   display: inline-flex;
@@ -805,6 +812,10 @@ body {
 
 .toc-task .toc-type {
   color: var(--trace-agent);
+}
+
+.toc-compaction .toc-type {
+  color: var(--trace-mcp);
 }
 
 .toc-session .toc-type {
@@ -2095,6 +2106,10 @@ details[open] summary {
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+}
+
+.compaction-checkpoint-result > .context-result-disclosure[id] {
+  scroll-margin-top: calc(var(--session-anchor-offset) + 3rem);
 }
 
 .compaction-checkpoint-result-label {

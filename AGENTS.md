@@ -69,8 +69,9 @@ The package is intentionally small:
   them.
 - Reasoning stays attached to the relevant assistant, tool, or subagent output
   and must not cross assistant-message boundaries.
-- The table of contents contains user messages, assistant/agent messages, and
-  task/subtask entries only.
+- The table of contents contains user messages, assistant/agent messages,
+  task/subtask entries, and distinct context-compaction checkpoints. Checkpoint
+  ordering and anchors must match the transcript's placement projection.
 - Runtime Workbench renders protocol events, work, relationships, and context
   from normalized provider evidence; it must not infer provider semantics in
   browser code.

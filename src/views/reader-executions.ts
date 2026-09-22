@@ -1,6 +1,7 @@
 import { t } from "../i18n.js";
 import { escapeHtml } from "../markdown.js";
-import { executionReturned, executionTimeRange, type ReaderExecution, type ReaderExecutionStep, type ReaderExecutions, type ReaderExecutionPage } from "../reader-executions.js";
+import { executionReturned, executionTimeRange, executionRecordedIntervals, type ReaderExecution, type ReaderExecutionStep, type ReaderExecutions, type ReaderExecutionPage } from "../reader-executions.js";
+import { formatLocalizedDurationMs } from "./components.js";
 import { anchorId } from "./anchors.js";
 import { renderReaderEventSourceLink } from "./reader-coordination.js";
 import { readerRelationPositionKey, type ReaderRelationMarkup } from "./reader-relations.js";
@@ -29,7 +30,11 @@ export function appendReaderExecutionMarkers(base: ReaderRelationMarkup | null, 
         const href = `/${encodeURIComponent(view.provider)}/session/${encodeURIComponent(view.sessionId)}#${anchor}`;
         return `<a data-reader-source data-reader-provider="${escapeHtml(view.provider)}" data-reader-session="${escapeHtml(view.sessionId)}" data-reader-anchor="${escapeHtml(anchor)}" href="${escapeHtml(href)}">${escapeHtml(t(step === firstYield ? "detail.execution_to_result" : "detail.execution_to_start"))}</a>`;
       })() : "";
-      const html = `<aside class="reader-execution-insert" id="${escapeHtml(anchorId("execution", step.eventId))}" data-reader-execution-marker="${escapeHtml(item.id)}" data-reader-execution-phase="${step.observation.phase}"><header><strong>${escapeHtml(kindLabel(item))}</strong><span>${escapeHtml(phaseLabel(step))}</span><time>${escapeHtml(clock(step.timestamp))}</time></header><div class="reader-execution-actions">${source(view, step)}${counterpartLink}</div><details data-reader-execution-detail data-reader-execution-url="${escapeHtml(url)}"><summary>${escapeHtml(t("detail.execution_view"))}</summary><div data-reader-execution-panel></div><div data-reader-execution-status role="status" aria-live="polite"></div></details></aside>`;
+      const preview = step === firstYield ? item.steps[0].preview : step.preview;
+      const intervals = executionReturned(step.observation.phase) ? executionRecordedIntervals(item) : null;
+      const timing = intervals ? `<p class="reader-execution-intervals">${escapeHtml(t("detail.execution_total_span", { time: formatLocalizedDurationMs(intervals.total) }))}<span>${escapeHtml(t("detail.execution_detached_span", { time: formatLocalizedDurationMs(intervals.detached) }))}</span></p>` : "";
+      const excerpt = preview ? `<pre class="reader-execution-preview">${escapeHtml(preview)}</pre>` : "";
+      const html = `<aside class="reader-execution-insert" id="${escapeHtml(anchorId("execution", step.eventId))}" data-reader-execution-marker="${escapeHtml(item.id)}" data-reader-execution-phase="${step.observation.phase}"><header><strong>${escapeHtml(item.name)}</strong><span class="reader-execution-kind">${escapeHtml(kindLabel(item))}</span><span>${escapeHtml(phaseLabel(step))}</span><time>${escapeHtml(clock(step.timestamp))}</time></header>${excerpt}${timing}<div class="reader-execution-actions">${source(view, step)}${counterpartLink}</div><details data-reader-execution-detail data-reader-execution-url="${escapeHtml(url)}"><summary>${escapeHtml(t("detail.execution_view"))}</summary><div data-reader-execution-panel></div><div data-reader-execution-status role="status" aria-live="polite"></div></details></aside>`;
       const key = readerRelationPositionKey(step.position.partId || step.position.messageId, step.position.side);
       const index = step.position.partId ? markup.parts : markup.messages;
       index.set(key, (index.get(key) || "") + html);

@@ -136,16 +136,19 @@ test("question answer continuation uses presentation offsets and preserves all f
   let offset = 0;
   let renderedValues = "";
   let pages = 0;
+  let labels = 0;
   do {
     const page = renderProgressiveContent(items, "question-answer", offset, 12000);
     assert.equal(page.totalLength, text.length);
     assert.doesNotMatch(page.html, /questionItemId|send_user_message_question_reply/);
     renderedValues += [...page.html.matchAll(/<dd class="question-answer-value">([\s\S]*?)<\/dd>/g)].map((match) => match[1]).join("");
+    labels += (page.html.match(/<dt data-search-exclude>/g) || []).length;
     assert.ok(page.nextOffset === null || page.nextOffset > offset);
     offset = page.nextOffset;
     pages += 1;
   } while (offset !== null);
   assert.ok(pages > 1);
+  assert.equal(labels, 4, "a field split across pages keeps one label");
   assert.equal(renderedValues, escapeHtml(items.flatMap(({ question, answer }) => [question, answer]).join("")));
   const raw = envelope(items.map(({ id, ...item }) => ({ questionItemId: id, ...item })));
   const html = messageBubble("user", raw, { partId: "recorded-message:text", questionAnswers: items });

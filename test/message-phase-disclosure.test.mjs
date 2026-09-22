@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { renderSessionPage } from "../dist/src/views/session.js";
+import { renderSessionPage, renderSessionReaderPane, renderReaderProcessChunk } from "../dist/src/views/session.js";
 import { renderProgressiveContent, resolveProgressiveField } from "../dist/src/views/components.js";
 
 function metrics(messageCount) {
@@ -66,6 +66,14 @@ function toolPart(messageId, output = "tool result") {
   };
 }
 
+function reasoningPart(messageId, text) {
+  return {
+    kind: "part", id: `${messageId}-reasoning-part`, messageId, sessionId: "root",
+    type: "reasoning", tool: null, title: "reasoning", timeStart: 0, timeEnd: 0,
+    childSessions: [], data: { type: "reasoning", text }
+  };
+}
+
 function message(id, role, timeCreated, parts, presentationPhase) {
   return {
     kind: "message",
@@ -93,13 +101,21 @@ function tree(messages) {
   };
 }
 
-function render(messages, conversationCompactions = []) {
+function render(messages, conversationCompactions = [], readerRelations = null) {
   const sessionTree = tree(messages);
+  const readerPane = readerRelations ? renderSessionReaderPane({
+    session: sessionTree.session,
+    sessionTree,
+    provider: "fixture",
+    conversationCompactions,
+    readerRelations
+  }) : "";
   return renderSessionPage({
     session: sessionTree.session,
     sessionTree,
     provider: "fixture",
-    conversationCompactions
+    conversationCompactions,
+    readerPane
   });
 }
 
@@ -164,6 +180,125 @@ test("Conversation SSR keeps unfinished commentary visible and tool detail expan
   assert.match(thread, /data-reader-execution-count="1"/);
   assert.ok(thread.indexOf("open commentary") < thread.indexOf("data-reader-execution"));
   assert.doesNotMatch(thread, /<details[^>]*data-reader-execution[^>]*\sopen(?:\s|>)/);
+});
+
+test("Conversation SSR combines a message's trailing tool with five adjacent process messages", () => {
+  const first = message("answer", "assistant", 1100, [textPart("answer", "Readable progress"), reasoningPart("answer", "First reasoning"), toolPart("answer")], "commentary");
+  first.data.tokens = { input: 101, output: 3, total: 104 };
+  const later = Array.from({ length: 5 }, (_, index) => {
+    const id = `step-${index}`;
+    const item = message(id, "assistant", 1200 + index, index === 0
+      ? [reasoningPart(id, "Later reasoning"), toolPart(id)] : [toolPart(id)]);
+    item.data.tokens = { input: 10 + index, output: 1, total: 11 + index };
+    return item;
+  });
+  const messages = [
+    message("u1", "user", 1000, [textPart("u1", "Question")]), first, ...later,
+    message("done", "assistant", 1300, [textPart("done", "Final answer")], "final")
+  ];
+  const thread = threadOf(render(messages));
+  assert.deepEqual([...thread.matchAll(/data-conversation-process-count="(\d+)"/g)].map((match) => match[1]), ["6"]);
+  assert.equal((thread.match(/data-reader-execution-count=/g) || []).length, 0, "no nested process doorways");
+  assert.ok(thread.indexOf("Readable progress") < thread.indexOf('data-conversation-process-count="6"'));
+  const process = thread.slice(thread.indexOf('data-conversation-process-count="6"'), thread.indexOf("Final answer"));
+  const anchors = ["answer", ...later.map((item) => item.id)].map((id) => `id="part-${id}-tool-part"`);
+  for (let index = 0; index < anchors.length; index += 1) {
+    assert.equal((process.match(new RegExp(anchors[index], "g")) || []).length, 1, `${anchors[index]} appears once`);
+    if (index) assert.ok(process.indexOf(anchors[index - 1]) < process.indexOf(anchors[index]));
+  }
+  for (const id of ["answer", ...later.map((item) => item.id)]) {
+    assert.equal((thread.match(new RegExp(`id="msg-${id}"`, "g")) || []).length, 1, `canonical message ${id} retained`);
+  }
+  assert.ok(thread.indexOf('id="msg-answer"') < thread.indexOf('data-conversation-process-count="6"'));
+  assert.equal((process.match(/id="msg-answer"/g) || []).length, 0, "the first message stays outside the merged doorway");
+  assert.equal((process.match(/data-reader-process-chunk/g) || []).length, 6);
+  const summary = process.slice(0, process.indexOf("</summary>"));
+  assert.match(summary, /Total tokens across 5 model requests: 65/);
+  assert.match(summary, /message-context-length[^>]*title="[^"]*14/);
+  assert.doesNotMatch(summary, /101|104/, "prior message's token usage is not added to the merged summary");
+  assert.match(process, /data-reader-process-origin-message="answer"/);
+  assert.match(process, /id="part-answer-reasoning-part"/);
+  assert.match(process, /id="part-step-0-reasoning-part"/);
+  const sessionTree = tree(messages);
+  const firstChunk = renderReaderProcessChunk({ sessionTree, messageId: "answer", firstPartId: "answer-tool-part", lastPartId: "answer-tool-part" });
+  const laterChunk = renderReaderProcessChunk({ sessionTree, messageId: "step-0", firstPartId: "step-0-tool-part", lastPartId: "step-0-tool-part" });
+  assert.match(firstChunk.html, /data-progressive-part-id="answer-reasoning-part" data-progressive-field="reasoning"/);
+  assert.doesNotMatch(firstChunk.html, /step-0-reasoning-part/);
+  assert.match(laterChunk.html, /data-progressive-part-id="step-0-reasoning-part" data-progressive-field="reasoning"/);
+  assert.doesNotMatch(laterChunk.html, /answer-reasoning-part/);
+  for (const [part, expected] of [[first.parts[1], "First reasoning"], [later[0].parts[0], "Later reasoning"]]) {
+    const field = resolveProgressiveField(part.data, "reasoning");
+    assert.match(renderProgressiveContent(field.value, field.format, 0, field.limit).html, new RegExp(expected));
+  }
+});
+
+test("Conversation SSR combines trailing process after a visible result milestone with five adjacent process messages", () => {
+  const first = message("teaching-review", "assistant", 1100, [
+    textPart("teaching-review", "Review result received"),
+    toolPart("teaching-review")
+  ], "commentary");
+  const later = Array.from({ length: 5 }, (_, index) => {
+    const id = `devils-advocate-${index}`;
+    return message(id, "assistant", 1200 + index, [toolPart(id)]);
+  });
+  const lane = { id: "teaching-review", name: "teaching_review", childSession: null, runIds: ["review-run"] };
+  const readerRelations = {
+    lanes: [lane],
+    unplaced: [],
+    milestones: [{
+      id: "review-result",
+      laneId: lane.id,
+      kind: "result-delivery",
+      eventId: "review-result-event",
+      sequence: 1,
+      timestamp: 1100,
+      runId: "review-run",
+      sourceEventRef: { session: { provider: "fixture", sessionId: "root" }, eventId: "review-result-event" },
+      position: { messageId: first.id, partId: first.parts[0].id, side: "after" }
+    }]
+  };
+  const thread = threadOf(render([
+    message("u1", "user", 1000, [textPart("u1", "Question")]),
+    first,
+    ...later,
+    message("done", "assistant", 1300, [textPart("done", "Final answer")], "final")
+  ], [], readerRelations));
+
+  assert.deepEqual([...thread.matchAll(/data-conversation-process-count="(\d+)"/g)].map((match) => match[1]), ["6"]);
+  const milestone = thread.indexOf('id="milestone-review-result"');
+  const process = thread.indexOf('data-conversation-process-count="6"');
+  assert.ok(milestone >= 0 && milestone < process, "the result card stays before the combined process doorway");
+  assert.equal((thread.match(/id="milestone-review-result"/g) || []).length, 1);
+  assert.equal((thread.slice(process).match(/data-reader-process-chunk/g) || []).length, 6);
+});
+
+test("Conversation SSR retains trailing reasoning in its original message instead of combining it", () => {
+  const thread = threadOf(render([
+    message("u1", "user", 1000, [textPart("u1", "Question")]),
+    message("answer", "assistant", 1100, [textPart("answer", "Progress"), toolPart("answer"), reasoningPart("answer", "Unfinished thought")]),
+    message("next", "assistant", 1200, [toolPart("next")])
+  ]));
+  assert.doesNotMatch(thread, /data-conversation-process-count="2"/);
+  assert.match(thread, /data-progressive-part-id="answer-reasoning-part" data-progressive-field="reasoning"/);
+  assert.equal((thread.match(/id="msg-answer"/g) || []).length, 1);
+});
+
+test("Conversation SSR keeps a final reply, error, and checkpoint between process runs", () => {
+  const first = message("answer", "assistant", 1100, [textPart("answer", "Readable progress"), toolPart("answer")]);
+  const second = message("next", "assistant", 1200, [toolPart("next")]);
+  const final = message("final", "assistant", 1150, [textPart("final", "Recorded result")], "final");
+  const failed = toolPart("failed");
+  failed.data.state.status = "failed";
+  const cases = [
+    { messages: [first, final, second], compactions: [] },
+    { messages: [message("failed", "assistant", 1100, [textPart("failed", "Warning"), failed]), second], compactions: [] },
+    { messages: [first, second], compactions: [{ id: "cp-1", anchorMessageId: "answer", timestamp: 1100 }] }
+  ];
+  for (const { messages, compactions } of cases) {
+    const thread = threadOf(render([message("u1", "user", 1000, [textPart("u1", "Question")]), ...messages], compactions));
+    assert.doesNotMatch(thread, /data-conversation-process-count="2"/, "boundary separates adjacent executions");
+    assert.equal((thread.match(/data-reader-execution-count="1"/g) || []).length, 2);
+  }
 });
 
 test("Conversation SSR does not combine process disclosures across a checkpoint", () => {

@@ -69,6 +69,7 @@ function clientField(t, { field = 'output', session = 'child', scope = 'owned', 
     dispatchEvent(event) { events.push(event); }
   };
   const container = {
+    get firstElementChild() { return inserts[0] || button; },
     querySelector(selector) { assert.equal(selector, '[data-progressive-status]'); return status; },
     insertBefore(chunk, before) {
       assert.equal(before, button);
@@ -111,8 +112,20 @@ function clientField(t, { field = 'output', session = 'child', scope = 'owned', 
     else delete globalThis.CustomEvent;
   });
   globalThis.document = { createElement: (tagName) => ({
-    tagName, className: '', innerHTML: '', textContent: '', dataset: {}, attributes: new Map(), children: [],
-    firstElementChild: { tabIndex: -1 },
+    tagName, className: '', textContent: '', dataset: {}, attributes: new Map(), children: [], childNodes: [],
+    set innerHTML(value) {
+      this._html = value;
+      const tag = /^<([a-z]+)/i.exec(value)?.[1]?.toUpperCase();
+      const plain = tag === 'PRE' ? value.replace(/^<pre>/, '').replace(/<\/pre>$/, '')
+        .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&') : '';
+      this.firstElementChild = tag ? {
+        tagName: tag, innerHTML: value, tabIndex: -1,
+        childNodes: tag === 'PRE' ? [{ textContent: plain }] : [], dataset: {},
+        classList: { contains: (name) => value.includes(name) },
+        append(...nodes) { this.childNodes.push(...nodes); }
+      } : null;
+    },
+    get innerHTML() { return this._html || ''; },
     setAttribute(name, value) { this.attributes.set(name, value); },
     getAttribute(name) { return this.attributes.get(name) ?? null; },
     append(...children) { this.children.push(...children); },
@@ -160,7 +173,8 @@ test('specific disclosure autoload, manual click and search share a request then
   assert.equal(new URL(urls[1], 'http://localhost').searchParams.get('offset'), '3000');
   pending.shift()(response('<pre>last</pre>'));
   await continuation;
-  assert.equal(fixture.inserts.length, 2);
+  assert.equal(fixture.inserts.length, 1, 'both pages share one content surface');
+  assert.equal(fixture.inserts[0].childNodes.map((node) => node.textContent).join(''), 'firstlast');
   assert.equal(fixture.button.isConnected, false);
   assert.equal(fixture.events[0].detail.pane, fixture.pane);
 });
@@ -204,7 +218,7 @@ test('an earlier autoloaded input does not interrupt a search revealing later ou
   await Promise.all([targetLast, automatic]);
   assert.equal(calls, 3);
   assert.equal(output.events.length, 0);
-  assert.deepEqual(output.inserts.map((chunk) => chunk.innerHTML), ['<pre>early output</pre>', '<pre>late search hit</pre>']);
+  assert.deepEqual(output.inserts.map((chunk) => chunk.innerHTML), ['<pre>early output</pre>']);
 });
 
 test('a failed field stays visible and retries through the same loader', async (t) => {
@@ -253,7 +267,7 @@ test('artifact disclosures page through their own identity and report an empty r
   const empty = clientField(t, { scope: 'context-artifact', artifactId: 'summary:child:empty' });
   globalThis.fetch.mock.mockImplementationOnce(async () => response('', null, 0));
   await loadFoldedContent(empty.details);
-  assert.equal(empty.inserts[0].innerHTML, '');
+  assert.equal(empty.inserts.length, 0);
   assert.equal(empty.status.textContent, 'The recorded content is empty.');
   assert.equal(empty.button.isConnected, false);
 });
@@ -328,8 +342,8 @@ test('evidence source continuation stays with its child artifact and record iden
   assert.equal(first.searchParams.get('artifact'), 'summary:version');
   assert.equal(first.searchParams.get('record'), 'record:version');
   assert.equal(new URL(urls[1], 'http://localhost').searchParams.get('offset'), '6000');
-  assert.equal(fixture.inserts.length, 2);
-  assert.ok(fixture.inserts.every(chunk => chunk.firstElementChild.tabIndex === 0), 'each source page can scroll with the keyboard');
+  assert.equal(fixture.inserts.length, 1, 'evidence continuation stays in one source surface');
+  assert.equal(fixture.inserts[0].tabIndex, 0, 'the source surface can scroll with the keyboard');
 });
 
 test('a detached evidence source ignores a stale response and remains retryable', async (t) => {

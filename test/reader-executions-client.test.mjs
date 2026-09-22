@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { initReaderExecutions, loadReaderExecution } from "../src/static/app/reader-executions.js";
+import { initReaderExecutions, loadReaderExecution, executionBracketSlots } from "../src/static/app/reader-executions.js";
+
+test("nonconsecutive asynchronous occurrences have distinct stable bracket slots", () => {
+  const initial = executionBracketSlots(["run-0", "run-4", "run-8", "run-12"]);
+  assert.equal(new Set(initial.values()).size, 4);
+  const promoted = executionBracketSlots(["run-16", "run-0", "run-4", "run-8", "run-12"], initial);
+  assert.equal(promoted.size, 4);
+  assert.equal(new Set(promoted.values()).size, 4);
+  for (const id of ["run-0", "run-4", "run-8"]) assert.equal(promoted.get(id), initial.get(id));
+  assert.equal(promoted.get("run-16"), initial.get("run-12"));
+});
 
 const deferred = () => {
   let resolve;
@@ -125,11 +135,15 @@ function executionHarness(t) {
   pane.append(detail);
   const workbenchListeners = new Map();
   const workbench = {
+    querySelectorAll() { return []; },
     addEventListener(type, listener) { workbenchListeners.set(type, listener); },
     dispatchEvent(event) { workbenchListeners.get(event.type)?.(event); }
   };
   const requests = [];
   const globals = {
+    ResizeObserver: class { observe() {} unobserve() {} },
+    requestAnimationFrame: () => 1,
+    window: { addEventListener() {} },
     location: { href: "http://localhost/reader" },
     CSS: { escape: (value) => String(value) },
     fetch(url, options) {

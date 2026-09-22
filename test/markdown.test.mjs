@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { renderMarkdown } from "../dist/src/markdown.js";
+import { MARKDOWN_BLOCK_SOURCE_LIMIT, renderMarkdown } from "../dist/src/markdown.js";
 import { messageBubble, reasoningBlock, toolCallBlock, renderProgressiveContent } from "../dist/src/views/components.js";
 import { setLocale } from "../dist/src/i18n.js";
 
@@ -153,6 +153,159 @@ test("long Markdown messages use server-backed continuation", () => {
   assert.ok(html.includes('data-field="text"'));
   assert.ok(html.includes("progressive-more"));
   assert.ok(html.length < 20000, "the full message is not embedded in initial HTML");
+});
+
+test("long fenced Markdown continues one code block without merging an adjacent fence", () => {
+  const code = "const value = `<script>`;\n".repeat(700);
+  const source = `intro\n\n\`\`\`ts\n${code}\`\`\`\n\n\`\`\`text\nsecond fence\n\`\`\`\n`;
+  const pages = [];
+  for (let offset = 0; offset !== null;) {
+    const page = renderProgressiveContent(source, "markdown", offset, 3000);
+    pages.push({ offset, ...page });
+    assert.ok(page.html.length < 40000, "a page stays bounded even within a long fence");
+    offset = page.nextOffset;
+  }
+  assert.equal(pages.map((page, index) => source.slice(page.offset, page.nextOffset ?? source.length)).join(""), source);
+  assert.ok(pages.some((page) => page.continuation?.kind === "fence"));
+  const codeFragments = pages.flatMap((page) => [...page.html.matchAll(/<pre><code[^>]*>([\s\S]*?)<\/code><\/pre>/g)].map((match) => ({ continuation: page.continuation, text: match[1] })));
+  const decode = (text) => text.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+  const firstFence = codeFragments.filter((fragment) => fragment.text.includes("const value"));
+  assert.equal(decode(firstFence.map((fragment) => fragment.text).join("")), code.trimEnd());
+  assert.ok(codeFragments.some((fragment) => fragment.text === "second fence" && fragment.continuation === null), "adjacent independent fences are not continuations");
+  assert.ok(pages.every((page) => !page.html.includes("<script>")), "code remains escaped");
+});
+
+test("Markdown pages cut around a complete table and list", () => {
+  const source = `${"p".repeat(2800)}\n\n| Name | Qty |\n| --- | ---: |\n| A | 1 |\n| B | 2 |\n\n- first\n- second\n\n${"tail\n\n".repeat(900)}`;
+  const pages = [];
+  for (let offset = 0; offset !== null;) {
+    const page = renderProgressiveContent(source, "markdown", offset, 3000);
+    pages.push({ offset, ...page });
+    offset = page.nextOffset;
+  }
+  assert.equal(pages.map((page) => source.slice(page.offset, page.nextOffset ?? source.length)).join(""), source);
+  assert.equal(pages.filter((page) => page.html.includes("<table>")).length, 1);
+  assert.equal(pages.filter((page) => page.html.includes("<ul>")).length, 1);
+  assert.match(pages.find((page) => page.html.includes("<table>")).html, /<td>A<\/td>[\s\S]*<td>B<\/td>/);
+});
+
+test("oversized paragraphs, tables and nested lists carry structural continuation metadata", () => {
+  const paragraph = `<unsafe> ${"word ".repeat(1400)}tail`;
+  const paragraphPages = [];
+  for (let offset = 0; offset !== null;) {
+    const page = renderProgressiveContent(paragraph, "markdown", offset, 600);
+    paragraphPages.push({ offset, ...page });
+    assert.ok(page.html.length < 4000);
+    offset = page.nextOffset;
+  }
+  assert.ok(paragraphPages.slice(1).every((page) => page.continuation?.kind === "paragraph"));
+  assert.ok(paragraphPages.every((page) => !page.html.includes("<unsafe>")));
+  assert.equal(paragraphPages.map((page) => paragraph.slice(page.offset, page.nextOffset ?? paragraph.length)).join(""), paragraph);
+
+  const table = `| Name | Qty |\n| --- | ---: |\n${Array.from({ length: 240 }, (_, index) => `| row-${index} | ${index} |`).join("\n")}`;
+  const tablePages = [];
+  for (let offset = 0; offset !== null;) {
+    const page = renderProgressiveContent(table, "markdown", offset, 500);
+    tablePages.push(page);
+    offset = page.nextOffset;
+  }
+  assert.ok(tablePages.slice(1).every((page) => page.continuation?.kind === "table"));
+  assert.equal(tablePages.reduce((count, page) => count + (page.html.match(/<tr>/g) || []).length, 0), 241);
+  assert.equal(tablePages.reduce((count, page) => count + (page.html.match(/<thead>/g) || []).length, 0), 1);
+
+  const nested = `- parent\n${Array.from({ length: 240 }, (_, index) => `  - child-${index}`).join("\n")}\n- tail`;
+  const listPages = [];
+  for (let offset = 0; offset !== null;) {
+    const page = renderProgressiveContent(nested, "markdown", offset, 500);
+    listPages.push(page);
+    offset = page.nextOffset;
+  }
+  assert.ok(listPages.some((page) => page.continuation?.kind === "list" && page.continuation.depth === 1));
+  assert.equal(listPages.reduce((count, page) => count + (page.html.match(/<li>/g) || []).length, 0), 242);
+});
+
+test("sub-ceiling inline atoms and near-ceiling table headers stay Markdown", () => {
+  for (const source of [
+    `**${"x".repeat(5000)}**`,
+    `[${"label".repeat(800)}](https://example.com/path)`
+  ]) {
+    const page = renderProgressiveContent(source, "markdown", 0, 500);
+    assert.equal(page.nextOffset, null);
+    assert.equal(page.html, `<div class="tool-output-body markdown">${renderMarkdown(source)}</div>`);
+  }
+
+  const table = `| ${"h".repeat(65_400)} |\n| --- |\n| value |`;
+  const first = renderProgressiveContent(table, "markdown", 0, 500);
+  assert.ok(!first.html.includes("markdown-source-block"));
+  assert.ok(first.html.includes("<table>"));
+  assert.ok((first.nextOffset ?? 0) <= MARKDOWN_BLOCK_SOURCE_LIMIT);
+});
+
+test("oversized indivisible Markdown blocks stream as bounded escaped source and resume Markdown", () => {
+  setLocale("en");
+  const oversized = `<unsafe>${"x".repeat(MARKDOWN_BLOCK_SOURCE_LIMIT + 5000)}`;
+  const cases = {
+    "inline atom": `**${oversized}**`,
+    "table row": `| Name | Value |\n| --- | --- |\n| huge | ${oversized} |\n| small | ok |`,
+    "list item": `- ${oversized}\n- small`,
+    quote: `> ${oversized}`
+  };
+  for (const [name, block] of Object.entries(cases)) {
+    const source = `${block}\n\nAfter *markdown*`;
+    const pages = [];
+    for (let offset = 0; offset !== null;) {
+      const page = renderProgressiveContent(source, "markdown", offset, 6000);
+      const end = page.nextOffset ?? source.length;
+      pages.push({ offset, end, ...page });
+      assert.ok(end - offset <= MARKDOWN_BLOCK_SOURCE_LIMIT, `${name} source response stays bounded`);
+      offset = page.nextOffset;
+    }
+    assert.equal(pages.map((page) => source.slice(page.offset, page.end)).join(""), source, `${name} preserves exact source offsets`);
+    const sourcePages = pages.filter((page) => page.html.includes("markdown-source-block"));
+    assert.ok(sourcePages.length > 1, `${name} uses bounded source continuation pages`);
+    assert.equal(sourcePages[0].continuation, null);
+    assert.ok(sourcePages.slice(1).every((page) => page.continuation?.kind === "source"));
+    assert.ok(sourcePages.every((page) => page.html.includes("Large Markdown block shown as source")));
+    assert.ok(sourcePages.every((page) => !page.html.includes("<unsafe>")), `${name} stays escaped`);
+    assert.match(pages.at(-1).html, /After <em>markdown<\/em>/, `${name} resumes normal Markdown afterward`);
+  }
+});
+
+test("oversized plain paragraphs preserve whitespace and raw pages preserve surrogate pairs", () => {
+  const source = `word    ${"word    ".repeat(10_000)}tail`;
+  const expected = /^<p>([\s\S]*)<\/p>$/.exec(renderMarkdown(source))[1];
+  let merged = "";
+  for (let offset = 0; offset !== null;) {
+    const page = renderProgressiveContent(source, "markdown", offset, 5999);
+    const inner = /^<div class="tool-output-body markdown"><p>([\s\S]*)<\/p><\/div>$/.exec(page.html)?.[1] ?? "";
+    if (page.continuation?.kind === "paragraph") merged += page.continuation.separator;
+    merged += inner;
+    offset = page.nextOffset;
+  }
+  assert.equal(merged, expected);
+
+  const raw = `**${"😀".repeat(MARKDOWN_BLOCK_SOURCE_LIMIT)}**`;
+  for (let offset = 0; offset !== null;) {
+    const page = renderProgressiveContent(raw, "markdown", offset, 5999);
+    const end = page.nextOffset ?? raw.length;
+    assert.ok(!/[\uD800-\uDBFF]/.test(raw[end - 1] || ""));
+    assert.ok(!/[\uDC00-\uDFFF]/.test(raw[offset] || ""));
+    offset = page.nextOffset;
+  }
+});
+
+test("oversized fence delimiters use bounded source pages and normal Markdown resumes", () => {
+  const delimiter = "`".repeat(60_000);
+  const source = `${delimiter}ts\ncode\n${delimiter}\n\nAfter *markdown*`;
+  const pages = [];
+  for (let offset = 0; offset !== null;) {
+    const page = renderProgressiveContent(source, "markdown", offset, 500);
+    pages.push({ offset, ...page });
+    assert.ok((page.nextOffset ?? source.length) - offset <= MARKDOWN_BLOCK_SOURCE_LIMIT);
+    offset = page.nextOffset;
+  }
+  assert.ok(pages.some((page) => page.html.includes("markdown-source-block")));
+  assert.match(pages.at(-1).html, /After <em>markdown<\/em>/);
 });
 
 // ---------------------------------------------------------------------------

@@ -170,7 +170,8 @@ test("Team peer handoffs and root follow-ups are visible, expandable reading nod
   assert.match(peerMarkup, /Inspect the patch/);
   assert.match(peerMarkup, /data-reader-coordination-content/);
   assert.match(peerMarkup, /data-reader-coordination-content-url="\/api\/fixture\/session\/root\/reader\/coordination\/peer-handoff\/content"/);
-  assert.match(peerMarkup, /reader-coordination-technical/);
+  assert.match(peerMarkup, /<div class="reader-coordination-content-actions"><a[^>]*>View event details<\/a><\/div>/);
+  assert.doesNotMatch(peerMarkup, /reader-coordination-technical/);
   assert.match(peerMarkup, /data-reader-open[^>]*data-reader-session="child\/a"/);
   assert.ok(value.placedObservationIds.has("peer-handoff"));
   assert.ok(value.placedObservationIds.has("root-followup"));

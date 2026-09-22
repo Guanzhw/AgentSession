@@ -180,12 +180,19 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
 }
 
 .session-workbench[data-session-reader] [data-reader-pane] .message-turn-user {
-  align-self: stretch;
-  width: 100%;
-  padding: 12px 0;
+  align-self: flex-end;
+  width: fit-content;
+  max-width: min(85%, 64ch);
+  margin: 8px 0 18px auto;
+  padding: 12px 16px;
   border: 0;
-  border-radius: 0;
-  background: transparent;
+  border-radius: 12px;
+  background: var(--reader-user);
+  text-align: left;
+}
+
+.session-workbench[data-session-reader] [data-reader-pane] .message-turn-user .message-meta {
+  justify-content: flex-end;
 }
 
 .session-workbench[data-session-reader] [data-reader-pane] .message-user {
@@ -468,8 +475,8 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
 .session-workbench[data-session-reader] .reader-step-current:first-child { padding-left: 0; }
 .session-workbench[data-session-reader] .reader-step-current:last-child { padding-right: 0; }
 
-/* Collaboration is a native disclosure. It is absent entirely when the
-   normalized view has no recorded collaboration facts. */
+/* Collaboration remains one native disclosure per owning pane. The active
+   disclosure docks only when the document, ToC, and member rail still fit. */
 .session-workbench[data-session-reader] .reader-collaboration-overview {
   min-width: 0;
   margin: 25px 0 8px;
@@ -514,14 +521,57 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
   overflow-y: auto;
 }
 
-@media (min-width: 1100px) {
-  .session-workbench[data-session-reader]:has(.reader-collaboration-overview[open]) > .main-content { max-width: none; width: calc(100% - var(--reader-panel-width)); margin-left: 0; margin-right: var(--reader-panel-width); padding-right: 24px; }
-  .session-workbench[data-session-reader] .reader-collaboration-overview[open] > .reader-collaboration { position: fixed; top: var(--topbar-height); right: 0; bottom: 0; z-index: 40; }
+.session-workbench[data-session-reader][data-reader-panel-ready] .reader-collaboration-overview {
+  height: 0;
+  margin: 0;
+  border: 0;
 }
-
-.session-workbench[data-session-reader] .reader-collaboration-overview[open] > .reader-collaboration-overview-summary {
+.session-workbench[data-session-reader][data-reader-panel-ready] .reader-collaboration-overview > .reader-collaboration-overview-summary,
+.session-workbench[data-session-reader][data-reader-panel-ready] .reader-collaboration-overview:not([data-reader-panel-active]) > .reader-collaboration {
   display: none;
 }
+.session-workbench[data-session-reader][data-reader-panel-ready] .reader-collaboration-overview[data-reader-panel-active][open] > .reader-collaboration {
+  position: fixed;
+  top: var(--topbar-height);
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+}
+.session-workbench[data-session-reader][data-reader-panel-mode="dock"]:has(.reader-collaboration-overview[data-reader-panel-active][open]) > .main-content {
+  max-width: none;
+  width: calc(100% - var(--reader-panel-width));
+  margin-left: 0;
+  margin-right: var(--reader-panel-width);
+  padding-right: 24px;
+}
+.session-workbench[data-session-reader][data-reader-panel-mode="overlay"] .reader-collaboration-overview[data-reader-panel-active][open] > .reader-collaboration {
+  top: calc(var(--topbar-height) + 8px);
+  right: 12px;
+  bottom: 12px;
+  width: min(var(--reader-panel-width), calc(100vw - 24px));
+  border: 1px solid var(--reader-line);
+  border-radius: 8px;
+  box-shadow: 0 16px 42px color-mix(in srgb, var(--text-primary) 20%, transparent);
+}
+.session-workbench[data-session-reader][data-reader-panel-ready] .session-actions .reader-header-collaboration {
+  position: fixed;
+  top: 50%;
+  right: 0;
+  z-index: 39;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 40px;
+  max-height: calc(100vh - var(--topbar-height) - 24px);
+  padding: 12px 7px;
+  border-radius: 8px 0 0 8px;
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--text-primary) 16%, transparent);
+  transform: translateY(-50%);
+}
+.session-workbench[data-session-reader][data-reader-panel-ready] .reader-header-collaboration span { writing-mode: vertical-rl; }
+.session-workbench[data-session-reader][data-reader-panel-ready]:has(.reader-collaboration-overview[data-reader-panel-active][open]) .reader-header-collaboration { display: none; }
+.session-workbench[data-session-reader] .reader-header-collaboration[hidden] { display: none; }
 
 .session-workbench[data-session-reader] .reader-collaboration-heading {
   position: sticky;
@@ -710,6 +760,28 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
   background: color-mix(in srgb, var(--reader-accent) 3%, var(--reader-surface));
 }
 
+.session-workbench[data-session-reader] .reader-inline-pane[data-reader-inline-attached] {
+  grid-column: 1 / -1;
+  min-width: 0;
+  margin: 7px 0 0;
+  padding: 12px 0 4px;
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--member-rail-event-color, var(--reader-lane-color, var(--reader-accent))) 30%, var(--reader-line));
+  border-radius: 0;
+  background: transparent;
+  --reader-inline-accent: var(--member-rail-event-color, var(--reader-lane-color, var(--reader-accent)));
+}
+
+.session-workbench[data-session-reader] .reader-inline-pane[data-reader-inline-attached] > .reader-inline-pane-controls {
+  justify-content: flex-start;
+  gap: 8px 14px;
+}
+
+.session-workbench[data-session-reader] .reader-inline-pane[data-reader-inline-attached] > .reader-inline-pane-controls > .reader-inline-pane-standalone,
+.session-workbench[data-session-reader] .reader-inline-pane[data-reader-inline-attached] > .reader-ancestor-path > button {
+  color: var(--reader-inline-accent);
+}
+
 .session-workbench[data-session-reader] .reader-inline-pane-controls {
   display: flex;
   flex-wrap: wrap;
@@ -842,19 +914,13 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
     border-radius: 0;
     background: var(--reader-surface);
   }
-  .session-workbench[data-session-reader] .reader-ancestor-path > button { max-width: 14ch; }
-}
-
-@media (max-width: 1099px) {
-  .session-workbench[data-session-reader] .reader-collaboration-overview[open] > .reader-collaboration {
-    position: fixed;
-    inset: calc(var(--topbar-height) + 8px) 12px 12px;
-    z-index: 40;
-    width: auto;
-    max-height: none;
-    overflow: auto;
-    box-shadow: 0 16px 42px color-mix(in srgb, var(--text-primary) 20%, transparent);
+  .session-workbench[data-session-reader] .reader-inline-pane[data-reader-inline-attached] {
+    margin: 7px 0 0;
+    padding: 12px 0 4px;
+    border-top: 1px solid var(--reader-line);
+    background: transparent;
   }
+  .session-workbench[data-session-reader] .reader-ancestor-path > button { max-width: 14ch; }
 }
 
 @media (max-width: 600px) {
@@ -867,6 +933,13 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
 .reader-execution-insert { margin: 14px 0; padding: 12px 0 12px 14px; border-left: 2px solid var(--accent-color); font-size: 13px; scroll-margin-top: var(--session-anchor-offset); }
 .reader-execution-insert > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
 .reader-execution-insert time { color: var(--text-secondary); font-size: 11px; }
+.reader-execution-kind { color: var(--text-secondary); font-size: 11px; }
+.session-workbench[data-session-reader] [data-reader-pane] .reader-execution-insert > .reader-execution-preview { white-space: pre-wrap; overflow-wrap: anywhere; padding: 0; margin: 8px 0; border: 0; background: transparent; font-size: 12px; line-height: 1.5; }
+.reader-execution-intervals { display: flex; flex-wrap: wrap; gap: 14px; color: var(--text-secondary); font-size: 11px; margin: 6px 0; }
+.reader-execution-inline-links { position: absolute; left: -40px; overflow: hidden; pointer-events: none; }
+.reader-execution-inline-links path { fill: none; stroke: var(--accent-color); stroke-width: 1.5; opacity: .35; }
+.reader-execution-inline-links path.is-focused { stroke-width: 2; opacity: .9; }
+.reader-execution-insert[data-reader-execution-selected] { background: color-mix(in srgb, var(--accent-color) 5%, transparent); }
 .reader-execution-actions { display: flex; gap: 16px; margin: 8px 0; }
 .reader-execution-insert details > summary { cursor: pointer; padding: 7px 0; }
 .reader-execution-time-view { margin: 14px 0; padding: 14px; background: var(--reader-surface); border: 1px solid var(--border-color); }
@@ -977,10 +1050,8 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
   pointer-events: none;
 }
 .session-workbench[data-session-reader] .reader-member-rails-track,
-.session-workbench[data-session-reader] .reader-member-rails-unknown,
 .session-workbench[data-session-reader] .reader-member-rails-connector { fill: none; vector-effect: non-scaling-stroke; }
 .session-workbench[data-session-reader] .reader-member-rails-track { stroke: currentColor; stroke-width: 2; opacity: .54; }
-.session-workbench[data-session-reader] .reader-member-rails-unknown { stroke: currentColor; stroke-width: 2; stroke-dasharray: 2 5; opacity: .54; }
 .session-workbench[data-session-reader] .reader-member-rails-connector { stroke: currentColor; stroke-width: 2; }
 .session-workbench[data-session-reader] .reader-member-rails-hit {
   position: absolute;
@@ -1018,13 +1089,14 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
   text-overflow: ellipsis;
   pointer-events: auto;
 }
-.session-workbench[data-session-reader] [data-reader-member-rails-active="true"] [data-reader-member-rails-event] .reader-milestone-body {
+.session-workbench[data-session-reader] [data-reader-member-rails-shown] > .reader-milestone-body {
   border-left-color: var(--member-rail-event-color);
   background: color-mix(in srgb, var(--member-rail-event-color) 6%, var(--reader-surface));
 }
-.session-workbench[data-session-reader] [data-reader-member-rails-active="true"] [data-reader-member-rails-event] .reader-milestone-mark,
-.session-workbench[data-session-reader] [data-reader-member-rails-active="true"] [data-reader-member-rails-event] .reader-milestone-trace { display: none; }
-.session-workbench[data-session-reader] [data-reader-member-rails-active="true"] [data-reader-member-rails-event] .agent-channel-direction {
+.session-workbench[data-session-reader] [data-reader-member-rails-shown] > .reader-milestone-body > .reader-coordination-exchange > summary { padding-right: 70px; }
+.session-workbench[data-session-reader] [data-reader-member-rails-shown] > .reader-milestone-mark,
+.session-workbench[data-session-reader] [data-reader-member-rails-shown] > .reader-milestone-body > .reader-milestone-trace { display: none; }
+.session-workbench[data-session-reader] [data-reader-member-rails-shown] > .reader-milestone-body > .reader-coordination-exchange > summary .agent-channel-direction {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -1034,8 +1106,25 @@ body:has(.session-workbench[data-session-reader]) { background: var(--bg-primary
   clip-path: inset(50%);
   white-space: nowrap;
 }
-.session-workbench[data-session-reader] [data-reader-member-rails-active="true"] [data-reader-member-rails-event] .reader-coordination-kind { color: var(--member-rail-event-color); }
-.session-workbench[data-session-reader] [data-reader-member-rails-active="true"] [data-reader-member-rails-event].reader-member-rails-focused {
+.session-workbench[data-session-reader] [data-reader-member-rails-shown] > .reader-milestone-body > .reader-coordination-exchange > summary .reader-coordination-kind { color: var(--member-rail-event-color); }
+.session-workbench[data-session-reader] [data-reader-member-rails-shown].reader-member-rails-focused {
   outline: 2px solid var(--member-rail-event-color);
   outline-offset: 3px;
+}
+.session-workbench[data-session-reader] [data-reader-member-rails-shown] > .reader-milestone-body > .reader-member-rails-focus:not([hidden]) {
+  position: absolute;
+  top: 8px;
+  right: 9px;
+  padding: 3px 6px;
+  border: 1px solid var(--member-rail-event-color);
+  border-radius: 4px;
+  color: var(--member-rail-event-color);
+  background: var(--reader-surface);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.session-workbench[data-session-reader] [data-reader-member-rails-shown] > .reader-milestone-body > .reader-member-rails-focus:focus-visible {
+  outline: 2px solid var(--member-rail-event-color);
+  outline-offset: 2px;
 }

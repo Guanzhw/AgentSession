@@ -36,6 +36,8 @@ export interface RawSession {
   timeUpdated: number;
   messageCount: number;
   tokenCount: number | null;
+  /** Bounded provider-owned user text retained in the viewer index for Library identification. */
+  libraryEvidence?: string[];
   metadata?: Record<string, unknown> | null;
 }
 

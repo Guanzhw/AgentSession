@@ -570,6 +570,12 @@ function getCodexTokenStats(days = 30) {
   }
 }
 
+function boundedLibraryEvidence(content: string) {
+  const text = content.replace(/\s+/g, " ").trim();
+  if (text.length <= 1024) return text;
+  return `${text.slice(0, 256)} … ${text.slice(-765)}`;
+}
+
 const codex = {
   id: "codex",
   name: "Codex CLI",
@@ -596,7 +602,17 @@ const codex = {
   async *scan() {
     for (const entry of sessionFiles.list()) {
       try {
-        if (entry.records.length) yield resolveEntry(entry).session;
+        if (entry.records.length) {
+          const resolved = resolveEntry(entry);
+          const userTexts = resolved.messages
+            .filter((message) => message.role === "user" && message.content.trim())
+            .map((message) => boundedLibraryEvidence(message.content));
+          yield {
+            ...resolved.session,
+            libraryEvidence: [...userTexts.slice(0, 3), ...userTexts.slice(-2)]
+              .filter((text, index, all) => all.indexOf(text) === index)
+          };
+        }
       } catch (error) {
         console.warn("Skipping unreadable Codex session during scan:", entry.filePath, error);
       }

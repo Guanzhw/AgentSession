@@ -373,6 +373,66 @@ function makeTocNode(id: any, type: any, label: any, meta: any, depth: any, chil
   };
 }
 
+type CompactionPlacement = "anchored" | "timestamp" | "end";
+
+interface PlacedConversationCompaction {
+  compaction: ConversationCompaction;
+  placement: CompactionPlacement;
+  position: number;
+  afterMessageId: string | null;
+}
+
+/**
+ * Resolve checkpoint placement once for both the transcript and its ToC.
+ * Keeping this projection shared means a ToC entry never invents a second
+ * chronology for the same recorded checkpoint.
+ */
+function placeConversationCompactions(entries: ConversationEntry[], compactions: ConversationCompaction[]) {
+  const indexOf = (messageId: string) => entries.findIndex((entry) => entry.messageId === messageId);
+  return compactions.map((compaction): PlacedConversationCompaction => {
+    const anchored = compaction.anchorMessageId ? indexOf(compaction.anchorMessageId) : -2;
+    let position: number;
+    let placement: CompactionPlacement;
+    if (anchored >= 0) {
+      position = anchored;
+      placement = "anchored";
+    } else {
+      const timestamp = Number(compaction.timestamp);
+      const hasTimestamp = Number.isFinite(timestamp) && timestamp > 0;
+      position = hasTimestamp
+        ? entries.reduce((found, entry, index) => (entry.timeCreated && entry.timeCreated <= timestamp ? index : found), -1)
+        : entries.length;
+      placement = hasTimestamp ? "timestamp" : "end";
+    }
+    return {
+      compaction,
+      placement,
+      position,
+      afterMessageId: position >= 0 && position < entries.length ? entries[position].messageId : position >= entries.length ? entries.at(-1)?.messageId || null : null
+    };
+  });
+}
+
+function compactionTocNode(compaction: ConversationCompaction, index: number, total: number, depth: number) {
+  const ordinal = total > 1 ? t("detail.toc_compaction_number", { current: String(index + 1), total: String(total) }) : "";
+  const timestamp = compaction.timestamp ? formatTime(compaction.timestamp) : "";
+  return makeTocNode(
+    anchorId("checkpoint", compaction.id),
+    "Compaction",
+    t("detail.toc_compaction"),
+    [ordinal, timestamp].filter(Boolean).join(" · "),
+    depth
+  );
+}
+
+function orderedCompactionPlacements(entries: ConversationEntry[], compactions: ConversationCompaction[]) {
+  const placed = placeConversationCompactions(entries, compactions);
+  const total = placed.length;
+  return [...placed]
+    .sort((left, right) => left.position - right.position)
+    .map((item, index) => ({ ...item, index, total }));
+}
+
 function collectMessageTaskTocNodes(message: any, parentAgentDepth: any, seenChildSessionIds = new Set<string>(), provider = "opencode", ownedChildrenByPart: Map<string, OwnedReaderChildDescriptor[]> | null = null): any[] {
   const nodes: any[] = [];
   const childNode = (child: ReaderChildTarget, labelOverride = "", metaOverride = "") => {
@@ -468,15 +528,23 @@ function foldedCommentaryMessageIds(messages: any[]) {
   return folded;
 }
 
-function collectTocNodes(tree: SessionTree, userDepth = 0, provider = "opencode", ownedChildrenByPart: Map<string, OwnedReaderChildDescriptor[]> | null = null, ownedDetachedChildren: OwnedReaderChildDescriptor[] = []): any[] {
+function collectTocNodes(tree: SessionTree, userDepth = 0, provider = "opencode", ownedChildrenByPart: Map<string, OwnedReaderChildDescriptor[]> | null = null, ownedDetachedChildren: OwnedReaderChildDescriptor[] = [], compactionsByAnchor: Map<string | null, any[]> | null = null, leadingCompactions: any[] = [], trailingCompactions: any[] = []): any[] {
   const nodes: any[] = [];
   let currentUserNode: any = null;
   const foldedCommentary = foldedCommentaryMessageIds(tree.messages);
   const seenChildSessionIds = new Set<string>();
 
+  for (const placed of leadingCompactions) {
+    nodes.push(compactionTocNode(placed.compaction, placed.index, placed.total, userDepth));
+  }
+
   tree.messages.forEach((message) => {
     const role = String(message.role || "").toLowerCase();
     if (!isNavigableMessageRole(role)) {
+      const target = currentUserNode ? currentUserNode.children : nodes;
+      for (const placed of compactionsByAnchor?.get(String(message.id)) || []) {
+        target.push(compactionTocNode(placed.compaction, placed.index, placed.total, currentUserNode ? userDepth + 1 : userDepth));
+      }
       return;
     }
 
@@ -491,6 +559,10 @@ function collectTocNodes(tree: SessionTree, userDepth = 0, provider = "opencode"
           nodes.push(...taskNodes);
         }
       }
+      const target = currentUserNode ? currentUserNode.children : nodes;
+      for (const placed of compactionsByAnchor?.get(String(message.id)) || []) {
+        target.push(compactionTocNode(placed.compaction, placed.index, placed.total, currentUserNode ? agentDepth : userDepth));
+      }
       return;
     }
 
@@ -503,6 +575,9 @@ function collectTocNodes(tree: SessionTree, userDepth = 0, provider = "opencode"
         userDepth
       );
       nodes.push(currentUserNode);
+      for (const placed of compactionsByAnchor?.get(String(message.id)) || []) {
+        currentUserNode.children.push(compactionTocNode(placed.compaction, placed.index, placed.total, agentDepth));
+      }
       return;
     }
 
@@ -520,7 +595,15 @@ function collectTocNodes(tree: SessionTree, userDepth = 0, provider = "opencode"
     } else {
       nodes.push(node);
     }
+    const target = currentUserNode ? currentUserNode.children : nodes;
+    for (const placed of compactionsByAnchor?.get(String(message.id)) || []) {
+      target.push(compactionTocNode(placed.compaction, placed.index, placed.total, agentDepth));
+    }
   });
+
+  for (const placed of trailingCompactions) {
+    (currentUserNode ? currentUserNode.children : nodes).push(compactionTocNode(placed.compaction, placed.index, placed.total, currentUserNode ? userDepth + 1 : userDepth));
+  }
 
   for (const child of [...tree.detachedChildren, ...ownedDetachedChildren]) {
     const childId = isOwnedReaderChild(child) ? child.sessionId : child.session.id;
@@ -553,7 +636,9 @@ function renderTocNode(node: any, childNames: Map<string, string>) {
       ? "Agent"
       : normalizedType === "task"
         ? "Task"
-        : normalizedType;
+        : normalizedType === "compaction"
+          ? t("detail.toc_compaction")
+          : normalizedType;
   const typeLabel = typeName.slice(0, 1).toUpperCase();
   const linkTitle = [typeName, label, node.meta].filter(Boolean).join(" - ");
   const readerAttributes = node.readerSession
@@ -580,8 +665,25 @@ function renderTocNode(node: any, childNames: Map<string, string>) {
   </details>`;
 }
 
-function renderToc(tree: SessionTree | null, provider = "opencode", ownedReader: OwnedReaderProjection | null = null, childNames = new Map<string, string>()) {
+function renderToc(tree: SessionTree | null, provider = "opencode", ownedReader: OwnedReaderProjection | null = null, childNames = new Map<string, string>(), conversationEntries: ConversationEntry[] = [], conversationCompactions: ConversationCompaction[] = []) {
   if (!tree) {
+    const placedCompactions = orderedCompactionPlacements(conversationEntries, conversationCompactions);
+    if (placedCompactions.length) {
+      const markup = placedCompactions
+        .map((placed, index) => renderTocNode(compactionTocNode(placed.compaction, index, placedCompactions.length, 0), childNames))
+        .join("\n");
+      return `<aside class="session-toc">
+    <div class="toc-header">
+      <h2>${escapeHtml(t("detail.toc_title"))}</h2>
+      <div class="toc-controls" aria-label="${escapeHtml(t("detail.toc_controls"))}">
+        <button type="button" class="toc-control" data-toc-action="collapse" title="${escapeHtml(t("detail.toc_collapse_all"))}">-</button>
+        <button type="button" class="toc-control" data-toc-action="expand" title="${escapeHtml(t("detail.toc_expand_all"))}">+</button>
+      </div>
+    </div>
+    <div class="toc-list">${markup}</div>
+    <button class="toc-resize-handle" type="button" aria-label="${escapeHtml(t("detail.toc_resize"))}"></button>
+  </aside>`;
+    }
     return `<aside class="session-toc"><h2>${escapeHtml(t("detail.toc_navigate"))}</h2><p class="toc-empty">${escapeHtml(t("detail.toc_no_indexed_messages"))}</p><button class="toc-resize-handle" type="button" aria-label="${escapeHtml(t("detail.toc_resize"))}"></button></aside>`;
   }
 
@@ -593,7 +695,22 @@ function renderToc(tree: SessionTree | null, provider = "opencode", ownedReader:
       ownedChildrenByPart.set(child.parentPartId, entries);
     }
   }
-  const nodes = collectTocNodes(tree, 0, provider, ownedChildrenByPart, (ownedReader?.children || []).filter((child) => child.detached));
+  const normalizedPlacements = orderedCompactionPlacements(conversationEntries, conversationCompactions);
+  const compactionsByAnchor = new Map<string | null, any[]>();
+  const leadingCompactions: any[] = [];
+  const trailingCompactions: any[] = [];
+  for (const placed of normalizedPlacements) {
+    if (placed.position < 0) {
+      leadingCompactions.push(placed);
+    } else if (placed.position >= conversationEntries.length) {
+      trailingCompactions.push(placed);
+    } else {
+      const list = compactionsByAnchor.get(placed.afterMessageId) || [];
+      list.push(placed);
+      compactionsByAnchor.set(placed.afterMessageId, list);
+    }
+  }
+  const nodes = collectTocNodes(tree, 0, provider, ownedChildrenByPart, (ownedReader?.children || []).filter((child) => child.detached), compactionsByAnchor, leadingCompactions, trailingCompactions);
   const markup = nodes.map((node) => renderTocNode(node, childNames)).join("\n");
 
   return `<aside class="session-toc">
@@ -926,6 +1043,7 @@ function renderMessagePartsResult(message: any, depth = 0, provider = "opencode"
   const pendingReasoning = [...initialReasoning];
   let visibleCount = 0;
   let hasMilestones = false;
+  let hasProcessMilestones = false;
   const chunks = deferExecution ? readerProcessChunks(message, relations, new Set(ownedChildrenByPart?.keys() || [])) : [];
   const chunksByTool = new Map(chunks.flatMap((chunk) => chunk.tools.map(({ part }) => [part.id, chunk] as const)));
   const deferredReasoning = new Set(chunks.flatMap((chunk) => chunk.tools.flatMap(({ reasoning }) => reasoning.map((part) => part.id))));
@@ -948,6 +1066,7 @@ function renderMessagePartsResult(message: any, depth = 0, provider = "opencode"
       }
       executionParts.push({ kind: "block", role: "assistant", processOnly: true, html: markup, itemCount: 0 });
       visibleCount += 1;
+      hasProcessMilestones = true;
       return;
     }
     if (messagePosition) return;
@@ -1016,12 +1135,17 @@ function renderMessagePartsResult(message: any, depth = 0, provider = "opencode"
     milestone(part.id, "after");
   }
   milestone(message.id, "after", true);
+  const trailingExecution = executionParts;
+  const markupBeforeTrailingExecution = renderedParts.filter(Boolean).join("\n");
   flushExecution();
 
   return {
     markup: renderedParts.filter(Boolean).join("\n"),
+    markupBeforeTrailingExecution,
+    trailingExecution,
     hasVisibleContent: visibleCount > 0,
     hasMilestones,
+    hasProcessMilestones,
     pendingReasoning
   };
 }
@@ -1036,6 +1160,9 @@ interface ConversationEntry {
   hasMilestones?: boolean;
   attentionCount?: number;
   usage?: ConversationUsage | null;
+  markupBeforeTrailingProcess?: string;
+  trailingProcess?: ConversationItem;
+  flatProcessMarkup?: string;
 }
 
 interface ConversationUsage {
@@ -1108,6 +1235,7 @@ function renderSessionMessageEntries(tree: SessionTree, depth = 0, provider = "o
     }
     let markup = "";
     const result = renderMessagePartsResult(message, depth, provider, [], view, placedCardIds, relations, ownedChildrenByPart, deferExecution);
+    const hasTrailingReasoning = result.pendingReasoning.length > 0;
     if (result.hasVisibleContent && result.markup) {
       const group = [renderMessageGroup(message, result.markup, provider)];
       attachPendingReasoning(group, result.pendingReasoning);
@@ -1135,7 +1263,20 @@ function renderSessionMessageEntries(tree: SessionTree, depth = 0, provider = "o
       timeCreated: Number(message.timeCreated) || 0,
       presentationPhase: message.data?.presentationPhase,
       processOnly: messageTurnRole(message.role) === "assistant" && !hasOwnMessageBubble(message),
-      usage: messageTurnRole(message.role) === "assistant" ? ownedConversationUsage(message.data) : null
+      usage: messageTurnRole(message.role) === "assistant" ? ownedConversationUsage(message.data) : null,
+      markupBeforeTrailingProcess: result.trailingExecution.length && result.markupBeforeTrailingExecution
+        && !hasTrailingReasoning && !result.hasProcessMilestones && !after
+        ? before + renderMessageGroup(message, result.markupBeforeTrailingExecution, provider) + after : undefined,
+      trailingProcess: result.trailingExecution.length ? {
+        kind: "block", role: "assistant", processOnly: true,
+        html: `<div data-reader-process-origin-message="${escapeHtml(message.id)}">${result.trailingExecution.map((item: ConversationItem) => item.html).join("\n")}</div>`,
+        itemCount: result.trailingExecution.reduce((sum: number, item: ConversationItem) => sum + (item.itemCount ?? 1), 0),
+        attentionCount: result.trailingExecution.reduce((sum: number, item: ConversationItem) => sum + (item.attentionCount || 0), 0),
+        deferredProcess: result.trailingExecution.some((item: ConversationItem) => item.deferredProcess)
+      } : undefined,
+      flatProcessMarkup: result.trailingExecution.length && !result.markupBeforeTrailingExecution
+        && result.hasVisibleContent && !hasTrailingReasoning && !result.hasProcessMilestones
+        ? before + renderMessageGroup(message, result.trailingExecution.map((item: ConversationItem) => item.html).join("\n"), provider) + after : undefined
     });
   }
 
@@ -1664,11 +1805,14 @@ function renderCompactionCheckpoint(compaction: any, provider: string, sessionId
     const encoded = encodeURIComponent(compaction.continuationSessionId);
     facts.push(`<dt>${escapeHtml(t("conversation.checkpoint_continuation"))}</dt><dd><a data-reader-open data-reader-provider="${escapeHtml(provider)}" data-reader-session="${escapeHtml(compaction.continuationSessionId)}" href="/${escapeHtml(provider)}/session/${encoded}">${escapeHtml(compaction.continuationSessionId)}</a></dd>`);
   }
-  const result = `<div class="compaction-checkpoint-result"><details class="context-result-disclosure" data-context-result data-context-result-provider="${escapeHtml(provider)}" data-context-result-session="${escapeHtml(sessionId)}" data-context-result-checkpoint="${escapeHtml(compaction.id)}"><summary>${escapeHtml(t("conversation.context_result_disclosure"))}</summary><div class="context-result-panel" data-context-result-panel><span class="context-result-state">${escapeHtml(t("conversation.context_result_load_prompt"))}</span></div></details></div>`;
+  // The canonical checkpoint anchor lives on the retained-context disclosure
+  // itself. Generic reader navigation therefore both locates the checkpoint
+  // and opens the disclosure before scrolling to it.
+  const result = `<div class="compaction-checkpoint-result"><details id="${escapeHtml(anchorId("checkpoint", compaction.id))}" class="context-result-disclosure" data-context-result data-context-result-provider="${escapeHtml(provider)}" data-context-result-session="${escapeHtml(sessionId)}" data-context-result-checkpoint="${escapeHtml(compaction.id)}"><summary>${escapeHtml(t("conversation.context_result_disclosure"))}</summary><div class="context-result-panel" data-context-result-panel><span class="context-result-state">${escapeHtml(t("conversation.context_result_load_prompt"))}</span></div></details></div>`;
   const evidence = facts.length || meta
     ? `<details class="compaction-checkpoint-details"><summary>${escapeHtml(t("conversation.checkpoint_details"))}</summary>${meta ? `<p class="compaction-checkpoint-meta">${escapeHtml(meta)}</p>` : ""}${facts.length ? `<dl class="compaction-checkpoint-facts">${facts.join("")}</dl>` : ""}</details>`
     : "";
-  return `<section id="${escapeHtml(anchorId("checkpoint", compaction.id))}" class="compaction-checkpoint" data-compaction-checkpoint="${escapeHtml(compaction.id)}" data-compaction-placement="${placement}" data-compaction-fidelity="${escapeHtml(compaction.fidelity || "")}">
+  return `<section class="compaction-checkpoint" data-compaction-checkpoint="${escapeHtml(compaction.id)}" data-compaction-placement="${placement}" data-compaction-fidelity="${escapeHtml(compaction.fidelity || "")}" data-compaction-anchor="${escapeHtml(anchorId("checkpoint", compaction.id))}">
     <span class="compaction-checkpoint-kicker">${escapeHtml(t("conversation.checkpoint_kicker"))}</span>
     ${result}
     ${evidence}
@@ -1700,6 +1844,9 @@ interface ConversationItem {
   attentionCount?: number;
   deferredProcess?: boolean;
   usage?: ConversationUsage | null;
+  markupBeforeTrailingProcess?: string;
+  trailingProcess?: ConversationItem;
+  flatProcessMarkup?: string;
 }
 
 function isRecordedFinalItem(item: ConversationItem) {
@@ -1712,6 +1859,7 @@ function isRecordedFinalItem(item: ConversationItem) {
 function renderConversationSegmentItems(items: ConversationItem[]) {
   const rendered: string[] = [];
   let processItems: ConversationItem[] = [];
+  let mergingTrailingProcess = false;
   const hasLaterFinal = new Array<boolean>(items.length).fill(false);
   let foundFinal = false;
   for (let index = items.length - 1; index >= 0; index -= 1) {
@@ -1726,6 +1874,7 @@ function renderConversationSegmentItems(items: ConversationItem[]) {
     }
     rendered.push(renderConversationProcessDisclosure(processItems));
     processItems = [];
+    mergingTrailingProcess = false;
   };
 
   for (let index = 0; index < items.length; index += 1) {
@@ -1740,8 +1889,22 @@ function renderConversationSegmentItems(items: ConversationItem[]) {
       && !item.hasMilestones
       && !item.attentionCount
       && (pureProcess || commentary);
+    const next = items[index + 1];
+    const nextPureProcess = next?.kind === "block" && next.role === "assistant"
+      && next.processOnly === true && (next.presentationPhase == null || next.presentationPhase === "commentary")
+      && !next.hasMilestones && !next.attentionCount && next.flatProcessMarkup;
+    if (!processItems.length && item.markupBeforeTrailingProcess && item.trailingProcess
+      && item.role === "assistant" && item.presentationPhase !== "final"
+      && !item.attentionCount && nextPureProcess) {
+      rendered.push(item.markupBeforeTrailingProcess);
+      processItems.push(item.trailingProcess);
+      mergingTrailingProcess = true;
+      continue;
+    }
     if (foldable) {
-      processItems.push(item);
+      if (mergingTrailingProcess && !pureProcess) flushProcessItems();
+      processItems.push(mergingTrailingProcess && item.flatProcessMarkup
+        ? { ...item, html: item.flatProcessMarkup } : item);
       continue;
     }
     flushProcessItems();
@@ -1759,36 +1922,18 @@ function renderConversationSegmentItems(items: ConversationItem[]) {
  * derived fallback, and a checkpoint with neither renders after all segments.
  * Thread and Linear are presentation modes over the same SSR content;
  * checkpoints render exactly once, in both modes, and never as a message
- * group or ToC entry.
+ * group. The ToC reuses the same placement projection below.
  */
 function renderConversationThread(entries: ConversationEntry[], compactions: any[], provider: string, sessionId: string, view: ConversationViewModel | null = null) {
   // Resolve each checkpoint to the entry index it follows and to one of the
   // explicit placement kinds: -1 means before the first entry; entries.length
   // means after the last (explicit end placement). The placement kind is
   // derived exactly once here and never recomputed downstream.
-  const byEntryIndex = new Map<number, Array<{ compaction: any; placement: "anchored" | "timestamp" | "end" }>>();
-  const indexOf = (messageId: string) => entries.findIndex((entry) => entry.messageId === messageId);
-  const place = (compaction: any) => {
-    const anchored = compaction.anchorMessageId ? indexOf(compaction.anchorMessageId) : -2;
-    let position: number;
-    let placement: "anchored" | "timestamp" | "end";
-    if (anchored >= 0) {
-      position = anchored;
-      placement = "anchored";
-    } else {
-      const timestamp = Number(compaction.timestamp);
-      const hasTimestamp = Number.isFinite(timestamp) && timestamp > 0;
-      position = hasTimestamp
-        ? entries.reduce((found, entry, index) => (entry.timeCreated && entry.timeCreated <= timestamp ? index : found), -1)
-        : entries.length;
-      placement = hasTimestamp ? "timestamp" : "end";
-    }
-    const list = byEntryIndex.get(position) || [];
-    list.push({ compaction, placement });
-    byEntryIndex.set(position, list);
-  };
-  for (const compaction of compactions) {
-    place(compaction);
+  const byEntryIndex = new Map<number, PlacedConversationCompaction[]>();
+  for (const placed of placeConversationCompactions(entries, compactions)) {
+    const list = byEntryIndex.get(placed.position) || [];
+    list.push(placed);
+    byEntryIndex.set(placed.position, list);
   }
   const items: ConversationItem[] = [];
   const pushCheckpoints = (position: number) => {
@@ -1807,7 +1952,10 @@ function renderConversationThread(entries: ConversationEntry[], compactions: any
         processOnly: entry.processOnly,
         hasMilestones: entry.hasMilestones,
         attentionCount: entry.attentionCount,
-        usage: entry.usage
+        usage: entry.usage,
+        markupBeforeTrailingProcess: entry.markupBeforeTrailingProcess,
+        trailingProcess: entry.trailingProcess,
+        flatProcessMarkup: entry.flatProcessMarkup
       });
     }
     if (byEntryIndex.has(index)) {
@@ -2096,7 +2244,7 @@ export function renderSessionReaderPane({
     <div class="reader-pane-grid">
       <details class="reader-toc-disclosure" data-reader-toc open>
         <summary>${uiIcon("chevron-down")}<span>${escapeHtml(t("detail.reader_toc_toggle"))}</span></summary>
-        ${renderToc(effectiveTree, provider, ownedReader, childNames)}
+        ${renderToc(effectiveTree, provider, ownedReader, childNames, conversationEntries, conversationCompactions)}
       </details>
       <div class="reader-pane-main" data-reader-transcript>
         ${artifactMarkup}

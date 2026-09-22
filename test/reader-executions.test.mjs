@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { deriveReaderExecutions, readerExecutionPage, executionTimeRange } from "../dist/src/reader-executions.js";
+import { deriveReaderExecutions, readerExecutionPage, executionTimeRange, executionRecordedIntervals } from "../dist/src/reader-executions.js";
+import { executionBracketPath } from "../src/static/app/reader-executions.js";
 import { appendReaderExecutionMarkers, renderReaderExecutionPage } from "../dist/src/views/reader-executions.js";
 import { publicEvent } from "../dist/src/protocol-runtime.js";
 
@@ -44,6 +45,41 @@ test("ordinary conversation has no async markers, and missing native parts are n
   const unavailable = deriveReaderExecutions(protocol, { messages: [], partsByMessage: new Map() });
   assert.equal(unavailable.items[0].steps.every((step) => step.position === null), true);
   assert.equal(appendReaderExecutionMarkers(null, unavailable).parts.size, 0);
+});
+
+test("default async landmarks show exact bounded input and returned output with separate time intervals", () => {
+  const { document, protocol } = fixture();
+  document.partsByMessage.get("start")[0].data.state = { input: "run build <script>" };
+  document.partsByMessage.get("poll")[0].data.state = { output: "Build succeeded. " + "x".repeat(400) };
+  const view = deriveReaderExecutions(protocol, document);
+  assert.equal(view.items[0].steps[0].preview, "run build <script>");
+  assert.equal(view.items[0].steps.at(-1).preview.length, 281);
+  assert.deepEqual(executionRecordedIntervals(view.items[0]), { total: 4000, detached: 3000 });
+  const markup = appendReaderExecutionMarkers(null, view);
+  assert.match(markup.parts.get("after\u0000part-start"), /run build &lt;script&gt;/);
+  const returned = markup.parts.get("after\u0000part-poll");
+  assert.match(returned, /Build succeeded/);
+  assert.match(returned, /Start to result: 4s/);
+  assert.match(returned, /After separation: 3s/);
+  assert.doesNotMatch(returned, /exit code|CPU|<script>/);
+  const open = { ...view.items[0], steps: view.items[0].steps.slice(0, -1) };
+  assert.equal(executionRecordedIntervals(open), null);
+});
+
+test("execution bracket goes out from detach and returns at the actual second endpoint", () => {
+  assert.equal(executionBracketPath(40, 40, 30, 300), "M40 30 H28 V300 H40 M35 296 L40 300 L35 304");
+  assert.equal(executionBracketPath(40, 52, -300, 60, 2), "M40 -300 H14 V60 H52 M47 56 L52 60 L47 64");
+});
+
+test("structured async input excerpts stop before traversing a large remainder", () => {
+  const { document, protocol } = fixture();
+  const input = { command: "x".repeat(10000) };
+  Object.defineProperty(input, "remainder", { enumerable: true, get() { throw new Error("Preview read beyond its prefix"); } });
+  document.partsByMessage.get("start")[0].data.state = { input };
+  const preview = deriveReaderExecutions(protocol, document).items[0].steps[0].preview;
+  assert.equal(preview.length, 281);
+  assert.ok(preview.startsWith('{"command":"'));
+  assert.ok(preview.endsWith("…"));
 });
 
 test("execution time lanes use selected interval and distinct overlapping occurrences", () => {

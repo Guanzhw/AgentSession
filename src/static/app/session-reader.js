@@ -1,6 +1,7 @@
 import { readerPaneAnchor, scopeReaderFragment, scopeReaderPane, unscopeReaderPane } from "./reader-pane-dom.js";
 import { createReaderLocation, parseReaderLocation, stripReaderLocation } from "./reader-location.js";
 import { ensureReaderAnchor } from "./reader-process.js";
+import { mergeProgressiveSurface } from "./session-workbench.js";
 
 const coordinationContentLoads = new WeakMap();
 
@@ -45,8 +46,21 @@ export function loadReaderCoordinationContent(disclosure, { offset = 0, reload =
         throw error;
       }
       panel.querySelector("[data-reader-coordination-content-state]")?.remove();
-      more?.remove();
-      panel.insertAdjacentHTML("beforeend", data.html);
+      if (offset > 0 && data.available) {
+        const previous = panel.querySelector("[data-reader-coordination-content-chunk]");
+        const fragment = document.createElement("div");
+        fragment.innerHTML = data.html;
+        const next = fragment.querySelector("[data-reader-coordination-content-chunk]");
+        if (!previous || !next || !mergeProgressiveSurface(previous.firstElementChild, next.firstElementChild, data.continuation)) {
+          throw new Error("Exchange continuation did not match its loaded content surface");
+        }
+        more?.remove();
+        const nextMore = fragment.querySelector("[data-reader-coordination-content-more]");
+        if (nextMore) panel.append(nextMore);
+      } else {
+        more?.remove();
+        panel.insertAdjacentHTML("beforeend", data.html);
+      }
       disclosure.dataset.readerCoordinationContentLoaded = "true";
       disclosure.dataset.readerCoordinationContentRevision = data.revision || "";
       return true;
@@ -332,12 +346,6 @@ export function initSessionReader({ ft, showToast } = {}) {
     });
   };
 
-  const closeReaderCollaboration = (link) => {
-    const overview = link?.closest?.("[data-reader-collaboration-overview]");
-    if (!overview) return;
-    overview.open = false;
-  };
-
   const originIdentity = (origin) => {
     if (!origin?.dataset) return "";
     const canonicalAnchor = origin.dataset.readerCanonicalAnchor || origin.id;
@@ -375,6 +383,7 @@ export function initSessionReader({ ft, showToast } = {}) {
   const removeInlinePane = (key, { restore = false } = {}) => {
     const record = inlinePanes.get(key);
     if (!record) return;
+    record.returnOrigin?.setAttribute?.("aria-expanded", "false");
     record.wrapper?.remove?.();
     unscopeReaderPane(record.pane);
     inlinePanes.delete(key);
@@ -439,6 +448,9 @@ export function initSessionReader({ ft, showToast } = {}) {
     wrapper.className = "reader-inline-pane";
     wrapper.dataset.readerInlinePane = "true";
     wrapper.dataset.readerInlineKey = key;
+    const milestoneBody = origin?.matches?.("[data-reader-milestone], .reader-milestone")
+      ? origin.querySelector?.(".reader-milestone-body") : null;
+    if (milestoneBody) wrapper.dataset.readerInlineAttached = "true";
     const path = document.createElement("nav");
     path.className = "reader-ancestor-path";
     path.setAttribute("aria-label", ft?.("detail.reader_history_path") || "History path");
@@ -478,7 +490,8 @@ export function initSessionReader({ ft, showToast } = {}) {
     standalone.className = "reader-inline-pane-standalone";
     standalone.href = entry.href || `/${encodeURIComponent(entry.provider)}/session/${encodeURIComponent(entry.session)}`;
     standalone.textContent = ft?.("detail.reader_inline_standalone") || ft?.("detail.reader_child_history") || "Open full child history";
-    controls.append(title, standalone, close);
+    if (!milestoneBody) controls.append(title);
+    controls.append(standalone, close);
     if (!origin?.matches?.("[data-reader-milestone], .reader-milestone")
       && returnOrigin?.closest?.(".session-toc, .reader-branch-body")) {
       const placement = document.createElement("span");
@@ -486,10 +499,12 @@ export function initSessionReader({ ft, showToast } = {}) {
       placement.textContent = ft?.("detail.reader_inline_unplaced") || "No recorded position";
       controls.append(placement);
     }
-    wrapper.append(path, controls, pane);
+    if (!milestoneBody || ancestors.length > 1) wrapper.append(path);
+    wrapper.append(controls, pane);
     // Copied URLs carry the recorded path, not a previous reading position.
     const originState = entry.originState || null;
-    if (origin?.after) origin.after(wrapper);
+    if (milestoneBody) milestoneBody.append(wrapper);
+    else if (origin?.after) origin.after(wrapper);
     else parentPane?.append?.(wrapper);
     bindContextResultDisclosures(pane);
     const record = {
@@ -499,6 +514,7 @@ export function initSessionReader({ ft, showToast } = {}) {
       pane, parentPane, wrapper, origin, returnOrigin, originState
     };
     inlinePanes.set(key, record);
+    returnOrigin?.setAttribute?.("aria-expanded", "true");
     dispatch("session-reader:inline-opened", { provider: entry.provider, session: entry.session, key, pane });
     close.addEventListener("click", (event) => {
       event.preventDefault();
@@ -562,6 +578,10 @@ export function initSessionReader({ ft, showToast } = {}) {
     const parent = link.closest("[data-reader-pane]");
     if (!parent || canonicalKey(provider, session) === keyOf(parent)) return false;
     const key = canonicalKey(provider, session);
+    const openRecord = inlinePanes.get(key);
+    if (openRecord?.parentPane === parent && openRecord.returnOrigin === link) {
+      return closeInlinePane(key);
+    }
     const existingPane = paneFor(key);
     if (existingPane?.isConnected && (existingPane === activePane() || existingPane.contains?.(parent))) {
       const href = link.href || link.getAttribute("href") || "";
@@ -572,7 +592,6 @@ export function initSessionReader({ ft, showToast } = {}) {
         recordHistory(keyOf(activePane()), existingPane === activePane()
           ? url.pathname + url.search : inlineSourceHref(url, key));
       }
-      closeReaderCollaboration(link);
       revealAnchor(existingPane);
       dispatch("session-reader:anchor-revealed", { pane: existingPane, target: existingPane });
       return true;
@@ -597,7 +616,6 @@ export function initSessionReader({ ft, showToast } = {}) {
       if (existing.origin === origin && existing.parentPane === parent) {
         if (link.dataset.readerAnchor || new URL(link.href, location.href).hash) return revealSource(link);
         if (recordNavigation) recordHistory(keyOf(activePane()), inlineSourceHref(sourceUrlFor(link), key));
-        closeReaderCollaboration(link);
         revealAnchor(existing.pane);
         dispatch("session-reader:anchor-revealed", { pane: existing.pane, target: existing.pane });
         return true;
@@ -649,7 +667,6 @@ export function initSessionReader({ ft, showToast } = {}) {
         await revealSource(link, { replay: true });
         return true;
       }
-      closeReaderCollaboration(link);
       revealAnchor(record.pane);
       dispatch("session-reader:anchor-revealed", { pane: record.pane, target: record.pane });
     }
@@ -838,7 +855,6 @@ export function initSessionReader({ ft, showToast } = {}) {
       recordHistory(keyOf(activePane()), inlinePanes.has(key) ? inlineSourceHref(sourceUrl, key) : sourceHref);
       updateShell(activePane());
     }
-    closeReaderCollaboration(link);
     revealAnchor(target);
     dispatch("session-reader:anchor-revealed", { pane, target });
   };
@@ -918,7 +934,6 @@ export function initSessionReader({ ft, showToast } = {}) {
             recordHistory(keyOf(activePane()), inlinePanes.has(key) ? inlineSourceHref(url, key) : url.pathname + url.search + url.hash, { replace: replay });
           }
           updateShell(activePane());
-          closeReaderCollaboration(link);
           revealAnchor(source);
           dispatch("session-reader:anchor-revealed", { pane, target: source });
         }
@@ -1125,6 +1140,7 @@ export function initSessionReader({ ft, showToast } = {}) {
       event.preventDefault();
       const pane = host.querySelector("[data-reader-pane]");
       const target = pane?.querySelector("[data-reader-collaboration]");
+      if (target?.closest("[data-reader-collaboration-overview]")) return;
       if (target) {
         target.hidden = !target.hidden;
         target.dataset.readerCollaborationExpanded = target.hidden ? "false" : "true";
@@ -1182,6 +1198,65 @@ export function initSessionReader({ ft, showToast } = {}) {
   });
 
   const narrowLayout = window.matchMedia?.("(max-width: 820px)");
+  const dockLayout = window.matchMedia?.("(min-width: 1820px)");
+  const panelPreferenceKey = "agentsession.reader.collaboration-panel.v1";
+  let panelPreference = null;
+  try {
+    const stored = globalThis.localStorage?.getItem(panelPreferenceKey);
+    if (stored === "open" || stored === "closed") panelPreference = stored;
+  } catch { /* Browser storage can be unavailable; current-page state still works. */ }
+  const initializedPanels = new WeakSet();
+  const parkedPanelStates = new WeakMap();
+  let activeOverview = null;
+  const nativeOverviewFor = (pane) => [...(pane?.querySelectorAll("[data-reader-collaboration-overview]") || [])]
+    .find((overview) => overview.closest("[data-reader-pane]") === pane);
+  const panelOwnerPane = () => [...inlinePanes.values()].reverse()
+    .map((record) => record.pane).find((pane) => nativeOverviewFor(pane)) || activePane();
+  const rememberPanelChoice = (choice) => {
+    panelPreference = choice;
+    for (const panel of workbench.querySelectorAll("[data-reader-collaboration-overview]")) {
+      if (panel !== activeOverview) parkedPanelStates.set(panel, choice === "open");
+    }
+    try { globalThis.localStorage?.setItem(panelPreferenceKey, choice); } catch { /* Keep the current-page choice. */ }
+  };
+  const panelLaunchers = () => {
+    let launchers = [...workbench.querySelectorAll("[data-reader-collaboration-toggle]")]
+      .filter((button) => button.closest(".session-actions"));
+    if (!launchers.length) {
+      const actions = workbench.querySelector(".session-actions");
+      if (actions) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "reader-header-collaboration";
+        button.dataset.readerCollaborationToggle = "true";
+        button.textContent = ft?.("detail.reader_collaboration_title") || "Tasks & collaboration";
+        actions.append(button);
+        launchers = [button];
+      }
+    }
+    return launchers;
+  };
+  // The native disclosure and task controller own open/close. Only direct user
+  // controls change the persisted preference; task selection may open it too.
+  workbench.addEventListener("click", (event) => {
+    const toggle = event.target.closest?.("[data-reader-collaboration-toggle]");
+    const overview = nativeOverviewFor(panelOwnerPane());
+    if (toggle?.closest(".session-actions") && overview) {
+      rememberPanelChoice(overview.open ? "closed" : "open");
+      return;
+    }
+    if (event.target.closest?.("[data-reader-collaboration-close]")?.closest("[data-reader-collaboration-overview]")) {
+      rememberPanelChoice("closed");
+      return;
+    }
+    const summary = event.target.closest?.(".reader-collaboration-overview-summary");
+    if (summary) rememberPanelChoice(summary.closest("[data-reader-collaboration-overview]")?.open ? "closed" : "open");
+  }, true);
+  workbench.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && event.target.closest?.("[data-reader-collaboration-overview]")?.open) {
+      rememberPanelChoice("closed");
+    }
+  }, true);
   const ensureCollaborationToggle = (pane) => {
     const target = pane?.querySelector("[data-reader-collaboration]");
     if (!target) return null;
@@ -1201,6 +1276,38 @@ export function initSessionReader({ ft, showToast } = {}) {
   };
   const syncCollaborationLayout = () => {
     const pane = host.querySelector("[data-reader-pane]");
+    const overview = nativeOverviewFor(panelOwnerPane());
+    const samePanel = activeOverview === overview;
+    const previousMode = workbench.dataset.readerPanelMode;
+    if (activeOverview && activeOverview !== overview) parkedPanelStates.set(activeOverview, activeOverview.open);
+    for (const panel of workbench.querySelectorAll("[data-reader-collaboration-overview]")) {
+      delete panel.dataset.readerPanelActive;
+    }
+    activeOverview = overview || null;
+    if (overview) {
+      const dock = Boolean(dockLayout?.matches);
+      workbench.dataset.readerPanelReady = "true";
+      workbench.dataset.readerPanelMode = dock ? "dock" : "overlay";
+      overview.dataset.readerPanelActive = "true";
+      if (parkedPanelStates.has(overview)) {
+        overview.open = parkedPanelStates.get(overview);
+        parkedPanelStates.delete(overview);
+      } else if (!initializedPanels.has(overview)) {
+        overview.open = panelPreference === "open" || (panelPreference !== "closed" && dock);
+        initializedPanels.add(overview);
+      } else if (samePanel && previousMode && previousMode !== workbench.dataset.readerPanelMode && panelPreference === null) {
+        overview.open = dock;
+      }
+      panelLaunchers().forEach((toggle) => {
+        toggle.hidden = false;
+        toggle.setAttribute("aria-controls", overview.id);
+        toggle.setAttribute("aria-expanded", String(overview.open));
+      });
+      return;
+    }
+    delete workbench.dataset.readerPanelReady;
+    delete workbench.dataset.readerPanelMode;
+    for (const toggle of workbench.querySelectorAll(".reader-header-collaboration")) toggle.hidden = true;
     const collaboration = ensureCollaborationToggle(pane);
     if (!collaboration) return;
     const { target, toggle } = collaboration;
@@ -1208,8 +1315,15 @@ export function initSessionReader({ ft, showToast } = {}) {
     target.hidden = !expanded;
     toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
   };
+  workbench.addEventListener("toggle", (event) => {
+    if (event.target !== activeOverview) return;
+    for (const toggle of panelLaunchers()) toggle.setAttribute("aria-expanded", String(activeOverview.open));
+  }, true);
   narrowLayout?.addEventListener?.("change", syncCollaborationLayout);
+  dockLayout?.addEventListener?.("change", syncCollaborationLayout);
   workbench.addEventListener("session-reader:swapped", syncCollaborationLayout);
+  workbench.addEventListener("session-reader:inline-opened", syncCollaborationLayout);
+  workbench.addEventListener("session-reader:inline-closed", syncCollaborationLayout);
 
   backButton?.addEventListener("click", () => {
     if (historyIndex <= 0 && inlinePanes.size === 0) return;

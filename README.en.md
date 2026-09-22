@@ -63,6 +63,12 @@ relationships; a searchable, paged directory reaches every task. Repeated runs o
 one child history share a task, with run and message continuation kept separate.
 Initial requests, latest replies and complete child histories remain expandable.
 A separate optional activity window shows work occurring at the same time.
+On wide desktops the panel docks at the right; ordinary desktop windows retain an edge
+launcher and floating panel. Explicit open/close preference persists. User messages align
+right, Agent messages left, and expanded child history stays inside its originating card.
+Member rails stop at the last interaction; scrolling clips the overlay without moving cards
+or retained lane slots. Overflow relationships can be focused in place. Compaction ToC
+entries open the context retained at their recorded position.
 Per-message model and token details are visible in the message header;
 tools and reasoning stay independently expandable. Canonically identified tool
 input/output and reasoning bodies load when opened, with local retry and
@@ -77,6 +83,11 @@ coverage includes Codex outer `exec` / `wait` calls and independently identified
 `exec_command` / `write_stdin` background commands. Nested terminal processes are
 not correlated by interpreting script text. Missing returns show the last observation;
 sent input, stop requests and observed endings remain distinct.
+Local brackets connect separation and return beside the transcript. Bounded action/result
+excerpts are visible by default, with start-to-result and post-separation intervals labeled
+separately. Show more continues the same content surface, preserving paragraphs, lists,
+tables and code fences across pages. Oversized indivisible Markdown blocks are explicitly
+shown as paged source so complete content stays accessible within the loading limit.
 Explicit team records add a shared team/member graph and directed communication
 links in the same panel. Select a member to read assignments and exchanges, or a
 link to read messages in that direction. Assignments and messages have separate
@@ -90,6 +101,9 @@ highlighting stays static and toast/loading animations stop.
 Library titles prefer viewer custom titles or readable provider titles. When
 neither exists, Untitled plus a short ID identifies the entry without changing
 its canonical ID.
+Independent same-title, same-project sessions retain separate rows with exact UTC times,
+short IDs, and distinguishing excerpts when available. Codex's startup scan stores a few
+bounded user-text excerpts in the viewer index, avoiding transcript reparsing on Library requests.
 Library groups recorded parent/child histories into expandable connected
 branches, loading 20 direct children at a time. Title search and filters match
 children as well as roots, retaining the ancestor path to each match. Missing

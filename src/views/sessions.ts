@@ -4,6 +4,7 @@ import { formatCompactCount, sessionCard, sessionDayLabel } from "./components.j
 import { t } from "../i18n.js";
 import { projectFilterValue } from "../project-filter.js";
 import { libraryFamilyEntry } from "./library-family.js";
+import { buildLibraryDiscriminators, libraryDiscriminatorMarkup, libraryIdentityKey } from "./library-disambiguation.js";
 
 function dayKey(ts: any) {
   const value = Number(ts) || 0;
@@ -269,18 +270,20 @@ export function renderSessionsPage({
   // ── Timeline: sessions grouped by local day (default) ─────────────────────
   const familyFilters = new URLSearchParams(rawParams);
   if (!global && provider) familyFilters.set("provider", provider);
+  const discriminators = buildLibraryDiscriminators(sessions);
   const cards = sessions.map((session) => familyMode ? libraryFamilyEntry({ ...session.family, session }, {
     filters: familyFilters.toString(), returnTo: listPath,
     providerName: providerNames.get(session.provider || provider) || "",
-    manageable: global ? providerManageable.get(session.provider || "") === true : isManageableProvider
-  }) : sessionCard(session, false, {
+    manageable: global ? providerManageable.get(session.provider || "") === true : isManageableProvider,
+    discriminator: discriminators.get(libraryIdentityKey(session)) || null
+  }) : `${sessionCard(session, false, {
     showCheckbox: global ? providerManageable.get(session.provider || "") === true : isManageableProvider,
     provider: provider || session.provider,
     manageable: global ? providerManageable.get(session.provider || "") === true : isManageableProvider,
     showProvider: true,
     providerName: providerNames.get(session.provider || provider) || "",
     returnTo: listPath
-  }));
+  })}${libraryDiscriminatorMarkup(session, discriminators.get(libraryIdentityKey(session)) || null)}`);
   const dayGroups: { key: string; label: string; items: string[] }[] = [];
   const dayIndex = new Map<string, number>();
   const cardIterator = cards[Symbol.iterator]();

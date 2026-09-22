@@ -32,10 +32,15 @@ export function getIndexDb() {
         time_updated INTEGER,
         message_count INTEGER DEFAULT 0,
         token_count INTEGER,
+        library_evidence TEXT,
         last_indexed INTEGER NOT NULL,
         PRIMARY KEY (provider, id)
       )
     `);
+    const columns = indexDb.prepare("PRAGMA table_info(session_index)").all();
+    if (!columns.some((column: any) => column.name === "library_evidence")) {
+      indexDb.exec("ALTER TABLE session_index ADD COLUMN library_evidence TEXT");
+    }
     indexDb.exec("CREATE INDEX IF NOT EXISTS idx_session_provider ON session_index(provider)");
     indexDb.exec("CREATE INDEX IF NOT EXISTS idx_session_updated ON session_index(time_updated DESC)");
     indexDb.function("normalize_cross_provider_project", { deterministic: true }, normalizeCrossProviderProjectPath);
@@ -53,11 +58,12 @@ export function upsertIndex(provider: any, sessions: any) {
   const now = Date.now();
   const stmt = db.prepare(`
     INSERT OR REPLACE INTO session_index
-      (id, provider, parent_id, title, directory, time_created, time_updated, message_count, token_count, last_indexed)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (id, provider, parent_id, title, directory, time_created, time_updated, message_count, token_count, library_evidence, last_indexed)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   for (const s of sessions) {
-    stmt.run(s.id, provider, s.parentId, s.title, s.directory, s.timeCreated, s.timeUpdated, s.messageCount, s.tokenCount, now);
+    stmt.run(s.id, provider, s.parentId, s.title, s.directory, s.timeCreated, s.timeUpdated, s.messageCount, s.tokenCount,
+      s.libraryEvidence?.length ? JSON.stringify(s.libraryEvidence) : null, now);
   }
 }
 

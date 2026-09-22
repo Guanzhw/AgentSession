@@ -397,6 +397,11 @@ assert_positive_count "recorded user history" "$(printf '%s' "$reader_state" | g
 assert_positive_count "recorded assistant history" "$(printf '%s' "$reader_state" | grep -o '"assistants":[0-9]*' | cut -d: -f2)"
 assert_positive_count "recorded tool history" "$(printf '%s' "$reader_state" | grep -o '"tools":[0-9]*' | cut -d: -f2)"
 assert_positive_count "recorded reasoning history" "$(printf '%s' "$reader_state" | grep -o '"reasoning":[0-9]*' | cut -d: -f2)"
+message_alignment="$(read_ab "verify user right and agent left alignment" eval "(() => { const user = document.querySelector('#session-messages .message-turn-user'); const assistant = document.querySelector('#session-messages .message-turn-assistant'); const u = user.getBoundingClientRect(); const a = assistant.getBoundingClientRect(); return JSON.stringify({ userRight: Math.abs(u.right - a.right) < 2, distinctSides: u.left > a.left + 20, userBodyLeft: getComputedStyle(user.querySelector('.message-body')).textAlign === 'left', userMetadataRight: getComputedStyle(user.querySelector('.message-meta')).justifyContent === 'flex-end' }); })()" | tr -d '[:space:]')"
+assert_contains "message alignment" "$message_alignment" '"userRight":true'
+assert_contains "message alignment" "$message_alignment" '"distinctSides":true'
+assert_contains "message alignment" "$message_alignment" '"userBodyLeft":true'
+assert_contains "message alignment" "$message_alignment" '"userMetadataRight":true'
 detail="$(read_ab "read session detail" get text body)"
 assert_not_contains "detail" "$detail" "System Prompts"
 assert_contains "detail" "$detail" "Find in conversation"
@@ -430,7 +435,9 @@ assert_contains "More reader detail links" "$detail_more_tabs_state" '"targets":
 more_tab_open_state="$(read_ab "verify More reader detail link behavior" eval "(() => { const workLink = document.querySelector('.session-actions [data-detail-tab=tab-work]'); const eventsLink = document.querySelector('.session-actions [data-detail-tab=tab-events]'); const work = document.getElementById('tab-work'); const events = document.getElementById('tab-events'); if (!workLink || !eventsLink || !work || !events) return false; work.open = false; events.open = false; workLink.click(); const workOpened = work.open; work.open = false; eventsLink.click(); const eventsOpened = events.open; events.open = false; return workOpened && eventsOpened; })()")"
 assert_contains "More reader detail link behavior" "$more_tab_open_state" 'true'
 
-for sidebar_entry in '[data-reader-collaboration-toggle]' '.reader-collaboration-overview-summary'; do
+sidebar_launcher="$(read_ab "verify persistent task sidebar launcher" eval "(() => { const root = document.querySelector('[data-session-reader]'); const oldEntry = document.querySelector('.reader-collaboration-overview-summary'); const launcher = document.querySelector('[data-reader-collaboration-toggle]'); return !!root.dataset.readerPanelReady && !!launcher.getClientRects().length && !oldEntry.getClientRects().length; })()")"
+assert_contains "persistent task sidebar launcher" "$sidebar_launcher" 'true'
+for sidebar_entry in '[data-reader-collaboration-toggle]'; do
   ab "focus task sidebar entry" focus "$sidebar_entry" >/dev/null
   ab "open task sidebar with keyboard" press Enter >/dev/null
   sidebar_focus="$(read_ab "verify task sidebar entry focus" eval "document.querySelector('[data-reader-collaboration-overview]').open && document.activeElement.matches('[data-reader-collaboration-close]')")"

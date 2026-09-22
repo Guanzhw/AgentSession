@@ -86,28 +86,61 @@ test('long exchange continuation keeps all text and rejects changed versions', a
   const f = fixture();
   f.texts.set('exchange:2', `${'A'.repeat(6500)}\n\n${'B'.repeat(6500)}\n\nFinal marker`);
   const first = await f.request('exchange:2');
-  assert.equal(first.data.nextOffset, 6000);
+  assert.equal(first.data.nextOffset, 6000, 'an oversized paragraph uses a bounded structural page');
+  assert.equal(first.data.continuation, null);
   assert.equal(first.data.totalLength, f.texts.get('exchange:2').length);
   let current = first;
   const chunks = [first.data.html];
+  let sourceOffset = 0;
+  let reconstructed = '';
   while (current.data.nextOffset !== null) {
+    reconstructed += f.texts.get('exchange:2').slice(sourceOffset, current.data.nextOffset);
+    sourceOffset = current.data.nextOffset;
     current = await f.request('exchange:2', `?offset=${current.data.nextOffset}&revision=${first.data.revision}`);
     assert.equal(current.status, 200);
     assert.equal(current.data.revision, first.data.revision);
+    if (sourceOffset === 6000) assert.equal(current.data.continuation?.kind, 'paragraph');
     chunks.push(current.data.html);
   }
+  reconstructed += f.texts.get('exchange:2').slice(sourceOffset);
+  assert.equal(reconstructed, f.texts.get('exchange:2'));
   assert.match(chunks.at(-1), /Final marker/);
-  const missingRevision = await f.request('exchange:2', '?offset=6000');
+  const missingRevision = await f.request('exchange:2', `?offset=${first.data.nextOffset}`);
   assert.equal(missingRevision.status, 400);
   f.texts.set('exchange:2', 'Updated return');
-  const changed = await f.request('exchange:2', `?offset=6000&revision=${first.data.revision}`);
+  const changed = await f.request('exchange:2', `?offset=${first.data.nextOffset}&revision=${first.data.revision}`);
   assert.equal(changed.status, 409);
   assert.equal(changed.data.code, 'stale_content');
   assert.doesNotMatch(JSON.stringify(changed.data), /Updated return/);
   f.texts.delete('exchange:2');
-  const removed = await f.request('exchange:2', `?offset=6000&revision=${first.data.revision}`);
+  const removed = await f.request('exchange:2', `?offset=${first.data.nextOffset}&revision=${first.data.revision}`);
   assert.equal(removed.status, 409);
   assert.equal(removed.data.code, 'stale_content');
+});
+
+test('fenced exchange pages carry explicit continuation metadata and bounded escaped HTML', async () => {
+  const f = fixture();
+  const code = 'const value = `<script>`;\n'.repeat(2200);
+  const source = `\`\`\`ts\n${code}\`\`\`\n\nafter`;
+  f.texts.set('exchange:2', source);
+  const pages = [];
+  let offset = 0;
+  let revision = '';
+  do {
+    const response = await f.request('exchange:2', offset ? `?offset=${offset}&revision=${revision}` : '');
+    assert.equal(response.status, 200);
+    const page = response.data;
+    revision = page.revision;
+    pages.push(page);
+    assert.ok(page.html.length < 80000, 'one page does not render the whole long field');
+    offset = page.nextOffset;
+  } while (offset !== null);
+  assert.ok(pages.some((page) => page.continuation?.kind === 'fence'));
+  const fragments = pages.flatMap((page) => [...page.html.matchAll(/<pre><code[^>]*>([\s\S]*?)<\/code><\/pre>/g)].map((match) => match[1]));
+  const decoded = fragments.join('').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  assert.equal(decoded, code.trimEnd());
+  assert.ok(pages.every((page) => !page.html.includes('<script>')));
+  assert.match(pages.at(-1).html, /after/);
 });
 
 test('unavailable exchange bodies stay explicit and arbitrary observations do not reach the adapter', async () => {
@@ -239,5 +272,29 @@ test('channel markup is body-free, uses one localized row shape and retains acto
   const escaped = renderReaderCoordinationContentPage({ text: '<script>unsafe()</script>', format: 'plain' }, 0);
   assert.doesNotMatch(escaped.html, /<script>/);
   assert.match(escaped.html, /&lt;script&gt;/);
+  setLocale('en');
+});
+
+test('source action opens exact event details without repeating a disclosure', () => {
+  setLocale('en');
+  const f = fixture();
+  const page = deriveReaderCoordinationPage(f.protocol, { provider: f.provider, sessionId: 'root', runId: 'run' });
+  const base = page.items[1];
+  const callMarkup = renderReaderCoordinationItem({
+    ...base,
+    eventId: 'event:call',
+    sourceEventRef: { session: { provider: f.provider, sessionId: 'root' }, eventId: 'event:call' }
+  }, f.provider, 'root');
+  assert.match(callMarkup, /<div class="reader-coordination-content-actions"><a[^>]*>View event details<\/a><\/div>/);
+  assert.match(callMarkup, /data-reader-event-id="event:call"/);
+  assert.equal((callMarkup.match(/data-reader-event-source/g) || []).length, 1);
+  assert.doesNotMatch(callMarkup, /reader-coordination-technical/);
+
+  const eventMarkup = renderReaderCoordinationItem({
+    ...base,
+    eventId: 'event:message',
+    sourceEventRef: { session: { provider: f.provider, sessionId: 'root' }, eventId: 'event:message' }
+  }, f.provider, 'root');
+  assert.match(eventMarkup, /<div class="reader-coordination-content-actions"><a[^>]*>View event details<\/a><\/div>/);
   setLocale('en');
 });

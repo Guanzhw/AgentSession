@@ -3,12 +3,14 @@ import { t } from "../i18n.js";
 import { resolveLibraryTitle } from "../session-title.js";
 import type { LibraryFamilyNode } from "../library-families.js";
 import { formatTime, sessionCard, sessionDayKey } from "./components.js";
+import { libraryDiscriminatorMarkup, type LibraryDiscriminator } from "./library-disambiguation.js";
 
 export interface LibraryFamilyRenderOptions {
   returnTo: string;
   filters: string;
   providerName: string;
   manageable: boolean;
+  discriminator?: LibraryDiscriminator | null;
 }
 
 function childrenDisclosure(node: LibraryFamilyNode, options: LibraryFamilyRenderOptions) {
@@ -38,6 +40,7 @@ export function libraryFamilyEntry(node: LibraryFamilyNode, options: LibraryFami
     ? `<p class="library-family-boundary">${escapeHtml(t(node.parentBoundary === "cyclic-parent" ? "library.family_cycle" : "library.family_missing_parent"))}</p>` : "";
   return `<section class="library-family" data-library-family data-provider="${escapeHtml(session.provider)}" data-session-id="${escapeHtml(session.id)}" data-day="${escapeHtml(sessionDayKey(node.familyUpdated))}">
     ${sessionCard(session, false, { ...options, provider: session.provider, showProvider: true, showCheckbox: options.manageable && node.matched, showStats: false })}
+    ${libraryDiscriminatorMarkup(session, options.discriminator || null)}
     <div class="library-family-relations">${contextLabel(node)}${boundary}${childrenDisclosure(node, options)}</div>
   </section>`;
 }
@@ -53,6 +56,7 @@ export function libraryFamilyChild(node: LibraryFamilyNode, options: LibraryFami
       <div class="library-family-child-title">${checkbox}<a class="library-family-title" href="${escapeHtml(href)}">${escapeHtml(title)}</a></div>
       <time datetime="${new Date(session.time_updated).toISOString()}">${escapeHtml(formatTime(session.time_updated))}</time>
     </div>
+    ${libraryDiscriminatorMarkup(session, options.discriminator || { idLabel: session.id.slice(0, 8), excerpt: null })}
     ${contextLabel(node)}
     ${childrenDisclosure(node, options)}
   </li>`;

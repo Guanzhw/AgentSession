@@ -4144,7 +4144,7 @@ test("conversation thread segments the spine into user turns with a prelude befo
   assert.doesNotMatch(thread.slice(prelude, thread.indexOf('thread-turn thread-turn-user')), /thread-turn-header/);
 });
 
-test("conversation renders one recorded compaction checkpoint at its causal position without a ToC entry", () => {
+test("conversation renders one recorded compaction checkpoint at its causal position with a matching ToC entry", () => {
   const tree = flowSession("root", [
     flowVisible("u1", "user", 1000, [], { text: true }),
     flowVisible("a1", "assistant", 2000),
@@ -4185,7 +4185,35 @@ test("conversation renders one recorded compaction checkpoint at its causal posi
   assert.match(html, /Strategy<\/dt><dd>summary<\/dd>/);
   assert.match(html, /Continued session<\/dt><dd><a[^>]*data-reader-session="continued-next"[^>]*href="\/codex\/session\/continued-next">continued-next<\/a><\/dd>/);
   const toc = html.match(/<div class="toc-list">([\s\S]*?)<\/div>\s*<button class="toc-resize-handle"/)?.[1] || "";
-  assert.doesNotMatch(toc, /checkpoint|cp-1|Context compacted/);
+  assert.match(toc, /class="toc-link toc-compaction" href="#checkpoint-cp-1"/);
+  assert.match(toc, /Context compaction/);
+  assert.match(html, /<details id="checkpoint-cp-1" class="context-result-disclosure"/);
+  assert.ok(toc.indexOf("Context compaction") > toc.indexOf("assistant a1"), "ToC checkpoint follows the anchored message");
+  assert.ok(toc.indexOf("Context compaction") < toc.indexOf("user u2"), "ToC checkpoint precedes the next user turn");
+});
+
+test("multiple compactions keep independent ToC identities and chronology", () => {
+  const tree = flowSession("root", [
+    flowVisible("u1", "user", 1000, [], { text: true }),
+    flowVisible("a1", "assistant", 2000),
+    flowVisible("u2", "user", 3000, [], { text: true }),
+    flowVisible("a2", "assistant", 4000)
+  ]);
+  const html = renderSessionPage({
+    session: tree.session,
+    sessionTree: tree,
+    provider: "codex",
+    conversationCompactions: [
+      { id: "cp-1", anchorMessageId: "a1", timestamp: 2100, tokensBefore: null, tokensAfter: null, summary: null, strategy: null, trigger: null, continuationSessionId: null, fidelity: "recorded" },
+      { id: "cp-2", anchorMessageId: "a2", timestamp: 4100, tokensBefore: null, tokensAfter: null, summary: null, strategy: null, trigger: null, continuationSessionId: null, fidelity: "recorded" }
+    ]
+  });
+  const toc = html.match(/<div class="toc-list">([\s\S]*?)<\/div>\s*<button class="toc-resize-handle"/)?.[1] || "";
+  assert.equal((toc.match(/toc-compaction/g) || []).length, 2);
+  assert.match(toc, /第 1 \/ 2 次|1 \/ 2/);
+  assert.match(toc, /第 2 \/ 2 次|2 \/ 2/);
+  assert.ok(toc.indexOf("checkpoint-cp-1") < toc.indexOf("checkpoint-cp-2"));
+  assert.equal((html.match(/id="checkpoint-cp-[12]" class="context-result-disclosure"/g) || []).length, 2);
 });
 
 test("conversation checkpoints render only recorded fields with a derived placement marker", () => {

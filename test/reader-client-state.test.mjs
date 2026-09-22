@@ -94,7 +94,9 @@ test('progressive content commits to a connected inline child even when it is no
     getAttribute() { return null; },
     remove() { this.isConnected = false; }
   };
-  globalThis.document = { createElement: () => ({ className: '', set innerHTML(_value) {} }) };
+  globalThis.document = { createElement: () => ({ className: '', set innerHTML(value) {
+    this.firstElementChild = { tagName: 'P', innerHTML: value, tabIndex: -1 };
+  } }) };
   globalThis.CustomEvent = class { constructor(type, options) { this.type = type; Object.assign(this, options); } };
   const originalFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = originalFetch; });

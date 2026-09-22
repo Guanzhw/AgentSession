@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { initSessionReader } from '../src/static/app/session-reader.js';
 import { readerPaneAnchor } from '../src/static/app/reader-pane-dom.js';
@@ -13,7 +14,7 @@ test('unplaced inline history has browser-localized position labels', () => {
 });
 
 function readerHarness(t, initialHref = '/fixture/session/root?view=history#root-source', initialEvents = [], {
-  narrow = false, collaboration = false, browserSnapshot = null, initialRootSession = null, markup = null, ft
+  narrow = false, collaboration = false, nativePanel = false, dock = false, panelStorage = new Map(), browserSnapshot = null, initialRootSession = null, markup = null, ft
 } = {}) {
   const location = new URL(initialHref, 'http://localhost');
   const navigations = [];
@@ -120,6 +121,14 @@ function readerHarness(t, initialHref = '/fixture/session/root?view=history#root
       pane.append(new Element({ readerCollaboration: '' }, `${session}-collaboration`));
       pane.append(new Element({ readerCollaborationToggle: '' }));
     }
+    if (nativePanel) {
+      const overview = new Element({ readerCollaborationOverview: '' }, `${session}-overview`);
+      overview.tagName = 'DETAILS';
+      const panel = new Element({ readerCollaboration: '' });
+      panel.append(new Element({ readerCollaborationClose: '' }));
+      overview.append(panel);
+      pane.append(overview);
+    }
     panes.set(session, pane);
     return pane;
   };
@@ -139,6 +148,14 @@ function readerHarness(t, initialHref = '/fixture/session/root?view=history#root
   workbench.addEventListener('session-reader:swapped', (event) => swaps.push(event.detail));
   workbench.addEventListener('session-reader:anchor-revealed', (event) => anchorReveals.push(event.detail));
   workbench.append(currentTitle);
+  if (nativePanel) {
+    const actions = new Element();
+    actions.className = 'session-actions';
+    const toggle = new Element({ readerCollaborationToggle: '' });
+    toggle.className = 'reader-header-collaboration';
+    actions.append(toggle);
+    workbench.append(actions);
+  }
   workbench.append(host);
   workbench.append(back);
   workbench.append(status);
@@ -151,12 +168,14 @@ function readerHarness(t, initialHref = '/fixture/session/root?view=history#root
   window = new Element();
   const media = new Element();
   media.matches = narrow;
+  const dockMedia = new Element();
+  dockMedia.matches = dock;
   Object.assign(window, {
     scrollX: 0,
     scrollY: 0,
     scrollTo({ top, left }) { this.scrollY = top; this.scrollX = left; },
     setTimeout() {},
-    matchMedia: () => media
+    matchMedia: (query) => query.includes('min-width: 1820px') ? dockMedia : media
   });
   const traverse = (offset) => {
     browserIndex += offset;
@@ -187,6 +206,10 @@ function readerHarness(t, initialHref = '/fixture/session/root?view=history#root
     CSS: { escape: (value) => value },
     CustomEvent: class { constructor(type, options) { this.type = type; Object.assign(this, options); } },
     requestAnimationFrame: (callback) => frames.push(callback),
+    localStorage: {
+      getItem: (key) => panelStorage.get(key) ?? null,
+      setItem: (key, value) => panelStorage.set(key, value)
+    },
     fetch: async (url) => {
       requests.push(url);
       if (url.includes('/reader/process?')) {
@@ -237,9 +260,10 @@ function readerHarness(t, initialHref = '/fixture/session/root?view=history#root
   };
   return {
     reader, root, child, back, status, currentTitle, location, window, document, requests, makePane, flush, eventResponses, inheritedResponses, processResponses, paneResponses, swaps, anchorReveals,
-    makeElement, addRecordedChild, navigations, initialMarkup,
+    makeElement, addRecordedChild, navigations, initialMarkup, panelStorage,
     click,
     async resize(isNarrow) { media.matches = isNarrow; await media.dispatchEvent({ type: 'change' }); },
+    async resizeDock(isDock) { dockMedia.matches = isDock; await dockMedia.dispatchEvent({ type: 'change' }); },
     browserBack: async () => { traverse(-1); await flush(); },
     browserForward: async () => { traverse(1); await flush(); },
     async nativeFragment(href) {
@@ -787,9 +811,12 @@ test('collaboration child links mount after their canonical transcript milestone
   const h = readerHarness(t);
   const transcript = h.makeElement({ readerTranscript: '' });
   const milestone = h.makeElement({ readerMilestone: '' }, 'child-milestone');
+  const milestoneBody = h.makeElement();
+  milestoneBody.className = 'reader-milestone-body';
   const milestoneLink = h.makeElement({ readerOpen: '', readerProvider: 'fixture', readerSession: 'child' });
   milestoneLink.href = '/fixture/session/child#child-source';
-  milestone.append(milestoneLink);
+  milestoneBody.append(milestoneLink);
+  milestone.append(milestoneBody);
   const trailing = h.makeElement({}, 'trailing-prose');
   transcript.append(milestone, trailing);
   const overview = h.makeElement({ readerCollaborationOverview: '' });
@@ -815,8 +842,13 @@ test('collaboration child links mount after their canonical transcript milestone
 
   const wrapper = h.child.parentElement;
   assert.equal(wrapper.className, 'reader-inline-pane');
-  assert.equal(transcript.children[1], wrapper, 'The child follows the matching main-reading milestone');
-  assert.equal(transcript.children[2], trailing, 'Existing prose order remains intact');
+  assert.equal(wrapper.parentElement, milestoneBody, 'The child belongs to the matching task card');
+  assert.equal(wrapper.dataset.readerInlineAttached, 'true');
+  assert.equal(milestoneBody.children[1], wrapper, 'The child follows the card action directly');
+  assert.equal(transcript.children[1], trailing, 'Existing prose order remains intact');
+  assert.equal(wrapper.querySelector('.reader-inline-pane-title'), null, 'The task card already identifies its child');
+  assert.equal(wrapper.querySelector('.reader-ancestor-path'), null, 'First-level attached history needs no duplicate breadcrumb');
+  assert.equal(opener.getAttribute('aria-expanded'), 'true');
   assert.equal(overview.open, false, 'Opening the child closes the collaboration overview');
   assert.equal(h.document.activeElement, h.child, 'The opened history is revealed in the main reading flow');
 
@@ -827,6 +859,34 @@ test('collaboration child links mount after their canonical transcript milestone
   assert.equal(branch.open, true, 'Both nested disclosures are visible again');
   assert.equal(h.window.scrollY, 640);
   assert.equal(h.document.activeElement, opener, 'Closing the child restores opener focus');
+  assert.equal(opener.getAttribute('aria-expanded'), 'false');
+});
+
+test('the task-card opener toggles its attached child without changing its standalone link', async (t) => {
+  const h = readerHarness(t);
+  const milestone = h.makeElement({ readerMilestone: '' });
+  const body = h.makeElement();
+  body.className = 'reader-milestone-body';
+  const opener = h.makeElement({ readerOpen: '', readerProvider: 'fixture', readerSession: 'child' });
+  opener.href = '/fixture/session/child';
+  body.append(opener);
+  milestone.append(body);
+  h.root.append(milestone);
+  opener.focus();
+
+  await h.click(opener);
+  await h.flush();
+  const wrapper = h.child.parentElement;
+  assert.equal(wrapper.parentElement, body);
+  assert.equal(wrapper.querySelector('.reader-inline-pane-standalone').href, '/fixture/session/child');
+  assert.equal(opener.getAttribute('aria-expanded'), 'true');
+
+  await h.click(opener);
+  await h.flush();
+  assert.deepEqual(h.reader.getInlinePanes(), []);
+  assert.equal(body.children.length, 1);
+  assert.equal(opener.getAttribute('aria-expanded'), 'false');
+  assert.equal(h.document.activeElement, opener);
 });
 
 test('browser Back reopens saved focus ancestors before restoring the collaboration opener', async (t) => {
@@ -929,7 +989,7 @@ test('inline close restores the collaboration source that launched recorded chil
   assert.equal(team.open, true, 'Close reopens the Team detail containing the source link');
 });
 
-test('source reveal closes an open collaboration overview before exposing prose', async (t) => {
+test('source reveal keeps an open collaboration overview while exposing prose', async (t) => {
   const h = readerHarness(t);
   const overview = h.makeElement({ readerCollaborationOverview: '' });
   overview.tagName = 'DETAILS';
@@ -941,7 +1001,7 @@ test('source reveal closes an open collaboration overview before exposing prose'
 
   await h.click(source);
 
-  assert.equal(overview.open, false);
+  assert.equal(overview.open, true, 'locating the source preserves the panel state');
   assert.equal(h.document.activeElement.id, 'root-source');
 });
 
@@ -1567,6 +1627,64 @@ test('narrow root collaboration expansion survives inline child navigation and B
   assert.equal(rootPanel.hidden, false, 'Wide layouts keep collaboration visible');
   await h.resize(true);
   assert.equal(rootPanel.hidden, true, 'Returning to narrow retains this pane selection');
+});
+
+test('native collaboration defaults to dock on wide desktop and edge overlay otherwise', async (t) => {
+  const storage = new Map();
+  const h = readerHarness(t, undefined, [], { nativePanel: true, dock: true, panelStorage: storage });
+  const overview = h.root.querySelector('[data-reader-collaboration-overview]');
+  const toggle = h.document.querySelector().querySelector('[data-reader-collaboration-toggle]');
+  assert.equal(h.document.querySelector('.session-workbench').dataset.readerPanelMode, 'dock');
+  assert.equal(overview.open, true);
+  assert.equal(toggle.getAttribute('aria-controls'), overview.id);
+  await h.resizeDock(false);
+  assert.equal(h.document.querySelector('.session-workbench').dataset.readerPanelMode, 'overlay');
+  assert.equal(overview.open, false, 'a smaller desktop uses the closed edge launcher by default');
+  await h.click(toggle);
+  assert.equal(storage.get('agentsession.reader.collaboration-panel.v1'), 'open');
+  overview.open = true; // reader-relations owns the disclosure transition.
+  await h.resizeDock(true);
+  assert.equal(overview.open, true, 'an explicit open choice survives resize');
+  await h.click(toggle);
+  assert.equal(storage.get('agentsession.reader.collaboration-panel.v1'), 'closed');
+  overview.open = false; // reader-relations owns the disclosure transition.
+  await h.resizeDock(false);
+  await h.resizeDock(true);
+  assert.equal(overview.open, false, 'an explicit close choice is not undone by width changes');
+});
+
+test('native collaboration restores an explicit saved choice on a new page', (t) => {
+  const storage = new Map([['agentsession.reader.collaboration-panel.v1', 'closed']]);
+  const h = readerHarness(t, undefined, [], { nativePanel: true, dock: true, panelStorage: storage });
+  assert.equal(h.root.querySelector('[data-reader-collaboration-overview]').open, false);
+  assert.equal(h.document.querySelector().querySelector('[data-reader-collaboration-toggle]').getAttribute('aria-expanded'), 'false');
+});
+
+test('edge launcher follows the attached child panel and carries explicit choice through Back', async (t) => {
+  const h = readerHarness(t, undefined, [], { nativePanel: true, dock: true });
+  h.addRecordedChild();
+  const rootOverview = h.root.querySelector('[data-reader-collaboration-overview]');
+  const childOverview = h.child.querySelector('[data-reader-collaboration-overview]');
+  const toggle = h.document.querySelector().querySelector('[data-reader-collaboration-toggle]');
+  assert.equal(rootOverview.open, true);
+  await h.reader.openPane('fixture', 'child');
+  await h.flush();
+  assert.equal(childOverview.dataset.readerPanelActive, 'true');
+  assert.equal(rootOverview.dataset.readerPanelActive, undefined);
+  assert.equal(toggle.getAttribute('aria-controls'), childOverview.id);
+  await h.click(toggle);
+  assert.equal(h.panelStorage.get('agentsession.reader.collaboration-panel.v1'), 'closed');
+  childOverview.open = false; // reader-relations closes the selected child panel.
+  await h.back.dispatchEvent({ type: 'click' });
+  await h.flush();
+  assert.equal(rootOverview.dataset.readerPanelActive, 'true');
+  assert.equal(rootOverview.open, false, 'explicit close is not undone on Back');
+  assert.equal(toggle.getAttribute('aria-controls'), rootOverview.id);
+});
+
+test('checkpoint result anchors reserve the checkpoint heading above the sticky top bar', () => {
+  const css = readFileSync(new URL('../src/static/style.css', import.meta.url), 'utf8');
+  assert.match(css, /\.compaction-checkpoint-result\s*>\s*\.context-result-disclosure\[id\]\s*\{[^}]*scroll-margin-top:\s*calc\(var\(--session-anchor-offset\) \+ 3rem\)/s);
 });
 
 test('inline child identifies itself inside its wrapper while the root keeps its document shell', async (t) => {

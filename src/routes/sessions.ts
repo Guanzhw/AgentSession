@@ -20,6 +20,7 @@ import { sessionCard } from "../views/components.js";
 import { providerRenderContext } from "./provider-context.js";
 import { queryLibraryFamilies, queryLibraryFamilyChildren, queryLibraryFamilyProjects, type LibraryFamilyQuery } from "../library-families.js";
 import { libraryFamilyEntry, libraryFamilyChild } from "../views/library-family.js";
+import { buildLibraryDiscriminators, libraryIdentityKey } from "../views/library-disambiguation.js";
 
 export function registerSessions(
   app: any,
@@ -103,6 +104,7 @@ export function registerSessions(
     const limit = Math.min(Math.max(1, Number(params.get("limit")) || 30), 100);
     const offset = Math.max(0, Number(params.get("offset")) || 0);
     const result = buildLibraryList(params, limit, offset);
+    const discriminators = buildLibraryDiscriminators(result.sessions);
     return json(res, {
       sessions: result.sessions.map((session) => ({
         id: session.id,
@@ -110,7 +112,10 @@ export function registerSessions(
         title: session.title,
         directory: session.directory,
         time_updated: session.time_updated,
-        html: libraryFamilyEntry({ ...session.family, session }, familyRenderOptions(session.provider, params))
+        html: libraryFamilyEntry({ ...session.family, session }, {
+          ...familyRenderOptions(session.provider, params),
+          discriminator: discriminators.get(libraryIdentityKey(session)) || null
+        })
       })),
       total: result.total, offset, hasMore: result.hasMore,
       matchingSessions: result.overview.totalSessions
@@ -127,8 +132,16 @@ export function registerSessions(
       limit: 20, offset: Math.max(0, Number(params.get("offset")) || 0)
     });
     if (!result.parent) return json(res, { error: "History unavailable in this library" }, 404);
+    const children = result.children.map((node) => ({
+      ...node,
+      session: enrichSession(node.session, metaByProvider.get(provider))
+    }));
+    const discriminators = buildLibraryDiscriminators(children.map((node) => node.session));
     return json(res, {
-      html: result.children.map((node) => libraryFamilyChild({ ...node, session: enrichSession(node.session, metaByProvider.get(provider)) }, familyRenderOptions(provider, params))).join(""),
+      html: children.map((node) => libraryFamilyChild(node, {
+        ...familyRenderOptions(provider, params),
+        discriminator: discriminators.get(libraryIdentityKey(node.session)) || null
+      })).join(""),
       total: result.total, offset: result.offset, shown: result.children.length,
       nextOffset: result.hasMore ? result.offset + result.children.length : null
     });

@@ -9,6 +9,8 @@ export interface ReaderExecutionStep {
   timestamp: number | null;
   observation: ToolExecutionObservation;
   position: ReaderRelationPosition | null;
+  /** Bounded original input/result excerpt, resolved through the exact native part. */
+  preview: string | null;
 }
 
 export interface ReaderExecution {
@@ -29,6 +31,38 @@ export const executionReturned = (phase: ToolExecutionObservation["phase"]) => (
   phase === "completed" || phase === "failed"
 );
 
+/** Serialize only the visible prefix of normalized JSON, without materializing a large tool payload. */
+function executionPreview(value: any): string | null {
+  if (value == null) return null;
+  const limit = 280;
+  if (typeof value === "string") {
+    const text = value.trim();
+    return text ? text.slice(0, limit) + (text.length > limit ? "…" : "") : null;
+  }
+  let prefix = "";
+  const append = (text: string) => { prefix += text.slice(0, limit + 1 - prefix.length); };
+  const visit = (item: any) => {
+    if (prefix.length > limit) return;
+    if (typeof item === "string") append(JSON.stringify(item.slice(0, limit + 1)));
+    else if (item === null || typeof item !== "object") append(JSON.stringify(item));
+    else {
+      const array = Array.isArray(item);
+      append(array ? "[" : "{");
+      let first = true;
+      for (const key in item) {
+        if (prefix.length > limit) break;
+        if (!first) append(",");
+        first = false;
+        if (!array) append(JSON.stringify(key.slice(0, limit + 1)) + ":");
+        visit(item[key]);
+      }
+      append(array ? "]" : "}");
+    }
+  };
+  visit(value);
+  return prefix.slice(0, limit) + (prefix.length > limit ? "…" : "");
+}
+
 /** The provider has already established lifecycle meaning and occurrence identity. */
 export function deriveReaderExecutions(protocol: SessionProtocolV3, document: {
   messages: any[]; partsByMessage: Map<string, any[]>;
@@ -47,7 +81,13 @@ export function deriveReaderExecutions(protocol: SessionProtocolV3, document: {
         groups.set(group.id, group);
       }
       const native = resolve(event);
+      const part = native?.position.partId
+        ? document.partsByMessage.get(native.position.messageId)?.find((part) => part.id === native.position.partId)?.data : null;
+      const source = part?.type === "tool" ? (executionReturned(observation.phase)
+        ? part.state?.error ?? part.state?.output
+        : observation.phase === "started" ? part.state?.input : null) : null;
       group.steps.push({ eventId: event.id, sequence: event.sequence, timestamp: event.timestamp, observation,
+        preview: executionPreview(source),
         position: native ? { ...native.position,
           side: observation.phase === "yielded" || executionReturned(observation.phase) ? "after" : "before" } : null });
     } else if (event.category === "message" && event.timestamp !== null) {
@@ -109,4 +149,12 @@ export function executionTimeRange(execution: ReaderExecution): { start: number;
   const last = execution.steps[execution.steps.length - 1]?.timestamp;
   return first != null && split != null && last != null && last > first && split >= first && split <= last
     ? { start: first, end: last } : null;
+}
+
+export function executionRecordedIntervals(execution: ReaderExecution): { total: number; detached: number } | null {
+  const range = executionTimeRange(execution);
+  const last = execution.steps[execution.steps.length - 1];
+  if (!range || !executionReturned(last.observation.phase)) return null;
+  const split = execution.steps.find((step) => step.observation.phase === "yielded")!.timestamp!;
+  return { total: range.end - range.start, detached: range.end - split };
 }

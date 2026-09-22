@@ -4,6 +4,77 @@ import { initArtifactEvidence } from "./artifact-evidence.js";
 
 const progressiveContentLoads = new WeakMap();
 
+/** Merge a server-rendered continuation into its existing field surface. */
+export function mergeProgressiveSurface(surface, incoming, continuation) {
+  if (continuation && !(surface?.classList?.contains("tool-output-body") && incoming?.classList?.contains("tool-output-body"))) {
+    throw new Error("Progressive Markdown continuation is not a Markdown content surface");
+  }
+  if (surface?.tagName === "PRE" && incoming?.tagName === "PRE") {
+    surface.append(...incoming.childNodes);
+  } else if (surface?.classList?.contains("tool-output-body") && incoming?.classList?.contains("tool-output-body")) {
+    if (continuation?.kind === "fence") {
+      const existingCode = surface.lastElementChild?.matches("pre") && surface.lastElementChild.querySelector("code");
+      const nextCode = incoming.firstElementChild?.matches("pre") && incoming.firstElementChild.querySelector("code");
+      if (!existingCode || !nextCode) throw new Error("Progressive fence continuation does not match the loaded code block");
+      existingCode.append(...nextCode.childNodes);
+      incoming.firstElementChild.remove();
+    } else if (continuation?.kind === "source") {
+      const existingBlock = surface.lastElementChild?.classList?.contains("markdown-source-block") && surface.lastElementChild;
+      const nextBlock = incoming.firstElementChild?.classList?.contains("markdown-source-block") && incoming.firstElementChild;
+      const existingSource = existingBlock?.querySelector("pre");
+      const nextSource = nextBlock?.querySelector("pre");
+      if (!existingSource || !nextSource) throw new Error("Progressive source continuation does not match the loaded source block");
+      existingSource.append(...nextSource.childNodes);
+      nextBlock.remove();
+    } else if (continuation?.kind === "paragraph") {
+      const existingParagraph = surface.lastElementChild?.matches("p") && surface.lastElementChild;
+      const nextParagraph = incoming.firstElementChild?.matches("p") && incoming.firstElementChild;
+      if (!existingParagraph || !nextParagraph) throw new Error("Progressive paragraph continuation does not match the loaded paragraph");
+      if (continuation.separator) existingParagraph.append(document.createTextNode(continuation.separator));
+      existingParagraph.append(...nextParagraph.childNodes);
+      nextParagraph.remove();
+    } else if (continuation?.kind === "table") {
+      const existingBody = surface.lastElementChild?.matches("table") && surface.lastElementChild.querySelector("tbody");
+      const nextTable = incoming.firstElementChild?.matches("table") && incoming.firstElementChild;
+      const nextBody = nextTable?.querySelector("tbody");
+      if (!existingBody || !nextBody) throw new Error("Progressive table continuation does not match the loaded table");
+      existingBody.append(...nextBody.childNodes);
+      nextTable.remove();
+    } else if (continuation?.kind === "list") {
+      const lists = (node) => [...node.children].filter((child) => child.tagName === "UL" || child.tagName === "OL");
+      let parent = surface;
+      let target = lists(surface).at(-1) || null;
+      for (let depth = 0; depth < continuation.depth; depth += 1) {
+        const item = target?.lastElementChild?.matches("li") && target.lastElementChild;
+        if (!item) throw new Error("Progressive list continuation does not match the loaded list depth");
+        parent = item;
+        target = lists(item).at(-1) || null;
+      }
+      const additions = lists(incoming);
+      if (!additions.length) throw new Error("Progressive list continuation has no list items");
+      for (const addition of additions) {
+        if (target?.tagName === addition.tagName) {
+          target.append(...addition.children);
+          addition.remove();
+        } else {
+          parent.append(addition);
+          target = addition;
+        }
+      }
+    }
+    surface.append(...incoming.childNodes);
+  } else if (surface?.tagName === "DL" && incoming?.tagName === "DL") {
+    if (incoming.firstElementChild?.matches("dd") && surface.lastElementChild?.matches("dd")) {
+      surface.lastElementChild.append(...incoming.firstElementChild.childNodes);
+      incoming.firstElementChild.remove();
+    }
+    surface.append(...incoming.childNodes);
+  } else {
+    return false;
+  }
+  return true;
+}
+
 export function loadProgressiveContent(button, { dispatch = true } = {}) {
   if (!button || typeof button !== "object") return Promise.resolve(null);
   if (progressiveContentLoads.has(button)) return progressiveContentLoads.get(button);
@@ -64,11 +135,14 @@ export function loadProgressiveContent(button, { dispatch = true } = {}) {
         }
         throw new Error(data?.error || `HTTP ${response.status}`);
       }
-      const chunk = document.createElement("div");
-      chunk.className = "progressive-chunk";
-      chunk.innerHTML = data.html;
-      if (artifactEvidence) chunk.firstElementChild.tabIndex = 0;
-      container.insertBefore(chunk, button);
+      const fragment = document.createElement("div");
+      fragment.innerHTML = data.html;
+      const incoming = fragment.firstElementChild;
+      const surface = container.firstElementChild === button ? null : container.firstElementChild;
+      if (!mergeProgressiveSurface(surface, incoming, data.continuation) && incoming) {
+        if (artifactEvidence) incoming.tabIndex = 0;
+        container.insertBefore(incoming, button);
+      }
       delete button.dataset.loadInitial;
       if (dispatch && button.dataset.searchRevealPending !== "true") {
         workbench.dispatchEvent(new CustomEvent("session-reader:content-updated", {

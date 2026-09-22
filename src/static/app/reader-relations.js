@@ -32,6 +32,8 @@ export function initReaderRelations() {
   const ownedElements = (pane, selector) => [...pane.querySelectorAll(selector)]
     .filter((element) => element.closest("[data-reader-pane]") === pane);
   const overviewFor = (pane) => ownedElements(pane, "[data-reader-collaboration-overview]")[0];
+  const activeOverview = () => [...workbench.querySelectorAll("[data-reader-collaboration-overview]")]
+    .find((overview) => overview.dataset.readerPanelActive !== undefined);
 
   function mountReaderFragment(pane, host, html, append = true) {
     const wrapper = document.createElement("div");
@@ -396,9 +398,10 @@ export function initReaderRelations() {
     if (!toggle || !workbench.contains(toggle)) return;
     event.preventDefault?.();
     event.stopPropagation?.();
-    const pane = workbench.querySelector("[data-reader-pane]");
-    const overview = pane && overviewFor(pane);
+    const localPane = toggle.closest?.("[data-reader-pane]");
+    const overview = localPane ? overviewFor(localPane) : activeOverview() || overviewFor(workbench.querySelector("[data-reader-pane]"));
     if (!overview) return;
+    const pane = overview.closest("[data-reader-pane]");
     overviewOrigins.set(overview, toggle);
     if (overview.open) closeOverview(overview);
     else {
@@ -511,6 +514,7 @@ export function initReaderRelations() {
       return;
     }
     const milestone = event.target.closest?.("[data-reader-milestone]");
+    if (milestone?.closest("[data-reader-pane]") !== event.target.closest?.("[data-reader-pane]")) return;
     const milestoneContext = milestone ? contextForNode(milestone) : null;
     if (!milestoneContext?.select || event.target.closest?.("a,button")) return;
     milestoneContext.select.value = milestone.dataset.readerLane || "";

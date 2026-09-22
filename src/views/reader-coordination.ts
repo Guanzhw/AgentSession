@@ -82,7 +82,7 @@ export function renderReaderCoordinationItem(
   const detail = `<details class="reader-coordination-exchange${options?.inline ? " reader-collaboration-exchange" : ""}" data-reader-coordination-content data-reader-coordination-content-url="${escapeHtml(readerCoordinationContentPath(provider, sessionId, item.id))}">
       <summary><span class="agent-channel-kind reader-coordination-kind">${escapeHtml(readerCoordinationKindLabel(options?.actionLabel || item.kind))}</span>${subject}${direction ? `<span class="agent-channel-direction">${escapeHtml(direction)}</span>` : ""}${stateMarkup}${timestampMarkup}${deliveredMarkup}${interval}</summary>
       <div class="reader-coordination-content-panel" data-reader-coordination-content-panel aria-live="polite"></div>
-      ${source ? `<details class="reader-coordination-technical"><summary>${escapeHtml(t("detail.reader_observation_source"))}</summary><div class="reader-coordination-content-actions">${source}</div></details>` : ""}
+      ${source ? `<div class="reader-coordination-content-actions">${source}</div>` : ""}
     </details>`;
   if (options?.inline) return detail + (history ? `<div class="reader-coordination-content-actions">${history}</div>` : "");
   return `<li class="agent-channel-item reader-coordination-item" data-reader-coordination-item data-reader-observation-id="${escapeHtml(item.id)}" data-reader-kind="${escapeHtml(item.kind)}" data-reader-state="${escapeHtml(item.state)}" data-channel-kind="${escapeHtml(item.kind)}" data-channel-id="${escapeHtml(item.id)}">${detail}</li>`;
@@ -96,7 +96,7 @@ export function renderReaderCoordinationContentPage(content: ReaderCoordinationC
   const page = renderProgressiveContent(content.text, content.format, offset, 6000);
   const more = page.nextOffset === null ? "" : `<button type="button" class="reader-coordination-content-more" data-reader-coordination-content-more data-next-offset="${page.nextOffset}">${escapeHtml(t("detail.reader_coordination_content_more"))}</button>`;
   return {
-    available: true, nextOffset: page.nextOffset, totalLength: page.totalLength,
+    available: true, nextOffset: page.nextOffset, totalLength: page.totalLength, continuation: page.continuation,
     html: `<div class="reader-coordination-content" data-reader-coordination-content-chunk data-reader-coordination-content-offset="${offset}">${page.html}</div>${more}`
   };
 }
