@@ -1,90 +1,32 @@
-import os from "node:os";
-import path from "node:path";
-import { statSync } from "node:fs";
-import { icons } from "../../icons.js";
-import { createOpenCodeSqliteAdapter } from "./sqlite-adapter.js";
-import { buildOpenCodeSessionContainer } from "./session-container.js";
-import { buildOpenCodeSessionMetrics } from "./session-metrics.js";
-import { buildOpenCodeSessionTree } from "./session-tree.js";
-import { buildOpenCodeSystemPrompts } from "./system-prompts.js";
-import { buildOpenCodeRuntimeEnvironment } from "./runtime-environment.js";
-import { buildOpenCodeSessionProtocol, buildOpenCodeSessionProtocolV3, openCodeProtocolCapabilities } from "./protocol.js";
-import { finalizeSessionProtocolV3 } from "../shared/session-protocol-v3.js";
-import { createStructuredViewCache } from "../shared/file-adapter-helpers.js";
+import { getConfig } from "../../config.js";
+import type { ProviderAdapter } from "../interface.js";
+import v1 from "./v1-adapter.js";
+import { createOpenCodeV2Adapter } from "./v2-adapter.js";
+import { inspectOpenCodeStorage, openCodeStorageRevision, type OpenCodeStorage } from "./storage.js";
 
-function defaultDataPath() {
-  if (process.platform === "win32") {
-    return path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "opencode", "opencode.db");
-  }
-  const dataHome = process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share");
-  return path.join(dataHome, "opencode", "opencode.db");
+const dataPath = () => getConfig().dbPath as string;
+const v2 = createOpenCodeV2Adapter(dataPath);
+let cached: { revision: string; storage: OpenCodeStorage } | undefined;
+function storage() {
+  const revision = openCodeStorageRevision(dataPath());
+  if (cached?.revision !== revision) cached = { revision, storage: inspectOpenCodeStorage(dataPath()) };
+  return cached.storage;
 }
 
-const baseAdapter = createOpenCodeSqliteAdapter({
-  id: "opencode",
-  name: "OpenCode",
-  icon: icons.opencode,
-  defaultDataPath,
-  useConfiguredDbPath: true,
-  resumeCommand: {
-    executable: "opencode",
-    args: ["--session", "{sessionId}"]
-  },
-  capabilities: {
-    localManagement: true,
-    openCodeStatsStore: true
-  },
-  protocolCapabilities: openCodeProtocolCapabilities
-});
-
-const getOpenCodeTree = createStructuredViewCache((sessionId: string) => (
-  buildOpenCodeSessionTree(sessionId, baseAdapter.getDataPath() || undefined)
-));
-
-const opencode = {
-  ...baseAdapter,
-  getRuntimeEnvironment(sessionId: string) {
-    const session = baseAdapter.getSession(sessionId);
-    return typeof session?.directory === "string"
-      ? buildOpenCodeRuntimeEnvironment(sessionId, session.directory)
-      : null;
-  },
-  getSessionTree(sessionId: string) {
-    return getOpenCodeTree(sessionId);
-  },
-  getSessionContainer(sessionId: string) {
-    return buildOpenCodeSessionContainer(sessionId, baseAdapter.getDataPath() || undefined);
-  },
-  getSessionMetrics(sessionId: string) {
-    return buildOpenCodeSessionMetrics(sessionId, baseAdapter.getDataPath() || undefined);
-  },
-  getSessionProtocol(sessionId: string) {
-    if (!baseAdapter.detect()) return null;
-    const tree = getOpenCodeTree(sessionId);
-    if (!tree) return null;
-    return buildOpenCodeSessionProtocol(tree, this.getStatsRevision());
-  },
-  getSessionProtocolV3(sessionId: string) {
-    if (!baseAdapter.detect()) return null;
-    const tree = getOpenCodeTree(sessionId);
-    if (!tree) return null;
-    const revision = this.getStatsRevision();
-    const base = buildOpenCodeSessionProtocol(tree, revision);
-    return finalizeSessionProtocolV3(buildOpenCodeSessionProtocolV3(tree, base));
-  },
-  getStatsRevision() {
-    const dbPath = baseAdapter.getDataPath();
-    if (!dbPath) return "missing";
-    try {
-      const stat = statSync(dbPath);
-      return `${dbPath}:${stat.size}:${stat.mtimeMs}`;
-    } catch {
-      return `${dbPath}:missing`;
-    }
-  },
-  getSystemPrompts(sessionId: string) {
-    return buildOpenCodeSystemPrompts(sessionId, baseAdapter.getDataPath() || undefined);
+// Optional methods and capabilities must come from the selected reader too:
+// exposing v1 structured accessors on v2 would re-enter the old SQL queries.
+const opencode: ProviderAdapter = new Proxy(v1 as ProviderAdapter, {
+  get(_target, key) {
+    if (["id", "name", "icon", "resumeCommand"].includes(String(key))) return Reflect.get(v1, key);
+    if (key === "detect") return () => ["v1", "v2"].includes(storage().schema);
+    if (key === "getDataPath") return dataPath;
+    if (key === "getUnavailableReason") return () => storage().note;
+    if (key === "getStorageDiagnostic") return () => ({ ...storage(),
+      note: storage().note || (storage().schema === "v2" ? "OpenCode v2 read-only support: ordered messages, tools, compaction, parent/fork links and token usage. Copied fork context is shown separately. Pending inbox, event replay and task/run reconstruction are not projected." : null) });
+    if (key === "getStatsRevision" || key === "getProtocolRevision") return () => openCodeStorageRevision(dataPath());
+    const reader = storage().schema === "v2" ? v2 : v1;
+    const value = Reflect.get(reader, key);
+    return typeof value === "function" ? value.bind(reader) : value;
   }
-};
-
+});
 export default opencode;

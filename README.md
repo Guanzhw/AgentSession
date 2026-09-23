@@ -255,3 +255,10 @@ npm run build
 ## License
 
 MIT
+
+### OpenCode v1 / v2 数据库兼容
+
+按实际数据库 schema 自动选择读取器，保留 v1 支持，并增加 OpenCode v2.0.10
+的会话、消息、工具、压缩、分叉继承上下文和用量读取。无法读取的数据库会给出诊断，
+不会阻止其他 provider 启动。源数据库始终只读。
+完整范围及暂不支持的能力见 [OpenCode 存储兼容说明](docs/opencode-storage-compatibility.md)。

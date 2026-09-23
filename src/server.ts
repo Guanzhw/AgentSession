@@ -4,14 +4,12 @@ import {
   applyRuntimeUserConfig,
   getConfig
 } from "./config.js";
-import { getStats } from "./db.js";
 import { getLocale, setLocale } from "./i18n.js";
-import { getIndexDb, indexProvider } from "./index-db.js";
+import { getIndexDb, getIndexedTotals, indexProvider } from "./index-db.js";
 import { getAllProviders, getAvailableProviders } from "./providers/index.js";
 import {
   protocolCapabilityDescriptors,
-  supportsLocalManagement,
-  usesOpenCodeStatsStore
+  supportsLocalManagement
 } from "./providers/kinds.js";
 import {
   getRuntimeRouteContext,
@@ -72,6 +70,13 @@ export async function startServer(config = getConfig()) {
 
     // Index all providers
     const providers = getAvailableProviders();
+    for (const provider of getAllProviders()) {
+      if (!providers.includes(provider)) {
+        const reason = provider.getUnavailableReason?.();
+        if (reason) console.warn(`${provider.name}: ${reason}`);
+      }
+    }
+    const indexedProviders: typeof providers = [];
     getIndexDb();
     for (const provider of providers) {
       try {
@@ -90,6 +95,7 @@ export async function startServer(config = getConfig()) {
           ok: true
         });
         console.log(`Indexed ${indexed} sessions for ${provider.id} in ${durationMs}ms`);
+        indexedProviders.push(provider);
       } catch (err: any) {
         console.error(`Failed to index ${provider.id}: ${err.message}`);
         recordRuntimeEvent(appConfig.metaDir, {
@@ -103,7 +109,7 @@ export async function startServer(config = getConfig()) {
     }
 
     // Cache provider data after indexing
-    const availableProviders = providers;
+    const availableProviders = indexedProviders;
     const providerMap = new Map(availableProviders.map((provider) => [provider.id, provider]));
     const availableIds = new Set(availableProviders.map((p) => p.id));
     const providerInfo = getAllProviders().map((p) => ({
@@ -121,9 +127,8 @@ export async function startServer(config = getConfig()) {
     // Build router with populated deps
     const router = buildRouter(appConfig, providerMap, providerInfo, availableProviders);
 
-    // Startup stats
-    const statsProvider = availableProviders.find((provider) => usesOpenCodeStatsStore(provider));
-    const stats = statsProvider ? getStats(statsProvider.getDataPath() || undefined) : { totalSessions: 0, totalMessages: 0 };
+    // Use the index we just built, never query a failed source again for logging.
+    const stats = getIndexedTotals(availableProviders.map(provider => provider.id));
 
     const requestHandler = async (req: any, res: any) => {
       const url = new URL(req.url || "/", `http://localhost:${PORT}`);

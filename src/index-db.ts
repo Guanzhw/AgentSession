@@ -48,6 +48,16 @@ export function getIndexDb() {
   return indexDb;
 }
 
+/** Startup totals only include providers that completed this indexing pass. */
+export function getIndexedTotals(providerIds: string[]) {
+  if (!providerIds.length) return { totalSessions: 0, totalMessages: 0 };
+  const row = getIndexDb().prepare(`
+    SELECT COUNT(*) AS totalSessions, COALESCE(SUM(message_count), 0) AS totalMessages
+    FROM session_index WHERE provider IN (${providerIds.map(() => "?").join(",")})
+  `).get(...providerIds);
+  return { totalSessions: Number(row.totalSessions), totalMessages: Number(row.totalMessages) };
+}
+
 /**
  * Upsert a batch of RawSession objects into session_index.
  * @param {string} provider

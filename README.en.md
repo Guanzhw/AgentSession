@@ -462,3 +462,10 @@ See the [provider contribution guide](./docs/CONTRIBUTING-PROVIDER.md) and the [
 ## License
 
 MIT
+
+### OpenCode v1 / v2 storage
+
+Readers are selected by database schema. Existing v1 support is retained; v2.0.10
+adds sessions, messages, tools, compaction, inherited fork context and usage reads.
+Unsupported storage is diagnosed without preventing other providers from starting.
+Source databases remain read-only. See [compatibility and limitations](docs/opencode-storage-compatibility.md).
