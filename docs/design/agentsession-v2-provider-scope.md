@@ -330,14 +330,26 @@ the live JS heap returned to 216 MiB after forced collection. These are
 single-machine samples, and RSS includes allocator high-water memory. They
 identify repeated JSONL parsing and transient allocation as concrete targets
 for a narrower Node-side change; they do not yet establish a Rust speedup. The
-long Reader page's 23.47 MB response and roughly 180,000 DOM nodes point to a
+Codex cold scan currently parses the corpus while building file metadata, then
+rereads evicted bodies to derive owned counts and library evidence; a complete
+search rereads them again. Removing these passes is the next data-flow target.
+A parser-only byte-line prototype produced identical
+hashes and 81,428 records on one 753 MB rollout, but took 2.121–2.166 seconds
+versus 1.903–1.927 seconds for the current parser across three fresh-process
+runs. Its lower peak RSS (1.065–1.086 versus 1.368–1.398 GiB) did not satisfy
+the speed gate for a late 2.0 change. The long Reader page's 23.47 MB response
+and roughly 180,000 DOM nodes point to a
 browser rendering and incremental-loading problem; Rust would not shrink that
 DOM by itself. Continue with targeted Node indexing/cache work and Reader
 pagination while preserving full history and navigation. Reduce repeated
-parsing and transient allocations before reconsidering a narrow native parser
-or index worker. A later Rust decision record must show the workload,
-baseline, measured improvement, cross-platform packaging and maintenance
+parsing through a provider-owned scan projection that retains correct parent
+provenance and invalidation before reconsidering a narrow native parser or
+index worker. A later Rust proposal must show the workload, baseline, measured
+improvement, cross-platform packaging and maintenance
 cost, and data-compatibility implications.
+
+The [2.0 backend decision](../../.agents/decisions/implemented/2026-09-26-retain-node-backend-for-v2.md)
+records why a broad Rust rewrite is deferred.
 
 The Viewer now loads complete-turn conversation segments lazily while retaining
 the global message/compaction placement, full ToC, source anchors and child
