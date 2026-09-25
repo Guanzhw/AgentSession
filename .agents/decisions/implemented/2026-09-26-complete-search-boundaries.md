@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: implemented
 date: 2026-09-26
 decision: Keep MCP and Viewer search separate while making both complete across the five supported providers
 ---
@@ -57,12 +57,21 @@ into a parent by the search layer.
 
 ## Verification
 
-Before moving this record to `implemented/`, verify more than 100 MCP matches,
-more than 500 Viewer message matches, a late unique match, duplicate messages,
-OpenCode child and archived boundaries, cross-provider paging, default and
-opted-in thinking access, and exact browser source/back navigation. Recheck
-real provider data, MCP calls, long-session browser behavior, and cold/warm
-latency. Source and test anchors are `src/session-history.ts`,
-`src/session-queries.ts`, `src/routes/sessions.ts`,
-`src/providers/shared/file-adapter-helpers.ts`, `test/mcp.test.mjs`, and
-`test/content-search.test.mjs`.
+`test/mcp.test.mjs` covers more than 100 qualifying candidates, late unique
+matches, cursor identity, and thinking opt-in. `test/content-search.test.mjs`
+covers 601 message hits, duplicate hits, OpenCode child/archived visibility,
+return links, and bounded multi-term excerpts. The shared snippet helper now
+shows feasible AND terms in source order, including a long exact phrase,
+without changing the canonical message reference. Local 2.0 packages were
+installed and called through the real MCP protocol and Viewer API. MCP
+search/get/timeline/context worked across all five providers and returned six
+distinct Codex sessions over two cursor pages; a real multi-term Codex query
+returned five source-referenced excerpts, all within 160 characters and
+showing both terms. Browser content-search results opened source anchors on all
+five providers; OpenCode/Codex results, including child histories, returned to
+their result cards. The full browser E2E passed on the normal-mode isolated
+v2 server. See the [2.0 delivery evidence](../../../docs/design/agentsession-v2-provider-scope.md)
+for sample limits and timing.
+
+The decision is implemented in this branch. Version 2.0.0 remains unpublished
+and the user's normal port-3456 service still runs the prior build.

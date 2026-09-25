@@ -1,8 +1,8 @@
 # AgentSession 2.0 provider scope and delivery plan
 
-**Status:** implementation and real-surface verification in progress. The
-five-provider decision record remains proposed until the final boundary checks
-pass. Version 2.0.0 has not been released.
+**Status:** branch implementation and local release acceptance complete. The
+five-provider and search decisions are implemented in this branch. Version
+2.0.0 has not been released.
 
 ## Objective
 
@@ -65,18 +65,18 @@ publication. Once the v2 MCP package is current, OpenClaw/Hermes provider
 references no longer resolve. This release intentionally does not add a
 compatibility layer for those references.
 
-## Confirmed issues and items awaiting real-surface verification
+## Confirmed implementation findings
 
-These are current implementation findings and acceptance requirements, not
-claims that the fixes have shipped.
+These are branch implementation and local acceptance findings. Publication is
+tracked separately below.
 
 | Area | Evidence state | Finding or required check |
 |:---|:---|:---|
 | MCP `session_search` | Implemented; real protocol acceptance passed, further loading work remains | The old 100-candidate ceiling is gone. File providers now stream one search pass. On the local 775-session Codex store, the original query took 61.3 seconds; after the change an all-provider call took 10.4 seconds of search after a 22.9-second cold MCP connection, and a separate Codex query took 20.3 seconds. These timings vary with file-cache state and do not establish a general latency guarantee. |
 | Viewer provider-wide content search | Implemented; real browser paging and source navigation passed | The old 500-message candidate ceiling is covered by a 601-hit fixture. A live cross-provider search produced more than 30 results; the browser loaded a second page, opened its 36th result at the recorded Codex message, and returned to the same card and query. Provider-specific content pages use the same excerpt/source contract. |
 | MCP thinking previews | Implemented; real protocol acceptance passed | Thinking stays out of ordinary search and session previews. A real Codex thinking event was rejected by default `session_get_event`, returned with `includeThinking: true`, omitted from default context, and present in opted-in context. Timeline thinking remains an explicit segment. |
-| Cross-provider content and child-session meaning | Automated boundary coverage and live calls passed; lineage review remains | Viewer global `/sessions/search` searches only message content across selected providers, including non-archived OpenCode child sessions. Viewer exclusions apply; MCP uses each adapter's source-search scope without those Viewer exclusions. Both use canonical `{ provider, sessionId }` identity. Real MCP search/get/timeline/context calls succeeded on all five providers, and a Codex cursor returned six distinct sessions across two pages. |
-| Viewer search excerpts and source navigation | Real browser acceptance passed for a Codex later-page hit | A bounded excerpt links to a source-message anchor. The Reader preserves original source-message anchors when it groups fragments under a response; the detail back link returns to the exact result-card anchor on its page. Repeat across other available provider shapes before release handoff. |
+| Cross-provider content and child-session meaning | Automated boundaries and real MCP lineage passed for available recorded pairs | Viewer global `/sessions/search` searches only message content across selected providers, including non-archived OpenCode child sessions. Viewer exclusions apply; MCP uses each adapter's source-search scope without those Viewer exclusions. Both use canonical `{ provider, sessionId }` identity. Real MCP search/get/timeline/context calls succeeded on all five providers, and a Codex cursor returned six distinct sessions across two pages. Packed-MCP parent/child calls verified source-backed reciprocal refs for OpenCode, Codex, and DeepSeek Harness. Local Claude Code and Pi data contain no parented sessions. |
+| Viewer search excerpts and source navigation | Real source-anchor clicks passed on all five available providers | A bounded excerpt links to a source-message anchor. The Reader preserves original source-message anchors when it groups fragments under a response; the detail back link returns to the exact result-card anchor on its page. Browser Back clicks restored OpenCode and Codex cards, including child-session hits; the other three provider pages had valid return URLs. Multi-term AND matches now show all feasible terms in the bounded excerpt; a real Codex query confirmed both terms in each checked result. |
 | Long-session first load | Implemented and real-browser checked; server projection cost remains | Complete-turn lazy segments reduced a real 2,686-message Codex page from 23,498,218 to 4,859,680 initial HTML bytes and from 179,823 to 23,089 initial DOM elements. A direct URL fragment loaded a late segment and focused its canonical target. Later fragment and deep-location requests still rebuild the full server projection. |
 
 On a later warm local run against the same isolated v2 server, separate HTTP
@@ -110,12 +110,20 @@ the source and showed it in the viewport. The OpenCode browser E2E exercised
 native Back/Forward across an unloaded fragment and parent/child reader return.
 The complete history remains reachable, and only the first segment is rendered
 initially. A single oversized user turn can still form a large segment.
+In a separate warm Codex navigation, a `MutationObserver` followed by a browser
+frame observed the first visible conversation body at 1,857 ms; DOM ready was
+3,148 ms, with 40 message groups initially rendered. This is a single local
+sample, not a latency guarantee.
 
 ## Verification snapshot — 2026-09-26
 
-- `npm run ci:quality` passed with 1,057 tests. `npm run qa:e2e` passed against
-  a real OpenCode v2 session on the isolated v2 server at port 3457, with no
-  browser errors. The final E2E included a native fragment in an initially
+- `npm run ci:quality` passed with 1,058 tests after the multi-term excerpt
+  fix. `npm run qa:e2e` passed against a real OpenCode v2 session on the
+  normal-mode isolated v2 server at port 3459, with no browser errors. An
+  earlier rerun on an isolated server started with
+  `--disable-terminal-launch` stopped at the expected Enabled-settings check;
+  rerunning with the normal startup mode passed. The final E2E included a
+  native fragment in an initially
   unloaded segment and Back/Forward restoration. Real browser content hits
   reached source-message anchors for all five providers; the global Codex
   search also loaded a second result page and returned to its exact result
@@ -127,7 +135,38 @@ initially. A single oversized user turn can still form a large segment.
   provider. Codex cursor pages returned six distinct sessions; thinking was
   readable only with explicit opt-in. Windows 2.0.0 SEA binaries built and
   passed the Viewer/static-asset/MCP smoke. The packages and binaries were
-  rebuilt and rechecked after the lazy Reader change.
+  rebuilt and rechecked after the final multi-term excerpt change.
+- A real Codex `README advertises` query against the final Viewer API returned
+  four message snippets, each within 160 characters and showing both terms.
+  The final packed MCP returned five message matches for the same query; all
+  had canonical source-event refs, snippets within 160 characters, and both
+  terms visible. No transcript text was written to the QA log.
+- On the packed 2.0 MCP, `session_search` with `providers: ["openclaw"]` and
+  `session_get` with `provider: "hermes"` both return explicit schema errors
+  listing the five accepted IDs. The packed Viewer rejects `--openclaw-dir`
+  with an unsupported-provider error. The saved MCP launcher points to
+  `@acetamido/agentsession-mcp@latest`; the registry still serves v1.10.1, so
+  the saved launcher will not resolve v2 until 2.0 is published.
+- The packed MCP returned reciprocal source-backed parent/child refs for a
+  recorded OpenCode pair, a Codex pair, and a DeepSeek Harness pair. For each,
+  `session_get` on both ends, `session_timeline` on both ends, and a title
+  `session_search` kept canonical provider/session and event references. The
+  local OpenCode scan found 73/73 resolvable parent links, Codex 498/498, and
+  DeepSeek Harness 8/8. Local Claude Code (11 sessions) and Pi (one session)
+  had no parented sample, so positive lineage behavior for those providers is
+  not claimed. The sanitized local call log is
+  `tmp/v2-qa/mcp-lineage-protocol.log`; source fields were OpenCode
+  `session.parent_id`, Codex `session_meta` parent/fork/spawn fields, and
+  DeepSeek Harness header `parentSession`.
+- On the isolated live Viewer, content-search results for all five providers
+  opened an existing source-message anchor whose message contained the query.
+  The checked session ID suffixes were OpenCode `...WY1Ej`, Claude Code
+  `...84e4b`, Codex `...1ca583`, Pi `...466e`, and DeepSeek Harness
+  `...96c4`; exact local IDs and anchors are in the ignored local
+  `tmp/v2-qa/viewer-five-provider-search-qa.json`. OpenCode and Codex
+  child-session hits retained their own canonical
+  source anchors and returned to their result cards. The other three providers
+  had valid return URLs, but those links were not clicked in this pass.
 - Five sampled provider-owned source files retained identical lengths and
   SHA-256 hashes. The real Viewer `session_meta` row and token bucket/state
   tables retained their baseline row counts and hashes after final QA. The
@@ -138,6 +177,20 @@ initially. A single oversized user turn can still form a large segment.
   explicitly. The hash-only baseline cannot identify the index-row changes or
   distinguish them from ongoing indexing by the existing port-3456 process.
   The real metadata index still contains four Hermes and one OpenClaw row.
+- A later consistent snapshot of the real Viewer database was made through
+  SQLite's online backup API and refreshed with the built 2.0 service using
+  only the snapshot as `AGENTSESSION_META_PATH`. All five provider refreshes
+  returned `ok` in 22.3 seconds. The one OpenClaw and four Hermes index rows
+  retained identical identity and full-row SHA-256 digests before and after;
+  `session_meta` and all three token-stats tables retained their row counts,
+  row digests, and schema digests. The supported Codex index gained four rows,
+  so the full derived index changed from 990 to 994 rows as permitted. The
+  original database was opened read-only, passed `quick_check`, and had
+  unchanged size, modification time, and journal-sidecar state during the
+  snapshot. A direct source-file hash was unavailable because another Windows
+  process held an incompatible handle. The isolated snapshot was deleted;
+  only sanitized comparison and diagnostics remain under
+  `tmp/v2-qa/retired-preservation-20260926-acceptance/`.
 - The user's existing port-3456 process still serves the pre-v2 seven-provider
   build. The isolated port-3457 server and installed 2.0.0 artifacts were used
   for v2 acceptance; the normal listener has not been switched over. The
@@ -247,8 +300,11 @@ release.
 
 The current evidence does not justify a Rust backend rewrite for 2.0. MCP
 search latency fell substantially when repeated prefix scans were replaced by
-one streaming pass, without changing languages. Its remaining cold cost is
-dominated by Codex file-index initialization and transcript resolution. The
+one streaming pass, without changing languages. One packed-MCP run took 24.3
+seconds to connect and 20.9 seconds for a Codex search, while the other four
+provider searches took under 0.3 seconds each. Source inspection identifies
+startup indexing and file-backed transcript resolution as candidate costs;
+their CPU and I/O shares still need profiling. The
 long Reader page's 23.47 MB response and roughly 180,000 DOM nodes point to a
 browser rendering and incremental-loading problem; Rust would not shrink that
 DOM by itself. Continue with targeted Node indexing/cache work and Reader
@@ -269,7 +325,8 @@ records the cross-request contract.
 
 ## Review links
 
-- [Proposed five-provider decision](../../.agents/decisions/proposed/2026-09-26-five-provider-v2-scope.md)
+- [Five-provider decision](../../.agents/decisions/implemented/2026-09-26-five-provider-v2-scope.md)
+- [Search-boundary decision](../../.agents/decisions/implemented/2026-09-26-complete-search-boundaries.md)
 - [Runtime presentation contract](runtime-presentation-contract.md)
 - [Runtime delivery plan](runtime-delivery-plan.md)
 - [Provider contribution guide](../CONTRIBUTING-PROVIDER.md)

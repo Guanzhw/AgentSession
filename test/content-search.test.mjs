@@ -5,13 +5,55 @@ import path from "node:path";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 
-const { closeDb } = await import("../dist/src/db.js");
+const { closeDb, searchMessages } = await import("../dist/src/db.js");
 const { createSessionCatalog, getSearchResults, searchAcrossProviderCatalogs, toApiSessionShape } = await import("../dist/src/session-queries.js");
 const { renderSessionsPage } = await import("../dist/src/views/sessions.js");
 const { renderSessionReaderPane } = await import("../dist/src/views/session.js");
 const { sessionCard } = await import("../dist/src/views/components.js");
 const { parseSessionNavigationContext } = await import("../dist/src/navigation-context.js");
 const { buildMessageSessionTree } = await import("../dist/src/providers/shared/message-session.js");
+const { searchNormalizedMessages } = await import("../dist/src/providers/shared/file-adapter-helpers.js");
+const { createSnippet } = await import("../dist/src/providers/shared/parser.js");
+const { createOpenCodeSqliteAdapter } = await import("../dist/src/providers/opencode/sqlite-adapter.js");
+
+test("shared content search includes distant AND terms in bounded source-order excerpts", () => {
+  const content = `Opening Alpha marker.${"x".repeat(220)} closing OMEGA marker.`;
+  const [match] = searchNormalizedMessages([{
+    session: { id: "canonical-session" },
+    messages: [{ id: "canonical-message", sessionId: "canonical-session", role: "user", content, thinking: null, timestamp: 42 }]
+  }], "omega alpha");
+
+  assert.equal(match.sessionId, "canonical-session");
+  assert.equal(match.messageId, "canonical-message");
+  assert.match(match.snippet, /Alpha/);
+  assert.match(match.snippet, /OMEGA/);
+  assert.ok(match.snippet.indexOf("Alpha") < match.snippet.indexOf("OMEGA"));
+  assert.match(match.snippet, /…/);
+  assert.doesNotMatch(match.snippet, /x{80}/);
+  assert.ok(match.snippet.length <= 160);
+
+  const impossible = createSnippet(`${"a".repeat(90)} gap ${"b".repeat(90)}`, `${"a".repeat(90)} ${"b".repeat(90)}`);
+  assert.ok(impossible.length <= 160);
+  assert.ok(impossible.endsWith("…"));
+  assert.ok(impossible.includes("a".repeat(90)));
+  assert.equal(impossible.includes("b".repeat(90)), false);
+  assert.equal(createSnippet("before red blue after", "red blue"), "before red blue after");
+  const oversizedExactPhrase = `${"a".repeat(90)} ${"b".repeat(90)}`;
+  const clippedExactPhrase = createSnippet(oversizedExactPhrase, oversizedExactPhrase);
+  assert.ok(clippedExactPhrase.length <= 160);
+  assert.ok(clippedExactPhrase.endsWith("…"));
+
+  const overbudgetExactQuery = `alpha ${"x".repeat(120)} omega`;
+  const overbudgetExactText = `alpha decoy ${"p".repeat(40)}${overbudgetExactQuery} tail`;
+  const overbudgetExactSnippet = createSnippet(overbudgetExactText, overbudgetExactQuery);
+  assert.ok(overbudgetExactSnippet.includes(overbudgetExactQuery));
+  assert.doesNotMatch(overbudgetExactSnippet, /alpha decoy/);
+  assert.match(overbudgetExactSnippet, /alpha/);
+  assert.ok(overbudgetExactSnippet.includes("x".repeat(120)));
+  assert.match(overbudgetExactSnippet, /omega/);
+  assert.ok(overbudgetExactSnippet.indexOf("alpha") < overbudgetExactSnippet.indexOf("omega"));
+  assert.ok(overbudgetExactSnippet.length <= 160);
+});
 
 test("cross-provider content pages keep source identity and stable provider order", () => {
   const calls = [];
@@ -117,10 +159,11 @@ test("search source message remains an anchor when the Reader groups its text un
   assert.match(html, /id="part-msg-source-text"/);
 });
 
-test("OpenCode title hits stay first, content pages past 500 messages, and snippets render safely", () => {
+test("OpenCode title hits stay first, content pages past 500 messages, and multi-term snippets stay bounded", () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "agentsession-content-search-"));
   const dbPath = path.join(directory, "sessions.db");
   const db = new DatabaseSync(dbPath);
+  const distantText = `Opening Alpha marker.${"x".repeat(220)} closing OMEGA marker.`;
   try {
     db.exec(`
       CREATE TABLE project (id TEXT PRIMARY KEY, name TEXT, worktree TEXT);
@@ -146,6 +189,8 @@ test("OpenCode title hits stay first, content pages past 500 messages, and snipp
     }
     insertMessage.run("second-message", "second", JSON.stringify({ role: "assistant", time: { created: 1 } }));
     insertPart.run("second-part", "second-message", "second", JSON.stringify({ type: "text", text: 'needle <img src=x onerror="alert(1)">' }));
+    insertMessage.run("distant-message", "second", JSON.stringify({ role: "user", time: { created: 2 } }));
+    insertPart.run("distant-part", "distant-message", "second", JSON.stringify({ type: "text", text: distantText }));
     db.prepare("INSERT INTO session VALUES ('child', NULL, 'first', 'child', 'Child', '/project', 1, 150, 0, 0, 0, NULL)").run();
     insertMessage.run("child-message", "child", JSON.stringify({ role: "user", time: { created: 1 } }));
     insertPart.run("child-part", "child-message", "child", JSON.stringify({ type: "text", text: "childonly" }));
@@ -157,6 +202,25 @@ test("OpenCode title hits stay first, content pages past 500 messages, and snipp
   }
 
   try {
+    const sqliteMatch = searchMessages("omega alpha", 10, dbPath)[0];
+    assert.equal(sqliteMatch.messageId, "distant-message");
+    assert.equal(sqliteMatch.partId, "distant-part");
+    assert.equal(sqliteMatch.text, distantText);
+    assert.match(sqliteMatch.snippet, /Alpha/);
+    assert.match(sqliteMatch.snippet, /OMEGA/);
+    assert.ok(sqliteMatch.snippet.indexOf("Alpha") < sqliteMatch.snippet.indexOf("OMEGA"));
+    assert.match(sqliteMatch.snippet, /…/);
+    assert.doesNotMatch(sqliteMatch.snippet, /x{80}/);
+    assert.ok(sqliteMatch.snippet.length <= 160);
+
+    const openCodeAdapter = createOpenCodeSqliteAdapter({
+      id: "opencode", name: "OpenCode", defaultDataPath: () => dbPath
+    });
+    const adapterMatch = openCodeAdapter.searchMessages("omega alpha", 10)[0];
+    assert.equal(adapterMatch.messageId, "distant-message:distant-part");
+    const sourceMessage = openCodeAdapter.getMessages("second").find(({ id }) => id === adapterMatch.messageId);
+    assert.equal(sourceMessage.content, distantText);
+
     const pages = [0, 1, 2].map((offset) => getSearchResults("needle", 1, offset, dbPath, new Set(), new Map()));
     assert.deepEqual(pages.map((page) => page.sessions[0].id), ["title", "first", "second"]);
     assert.equal(pages[0].total, null);

@@ -16,4 +16,5 @@ tmp/
 .pi/
 .opensessionviewer/
 .firecrawl/
+.playwright-cli/
 /design-qa.md

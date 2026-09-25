@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: implemented
 date: 2026-09-26
 decision: Limit AgentSession 2.0 Viewer and MCP to five providers, remove OpenClaw and Hermes Agent without deleting or migrating local data
 ---
@@ -9,7 +9,7 @@ decision: Limit AgentSession 2.0 Viewer and MCP to five providers, remove OpenCl
 ## Context
 
 AgentSession 1.10.1 supports OpenCode, Claude Code, Codex CLI, OpenClaw, Hermes
-Agent, Pi, and DeepSeek Harness. The proposed 2.0 release narrows the public
+Agent, Pi, and DeepSeek Harness. The 2.0 implementation narrows the public
 provider set while retaining the local-first, read-only source boundary.
 Existing source records and user-owned Viewer state must remain unchanged, while the v2
 product provides no compatibility path for retired-provider history.
@@ -39,18 +39,25 @@ MCP launcher using `@latest` resolves the current release when the host starts.
 
 The Viewer registry, APIs, search, CLI/config surface, MCP diagnostics, and
 public support tables must agree on the same five provider IDs. OpenClaw and
-Hermes URLs and MCP references no longer work in 2.0. Existing provider records,
-user-owned Viewer metadata remain unchanged on disk; retired-provider index
+Hermes URLs and MCP references no longer work in 2.0. Existing provider records
+and user-owned Viewer metadata remain unchanged on disk; retired-provider index
 rows remain stored but are not exposed. MCP host entries
 using `@latest` resolve the current release when launched, so existing entries
 can move to the 2.0 provider set after publication.
 
 ## Verification
 
-Before moving this record to `implemented/`, verify the assembled 2.0 package
-and live Viewer/MCP surfaces against the [provider scope and delivery plan](../../../docs/design/agentsession-v2-provider-scope.md):
-the exact five-provider roster, absence of retired-provider routes in both
-interfaces, useful migration errors/guidance, clear failure for old URLs/MCP
-references, and preservation of provider source data and existing Viewer state.
-This proposal does not claim that the 2.0 release or migration checks have
-completed.
+The assembled local 2.0 Viewer and MCP packages expose exactly the five
+selected IDs. The live Viewer returns 404 for a retired-provider route; packed
+MCP calls with OpenClaw/Hermes IDs fail with explicit five-provider schema
+errors; retired CLI flags fail with an unsupported-provider message. Read-only
+source-file samples retained SHA-256 hashes. A consistent copy of the real
+Viewer database was refreshed through the built v2 indexer: one OpenClaw and
+four Hermes index rows retained the same identity and full-row hashes, and
+four user-owned metadata tables retained counts, row hashes, and schema hashes.
+Supported Codex index rows were refreshed. See the [2.0 delivery evidence](../../../docs/design/agentsession-v2-provider-scope.md)
+for the exact checks and limitations.
+
+This decision is implemented on the branch but 2.0 is not yet published or
+installed on the user's normal port-3456 server. The saved MCP `@latest`
+launcher continues to resolve published v1.10.1 until v2 publication.

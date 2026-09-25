@@ -21,8 +21,12 @@
   A separate cross-provider message search provides excerpts and source links,
   while existing Library search keeps its session/family behavior. Search
   results return to their query and result page after opening a session.
+  Multi-term matches show each feasible term in a bounded excerpt.
 - File-provider MCP search streams normalized matches in one scan per request,
   avoiding repeated prefix scans during result pagination.
+- Long Reader conversations load complete user-turn segments as needed while
+  keeping the full table of contents, source anchors, and child history
+  navigable. Fragment requests reject a changed markup revision explicitly.
 
 ## 1.9.1 - 2026-08-18
 
