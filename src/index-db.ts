@@ -415,9 +415,10 @@ export function findIndexedSessionMetadata(
 export function getIndexedSessionChildren(
   provider: string,
   parentId: string,
-  limit = 20
+  limit = 20,
+  offset = 0
 ) {
-  const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 100));
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 101));
   const where = ["provider = ?", "parent_id = ?"];
   const params: any[] = [provider, parentId];
   return getIndexDb().prepare(`
@@ -425,8 +426,8 @@ export function getIndexedSessionChildren(
     FROM session_index
     WHERE ${where.join(" AND ")}
     ORDER BY time_updated DESC, time_created DESC, id ASC
-    LIMIT ?
-  `).all(...params, safeLimit);
+    LIMIT ? OFFSET ?
+  `).all(...params, safeLimit, offset);
 }
 
 /**

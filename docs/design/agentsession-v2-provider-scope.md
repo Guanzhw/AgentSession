@@ -76,6 +76,7 @@ tracked separately below.
 | Viewer provider-wide content search | Implemented; real browser paging and source navigation passed | The old 500-message candidate ceiling is covered by a 601-hit fixture. A live cross-provider search produced more than 30 results; the browser loaded a second page, opened its 36th result at the recorded Codex message, and returned to the same card and query. Provider-specific content pages use the same excerpt/source contract. |
 | MCP thinking previews | Implemented; real protocol acceptance passed | Thinking stays out of ordinary search and session previews. A real Codex thinking event was rejected by default `session_get_event`, returned with `includeThinking: true`, omitted from default context, and present in opted-in context. Timeline thinking remains an explicit segment. |
 | Cross-provider content and child-session meaning | Automated boundaries and real MCP lineage passed for available recorded pairs | Viewer global `/sessions/search` searches only message content across selected providers, including non-archived OpenCode child sessions. Viewer exclusions apply; MCP uses each adapter's source-search scope without those Viewer exclusions. Both use canonical `{ provider, sessionId }` identity. Real MCP search/get/timeline/context calls succeeded on all five providers, and a Codex cursor returned six distinct sessions across two pages. Packed-MCP parent/child calls verified source-backed reciprocal refs for OpenCode, Codex, and DeepSeek Harness. Local Claude Code and Pi data contain no parented sessions. |
+| MCP direct-child completeness | Implemented; packed MCP protocol acceptance passed | A real Codex parent has 172 indexed direct children. The former `session_get` response silently stopped at 50; the packed fix returned all 172 canonical child refs in pages of 50, 50, 50, and 22, with explicit continuation flags and no duplicates. |
 | Viewer search excerpts and source navigation | Real source-anchor clicks passed on all five available providers | A bounded excerpt links to a source-message anchor. The Reader preserves original source-message anchors when it groups fragments under a response; the detail back link returns to the exact result-card anchor on its page. Browser Back clicks restored OpenCode and Codex cards, including child-session hits; the other three provider pages had valid return URLs. Multi-term AND matches now show all feasible terms in the bounded excerpt; a real Codex query confirmed both terms in each checked result. |
 | Long-session first load | Implemented and real-browser checked; server projection cost remains | Complete-turn lazy segments reduced a real 2,686-message Codex page from 23,498,218 to 4,859,680 initial HTML bytes and from 179,823 to 23,089 initial DOM elements. A direct URL fragment loaded a late segment and focused its canonical target. Later fragment and deep-location requests still rebuild the full server projection. |
 
@@ -117,7 +118,7 @@ sample, not a latency guarantee.
 
 ## Verification snapshot — 2026-09-26
 
-- `npm run ci:quality` passed with 1,058 tests after the multi-term excerpt
+- `npm run ci:quality` passed with 1,059 tests after the MCP child-pagination
   fix. `npm run qa:e2e` passed against a real OpenCode v2 session on the
   normal-mode isolated v2 server at port 3459, with no browser errors. An
   earlier rerun on an isolated server started with
@@ -135,7 +136,10 @@ sample, not a latency guarantee.
   provider. Codex cursor pages returned six distinct sessions; thinking was
   readable only with explicit opt-in. Windows 2.0.0 SEA binaries built and
   passed the Viewer/static-asset/MCP smoke. The packages and binaries were
-  rebuilt and rechecked after the final multi-term excerpt change.
+  rebuilt and rechecked after the multi-term excerpt change. After the MCP
+  child-pagination fix, the Windows Viewer/MCP SEA binaries were rebuilt and
+  passed smoke again (`version: 2.0.0`, Viewer/assets available, five MCP
+  tools).
 - A real Codex `README advertises` query against the final Viewer API returned
   four message snippets, each within 160 characters and showing both terms.
   The final packed MCP returned five message matches for the same query; all
@@ -158,6 +162,15 @@ sample, not a latency guarantee.
   `tmp/v2-qa/mcp-lineage-protocol.log`; source fields were OpenCode
   `session.parent_id`, Codex `session_meta` parent/fork/spawn fields, and
   DeepSeek Harness header `parentSession`.
+- An independent packed-MCP check used the real Codex parent
+  `01a0576a-98e2-7c31-a265-6d98d5fbff12`, whose derived index contains 172
+  direct children. `session_get` returned page sizes 50/50/50/22, 172 distinct
+  canonical child refs in the index's order, and `childrenTruncated` values
+  true/true/true/false. The installed package made these calls over stdio with
+  an isolated metadata index and no stderr. The regression in
+  `test/mcp.test.mjs` covers the same 172-child boundary and wrong-parent
+  cursor rejection. The installed packed artifacts are in
+  `tmp/v2-qa/mcp-child-audit-20260926/`.
 - On the isolated live Viewer, content-search results for all five providers
   opened an existing source-message anchor whose message contained the query.
   The checked session ID suffixes were OpenCode `...WY1Ej`, Claude Code
@@ -228,7 +241,8 @@ Keep thinking out of previews and default timeline/search output. A caller must
 opt in at the event-read boundary to receive thinking. Preserve tool input and
 output opt-in and bounded continuation. Across the five providers, keep search
 matches, session references, event references, timestamps, and child-session
-summaries tied to the owning source evidence.
+summaries tied to the owning source evidence. Direct-child lists must expose
+continuation when the bounded first page does not contain every child.
 
 **Acceptance:** call the running MCP through an actual supported client or MCP
 protocol client. Test more than 100 qualifying records and a late unique match
@@ -239,7 +253,9 @@ the 100-record boundary. Exercise
 multi-provider results with the same query and verify canonical provider/session
 and event references. Exercise recorded parent/child histories and confirm the
 MCP returns the provider's established relationship summaries without
-inventing or blending lineage. Read the session preview, context, and timeline
+inventing or blending lineage; traverse a parent with more than 50 indexed
+children until every recorded child is reachable. Read the session preview,
+context, and timeline
 without opt-in; then read context and event with `includeThinking: true` and the
 timeline with `segments: ["thinking"]`. Thinking must appear only in those
 explicit reads. Record provider availability, call inputs, returned cursors,
@@ -304,13 +320,22 @@ one streaming pass, without changing languages. One packed-MCP run took 24.3
 seconds to connect and 20.9 seconds for a Codex search, while the other four
 provider searches took under 0.3 seconds each. Source inspection identifies
 startup indexing and file-backed transcript resolution as candidate costs;
-their CPU and I/O shares still need profiling. The
+an isolated Windows cold-service profile of the local Codex store measured
+23.1 seconds for index refresh and 11.6 seconds for a following Codex search.
+Across the 34.8-second CPU sample, `parseLine` accounted for 12.4 seconds of
+self time, hashing 3.9 seconds, string decoding 3.8 seconds, and garbage
+collection 3.7 seconds. A separate run measured 22.2 seconds for refresh and
+10.3 seconds for search; its RSS peaked at 2,490 MiB during search, while
+the live JS heap returned to 216 MiB after forced collection. These are
+single-machine samples, and RSS includes allocator high-water memory. They
+identify repeated JSONL parsing and transient allocation as concrete targets
+for a narrower Node-side change; they do not yet establish a Rust speedup. The
 long Reader page's 23.47 MB response and roughly 180,000 DOM nodes point to a
 browser rendering and incremental-loading problem; Rust would not shrink that
 DOM by itself. Continue with targeted Node indexing/cache work and Reader
-pagination while preserving full history and navigation. Profile the necessary
-single-pass parse and measure memory before reconsidering a narrow native
-parser or index worker. A later Rust decision record must show the workload,
+pagination while preserving full history and navigation. Reduce repeated
+parsing and transient allocations before reconsidering a narrow native parser
+or index worker. A later Rust decision record must show the workload,
 baseline, measured improvement, cross-platform packaging and maintenance
 cost, and data-compatibility implications.
 

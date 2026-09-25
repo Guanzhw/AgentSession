@@ -22,6 +22,8 @@ const HARD_LIMITS = {
   queryChars: 500,
   previewChars: 240
 };
+const DEFAULT_CHILD_LIMIT = 50;
+const MAX_CHILD_LIMIT = 100;
 
 export type EventSegment = typeof EVENT_SEGMENTS[number];
 export type EventStatus = typeof EVENT_STATUSES[number];
@@ -596,10 +598,17 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
 
     get(input: Record<string, unknown>) {
       const ref = assertSessionRef(input?.session);
+      const childLimit = resolveLimit(input?.childLimit, DEFAULT_CHILD_LIMIT, MAX_CHILD_LIMIT, "childLimit");
+      const childFingerprint = cursorFingerprint({ session: ref });
+      const childOffset = input?.childCursor === undefined ? 0 : decodeCursor(input.childCursor, childFingerprint);
       const { session } = getProviderSession(ref);
       const messages = getProviderMessages(ref);
-      const children = indexedChildren(ref.provider, ref.sessionId, 50)
+      const indexedPage = indexedChildren(ref.provider, ref.sessionId, childLimit + 1, childOffset);
+      const children = indexedPage.slice(0, childLimit)
         .map((row: any) => indexedSessionSummary(ref.provider, row));
+      const childrenNextCursor = indexedPage.length > childLimit
+        ? encodeCursor(childOffset + children.length, childFingerprint)
+        : null;
       const messageEvents = projectEvents(ref, messages)
         .filter((event) => event.event.segment === "message" && event.preview.trim())
         .map(({ sourceIndex: _sourceIndex, ...event }) => event);
@@ -609,6 +618,8 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
         firstMessage: messageEvents[0] || null,
         lastMessage: messageEvents.at(-1) || null,
         children,
+        childrenNextCursor,
+        childrenTruncated: childrenNextCursor !== null,
         untrustedContent: true
       };
     },

@@ -445,6 +445,9 @@ queries sessions still present in provider storage, never writes provider data,
 and does not use Viewer hide/exclude metadata as an access filter. Its bounded
 tools are `session_search`, `session_get`, `session_timeline`,
 `session_get_context`, and `session_get_event`.
+`session_get` pages direct children (at most 100 per call). If
+`childrenTruncated` is true, pass `childrenNextCursor` as `childCursor` until
+all child summaries have been retrieved.
 
 ```bash
 npx --yes --prefer-online @acetamido/agentsession-mcp@latest install

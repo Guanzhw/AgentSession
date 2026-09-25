@@ -61,7 +61,7 @@ OpenClaw/Hermes provider references.
 
 The installer currently writes `@acetamido/agentsession-mcp@latest` into host
 configuration. `npx` resolves that tag when the MCP process starts, so an
-an existing entry will resolve to the current release after the 2.0 package is
+existing entry will resolve to the current release after the 2.0 package is
 published. Calls that request OpenClaw or Hermes sessions then become
 incompatible: 2.0 has no provider registration or compatibility adapter for
 those references. Remove retired provider IDs from MCP calls and host-side
@@ -82,7 +82,10 @@ not need to be adjacent. Use `directory` for an exact normalized project-path
 filter and `nextCursor` to continue a time-bounded result snapshot. Reasoning
 is excluded from normal search results. Default diagnostics include unavailable
 registered providers. `session_get` returns first and last visible-message
-previews. Truncated `session_get_event` results include reusable continuation
+previews and up to 50 direct child summaries by default (100 maximum). When
+`childrenTruncated` is true, pass `childrenNextCursor` as `childCursor` on the
+next `session_get` call to retrieve the remaining children. Truncated
+`session_get_event` results include reusable continuation
 arguments for assembling long content without guessing flags or offsets.
 `session_timeline` omits blank message segments; tool and requested thinking
 segments remain separate events.

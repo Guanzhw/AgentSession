@@ -237,6 +237,7 @@ agentsession [options]
 ## AgentSession-MCP
 
 `@acetamido/agentsession-mcp` 是独立的 read-only stdio MCP server。它查询 Provider 本地仍存在的 session，不写入 Provider 数据，也不受 Viewer 隐藏或排除元数据影响。工具边界是 `session_search`、`session_get`、`session_timeline`、`session_get_context` 和 `session_get_event`；返回内容带有长度上限和不可信来源边界。
+`session_get` 的直属子会话每页最多返回 100 条；若 `childrenTruncated` 为真，可将 `childrenNextCursor` 作为下一次请求的 `childCursor`，直到取完。
 
 ```bash
 npx --yes --prefer-online @acetamido/agentsession-mcp@latest install

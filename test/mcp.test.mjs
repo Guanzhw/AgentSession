@@ -433,6 +433,72 @@ test("session_get returns null previews when a session has no visible messages",
   assert.equal(overview.lastMessage, null);
 });
 
+test("session_get pages every indexed direct child through the MCP cursor", async (t) => {
+  const parent = {
+    id: "many-children-root", title: "Root", directory: "/work/many-children", parentId: null,
+    timeCreated: 1, timeUpdated: 2000, messageCount: 0, tokenCount: 0
+  };
+  const children = Array.from({ length: 172 }, (_, index) => ({
+    id: `many-children-${String(index).padStart(3, "0")}`, title: `Child ${index}`,
+    directory: parent.directory, parentId: parent.id, timeCreated: index + 2,
+    timeUpdated: 1000 - index, messageCount: 0, tokenCount: 0
+  }));
+  upsertIndex("codex", [parent, ...children]);
+  t.after(closeIndexDb);
+  const sessions = new Map([parent, ...children].map((session) => [session.id, session]));
+  const adapter = {
+    id: "codex", name: "Codex", detect: () => true, getDataPath: () => null,
+    async *scan() { yield* sessions.values(); },
+    getSession: (id) => sessions.get(id) || null,
+    getMessages: () => [], getTokenStats: () => [], searchMessages: () => []
+  };
+  const service = createSessionHistoryService({ dependencies: {
+    getAvailableProviders: () => [adapter], getAllProviders: () => [adapter]
+  } });
+  const server = createSessionHistoryMcpServer(service);
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "agentsession-mcp-child-pages", version: "1.0.0" });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  t.after(async () => {
+    await client.close();
+    await server.close();
+  });
+
+  const getTool = (await client.listTools()).tools.find((tool) => tool.name === "session_get");
+  assert.ok(getTool.inputSchema.properties.childCursor);
+  assert.equal(getTool.inputSchema.properties.childLimit.maximum, 100);
+  const session = { provider: "codex", sessionId: parent.id };
+  const observed = [];
+  const pageSizes = [];
+  let childCursor;
+  let firstCursor;
+  do {
+    const response = await client.callTool({ name: "session_get", arguments: { session, ...(childCursor ? { childCursor } : {}) } });
+    assert.equal(response.isError, undefined);
+    const result = response.structuredContent.result;
+    pageSizes.push(result.children.length);
+    observed.push(...result.children.map((child) => child.session.sessionId));
+    assert.equal(result.childrenTruncated, result.childrenNextCursor !== null);
+    assert.equal(response.content[0].text.includes("more available"), result.childrenTruncated);
+    childCursor = result.childrenNextCursor;
+    firstCursor ||= childCursor;
+  } while (childCursor);
+  assert.deepEqual(pageSizes, [50, 50, 50, 22]);
+  assert.deepEqual(observed, children.map((child) => child.id));
+
+  const largerPage = await client.callTool({ name: "session_get", arguments: { session, childLimit: 100 } });
+  assert.equal(largerPage.structuredContent.result.children.length, 100);
+  assert.equal(largerPage.structuredContent.result.childrenTruncated, true);
+  const wrongParent = await client.callTool({ name: "session_get", arguments: {
+    session: { provider: "codex", sessionId: children[0].id }, childCursor: firstCursor
+  } });
+  assert.equal(wrongParent.isError, true);
+  assert.match(wrongParent.content[0].text, /cursor is invalid for this request/);
+  const invalid = await client.callTool({ name: "session_get", arguments: { session, childLimit: 101 } });
+  assert.equal(invalid.isError, true);
+});
+
 test("OpenCode SQLite search event references round-trip and session_get reports normalized message count", () => {
   const dbPath = path.join(temp, "opencode-search-events.db");
   const db = new DatabaseSync(dbPath);
