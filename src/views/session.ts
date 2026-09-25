@@ -1039,6 +1039,7 @@ export function renderReaderProcessChunk(input: {
 
 function renderMessagePartsResult(message: any, depth = 0, provider = "opencode", initialReasoning: any[] = [], view: ConversationViewModel | null = null, placedCardIds: Set<string> | null = null, relations: ReaderRelationMarkup | null = null, ownedChildrenByPart: Map<string, OwnedReaderChildDescriptor[]> | null = null, deferExecution = true): any {
   const renderedParts: string[] = [];
+  const sourceMessageAnchors = new Set<string>();
   let executionParts: ConversationItem[] = [];
   const pendingReasoning = [...initialReasoning];
   let visibleCount = 0;
@@ -1113,6 +1114,10 @@ function renderMessagePartsResult(message: any, depth = 0, provider = "opencode"
       rendered = `${renderTurnReasoning(reasoningMarkup)}\n${rendered}`;
     } else if (rendered && reasoningMarkup && !rendered.includes(reasoningMarkup) && !(part.type === "text" && !part.data?.text)) {
       rendered = attachReasoningToRenderedPart(rendered, reasoningMarkup) || rendered;
+    }
+    if (rendered && part.type === "text" && part.sourceMessageId && part.sourceMessageId !== message.id && !sourceMessageAnchors.has(part.sourceMessageId)) {
+      sourceMessageAnchors.add(part.sourceMessageId);
+      rendered = `<span id="${escapeHtml(anchorId("msg", part.sourceMessageId))}" class="session-event-anchor" aria-hidden="true"></span>${rendered}`;
     }
     if (rendered) {
       const children = ownedChildrenByPart?.get(String(part.id)) || [];

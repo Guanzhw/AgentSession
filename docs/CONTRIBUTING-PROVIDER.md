@@ -6,6 +6,12 @@ Runtime Workbench, and read-only MCP consume normalized contracts. Provider
 databases, transcripts, and event logs must never be written, migrated,
 deleted, or repaired.
 
+AgentSession 2.0 supports OpenCode, Claude Code, Codex CLI, Pi, and DeepSeek
+Harness. OpenClaw and Hermes Agent were last included in published v1.10.1 and
+are fully removed from both the 2.0 Viewer and MCP. Their entries below are
+historical evidence only, not implementation references for the current
+runtime. See the [2.0 provider scope and migration plan](design/agentsession-v2-provider-scope.md).
+
 `src/providers/interface.ts` is authoritative. Keep provider behavior under
 `src/providers/<provider-id>/` and do not add central provider-ID branches in
 routes, projections, or browser code.
@@ -168,7 +174,7 @@ adapter/protocol smoke loaded 11 sessions. Current 2.1.263 format support is
 docs/upstream-verified; no live 2.1.263 transcript was available. The checked-in
 fixture is source-derived bounded synthetic data, not a live capture.
 
-### Hermes Agent evidence snapshot (2026-09-08)
+### Hermes Agent v1.10.1 historical evidence snapshot (2026-09-08)
 
 The installed Hermes package is `0.19.1` (local source checkout
 `840fb55a8aaeb69bfcd6f34a80e57f9a5bcd44ce`). The official current release is
@@ -248,7 +254,13 @@ Every adapter implements `ProviderAdapter`:
   live SQLite refresh behavior. Other providers use the startup index; Library
   does not rescan transcripts or construct protocols on navigation. An empty
   live snapshot replaces that provider's indexed rows for this request only;
-- normalized `getMessages()`, trusted `getTokenStats()`, and bounded `searchMessages()`;
+- normalized `getMessages()`, trusted `getTokenStats()`, and bounded
+  `searchMessages(query, limit, offset)`;
+- optional `iterateSearchMessages(query)` for file-backed providers. Yield
+  `{ session, match }` in the same normalized match order as `searchMessages()`
+  so Viewer and MCP can traverse a full search once without restarting at
+  each offset. Keep source files read-only and preserve the first matching
+  message ID and excerpt for each session;
 - optional `getSessionReaderSnapshot(sessionId)` for providers whose Reader
   accessors otherwise repeat expensive parsing. Capture the canonical session,
   normalized messages, inherited context and revision once per HTML/pane
@@ -315,10 +327,11 @@ stay ordinary text, and question IDs alone do not establish a tool relationship.
 | Source shape | Reference | Boundary to preserve |
 |:---|:---|:---|
 | JSONL transcript | `src/providers/claude-code/` or `src/providers/codex/` | Record order, response boundaries, and child evidence. |
-| Branch-tree JSONL | `src/providers/pi/` or `src/providers/openclaw/` | In-file branches and canonical parent/session IDs; OpenClaw v2 anchors every stored record and v3 maps only recorded native facts. |
+| Branch-tree JSONL | `src/providers/pi/` | In-file branches and canonical parent/session IDs. |
+| Branch-tree JSONL (v1.10.1 historical reference) | `src/providers/openclaw/` (removed in 2.0) | In-file branches and canonical parent/session IDs; OpenClaw v2 anchors every stored record and v3 maps only recorded native facts. Retired from the 2.0 Viewer and MCP. |
 | Event-sourced JSONL with Zstd frames | `src/providers/deepseek-harness/` | Frame decoding, packed-row keys, source sequence, and required event vocabulary. |
-| Provider-native SQLite | `src/providers/hermes/` | Provider schema, WAL snapshots, and lineage remain local to the adapter. |
-| OpenClaw current SQLite + legacy JSONL coexistence | `src/providers/openclaw/` | `session_nodes` canonical keys vs legacy file window ids; exactly-once dedup (SQLite wins); bounded `entry_json` normalization for v3 Goal/Actors/Runs; legacy-only/unsupported/unreadable diagnostics. |
+| Provider-native SQLite (v1.10.1 historical reference) | `src/providers/hermes/` (removed in 2.0) | Provider schema, WAL snapshots, and lineage remain local to the adapter. Retired from the 2.0 Viewer and MCP. |
+| OpenClaw current SQLite + legacy JSONL coexistence (v1.10.1 historical reference) | `src/providers/openclaw/` (removed in 2.0) | `session_nodes` canonical keys vs legacy file window ids; exactly-once dedup (SQLite wins); bounded `entry_json` normalization for v3 Goal/Actors/Runs; legacy-only/unsupported/unreadable diagnostics. Retired from the 2.0 Viewer and MCP. |
 | OpenCode SQLite | `src/providers/opencode/` | Only the OpenCode schema is supported; arbitrary SQLite is not interchangeable. |
 
 Shared helpers in `src/providers/shared/` are schema-neutral: file caching,

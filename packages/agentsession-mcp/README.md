@@ -4,8 +4,9 @@ AgentSession-MCP is a local, read-only stdio MCP server for AI coding-session
 history. It queries the providers configured for AgentSession without starting
 a web server or modifying provider-owned data.
 
-Supported provider references include OpenCode, Claude Code, Codex CLI,
-OpenClaw, Hermes Agent, Pi, and DeepSeek Harness histories.
+AgentSession 2.0 supports OpenCode, Claude Code, Codex CLI, Pi, and DeepSeek
+Harness histories. OpenClaw and Hermes Agent were supported by v1.10.1 and are
+retired from both the 2.0 Viewer and MCP.
 
 ## Install into coding agents
 
@@ -51,9 +52,20 @@ It supports both initialization-based MCP clients and stateless `2026-07-28`
 clients over stdio; the five-tool, read-only contract is identical in both
 protocol eras.
 
-Version 1.8 keeps this five-tool contract unchanged, adds OpenClaw and Hermes,
-and aligns the MCP package with the AgentSession 1.8 provider and
-session-history implementation.
+Version 1.8 added OpenClaw and Hermes while keeping the five-tool contract
+unchanged. That support was present in the last published v1 release, 1.10.1.
+AgentSession 2.0 supports the five providers listed above and does not accept
+OpenClaw/Hermes provider references.
+
+### Version behavior and retired provider references
+
+The installer currently writes `@acetamido/agentsession-mcp@latest` into host
+configuration. `npx` resolves that tag when the MCP process starts, so an
+an existing entry will resolve to the current release after the 2.0 package is
+published. Calls that request OpenClaw or Hermes sessions then become
+incompatible: 2.0 has no provider registration or compatibility adapter for
+those references. Remove retired provider IDs from MCP calls and host-side
+workflows when moving to the 2.0 provider set.
 
 Provider local storage is authoritative: every session still present in a
 configured provider's local store is exposed by this server. Viewer-only

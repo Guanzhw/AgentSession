@@ -4,7 +4,7 @@ import { icons } from "../../icons.js";
 import { buildAgentLoop } from "../shared/agent-loop.js";
 import { buildMessageSessionTree, buildMessageSessionViewsFromTree } from "../shared/message-session.js";
 import { isSubagentToolName } from "../shared/subagent-tools.js";
-import { searchNormalizedMessages } from "../shared/file-adapter-helpers.js";
+import { iterateNormalizedMessageSearch, searchNormalizedMessages } from "../shared/file-adapter-helpers.js";
 import { capabilityDescriptor, compactionEnvelope, finalizeSessionProtocol, sessionEvent, sessionRelationship, type SessionRelationship } from "../shared/session-protocol.js";
 import { decodeV2Record, normalizeV2Messages, v2Tokens, v2Total, type V2MessageRow } from "./v2-parser.js";
 import { openCodeStorageRevision } from "./storage.js";
@@ -47,6 +47,9 @@ export function createOpenCodeV2Adapter(dataPath: () => string): ProviderAdapter
   `).all(id) as V2MessageRow[]).map(decodeV2Record);
   const list = () => db().prepare(`${select} WHERE s.time_archived IS NULL ORDER BY s.time_updated DESC, s.id`).all().map(session);
   const messages = (id: string) => normalizeV2Messages(rows(id));
+  function* searchEntries() {
+    for (const current of list()) yield { session: current, messages: messages(current.id) };
+  }
   function protocol(id: string) {
     const current = getSession(id);
     if (!current) return null;
@@ -169,10 +172,10 @@ export function createOpenCodeV2Adapter(dataPath: () => string): ProviderAdapter
       }
       return [...totals.values()];
     },
-    searchMessages(query, limit = 20) {
-      function* entries() { for (const current of list()) yield { session: current, messages: messages(current.id) }; }
-      return searchNormalizedMessages(entries(), query, limit);
+    searchMessages(query, limit = 20, offset = 0) {
+      return searchNormalizedMessages(searchEntries(), query, limit, offset);
     },
+    iterateSearchMessages(query) { return iterateNormalizedMessageSearch(searchEntries(), query); },
     exportSession(id) {
       const current = getSession(id);
       return current ? { session: current, messages: messages(id), sourceRecords: rows(id) } : null;

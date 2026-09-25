@@ -11,6 +11,7 @@ import {
   createStructuredViewCache,
   createStructuredViewMethods,
   searchNormalizedMessages,
+  iterateNormalizedMessageSearch,
   type TokenFieldMapping
 } from "../shared/file-adapter-helpers.js";
 import {
@@ -261,8 +262,12 @@ const pi = {
     return sessionFiles.getStatsRevision();
   },
 
-  searchMessages(query, limit = 20) {
-    return searchNormalizedMessages(sessionFiles.list(), query, limit);
+  searchMessages(query, limit = 20, offset = 0) {
+    return searchNormalizedMessages(sessionFiles.list(), query, limit, offset);
+  },
+
+  *iterateSearchMessages(query) {
+    yield* iterateNormalizedMessageSearch(sessionFiles.list(), query);
   }
 } satisfies ProviderAdapter;
 

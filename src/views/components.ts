@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { escapeHtml, planMarkdownChunk, renderMarkdown, renderMarkdownTableRows } from "../markdown.js";
 import { t, getLocale } from "../i18n.js";
 import { anchorId } from "./anchors.js";
@@ -657,7 +658,12 @@ export function sessionCard(s: any, active = false, { showCheckbox = false, prov
   const protocolStats = renderListStatChips(s);
   const statsHtml = stats || protocolStats ? `<footer class="session-card-stats">${stats ? `<span class="session-card-file-stats">${stats}</span>` : ""}${protocolStats ? `<span class="session-card-signals">${protocolStats}</span>` : ""}</footer>` : "";
   const providerBadge = showProvider ? `<span class="session-provider-badge" title="${escapeHtml(sessionProvider)}">${escapeHtml(providerName || sessionProvider)}</span>` : "";
-  const detailHref = `/${encodedProvider}/session/${encodeURIComponent(s.id)}${returnTo ? `?from=${encodeURIComponent(returnTo)}` : ""}`;
+  const cardAnchor = `session-result-${createHash("sha256").update(`${sessionProvider}\u0000${s.id}`).digest("hex").slice(0, 16)}`;
+  const returnHref = returnTo && !returnTo.includes("#") ? `${returnTo}#${cardAnchor}` : returnTo;
+  const detailHref = `/${encodedProvider}/session/${encodeURIComponent(s.id)}${returnHref ? `?from=${encodeURIComponent(returnHref)}` : ""}`;
+  const searchMatch = s.searchMatch;
+  const matchHref = searchMatch?.messageId ? `${detailHref}#${anchorId("msg", searchMatch.messageId)}` : detailHref;
+  const matchHtml = searchMatch?.snippet ? `<a class="session-card-match" href="${escapeHtml(matchHref)}"><span class="session-card-match-label">${escapeHtml(t("sessions.message_match"))}</span><span class="session-card-match-snippet">${escapeHtml(searchMatch.snippet)}</span></a>` : "";
 
   const checkboxHtml = showCheckbox
     ? `<label class="card-checkbox-hit-area"><input type="checkbox" class="card-checkbox" data-id="${escapeHtml(s.id)}" data-provider="${escapeHtml(sessionProvider)}" aria-label="${escapeHtml(t("batch.select_session", { title: String(title) }))}"></label>`
@@ -679,7 +685,7 @@ export function sessionCard(s: any, active = false, { showCheckbox = false, prov
     </div>
   ` : "";
 
-  return `<article class="${classes.join(" ")}" data-session-id="${escapeHtml(s.id)}" data-provider="${escapeHtml(sessionProvider)}" data-day="${escapeHtml(dayKey)}" data-ts="${escapeHtml(String(Number(s.time_updated) || 0))}">
+  return `<article id="${cardAnchor}" class="${classes.join(" ")}" data-session-id="${escapeHtml(s.id)}" data-provider="${escapeHtml(sessionProvider)}" data-day="${escapeHtml(dayKey)}" data-ts="${escapeHtml(String(Number(s.time_updated) || 0))}">
     ${checkboxHtml}
     <div class="session-card-content">
       <header class="session-card-header">
@@ -692,6 +698,7 @@ export function sessionCard(s: any, active = false, { showCheckbox = false, prov
         <time class="session-card-time" datetime="${new Date(Number(s.time_updated) || Date.now()).toISOString()}">${escapeHtml(formatTime(s.time_updated))}</time>
       </header>
       <p class="session-card-directory">${escapeHtml(s.directory || "")}</p>
+      ${matchHtml}
       ${showStats ? statsHtml : ""}
     </div>
     ${actionsHtml}

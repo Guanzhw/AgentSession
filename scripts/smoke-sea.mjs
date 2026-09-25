@@ -14,7 +14,7 @@ const viewer = path.join(binaryDir, `agentsession${extension}`);
 const mcp = path.join(binaryDir, `agentsession-mcp${extension}`);
 const metadata = JSON.parse(readFileSync(path.join(binaryDir, "binary-metadata.json"), "utf8"));
 const packageVersion = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).version;
-const expectedProviderIds = ["opencode", "claude-code", "codex", "openclaw", "hermes", "pi", "deepseek-harness"];
+const expectedProviderIds = ["opencode", "claude-code", "codex", "pi", "deepseek-harness"];
 const staticAssets = [
   { path: "style.css", contentType: "text/css; charset=utf-8", marker: ":root", minLength: 1000 },
   { path: "app-shell.css", contentType: "text/css; charset=utf-8", marker: ":root", minLength: 1000 },
@@ -57,6 +57,11 @@ for (const [executable, expected] of [[viewer, "AgentSession —"], [mcp, "Agent
 
 
 const temp = mkdtempSync(path.join(os.tmpdir(), "agentsession-sea-smoke-"));
+const viewerEnv = {
+  ...process.env,
+  AGENTSESSION_META_PATH: path.join(temp, "viewer-meta.db"),
+  AGENTSESSION_CONFIG: path.join(temp, "viewer-config.json")
+};
 const port = await new Promise((resolve, reject) => {
   const probe = createServer();
   probe.once("error", reject);
@@ -74,10 +79,8 @@ const server = spawn(viewer, [
   "--claude-dir", path.join(temp, "missing-claude"),
   "--codex-dir", path.join(temp, "missing-codex"),
   "--pi-dir", path.join(temp, "missing-pi"),
-  "--dsh-dir", path.join(temp, "missing-dsh"),
-  "--openclaw-dir", path.join(temp, "missing-openclaw"),
-  "--hermes-dir", path.join(temp, "missing-hermes")
-], { stdio: ["ignore", "pipe", "pipe"] });
+  "--dsh-dir", path.join(temp, "missing-dsh")
+], { stdio: ["ignore", "pipe", "pipe"], env: viewerEnv });
 let serverStdout = "";
 let serverStderr = "";
 server.stdout.on("data", (chunk) => { serverStdout += chunk; });
@@ -117,13 +120,12 @@ writeFileSync(configPath, JSON.stringify({
   claudeDir: path.join(temp, "missing-claude"),
   codexDir: path.join(temp, "missing-codex"),
   piDir: path.join(temp, "missing-pi"),
-  dshDir: path.join(temp, "missing-dsh"),
-  openclawDir: path.join(temp, "missing-openclaw"),
-  hermesDir: path.join(temp, "missing-hermes")
+  dshDir: path.join(temp, "missing-dsh")
 }));
 const transport = new StdioClientTransport({
   command: mcp,
   args: ["--config", configPath],
+  env: { ...process.env, AGENTSESSION_META_PATH: path.join(temp, "mcp-meta.db") },
   stderr: "pipe"
 });
 const client = new Client(

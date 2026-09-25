@@ -18,6 +18,7 @@ function dayKey(ts: any) {
 export function renderSessionsPage({
   sessions = [],
   total = 0,
+  hasMore,
   limit = 30,
   offset = 0,
   query = "",
@@ -41,12 +42,16 @@ export function renderSessionsPage({
   familyMode = false,
   matchingSessions = 0,
   storageDiagnostic = null
-}: { sessions?: any[]; total?: number; limit?: number; offset?: number; query?: string; note?: string; range?: string; project?: string; sort?: string; starredOnly?: boolean; hasSubagent?: boolean; projectOptions?: { id: string; label: string; count?: number; worktree?: string }[]; searchMode?: string; totalMessages?: number; totalTokens?: number; deletedCount?: number; provider?: string | null; providerAvailable?: boolean; manageable?: boolean; providers?: any[]; selectedProviders?: string[]; global?: boolean; familyMode?: boolean; matchingSessions?: number; storageDiagnostic?: any } = {}) {
+}: { sessions?: any[]; total?: number | null; hasMore?: boolean; limit?: number; offset?: number; query?: string; note?: string; range?: string; project?: string; sort?: string; starredOnly?: boolean; hasSubagent?: boolean; projectOptions?: { id: string; label: string; count?: number; worktree?: string }[]; searchMode?: string; totalMessages?: number; totalTokens?: number; deletedCount?: number; provider?: string | null; providerAvailable?: boolean; manageable?: boolean; providers?: any[]; selectedProviders?: string[]; global?: boolean; familyMode?: boolean; matchingSessions?: number; storageDiagnostic?: any } = {}) {
   const isAvailable = global
     ? providers.some((item: any) => item.available !== false)
     : providerAvailable !== false;
   const isManageableProvider = isAvailable && manageable;
   const hasVisibleSessions = sessions.length > 0;
+  const moreSessions = hasMore ?? (total !== null && total > offset + sessions.length);
+  const sessionCount = total === null
+    ? t("sessions.count_at_least").replace("{count}", String(offset + sessions.length + (moreSessions ? 1 : 0)))
+    : t("sessions.count").replace("{count}", String(total));
   const hasActiveFilters = Boolean(query || range || project || starredOnly || hasSubagent || sort !== "updated-desc");
   const activeProviders = selectedProviders.length ? selectedProviders : (global ? providers.filter((item: any) => item.available !== false).map((item: any) => item.id) : [provider || "opencode"]);
   const providerCount = activeProviders.length;
@@ -61,7 +66,7 @@ export function renderSessionsPage({
   if (global) selectedProviders.forEach((id) => rawParams.append("provider", id));
 
   const listBasePath = global
-    ? "/sessions"
+    ? searchMode === "content" ? "/sessions/search" : "/sessions"
     : searchMode === "content"
       ? `/${encodeURIComponent(provider || "opencode")}/search`
       : `/${encodeURIComponent(provider || "opencode")}`;
@@ -107,10 +112,14 @@ export function renderSessionsPage({
     </p>`;
 
   // ── Primary search across providers ───────────────────────────────────────
+  const searchLabel = searchMode === "content"
+    ? t(global ? "library.search_content_label" : "library.search_content_provider_label")
+    : t("library.search_label");
+  const searchPlaceholder = searchMode === "content" ? t("library.search_content_placeholder") : t("library.search_placeholder");
   const searchBar = `
-    <form class="library-search" action="${listBasePath}" method="GET" role="search" aria-label="${escapeHtml(t("library.search_label"))}">
+    <form class="library-search" action="${listBasePath}" method="GET" role="search" aria-label="${escapeHtml(searchLabel)}">
       ${hiddenParams(rawParams, global ? ["provider", "range", "project", "sort", "starred", "has-subagent"] : ["range", "project", "sort", "starred", "has-subagent"])}
-      <input type="search" id="library-search-input" name="q" class="library-search-input" value="${escapeHtml(query)}" placeholder="${escapeHtml(t("library.search_placeholder"))}" aria-label="${escapeHtml(t("library.search_label"))}">
+      <input type="search" id="library-search-input" name="q" class="library-search-input" value="${escapeHtml(query)}" placeholder="${escapeHtml(searchPlaceholder)}" aria-label="${escapeHtml(searchLabel)}">
       <button type="submit" class="btn library-search-submit">${escapeHtml(t("library.search_action"))}</button>
     </form>`;
 
@@ -171,6 +180,12 @@ export function renderSessionsPage({
     })
   ].join("");
   const filterAction = global ? "/sessions" : `/${provider}`;
+  const contentSearchParams = new URLSearchParams();
+  if (query) contentSearchParams.set("q", query);
+  if (global) selectedProviders.forEach((id) => contentSearchParams.append("provider", id));
+  const globalContentSearchLink = global && searchMode !== "content"
+    ? `<a class="back-to-filter" href="/sessions/search${contentSearchParams.size ? `?${escapeHtml(contentSearchParams.toString())}` : ""}">${escapeHtml(t("library.search_content"))}</a>`
+    : "";
   const providerSelector = global ? `<fieldset class="provider-filter" aria-label="${escapeHtml(t("filter.providers"))}">
     <legend>${escapeHtml(t("filter.providers"))}</legend>
     ${providers.map((item: any) => `<label class="provider-filter-option${item.available === false ? " disabled" : ""}">
@@ -277,7 +292,7 @@ export function renderSessionsPage({
     manageable: global ? providerManageable.get(session.provider || "") === true : isManageableProvider,
     discriminator: discriminators.get(libraryIdentityKey(session)) || null
   }) : `${sessionCard(session, false, {
-    showCheckbox: global ? providerManageable.get(session.provider || "") === true : isManageableProvider,
+    showCheckbox: searchMode !== "content" && (global ? providerManageable.get(session.provider || "") === true : isManageableProvider),
     provider: provider || session.provider,
     manageable: global ? providerManageable.get(session.provider || "") === true : isManageableProvider,
     showProvider: true,
@@ -326,13 +341,13 @@ export function renderSessionsPage({
       <div class="page-header-row">
         <div>
           <h1>${searchMode === "content" && query ? t("sessions.search_title").replace("{query}", escapeHtml(query)) : t("sessions.title")}</h1>
-          <p>${t(familyMode ? "library.family_entries" : "sessions.count").replace("{count}", String(total))}${familyMode ? ` · ${t("library.family_matches", { count: String(matchingSessions) })}` : ""}</p>
+          <p${searchMode === "content" ? ` data-session-result-count data-count-known="${escapeHtml(t("sessions.count"))}" data-count-at-least="${escapeHtml(t("sessions.count_at_least"))}"` : ""}>${familyMode ? t("library.family_entries").replace("{count}", String(total)) : sessionCount}${familyMode ? ` · ${t("library.family_matches", { count: String(matchingSessions) })}` : ""}</p>
         </div>
         ${headerLinks}
       </div>
       ${searchNote}${storageNotices}
     </section>
-    ${searchMode !== "content" ? `${familyMode ? "" : summaryStrip}${searchBar}
+    ${searchMode !== "content" ? `${familyMode ? "" : summaryStrip}${searchBar}${globalContentSearchLink}
     <div class="library-toolbar">
       ${chipsBar}
       ${viewToggle}
@@ -352,14 +367,14 @@ export function renderSessionsPage({
     <section class="session-list session-list-library" id="session-list" data-view="timeline"${familyMode ? ` data-library-families data-library-return="${escapeHtml(listPath)}"` : ""}>
       ${listMarkup}
     </section>
-    ${total > offset + sessions.length ? `<button id="scroll-sentinel" class="scroll-load-more" type="button" data-offset="${offset + sessions.length}" data-total="${total}" data-range="${escapeHtml(range)}" data-project="${escapeHtml(project)}" data-query="${escapeHtml(query)}" data-mode="${escapeHtml(searchMode)}" data-sort="${escapeHtml(sort)}" data-starred="${starredOnly ? "1" : ""}" data-has-subagent="${hasSubagent ? "1" : ""}" data-provider="${escapeHtml(provider || "")}" data-providers="${escapeHtml(selectedProviders.join(","))}" data-provider-names="${escapeHtml(JSON.stringify(Object.fromEntries(providerNames)))}" data-return-to="${escapeHtml(listPath)}" data-global="${global ? "true" : "false"}">${t("sessions.load_more")}</button>` : ""}
+    ${moreSessions ? `<button id="scroll-sentinel" class="scroll-load-more" type="button" data-offset="${offset + sessions.length}" data-total="${total ?? ""}" data-range="${escapeHtml(range)}" data-project="${escapeHtml(project)}" data-query="${escapeHtml(query)}" data-mode="${escapeHtml(searchMode)}" data-sort="${escapeHtml(sort)}" data-starred="${starredOnly ? "1" : ""}" data-has-subagent="${hasSubagent ? "1" : ""}" data-provider="${escapeHtml(provider || "")}" data-providers="${escapeHtml(selectedProviders.join(","))}" data-provider-names="${escapeHtml(JSON.stringify(Object.fromEntries(providerNames)))}" data-return-to="${escapeHtml(listPath)}" data-global="${global ? "true" : "false"}">${t("sessions.load_more")}</button>` : ""}
   `;
 
   function showBatchControls() {
     return isAvailable && (global ? providers.some((item: any) => item.available !== false && item.manageable) : isManageableProvider);
   }
   function showBatchBar() {
-    return showBatchControls() && hasVisibleSessions;
+    return searchMode !== "content" && showBatchControls() && hasVisibleSessions;
   }
 
   const isContentSearch = searchMode === "content" && query;

@@ -1,6 +1,6 @@
 # AgentSession
 
-AgentSession 是本地优先的 agent 工作历史阅读器：以完整记录为内容，以 runtime 关系组织工作过程，默认连续阅读。它读取 OpenCode、Claude Code、Codex CLI、OpenClaw、Hermes Agent、Pi 和 DeepSeek Harness 的本地记录，让读者同时了解说了什么、谁执行了什么，以及结果如何回到主任务。
+AgentSession 是本地优先的 agent 工作历史阅读器：以完整记录为内容，以 runtime 关系组织工作过程，默认连续阅读。2.0 读取 OpenCode、Claude Code、Codex CLI、Pi 和 DeepSeek Harness 的本地记录，让读者同时了解说了什么、谁执行了什么，以及结果如何回到主任务。OpenClaw 与 Hermes Agent 最后包含于已发布的 v1.10.1，已从 2.0 Viewer 和 MCP 完全移除；旧 URL 在 2.0 不兼容。详细迁移步骤见[2.0 Provider 范围与交付计划](docs/design/agentsession-v2-provider-scope.md)。
 
 所有 Provider 原始数据库、transcript 和事件日志都保持只读；收藏、自定义标题和排除状态写入独立的 AgentSession 元数据。
 
@@ -111,24 +111,26 @@ GET /api/:provider/session/:id/runtime/context?maxItems=
 
 ## Provider coverage
 
-七个已注册 Provider 都覆盖 Session Protocol v2。能力表区分来源记录和适配器派生的事实；`partial` 不等于来源原生保存。
+AgentSession 2.0 当前支持五个 Provider：OpenCode、Claude Code、Codex CLI、Pi 和 DeepSeek Harness。表中 OpenClaw 与 Hermes Agent 行记录的是 v1.10.1 的历史覆盖，不属于 2.0；能力表区分来源记录和适配器派生的事实，`partial` 不等于来源原生保存。
 
 | Provider | 生命周期 | 本地来源 | Protocol fidelity 与覆盖 |
 |:---|:---|:---|:---|
 | OpenCode | active | `$XDG_DATA_HOME/opencode/opencode.db` 或 `~/.local/share/opencode/opencode.db` | v1 保留基于 message/part 的 native v3 Work/Execution/Coordination/Usage；v2 按 `seq` 读取消息、工具、压缩及父子/分叉关系，并通过共享层投影 v3，不重建原生 task/run。按数据库 schema 选择读取器；本机 OpenCode v2.0.16 已验证。[范围与限制](docs/opencode-storage-compatibility.md)。 |
 | Claude Code | active | `~/.claude/transcripts/`、`~/.claude/projects/` | `partial/derived` transcript、`system/compact_boundary`（`compactMetadata`）和 sidechain/task-notification 证据；native v3 保留 finalized v2 snapshot，并按 canonical assistant response id 去重生成 request Usage。官方 npm latest/next 2.1.263 与 upstream 已核验，本机 2.1.207，暂无 live 2.1.263 transcript。 |
 | Codex CLI | active | `~/.codex/sessions/**/*.jsonl`、冷文件 `*.jsonl.zst` | `full/recorded` response/item、工具、compaction 和当前 `token_usage_record`；`inter_agent_communication` 只进入 Runtime v3 actors/coordination，不改变线性 transcript；`partial/derived` NEW_TASK 关系、Task、AgentRun。`close_agent` 归一化为 `interrupt`；本机 0.152.1 仍主要写旧 `token_count`/collaboration 形状，官方 0.153.0 release 与当前源码 HEAD 已验证新形状。 |
-| OpenClaw | active — current SQLite（含 legacy/archive JSONL 回退） | `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite`（agent schema 19，v2026.9.3 release commit `1391f7cd…`；独立审计 HEAD `0140d656…`；schema SQL sha256 `fe932174…`）；legacy/archive `sessions/*.jsonl` | v2 canonical events/branches + v3 recorded Goal、agent identity、spawn Run、compaction context、request usage；limited goal states map to shared `blocked`，raw status 通过 bounded provenance 保留。高级 task/run/delivery tables deferred。 |
-| Hermes Agent | active | `$HERMES_HOME/state.db` | `full/recorded` active-only SQLite transcript、异步 delegation handle/state；native v3 保留 v2 facts，并将 dispatch/lifecycle/delivery 分开投影为 Coordination；`partial/derived` 压缩延续/delegation lineage 与 metadata-only compaction，压缩不是 spawned。当前 freshness：v0.21.1 / `v2026.9.7`、schema 30，release commit `2237be35…`，独立 HEAD `6e2b8e07…`；本机仍为 v0.19.1、schema 23。 |
+| OpenClaw | v1.10.1 only; retired in 2.0 | `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite`（agent schema 19，v2026.9.3 release commit `1391f7cd…`；独立审计 HEAD `0140d656…`；schema SQL sha256 `fe932174…`）；legacy/archive `sessions/*.jsonl` | v1.10.1 historical snapshot: v2 canonical events/branches + v3 recorded Goal、agent identity、spawn Run、compaction context、request usage；limited goal states map to shared `blocked`，raw status 通过 bounded provenance 保留。高级 task/run/delivery tables deferred。 |
+| Hermes Agent | v1.10.1 only; retired in 2.0 | `$HERMES_HOME/state.db` | v1.10.1 historical snapshot: `full/recorded` active-only SQLite transcript、异步 delegation handle/state；native v3 保留 v2 facts，并将 dispatch/lifecycle/delivery 分开投影为 Coordination；`partial/derived` 压缩延续/delegation lineage 与 metadata-only compaction，压缩不是 spawned。证据快照：v0.21.1 / `v2026.9.7`、schema 30，release commit `2237be35…`，独立 HEAD `6e2b8e07…`；本机仍为 v0.19.1、schema 23。 |
 | Pi | active | `~/.pi/agent/sessions/**/*.jsonl` | `full/recorded` branch/compaction 和 `partial/derived` parent lineage；不虚构 spawn。当前 upstream 为 `@earendil-works/pi-coding-agent`（npm 0.85.1，package tag/gitHead `d981de12…`；独立 upstream HEAD `f53ac113…`，官方 session format **v3**,2026-09-08 验证）；v3 保留 v2 facts，并按 assistant request 记录 Usage、把可读 branch/compaction summary 映射为 Context 结果。当前官方字段以 `firstKeptEntryId` 为边界；`retainedTail` 仅作为 historical/harness extension evidence，不作当前标准；本机 Pi 0.80.10，暂无 live 0.85.1 transcript。嵌套 `run-N/session.jsonl` 为 pi-subagents 产物（无 parentSession，不作 lineage）。 |
 | DeepSeek Harness | active preview | `$DSH_HOME/sessions/**/{session.jsonl,session.v1.jsonl,session.v2.jsonl,session.v3.jsonl}[.zstd]` 或 `~/.dsh/sessions/**` | `full/recorded` v0/v1/v2/v3 event/context；每个 session root 选择最高 generation，`partial/derived` workflow、team 和跨 session 关系。 |
 
-当前 Provider 也提供消息搜索、token 统计、导出和只修改 AgentSession 元数据的本地管理。Runtime Environment 与 system-prompt evidence 仍是独立的只读能力：只展示可解析的本地来源，不声称恢复隐藏 prompt。
+当前五个 Provider 也提供消息搜索、token 统计、导出和只修改 AgentSession 元数据的本地管理。Runtime Environment 与 system-prompt evidence 仍是独立的只读能力：只展示可解析的本地来源，不声称恢复隐藏 prompt。
 未检测到的安装会显示为 unavailable 并保留 Provider diagnostic，不会被报告为空的成功来源。
 
-## OpenClaw current SQLite compatibility
+## OpenClaw v1.10.1 SQLite compatibility snapshot
 
-OpenClaw 自 2026.7.2-beta.1 起把 session/transcript 主存储迁入每 agent 的 SQLite（agent schema 19）；`sessions/*.jsonl` 与 `sessions.json` 是 legacy/archive（doctor 迁移输入）。AgentSession 当前实现（v2026.9.3 release commit `1391f7cd…`，并单独记录审计 HEAD `0140d656…`）：
+以下是 v1.10.1 的历史兼容记录；AgentSession 2.0 不再注册 OpenClaw Provider。
+
+OpenClaw 自 2026.7.2-beta.1 起把 session/transcript 主存储迁入每 agent 的 SQLite（agent schema 19）；`sessions/*.jsonl` 与 `sessions.json` 是 legacy/archive（doctor 迁移输入）。v1.10.1 的 AgentSession adapter 实现（v2026.9.3 release commit `1391f7cd…`，并单独记录审计 HEAD `0140d656…`）：
 
 - 主存储：`~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite`（只读打开，支持 WAL 快照签名），canonical session id = `session_nodes.session_key`（如 `agent:main:main`）；`session_windows` 是 transcript 代数（`previous_session_id` + `reason`：initial/reset/rollover/fork/rewind/switch/recovery/compaction），展示层只暴露 live 窗口并记录代数链（`metadata.windowLineage`，有界 20）。
 - `transcript_events.event_json` 与 legacy JSONL record 同形，parser 复用不变；active path 直接由 raw events 计算（`session_transcript_active_events` 是派生投影，不可依赖）。
@@ -194,8 +196,6 @@ agentsession [options]
 --codex-dir <path>    Codex CLI 数据目录
 --pi-dir <path>       Pi agent 数据目录
 --dsh-dir <path>      DeepSeek Harness 数据目录（默认 $DSH_HOME 或 ~/.dsh）
---openclaw-dir <path> OpenClaw state 目录
---hermes-dir <path>   Hermes Agent 数据目录
 --config <path>       AgentSession JSON 配置
 --disable-terminal-launch  禁止 resume command 启动
 --reindex             启动时重建索引
@@ -232,7 +232,7 @@ agentsession [options]
 
 `projectPaths.<provider>` 的 key 必须是来源提供的稳定 opaque project key，value 必须是已存在的绝对目录；AgentSession 不猜测或写回该映射。`resumeCommands` 只覆盖 resume 命令，`resumeShell` 只定义受信任的本地宿主。`allowTerminalLaunch` 是启动时开关，不写入保存配置。
 
-常用环境变量：`PORT`、`AGENTSESSION_DB_PATH`、`XDG_DATA_HOME`、`CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`OPENCLAW_STATE_DIR`、`OPENCLAW_HOME`、`HERMES_HOME`、`PI_CODING_AGENT_DIR`、`DSH_HOME`、`AGENTSESSION_META_PATH`、`AGENTSESSION_CONFIG`。
+常用环境变量：`PORT`、`AGENTSESSION_DB_PATH`、`XDG_DATA_HOME`、`CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`PI_CODING_AGENT_DIR`、`DSH_HOME`、`AGENTSESSION_META_PATH`、`AGENTSESSION_CONFIG`。
 
 ## AgentSession-MCP
 

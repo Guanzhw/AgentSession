@@ -2,7 +2,7 @@ import type { AgentRun, ContextArtifactEvidenceRequest, ContextArtifactEvidenceR
 import type { CoordinationObservation, SessionProtocolV3 } from "./shared/session-protocol-v3.js";
 import type { SessionTree } from "./shared/session-tree.js";
 
-export type ProviderId = "opencode" | "claude-code" | "codex" | "openclaw" | "hermes" | "pi" | "deepseek-harness";
+export type ProviderId = "opencode" | "claude-code" | "codex" | "pi" | "deepseek-harness";
 
 export interface ResumeCommandSpec {
   executable: string;
@@ -331,7 +331,9 @@ export interface ProviderAdapter {
   getTokenSessionCount?(days?: number, fromDate?: string, toDate?: string): number;
   /** Monotonically changes when a file-backed provider's stats source changes. */
   getStatsRevision?(): string | number;
-  searchMessages(query: string, limit?: number): SearchResult[];
+  searchMessages(query: string, limit?: number, offset?: number): SearchResult[];
+  /** Stream normalized matches and their owning session in one file scan. */
+  iterateSearchMessages?(query: string): Iterable<{ session: RawSession | Record<string, unknown>; match: SearchResult }>;
   exportSession?(sessionId: string): unknown;
   getRuntimeEnvironment?(sessionId: string): RuntimeEnvironmentView | null;
   getSystemPrompts?(sessionId: string): unknown;

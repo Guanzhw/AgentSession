@@ -2,11 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { buildOpenCodeSessionProtocol } from "../dist/src/providers/opencode/protocol.js";
-import { buildOpenClawSessionProtocol } from "../dist/src/providers/openclaw/protocol.js";
-
-function session(id, provider, parentId = null) {
-  return { id, provider, parentId, title: null, directory: null, timeCreated: 1, timeUpdated: 2, messageCount: 0, tokenCount: null, metadata: null };
-}
 
 test("OpenCode protocol projects native parts and child sessions", () => {
   const tree = {
@@ -75,21 +70,4 @@ test("OpenCode current task output, todos, and compaction parts retain provider 
   const duplicateTodos = buildOpenCodeSessionProtocol({ ...tree, todos: [tree.todos[0], { ...tree.todos[0], position: 9 }] }, 1);
   assert.equal(duplicateTodos.validation.ok, true);
   assert.equal(new Set(duplicateTodos.tasks.slice(0, 2).map((task) => task.id)).size, 2);
-});
-
-test("OpenClaw protocol keeps active path and recorded branch heads", () => {
-  const records = [
-    { type: "session", id: "oclaw" },
-    { type: "message", id: "a", parentId: null, message: { role: "user", content: "hi" } },
-    { type: "message", id: "b", parentId: "a", message: { role: "assistant", content: "ok" } },
-    { type: "message", id: "branch", parentId: "a", message: { role: "assistant", content: "other" } },
-    { type: "message", id: "c", parentId: "b", message: { role: "assistant", content: "final" } }
-  ];
-  const protocol = buildOpenClawSessionProtocol(session("oclaw", "openclaw"), records, [], 1);
-  assert.equal(protocol.validation.ok, true);
-  assert.equal(protocol.events.some((event) => event.id === "record:c"), true);
-  // Every stored non-header record has a canonical event anchor, including
-  // the abandoned branch head; only the message projection stays active-path.
-  assert.equal(protocol.events.some((event) => event.id === "record:branch"), true);
-  assert.equal(protocol.branches.length, 2);
 });

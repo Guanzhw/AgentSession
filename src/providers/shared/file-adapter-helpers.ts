@@ -360,27 +360,38 @@ export function createStructuredViewMethods(
 export function searchNormalizedMessages(
   entries: Iterable<{ session: { id: string }; messages: Message[] }>,
   query: string,
-  limit = 20
+  limit = 20,
+  offset = 0
 ): SearchResult[] {
-  if (!String(query || "").trim()) return [];
   const results: SearchResult[] = [];
-  for (const entry of entries) {
+  let skipped = 0;
+  for (const { match } of iterateNormalizedMessageSearch(entries, query)) {
+    if (skipped < offset) { skipped += 1; continue; }
+    results.push(match);
     if (results.length >= limit) break;
+  }
+  return results;
+}
+
+export function* iterateNormalizedMessageSearch<TSession extends { id: string }>(
+  entries: Iterable<{ session: TSession; messages: Message[] }>,
+  query: string
+): IterableIterator<{ session: TSession; match: SearchResult }> {
+  if (!String(query || "").trim()) return;
+  for (const entry of entries) {
     for (const message of entry.messages) {
-      if (results.length >= limit) break;
       if (message.role !== "user" && message.role !== "assistant") continue;
       const content = message.questionAnswers ? questionAnswersText(message.questionAnswers) : message.content;
       if (!matchesSearchQuery(content, query)) continue;
-      results.push({
+      yield { session: entry.session, match: {
         sessionId: entry.session.id,
         messageId: message.id,
         role: message.role,
         snippet: createSnippet(content, query),
         timestamp: message.timestamp
-      });
+      } };
     }
   }
-  return results;
 }
 
 /**

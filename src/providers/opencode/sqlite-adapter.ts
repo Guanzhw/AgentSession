@@ -171,8 +171,8 @@ export function createOpenCodeSqliteAdapter({
     }));
   },
 
-  searchMessages(query, limit = 20) {
-    return dbSearchMessages(query, limit, getAdapterDataPath()).map((r: any) => ({
+  searchMessages(query, limit = 20, offset = 0) {
+    return dbSearchMessages(query, limit, getAdapterDataPath(), undefined, offset, true).map((r: any) => ({
       sessionId: r.sessionId,
       messageId: r.messageId && r.partId ? `${r.messageId}:${r.partId}` : r.messageId || r.partId,
       role: r.role || "unknown",

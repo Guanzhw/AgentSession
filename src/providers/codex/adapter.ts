@@ -41,6 +41,7 @@ import {
   createSessionFileStore,
   createIncrementalTokenStats,
   searchNormalizedMessages,
+  iterateNormalizedMessageSearch,
   sessionFileSignature,
   type TokenFieldMapping
 } from "../shared/file-adapter-helpers.js";
@@ -741,15 +742,23 @@ const codex = {
     return sessionFiles.getStatsRevision();
   },
 
-  searchMessages(query, limit = 20) {
+  searchMessages(query, limit = 20, offset = 0) {
     function* entries() {
       for (const entry of sessionFiles.list()) yield resolveEntry(entry);
     }
     return searchNormalizedMessages(
       entries(),
       query,
-      limit
+      limit,
+      offset
     );
+  },
+
+  *iterateSearchMessages(query) {
+    function* entries() {
+      for (const entry of sessionFiles.list()) yield resolveEntry(entry);
+    }
+    yield* iterateNormalizedMessageSearch(entries(), query);
   },
 
 } satisfies ProviderAdapter;

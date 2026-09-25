@@ -2,9 +2,12 @@
 
 AgentSession is a local-first agent work-history reader: complete records are
 the content, runtime relationships organize the work, and continuous reading
-is the default. It reads OpenCode, Claude Code, Codex CLI, OpenClaw, Hermes
-Agent, Pi, and DeepSeek Harness data to show what was said, who performed the
-work, and how results returned to the main task.
+is the default. AgentSession 2.0 reads OpenCode, Claude Code, Codex CLI, Pi,
+and DeepSeek Harness data to show what was said, who performed the work, and
+how results returned to the main task. OpenClaw and Hermes Agent were last
+included in published v1.10.1 and are fully removed from the 2.0 Viewer and MCP;
+their old URLs are incompatible with 2.0. See the [2.0 provider scope and
+migration plan](docs/design/agentsession-v2-provider-scope.md) for details.
 
 Provider-owned databases, transcripts, and event logs are
 always read-only. Stars, custom titles, and exclusions live in separate
@@ -252,7 +255,9 @@ invalid sessions retain their diagnostics.
 
 ## Provider coverage
 
-All seven registered providers expose Session Protocol v2. The table separates
+AgentSession 2.0 currently supports five providers: OpenCode, Claude Code,
+Codex CLI, Pi, and DeepSeek Harness. The OpenClaw and Hermes Agent rows record
+v1.10.1 historical coverage and are not part of 2.0. The table separates
 source-recorded facts from adapter-derived facts; `partial` never means that a
 fact was stored natively.
 
@@ -261,24 +266,27 @@ fact was stored natively.
 | OpenCode | active | `$XDG_DATA_HOME/opencode/opencode.db` or `~/.local/share/opencode/opencode.db` | v1 retains native v3 Work, Execution, Coordination, and Usage from message/part evidence. v2 reads `seq`-ordered messages, tools, compaction, parent and fork relationships, and uses the shared v3 projection without reconstructing native tasks or runs. The reader is selected by database schema; installed OpenCode v2.0.16 was verified. See [scope and limitations](docs/opencode-storage-compatibility.md). |
 | Claude Code | active | `~/.claude/transcripts/`, `~/.claude/projects/` | `partial/derived` transcript, recorded `system/compact_boundary` (`compactMetadata`), and sidechain/task-notification evidence; native v3 preserves the finalized v2 snapshot and adds deduplicated request Usage from canonical assistant response ids. npm latest/next 2.1.263 and official upstream are verified, installed CLI is 2.1.207, and no live 2.1.263 transcript was available. |
 | Codex CLI | active | `~/.codex/sessions/**/*.jsonl`, cold `*.jsonl.zst` rollouts | `full/recorded` response/item, tool, compaction, and current `token_usage_record`; `inter_agent_communication` is exposed only in Runtime v3 actors/coordination and does not alter the linear transcript; `partial/derived` NEW_TASK relationships, Tasks, and AgentRuns. `close_agent` normalizes to `interrupt`; the installed 0.152.1 still mainly writes legacy `token_count`/collaboration shapes, while the official 0.153.0 release and current source HEAD cover the new shapes. |
-| OpenClaw | active — current SQLite (with legacy/archive JSONL fallback) | `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite` (agent schema 19; v2026.9.3 release commit `1391f7cd…`, separately audited HEAD `0140d656…`, schema SQL sha256 `fe932174…`); legacy/archive `sessions/*.jsonl` | v2 canonical events/branches plus v3 recorded Goal, agent identity, spawn Run, compaction context, and request usage; limited goal states map to shared `blocked` while retaining raw status in bounded provenance. Advanced task/run/delivery tables are deferred. |
-| Hermes Agent | active | `$HERMES_HOME/state.db` | `full/recorded` active-only SQLite transcript and async delegation handle/state; native v3 preserves v2 facts and projects dispatch/lifecycle/delivery as separate Coordination observations; `partial/derived` compression continuation/delegation lineage and metadata-only compaction; compression is not spawned work. Current freshness: v0.21.1 / `v2026.9.7`, schema 30, release commit `2237be35…`, separate HEAD `6e2b8e07…`; local install remains v0.19.1, schema 23. |
+| OpenClaw | v1.10.1 only; retired in 2.0 | `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite` (agent schema 19; v2026.9.3 release commit `1391f7cd…`, separately audited HEAD `0140d656…`, schema SQL sha256 `fe932174…`); legacy/archive `sessions/*.jsonl` | v1.10.1 historical snapshot: v2 canonical events/branches plus v3 recorded Goal, agent identity, spawn Run, compaction context, and request usage; limited goal states map to shared `blocked` while retaining raw status in bounded provenance. Advanced task/run/delivery tables are deferred. |
+| Hermes Agent | v1.10.1 only; retired in 2.0 | `$HERMES_HOME/state.db` | v1.10.1 historical snapshot: `full/recorded` active-only SQLite transcript and async delegation handle/state; native v3 preserves v2 facts and projects dispatch/lifecycle/delivery as separate Coordination observations; `partial/derived` compression continuation/delegation lineage and metadata-only compaction; compression is not spawned work. Evidence snapshot: v0.21.1 / `v2026.9.7`, schema 30, release commit `2237be35…`, separate HEAD `6e2b8e07…`; local install remains v0.19.1, schema 23. |
 | Pi | active | `~/.pi/agent/sessions/**/*.jsonl` | `full/recorded` branch/compaction events and `partial/derived` parent lineage; never invented spawn. Current upstream is `@earendil-works/pi-coding-agent` (npm 0.85.1, package tag/gitHead `d981de12…`; separate upstream HEAD `f53ac113…`, official session format **v3**, verified 2026-09-08); the v3 reader preserves v2 facts, emits assistant-request Usage, and maps readable branch/compaction summaries to Context results. The current official boundary is `firstKeptEntryId`; `retainedTail` is historical/harness extension evidence only, not a current standard field. The local Pi install is 0.80.10, with no live 0.85.1 transcript available; nested `run-N/session.jsonl` files are pi-subagents run artifacts (no parentSession, no lineage). |
 | DeepSeek Harness | active preview | `$DSH_HOME/sessions/**/{session.jsonl,session.v1.jsonl,session.v2.jsonl,session.v3.jsonl}[.zstd]` or `~/.dsh/sessions/**` | `full/recorded` v0/v1/v2/v3 events/context; each session root selects the highest generation, with `partial/derived` workflow, team, and cross-session relationships. |
 
-All providers also expose message search, token statistics, export, and local
+The five current providers also expose message search, token statistics, export, and local
 management that changes only AgentSession metadata. Runtime-environment and
 system-prompt evidence remain independent read-only capabilities: only locally
 resolvable sources are shown, and hidden provider prompts are never claimed.
 An undetected installation is shown as unavailable with its provider diagnostic;
 it is never reported as an empty successful source.
 
-## OpenClaw current SQLite compatibility
+## OpenClaw v1.10.1 SQLite compatibility snapshot
+
+The following is the historical v1.10.1 compatibility record; AgentSession 2.0
+no longer registers the OpenClaw provider.
 
 OpenClaw moved sessions/transcripts into the per-agent SQLite store starting
 with 2026.7.2-beta.1 (agent schema 19); `sessions/*.jsonl` and
-`sessions.json` are legacy/archive (doctor migration inputs). AgentSession's
-current implementation targets the v2026.9.3 release commit `1391f7cd…` and
+`sessions.json` are legacy/archive (doctor migration inputs). The v1.10.1
+AgentSession adapter targeted the v2026.9.3 release commit `1391f7cd…` and
 records the separately audited upstream HEAD `0140d656…`:
 
 - Primary store: `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite`
@@ -380,8 +388,6 @@ agentsession [options]
 --codex-dir <path>    Codex CLI data directory
 --pi-dir <path>       Pi agent data directory
 --dsh-dir <path>      DeepSeek Harness data directory (default: $DSH_HOME or ~/.dsh)
---openclaw-dir <path> OpenClaw state directory
---hermes-dir <path>   Hermes Agent data directory
 --config <path>       AgentSession JSON configuration
 --disable-terminal-launch  Disable resume command launching
 --reindex             Rebuild the index at startup
@@ -428,8 +434,7 @@ overrides resume commands; `resumeShell` defines the trusted local host.
 `allowTerminalLaunch` is a startup switch and is not persisted.
 
 Common environment variables are `PORT`, `AGENTSESSION_DB_PATH`,
-`XDG_DATA_HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `OPENCLAW_STATE_DIR`,
-`OPENCLAW_HOME`, `HERMES_HOME`,
+`XDG_DATA_HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
 `PI_CODING_AGENT_DIR`, `DSH_HOME`, `AGENTSESSION_META_PATH`, and
 `AGENTSESSION_CONFIG`.
 

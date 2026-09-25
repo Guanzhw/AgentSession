@@ -170,16 +170,16 @@ memory / experience / dream 及输入、结果 artifact、run/event/turn。
 producer reference，且[输入 session 投影](../../src/protocol-runtime-v3.ts)
 使用当前 provider。不要用 `sourceSessionIds` 代替 generator。
 
-| Provider | 已确认的当前证据 | 当前缺口 |
+| Provider | 调查时已确认的证据 | 调查时缺口 |
 | --- | --- | --- |
-| OpenClaw | [冻结 schema v19](../../test/fixtures/openclaw-agent-schema-v19.sql) 有 `memory_index_chunks`、`memory_index_chunk_provenance`、`memory_entry_origins`，包含 path/hash、origin_class、session_kind、session_id/session_key | [当前 protocol](../../src/providers/openclaw/protocol.ts) 的 `artifactsFor()` 只处理 compact/branch summary；来源列本身不证明生成 run。需先核实 provider 写入语义 |
+| OpenClaw | [冻结 schema v19](../../test/fixtures/openclaw-agent-schema-v19.sql) 有 `memory_index_chunks`、`memory_index_chunk_provenance`、`memory_entry_origins`，包含 path/hash、origin_class、session_kind、session_id/session_key | [调查时的 protocol](https://github.com/Guanzhw/AgentSession/blob/c27315d/src/providers/openclaw/protocol.ts) 的 `artifactsFor()` 只处理 compact/branch summary；来源列本身不证明生成 run。需先核实 provider 写入语义 |
 | DSH | [protocol](../../src/providers/deepseek-harness/protocol.ts) 保留 compact 的 `sourceCommandId`、shadowed 范围和 summary transformation event | 这些是 compact 输入与结果证据，不是 memory / dream / experience 生成记录 |
-| Hermes | [protocol](../../src/providers/hermes/protocol.ts) 有 compression continuation 和 opaque summary | continuation 身份不能替代生成者/输入产物链 |
+| Hermes | [调查时的 protocol](https://github.com/Guanzhw/AgentSession/blob/c27315d/src/providers/hermes/protocol.ts) 有 compression continuation 和 opaque summary | continuation 身份不能替代生成者/输入产物链 |
 | Claude | [protocol](../../src/providers/claude-code/protocol.ts) 有 compactUuid、trigger、strategy | 尚无上述辅助产物的归一化生产链 |
 
 本机 OpenClaw 的配置路径是 `C:\Users\QQ110\.openclaw`，仅发现 agent `main`，
 但 `agents/main/agent/openclaw-agent.sqlite` 不存在，所以没有 live memory 表或
-行可验。[OpenClaw store 契约](../../src/providers/openclaw/sqlite-store.ts) 中
+行可验。[调查时的 OpenClaw store 契约](https://github.com/Guanzhw/AgentSession/blob/c27315d/src/providers/openclaw/sqlite-store.ts) 中
 `session_key` 是 canonical logical session，`session_id` 是 transcript window；
 未来读取 memory origin 时必须保留该区别。
 

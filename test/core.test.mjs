@@ -2236,7 +2236,7 @@ test("provider registration distinguishes source-supported resume commands from 
   const providers = getAllProviders();
   assert.deepEqual(
     providers.map((provider) => provider.id),
-    ["opencode", "claude-code", "codex", "openclaw", "hermes", "pi", "deepseek-harness"]
+    ["opencode", "claude-code", "codex", "pi", "deepseek-harness"]
   );
   for (const provider of providers.filter((provider) => provider.resumeCommand)) {
     assert.equal(typeof provider.resumeCommand?.executable, "string", provider.id);
@@ -2247,8 +2247,6 @@ test("provider registration distinguishes source-supported resume commands from 
   assert.equal(providers.find((provider) => provider.id === "deepseek-harness")?.resumeCommand, undefined);
   assert.equal(parseArgs(["--pi-dir", "D:\\fixtures\\pi-agent"]).piDir, "D:\\fixtures\\pi-agent");
   assert.equal(parseArgs(["--dsh-dir", "D:\\fixtures\\dsh"]).dshDir, "D:\\fixtures\\dsh");
-  assert.equal(parseArgs(["--openclaw-dir", "D:\\fixtures\\openclaw"]).openclawDir, "D:\\fixtures\\openclaw");
-  assert.equal(parseArgs(["--hermes-dir", "D:\\fixtures\\hermes"]).hermesDir, "D:\\fixtures\\hermes");
 });
 
 test("every provider exposes the complete shared session capability surface", () => {

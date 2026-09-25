@@ -184,16 +184,16 @@ test("structured storage diagnostics stay bounded instead of leaking object coer
     sessions: [],
     total: 0,
     global: true,
-    selectedProviders: ["openclaw"],
+    selectedProviders: ["pi"],
     providers: [{
-      id: "openclaw",
-      name: "OpenClaw",
+      id: "pi",
+      name: "Pi",
       available: true,
       manageable: true,
       storageDiagnostic: { states: [{ status: "legacy-only", detail: "Provider-owned detail" }] }
     }]
   });
-  assert.match(html, /OpenClaw · Storage diagnostic/);
+  assert.match(html, /Pi · Storage diagnostic/);
   assert.doesNotMatch(html, /\[object Object\]/);
   assert.doesNotMatch(html, /Provider-owned detail/, "the shared view does not interpret provider diagnostic fields");
 });
@@ -230,9 +230,48 @@ test("global sessions API cards carry per-provider batch controls", async () => 
   assert.match(piCard.html, /class="card-checkbox" data-id="api-1" data-provider="pi"/);
   assert.match(piCard.html, /class="star-btn /);
   assert.match(piCard.html, /data-day="/);
-  assert.match(piCard.html, /href="\/pi\/session\/api-1\?from=%2Fsessions"/);
+  assert.match(piCard.html, /href="\/pi\/session\/api-1\?from=%2Fsessions%23session-result-[a-f0-9]{16}"/);
   assert.doesNotMatch(readonlyCard.html, /card-checkbox/);
   assert.doesNotMatch(readonlyCard.html, /star-btn/);
+});
+
+test("global content search reaches both providers and keeps a paged source return link", async () => {
+  const providers = ["probe-a", "probe-b"];
+  const providerMap = new Map(providers.map((provider) => [provider, {
+    id: provider,
+    capabilities: {},
+    searchMessages(query, limit, offset) {
+      const matches = query === "needle" ? [
+        { sessionId: "same-id", messageId: `${provider}-message`, role: "user", snippet: `needle from ${provider}` },
+        { sessionId: "same-id", messageId: `${provider}-duplicate`, role: "user", snippet: "needle duplicate" }
+      ] : [];
+      return matches.slice(offset, offset + limit);
+    },
+    getSession(id) { return { id, title: `${provider} task`, time_updated: NOW, directory: "D:\\probe" }; }
+  }]));
+  const routes = captureGetRoutes(registerSessions, {
+    appConfig: {}, providerMap,
+    providerInfo: providers.map((id) => ({ id, name: id, icon: "", available: true, manageable: false }))
+  });
+  const api = routes.find(({ pattern }) => pattern === "/api/sessions");
+  const page = routes.find(({ pattern }) => pattern === "/sessions/search");
+  assert.ok(api);
+  assert.ok(page);
+  const html = await page.handler({ url: "/sessions/search?q=needle&provider=probe-a&provider=probe-b" });
+  assert.equal(html.status, 200);
+  assert.match(html.body, /action="\/sessions\/search"/);
+  assert.match(html.body, /needle from probe-a/);
+  assert.match(html.body, /needle from probe-b/);
+  const response = mutationResponse();
+  await api.handler({
+    url: "/api/sessions?mode=content&q=needle&provider=probe-a&provider=probe-b&limit=1&offset=1&returnTo=%2Fsessions%2Fsearch%3Fq%3Dneedle%26provider%3Dprobe-a%26provider%3Dprobe-b%26offset%3D1"
+  }, response);
+  const payload = JSON.parse(response.body);
+  assert.equal(payload.sessions.length, 1);
+  assert.equal(payload.sessions[0].provider, "probe-b");
+  assert.equal(payload.sessions[0].searchMatch.messageId, "probe-b-message");
+  assert.match(payload.sessions[0].html, /from=%2Fsessions%2Fsearch%3Fq%3Dneedle%26provider%3Dprobe-a%26provider%3Dprobe-b%26offset%3D1/);
+  assert.equal(payload.hasMore, false);
 });
 
 test("cross-provider batch mutates viewer metadata per provider and skips unsupported sources", async () => {

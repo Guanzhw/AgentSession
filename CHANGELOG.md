@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.0.0 - Unreleased
+
+### Breaking
+
+- Viewer and MCP support OpenCode, Claude Code, Codex CLI, Pi, and DeepSeek
+  Harness. OpenClaw and Hermes Agent adapters, routes, configuration options,
+  and MCP provider IDs are removed. The upgrade does not delete provider-owned
+  files or existing Viewer metadata.
+- Retired provider URLs and MCP references have no 2.0 compatibility route.
+  Remove their entries from saved configuration; retired CLI directory flags
+  now fail with an explicit unsupported-provider message.
+
+### Added and fixed
+
+- MCP session search traverses complete provider matches with bounded cursor
+  pages and returns canonical message references. Thinking content requires an
+  explicit read option in context and event tools.
+- Viewer content search reaches matches beyond the former candidate ceiling.
+  A separate cross-provider message search provides excerpts and source links,
+  while existing Library search keeps its session/family behavior. Search
+  results return to their query and result page after opening a session.
+- File-provider MCP search streams normalized matches in one scan per request,
+  avoiding repeated prefix scans during result pagination.
+
 ## 1.9.1 - 2026-08-18
 
 ### Fixed

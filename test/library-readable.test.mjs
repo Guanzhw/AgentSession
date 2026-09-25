@@ -108,7 +108,7 @@ test("Library discriminators preserve search return links and family rows", () =
     query: "needle",
     providers: [{ id: "codex", name: "Codex", available: true, manageable: true }]
   });
-  assert.match(html, /href="\/codex\/session\/search-session\?from=%2Fcodex%2Fsearch%3Fq%3Dneedle"/);
+  assert.match(html, /href="\/codex\/session\/search-session\?from=%2Fcodex%2Fsearch%3Fq%3Dneedle%23session-result-[a-f0-9]{16}"/);
 
   const familyHtml = renderSessionsPage({
     sessions: [{
@@ -123,5 +123,5 @@ test("Library discriminators preserve search return links and family rows", () =
     familyMode: true
   });
   assert.match(familyHtml, /data-library-family/);
-  assert.match(familyHtml, /href="\/codex\/session\/family-root\?from=%2Fsessions%3Fprovider%3Dcodex"/);
+  assert.match(familyHtml, /href="\/codex\/session\/family-root\?from=%2Fsessions%3Fprovider%3Dcodex%23session-result-[a-f0-9]{16}"/);
 });

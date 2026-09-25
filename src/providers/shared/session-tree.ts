@@ -7,6 +7,8 @@ type Row = Record<string, any>;
 export interface SessionPartNode {
   id: string;
   messageId: string;
+  /** Canonical normalized source message before response fragments are grouped. */
+  sourceMessageId?: string;
   sessionId: string;
   type: string;
   tool: string | null;

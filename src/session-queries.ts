@@ -57,40 +57,110 @@ export function resolveSessionSearchMode(params: URLSearchParams): string {
 export function getSearchResults(query: string, limit: number, offset: number, dbPath: any = undefined, excludedIds: Set<string> = new Set(), metaMap: any = undefined) {
   const term = (query || "").trim();
   if (!term) {
-    return { sessions: [], total: 0, note: "Enter a search query to find sessions." };
+    return { sessions: [], total: 0, hasMore: false, note: "Enter a search query to find sessions." };
   }
 
   const titleOverrides = getTitleOverrides(metaMap || new Map());
-  const titleMatches = listSessions(1000, 0, term, "", dbPath, "", excludedIds, "updated-desc", undefined, titleOverrides).sessions;
-  const contentMatches = searchMessages(term, 500, dbPath, excludedIds);
-  const orderedIds: string[] = [];
-  const sessionMap = new Map();
-
-  for (const session of titleMatches) {
-    const enriched = enrichSession(session, metaMap);
-    if (!sessionMap.has(enriched.id)) {
-      orderedIds.push(enriched.id);
-      sessionMap.set(enriched.id, enriched);
-    }
+  const titleQuery = (pageLimit: number, pageOffset: number) =>
+    listSessions(pageLimit, pageOffset, term, "", dbPath, "", excludedIds, "updated-desc", undefined, titleOverrides);
+  const titleTotal = titleQuery(0, 0).total;
+  const titlePageLimit = Math.max(0, Math.min(limit, titleTotal - offset));
+  const titlePage = titlePageLimit ? titleQuery(titlePageLimit, offset).sessions.map((session: any) => enrichSession(session, metaMap)) : [];
+  if (offset + titlePage.length < titleTotal) {
+    return {
+      sessions: titlePage,
+      total: null,
+      hasMore: true,
+      note: `Showing title and message-content matches for "${term}".`
+    };
   }
 
-  for (const match of contentMatches) {
-    if (!sessionMap.has(match.sessionId)) {
-      const session = getSession(match.sessionId, dbPath);
-      const enriched = enrichSession(session, metaMap);
-      if (enriched) {
-        orderedIds.push(enriched.id);
-        sessionMap.set(enriched.id, enriched);
-      }
-    }
+  // Title hits precede content hits. Keep only their IDs while scanning the
+  // content stream so duplicate messages never consume a session page slot.
+  const titleIds = new Set<string>();
+  for (let titleOffset = 0; titleOffset < titleTotal; titleOffset += SEARCH_BATCH_SIZE) {
+    for (const session of titleQuery(SEARCH_BATCH_SIZE, titleOffset).sessions) titleIds.add(session.id);
   }
-
-  const visibleIds = orderedIds.filter((id) => !excludedIds.has(id));
+  const content = pageContentMatches({
+    limit: limit - titlePage.length,
+    offset: Math.max(0, offset - titleTotal),
+    excludedIds,
+    seenIds: titleIds,
+    fetchMatches: (batchOffset) => searchMessages(term, SEARCH_BATCH_SIZE, dbPath, excludedIds, batchOffset, false, true),
+    getMatchingSession: (id) => getSession(id, dbPath),
+    metaMap
+  });
   return {
-    sessions: visibleIds.slice(offset, offset + limit).map((id) => sessionMap.get(id)).filter(Boolean),
-    total: visibleIds.length,
+    sessions: [...titlePage, ...content.sessions],
+    total: content.total === null ? null : titleTotal + content.total,
+    hasMore: content.hasMore,
     note: `Showing title and message-content matches for "${term}".`
   };
+}
+
+const SEARCH_BATCH_SIZE = 256;
+
+function getOpenCodeMessageSearchResults(query: string, limit: number, offset: number, dbPath: any, excludedIds: Set<string>, metaMap: any) {
+  const term = (query || "").trim();
+  if (!term) return { sessions: [], total: 0, hasMore: false, note: "Enter a search query to find sessions." };
+  const result = pageContentMatches({
+    limit, offset, excludedIds, metaMap,
+    fetchMatches: (batchOffset) => searchMessages(term, SEARCH_BATCH_SIZE, dbPath, excludedIds, batchOffset, false, true),
+    getMatchingSession: (id) => getSession(id, dbPath)
+  });
+  return { ...result, note: `Showing message-content matches for "${term}".` };
+}
+
+/** Read a stable match stream in bounded batches; rank sessions by first hit. */
+function pageContentMatches({ limit, offset, excludedIds, seenIds = new Set<string>(), fetchMatches, getMatchingSession, iterateMatches, metaMap }: {
+  limit: number;
+  offset: number;
+  excludedIds: Set<string>;
+  seenIds?: Set<string>;
+  fetchMatches?: (offset: number) => any[];
+  getMatchingSession?: (id: string) => any;
+  iterateMatches?: Iterable<{ session: any; match: any }>;
+  metaMap: any;
+}) {
+  const sessions: any[] = [];
+  let uniqueCount = 0;
+  let hasMore = false;
+  function* matches(): IterableIterator<{ session?: any; match: any }> {
+    if (iterateMatches) {
+      yield* iterateMatches;
+      return;
+    }
+    let matchOffset = 0;
+    while (true) {
+      const batch = fetchMatches!(matchOffset);
+      for (const match of batch) yield { match };
+      matchOffset += batch.length;
+      if (batch.length < SEARCH_BATCH_SIZE) return;
+    }
+  }
+  for (const { session: matchedSession, match } of matches()) {
+      const id = match.sessionId;
+      if (seenIds.has(id) || excludedIds.has(id)) continue;
+      seenIds.add(id);
+      const source = matchedSession || getMatchingSession!(id);
+      if (!source) continue;
+      const position = uniqueCount++;
+      if (position >= offset + limit) {
+        hasMore = true;
+        break;
+      }
+      if (position < offset) continue;
+      const session = enrichSession(source, metaMap);
+      sessions.push({
+        ...session,
+        searchMatch: {
+          messageId: match.messageId,
+          role: match.role,
+          snippet: match.snippet
+        }
+      });
+  }
+  return { sessions, total: hasMore ? null : uniqueCount, hasMore };
 }
 
 export function loadPartsByMessage(messages: any[], dbPath: any = undefined): Map<string, any[]> {
@@ -261,28 +331,17 @@ export function getSessionDocument(
 function getProviderSearchResults(adapter: any, query: string, limit: number, offset: number, metaMap: any = undefined, excludedIds: Set<string> = new Set()) {
   const term = (query || "").trim();
   if (!term) {
-    return { sessions: [], total: 0, note: "Enter a search query to find sessions." };
+    return { sessions: [], total: 0, hasMore: false, note: "Enter a search query to find sessions." };
   }
 
-  const matches = adapter.searchMessages(term, 500);
-  const orderedIds: string[] = [];
-  const sessionMap = new Map();
-
-  for (const match of matches) {
-    if (sessionMap.has(match.sessionId) || excludedIds.has(match.sessionId)) {
-      continue;
-    }
-    const session = enrichSession(adapter.getSession(match.sessionId), metaMap);
-    if (!session) {
-      continue;
-    }
-    orderedIds.push(match.sessionId);
-    sessionMap.set(match.sessionId, normalizeSessionRecord(session));
-  }
-
+  const result = pageContentMatches({
+    limit, offset, excludedIds, metaMap,
+    iterateMatches: adapter.iterateSearchMessages?.(term),
+    fetchMatches: (batchOffset) => adapter.searchMessages(term, SEARCH_BATCH_SIZE, batchOffset),
+    getMatchingSession: (id) => adapter.getSession(id)
+  });
   return {
-    sessions: orderedIds.slice(offset, offset + limit).map((id: string) => sessionMap.get(id)).filter(Boolean),
-    total: orderedIds.length,
+    ...result,
     note: `Showing message-content matches for "${term}".`
   };
 }
@@ -332,6 +391,13 @@ export function createSessionCatalog(adapter: any, providerId: string, metadata:
       return { ...results, sessions: normalizeRows(results.sessions) };
     },
 
+    messageSearch({ query, limit, offset }: any) {
+      const results = sqlite
+        ? getOpenCodeMessageSearchResults(query, limit, offset, dbPath, excludedIds, metaMap)
+        : getProviderSearchResults(adapter, query, limit, offset, metaMap, excludedIds);
+      return { ...results, sessions: normalizeRows(results.sessions) };
+    },
+
     overview({ range = "", query = "", project = "", starredOnly = false, hasSubagent = false }: any = {}) {
       const includedIds = starredOnly ? getStarredIds(metaMap) : undefined;
       return sqlite
@@ -353,6 +419,40 @@ export function createSessionCatalog(adapter: any, providerId: string, metadata:
         : getIndexedSessions(providerId, ids.length, 0, "", "", "", "updated-desc", ids as any).sessions;
       return normalizeRows(sessions);
     }
+  };
+}
+
+/** Interleave provider-owned result order without conflating equal session IDs. */
+export function searchAcrossProviderCatalogs(
+  catalogs: { provider: string; messageSearch: (options: { query: string; limit: number; offset: number }) => any }[],
+  query: string,
+  limit: number,
+  offset: number
+) {
+  if (!query.trim() || !catalogs.length) return { sessions: [], total: 0, hasMore: false };
+  const needed = offset + limit + 1;
+  const results = catalogs.map(({ provider, messageSearch }) => ({
+    provider,
+    ...messageSearch({ query, limit: needed, offset: 0 })
+  }));
+  const sessions: any[] = [];
+  const seen = new Set<string>();
+  const longest = Math.max(...results.map((result) => result.sessions.length));
+  for (let rank = 0; rank < longest && sessions.length < needed; rank += 1) {
+    for (const result of results) {
+      const session = result.sessions[rank];
+      if (!session) continue;
+      const key = JSON.stringify([result.provider, session.id]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      sessions.push({ ...session, provider: result.provider });
+    }
+  }
+  const hasMore = sessions.length > offset + limit || results.some((result) => result.hasMore);
+  return {
+    sessions: sessions.slice(offset, offset + limit),
+    total: hasMore ? null : sessions.length,
+    hasMore
   };
 }
 
@@ -380,6 +480,9 @@ export function toApiSessionShape(session: any, extras: { html?: string } = {}) 
   };
   if (extras.html !== undefined) {
     (shape as any).html = extras.html;
+  }
+  if (session.searchMatch) {
+    (shape as any).searchMatch = session.searchMatch;
   }
   return shape;
 }

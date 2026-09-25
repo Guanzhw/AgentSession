@@ -358,6 +358,7 @@ body {
 }
 
 .session-card {
+  scroll-margin-top: 88px;
   background-color: var(--bg-primary);
   border-radius: 12px;
   box-shadow: var(--shadow-sm);
@@ -466,6 +467,36 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   margin-bottom: 12px;
+}
+
+.session-card-match {
+  display: block;
+  margin: -4px 0 12px;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.session-card-match:hover .session-card-match-snippet {
+  text-decoration: underline;
+}
+
+.session-card-match:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+.session-card-match-label {
+  display: block;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.session-card-match-snippet {
+  display: block;
 }
 
 .session-card-stats {

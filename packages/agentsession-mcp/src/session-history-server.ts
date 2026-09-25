@@ -16,8 +16,6 @@ const providerIds = [
   "opencode",
   "claude-code",
   "codex",
-  "openclaw",
-  "hermes",
   "pi",
   "deepseek-harness"
 ] as const;
@@ -129,9 +127,10 @@ export function createSessionHistoryMcpServer(service: SessionHistoryService) {
 
   server.registerTool("session_get_context", {
     title: "Get bounded local session context",
-    description: "Read-only summaries around one event in the same session. It never follows parent or child sessions automatically.",
+    description: "Read-only summaries around one event in the same session. Thinking previews require explicit includeThinking opt-in. It never follows parent or child sessions automatically.",
     inputSchema: z.object({
       event: eventRefSchema,
+      includeThinking: z.boolean().optional(),
       before: z.number().int().min(0).max(20).optional(),
       after: z.number().int().min(0).max(20).optional()
     }).strict(),

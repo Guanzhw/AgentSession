@@ -224,6 +224,7 @@ if [[ "$keyboard_stats_path" != "/stats" && "$keyboard_stats_path" != "\"/stats\
   exit 1
 fi
 ab "return to Library after keyboard shortcut" open "$BASE/opencode" >/dev/null
+ab "wait for Library interactions" wait --load networkidle >/dev/null
 editable_shortcut_path="$(read_ab "verify editable shortcut protection" eval "(() => { const input = document.querySelector('#search-input'); input?.focus(); return document.activeElement === input; })()")"
 if [[ "$editable_shortcut_path" != "true" ]]; then
   echo "Dashboard search input should be focusable for editable-target protection" >&2
@@ -304,9 +305,19 @@ if [[ "$stats_export_count" != "2" ]]; then
   exit 1
 fi
 stats_advanced_count="$(read_ab "count progressive advanced stats sections" get count ".stats-advanced-details")"
-if [[ "$stats_advanced_count" != "1" ]]; then
-  echo "SQLite Token Explorer should expose one progressive advanced section, got $stats_advanced_count" >&2
-  exit 1
+opencode_schema="$(curl -fsS "$BASE/api/providers" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>process.stdout.write(JSON.parse(s).find(p=>p.id==='opencode')?.storageDiagnostic?.schema || 'v1'))")"
+opencode_task_support="$(curl -fsS "$BASE/api/providers" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>process.stdout.write(JSON.parse(s).find(p=>p.id==='opencode')?.protocolCapabilities?.tasks?.support || 'none'))")"
+opencode_run_support="$(curl -fsS "$BASE/api/providers" | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>process.stdout.write(JSON.parse(s).find(p=>p.id==='opencode')?.protocolCapabilities?.agentRuns?.support || 'none'))")"
+if [[ "$opencode_schema" == "v2" ]]; then
+  if [[ "$stats_advanced_count" != "0" ]]; then
+    echo "OpenCode v2 aggregate statistics should not expose SQLite-only advanced controls, got $stats_advanced_count" >&2
+    exit 1
+  fi
+else
+  if [[ "$stats_advanced_count" != "1" ]]; then
+    echo "OpenCode v1 SQLite Token Explorer should expose one progressive advanced section, got $stats_advanced_count" >&2
+    exit 1
+  fi
 fi
 saved_view_result="$(read_ab "save and delete a stats view" eval "(() => { const key = 'agentsession-saved-views-opencode'; localStorage.removeItem(key); document.getElementById('save-view-btn')?.click(); const dialog = document.querySelector('.saved-view-dialog'); const input = dialog?.querySelector('.saved-view-input'); if (!dialog?.open || !input) return 'dialog-missing'; input.value = 'QA 7 days'; dialog.querySelector('.saved-view-dialog-save')?.click(); const saved = JSON.parse(localStorage.getItem(key) || '[]'); const link = document.querySelector('.saved-view-link'); const ok = saved.length === 1 && saved[0].name === 'QA 7 days' && link?.getAttribute('href')?.includes('/opencode/stats'); document.querySelector('.saved-view-delete')?.click(); return ok && JSON.parse(localStorage.getItem(key) || '[]').length === 0 ? 'ok' : 'failed'; })()")"
 if [[ "$saved_view_result" != "ok" && "$saved_view_result" != '"ok"' ]]; then
@@ -442,7 +453,7 @@ for sidebar_entry in '[data-reader-collaboration-toggle]'; do
   ab "open task sidebar with keyboard" press Enter >/dev/null
   sidebar_focus="$(read_ab "verify task sidebar entry focus" eval "document.querySelector('[data-reader-collaboration-overview]').open && document.activeElement.matches('[data-reader-collaboration-close]')")"
   assert_contains "task sidebar entry focus" "$sidebar_focus" 'true'
-  sidebar_default="$(read_ab "verify task reading comes before activity details" eval "(() => { const graph = document.querySelector('[data-reader-task-graph]'); const map = document.querySelector('[data-reader-task-map]'); return (graph ? !map.open && graph.querySelector('[data-reader-task-graph-page]:not([hidden])').querySelectorAll('.reader-task-graph-node').length <= 4 : map.open) && !document.querySelector('[data-reader-activity-disclosure]').open; })()")"
+  sidebar_default="$(read_ab "verify task reading comes before activity details" eval "(() => { const graph = document.querySelector('[data-reader-task-graph]'); const map = document.querySelector('[data-reader-task-map]'); const activity = document.querySelector('[data-reader-activity-disclosure]'); return (graph ? !!map && !map.open && graph.querySelector('[data-reader-task-graph-page]:not([hidden])').querySelectorAll('.reader-task-graph-node').length <= 4 : !map || map.open) && !!activity && !activity.open; })()")"
   assert_contains "task reading first" "$sidebar_default" 'true'
   ab "focus concurrent work disclosure" focus '[data-reader-activity-disclosure] > summary' >/dev/null
   ab "expand concurrent work on demand" press Enter >/dev/null
@@ -706,7 +717,9 @@ if [[ "$legacy_topology_button_count" != "0" ]]; then
 fi
 
 subagent_export_count="$(read_ab "count subagent export buttons" get count ".subagent-export-btn")"
-assert_positive_count "subagent export buttons" "$subagent_export_count"
+if [[ "$opencode_run_support" != "none" ]]; then
+  assert_positive_count "subagent export buttons" "$subagent_export_count"
+fi
 
 # P2b: sessions with recorded Task/AgentRun evidence render compact agent
 # cards on the spine; sessions without a protocol binding keep the nested
@@ -725,7 +738,7 @@ if [[ "$agent_card_count_n" != "0" ]]; then
   if [[ "$agent_card_state" == *'"channelState":{"present":true'* ]]; then
     assert_contains "P2b channel default collapsed" "$agent_card_state" '"collapsed":true'
   fi
-else
+elif [[ "$opencode_run_support" != "none" ]]; then
   subagent_summary_count="$(read_ab "count subagent headers" get count ".subagent-summary")"
   assert_positive_count "subagent headers" "$subagent_summary_count"
 
@@ -799,7 +812,9 @@ if [[ "$runtime_overview_count" == "1" ]]; then
   assert_contains "P3a Conversation inspector entry point" "$p3a_overview_state" '"context":true'
   assert_contains "P3a context heading layout" "$p3a_overview_state" '"contextHeading":true'
   assert_contains "P3a context coverage layout" "$p3a_overview_state" '"contextCoverageSeparated":true'
-  assert_contains "P3a bounded task table" "$p3a_overview_state" '"task":true'
+  if [[ "$opencode_task_support" != "none" ]]; then
+    assert_contains "P3a bounded task table" "$p3a_overview_state" '"task":true'
+  fi
   assert_contains "P3b goal/task graph" "$p3a_overview_state" '"goalGraph":true'
   assert_contains "P3b collaboration graph" "$p3a_overview_state" '"collaborationGraph":true'
   assert_contains "P3b graph node bound" "$p3a_overview_state" '"graphNodesBounded":true'
@@ -836,23 +851,26 @@ if [[ "$completed_work_count" == "1" ]]; then
   completed_work_open="$(read_ab "verify completed work expansion" eval "document.querySelector('#tab-work [data-runtime-completed-work]').open")"
   assert_contains "completed work keyboard expansion" "$completed_work_open" "true"
 fi
-runtime_task_evidence_count="$(read_ab "count Work task evidence controls" get count "#tab-work [data-runtime-evidence-kind='task']")"
-assert_positive_count "Work task evidence controls" "$runtime_task_evidence_count"
-ab "reveal Work task selection" scrollintoview "#tab-work [data-runtime-select-kind='task']" >/dev/null
-ab "select Work task" click "#tab-work [data-runtime-select-kind='task']" >/dev/null
-runtime_selection_open="$(read_ab "verify Work selection inspector" eval "!document.querySelector('[data-runtime-inspector]').hidden")"
-assert_contains "Work selection inspector" "$runtime_selection_open" "true"
-ab "close Work selection with Escape" press Escape >/dev/null
-runtime_selection_closed="$(read_ab "verify Work selection focus return" eval "document.querySelector('[data-runtime-inspector]').hidden && document.activeElement.dataset.runtimeSelectKind === 'task'")"
-assert_contains "Work selection focus return" "$runtime_selection_closed" "true"
-ab "open Work task evidence" click "#tab-work [data-runtime-evidence-kind='task']" >/dev/null
-runtime_work_drawer_open="$(read_ab "verify Work evidence drawer" eval "Boolean(document.querySelector('#tab-work [data-runtime-drawer]')?.open)")"
-if [[ "$runtime_work_drawer_open" != "true" ]]; then
-  echo "Work task evidence control should open the provenance drawer, got $runtime_work_drawer_open" >&2
-  exit 1
+if [[ "$opencode_task_support" != "none" ]]; then
+  runtime_task_evidence_count="$(read_ab "count Work task evidence controls" get count "#tab-work [data-runtime-evidence-kind='task']")"
+  assert_positive_count "Work task evidence controls" "$runtime_task_evidence_count"
+  ab "reveal Work task selection" scrollintoview "#tab-work [data-runtime-select-kind='task']" >/dev/null
+  ab "select Work task" click "#tab-work [data-runtime-select-kind='task']" >/dev/null
+  runtime_selection_open="$(read_ab "verify Work selection inspector" eval "!document.querySelector('[data-runtime-inspector]').hidden")"
+  assert_contains "Work selection inspector" "$runtime_selection_open" "true"
+  ab "close Work selection with Escape" press Escape >/dev/null
+  runtime_selection_closed="$(read_ab "verify Work selection focus return" eval "document.querySelector('[data-runtime-inspector]').hidden && document.activeElement.dataset.runtimeSelectKind === 'task'")"
+  assert_contains "Work selection focus return" "$runtime_selection_closed" "true"
+  ab "open Work task evidence" click "#tab-work [data-runtime-evidence-kind='task']" >/dev/null
+  runtime_work_drawer_open="$(read_ab "verify Work evidence drawer" eval "Boolean(document.querySelector('#tab-work [data-runtime-drawer]')?.open)")"
+  if [[ "$runtime_work_drawer_open" != "true" ]]; then
+    echo "Work task evidence control should open the provenance drawer, got $runtime_work_drawer_open" >&2
+    exit 1
+  fi
+  ab "close Work evidence drawer" press Escape >/dev/null
 fi
-ab "close Work evidence drawer" press Escape >/dev/null
 
+if [[ "$opencode_run_support" != "none" ]]; then
 ab "set desktop run restoration viewport" set viewport 1280 900 >/dev/null
 ab "focus recorded lane run" focus "#tab-work [data-runtime-run-list] [data-runtime-select-kind='run']" >/dev/null
 ab "select recorded lane run" press Enter >/dev/null
@@ -868,6 +886,7 @@ ab "close restored run inspector" press Escape >/dev/null
 restored_run_focus="$(read_ab "verify restored run Escape target" eval "document.activeElement.dataset.runtimeSelectId === new URLSearchParams(location.search).get('runtimeRun') && !!document.activeElement.closest('[data-runtime-run-list]')")"
 assert_contains "restored run focus return" "$restored_run_focus" 'true'
 ab "restore desktop after run navigation" set viewport 1280 900 >/dev/null
+fi
 
 ab "open Coordination disclosure" click "#tab-work [data-runtime-section='coordination'] > summary" >/dev/null
 runtime_relationship_count="$(read_ab "count runtime relationship rows" get count "#tab-work .runtime-session-edge")"

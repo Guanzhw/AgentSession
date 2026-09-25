@@ -10,6 +10,9 @@ AgentSession is a local-first, multi-provider viewer for AI coding
 sessions. It reads provider-owned session data, builds a cross-provider index,
 renders server-side HTML, exposes JSON APIs, and stores viewer-only metadata
 such as stars, custom titles, and deletion state in a separate local database.
+AgentSession 2.0 supports OpenCode, Claude Code, Codex CLI, Pi, and DeepSeek
+Harness. OpenClaw and Hermes Agent were last included in published v1.10.1 and
+are fully removed from both the 2.0 Viewer and MCP, with no compatibility path.
 
 The Web UI serves people revisiting complete conversations and understanding
 how agents worked. Default to readable requests, replies, and meaningful
@@ -21,7 +24,9 @@ retains its separate machine-oriented interface. Product requirements and
 acceptance criteria live in the
 [presentation contract](docs/design/runtime-presentation-contract.md); the
 [delivery plan](docs/design/runtime-delivery-plan.md) owns the finite stages,
-current progress and next action.
+current progress and next action. The [2.0 provider scope and migration
+plan](docs/design/agentsession-v2-provider-scope.md) owns the five-provider
+boundary and release gates.
 
 The package is intentionally small:
 
@@ -30,8 +35,9 @@ The package is intentionally small:
 - No runtime npm dependencies.
 - Server-rendered HTML with plain browser JavaScript and CSS.
 - Node's built-in test runner.
-- Provider adapters for OpenCode, Claude Code, Codex CLI, OpenClaw, Hermes
-  Agent, Pi, and DeepSeek Harness.
+- Provider adapters for OpenCode, Claude Code, Codex CLI, Pi, and DeepSeek
+  Harness. OpenClaw and Hermes Agent were last included in published v1.10.1
+  and are outside the 2.0 runtime.
 
 ## Non-Negotiable Invariants
 
@@ -41,6 +47,9 @@ The package is intentionally small:
   databases and transcript files.
 - Viewer state belongs in `src/meta.ts` and the AgentSession metadata
   database.
+- A version upgrade must not automatically delete or migrate provider source
+  records, viewer metadata, or a v1 session index. Treat v1.10.1 as historical;
+  AgentSession 2.0 has no compatibility path for OpenClaw or Hermes Agent.
 - "Permanent delete" currently means permanently excluding a session in viewer
   metadata. It does not delete the source session.
 
@@ -132,8 +141,6 @@ src/
     opencode/                    OpenCode adapter and structured views
     claude-code/                 Claude transcript adapter/parser
     codex/                       Codex JSONL adapter/parser
-    openclaw/                    OpenClaw branch-aware JSONL adapter/parser
-    hermes/                      Hermes read-only SQLite adapter/parser
     pi/                          Pi branch-aware JSONL adapter/parser
     deepseek-harness/            DSH multi-frame Zstd adapter/parser/protocol
   views/                         server-rendered page and component templates
@@ -153,6 +160,9 @@ packages/
   agentsession-mcp/              publishable read-only stdio MCP server
 tmp/, logs/, .agentsession/ runtime and QA artifacts; do not commit
 ```
+
+OpenClaw and Hermes adapters documented in v1.10.1 history are outside the
+AgentSession 2.0 runtime.
 
 ## Source And Build Conventions
 

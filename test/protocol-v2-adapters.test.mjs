@@ -17,7 +17,6 @@ initConfig(["--pi-dir", piRoot]);
 const pi = (await import("../dist/src/providers/pi/adapter.js")).default;
 const claude = (await import("../dist/src/providers/claude-code/adapter.js")).default;
 const codex = (await import("../dist/src/providers/codex/adapter.js")).default;
-const hermes = (await import("../dist/src/providers/hermes/adapter.js")).default;
 
 test.after(() => {
   try { rmSync(temp, { recursive: true, force: true }); } catch { /* best effort */ }
@@ -41,7 +40,6 @@ test("Pi adapter returns a finalized v2 protocol with truthful branch topology",
 test("migrated provider capabilities keep canonical v2 branch and mixed-fidelity claims explicit", () => {
   assert.equal(pi.protocolCapabilities.branches.support, "partial");
   assert.equal(codex.protocolCapabilities.branches.support, "none");
-  assert.equal(hermes.protocolCapabilities.branches.support, "none");
   assert.equal(claude.protocolCapabilities.sessionRelationships.support, "partial");
   assert.equal(claude.protocolCapabilities.sessionRelationships.provenance, "derived");
 });

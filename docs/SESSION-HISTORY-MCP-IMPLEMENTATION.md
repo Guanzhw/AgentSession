@@ -40,8 +40,9 @@ filters. A session still present in provider storage remains queryable.
 ## Provider and identity rules
 
 The MCP uses the same provider registry and configuration paths as AgentSession.
-The current ProviderId set is `opencode`, `claude-code`, `codex`, `openclaw`,
-`hermes`, `pi`, and `deepseek-harness`.
+The AgentSession 2.0 ProviderId set is `opencode`, `claude-code`, `codex`,
+`pi`, and `deepseek-harness`. OpenClaw and Hermes Agent references are not
+accepted by the 2.0 MCP.
 
 All public identifiers use structured references:
 
