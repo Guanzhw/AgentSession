@@ -95,6 +95,33 @@ browser load was about 12 seconds; cache state and machine load affect these
 numbers. First-readable timing and incremental-history behavior remain to be
 measured and improved before claiming the long-session acceptance complete.
 
+## Verification snapshot — 2026-09-26
+
+- `npm run ci:quality` passed with 1,055 tests. `npm run qa:e2e` passed against
+  a real OpenCode v2 session on the isolated v2 server at port 3457, with no
+  browser errors. Real browser content hits reached source-message anchors for
+  all five providers; the global Codex search also loaded a second result page
+  and returned to its exact result card.
+- Local 2.0.0 Viewer and MCP tarballs were packed and installed in an isolated
+  directory. The packed Viewer returned exactly the five provider IDs, five
+  content hits with source references, and 404 for a retired-provider route.
+  The packed MCP completed search/get/timeline/context calls on each real
+  provider. Codex cursor pages returned six distinct sessions; thinking was
+  readable only with explicit opt-in. Windows 2.0.0 SEA binaries built and
+  passed the Viewer/static-asset/MCP smoke.
+- Five sampled provider-owned source files retained identical lengths and
+  SHA-256 hashes. The real Viewer `session_meta` row and token bucket/state
+  tables retained their baseline row counts and hashes. Two derived tables,
+  `session_index` and `token_stats_session_revision`, retained row counts but
+  changed hashes; an MCP test transport had not inherited its intended
+  isolated metadata path. The stdio test and binary smoke now pass that path
+  explicitly. The hash-only baseline cannot identify the changed rows.
+- The user's existing port-3456 process still serves the pre-v2 seven-provider
+  build. The isolated port-3457 server and installed 2.0.0 artifacts were used
+  for v2 acceptance; the normal listener has not been switched over. The
+  packages are not published, and long-session incremental loading remains
+  open.
+
 ## Delivery phases
 
 ### Phase 1 — Establish the five-provider boundary
