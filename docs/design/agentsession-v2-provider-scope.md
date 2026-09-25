@@ -77,7 +77,7 @@ tracked separately below.
 | MCP thinking previews | Implemented; real protocol acceptance passed | Thinking stays out of ordinary search and session previews. A real Codex thinking event was rejected by default `session_get_event`, returned with `includeThinking: true`, omitted from default context, and present in opted-in context. Timeline thinking remains an explicit segment. |
 | Cross-provider content and child-session meaning | Automated boundaries and real MCP lineage passed for available recorded pairs | Viewer global `/sessions/search` searches only message content across selected providers, including non-archived OpenCode child sessions. Viewer exclusions apply; MCP uses each adapter's source-search scope without those Viewer exclusions. Both use canonical `{ provider, sessionId }` identity. Real MCP search/get/timeline/context calls succeeded on all five providers, and a Codex cursor returned six distinct sessions across two pages. Packed-MCP parent/child calls verified source-backed reciprocal refs for OpenCode, Codex, and DeepSeek Harness. Local Claude Code and Pi data contain no parented sessions. |
 | MCP direct-child completeness | Implemented; packed MCP protocol acceptance passed | A real Codex parent has 172 indexed direct children. The former `session_get` response silently stopped at 50; the packed fix returned all 172 canonical child refs in pages of 50, 50, 50, and 22, with explicit continuation flags and no duplicates. |
-| Viewer search excerpts and source navigation | Real source-anchor clicks passed on all five available providers | A bounded excerpt links to a source-message anchor. The Reader preserves original source-message anchors when it groups fragments under a response; the detail back link returns to the exact result-card anchor on its page. Browser Back clicks restored OpenCode and Codex cards, including child-session hits; the other three provider pages had valid return URLs. Multi-term AND matches now show all feasible terms in the bounded excerpt; a real Codex query confirmed both terms in each checked result. |
+| Viewer search excerpts and source navigation | Real source-anchor and back-to-card clicks passed on all five available providers | A bounded excerpt links to a source-message anchor. The Reader preserves original source-message anchors when it groups fragments under a response; the detail back link returns to the exact result-card anchor on its page. Browser clicks restored the same query and exact card for every provider, including OpenCode/Codex child-session hits. Multi-term AND matches now show all feasible terms in the bounded excerpt; a real Codex query confirmed both terms in each checked result. |
 | Long-session first load | Implemented and real-browser checked; server projection cost remains | Complete-turn lazy segments reduced a real 2,686-message Codex page from 23,498,218 to 4,859,680 initial HTML bytes and from 179,823 to 23,089 initial DOM elements. A direct URL fragment loaded a late segment and focused its canonical target. Later fragment and deep-location requests still rebuild the full server projection. |
 
 On a later warm local run against the same isolated v2 server, separate HTTP
@@ -178,8 +178,13 @@ sample, not a latency guarantee.
   `...96c4`; exact local IDs and anchors are in the ignored local
   `tmp/v2-qa/viewer-five-provider-search-qa.json`. OpenCode and Codex
   child-session hits retained their own canonical
-  source anchors and returned to their result cards. The other three providers
-  had valid return URLs, but those links were not clicked in this pass.
+  source anchors and returned to their result cards. A second provider-specific
+  content-search browser pass clicked the source links and back breadcrumbs for
+  Claude Code, Pi, and DeepSeek Harness; each restored the same query and exact
+  result card. The DeepSeek Harness pass used a different matching message in
+  the same session, whose visible source text contained its query. The ignored
+  sanitized record is `tmp/v2-qa/viewer-backlinks-final.json`; it stores no
+  transcript or query text.
 - Five sampled provider-owned source files retained identical lengths and
   SHA-256 hashes. The real Viewer `session_meta` row and token bucket/state
   tables retained their baseline row counts and hashes after final QA. The
