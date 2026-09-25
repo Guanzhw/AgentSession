@@ -109,10 +109,10 @@ function messageEvents(message: Message, index: number): AgentLoopEvent[] {
       text: "",
       input: message.toolInput,
       output: message.toolOutput ?? message.content ?? "",
-      status: isError ? "error" : "completed",
+      status: isError ? "error" : ["pending", "running", "streaming"].includes(metadata.status) ? "running" : "completed",
       metadata: message.metadata ? asRow(message.metadata) : null,
-      timeStart: message.timestamp,
-      timeEnd: message.timestamp
+      timeStart: asNumber(metadata.timeStart) || message.timestamp,
+      timeEnd: ["pending", "running", "streaming"].includes(metadata.status) ? 0 : asNumber(metadata.timeEnd) || message.timestamp
     });
   } else if (message.content) {
     events.push({

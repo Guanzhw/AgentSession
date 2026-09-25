@@ -636,3 +636,12 @@ not changed, and update both READMEs when public capabilities change.
 - `src/providers/pi/` — compact provider-specific protocol example.
 - `packages/agentsession-mcp/src/session-history-server.ts` — read-only MCP boundary.
 - [`docs/specs/runtime-protocol-workbench/`](./specs/runtime-protocol-workbench/) — requirements and design source.
+
+### OpenCode schema generations
+
+`src/providers/opencode/adapter.ts` selects provider-owned v1/v2 readers using
+`storage.ts`. Keep SQL and payload interpretation in those readers; never add
+OpenCode schema branches to routes or shared protocol projections. v2 does not
+advertise `openCodeStatsStore`, which is reserved for legacy SQL consumers.
+Preserve lazy configuration: reading registry identity during module import must
+not parse CLI arguments. See [storage compatibility](opencode-storage-compatibility.md).

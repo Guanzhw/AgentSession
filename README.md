@@ -115,7 +115,7 @@ GET /api/:provider/session/:id/runtime/context?maxItems=
 
 | Provider | 生命周期 | 本地来源 | Protocol fidelity 与覆盖 |
 |:---|:---|:---|:---|
-| OpenCode | active | `$XDG_DATA_HOME/opencode/opencode.db` 或 `~/.local/share/opencode/opencode.db` | `partial/derived` message/part 事件；native v3 保留 v2 facts，并增加基于真实 todo/task result 的 Work/Execution/Coordination/Usage；Goal、Actor、Context result 保持空或 unknown（官方 1.18.27/1.18.29 schema 一致；本机 1.17.11）。 |
+| OpenCode | active | `$XDG_DATA_HOME/opencode/opencode.db` 或 `~/.local/share/opencode/opencode.db` | v1 保留基于 message/part 的 native v3 Work/Execution/Coordination/Usage；v2 按 `seq` 读取消息、工具、压缩及父子/分叉关系，并通过共享层投影 v3，不重建原生 task/run。按数据库 schema 选择读取器；本机 OpenCode v2.0.16 已验证。[范围与限制](docs/opencode-storage-compatibility.md)。 |
 | Claude Code | active | `~/.claude/transcripts/`、`~/.claude/projects/` | `partial/derived` transcript、`system/compact_boundary`（`compactMetadata`）和 sidechain/task-notification 证据；native v3 保留 finalized v2 snapshot，并按 canonical assistant response id 去重生成 request Usage。官方 npm latest/next 2.1.263 与 upstream 已核验，本机 2.1.207，暂无 live 2.1.263 transcript。 |
 | Codex CLI | active | `~/.codex/sessions/**/*.jsonl`、冷文件 `*.jsonl.zst` | `full/recorded` response/item、工具、compaction 和当前 `token_usage_record`；`inter_agent_communication` 只进入 Runtime v3 actors/coordination，不改变线性 transcript；`partial/derived` NEW_TASK 关系、Task、AgentRun。`close_agent` 归一化为 `interrupt`；本机 0.152.1 仍主要写旧 `token_count`/collaboration 形状，官方 0.153.0 release 与当前源码 HEAD 已验证新形状。 |
 | OpenClaw | active — current SQLite（含 legacy/archive JSONL 回退） | `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite`（agent schema 19，v2026.9.3 release commit `1391f7cd…`；独立审计 HEAD `0140d656…`；schema SQL sha256 `fe932174…`）；legacy/archive `sessions/*.jsonl` | v2 canonical events/branches + v3 recorded Goal、agent identity、spawn Run、compaction context、request usage；limited goal states map to shared `blocked`，raw status 通过 bounded provenance 保留。高级 task/run/delivery tables deferred。 |
@@ -251,6 +251,13 @@ npm run build
 ```
 
 真实数据验证应检查 `/api/providers`、一个代表性 session 的 `/protocol` 和四个 Runtime API，并运行桌面验收 `npm run qa:e2e`。产品面向桌面，已有响应式改进保留，窄屏不再是开发和验收范围。请使用 [provider contribution guide](./docs/CONTRIBUTING-PROVIDER.md) 添加 Provider；协议规格位于 [`docs/specs/runtime-protocol-workbench/`](./docs/specs/runtime-protocol-workbench/)。
+
+### OpenCode v1 / v2 数据库兼容
+
+按实际数据库 schema 自动选择读取器，保留 v1 支持，并增加 OpenCode v2
+的会话、消息、工具、压缩、分叉继承上下文和用量读取。无法读取的数据库会给出诊断，
+不会阻止其他 provider 启动。源数据库始终只读。
+完整范围及暂不支持的能力见 [OpenCode 存储兼容说明](docs/opencode-storage-compatibility.md)。
 
 ## License
 

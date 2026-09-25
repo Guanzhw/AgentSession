@@ -2253,14 +2253,15 @@ test("provider registration distinguishes source-supported resume commands from 
 
 test("every provider exposes the complete shared session capability surface", () => {
   for (const provider of getAllProviders()) {
+    const openCodeV2 = provider.id === "opencode" && provider.getStorageDiagnostic?.().schema === "v2";
     assert.equal(supportsLocalManagement(provider), true, provider.id);
     assert.equal(typeof provider.getSessionTree, "function", provider.id);
     assert.equal(typeof provider.getSessionContainer, "function", provider.id);
     assert.equal(typeof provider.getSessionMetrics, "function", provider.id);
-    assert.equal(supportsSystemPromptEvidence(provider), true, provider.id);
-    assert.equal(supportsRuntimeEnvironment(provider), true, provider.id);
+    assert.equal(supportsSystemPromptEvidence(provider), !openCodeV2, provider.id);
+    assert.equal(supportsRuntimeEnvironment(provider), !openCodeV2, provider.id);
     assert.equal(Boolean(provider.resumeCommand || provider.getResumeCommandSpec), provider.id !== "deepseek-harness", provider.id);
-    assert.equal(usesOpenCodeStatsStore(provider), provider.id === "opencode", provider.id);
+    assert.equal(usesOpenCodeStatsStore(provider), provider.id === "opencode" && !openCodeV2, provider.id);
   }
 });
 
