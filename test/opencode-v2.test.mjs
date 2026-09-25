@@ -13,6 +13,7 @@ import adapter from '../dist/src/providers/opencode/adapter.js';
 import { createOpenCodeV2Adapter } from '../dist/src/providers/opencode/v2-adapter.js';
 import { inspectOpenCodeStorage, openCodeStorageRevision } from '../dist/src/providers/opencode/storage.js';
 import { buildAgentLoop } from '../dist/src/providers/shared/agent-loop.js';
+import { renderInheritedContextPage, renderSessionReaderPane } from '../dist/src/views/session.js';
 
 // DDL matches the relevant columns reported by the user's v2.0.10 database.
 // Payloads follow anomalyco/opencode v2.0.10 session-message.ts and sql.ts.
@@ -99,6 +100,68 @@ test('fork copied prefix is disclosed separately and never double-counted as own
   assert.ok(v2.searchMessages('channel').every(result => result.sessionId !== 'fork'));
 });
 
+test('fork inherited history remains available across Reader pages beyond 200 messages', t => {
+  const { v2, add, now } = fixture(t);
+  for (let index = 0; index < 205; index++) {
+    const seq = index + 10;
+    add(`msg_forkevent_${seq}`, 'user', seq, { text: `inherited ${index}` }, now, 'fork');
+  }
+  const inherited = v2.getInheritedContext('fork');
+  assert.equal(inherited.total, 205);
+  assert.equal(inherited.messages.length, 205);
+  assert.equal(inherited.truncated, false);
+  let offset = 0;
+  let pages = 0;
+  while (offset !== null) {
+    const page = renderInheritedContextPage(inherited, 'opencode', offset);
+    pages++;
+    if (page.nextOffset === null) assert.match(page.html, /inherited 204/);
+    offset = page.nextOffset;
+  }
+  assert.equal(pages, 6);
+});
+
+test('v2 Reader binds only source-identified owned children to subagent tools', t => {
+  const { db, v2, add, now } = fixture(t);
+  db.prepare(`INSERT INTO session_v2 (id,project_id,parent_id,slug,directory,title,time_created,time_updated)
+    VALUES ('unmatched','project','root','slug','/workspace','Unmatched child',?,?)`).run(now, now);
+  db.prepare(`INSERT INTO session_v2 (id,project_id,parent_id,slug,directory,title,time_created,time_updated)
+    VALUES ('output-child','project','root','slug','/workspace','Output child',?,?)`).run(now, now);
+  add('assistant3', 'assistant', 6, { content: [
+    { type: 'tool', id: 'launch', name: 'task', state: { status: 'completed', input: {}, metadata: { sessionId: 'child' }, content: [{ type: 'text', text: 'Done' }] }, time: { created: now, completed: now } },
+    { type: 'tool', id: 'output', name: 'task', state: { status: 'completed', input: {}, metadata: {}, content: [{ type: 'text', text: 'Done\ntask_id: output-child\n' }] }, time: { created: now, completed: now } },
+    { type: 'tool', id: 'other', name: 'subagent', state: { status: 'completed', input: {}, metadata: { sessionId: 'archived' }, content: [{ type: 'text', text: 'Done' }] }, time: { created: now, completed: now } }
+  ] });
+  const projection = v2.getOwnedReaderProjection('root');
+  const linked = projection.children.find(child => child.sessionId === 'child');
+  assert.equal(linked.parentPartId, 'assistant3:content:0:tool');
+  assert.equal(linked.link, 'explicit');
+  assert.equal(linked.detached, false);
+  assert.equal(projection.children.find(child => child.sessionId === 'output-child').parentPartId, 'assistant3:content:1:tool');
+  const unmatched = projection.children.find(child => child.sessionId === 'unmatched');
+  assert.equal(unmatched.parentPartId, null);
+  assert.equal(unmatched.detached, true);
+  const html = renderSessionReaderPane({ session: v2.getSession('root'), ownedReader: projection, provider: 'opencode' });
+  assert.match(html, /data-parent-part-id="assistant3:content:0:tool"/);
+  assert.match(html, /data-reader-child-session="child"/);
+  assert.match(html, /data-reader-open data-reader-provider="opencode" data-reader-session="child"/);
+});
+
+test('v2 usage session count follows the selected days and excludes fork copies', t => {
+  const { v2, add, now } = fixture(t);
+  const yesterday = new Date(now); yesterday.setUTCHours(0, 0, 0, 0);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const usage = { content: [], tokens: { input: 2, output: 1, reasoning: 0, cache: { read: 0, write: 0 } } };
+  add('child-usage', 'assistant', 1, usage, yesterday.getTime() + 3600000, 'child');
+  add('msg_forkevent_2', 'assistant', 2, usage, now, 'fork');
+  const today = new Date(now).toISOString().slice(0, 10);
+  const priorDay = yesterday.toISOString().slice(0, 10);
+  assert.equal(v2.getTokenSessionCount(2), 2);
+  assert.equal(v2.getTokenSessionCount(2, today, today), 1);
+  assert.equal(v2.getTokenSessionCount(2, priorDay, priorDay), 1);
+  assert.equal(v2.getTokenSessionCount(2, today, priorDay), 0);
+});
+
 test('facade selects v2 over coexisting v1 and does not expose legacy-only methods', t => {
   const { file, db } = fixture(t);
   db.exec('CREATE TABLE session (id TEXT);');
@@ -136,38 +199,59 @@ test('WAL updates invalidate revisions and malformed messages are explicit error
   assert.throws(() => v2.getMessages('root'), /Invalid OpenCode v2 message JSON: late/);
 });
 
-async function server(t, fixtureData) {
+async function server(fixtureData) {
   const { dir, file } = fixtureData;
   const pi = path.join(dir, 'pi'); mkdirSync(path.join(pi, 'sessions'), { recursive: true });
+  const unavailable = path.join(dir, 'unavailable');
   const port = 39000 + Math.floor(Math.random() * 15000);
-  const child = spawn(process.execPath, ['dist/bin/cli.js', '--opencode-db', file, '--pi-dir', pi, '--port', String(port), '--disable-terminal-launch'], {
+  const child = spawn(process.execPath, ['dist/bin/cli.js', '--opencode-db', file, '--pi-dir', pi,
+    '--claude-dir', unavailable, '--codex-dir', unavailable, '--dsh-dir', unavailable,
+    '--openclaw-dir', unavailable, '--hermes-dir', unavailable,
+    '--port', String(port), '--disable-terminal-launch'], {
     env: { ...process.env, AGENTSESSION_META_PATH: path.join(dir, 'meta.db'), AGENTSESSION_CONFIG: path.join(dir, 'config.json') }, stdio: ['ignore', 'pipe', 'pipe']
   });
   let output = ''; child.stdout.on('data', b => { output += b; }); child.stderr.on('data', b => { output += b; });
-  t.after(async () => { if (child.exitCode === null) { child.kill(); await once(child, 'exit'); } });
-  for (let i = 0; i < 150; i++) {
-    if (child.exitCode !== null) assert.fail(output);
-    try { const response = await fetch(`http://127.0.0.1:${port}/api/providers`); if (response.ok) return { base: `http://127.0.0.1:${port}`, providers: await response.json(), output: () => output }; } catch {}
-    await new Promise(resolve => setTimeout(resolve, 50));
+  const stop = async () => {
+    if (child.exitCode !== null) return;
+    const exited = once(child, 'exit');
+    child.kill();
+    await exited;
+  };
+  try {
+    for (let i = 0; i < 150; i++) {
+      if (child.exitCode !== null) assert.fail(output);
+      try { const response = await fetch(`http://127.0.0.1:${port}/api/providers`); if (response.ok) return { base: `http://127.0.0.1:${port}`, providers: await response.json(), output: () => output, stop }; } catch {}
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.fail(`Startup timeout: ${output}`);
+  } catch (error) {
+    await stop();
+    throw error;
   }
-  assert.fail(`Startup timeout: ${output}`);
 }
 
 test('unsupported OpenCode does not prevent another provider and HTTP server from starting', async t => {
   const f = fixture(t); f.db.exec('DROP TABLE session_message');
-  const running = await server(t, f);
-  assert.equal(running.providers.find(p => p.id === 'opencode').available, false);
-  assert.equal(running.providers.find(p => p.id === 'pi').available, true);
-  assert.match(running.output(), /Unsupported OpenCode schema/);
+  const running = await server(f);
+  try {
+    assert.equal(running.providers.find(p => p.id === 'opencode').available, false);
+    assert.equal(running.providers.find(p => p.id === 'pi').available, true);
+    assert.match(running.output(), /Unsupported OpenCode schema/);
+  } finally { await running.stop(); }
 });
 
 test('v2 server exposes readable API, HTML, runtime and JSON export', async t => {
-  const f = fixture(t); const running = await server(t, f);
-  assert.equal(running.providers.find(p => p.id === 'opencode').available, true);
-  for (const route of ['/sessions', '/opencode/session/root', '/api/opencode/session/root', '/api/opencode/session/root/export?format=json', '/api/opencode/session/root/protocol', '/api/opencode/session/root/runtime/summary', '/api/opencode/session/root/runtime/context', '/opencode/stats']) {
-    const response = await fetch(running.base + route);
-    assert.equal(response.status, 200, `${route}: ${await response.text()}`);
-  }
-  assert.ok(!running.output().includes('no such table'));
-  assert.match(running.output(), /3 sessions, 3 messages/);
+  const f = fixture(t); const running = await server(f);
+  try {
+    assert.equal(running.providers.find(p => p.id === 'opencode').available, true);
+    for (const route of ['/sessions', '/opencode/session/root', '/api/opencode/session/root', '/api/opencode/session/root/export?format=json', '/api/opencode/session/root/protocol', '/api/opencode/session/root/runtime/summary', '/api/opencode/session/root/runtime/context', '/opencode/stats']) {
+      const response = await fetch(running.base + route);
+      assert.equal(response.status, 200, `${route}: ${await response.text()}`);
+    }
+    assert.ok(!running.output().includes('no such table'));
+    assert.match(running.output(), /3 sessions, 3 messages/);
+    const stats = await fetch(running.base + '/api/opencode/stats/export.json').then(response => response.json());
+    assert.equal(stats.overview.totalSessions, 1);
+    assert.equal(stats.overview.avgTokensPerSession, 21);
+  } finally { await running.stop(); }
 });

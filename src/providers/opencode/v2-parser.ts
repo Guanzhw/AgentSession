@@ -50,7 +50,7 @@ export function normalizeV2Messages(records: V2Record[]): Message[] {
           return { ...item, role: "tool", toolName: part.name, toolInput: part.state.input ?? null,
             toolOutput: output ?? null, content: output || "", timestamp: part.time?.created ?? row.time_created,
             metadata: { ...item.metadata, providerMetadata: part.state.metadata, responseGroupId: row.id, sourceMessageId: row.id, sourceSequence: row.seq,
-              callId: part.id, status: part.state.status, isError: part.state.status === "error",
+              callId: part.id, subagent: part.name === "subagent", status: part.state.status, isError: part.state.status === "error",
               timeStart: part.time?.ran ?? part.time?.created, timeEnd: part.time?.completed,
               content: part.state.content, error: part.state.error } };
         }

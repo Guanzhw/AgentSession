@@ -258,7 +258,7 @@ fact was stored natively.
 
 | Provider | Lifecycle | Local source | Protocol fidelity and coverage |
 |:---|:---|:---|:---|
-| OpenCode | active | `$XDG_DATA_HOME/opencode/opencode.db` or `~/.local/share/opencode/opencode.db` | `partial/derived` message/part events; native v3 preserves v2 facts and adds evidence-backed todo/task-result Work, Execution, Coordination, and request Usage while Goals, Actors, and Context results remain empty or unknown (official 1.18.27/1.18.29 schema unchanged; installed 1.17.11). |
+| OpenCode | active | `$XDG_DATA_HOME/opencode/opencode.db` or `~/.local/share/opencode/opencode.db` | v1 retains native v3 Work, Execution, Coordination, and Usage from message/part evidence. v2 reads `seq`-ordered messages, tools, compaction, parent and fork relationships, and uses the shared v3 projection without reconstructing native tasks or runs. The reader is selected by database schema; installed OpenCode v2.0.16 was verified. See [scope and limitations](docs/opencode-storage-compatibility.md). |
 | Claude Code | active | `~/.claude/transcripts/`, `~/.claude/projects/` | `partial/derived` transcript, recorded `system/compact_boundary` (`compactMetadata`), and sidechain/task-notification evidence; native v3 preserves the finalized v2 snapshot and adds deduplicated request Usage from canonical assistant response ids. npm latest/next 2.1.263 and official upstream are verified, installed CLI is 2.1.207, and no live 2.1.263 transcript was available. |
 | Codex CLI | active | `~/.codex/sessions/**/*.jsonl`, cold `*.jsonl.zst` rollouts | `full/recorded` response/item, tool, compaction, and current `token_usage_record`; `inter_agent_communication` is exposed only in Runtime v3 actors/coordination and does not alter the linear transcript; `partial/derived` NEW_TASK relationships, Tasks, and AgentRuns. `close_agent` normalizes to `interrupt`; the installed 0.152.1 still mainly writes legacy `token_count`/collaboration shapes, while the official 0.153.0 release and current source HEAD cover the new shapes. |
 | OpenClaw | active — current SQLite (with legacy/archive JSONL fallback) | `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite` (agent schema 19; v2026.9.3 release commit `1391f7cd…`, separately audited HEAD `0140d656…`, schema SQL sha256 `fe932174…`); legacy/archive `sessions/*.jsonl` | v2 canonical events/branches plus v3 recorded Goal, agent identity, spawn Run, compaction context, and request usage; limited goal states map to shared `blocked` while retaining raw status in bounded provenance. Advanced task/run/delivery tables are deferred. |
@@ -459,13 +459,13 @@ session's `/protocol`, all four Runtime APIs, and the desktop UI through
 remain, but narrow screens are outside ongoing development and acceptance scope.
 See the [provider contribution guide](./docs/CONTRIBUTING-PROVIDER.md) and the [Runtime Workbench specification](./docs/specs/runtime-protocol-workbench/).
 
-## License
-
-MIT
-
 ### OpenCode v1 / v2 storage
 
-Readers are selected by database schema. Existing v1 support is retained; v2.0.10
+Readers are selected by database schema. Existing v1 support is retained; v2
 adds sessions, messages, tools, compaction, inherited fork context and usage reads.
 Unsupported storage is diagnosed without preventing other providers from starting.
 Source databases remain read-only. See [compatibility and limitations](docs/opencode-storage-compatibility.md).
+
+## License
+
+MIT

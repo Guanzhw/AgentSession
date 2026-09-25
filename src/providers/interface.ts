@@ -327,6 +327,8 @@ export interface ProviderAdapter {
   /** Optional bounded reader projection; child bodies remain on-demand. */
   getOwnedReaderProjection?(sessionId: string, evidence?: OwnedReaderLinkEvidence): OwnedReaderProjection | null;
   getTokenStats(days?: number): DailyTokenStat[];
+  /** Distinct sessions with recorded usage in the selected token-stat period, when available. */
+  getTokenSessionCount?(days?: number, fromDate?: string, toDate?: string): number;
   /** Monotonically changes when a file-backed provider's stats source changes. */
   getStatsRevision?(): string | number;
   searchMessages(query: string, limit?: number): SearchResult[];

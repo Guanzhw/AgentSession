@@ -20,7 +20,9 @@ selected with the reader. Registry identity remains configuration-free.
 
 Normalize v2 seq-ordered message projections, not event replay. Preserve live tool
 status in the common loop. Recognize provider-recorded fork-copy IDs and disclose
-those records separately from owned history/usage. Mark unsupported protocol
+those records separately from owned history/usage. Attach a child to its launcher
+only when an exact child ID appears in subagent tool metadata or a `task_id:`
+result line; leave other parent-owned children detached. Mark unsupported protocol
 domains explicitly. All provider source access remains read-only.
 
 Only successfully indexed providers enter the HTTP routing map. Startup totals
@@ -37,14 +39,17 @@ because upstream exposes session_message as the transcript projection.
 
 Core v2 reads coexist with v1 without new configuration or dependencies. v2 task/run
 reconstruction, pending inbox and event replay remain unsupported and disclosed.
-No hidden/system prompt evidence is claimed for v2. Real Windows data verification
-remains a release gate, not something synthetic fixtures can establish.
+No hidden/system prompt evidence is claimed for v2. The real Windows database and
+desktop Reader were verified before merging.
 
 ## Verification
 
 Upstream tag v2.0.10 commit b8cedc1a7a5e2916bbb65dc1d4b620729c261638 was inspected
-for schema, serialization, ordering, fork projection and token totals.
-Focused OpenCode/MCP tests, full npm test, npm run review/pre-push and live HTTP
-checks are run for this branch; exact results are recorded in the PR handoff.
-Source hashes are checked before/after read tests. No real conversation database
-or Windows desktop/browser QA was available in this environment.
+for schema, serialization, ordering, fork projection and token totals. The local
+OpenCode v2.0.16 database indexed 151 sessions without modifying its SHA-256 hash.
+For a 34-child parent, 31 children had exact inline launcher bindings and three
+remained detached. Real Reader navigation, child preview, return, usage, stats,
+protocol/API/export and read-only MCP calls were checked. `npm test` passed
+1,080/1,080 on Windows; `npm run review` and `npm run pre-push` completed before
+push. The existing whole-site E2E script still assumes v1-only statistics and
+subagent-export controls, so the v2 browser path was checked directly.

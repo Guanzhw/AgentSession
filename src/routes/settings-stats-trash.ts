@@ -382,8 +382,9 @@ export function registerSettingsStatsTrash(
     // File-based providers: coverage is null (no database to query)
     const coverage: CoverageInfo | null = null;
 
+    const totalSessions = adapter.getTokenSessionCount?.(collectionDays, filters.from || undefined, filters.to || undefined) ?? 0;
     const overview = {
-      totalSessions: 0,
+      totalSessions,
       totalMessages,
       totalTokens,
       inputTokens: padded.reduce((s, r) => s + r.input_tokens, 0),
@@ -393,7 +394,7 @@ export function registerSettingsStatsTrash(
       cacheWriteTokens: padded.reduce((s, r) => s + r.cache_write_tokens, 0),
       peakDay: padded.reduce((best, r) => r.total_tokens > (best.total_tokens || 0) ? r : best, { day: "", total_tokens: 0 } as any).day,
       peakDayTokens: Math.max(...padded.map(r => r.total_tokens), 0),
-      avgTokensPerSession: 0,
+      avgTokensPerSession: totalSessions ? totalTokens / totalSessions : 0,
     };
 
     // Projects: null means unavailable (file-based providers)

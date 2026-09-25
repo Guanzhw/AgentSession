@@ -1,8 +1,9 @@
-import type { DailyTokenStat, LibrarySessionMetadata, ProviderAdapter, RawSession } from "../interface.js";
+import type { DailyTokenStat, LibrarySessionMetadata, OwnedReaderChildDescriptor, ProviderAdapter, RawSession } from "../interface.js";
 import { getDb } from "../../db.js";
 import { icons } from "../../icons.js";
 import { buildAgentLoop } from "../shared/agent-loop.js";
 import { buildMessageSessionTree, buildMessageSessionViewsFromTree } from "../shared/message-session.js";
+import { isSubagentToolName } from "../shared/subagent-tools.js";
 import { searchNormalizedMessages } from "../shared/file-adapter-helpers.js";
 import { capabilityDescriptor, compactionEnvelope, finalizeSessionProtocol, sessionEvent, sessionRelationship, type SessionRelationship } from "../shared/session-protocol.js";
 import { decodeV2Record, normalizeV2Messages, v2Tokens, v2Total, type V2MessageRow } from "./v2-parser.js";
@@ -89,24 +90,68 @@ export function createOpenCodeV2Adapter(dataPath: () => string): ProviderAdapter
     async *scan() { yield* list(); },
     getLibrarySessions() { return db().prepare("SELECT * FROM session_v2 WHERE time_archived IS NULL ORDER BY time_updated DESC, id").all().map(identity); },
     getSession, getMessages: messages, getSessionProtocol: protocol,
+    getOwnedReaderProjection(id) {
+      const current = getSession(id);
+      if (!current) return null;
+      const records = rows(id);
+      const rootTree = buildMessageSessionTree(current, normalizeV2Messages(records));
+      const children = db().prepare("SELECT id, title, slug FROM session_v2 WHERE parent_id=? ORDER BY time_created, id").all(id) as Row[];
+      const byId = new Map(children.map(child => [child.id, child]));
+      const parts = new Set(rootTree.messages.flatMap(message => message.parts.map(part => part.id)));
+      const anchors = new Map<string, string>();
+      for (const row of records) {
+        if (row.type !== "assistant") continue;
+        row.data.content.forEach((part: any, index: number) => {
+          if (part.type !== "tool" || !(isSubagentToolName(part.name) || part.name === "subagent")) return;
+          const recordedId = part.state?.metadata?.sessionId;
+          const outputId = recordedId === undefined
+            ? (Array.isArray(part.state?.content) ? part.state.content : [])
+              .filter((content: any) => content.type === "text" && typeof content.text === "string")
+              .flatMap((content: any) => content.text.split(/\r?\n/))
+              .map((line: string) => /^task_id:\s*(\S+)\s*$/.exec(line)?.[1])
+              .find((value: string | undefined) => value && byId.has(value))
+            : undefined;
+          const childId = recordedId ?? outputId;
+          const partId = `${row.id}:content:${index}:tool`;
+          if (typeof childId === "string" && byId.has(childId) && parts.has(partId) && !anchors.has(childId)) {
+            anchors.set(childId, partId);
+          }
+        });
+      }
+      const linked: OwnedReaderChildDescriptor[] = children.map(child => ({
+        provider: "opencode", sessionId: child.id, title: child.title || child.slug || null,
+        available: true, link: anchors.has(child.id) ? "explicit" : "inferred",
+        parentPartId: anchors.get(child.id) || null, detached: !anchors.has(child.id)
+      }));
+      return { rootTree, children: linked };
+    },
     getInheritedContext(id) {
       const current = getSession(id);
       if (typeof current?.metadata?.forkSessionId !== "string") return null;
-      const retained: ReturnType<typeof normalizeV2Messages> = [];
-      let total = 0;
+      const inheritedMessages: ReturnType<typeof normalizeV2Messages> = [];
       const inherited = db().prepare(`SELECT m.* FROM session_message m JOIN session_v2 s ON s.id=m.session_id WHERE s.id=? AND NOT ${owned} ORDER BY m.seq ASC`).iterate(id);
       for (const raw of inherited) {
-        const normalized = normalizeV2Messages([decodeV2Record(raw as V2MessageRow)]);
-        total += normalized.length;
-        if (retained.length < 200) retained.push(...normalized.slice(0, 200 - retained.length));
+        inheritedMessages.push(...normalizeV2Messages([decodeV2Record(raw as V2MessageRow)]));
       }
       return { sourceSession: { provider: "opencode", sessionId: current.metadata.forkSessionId },
-        messages: retained, total, truncated: total > retained.length };
+        messages: inheritedMessages, total: inheritedMessages.length, truncated: false };
     },
     getSessionTree(id) { return views(id)?.tree || null; },
     getSessionContainer(id) { return views(id)?.container || null; },
     getSessionMetrics(id) { return views(id)?.metrics || null; },
     getStatsRevision: () => openCodeStorageRevision(dataPath()),
+    getTokenSessionCount(days = 30, fromDate, toDate) {
+      const today = new Date(); today.setUTCHours(0, 0, 0, 0);
+      const cutoff = today.getTime() - (Math.max(1, days) - 1) * 86400000;
+      const start = fromDate ? Math.max(cutoff, Date.parse(`${fromDate}T00:00:00Z`)) : cutoff;
+      const end = toDate ? Date.parse(`${toDate}T00:00:00Z`) + 86400000 : Number.MAX_SAFE_INTEGER;
+      const row = db().prepare(`SELECT COUNT(DISTINCT m.session_id) AS count
+        FROM session_message m JOIN session_v2 s ON s.id=m.session_id
+        WHERE ${owned} AND m.type IN ('assistant','compaction')
+          AND m.time_created >= ? AND m.time_created < ?
+          AND json_type(m.data, '$.tokens') IS NOT NULL`).get(start, end);
+      return Number(row.count);
+    },
     getTokenStats(days = 30) {
       const today = new Date(); today.setUTCHours(0, 0, 0, 0);
       const cutoff = today.getTime() - (Math.max(1, days) - 1) * 86400000;

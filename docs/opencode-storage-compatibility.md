@@ -6,7 +6,7 @@ not the version of an installed CLI. Provider databases are always read-only.
 | Storage | Reader | Support |
 | --- | --- | --- |
 | `session`, `message`, `part` | Existing v1 reader | Existing behavior retained |
-| `session_v2`, `session_message` | v2 reader | Tested against the v2.0.10 schema and source contract |
+| `session_v2`, `session_message` | v2 reader | Upstream v2.0.10 source contract and local OpenCode v2.0.16 data checked |
 | Missing, incomplete, unreadable | None | Diagnostic; other providers can still start |
 
 When both generations exist, the v2 schema takes precedence. An incomplete v2
@@ -28,12 +28,18 @@ is required.
   visible instead of being silently discarded.
 - Parent and fork source relationships are projected separately. v2.0.10 copies
   settled history into forks with `msg_<fork-event>_<source-seq>` IDs and resets
-  session usage. Copied records are disclosed as inherited context (up to 200
-  normalized messages), and excluded from owned messages, search, exports,
+  session usage. Copied records are disclosed as paginated inherited context,
+  and excluded from owned messages, search, exports,
   protocol events and daily usage. Nested copied prefixes follow the same rule.
+- Child sessions with a recorded `parent_id` appear in the Reader. A child is
+  attached to a parent subagent tool only when that tool records the exact
+  child ID in `state.metadata.sessionId` or a `task_id:` result line. Children
+  without this binding remain separately accessible without guessing which
+  tool launched them.
 - Search, JSON/Markdown routes and the read-only MCP use the selected reader.
 - Daily usage uses assistant/compaction records and mutually exclusive token
-  components; indexed totals use the provider's session-level counters.
+  components. The stats overview counts distinct sessions with usage in the
+  selected period; indexed totals use the provider's session-level counters.
 - Viewer-only management remains available; it never modifies OpenCode data.
 - WAL changes participate in protocol/stat revision detection.
 
@@ -59,6 +65,8 @@ Automated coverage is in `test/opencode-v2.test.mjs`, alongside existing v1
 scan/protocol tests. It covers schema selection, malformed/missing storage,
 source hashes, sequence ordering, response boundaries, live tool status,
 compaction, fork accounting, WAL revisions, and live HTTP startup/read/export.
-No real conversation database was available in the implementation environment.
-Before release, verify on the affected Windows machine: indexing, one real
-conversation with tools/reasoning, fork context, token totals, and MCP history.
+The Windows test suite passed 1,080/1,080. Local OpenCode v2.0.16 data indexed
+151 sessions. A real parent with 34 children showed 31 exact inline launcher
+bindings and three detached child links; Reader preview, complete child history,
+return navigation, usage, API, protocol and read-only MCP access were checked.
+The source database SHA-256 remained unchanged after validation.
