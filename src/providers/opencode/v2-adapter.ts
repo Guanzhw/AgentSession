@@ -129,8 +129,9 @@ export function createOpenCodeV2Adapter(dataPath: () => string): ProviderAdapter
       const current = getSession(id);
       if (typeof current?.metadata?.forkSessionId !== "string") return null;
       const inheritedMessages: ReturnType<typeof normalizeV2Messages> = [];
-      const inherited = db().prepare(`SELECT m.* FROM session_message m JOIN session_v2 s ON s.id=m.session_id WHERE s.id=? AND NOT ${owned} ORDER BY m.seq ASC`).iterate(id);
-      for (const raw of inherited) {
+      // Node 22 may finalize a temporary StatementSync before its iterator finishes.
+      const inheritedStatement = db().prepare(`SELECT m.* FROM session_message m JOIN session_v2 s ON s.id=m.session_id WHERE s.id=? AND NOT ${owned} ORDER BY m.seq ASC`);
+      for (const raw of inheritedStatement.iterate(id)) {
         inheritedMessages.push(...normalizeV2Messages([decodeV2Record(raw as V2MessageRow)]));
       }
       return { sourceSession: { provider: "opencode", sessionId: current.metadata.forkSessionId },
