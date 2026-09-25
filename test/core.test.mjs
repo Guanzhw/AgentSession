@@ -29,7 +29,7 @@ import {
 import { buildCodexRuntimeEnvironment } from "../dist/src/providers/codex/runtime-environment.js";
 import { codexDailyTokenComponents } from "../dist/src/providers/codex/adapter.js";
 import { buildPiRuntimeEnvironment } from "../dist/src/providers/pi/runtime-environment.js";
-import { renderSessionPage, renderReaderProcessChunk } from "../dist/src/views/session.js";
+import { renderSessionPage, renderSessionReaderPane, renderSessionReaderSegment, locateSessionReaderSegment, renderReaderProcessChunk } from "../dist/src/views/session.js";
 import { renderSettingsPage } from "../dist/src/views/settings.js";
 import { renderStatsDeferredSection, renderStatsPage } from "../dist/src/views/stats.js";
 import { formatDuration, formatDurationMs, sessionCard } from "../dist/src/views/components.js";
@@ -4189,6 +4189,36 @@ test("conversation renders one recorded compaction checkpoint at its causal posi
   assert.match(html, /<details id="checkpoint-cp-1" class="context-result-disclosure"/);
   assert.ok(toc.indexOf("Context compaction") > toc.indexOf("assistant a1"), "ToC checkpoint follows the anchored message");
   assert.ok(toc.indexOf("Context compaction") < toc.indexOf("user u2"), "ToC checkpoint precedes the next user turn");
+});
+
+test("long Reader defers complete turns while retaining later ToC anchors and a revision-bound fragment", () => {
+  const messages = [];
+  for (let index = 1; index <= 100; index += 1) {
+    const suffix = index === 100 ? "late:source" : String(index);
+    messages.push(flowVisible(`u${suffix}`, "user", index * 1000, [], { text: true }));
+    messages.push(flowVisible(`a${suffix}`, "assistant", index * 1000 + 500));
+  }
+  const tree = flowSession("root", messages);
+  const input = {
+    session: tree.session, sessionTree: tree, provider: "codex",
+    conversationCompactions: [{ id: "late-checkpoint", anchorMessageId: "a90", timestamp: 90500,
+      tokensBefore: 120, tokensAfter: 45, fidelity: "recorded" }]
+  };
+  const pane = renderSessionReaderPane(input);
+  const placeholders = [...pane.matchAll(/data-reader-segment-index="([0-9]+)" data-reader-segment-url="[^"]*revision=([a-f0-9]{24})"/g)];
+  assert.ok(placeholders.length >= 2, "later turns have bounded placeholders");
+  assert.ok(pane.includes('href="#msg-alate-source"'), "the full ToC keeps a later canonical message anchor");
+  assert.match(pane, /href="#checkpoint-late-checkpoint"/, "the full ToC keeps a later checkpoint");
+  assert.ok(!pane.includes('id="msg-alate-source"'), "the later message is absent from initial DOM");
+  const lateIndex = locateSessionReaderSegment(input, "msg-alate-source");
+  const late = placeholders.find((match) => Number(match[1]) === lateIndex);
+  assert.ok(late, "the later anchor maps to a deferred segment");
+  const fragment = renderSessionReaderSegment(input, lateIndex, late[2]);
+  assert.equal(fragment.ok, true);
+  assert.ok(fragment.html.includes('id="msg-alate-source"'));
+  assert.equal(renderSessionReaderSegment(input, lateIndex, "0".repeat(24)).code, "stale_segment");
+  const allMarkup = pane + placeholders.map((match) => renderSessionReaderSegment(input, Number(match[1]), match[2]).html).join("\n");
+  assert.equal((allMarkup.match(/data-compaction-checkpoint="late-checkpoint"/g) || []).length, 1);
 });
 
 test("multiple compactions keep independent ToC identities and chronology", () => {

@@ -75,9 +75,9 @@ claims that the fixes have shipped.
 | MCP `session_search` | Implemented; real protocol acceptance passed, further loading work remains | The old 100-candidate ceiling is gone. File providers now stream one search pass. On the local 775-session Codex store, the original query took 61.3 seconds; after the change an all-provider call took 10.4 seconds of search after a 22.9-second cold MCP connection, and a separate Codex query took 20.3 seconds. These timings vary with file-cache state and do not establish a general latency guarantee. |
 | Viewer provider-wide content search | Implemented; real browser paging and source navigation passed | The old 500-message candidate ceiling is covered by a 601-hit fixture. A live cross-provider search produced more than 30 results; the browser loaded a second page, opened its 36th result at the recorded Codex message, and returned to the same card and query. Provider-specific content pages use the same excerpt/source contract. |
 | MCP thinking previews | Implemented; real protocol acceptance passed | Thinking stays out of ordinary search and session previews. A real Codex thinking event was rejected by default `session_get_event`, returned with `includeThinking: true`, omitted from default context, and present in opted-in context. Timeline thinking remains an explicit segment. |
-| Cross-provider content and child-session meaning | Automated boundary coverage and live calls passed; lineage review remains | Viewer global `/sessions/search` searches only message content across selected providers, including non-archived OpenCode child sessions. Viewer exclusions apply; MCP separately searches all provider-stored sessions. Both use canonical `{ provider, sessionId }` identity. Real MCP search/get/timeline/context calls succeeded on all five providers, and a Codex cursor returned six distinct sessions across two pages. |
+| Cross-provider content and child-session meaning | Automated boundary coverage and live calls passed; lineage review remains | Viewer global `/sessions/search` searches only message content across selected providers, including non-archived OpenCode child sessions. Viewer exclusions apply; MCP uses each adapter's source-search scope without those Viewer exclusions. Both use canonical `{ provider, sessionId }` identity. Real MCP search/get/timeline/context calls succeeded on all five providers, and a Codex cursor returned six distinct sessions across two pages. |
 | Viewer search excerpts and source navigation | Real browser acceptance passed for a Codex later-page hit | A bounded excerpt links to a source-message anchor. The Reader preserves original source-message anchors when it groups fragments under a response; the detail back link returns to the exact result-card anchor on its page. Repeat across other available provider shapes before release handoff. |
-| Long-session first load | Measured baseline; loading optimization remains | A real 2,686-message Codex page transferred about 23.47 MB and constructed about 179,601 DOM elements; browser DOM interactive took about 12 seconds. The large server-rendered document and DOM are an independent loading problem that a backend language change alone would not solve. |
+| Long-session first load | Implemented and real-browser checked; server projection cost remains | Complete-turn lazy segments reduced a real 2,686-message Codex page from 23,498,218 to 4,859,680 initial HTML bytes and from 179,823 to 23,089 initial DOM elements. A direct URL fragment loaded a late segment and focused its canonical target. Later fragment and deep-location requests still rebuild the full server projection. |
 
 On a later warm local run against the same isolated v2 server, separate HTTP
 downloads and browser navigations gave the following samples. `DOM interactive`
@@ -92,35 +92,58 @@ is navigation timing, not a guaranteed time to readable content:
 The largest local Claude Code and Pi samples have 8 and 2 indexed messages,
 respectively, so they do not exercise long-session loading. The earlier Codex
 browser load was about 12 seconds; cache state and machine load affect these
-numbers. First-readable timing and incremental-history behavior remain to be
-measured and improved before claiming the long-session acceptance complete.
+numbers. After complete-turn lazy loading, the same isolated v2 server gave:
+
+| Provider | Sample messages | Initial HTML download | Initial DOM elements | DOM interactive | First contentful paint | Segments |
+|:---|---:|---:|---:|---:|---:|---:|
+| OpenCode | 278 | 333,259 bytes | 2,689 | 341 ms | 444 ms | 6 |
+| DeepSeek Harness | 1,219 | 482,887 bytes | 2,865 | 198 ms | 304 ms | 11 |
+| Codex | 2,686 | 4,859,680 bytes | 23,089 | 4,130 ms | 4,056 ms | 43 |
+
+These are individual warm browser and HTTP samples, not controlled benchmark
+averages; the Codex DOM-interactive observation ranged from 3,173 to 5,256 ms
+across three runs. First contentful paint can include the page shell, while the
+initial conversation text is present by DOM interactive. The reader can open
+other Workbench areas or navigate from the full ToC before all segments load.
+On the Codex sample, a late assistant URL fragment loaded its segment, focused
+the source and showed it in the viewport. The OpenCode browser E2E exercised
+native Back/Forward across an unloaded fragment and parent/child reader return.
+The complete history remains reachable, and only the first segment is rendered
+initially. A single oversized user turn can still form a large segment.
 
 ## Verification snapshot — 2026-09-26
 
-- `npm run ci:quality` passed with 1,055 tests. `npm run qa:e2e` passed against
+- `npm run ci:quality` passed with 1,057 tests. `npm run qa:e2e` passed against
   a real OpenCode v2 session on the isolated v2 server at port 3457, with no
-  browser errors. Real browser content hits reached source-message anchors for
-  all five providers; the global Codex search also loaded a second result page
-  and returned to its exact result card.
+  browser errors. The final E2E included a native fragment in an initially
+  unloaded segment and Back/Forward restoration. Real browser content hits
+  reached source-message anchors for all five providers; the global Codex
+  search also loaded a second result page and returned to its exact result
+  card.
 - Local 2.0.0 Viewer and MCP tarballs were packed and installed in an isolated
   directory. The packed Viewer returned exactly the five provider IDs, five
   content hits with source references, and 404 for a retired-provider route.
   The packed MCP completed search/get/timeline/context calls on each real
   provider. Codex cursor pages returned six distinct sessions; thinking was
   readable only with explicit opt-in. Windows 2.0.0 SEA binaries built and
-  passed the Viewer/static-asset/MCP smoke.
+  passed the Viewer/static-asset/MCP smoke. The packages and binaries were
+  rebuilt and rechecked after the lazy Reader change.
 - Five sampled provider-owned source files retained identical lengths and
   SHA-256 hashes. The real Viewer `session_meta` row and token bucket/state
-  tables retained their baseline row counts and hashes. Two derived tables,
-  `session_index` and `token_stats_session_revision`, retained row counts but
-  changed hashes; an MCP test transport had not inherited its intended
-  isolated metadata path. The stdio test and binary smoke now pass that path
-  explicitly. The hash-only baseline cannot identify the changed rows.
+  tables retained their baseline row counts and hashes after final QA. The
+  derived `session_index` had 987 rows versus 985 in the baseline, and its hash
+  changed; `token_stats_session_revision` kept its count and baseline hash at
+  the final check. An earlier MCP test transport had not inherited its intended
+  isolated metadata path; the stdio test and binary smoke now pass that path
+  explicitly. The hash-only baseline cannot identify the index-row changes or
+  distinguish them from ongoing indexing by the existing port-3456 process.
+  The real metadata index still contains four Hermes and one OpenClaw row.
 - The user's existing port-3456 process still serves the pre-v2 seven-provider
   build. The isolated port-3457 server and installed 2.0.0 artifacts were used
   for v2 acceptance; the normal listener has not been switched over. The
-  packages are not published, and long-session incremental loading remains
-  open.
+  packages are not published. Long-session first-load and source navigation
+  were accepted locally; full server projection per fragment remains a measured
+  performance follow-up.
 
 ## Delivery phases
 
@@ -235,13 +258,14 @@ parser or index worker. A later Rust decision record must show the workload,
 baseline, measured improvement, cross-platform packaging and maintenance
 cost, and data-compatibility implications.
 
-The next Viewer loading experiment is lazy conversation segments: keep the
-global message/compaction placement and TOC projection, send the first segment
-batch, and fetch later rendered segments when the reader or a source anchor
-needs them. Preserve the existing source-anchor and child-history behavior.
-This would reduce transfer and DOM construction first; it would not by itself
-remove full server-side parsing. Measure those costs independently before
-considering a native worker.
+The Viewer now loads complete-turn conversation segments lazily while retaining
+the global message/compaction placement, full ToC, source anchors and child
+history. This reduced transfer and DOM construction, but did not remove full
+server-side parsing. One measured late Codex `segment-location` request took
+1,475 ms and a 491,016-byte late fragment took 3,572 ms on the isolated server;
+these are single warm samples. Profile and optimize repeated server projection
+before considering a narrow native worker. The [Reader segment decision](../../.agents/decisions/implemented/2026-09-26-lazy-reader-conversation-segments.md)
+records the cross-request contract.
 
 ## Review links
 

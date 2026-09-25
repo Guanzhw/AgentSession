@@ -254,6 +254,7 @@ function workbenchHarness(t, { tocSize = 0 } = {}) {
   install("HTMLElement", FakeElement);
   install("HTMLDetailsElement", FakeElement);
   install("CSS", { escape: (value) => value });
+  install("IntersectionObserver", class { observe() {} unobserve() {} });
   install("getComputedStyle", () => ({ getPropertyValue: () => "0" }));
   install("requestAnimationFrame", (callback) => callback());
   install("setTimeout", setTimeout);
