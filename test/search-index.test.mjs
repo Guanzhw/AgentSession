@@ -47,8 +47,9 @@ test("derived search index tracks source revisions and preserves exact text and 
   assert.deepEqual(find("CODEX alpha").map(hit => hit.messageId), ["user-1"]);
   assert.deepEqual(find("中文").map(hit => hit.messageId), ["user-1"]);
   assert.deepEqual(find("文检").map(hit => hit.messageId), ["user-1"], "two-character CJK substring remains complete");
-  assert.deepEqual(find("äPF").map(hit => hit.messageId), ["user-1"], "Unicode case folding retains trigram candidates");
-  assert.deepEqual(find("🙂ab").map(hit => hit.messageId), ["user-1"], "astral code points retain trigram candidates");
+  assert.deepEqual(find("äPF").map(hit => hit.messageId), ["user-1"], "Unicode case folding retains substring candidates");
+  assert.deepEqual(find("🙂ab").map(hit => hit.messageId), ["user-1"], "astral code points retain substring matches");
+  assert.deepEqual(find("\uD83D").map(hit => hit.messageId), ["user-1"], "a UTF-16 half-surrogate retains JavaScript substring semantics");
   assert.deepEqual(find("alpha missing"), [], "all whitespace terms must match");
   assert.deepEqual(find("unfindable"), []);
   assert.deepEqual(find("%_").map(hit => hit.messageId), []);
@@ -56,6 +57,7 @@ test("derived search index tracks source revisions and preserves exact text and 
   assert.deepEqual(find("percent %", ["assistant"]).map(hit => hit.messageId), ["assistant-1"]);
   assert.deepEqual(find("Read", ["toolName"]).map(hit => hit.messageId), ["tool-1"]);
   assert.deepEqual(find("needle", ["assistant"]).map(hit => hit.messageId), ["assistant-nul"]);
+  assert.deepEqual(find("prefix\u0000needle", ["assistant"]).map(hit => hit.messageId), ["assistant-nul"]);
   assert.deepEqual(find("SECRET").map(hit => hit.messageId), []);
   const service = createSessionHistoryService({ dependencies: {
     getAvailableProviders: () => [provider], getAllProviders: () => [provider]

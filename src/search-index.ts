@@ -35,7 +35,10 @@ export function closeSearchDb() {
 function ensureSchema() {
   if (searchDb) return searchDb;
   const db = new DatabaseSync(`${getConfig().metaPath}.search.db`);
+  // Earlier derived indexes may still contain FTS triggers on these tables.
   db.exec(`
+    DROP TRIGGER IF EXISTS search_document_insert;
+    DROP TRIGGER IF EXISTS search_document_delete;
     CREATE TABLE IF NOT EXISTS search_index_revision (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       revision TEXT NOT NULL
@@ -67,16 +70,6 @@ function ensureSchema() {
     );
     CREATE INDEX IF NOT EXISTS idx_search_document_session ON search_document(provider, session_id);
     CREATE INDEX IF NOT EXISTS idx_search_document_field ON search_document(provider, field);
-    CREATE VIRTUAL TABLE IF NOT EXISTS search_document_fts USING fts5(
-      folded, content='search_document', content_rowid='id', tokenize='trigram', detail='none'
-    );
-    CREATE TRIGGER IF NOT EXISTS search_document_insert AFTER INSERT ON search_document BEGIN
-      INSERT INTO search_document_fts(rowid, folded) VALUES (new.id, new.folded);
-    END;
-    CREATE TRIGGER IF NOT EXISTS search_document_delete AFTER DELETE ON search_document BEGIN
-      INSERT INTO search_document_fts(search_document_fts, rowid, folded)
-      VALUES ('delete', old.id, old.folded);
-    END;
   `);
   db.prepare("INSERT OR IGNORE INTO search_index_revision(id, revision) VALUES (1, ?)").run(randomUUID());
   searchDb = db;
@@ -170,7 +163,7 @@ export function refreshSearchIndex(provider: ProviderAdapter): { sources: number
   return { sources: sources.length, changed: changed.length + removed.length };
 }
 
-/** The FTS trigram is a candidate filter; the existing matcher decides every hit. */
+/** SQLite narrows candidates; the existing matcher decides every hit. */
 export function* findSearchDocuments(
   provider: string,
   query: string,
@@ -180,20 +173,19 @@ export function* findSearchDocuments(
   const terms = splitSearchTerms(query);
   if (!terms.length) return;
   const db = ensureSchema();
-  const candidate = terms.find(term => Array.from(term).length >= 3 && !/[%_\u0000]/u.test(term));
-  const join = candidate ? "JOIN search_document_fts ON search_document_fts.rowid = d.id" : "";
-  const candidateWhere = candidate ? "AND search_document_fts.folded LIKE ?" : "";
+  // SQLite compares UTF-8 code points; JavaScript can match half of a surrogate pair.
+  const candidate = terms.filter(term => !/[\u0000\uD800-\uDFFF]/.test(term)).sort((a, b) => b.length - a.length)[0];
+  const candidateWhere = candidate ? "AND instr(d.folded, ?) > 0" : "";
   const statement = db.prepare(`
     SELECT d.session_id, d.message_id, d.field, d.role, d.timestamp, d.text,
       s.title, s.directory, s.parent_id, s.time_created, s.time_updated, s.message_count, s.token_count
     FROM search_document AS d
-    ${join}
     JOIN search_index_source AS s ON s.provider = d.provider AND s.session_id = d.session_id
     WHERE d.provider = ? AND d.field IN (SELECT value FROM json_each(?)) ${candidateWhere}
     ORDER BY s.time_updated DESC, s.time_created DESC, d.session_id ASC, d.ordinal ASC, d.id ASC
   `);
   const params = candidate
-    ? [provider, JSON.stringify(fields), `%${candidate}%`]
+    ? [provider, JSON.stringify(fields), candidate]
     : [provider, JSON.stringify(fields)];
   for (const row of statement.iterate(...params) as Iterable<Record<string, any>>) {
     if (!matchesSearchQuery(row.text, query)) continue;

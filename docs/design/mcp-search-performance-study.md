@@ -86,34 +86,41 @@ ordered result/reference hashes. The compiled artifacts are identified in each
 ignored `tmp/bench-session-search/<run-id>/result.json`; A0 is clean
 `d047100f2a2275283fd972a13b4f51c8c56c26b2`, and A1's measured core
 artifact SHA-256 is
-`b51b7fa66513da93063810ad191f2fb0cec5971796a6949fc1223c92003b0104`.
+`f63d2e6142bd2662295983d50048f14ae264d867426c4bf0ac8da2e42ba882a8`.
+The five A1 runs used the portable SQLite `instr()` candidate check. A later
+guard for half-surrogate queries and removal of an unnecessary index-format
+bump leave the measured `codex` query path unchanged. A separate warm check of
+the final core artifact
+`f819686df76d94395e74953cf0dc1da9e3bf8b969030ccdbbde0b57e9006cb4e`
+returned the same hashes in 78.7 ms and 70.5 ms for first and repeated search.
 
 | Repetition | A0 startup (s) | A1 startup (s) | A0 first search (s) | A1 first search (ms) | A0 repeat (s) | A1 repeat (ms) |
 |:---:|---:|---:|---:|---:|---:|---:|
-| 1 | 25.889 | 13.588 | 11.596 | 63.4 | 11.530 | 58.6 |
-| 2 | 25.087 | 12.706 | 11.683 | 72.5 | 12.273 | 54.8 |
-| 3 | 24.618 | 12.659 | 11.376 | 62.7 | 11.278 | 55.6 |
-| 4 | 24.667 | 12.802 | 10.860 | 83.1 | 11.889 | 62.0 |
-| 5 | 26.610 | 13.354 | 12.388 | 60.3 | 12.085 | 70.0 |
-| Median | 25.087 | 12.802 | 11.596 | 63.4 | 11.889 | 58.6 |
-| p95 (maximum of five) | 26.610 | 13.588 | 12.388 | 83.1 | 12.273 | 70.0 |
+| 1 | 25.347 | 12.741 | 11.560 | 90.7 | 11.274 | 69.9 |
+| 2 | 25.729 | 13.072 | 12.197 | 94.0 | 11.909 | 78.4 |
+| 3 | 24.971 | 12.681 | 11.490 | 76.8 | 11.448 | 70.4 |
+| 4 | 24.749 | 12.425 | 11.161 | 84.4 | 11.202 | 73.8 |
+| 5 | 24.565 | 12.318 | 11.360 | 93.2 | 11.108 | 79.2 |
+| Median | 24.971 | 12.681 | 11.490 | 90.7 | 11.274 | 73.8 |
+| p95 (maximum of five) | 25.729 | 13.072 | 12.197 | 94.0 | 11.909 | 79.2 |
 
-Median measured search wall time improved about 183-fold for the first
-unchanged-process query and 203-fold for its repeat. Startup improved about
+Median measured search wall time improved about 127-fold for the first
+unchanged-process query and 153-fold for its repeat. Startup improved about
 49%, but remains above the two-second usability target. Median startup peak
-RSS was 3.188 GB for A0 and 3.114 GB for A1; the content index does not solve
+RSS was 3.192 GB for A0 and 3.134 GB for A1; the content index does not solve
 the startup memory peak. A1's reused metadata plus search databases occupied
-about 52 MB, versus about 0.6 MB for A0's metadata DB.
+about 36.5 MB, versus about 0.6 MB for A0's metadata DB.
 
 One fresh A1 index build, kept separate from the five warm-restart repetitions,
-took 16.755 s in the first Codex query after 12.963 s of startup; the next
-query took 95 ms. Its metadata plus search databases occupied 47.96 MB. A
+took 11.847 s in the first Codex query after 12.427 s of startup. Its metadata
+plus search databases occupied 36.51 MB. A
 single cold-build observation is not a p95 estimate. A two-page `benchmark`
 query reached the end with 34 results and identical page-sequence hashes in
 A0 and A1. Synthetic tests additionally cover changed/deleted sources,
 canonical duplicate IDs, OpenCode match ordering, short Chinese terms,
-literal wildcard characters, and tool-name event references. Real MCP checks
-exercised all five providers; the local Pi sample had no tool records.
+literal wildcard characters, a UTF-16 half-surrogate query, and tool-name event
+references. Real MCP checks exercised all five providers; the local Pi sample
+had no tool records.
 
 The [standalone Rust parser probe](../benchmark-rust-codex-parse.md) found a
 13.227 s Node versus 7.621 s Rust median for source read, JSON parse, and
