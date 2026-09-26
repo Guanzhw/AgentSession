@@ -1,4 +1,5 @@
 // src/index-db.js
+import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { getConfig } from "./config.js";
 import { isEmptyProjectFilter, normalizeCrossProviderProjectPath } from "./project-filter.js";
@@ -43,18 +44,26 @@ export function getIndexDb() {
     }
     indexDb.exec("CREATE INDEX IF NOT EXISTS idx_session_provider ON session_index(provider)");
     indexDb.exec("CREATE INDEX IF NOT EXISTS idx_session_updated ON session_index(time_updated DESC)");
+    indexDb.exec("CREATE TABLE IF NOT EXISTS index_catalog_revision (id INTEGER PRIMARY KEY CHECK (id = 1), revision TEXT NOT NULL)");
+    indexDb.prepare("INSERT OR IGNORE INTO index_catalog_revision(id, revision) VALUES (1, ?)").run(randomUUID());
     indexDb.function("normalize_cross_provider_project", { deterministic: true }, normalizeCrossProviderProjectPath);
     indexDb.function("matches_search_query", { deterministic: true }, (text: string, query: string) => matchesSearchQuery(text, query) ? 1 : 0);
   }
   return indexDb;
 }
 
-/** Invalidate offset cursors when this process or another connection changes the shared metadata DB. */
+/** Invalidate cursors across local writes, external connections, and process restarts. */
 export function getIndexedCatalogRevision(): string {
   const db = getIndexDb();
+  const durable = db.prepare("SELECT revision FROM index_catalog_revision WHERE id = 1").get().revision;
   const external = db.prepare("PRAGMA data_version").get().data_version;
   const local = db.prepare("SELECT total_changes() AS value").get().value;
-  return `${external}:${local}`;
+  return `${durable}:${external}:${local}`;
+}
+
+/** Call inside the same transaction as a derived-index update. */
+export function bumpIndexedCatalogRevision() {
+  getIndexDb().prepare("UPDATE index_catalog_revision SET revision = ? WHERE id = 1").run(randomUUID());
 }
 
 /** Startup totals only include providers that completed this indexing pass. */
@@ -73,6 +82,7 @@ export function getIndexedTotals(providerIds: string[]) {
  * @param {import('./providers/interface.js').RawSession[]} sessions
  */
 export function upsertIndex(provider: any, sessions: any) {
+  if (!sessions.length) return;
   const db = getIndexDb();
   const now = Date.now();
   const stmt = db.prepare(`
@@ -80,9 +90,17 @@ export function upsertIndex(provider: any, sessions: any) {
       (id, provider, parent_id, title, directory, time_created, time_updated, message_count, token_count, library_evidence, last_indexed)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  for (const s of sessions) {
-    stmt.run(s.id, provider, s.parentId, s.title, s.directory, s.timeCreated, s.timeUpdated, s.messageCount, s.tokenCount,
-      s.libraryEvidence?.length ? JSON.stringify(s.libraryEvidence) : null, now);
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    for (const s of sessions) {
+      stmt.run(s.id, provider, s.parentId, s.title, s.directory, s.timeCreated, s.timeUpdated, s.messageCount, s.tokenCount,
+        s.libraryEvidence?.length ? JSON.stringify(s.libraryEvidence) : null, now);
+    }
+    bumpIndexedCatalogRevision();
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
   }
 }
 
@@ -560,9 +578,17 @@ export async function indexProvider(adapter: any) {
  */
 export function clearIndex(provider: any) {
   const db = getIndexDb();
-  if (provider) {
-    db.prepare("DELETE FROM session_index WHERE provider = ?").run(provider);
-  } else {
-    db.exec("DELETE FROM session_index");
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    if (provider) {
+      db.prepare("DELETE FROM session_index WHERE provider = ?").run(provider);
+    } else {
+      db.exec("DELETE FROM session_index");
+    }
+    bumpIndexedCatalogRevision();
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
   }
 }

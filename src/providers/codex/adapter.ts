@@ -30,7 +30,7 @@ import { readCodexMemoryEvidence } from "./memory-evidence.js";
 import { finalizeSessionProtocol, protocolRevision } from "../shared/session-protocol.js";
 import { finalizeSessionProtocolV3 } from "../shared/session-protocol-v3.js";
 import { icons } from "../../icons.js";
-import type { InheritedContextView, Message, OwnedReaderLinkEvidence, OwnedReaderProjection, ProviderAdapter, RawSession, SessionReaderSnapshot } from "../interface.js";
+import type { InheritedContextView, Message, OwnedReaderLinkEvidence, OwnedReaderProjection, ProviderAdapter, RawSession, SearchIndexSource, SessionReaderSnapshot } from "../interface.js";
 import { buildLinkedMessageSessionViews, buildOwnedReaderChildLinks } from "../shared/linked-message-session.js";
 import { buildMessageSessionTree, buildMessageSessionViews } from "../shared/message-session.js";
 import { buildResolvedSystemPromptEvidence } from "../shared/system-prompt-evidence.js";
@@ -94,6 +94,33 @@ function readSnapshotPayload(filePath: string, canonicalId: string, snapshot: Co
 }
 
 const indexedChildFacts = new WeakMap<RawSession, CodexProtocolChildFacts>();
+type CodexScanSession = RawSession & { libraryEvidence: string[] };
+const indexedScanSessions = new WeakMap<RawSession, {
+  parentSignature: string | null;
+  parentSession: RawSession | null;
+  session: CodexScanSession;
+}>();
+const needsParentProvenance = new WeakMap<RawSession, boolean>();
+
+function scanSession(session: RawSession, messages: Message[]): CodexScanSession {
+  const userTexts = messages
+    .filter((message) => message.role === "user" && message.content.trim())
+    .map((message) => boundedLibraryEvidence(message.content));
+  return {
+    ...session,
+    libraryEvidence: [...userTexts.slice(0, 3), ...userTexts.slice(-2)]
+      .filter((text, index, all) => all.indexOf(text) === index)
+  };
+}
+
+function parentSourceSignature(filePath: string): string {
+  try {
+    return sessionFileSignature(filePath, lstatSync(filePath));
+  } catch (error: any) {
+    if (error?.code === "ENOENT") return `${path.resolve(filePath)}:missing`;
+    throw error;
+  }
+}
 
 const sessionFiles = createSessionFileStore({
   discoverFiles: discoverSessionFiles,
@@ -106,7 +133,24 @@ const sessionFiles = createSessionFileStore({
     const canonicalId = extractCodexSessionId(records, entry.sessionId);
     const messages = recordsToMessages(records, canonicalId);
     const session = extractMeta(records, entry.sessionId, messages);
-    if (session.parentId && !codexNeedsParentRecordsForProvenance(records)) {
+    const needsParent = codexNeedsParentRecordsForProvenance(records);
+    needsParentProvenance.set(session, needsParent);
+    if (records.length && !needsParent) {
+      // The indexed messages already contain only session-owned content.
+      // Retain a small search summary, not another copy of the body.
+      indexedScanSessions.set(session, {
+        parentSignature: null,
+        parentSession: null,
+        session: scanSession({
+          ...session,
+          metadata: session.metadata?.inheritedContext ? {
+            ...session.metadata,
+            inheritedContext: { ...session.metadata.inheritedContext, excludedUserMessages: 0 }
+          } : session.metadata
+        }, messages)
+      });
+    }
+    if (session.parentId && !needsParent) {
       const provenance = classifyCodexRecordProvenance(records);
       indexedChildFacts.set(session, codexProtocolChildFactsFromRecords(
         records.filter((record) => provenance.get(record) === "session")
@@ -600,20 +644,54 @@ const codex = {
     return path.join(getCodexDir(), "sessions");
   },
 
+  getSearchIndexSources(): SearchIndexSource[] {
+    const entries = sessionFiles.list();
+    const canonical = new Map(entries.map(entry => [String(entry.session.id), entry]));
+    const signatures = new Map(sessionFiles.getFileSignatures().map(({ filePath, signature }) => [filePath, signature]));
+    const byId = new Map<string, typeof entries[number]>();
+    for (const entry of entries) {
+      byId.set(String(entry.session.id), entry);
+      if (entry.sessionId && !byId.has(entry.sessionId)) byId.set(entry.sessionId, entry);
+    }
+    return [...canonical.values()].map((entry) => {
+      const parentId = entry.session.parentId ? String(entry.session.parentId) : null;
+      const parent = parentId ? byId.get(parentId) : null;
+      return {
+        sessionId: String(entry.session.id),
+        revision: JSON.stringify([
+          signatures.get(entry.filePath),
+          parent ? String(parent.session.id) : parentId,
+          parent ? signatures.get(parent.filePath) : parentId ? "missing" : null
+        ])
+      };
+    });
+  },
+
   async *scan() {
     for (const entry of sessionFiles.list()) {
       try {
-        if (entry.records.length) {
-          const resolved = resolveEntry(entry);
-          const userTexts = resolved.messages
-            .filter((message) => message.role === "user" && message.content.trim())
-            .map((message) => boundedLibraryEvidence(message.content));
-          yield {
-            ...resolved.session,
-            libraryEvidence: [...userTexts.slice(0, 3), ...userTexts.slice(-2)]
-              .filter((text, index, all) => all.indexOf(text) === index)
-          };
+        // A held scan must still skip a rollout deleted after discovery.
+        lstatSync(entry.filePath);
+        const needsParent = needsParentProvenance.get(entry.session);
+        const parent = needsParent ? parentEntryFor(entry) : null;
+        const parentSignature = parent
+          ? parentSourceSignature(parent.filePath)
+          : needsParent ? "missing" : null;
+        const cached = indexedScanSessions.get(entry.session);
+        if (cached?.parentSignature === parentSignature
+          && cached.parentSession === (parent?.session || null)) {
+          yield cached.session;
+          continue;
         }
+        if (!entry.records.length) continue;
+        const resolved = resolveEntry(entry);
+        const session = scanSession(resolved.session, resolved.messages);
+        indexedScanSessions.set(entry.session, {
+          parentSignature,
+          parentSession: parent?.session || null,
+          session
+        });
+        yield session;
       } catch (error) {
         console.warn("Skipping unreadable Codex session during scan:", entry.filePath, error);
       }

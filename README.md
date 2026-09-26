@@ -236,7 +236,7 @@ agentsession [options]
 
 ## AgentSession-MCP
 
-`@acetamido/agentsession-mcp` 是独立的 read-only stdio MCP server。它查询 Provider 本地仍存在的 session，不写入 Provider 数据，也不受 Viewer 隐藏或排除元数据影响。`session_browse` 按 Provider、项目、会话逐层定位，`session_search` 可指定标题、目录、用户或助手消息以及根/子会话范围，`session_get` 展示角色与工具名分布，`session_timeline` 可在会话内按消息、工具名和关键词筛选；`session_get_context` 和 `session_get_event` 用于继续读取证据。返回内容带有长度上限和不可信来源边界；思考内容与工具输入/输出仍需显式选择。
+`@acetamido/agentsession-mcp` 是独立的 read-only stdio MCP server。它查询 Provider 本地仍存在的 session，不写入 Provider 数据，也不受 Viewer 隐藏或排除元数据影响。`session_browse` 按 Provider、项目、会话逐层定位，`session_search` 可指定标题、目录、用户或助手消息以及根/子会话范围，也可显式用 `fields: ["toolName"]` 跨会话检索工具名。`session_get` 展示角色与工具名分布，`session_timeline` 可在会话内按消息、工具名和关键词筛选；`session_get_context` 和 `session_get_event` 用于继续读取证据。返回内容带有长度上限和不可信来源边界；思考内容与工具输入/输出仍需显式选择。
 `session_get` 的直属子会话每页最多返回 100 条；若 `childrenTruncated` 为真，可将 `childrenNextCursor` 作为下一次请求的 `childCursor`，直到取完。
 
 ```bash

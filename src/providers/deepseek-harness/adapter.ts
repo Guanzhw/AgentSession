@@ -306,6 +306,10 @@ const deepseekHarness = {
     return sessionFiles.get(sessionId)?.messages || [];
   },
 
+  getSearchIndexSources() {
+    return sessionFiles.getSearchIndexSources();
+  },
+
   getReaderCoordinationContent(sessionId, observation) {
     const captured = sessionFiles.captureSession(sessionId);
     return captured ? dshTeamCoordinationContent(captured.records, observation) : null;

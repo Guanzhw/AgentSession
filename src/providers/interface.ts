@@ -194,6 +194,12 @@ export interface SearchResult {
   timestamp: number;
 }
 
+/** Provider-owned revision of one session's normalized search surface. */
+export interface SearchIndexSource {
+  sessionId: string;
+  revision: string;
+}
+
 export type RuntimeExtensionScope = "project" | "user";
 
 export type RuntimeExtensionKind =
@@ -334,6 +340,10 @@ export interface ProviderAdapter {
   searchMessages(query: string, limit?: number, offset?: number): SearchResult[];
   /** Stream normalized matches and their owning session in one file scan. */
   iterateSearchMessages?(query: string): Iterable<{ session: RawSession | Record<string, unknown>; match: SearchResult }>;
+  /** List source revisions without loading every message body. Child revisions include any parent evidence used to determine ownership. */
+  getSearchIndexSources?(): SearchIndexSource[];
+  /** Provider-owned match order when it differs from the normal conversation order. */
+  getSearchIndexMessages?(sessionId: string): Message[];
   exportSession?(sessionId: string): unknown;
   getRuntimeEnvironment?(sessionId: string): RuntimeEnvironmentView | null;
   getSystemPrompts?(sessionId: string): unknown;

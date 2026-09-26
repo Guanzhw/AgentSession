@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
+import { zstdCompressSync } from "node:zlib";
 import { readCodexSessionSnapshot } from "../dist/src/providers/codex/parser.js";
 import { createSessionFileStore, sessionFileSignature } from "../dist/src/providers/shared/file-adapter-helpers.js";
 
@@ -358,4 +359,107 @@ test("Codex protocol snapshot pair preserves ownership and the captured revision
   now += 2000;
   assert.equal(codex.getSessionProtocolSnapshots("root"), null);
   assert.equal(codex.getSessionProtocolSnapshots("root-alias"), null);
+});
+
+test("Codex scan reuses indexed summaries and invalidates legacy children when their parent changes", async (t) => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "agentsession-codex-scan-summary-"));
+  t.after(() => rmSync(temp, { recursive: true, force: true }));
+  const { initConfig } = await import("../dist/src/config.js");
+  const row = (type, payload) => ({ type, payload, timestamp: "2026-09-15T00:00:00.000Z" });
+  const usage = (total) => row("event_msg", {
+    type: "token_count", info: { last_token_usage: { input_tokens: total, total_tokens: total } }
+  });
+
+  for (const compressed of [false, true]) {
+    const codexDir = path.join(temp, compressed ? "compressed" : "plain");
+    const sessions = path.join(codexDir, "sessions");
+    mkdirSync(sessions, { recursive: true });
+    const suffix = compressed ? ".jsonl.zst" : ".jsonl";
+    const parentFile = path.join(sessions, `00-parent-alias${suffix}`);
+    const childFile = path.join(sessions, `01-child-alias${suffix}`);
+    const writeRollout = (filePath, records) => {
+      const source = Buffer.from(records.map(JSON.stringify).join("\n") + "\n");
+      writeFileSync(filePath, compressed ? zstdCompressSync(source) : source);
+    };
+    const parentMeta = row("session_meta", { id: "parent" });
+    const childRecords = [
+      row("session_meta", { id: "child", parent_thread_id: "00-parent-alias" }),
+      usage(1), usage(2),
+      row("event_msg", { type: "agent_message", message: "owned answer" }),
+      usage(3)
+    ];
+    writeRollout(parentFile, [parentMeta, usage(1), usage(2)]);
+    writeRollout(childFile, childRecords);
+
+    initConfig(["--codex-dir", codexDir]);
+    let now = Date.now();
+    const clock = t.mock.method(Date, "now", () => now);
+    const reads = new Map();
+    const readMethod = compressed ? "readFileSync" : "openSync";
+    const originalRead = fs[readMethod];
+    const reader = t.mock.method(fs, readMethod, (...args) => {
+      const filePath = path.resolve(String(args[0]));
+      reads.set(filePath, (reads.get(filePath) || 0) + 1);
+      return originalRead(...args);
+    });
+    syncBuiltinESMExports();
+    const { default: codex } = await import(`../dist/src/providers/codex/adapter.js?scan-summary-${compressed}`);
+    const scan = async () => {
+      const found = [];
+      for await (const session of codex.scan()) found.push(session);
+      return found;
+    };
+    try {
+      const initialSources = codex.getSearchIndexSources();
+      assert.deepEqual(initialSources.map((source) => source.sessionId), ["parent", "child"]);
+      assert.equal(JSON.parse(initialSources[1].revision)[1], "parent",
+        "the child revision uses the resolved canonical parent identity");
+      const initial = await scan();
+      assert.deepEqual(initial.map((session) => session.id), ["parent", "child"]);
+      assert.equal(initial[1].tokenCount, 3);
+      assert.equal(initial[1].parentId, "00-parent-alias");
+      const initialReads = new Map(reads);
+      const repeated = await scan();
+      assert.strictEqual(repeated[0], initial[0], "parent summary comes from indexing");
+      assert.strictEqual(repeated[1], initial[1], "legacy child summary is reused");
+      assert.deepEqual(reads, initialReads, "unchanged scan does not reread rollouts");
+      assert.deepEqual(codex.getSearchIndexSources(), initialSources);
+      assert.deepEqual(reads, initialReads, "source enumeration does not reload message bodies");
+
+      writeRollout(parentFile, [parentMeta, usage(1)]);
+      const held = await scan();
+      assert.equal(held[1].tokenCount, 3, "the indexed parent stays coherent within its refresh window");
+      assert.deepEqual(codex.getSearchIndexSources(), initialSources);
+      now += 2000;
+      const revised = await scan();
+      assert.equal(revised[1].tokenCount, 6, "parent rewrite changes child token ownership");
+      assert.notStrictEqual(revised[1], initial[1]);
+      assert.deepEqual(revised[1].libraryEvidence, initial[1].libraryEvidence);
+      assert.deepEqual(revised[1], {
+        ...codex.getSession("child"), libraryEvidence: revised[1].libraryEvidence
+      });
+      const revisedSources = codex.getSearchIndexSources();
+      assert.notEqual(revisedSources[0].revision, initialSources[0].revision);
+      assert.notEqual(revisedSources[1].revision, initialSources[1].revision,
+        "the child search revision includes its parent source revision");
+
+      writeRollout(childFile, [...childRecords, usage(4)]);
+      now += 2000;
+      const appended = await scan();
+      assert.equal(appended[1].tokenCount, 10, "child rewrite invalidates its own summary");
+      assert.notStrictEqual(appended[1], revised[1]);
+      const appendedSources = codex.getSearchIndexSources();
+      assert.equal(appendedSources[0].revision, revisedSources[0].revision);
+      assert.notEqual(appendedSources[1].revision, revisedSources[1].revision);
+
+      rmSync(childFile);
+      now += 2000;
+      assert.deepEqual((await scan()).map((session) => session.id), ["parent"]);
+      assert.deepEqual(codex.getSearchIndexSources().map((source) => source.sessionId), ["parent"]);
+    } finally {
+      reader.mock.restore();
+      clock.mock.restore();
+      syncBuiltinESMExports();
+    }
+  }
 });

@@ -88,15 +88,24 @@ If the metadata database changes between browse pages, restart that browse
 from its first page with a new cursor.
 
 `session_search` uses case-insensitive AND matching for whitespace-separated
-terms across titles, recorded directories, and visible message text. Terms do
-not need to be adjacent. Its optional `fields` selects `title`, `directory`,
-`user`, and/or `assistant`; `lineage` selects all, root, or child sessions.
-Omitting those options preserves the original search behavior. Use `directory`
-for an exact normalized project-path filter and `nextCursor` to continue a
-time-bounded result snapshot. Message hits identify their `matchRole`;
-metadata hits set it to `null`. Reasoning and tool payloads are excluded from
-normal search results. Default diagnostics include unavailable registered
-providers. `session_get` returns role and tool-name counts, first and last
+terms across titles, recorded directories, and user/assistant message text.
+Terms do not need to be adjacent. Its optional `fields` selects `title`,
+`directory`, `user`, `assistant`, and/or `toolName`; `lineage` selects all, root,
+or child sessions. By default, the first four fields are searched. Select
+`toolName` explicitly to locate tool calls across sessions; a tool-name hit
+returns an event reference with the `tool` segment. Use `directory` for an
+exact normalized project-path filter and `nextCursor` to continue a time-bounded
+result snapshot. Search cursors are tied to the derived index revision; restart
+from the first page if the index changes. Message hits identify their
+`matchRole`; metadata hits set it to `null`. Reasoning and tool payloads are
+excluded from normal search results. Default diagnostics include unavailable
+registered providers. Search maintains a derived copy of user/assistant
+message text and tool names in a local search database beside the AgentSession
+metadata database. It checks provider-owned source revisions before content queries and rebuilds
+changed sessions; the first build can take substantially longer than repeated
+queries and consume additional local disk space.
+
+`session_get` returns role and tool-name counts, first and last
 visible-message previews, and up to 50 direct child summaries by default
 (100 maximum). When
 `childrenTruncated` is true, pass `childrenNextCursor` as `childCursor` on the
