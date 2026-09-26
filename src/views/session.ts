@@ -1,4 +1,5 @@
 import { t } from "../i18n.js";
+import { createHash } from "node:crypto";
 import { escapeHtml } from "../markdown.js";
 import { buildPartsFromProviderMessages } from "../session-queries.js";
 import { questionAnswersText } from "../providers/shared/question-answers.js";
@@ -1039,6 +1040,7 @@ export function renderReaderProcessChunk(input: {
 
 function renderMessagePartsResult(message: any, depth = 0, provider = "opencode", initialReasoning: any[] = [], view: ConversationViewModel | null = null, placedCardIds: Set<string> | null = null, relations: ReaderRelationMarkup | null = null, ownedChildrenByPart: Map<string, OwnedReaderChildDescriptor[]> | null = null, deferExecution = true): any {
   const renderedParts: string[] = [];
+  const sourceMessageAnchors = new Set<string>();
   let executionParts: ConversationItem[] = [];
   const pendingReasoning = [...initialReasoning];
   let visibleCount = 0;
@@ -1113,6 +1115,10 @@ function renderMessagePartsResult(message: any, depth = 0, provider = "opencode"
       rendered = `${renderTurnReasoning(reasoningMarkup)}\n${rendered}`;
     } else if (rendered && reasoningMarkup && !rendered.includes(reasoningMarkup) && !(part.type === "text" && !part.data?.text)) {
       rendered = attachReasoningToRenderedPart(rendered, reasoningMarkup) || rendered;
+    }
+    if (rendered && part.type === "text" && part.sourceMessageId && part.sourceMessageId !== message.id && !sourceMessageAnchors.has(part.sourceMessageId)) {
+      sourceMessageAnchors.add(part.sourceMessageId);
+      rendered = `<span id="${escapeHtml(anchorId("msg", part.sourceMessageId))}" class="session-event-anchor" aria-hidden="true"></span>${rendered}`;
     }
     if (rendered) {
       const children = ownedChildrenByPart?.get(String(part.id)) || [];
@@ -1847,6 +1853,7 @@ interface ConversationItem {
   markupBeforeTrailingProcess?: string;
   trailingProcess?: ConversationItem;
   flatProcessMarkup?: string;
+  messageId?: string;
 }
 
 function isRecordedFinalItem(item: ConversationItem) {
@@ -1924,7 +1931,7 @@ function renderConversationSegmentItems(items: ConversationItem[]) {
  * checkpoints render exactly once, in both modes, and never as a message
  * group. The ToC reuses the same placement projection below.
  */
-function renderConversationThread(entries: ConversationEntry[], compactions: any[], provider: string, sessionId: string, view: ConversationViewModel | null = null) {
+function conversationThreadSegments(entries: ConversationEntry[], compactions: any[], provider: string, sessionId: string) {
   // Resolve each checkpoint to the entry index it follows and to one of the
   // explicit placement kinds: -1 means before the first entry; entries.length
   // means after the last (explicit end placement). The placement kind is
@@ -1948,6 +1955,7 @@ function renderConversationThread(entries: ConversationEntry[], compactions: any
         kind: "block",
         role: entry.role,
         html: entry.markup,
+        messageId: entry.messageId,
         presentationPhase: entry.presentationPhase,
         processOnly: entry.processOnly,
         hasMilestones: entry.hasMilestones,
@@ -1983,17 +1991,96 @@ function renderConversationThread(entries: ConversationEntry[], compactions: any
       ? `<header class="thread-turn-header"><span class="thread-turn-kicker">${escapeHtml(t("conversation.thread_turn"))} ${segment.userTurnIndex}</span></header>`
       : "";
     const turnClass = segment.userTurn ? " thread-turn-user" : " thread-turn-prelude";
-    return `<section class="thread-turn${turnClass}">${header}<div class="thread-turn-content">${renderConversationSegmentItems(segment.items)}</div></section>`;
-  }).join("\n");
+    return {
+      html: `<section class="thread-turn${turnClass}">${header}<div class="thread-turn-content">${renderConversationSegmentItems(segment.items)}</div></section>`,
+      messageIds: segment.items.map((item) => item.messageId).filter(Boolean) as string[]
+    };
+  });
 
   const trailing = byEntryIndex.get(entries.length) || [];
-  return trailing.length
-    ? `${thread}${thread ? "\n" : ""}${trailing.map((placed) => renderCompactionCheckpoint(placed.compaction, provider, sessionId, placed.placement)).join("\n")}`
-    : thread;
+  if (trailing.length) thread.push({
+    html: trailing.map((placed) => renderCompactionCheckpoint(placed.compaction, provider, sessionId, placed.placement)).join("\n"),
+    messageIds: []
+  });
+  return thread;
+}
+
+const CONVERSATION_SEGMENT_THRESHOLD = 160;
+const CONVERSATION_SEGMENT_MESSAGES = 48;
+
+function conversationSegments(entries: ConversationEntry[], compactions: any[], provider: string, sessionId: string) {
+  if (entries.length <= CONVERSATION_SEGMENT_THRESHOLD) return null;
+  const turns = conversationThreadSegments(entries, compactions, provider, sessionId);
+  const segments: Array<{ html: string; messageIds: string[]; anchors: string[]; revision: string }> = [];
+  let current: typeof turns = [];
+  let count = 0;
+  const finish = () => {
+    if (!current.length) return;
+    const html = current.map((turn) => turn.html).join("\n");
+    const anchors = [...html.matchAll(/\bid="([A-Za-z0-9_-]+)"/g)].map((match) => match[1]);
+    segments.push({
+      html,
+      messageIds: current.flatMap((turn) => turn.messageIds),
+      anchors,
+      revision: createHash("sha256").update(html).digest("hex").slice(0, 24)
+    });
+    current = [];
+    count = 0;
+  };
+  for (const turn of turns) {
+    if (current.length && count + turn.messageIds.length > CONVERSATION_SEGMENT_MESSAGES) finish();
+    current.push(turn);
+    count += turn.messageIds.length;
+  }
+  finish();
+  return segments.length > 1 ? segments : null;
+}
+
+function renderConversationThread(entries: ConversationEntry[], compactions: any[], provider: string, sessionId: string) {
+  return conversationThreadSegments(entries, compactions, provider, sessionId).map((turn) => turn.html).join("\n");
+}
+
+function conversationSegmentPlaceholder(segment: NonNullable<ReturnType<typeof conversationSegments>>[number], index: number, provider: string, sessionId: string) {
+  const url = `/api/${encodeURIComponent(provider)}/session/${encodeURIComponent(sessionId)}/reader/segment?index=${index}&revision=${segment.revision}`;
+  const commonAnchors = segment.anchors.filter((anchor) => /^msg[-_]/.test(anchor) || anchor.startsWith("checkpoint-"));
+  return `<div class="reader-conversation-segment reader-conversation-segment-placeholder" data-reader-conversation-segment data-reader-segment-index="${index}" data-reader-segment-url="${escapeHtml(url)}" data-reader-segment-anchors="${escapeHtml(commonAnchors.join(" "))}" data-reader-segment-loading="${escapeHtml(t("detail.reader_segment_loading"))}" data-reader-segment-failed="${escapeHtml(t("detail.reader_segment_failed"))}" data-reader-segment-changed="${escapeHtml(t("detail.reader_segment_changed"))}" data-reader-segment-state="unloaded"><button type="button" class="reader-segment-load" data-reader-segment-load>${escapeHtml(t("detail.reader_segment_load", { count: String(index + 1) }))}</button><span data-reader-segment-status role="status"></span></div>`;
+}
+
+function readerConversationSegments(input: Parameters<typeof renderSessionReaderPane>[0]) {
+  const projection = projectReaderConversation({
+    sessionTree: input.sessionTree || null,
+    ownedReader: input.ownedReader || null,
+    messages: input.messages || [],
+    partsByMessage: input.partsByMessage || new Map(),
+    provider: input.provider || "opencode",
+    conversationView: input.conversationView || null,
+    readerRelations: input.readerRelations || null,
+    readerExecutions: input.readerExecutions || null,
+    deferExecution: input.deferExecution ?? true
+  });
+  return conversationSegments(projection.entries, input.conversationCompactions || [], input.provider || "opencode", String(input.session.id));
+}
+
+export function renderSessionReaderSegment(input: Parameters<typeof renderSessionReaderPane>[0], index: number, revision: string) {
+  const segments = readerConversationSegments(input);
+  const segment = segments?.[index];
+  if (!segment) return { ok: false as const, code: "segment_not_found" as const };
+  if (segment.revision !== revision) return { ok: false as const, code: "stale_segment" as const };
+  return { ok: true as const, html: segment.html, index, revision };
+}
+
+export function locateSessionReaderSegment(input: Parameters<typeof renderSessionReaderPane>[0], anchor: string) {
+  const segments = readerConversationSegments(input);
+  return segments?.findIndex((segment) => segment.anchors.includes(anchor)) ?? -1;
 }
 
 function renderConversationPanel(entries: ConversationEntry[], compactions: any[], provider: string, sessionId: string, detachedMarkup = "", normalizedMessageCount = entries.length, view: ConversationViewModel | null = null, placedCardIds: Set<string> | null = null, relations: ReaderRelationMarkup | null = null) {
-  const threadMarkup = renderConversationThread(entries, compactions, provider, sessionId, view);
+  const segments = conversationSegments(entries, compactions, provider, sessionId);
+  const threadMarkup = segments
+    ? segments.map((segment, index) => index === 0
+      ? `<div class="reader-conversation-segment" data-reader-conversation-segment data-reader-segment-index="0" data-reader-segment-state="loaded">${segment.html}</div>`
+      : conversationSegmentPlaceholder(segment, index, provider, sessionId)).join("\n")
+    : renderConversationThread(entries, compactions, provider, sessionId);
   // P2b truthful fallback: view-model cards without a real transcript/part
   // binding (e.g. run/task records whose ids name no tree part) render
   // exactly once in an explicitly unplaced section, never at an invented
@@ -2190,6 +2277,29 @@ function renderReaderRelationshipRail(view: ConversationViewModel | null, provid
   </details>`;
 }
 
+function projectReaderConversation({ sessionTree, ownedReader, messages, partsByMessage, provider,
+  conversationView, readerRelations, readerExecutions, deferExecution }: {
+  sessionTree: SessionTree | null; ownedReader: OwnedReaderProjection | null; messages: any[];
+  partsByMessage: Map<any, any>; provider: string; conversationView: ConversationViewModel | null;
+  readerRelations: ReaderRelations | null; readerExecutions: ReaderExecutions | null; deferExecution: boolean;
+}) {
+  const placedCardIds = new Set<string>();
+  const relationMarkup = appendReaderExecutionMarkers(renderReaderRelations(readerRelations), readerExecutions);
+  const effectiveTree = ownedReader?.rootTree || sessionTree;
+  const ownedChildrenByPart = new Map<string, OwnedReaderChildDescriptor[]>();
+  for (const child of ownedReader?.children || []) {
+    if (child.parentPartId) {
+      const entries = ownedChildrenByPart.get(child.parentPartId) || [];
+      entries.push(child);
+      ownedChildrenByPart.set(child.parentPartId, entries);
+    }
+  }
+  const entries = effectiveTree
+    ? renderSessionMessageEntries(effectiveTree, 0, provider, conversationView, placedCardIds, relationMarkup, ownedChildrenByPart, deferExecution)
+    : renderRawMessageEntries(messages, partsByMessage, provider, "msg", relationMarkup);
+  return { entries, placedCardIds, relationMarkup, effectiveTree };
+}
+
 /** Render the reusable, page-shell-free reader fragment for one canonical session. */
 export function renderSessionReaderPane({
   session,
@@ -2211,22 +2321,11 @@ export function renderSessionReaderPane({
   deferExecution = true
 }: { session: any; sessionTree?: SessionTree | null; ownedReader?: OwnedReaderProjection | null; messages?: any[]; partsByMessage?: Map<any, any>; provider?: string; conversationCompactions?: ConversationCompaction[]; conversationView?: ConversationViewModel | null; readerTeams?: ReaderTeamDirectoryPage | null; readerRelations?: ReaderRelations | null; readerExecutions?: ReaderExecutions | null; inheritedContext?: InheritedContextView | null; contextArtifacts?: ContextArtifact[]; contextArtifactSourceState?: ContextArtifactSourceState | null; canReadContextArtifacts?: boolean; canReadContextArtifactEvidence?: boolean; deferExecution?: boolean }) {
   const title = session.title || session.slug || session.id;
-  const placedCardIds = new Set<string>();
+  const projection = projectReaderConversation({ sessionTree, ownedReader, messages, partsByMessage, provider,
+    conversationView, readerRelations, readerExecutions, deferExecution });
+  const { entries: conversationEntries, placedCardIds, relationMarkup, effectiveTree } = projection;
   const childNames = new Map((readerRelations?.lanes || []).filter((lane) => lane.childSession && lane.name)
     .map((lane) => [`${lane.childSession!.provider}\u0000${lane.childSession!.sessionId}`, lane.name!]));
-  const relationMarkup = appendReaderExecutionMarkers(renderReaderRelations(readerRelations), readerExecutions);
-  const effectiveTree = ownedReader?.rootTree || sessionTree;
-  const ownedChildrenByPart = new Map<string, OwnedReaderChildDescriptor[]>();
-  for (const child of ownedReader?.children || []) {
-    if (child.parentPartId) {
-      const entries = ownedChildrenByPart.get(child.parentPartId) || [];
-      entries.push(child);
-      ownedChildrenByPart.set(child.parentPartId, entries);
-    }
-  }
-  const conversationEntries = effectiveTree
-    ? renderSessionMessageEntries(effectiveTree, 0, provider, conversationView, placedCardIds, relationMarkup, ownedChildrenByPart, deferExecution)
-    : renderRawMessageEntries(messages, partsByMessage, provider, "msg", relationMarkup);
   const renderedEntryCount = conversationEntries.filter((entry) => entry.markup).length;
   const detachedMarkup = effectiveTree
     ? [

@@ -334,7 +334,7 @@ export function getTodos(sessionId: any, pathOverride: string | undefined = unde
   `).all(sessionId);
 }
 
-export function searchMessages(query: any, limit = 20, pathOverride: string | undefined = undefined, excludedIds: Set<string> | undefined = undefined) {
+export function searchMessages(query: any, limit = 20, pathOverride: string | undefined = undefined, excludedIds: Set<string> | undefined = undefined, offset = 0, includeAllStoredSessions = false, includeChildSessions = false) {
   const db = getDb(pathOverride);
   const term = query?.trim();
 
@@ -359,16 +359,15 @@ export function searchMessages(query: any, limit = 20, pathOverride: string | un
     FROM part
     JOIN message ON message.id = part.message_id
     JOIN session ON session.id = part.session_id
-    WHERE session.time_archived IS NULL
-      AND session.parent_id IS NULL
+    WHERE ${includeAllStoredSessions ? "1 = 1" : includeChildSessions ? "session.time_archived IS NULL" : "session.time_archived IS NULL AND session.parent_id IS NULL"}
       AND json_extract(part.data, '$.type') = 'text'
       ${searchTerms.map(() => "AND COALESCE(json_extract(part.data, '$.text'), '') LIKE ? ESCAPE '\\'").join("\n      ")}
       ${excludedClause}
     ORDER BY session.time_updated DESC,
              COALESCE(CAST(json_extract(message.data, '$.time.created') AS INTEGER), 0) DESC,
              part.id DESC
-    LIMIT ?
-  `).all(...searchTerms.map((searchTerm) => `%${searchTerm}%`), ...excluded, limit);
+    LIMIT ? OFFSET ?
+  `).all(...searchTerms.map((searchTerm) => `%${searchTerm}%`), ...excluded, limit, offset);
 
   return rows.map((row: any) => {
     const partData = parseJson(row.part_data) || {};

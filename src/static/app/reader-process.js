@@ -1,4 +1,5 @@
 import { readerPaneAnchor, scopeReaderFragment } from "./reader-pane-dom.js";
+import { ensureReaderSegmentAnchor } from "./reader-segments.js";
 
 const pendingChunks = new WeakMap();
 
@@ -54,7 +55,7 @@ export function loadReaderProcess(chunk) {
 }
 
 export async function ensureReaderAnchor(pane, canonicalAnchor) {
-  const anchor = readerPaneAnchor(pane, canonicalAnchor);
+  const anchor = readerPaneAnchor(pane, canonicalAnchor) || await ensureReaderSegmentAnchor(pane, canonicalAnchor);
   const chunk = anchor?.closest("[data-reader-process-chunk]");
   if (!chunk || chunk.dataset.readerProcessState === "loaded") return anchor;
   if (!await loadReaderProcess(chunk)) return null;

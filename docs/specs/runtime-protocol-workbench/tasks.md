@@ -1,5 +1,9 @@
 # Runtime Protocol Workbench implementation tasks
 
+This records the earlier seven-provider implementation. AgentSession 2.0
+supports five providers; see the [2.0 scope and delivery plan](../../design/agentsession-v2-provider-scope.md)
+for the current support boundary.
+
 Status values: `[ ]` pending, `[-]` active, `[x]` complete, `[N/A]` retired or
 not applicable
 

@@ -3,8 +3,6 @@ import type { ProviderAdapter } from "./interface.js";
 import opencode from "./opencode/adapter.js";
 import claudeCode from "./claude-code/adapter.js";
 import codex from "./codex/adapter.js";
-import openclaw from "./openclaw/adapter.js";
-import hermes from "./hermes/adapter.js";
 import pi from "./pi/adapter.js";
 import deepseekHarness from "./deepseek-harness/adapter.js";
 
@@ -12,8 +10,6 @@ const ALL_PROVIDERS: readonly ProviderAdapter[] = [
   opencode,
   claudeCode,
   codex,
-  openclaw,
-  hermes,
   pi,
   deepseekHarness
 ];

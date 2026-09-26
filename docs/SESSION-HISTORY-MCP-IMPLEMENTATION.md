@@ -29,7 +29,7 @@ untrusted content, not instructions.
 The server exposes exactly five bounded tools:
 
 - `session_search` — keyword search over title, message text, and recorded directory;
-- `session_get` — canonical session metadata with first/last visible-message previews;
+- `session_get` — canonical session metadata with first/last visible-message previews and paged direct-child summaries (`childCursor`, `childLimit`, `childrenNextCursor`, `childrenTruncated`);
 - `session_timeline` — bounded message, reasoning, and tool event timeline;
 - `session_get_context` — bounded context around a canonical event;
 - `session_get_event` — one event with continuation parameters when content is truncated.
@@ -40,8 +40,9 @@ filters. A session still present in provider storage remains queryable.
 ## Provider and identity rules
 
 The MCP uses the same provider registry and configuration paths as AgentSession.
-The current ProviderId set is `opencode`, `claude-code`, `codex`, `openclaw`,
-`hermes`, `pi`, and `deepseek-harness`.
+The AgentSession 2.0 ProviderId set is `opencode`, `claude-code`, `codex`,
+`pi`, and `deepseek-harness`. OpenClaw and Hermes Agent references are not
+accepted by the 2.0 MCP.
 
 All public identifiers use structured references:
 
@@ -62,7 +63,9 @@ Search uses case-insensitive AND matching for whitespace-separated keywords.
 Timeline, context, and event content are length-limited and server-capped.
 Reasoning, tool input, and tool output are returned only when explicitly
 requested. Truncation includes reusable continuation offsets until no further
-content remains. Provider diagnostics remain visible without exposing secrets,
+content remains. Direct child lists use a 50-item default and a 100-item hard
+limit per call; the returned cursor makes every indexed child reachable.
+Provider diagnostics remain visible without exposing secrets,
 full command arguments, cookies, tokens, or other credentials.
 
 ## Configuration and installation

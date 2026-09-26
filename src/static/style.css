@@ -358,6 +358,7 @@ body {
 }
 
 .session-card {
+  scroll-margin-top: 88px;
   background-color: var(--bg-primary);
   border-radius: 12px;
   box-shadow: var(--shadow-sm);
@@ -466,6 +467,36 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   margin-bottom: 12px;
+}
+
+.session-card-match {
+  display: block;
+  margin: -4px 0 12px;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.session-card-match:hover .session-card-match-snippet {
+  text-decoration: underline;
+}
+
+.session-card-match:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+.session-card-match-label {
+  display: block;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.session-card-match-snippet {
+  display: block;
 }
 
 .session-card-stats {
@@ -1977,6 +2008,30 @@ details[open] summary {
 /* Thread spine: one spine section per user turn; Linear flattens it. */
 .conversation-thread {
   gap: 0;
+}
+
+.reader-conversation-segment {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+.reader-conversation-segment-placeholder {
+  min-height: 52px;
+  align-items: flex-start;
+  padding: 10px 16px;
+  border-left: 2px solid var(--border-color);
+  color: var(--text-muted);
+}
+
+.reader-segment-load {
+  color: var(--accent-color);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  padding: 4px 0;
 }
 
 .conversation-thread .thread-turn {

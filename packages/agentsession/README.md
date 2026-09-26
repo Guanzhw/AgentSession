@@ -1,8 +1,9 @@
 # AgentSession
 
-AgentSession is a local-first, read-only harness runtime inspector for
-OpenCode, Claude Code, Codex CLI, OpenClaw, Hermes Agent, Pi, and DeepSeek
-Harness.
+AgentSession 2.0 is a local-first, read-only harness runtime inspector for
+OpenCode, Claude Code, Codex CLI, Pi, and DeepSeek Harness. OpenClaw and Hermes
+Agent were last included in published v1.10.1 and are fully removed from the
+2.0 Viewer and MCP. Old provider URLs are incompatible with 2.0.
 
 It reads provider-owned session data and exposes the Runtime Workbench:
 `Overview | Conversation | Runtime | Raw`, with Summary, Events, Work,
@@ -36,6 +37,7 @@ Requires Node.js `>= 22.15.0`. Project-directory mappings use top-level
 `projectPaths`; terminal launching is limited to structured provider resume
 commands and can be disabled with `--disable-terminal-launch`.
 
-See the [repository README](../../README.en.md) and [provider contribution
-guide](../../docs/CONTRIBUTING-PROVIDER.md) for installation, configuration,
-provider coverage, and DSH rc.8 compatibility details.
+See the [repository README](../../README.en.md), [provider contribution
+guide](../../docs/CONTRIBUTING-PROVIDER.md), and [2.0 provider scope and
+migration plan](../../docs/design/agentsession-v2-provider-scope.md) for
+installation, configuration, provider coverage, and migration details.

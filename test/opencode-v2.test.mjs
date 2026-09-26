@@ -100,6 +100,21 @@ test('fork copied prefix is disclosed separately and never double-counted as own
   assert.ok(v2.searchMessages('channel').every(result => result.sessionId !== 'fork'));
 });
 
+test('v2 search iterator reaches later messages with the same source IDs as paged search', t => {
+  const { v2, add, now } = fixture(t);
+  for (let index = 0; index < 105; index++) {
+    add(`needle-${index}`, 'user', index + 10, { text: `needle ${index}` }, now);
+  }
+  add('archived-needle', 'user', 1, { text: 'needle archived' }, now, 'archived');
+  const streamed = [...v2.iterateSearchMessages('needle')].map(({ session, match }) => ({
+    sessionId: session.id,
+    messageId: match.messageId
+  }));
+  assert.equal(streamed.length, 105);
+  assert.deepEqual(streamed.slice(100, 105), v2.searchMessages('needle', 5, 100).map(({ sessionId, messageId }) => ({ sessionId, messageId })));
+  assert.equal(streamed.at(-1).messageId, 'needle-104');
+});
+
 test('fork inherited history remains available across Reader pages beyond 200 messages', t => {
   const { v2, add, now } = fixture(t);
   for (let index = 0; index < 205; index++) {
@@ -206,7 +221,6 @@ async function server(fixtureData) {
   const port = 39000 + Math.floor(Math.random() * 15000);
   const child = spawn(process.execPath, ['dist/bin/cli.js', '--opencode-db', file, '--pi-dir', pi,
     '--claude-dir', unavailable, '--codex-dir', unavailable, '--dsh-dir', unavailable,
-    '--openclaw-dir', unavailable, '--hermes-dir', unavailable,
     '--port', String(port), '--disable-terminal-launch'], {
     env: { ...process.env, AGENTSESSION_META_PATH: path.join(dir, 'meta.db'), AGENTSESSION_CONFIG: path.join(dir, 'config.json') }, stdio: ['ignore', 'pipe', 'pipe']
   });

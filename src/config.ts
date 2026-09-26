@@ -78,20 +78,6 @@ function defaultDshDir() {
   return probePaths([configured, fallback].filter(Boolean), fallback);
 }
 
-function defaultOpenClawDir() {
-  const home = os.homedir();
-  const fallback = path.join(home, ".openclaw");
-  return probePaths([process.env.OPENCLAW_STATE_DIR, process.env.OPENCLAW_HOME && path.join(process.env.OPENCLAW_HOME, ".openclaw"), fallback].filter(Boolean), fallback);
-}
-
-function defaultHermesDir() {
-  const home = os.homedir();
-  const fallback = process.platform === "win32"
-    ? path.join(process.env.LOCALAPPDATA || path.join(home, "AppData", "Local"), "hermes")
-    : path.join(home, ".hermes");
-  return probePaths([process.env.HERMES_HOME, fallback].filter(Boolean), fallback);
-}
-
 const defaults = {
   port: 3456,
   dbPath: defaultDbPath(),
@@ -102,8 +88,6 @@ const defaults = {
   codexDir: defaultCodexDir(),
   piDir: defaultPiDir(),
   dshDir: defaultDshDir(),
-  openclawDir: defaultOpenClawDir(),
-  hermesDir: defaultHermesDir(),
   reindex: false,
   allowTerminalLaunch: true,
   mcp: {
@@ -225,13 +209,19 @@ function normalizeUserConfig(config: any) {
   normalized.projectPaths = normalizeProjectPaths(config);
   delete normalized.projectPaths.copilot;
   delete normalized.projectPaths.gemini;
+  delete normalized.projectPaths.openclaw;
+  delete normalized.projectPaths.hermes;
   if (isObject(normalized.resumeCommands)) {
     normalized.resumeCommands = { ...normalized.resumeCommands };
     delete normalized.resumeCommands.copilot;
     delete normalized.resumeCommands.gemini;
+    delete normalized.resumeCommands.openclaw;
+    delete normalized.resumeCommands.hermes;
   }
   delete normalized.copilotDir;
   delete normalized.geminiDir;
+  delete normalized.openclawDir;
+  delete normalized.hermesDir;
   delete normalized.analysis;
   return normalized;
 }
@@ -403,11 +393,12 @@ export function writeUserConfig(configPath: any, config: any) {
 }
 
 export function applyRuntimeUserConfig(config: any, fileConfig: any) {
-  config.resumeCommands = isObject(fileConfig.resumeCommands) ? fileConfig.resumeCommands : {};
-  config.resumeShell = isObject(fileConfig.resumeShell) ? fileConfig.resumeShell : null;
-  config.projectPaths = normalizeProjectPaths(fileConfig);
-  config.tokenPricing = isObject(fileConfig.tokenPricing) ? fileConfig.tokenPricing : {};
-  config.mcp = normalizeMcpConfig(fileConfig.mcp);
+  const normalized = normalizeUserConfig(fileConfig);
+  config.resumeCommands = isObject(normalized.resumeCommands) ? normalized.resumeCommands : {};
+  config.resumeShell = isObject(normalized.resumeShell) ? normalized.resumeShell : null;
+  config.projectPaths = normalized.projectPaths;
+  config.tokenPricing = isObject(normalized.tokenPricing) ? normalized.tokenPricing : {};
+  config.mcp = normalizeMcpConfig(normalized.mcp);
   return config;
 }
 
@@ -460,10 +451,8 @@ export function parseArgs(argv = process.argv.slice(2)) {
       config.piDir = argv[++i];
     } else if (argv[i] === "--dsh-dir" && argv[i + 1]) {
       config.dshDir = argv[++i];
-    } else if (argv[i] === "--openclaw-dir" && argv[i + 1]) {
-      config.openclawDir = argv[++i];
-    } else if (argv[i] === "--hermes-dir" && argv[i + 1]) {
-      config.hermesDir = argv[++i];
+    } else if (argv[i] === "--openclaw-dir" || argv[i] === "--hermes-dir") {
+      throw new Error(`${argv[i]} is unavailable: OpenClaw and Hermes are not supported in AgentSession 2.0.`);
     } else if (argv[i] === "--reindex") {
       config.reindex = true;
     } else if (argv[i] === "--disable-terminal-launch") {
@@ -486,8 +475,6 @@ Options:
   --codex-dir <path>    Path to Codex data dir (default: ~/.codex)
   --pi-dir <path>       Path to Pi agent data dir (default: ~/.pi/agent)
   --dsh-dir <path>      Path to DeepSeek Harness data dir (default: $DSH_HOME or ~/.dsh)
-  --openclaw-dir <path> Path to OpenClaw state dir (default: ~/.openclaw)
-  --hermes-dir <path>   Path to Hermes Agent data dir
   --config <path>       Path to AgentSession JSON config
   --disable-terminal-launch
                         Disable resume command launching

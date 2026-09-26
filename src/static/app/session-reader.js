@@ -345,6 +345,9 @@ export function initSessionReader({ ft, showToast } = {}) {
       link.setAttribute("href", `/${encodeURIComponent(providerOf(pane))}/session/${encodeURIComponent(sessionOf(pane))}#${encodeURIComponent(anchor)}`);
     });
   };
+  workbench.addEventListener("session-reader:segment-loaded", (event) => {
+    if (event.detail?.pane) preserveCanonicalSourceLinks(event.detail.pane);
+  });
 
   const originIdentity = (origin) => {
     if (!origin?.dataset) return "";
@@ -1445,8 +1448,7 @@ export function initSessionReader({ ft, showToast } = {}) {
   syncCollaborationLayout();
   const initialRevision = swapRevision;
   if (initial && (inlineStackFrom(history.state).length || new URLSearchParams(location.search).has("readerSource")
-    || new URLSearchParams(location.search).has("readerEvent")
-    || location.hash && readerPaneAnchor(initial, decodeURIComponent(location.hash.slice(1))))) queueMicrotask(async () => {
+    || new URLSearchParams(location.search).has("readerEvent") || location.hash)) queueMicrotask(async () => {
     if (initialRevision !== swapRevision) return;
     await applyInlineStack(inlineStackFrom(history.state), { rootIdentity: history.state?.readerInlineRoot });
     if (initialRevision === swapRevision) await replayLocation();

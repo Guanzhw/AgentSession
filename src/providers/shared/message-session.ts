@@ -31,6 +31,7 @@ function loopEventToPart(event: AgentLoopEvent, turnId: string, sessionId: strin
     return {
       id: event.id,
       messageId: turnId,
+      sourceMessageId: event.sourceMessageId,
       sessionId,
       type: "reasoning",
       tool: null,
@@ -44,6 +45,7 @@ function loopEventToPart(event: AgentLoopEvent, turnId: string, sessionId: strin
     return {
       id: event.id,
       messageId: turnId,
+      sourceMessageId: event.sourceMessageId,
       sessionId,
       type: "text",
       tool: null,
@@ -56,6 +58,7 @@ function loopEventToPart(event: AgentLoopEvent, turnId: string, sessionId: strin
   return {
     id: event.id,
     messageId: turnId,
+    sourceMessageId: event.sourceMessageId,
     sessionId,
     type: "tool",
     tool: event.tool || "tool",

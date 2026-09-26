@@ -22,6 +22,7 @@ import { finalizeSessionProtocolV3 } from "../shared/session-protocol-v3.js";
 import {
   createSessionFileStore,
   searchNormalizedMessages,
+  iterateNormalizedMessageSearch,
   createStructuredViewCache,
   createStructuredViewMethods,
   createIncrementalTokenStats,
@@ -278,8 +279,12 @@ const claudeCode = {
     return sessionFiles.getStatsRevision();
   },
 
-  searchMessages(query, limit = 20) {
-    return searchNormalizedMessages(sessionFiles.list(), query, limit);
+  searchMessages(query, limit = 20, offset = 0) {
+    return searchNormalizedMessages(sessionFiles.list(), query, limit, offset);
+  },
+
+  *iterateSearchMessages(query) {
+    yield* iterateNormalizedMessageSearch(sessionFiles.list(), query);
   },
 
   ...createStructuredViewMethods(getClaudeViews),

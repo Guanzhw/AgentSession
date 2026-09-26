@@ -14,7 +14,7 @@ import {
   supportsSystemPromptEvidence,
 } from "../providers/kinds.js";
 import { getResumeCommand } from "../resume.js";
-import { renderSessionPage, renderSessionReaderPane, renderReaderProcessChunk, renderInheritedContextPage, renderSessionMetricsPanel } from "../views/session.js";
+import { renderSessionPage, renderSessionReaderPane, renderSessionReaderSegment, locateSessionReaderSegment, renderReaderProcessChunk, renderInheritedContextPage, renderSessionMetricsPanel } from "../views/session.js";
 import type { ContextArtifactEvidenceRequest, ContextArtifactEvidenceResult, SessionProtocol } from "../providers/shared/session-protocol.js";
 import type { ContextChangeResult, SessionReaderSnapshot } from "../providers/interface.js";
 import { decorateRuntimeTransformationEvidence, projectRuntimeLanePresentation, renderRuntimeEvents, renderRuntimeRunPage, renderRuntimeWorkbench } from "../views/runtime-workbench.js";
@@ -156,7 +156,7 @@ export function registerSessionDetail(
   // Keeping the normalized tree, runtime compactions, inherited context and
   // conversation projection together makes both consumers render the same
   // reader input and keeps child loading on the existing provider boundary.
-  const prepareReader = (adapter: any, providerId: string, sessionId: string, document: any, runPageOptions: { cursor?: string | null; limit?: string | null } = {}, captured?: SessionReaderSnapshot) => {
+  const prepareReader = (adapter: any, providerId: string, sessionId: string, document: any, runPageOptions: { cursor?: string | null; limit?: string | null } = {}, captured?: SessionReaderSnapshot, renderPane = true) => {
     const runtime = runtimeRenderData(adapter, sessionId, document.session, runPageOptions, captured);
     const conversationView = runtime.v3 && runtime.projections
       ? deriveConversationView({
@@ -189,7 +189,7 @@ export function registerSessionDetail(
       deferExecution: !supportsSessionProtocol(adapter) || Boolean(runtime.v3),
       inheritedContext: captured ? captured.inheritedContext : adapter.getInheritedContext?.(sessionId) || null
     };
-    return { runtime, readerPane: renderSessionReaderPane(readerInput) };
+    return { runtime, readerInput, readerPane: renderPane ? renderSessionReaderPane(readerInput) : "" };
   };
 
   const runtimeError = (res: any, error: unknown, options: { protocolInvalid?: boolean } = {}) => {
@@ -454,6 +454,60 @@ export function registerSessionDetail(
     } catch (err: any) {
       console.error(`Reader route error: ${err.message}`);
       return json(res, { ok: false, error: "Internal server error" }, 500);
+    }
+  });
+
+  app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/reader\/segment$/, async (req: any, res: any, match: RegExpMatchArray) => {
+    const providerId = match[1];
+    const sessionId = safeDecodeId(match[2]);
+    const adapter = providerMap.get(providerId);
+    if (!adapter) {
+      const missing = missingProviderResponse(providerId);
+      return json(res, missing.body, missing.status);
+    }
+    const params = new URL(req.url || "/", `http://localhost:${appConfig.port}`).searchParams;
+    const indexText = params.get("index") || "";
+    const revision = params.get("revision") || "";
+    if (!sessionId || !/^(?:0|[1-9][0-9]{0,5})$/.test(indexText) || !/^[a-f0-9]{24}$/.test(revision)) {
+      return json(res, { ok: false, error: "Invalid conversation segment", code: "invalid_input" }, 400);
+    }
+    try {
+      const captured = adapter.getSessionReaderSnapshot?.(sessionId);
+      const document = getSessionDocument(adapter, providerId, sessionId, captured);
+      if (!document) return json(res, { ok: false, error: "Session not found", code: "session_not_found" }, 404);
+      const reader = prepareReader(adapter, providerId, sessionId, document, {}, captured, false);
+      const segment = renderSessionReaderSegment(reader.readerInput, Number(indexText), revision);
+      if (!segment.ok) return json(res, { ok: false, error: segment.code, code: segment.code }, segment.code === "stale_segment" ? 409 : 404);
+      return json(res, { ...segment, provider: providerId, sessionId });
+    } catch (error) {
+      console.error(`Conversation segment route error: ${error instanceof Error ? error.message : String(error)}`);
+      return json(res, { ok: false, error: "Unable to load conversation segment", code: "segment_failed" }, 500);
+    }
+  });
+
+  app.get(/^\/api\/([a-z][a-z0-9-]*)\/session\/([^/]+)\/reader\/segment-location$/, async (req: any, res: any, match: RegExpMatchArray) => {
+    const providerId = match[1];
+    const sessionId = safeDecodeId(match[2]);
+    const adapter = providerMap.get(providerId);
+    if (!adapter) {
+      const missing = missingProviderResponse(providerId);
+      return json(res, missing.body, missing.status);
+    }
+    const anchor = new URL(req.url || "/", `http://localhost:${appConfig.port}`).searchParams.get("anchor") || "";
+    if (!sessionId || !/^[A-Za-z0-9_-]{1,4096}$/.test(anchor)) {
+      return json(res, { ok: false, error: "Invalid conversation anchor", code: "invalid_input" }, 400);
+    }
+    try {
+      const captured = adapter.getSessionReaderSnapshot?.(sessionId);
+      const document = getSessionDocument(adapter, providerId, sessionId, captured);
+      if (!document) return json(res, { ok: false, error: "Session not found", code: "session_not_found" }, 404);
+      const reader = prepareReader(adapter, providerId, sessionId, document, {}, captured, false);
+      const index = locateSessionReaderSegment(reader.readerInput, anchor);
+      if (index < 0) return json(res, { ok: false, error: "Anchor not found", code: "anchor_not_found" }, 404);
+      return json(res, { ok: true, index });
+    } catch (error) {
+      console.error(`Conversation segment location error: ${error instanceof Error ? error.message : String(error)}`);
+      return json(res, { ok: false, error: "Unable to locate conversation anchor", code: "segment_failed" }, 500);
     }
   });
 

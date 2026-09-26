@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   findIndexedSessionMetadata,
   getIndexedSessionChildren,
@@ -21,6 +22,8 @@ const HARD_LIMITS = {
   queryChars: 500,
   previewChars: 240
 };
+const DEFAULT_CHILD_LIMIT = 50;
+const MAX_CHILD_LIMIT = 100;
 
 export type EventSegment = typeof EVENT_SEGMENTS[number];
 export type EventStatus = typeof EVENT_STATUSES[number];
@@ -286,25 +289,40 @@ function decodeCursor(cursor: unknown, fingerprint: string): number {
   }
 }
 
-function encodeSearchCursor(offset: number, fingerprint: string, snapshotUpdatedBefore: number): string {
-  return Buffer.from(JSON.stringify({ version: 1, offset, fingerprint, snapshotUpdatedBefore }), "utf8").toString("base64url");
+interface SearchPosition { rank: number; updatedAt: number; key: string }
+
+function encodeSearchCursor(after: SearchPosition, fingerprint: string, snapshotUpdatedBefore: number): string {
+  return Buffer.from(JSON.stringify({
+    version: 3,
+    after: { rank: after.rank, updatedAt: after.updatedAt, key: after.key },
+    fingerprint,
+    snapshotUpdatedBefore
+  }), "utf8").toString("base64url");
 }
 
-function decodeSearchCursor(cursor: unknown, fingerprint: string): { offset: number; snapshotUpdatedBefore: number } {
+function decodeSearchCursor(cursor: unknown, fingerprint: string): { after: SearchPosition; snapshotUpdatedBefore: number } {
   if (typeof cursor !== "string" || !cursor) {
     throw new SessionHistoryError("invalid_cursor", "cursor must be an opaque cursor returned by session_search.");
   }
   try {
     const payload = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
-    if (payload?.version !== 1 || !Number.isInteger(payload.offset) || payload.offset < 0
+    if (payload?.version !== 3 || !Number.isInteger(payload.after?.rank) || payload.after.rank < 0 || payload.after.rank > 2
+      || typeof payload.after?.updatedAt !== "number" || !Number.isFinite(payload.after.updatedAt)
+      || typeof payload.after?.key !== "string" || !payload.after.key
       || typeof payload.snapshotUpdatedBefore !== "number" || !Number.isFinite(payload.snapshotUpdatedBefore)
       || payload.fingerprint !== fingerprint) {
       throw new Error("mismatch");
     }
-    return { offset: payload.offset, snapshotUpdatedBefore: payload.snapshotUpdatedBefore };
+    return { after: payload.after, snapshotUpdatedBefore: payload.snapshotUpdatedBefore };
   } catch {
     throw new SessionHistoryError("invalid_cursor", "cursor is invalid for this search request.");
   }
+}
+
+interface SearchCandidate extends SearchPosition { value: Record<string, unknown> }
+
+function compareSearchCandidates(left: SearchPosition, right: SearchPosition): number {
+  return left.rank - right.rank || right.updatedAt - left.updatedAt || left.key.localeCompare(right.key);
 }
 
 function pageText(value: unknown, offset: number, maxChars: number) {
@@ -352,10 +370,6 @@ function sessionSummary(provider: ProviderId, session: RawSession | Record<strin
       ? { provider, sessionId: String(raw.parentId ?? raw.parent_id) }
       : null
   };
-}
-
-function indexedSessionSummary(provider: ProviderId, session: Record<string, unknown>) {
-  return sessionSummary(provider, session);
 }
 
 function isWithinRange(updatedAt: number, updatedAfter: number | undefined, updatedBefore: number | undefined) {
@@ -455,12 +469,26 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
       const available = availableProviderMap();
       const selectedIds = requestedProviders
         || [...new Set(allProviders().map((provider) => provider.id))];
-      const fingerprint = cursorFingerprint({ query, providers: selectedIds, updatedAfter, updatedBefore: requestedUpdatedBefore, directory });
+      const fingerprint = createHash("sha256").update(cursorFingerprint({
+        query, providers: selectedIds, availableProviders: selectedIds.filter((id) => available.has(id)),
+        updatedAfter, updatedBefore: requestedUpdatedBefore, directory
+      })).digest("base64url");
       const cursorPage = input?.cursor === undefined ? null : decodeSearchCursor(input.cursor, fingerprint);
-      const offset = cursorPage?.offset || 0;
       const updatedBefore = cursorPage?.snapshotUpdatedBefore ?? requestedUpdatedBefore ?? Date.now();
       const diagnostics: ProviderDiagnostic[] = [];
-      const results = new Map<string, { key: string; rank: number; value: Record<string, unknown> }>();
+      const pageCapacity = limit + 1;
+      const results = new Map<string, SearchCandidate>();
+
+      const retain = (pool: Map<string, SearchCandidate>, candidate: SearchCandidate) => {
+        if (cursorPage && compareSearchCandidates(candidate, cursorPage.after) <= 0) return;
+        const existing = pool.get(candidate.key);
+        if (existing && compareSearchCandidates(existing, candidate) <= 0) return;
+        pool.set(candidate.key, candidate);
+        if (pool.size > pageCapacity) {
+          const worst = [...pool.values()].sort(compareSearchCandidates).at(-1);
+          if (worst) pool.delete(worst.key);
+        }
+      };
 
       for (const providerId of selectedIds) {
         const provider = available.get(providerId);
@@ -470,44 +498,72 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
         }
         const startedAt = Date.now();
         const perProviderLimit = HARD_LIMITS.searchLimit;
+        const providerResults = new Map<string, SearchCandidate>();
+        const sessionCache = new Map<string, RawSession | Record<string, unknown> | null>();
+        const cachedSession = (sessionId: string) => {
+          if (sessionCache.has(sessionId)) return sessionCache.get(sessionId);
+          const session = provider.getSession(sessionId);
+          sessionCache.set(sessionId, session);
+          if (sessionCache.size > 256) sessionCache.delete(sessionCache.keys().next().value!);
+          return session;
+        };
         try {
           const add = (session: RawSession | Record<string, unknown>, field: "title" | "directory" | "message", snippet: string, messageId: string | null = null) => {
             const summary = sessionSummary(providerId, session);
             if (!summary.session.sessionId || !isWithinRange(summary.updatedAt, updatedAfter, updatedBefore)) return;
             if (directory && normalizeCrossProviderProjectPath(summary.directory) !== directory) return;
-            const rank = field === "title" ? 0 : field === "directory" ? 1 : 2;
+            const bestField = field === "message" && matchesSearchQuery(summary.title, query) ? "title"
+              : field === "message" && matchesSearchQuery(summary.directory, query) ? "directory" : field;
+            if (bestField !== field) {
+              snippet = bestField === "title" ? summary.title : summary.directory || "";
+              messageId = null;
+            }
+            const rank = bestField === "title" ? 0 : bestField === "directory" ? 1 : 2;
             const key = `${providerId}\u0000${summary.session.sessionId}`;
             const value = {
               session: summary.session,
               event: messageId ? { ...summary.session, messageId, segment: "message" } : null,
-              matchField: field,
+              matchField: bestField,
               snippet: boundedText(snippet, HARD_LIMITS.previewChars),
               title: summary.title,
               directory: summary.directory,
               updatedAt: summary.updatedAt,
               untrustedContent: true
             };
-            const existing = results.get(key);
-            if (!existing || rank < existing.rank || (rank === existing.rank && Number(value.updatedAt) > Number(existing.value.updatedAt))) {
-              results.set(key, { key, rank, value });
-            }
+            retain(providerResults, { key, rank, updatedAt: summary.updatedAt, value });
           };
 
-          const metadataMatches = findIndexed(providerId, query, perProviderLimit, updatedAfter, updatedBefore);
-          for (const indexed of metadataMatches) {
-            const row = indexed as Record<string, unknown>;
-            const title = String(row.title || "");
-            const directory = String(row.directory || "");
-            if (matchesSearchQuery(title, query)) add(row, "title", title);
-            else if (matchesSearchQuery(directory, query)) add(row, "directory", directory);
+          for (let metadataOffset = 0;; metadataOffset += perProviderLimit) {
+            const metadataMatches = findIndexed(providerId, query, perProviderLimit, updatedAfter, updatedBefore, metadataOffset);
+            for (const indexed of metadataMatches) {
+              const row = indexed as Record<string, unknown>;
+              const sessionId = asNonEmptyString(row.id);
+              const session = sessionId ? cachedSession(sessionId) : null;
+              if (!session) continue;
+              const title = String(session.title || "");
+              const recordedDirectory = String(session.directory || "");
+              if (matchesSearchQuery(title, query)) add(session, "title", title);
+              else if (matchesSearchQuery(recordedDirectory, query)) add(session, "directory", recordedDirectory);
+            }
+            if (metadataMatches.length < perProviderLimit) break;
           }
 
-          const messageMatches = provider.searchMessages(query, perProviderLimit);
-          for (const match of messageMatches) {
-            if (!match?.sessionId) continue;
-            const session = provider.getSession(match.sessionId);
-            if (session) add(session, "message", String(match.snippet || ""), asNonEmptyString(match.messageId));
+          if (provider.iterateSearchMessages) {
+            for (const { session, match } of provider.iterateSearchMessages(query)) {
+              add(session, "message", String(match.snippet || ""), asNonEmptyString(match.messageId));
+            }
+          } else {
+            for (let messageOffset = 0;; messageOffset += perProviderLimit) {
+              const messageMatches = provider.searchMessages(query, perProviderLimit, messageOffset);
+              for (const match of messageMatches) {
+                if (!match?.sessionId) continue;
+                const session = cachedSession(match.sessionId);
+                if (session) add(session, "message", String(match.snippet || ""), asNonEmptyString(match.messageId));
+              }
+              if (messageMatches.length < perProviderLimit) break;
+            }
           }
+          for (const candidate of providerResults.values()) retain(results, candidate);
           diagnostics.push({ provider: providerId, status: "ok", durationMs: Date.now() - startedAt });
         } catch (error: any) {
           diagnostics.push({
@@ -520,14 +576,11 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
       }
 
       const sortedMatches = [...results.values()]
-        .sort((left, right) => left.rank - right.rank
-          || Number(right.value.updatedAt) - Number(left.value.updatedAt)
-          || left.key.localeCompare(right.key))
-        .map((entry) => entry.value);
-      const matches = sortedMatches.slice(offset, offset + limit);
-      const nextOffset = offset + matches.length;
-      const nextCursor = nextOffset < sortedMatches.length
-        ? encodeSearchCursor(nextOffset, fingerprint, updatedBefore)
+        .sort(compareSearchCandidates);
+      const page = sortedMatches.slice(0, limit);
+      const matches = page.map((entry) => entry.value);
+      const nextCursor = sortedMatches.length > limit && page.length
+        ? encodeSearchCursor(page.at(-1)!, fingerprint, updatedBefore)
         : null;
       return {
         matches,
@@ -541,10 +594,28 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
 
     get(input: Record<string, unknown>) {
       const ref = assertSessionRef(input?.session);
-      const { session } = getProviderSession(ref);
+      const childLimit = resolveLimit(input?.childLimit, DEFAULT_CHILD_LIMIT, MAX_CHILD_LIMIT, "childLimit");
+      const childFingerprint = cursorFingerprint({ session: ref });
+      const childOffset = input?.childCursor === undefined ? 0 : decodeCursor(input.childCursor, childFingerprint);
+      const { provider, session } = getProviderSession(ref);
       const messages = getProviderMessages(ref);
-      const children = indexedChildren(ref.provider, ref.sessionId, 50)
-        .map((row: any) => indexedSessionSummary(ref.provider, row));
+      const indexedPage = indexedChildren(ref.provider, ref.sessionId, childLimit + 1, childOffset);
+      const children = indexedPage.slice(0, childLimit)
+        .flatMap((row: any) => {
+          let child: RawSession | Record<string, unknown> | null;
+          try {
+            child = provider.getSession(row.id);
+          } catch (error: any) {
+            throw new SessionHistoryError("provider_error", `Could not read ${ref.provider} child session: ${error?.message || String(error)}`);
+          }
+          if (!child) return [];
+          const source = child as Record<string, unknown>;
+          if (source.id !== row.id || (source.parentId ?? source.parent_id) !== ref.sessionId) return [];
+          return [sessionSummary(ref.provider, child)];
+        });
+      const childrenNextCursor = indexedPage.length > childLimit
+        ? encodeCursor(childOffset + childLimit, childFingerprint)
+        : null;
       const messageEvents = projectEvents(ref, messages)
         .filter((event) => event.event.segment === "message" && event.preview.trim())
         .map(({ sourceIndex: _sourceIndex, ...event }) => event);
@@ -554,6 +625,8 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
         firstMessage: messageEvents[0] || null,
         lastMessage: messageEvents.at(-1) || null,
         children,
+        childrenNextCursor,
+        childrenTruncated: childrenNextCursor !== null,
         untrustedContent: true
       };
     },
@@ -587,10 +660,15 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
 
     getContext(input: Record<string, unknown>) {
       const target = assertEventRef(input?.event);
+      const includeThinking = input?.includeThinking === true;
+      if (target.segment === "thinking" && !includeThinking) {
+        throw new SessionHistoryError("thinking_opt_in_required", "Set includeThinking to true before reading a thinking event.");
+      }
       const before = resolveNonNegative(input?.before, limits.contextWindow, limits.contextWindow, "before");
       const after = resolveNonNegative(input?.after, limits.contextWindow, limits.contextWindow, "after");
       const messages = getProviderMessages(target);
-      const events = projectEvents(target, messages);
+      const events = projectEvents(target, messages)
+        .filter((event) => includeThinking || event.event.segment !== "thinking");
       const targetIndex = events.findIndex((event) => eventKey(event.event) === eventKey(target));
       if (targetIndex < 0) {
         throw new SessionHistoryError("event_not_found", "No session event matches this reference.");

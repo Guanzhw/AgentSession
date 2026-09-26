@@ -30,7 +30,9 @@ export function parseSessionNavigationContext(value: unknown): SessionNavigation
   }
   if (parsed.origin !== "http://agentsession.local") return null;
 
-  const isSessions = parsed.pathname === "/sessions" || /^\/[a-z][a-z0-9-]*\/?$/.test(parsed.pathname);
+  const isSessions = parsed.pathname === "/sessions"
+    || parsed.pathname === "/sessions/search"
+    || /^\/[a-z][a-z0-9-]*(?:\/search)?\/?$/.test(parsed.pathname);
   const isStats = parsed.pathname === "/stats" || /^\/[a-z][a-z0-9-]*\/stats$/.test(parsed.pathname);
   const detailMatch = parsed.pathname.match(LOCAL_DETAIL_PATH);
   if (!isSessions && !isStats && !detailMatch) return null;

@@ -16,8 +16,6 @@ const providerIds = [
   "opencode",
   "claude-code",
   "codex",
-  "openclaw",
-  "hermes",
   "pi",
   "deepseek-harness"
 ] as const;
@@ -99,12 +97,16 @@ export function createSessionHistoryMcpServer(service: SessionHistoryService) {
 
   server.registerTool("session_get", {
     title: "Get a local coding-agent session overview",
-    description: "Read-only session metadata, first/last non-blank message previews, and direct child-session summaries. This never returns a full transcript.",
-    inputSchema: z.object({ session: sessionRefSchema }).strict(),
+    description: "Read-only session metadata, first/last non-blank message previews, and paged direct child-session summaries. When childrenTruncated is true, pass childrenNextCursor as childCursor to inspect the next indexed page; a page can be empty if indexed children are no longer present in provider data. This never returns a full transcript.",
+    inputSchema: z.object({
+      session: sessionRefSchema,
+      childCursor: z.string().min(1).max(4000).optional(),
+      childLimit: z.number().int().positive().max(100).optional()
+    }).strict(),
     outputSchema: toolOutputSchema,
     annotations
   }, (input) => execute(
-    (result) => `Loaded session ${result?.session?.provider || ""}/${result?.session?.sessionId || ""}.`,
+    (result) => `Loaded session ${result?.session?.provider || ""}/${result?.session?.sessionId || ""} with ${result?.children?.length || 0} direct child summary(s)${result?.childrenTruncated ? "; more indexed candidates via childrenNextCursor" : ""}.`,
     () => service.get(input)
   ));
 
@@ -129,9 +131,10 @@ export function createSessionHistoryMcpServer(service: SessionHistoryService) {
 
   server.registerTool("session_get_context", {
     title: "Get bounded local session context",
-    description: "Read-only summaries around one event in the same session. It never follows parent or child sessions automatically.",
+    description: "Read-only summaries around one event in the same session. Thinking previews require explicit includeThinking opt-in. It never follows parent or child sessions automatically.",
     inputSchema: z.object({
       event: eventRefSchema,
+      includeThinking: z.boolean().optional(),
       before: z.number().int().min(0).max(20).optional(),
       after: z.number().int().min(0).max(20).optional()
     }).strict(),

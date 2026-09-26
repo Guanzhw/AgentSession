@@ -1,19 +1,16 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { DatabaseSync } from "node:sqlite";
 
 // Provider directories come from config flags, so initialize config against
 // per-test temp roots before touching the adapters' stores.
 const temp = mkdtempSync(path.join(os.tmpdir(), "agentsession-protocol-integration-"));
 const piRoot = path.join(temp, "pi");
 const claudeRoot = path.join(temp, "claude");
-const hermesRoot = path.join(temp, "hermes");
 mkdirSync(path.join(piRoot, "sessions"), { recursive: true });
 mkdirSync(path.join(claudeRoot, "projects", "proj-a", "subagents"), { recursive: true });
-mkdirSync(hermesRoot, { recursive: true });
 
 // Pi fixture: the shared pi-current fixture, copied into the temp sessions dir.
 writeFileSync(
@@ -37,45 +34,10 @@ const claudeSidechain = [
 ].map((record) => JSON.stringify(record)).join("\n");
 writeFileSync(path.join(claudeRoot, "projects", "proj-a", "subagents", "agent-side-agent-1.jsonl"), claudeSidechain);
 
-// Hermes fixture: root session, one compression continuation, one delegate.
-const dbPath = path.join(hermesRoot, "state.db");
-const db = new DatabaseSync(dbPath);
-db.exec(`
-  CREATE TABLE sessions (
-    id TEXT PRIMARY KEY, source TEXT, model TEXT, model_config TEXT, system_prompt TEXT,
-    parent_session_id TEXT, started_at REAL, ended_at REAL, end_reason TEXT, title TEXT,
-    input_tokens INTEGER, output_tokens INTEGER, cache_read_tokens INTEGER,
-    cache_write_tokens INTEGER, reasoning_tokens INTEGER, cwd TEXT, billing_provider TEXT,
-    archived INTEGER DEFAULT 0
-  );
-  CREATE TABLE messages (
-    id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, tool_call_id TEXT,
-    tool_calls TEXT, tool_name TEXT, effect_disposition TEXT, timestamp REAL,
-    finish_reason TEXT, reasoning TEXT, reasoning_content TEXT, reasoning_details TEXT,
-    platform_message_id TEXT, active INTEGER DEFAULT 1
-  );
-`);
-const started = Date.parse("2026-08-02T02:00:00.000Z") / 1000;
-const insertSession = db.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-insertSession.run("hermes-root", "cli", "deepseek-v4-flash", "{}", null, null, started, started + 5.5, "compression", "Hermes fixture", 40, 15, 10, 0, 5, hermesRoot, "deepseek", 0);
-insertSession.run("hermes-compression", "cli", "deepseek-v4-flash", "{}", null, "hermes-root", started + 6, started + 7, "compression", null, 0, 0, 0, 0, 0, hermesRoot, "deepseek", 0);
-insertSession.run("hermes-delegate", "delegate", "deepseek-v4-flash", JSON.stringify({ _delegate_from: "hermes-root" }), null, "hermes-root", started + 8, started + 9, "stop", "Review delegate", 0, 0, 0, 0, 0, hermesRoot, "deepseek", 0);
-const insertMessage = db.prepare("INSERT INTO messages (session_id, role, content, tool_calls, timestamp, finish_reason, reasoning, active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)");
-insertMessage.run("hermes-root", "user", "Hermes marker", null, started, null, null);
-insertMessage.run("hermes-root", "assistant", "", JSON.stringify([{ id: "hdelegate", function: { name: "delegate_task", arguments: JSON.stringify({ task: "Summarize the workspace" }) } }]), started + 4, "tool_calls", null);
-db.prepare("INSERT INTO messages (session_id, role, content, tool_call_id, tool_name, timestamp, active) VALUES (?, 'tool', ?, ?, ?, ?, 1)").run("hermes-root", JSON.stringify({ task: "Summarize the workspace", status: "ok" }), "hdelegate", "delegate_task", started + 5);
-insertMessage.run("hermes-root", "assistant", "Hermes ready", null, started + 3, "stop", null);
-insertMessage.run("hermes-compression", "user", "Root compression question", null, started + 6.2, null, null);
-insertMessage.run("hermes-compression", "assistant", "Root compression reply", null, started + 6.8, "stop", null);
-insertMessage.run("hermes-delegate", "user", "Delegate request", null, started + 8, null, null);
-insertMessage.run("hermes-delegate", "assistant", "Delegate response text", null, started + 9, "stop", null);
-db.close();
-
 const { initConfig } = await import("../dist/src/config.js");
-initConfig(["--pi-dir", piRoot, "--claude-dir", claudeRoot, "--hermes-dir", hermesRoot]);
+initConfig(["--pi-dir", piRoot, "--claude-dir", claudeRoot]);
 const pi = (await import("../dist/src/providers/pi/adapter.js")).default;
 const claudeCode = (await import("../dist/src/providers/claude-code/adapter.js")).default;
-const hermes = (await import("../dist/src/providers/hermes/adapter.js")).default;
 
 test.after(() => {
   try { rmSync(temp, { recursive: true, force: true }); } catch { /* best effort */ }
@@ -162,50 +124,8 @@ test("Claude adapter protocol evidence reaches buildLinkedMessageSessionViews th
   );
 });
 
-test("Hermes adapter protocol evidence reaches the merged lineage view path", () => {
-  const protocol = hermes.getSessionProtocol("hermes-root");
-  assert.ok(protocol);
-  assert.equal(
-    protocol.relationships.some((relationship) => (
-      relationship.type === "compacted-into"
-      && relationship.toSessionId === "hermes-compression"
-    )),
-    true
-  );
-  const compactionEvents = protocol.events.filter((event) => event.kind === "context.compaction");
-  assert.equal(compactionEvents.length, 1);
-  assert.equal(compactionEvents[0].compaction.continuationSessionId, "hermes-compression");
-  assert.equal(protocol.tasks.length, 1);
-  assert.equal(protocol.tasks[0].kind, "delegate");
-  assert.equal(protocol.tasks[0].mode, undefined);
-  assert.equal(protocol.agentRuns.length, 1);
-  assert.equal(protocol.agentRuns[0].childSessionId, "hermes-delegate");
-  assert.equal(protocol.contextArtifacts.length, 1);
-  assert.equal(protocol.contextArtifacts[0].kind, "summary");
-  assert.equal(protocol.contextArtifacts[0].contentAccess, "metadata-only");
-  assert.equal(protocol.contextArtifacts[0].summary, null);
-
-  // The view path merges compression segments into one logical session and
-  // keeps the delegate attached without recursion or cache loops.
-  const tree = hermes.getSessionTree("hermes-root");
-  assert.ok(tree);
-  assert.equal(tree.session.id, "hermes-root");
-  const texts = tree.messages.flatMap((message) => message.parts).map((part) => part.data?.text).filter(Boolean);
-  assert.ok(texts.some((text) => String(text).includes("Root compression question")), "compression segment merged");
-  assert.ok(texts.some((text) => String(text).includes("Hermes ready")));
-  const delegatePart = tree.messages
-    .flatMap((message) => message.parts)
-    .find((part) => part.type === "tool" && part.tool === "delegate_task");
-  assert.ok(delegatePart, "delegate spawn part exists");
-  assert.equal(delegatePart.childSessions[0].session.id, "hermes-delegate");
-  // The compression continuation is not a subagent branch.
-  const childTree = hermes.getSessionTree("hermes-compression");
-  assert.equal(childTree.session.id, "hermes-root", "compression resolves back to the logical base");
-});
-
 test("protocol accessors answer null for unknown sessions on real adapters", () => {
   assert.equal(pi.getSessionProtocol("no-such-session"), null);
   assert.equal(claudeCode.getSessionProtocol("no-such-session"), null);
-  assert.equal(hermes.getSessionProtocol("no-such-session"), null);
   assert.equal(pi.getSessionProtocol(""), null);
 });

@@ -9,7 +9,8 @@ import {
   toApiSessionShape,
   normalizeSessionRecord,
   enrichSession,
-  createSessionCatalog
+  createSessionCatalog,
+  searchAcrossProviderCatalogs
 } from "../session-queries.js";
 import { json, missingProviderResponse } from "../server-helpers.js";
 import { attachSessionListStats } from "../session-list-stats.js";
@@ -31,6 +32,14 @@ export function registerSessions(
   }
 ) {
   const { providerMap, providerInfo } = deps;
+
+  const MAX_CONTENT_SEARCH_OFFSET = 100_000;
+  function contentSearchOffset(params: URLSearchParams): number | null {
+    const raw = params.get("offset");
+    if (raw === null || raw === "") return 0;
+    const value = Number(raw);
+    return Number.isSafeInteger(value) && value >= 0 && value <= MAX_CONTENT_SEARCH_OFFSET ? value : null;
+  }
 
   function selectedProviderIds(searchParams: URLSearchParams) {
     const requested = searchParams.getAll("provider").flatMap((value) => value.split(",")).filter(Boolean);
@@ -67,6 +76,18 @@ export function registerSessions(
       sessions,
       ...filters,
     };
+  }
+
+  function buildCrossProviderContentSearch(searchParams: URLSearchParams, limit = 30, offset = 0) {
+    const providers = selectedProviderIds(searchParams);
+    const query = searchParams.get("q") || "";
+    const catalogs = providers.map((provider) => ({
+      provider,
+      messageSearch: createSessionCatalog(providerMap.get(provider), provider).messageSearch
+    }));
+    const result = searchAcrossProviderCatalogs(catalogs, query, limit, offset);
+    attachSessionListStats(result.sessions, (provider) => providerMap.get(provider));
+    return { ...result, query, providers };
   }
 
   function withLiveLibrarySessions(query: LibraryFamilyQuery): LibraryFamilyQuery {
@@ -151,8 +172,13 @@ export function registerSessions(
     try {
       const searchParams = new URL(req.url || "/", "http://localhost").searchParams;
       const limit = Math.min(Math.max(1, Number(searchParams.get("limit")) || 30), 100);
-      const offset = Math.max(0, Number(searchParams.get("offset")) || 0);
-      const result = buildCrossProviderList(searchParams, limit, offset);
+      const contentSearch = resolveSessionSearchMode(searchParams) === "content";
+      const contentOffset = contentSearch ? contentSearchOffset(searchParams) : null;
+      if (contentSearch && contentOffset === null) return json(res, { error: `Content search offset must be an integer from 0 to ${MAX_CONTENT_SEARCH_OFFSET}` }, 400);
+      const offset = contentSearch ? contentOffset! : Math.max(0, Number(searchParams.get("offset")) || 0);
+      const result = contentSearch
+        ? buildCrossProviderContentSearch(searchParams, limit, offset)
+        : buildCrossProviderList(searchParams, limit, offset);
       const returnTo = searchParams.get("returnTo") || "";
       const providerNames = new Map(providerInfo.map((item: any) => [item.id, item.name || item.id]));
       const manageableByProvider = new Map(providerInfo.map((item: any) => [item.id, Boolean(item.manageable)]));
@@ -164,7 +190,7 @@ export function registerSessions(
             html: sessionCard(session, false, {
               provider: providerId,
               manageable: cardManageable,
-              showCheckbox: cardManageable,
+              showCheckbox: !contentSearch && cardManageable,
               showProvider: true,
               providerName: providerNames.get(providerId) || providerId || "",
               returnTo
@@ -173,7 +199,7 @@ export function registerSessions(
         }),
         total: result.total,
         offset,
-        hasMore: offset + result.sessions.length < result.total,
+        hasMore: "hasMore" in result ? result.hasMore : offset + result.sessions.length < result.total,
       });
     } catch (err: any) {
       console.error(`Route error: ${err.message}`);
@@ -218,6 +244,34 @@ export function registerSessions(
     }
   });
 
+  app.get("/sessions/search", async (req: any) => {
+    try {
+      const searchParams = new URL(req.url || "/", "http://localhost").searchParams;
+      const offset = contentSearchOffset(searchParams);
+      if (offset === null) return { status: 400, body: `Content search offset must be an integer from 0 to ${MAX_CONTENT_SEARCH_OFFSET}`, contentType: "text/plain; charset=utf-8" };
+      const result = buildCrossProviderContentSearch(searchParams, 30, offset);
+      return {
+        status: 200,
+        body: renderSessionsPage({
+          ...result,
+          limit: 30,
+          offset,
+          searchMode: "content",
+          provider: null,
+          providers: providerInfo,
+          selectedProviders: result.providers,
+          global: true,
+          familyMode: false,
+          manageable: false,
+        }),
+        contentType: "text/html; charset=utf-8",
+      };
+    } catch (err: any) {
+      console.error(`Route error: ${err.message}`);
+      return { status: 500, body: JSON.stringify({ error: "Internal server error" }), contentType: "application/json; charset=utf-8" };
+    }
+  });
+
   // API: list sessions
   app.get(/^\/api\/([a-z][a-z0-9-]*)\/sessions$/, async (req: any, res: any, match: RegExpMatchArray) => {
     const providerId = match[1];
@@ -230,11 +284,13 @@ export function registerSessions(
     try {
       const url = new URL(req.url || "/", "http://localhost");
       const apiLimit = Math.min(Math.max(1, Number(url.searchParams.get("limit")) || 30), 100);
-      const apiOffset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
       const range = url.searchParams.get("range") || "";
       const query = url.searchParams.get("q") || "";
       const project = url.searchParams.get("project") || "";
       const searchMode = resolveSessionSearchMode(url.searchParams);
+      const contentOffset = searchMode === "content" ? contentSearchOffset(url.searchParams) : null;
+      if (searchMode === "content" && contentOffset === null) return json(res, { error: `Content search offset must be an integer from 0 to ${MAX_CONTENT_SEARCH_OFFSET}` }, 400);
+      const apiOffset = searchMode === "content" ? contentOffset! : Math.max(0, Number(url.searchParams.get("offset")) || 0);
       const sort = resolveSessionSort(url.searchParams);
       const starredOnly = resolveStarredFilter(url.searchParams);
       const hasSubagent = url.searchParams.has("has-subagent");
@@ -253,14 +309,14 @@ export function registerSessions(
           html: sessionCard(session, false, {
             provider: providerId,
             manageable,
-            showCheckbox: manageable,
+            showCheckbox: searchMode !== "content" && manageable,
             showProvider: false,
             returnTo
           })
         })),
         total,
         offset: apiOffset,
-        hasMore: apiOffset + sessions.length < total
+        hasMore: "hasMore" in results ? results.hasMore : apiOffset + sessions.length < total
       });
     } catch (err: any) {
       console.error(`Route error: ${err.message}`);
@@ -296,7 +352,8 @@ export function registerSessions(
 
     const url = new URL(req.url || "/", "http://localhost");
     const limit = 30;
-    const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
+    const offset = contentSearchOffset(url.searchParams);
+    if (offset === null) return { status: 400, body: `Content search offset must be an integer from 0 to ${MAX_CONTENT_SEARCH_OFFSET}`, contentType: "text/plain; charset=utf-8" };
     const range = url.searchParams.get("range") || "";
     const query = url.searchParams.get("q") || "";
     const project = url.searchParams.get("project") || "";

@@ -27,8 +27,6 @@ const concreteProviderIds = new Set([
   "opencode",
   "claude-code",
   "codex",
-  "openclaw",
-  "hermes",
   "pi",
   "deepseek-harness"
 ]);

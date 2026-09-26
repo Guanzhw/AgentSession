@@ -1,5 +1,6 @@
 import { readerPaneAnchor } from "./reader-pane-dom.js";
 import { ensureReaderAnchor, initReaderProcesses } from "./reader-process.js";
+import { initReaderSegments } from "./reader-segments.js";
 import { initArtifactEvidence } from "./artifact-evidence.js";
 
 const progressiveContentLoads = new WeakMap();
@@ -213,6 +214,7 @@ const sessionWorkbench = document.querySelector(".session-workbench");
 if (sessionWorkbench) {
   initArtifactEvidence(sessionWorkbench);
   initReaderProcesses(sessionWorkbench);
+  initReaderSegments(sessionWorkbench);
   sessionWorkbench.addEventListener("toggle", (event) => {
     void loadFoldedContent(event.target);
   }, true);
@@ -387,6 +389,15 @@ if (sessionWorkbench) {
   const revealSearchMatch = async (entry, query, scroll = true, revealRevision = transcriptRevealRevision) => {
     const match = entry.match;
     const pane = getSearchPane();
+    const cleanedMessageId = String(match.messageId || "").replace(/[^A-Za-z0-9_-]/g, "-");
+    const messageAnchor = /^msg[-_]/i.test(cleanedMessageId) ? cleanedMessageId : `msg-${cleanedMessageId}`;
+    try {
+      await ensureReaderAnchor(pane, messageAnchor);
+    } catch (error) {
+      if (revealRevision === transcriptRevealRevision) transcriptSearchStatus.textContent = ft("detail.search_failed");
+      return;
+    }
+    if (revealRevision !== transcriptRevealRevision || pane !== getSearchPane() || !pane.isConnected) return;
     const source = findMatchPart(match);
     if (source?.hasAttribute("data-reader-process-anchor")) {
       try {
@@ -648,6 +659,9 @@ if (sessionWorkbench) {
   });
   sessionWorkbench.addEventListener("session-reader:process-loaded", (event) => {
     invalidateNavigationCache(event.detail.pane);
+  });
+  sessionWorkbench.addEventListener("session-reader:segment-loaded", (event) => {
+    invalidateNavigationCache(event.detail?.pane);
   });
   sessionWorkbench.addEventListener("session-reader:inline-opened", (event) => {
     refreshSearchScopes();

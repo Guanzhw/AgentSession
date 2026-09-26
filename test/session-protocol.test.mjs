@@ -32,8 +32,8 @@ import {
 import { buildCodexSessionProtocol, codexCompactionRecord, codexProtocolChildFactsFromRecords } from "../dist/src/providers/codex/protocol.js";
 import { buildClaudeSessionProtocol, claudeCompactionRecord } from "../dist/src/providers/claude-code/protocol.js";
 import { buildPiSessionProtocol, piCompactionEntry } from "../dist/src/providers/pi/protocol.js";
-import { buildHermesSessionProtocol } from "../dist/src/providers/hermes/protocol.js";
 import { buildDshSessionProtocol } from "../dist/src/providers/deepseek-harness/protocol.js";
+import { buildOpenCodeSessionProtocol } from "../dist/src/providers/opencode/protocol.js";
 import { buildLinkedMessageSessionViews } from "../dist/src/providers/shared/linked-message-session.js";
 import { parseTranscript, extractSessionMeta, recordsToMessages } from "../dist/src/providers/claude-code/parser.js";
 import { join } from "node:path";
@@ -413,9 +413,8 @@ test("descriptor provenance never overclaims recorded for mixed-fidelity domains
     ["agentRuns", "agentRuns"],
     ["contextArtifacts", "contextArtifacts"]
   ];
-  const protocols = [
-    // Codex: recorded compaction/task events + derived message events.
-    buildCodexSessionProtocol({
+  const protocols = {
+    codex: buildCodexSessionProtocol({
       session: session("root"),
       messages: [message("m1", "assistant", 500)],
       records: [
@@ -424,8 +423,7 @@ test("descriptor provenance never overclaims recorded for mixed-fidelity domains
       ],
       children: []
     }),
-    // Claude: recorded notifications + derived message events.
-    buildClaudeSessionProtocol({
+    "claude-code": buildClaudeSessionProtocol({
       session: session("parent-session"),
       messages: [message("m1", "tool", 600)],
       records: [{
@@ -436,8 +434,7 @@ test("descriptor provenance never overclaims recorded for mixed-fidelity domains
       }],
       children: []
     }),
-    // Pi: recorded compaction entries + derived message events.
-    buildPiSessionProtocol({
+    pi: buildPiSessionProtocol({
       session: session("pi-session", "019f7a00-0000-7000-8000-000000000000"),
       records: [
         { type: "session", version: 3, id: "pi-session", timestamp: "2026-07-19T01:00:00.000Z" },
@@ -445,14 +442,7 @@ test("descriptor provenance never overclaims recorded for mixed-fidelity domains
       ],
       messages: [message("m1", "assistant", 700)]
     }),
-    // Hermes: fully derived lineage.
-    buildHermesSessionProtocol({
-      ...hermesEntry("hermes-root"),
-      family: [hermesEntry("hermes-root"), hermesEntry("hermes-continuation", null, "hermes-root")]
-    }),
-    // DSH: every retained source event is recorded rather than a
-    // message-derived reconstruction; compaction remains metadata-only.
-    buildDshSessionProtocol({
+    "deepseek-harness": buildDshSessionProtocol({
       session: session("dsh-root"),
       records: [
         { type: "session", version: 0, id: "dsh-root", createdAt: 1000 },
@@ -460,26 +450,38 @@ test("descriptor provenance never overclaims recorded for mixed-fidelity domains
       ],
       messages: [],
       children: []
-    })
-  ];
+    }),
+    opencode: buildOpenCodeSessionProtocol({
+      session: {
+        id: "opencode-root", parent_id: null, title: "OpenCode", slug: null,
+        directory: null, time_created: 1000, time_updated: 1100,
+        message_count: 1, token_count: null, agent: "build", model: "m"
+      },
+      todos: [{ content: "Recorded todo", status: "completed", priority: "high", position: 0, time_created: 1000, time_updated: 1100 }],
+      messages: [{
+        id: "opencode-message", sessionId: "opencode-root", role: "assistant",
+        data: { role: "assistant", modelID: "m" }, timeCreated: 1050,
+        parts: [{
+          id: "opencode-part", messageId: "opencode-message", sessionId: "opencode-root",
+          type: "text", data: { type: "text", text: "Done" },
+          timeStart: 1050, timeEnd: 1050, childSessions: []
+        }]
+      }],
+      detachedChildren: [],
+      metrics: {}
+    }, 1)
+  };
+  const providersById = new Map(getAllProviders().map((provider) => [provider.id, provider]));
+  assert.deepEqual(Object.keys(protocols).sort(), [...providersById.keys()].sort());
 
-  for (const provider of getAllProviders().filter((candidate) => supportsSessionProtocol(candidate))) {
+  for (const [providerId, protocol] of Object.entries(protocols)) {
+    const provider = providersById.get(providerId);
+    assert.ok(provider && supportsSessionProtocol(provider), providerId);
     const descriptors = protocolCapabilityDescriptors(provider);
-    const byId = {
-      codex: protocols[0],
-      "claude-code": protocols[1],
-      pi: protocols[2],
-      hermes: protocols[3],
-      "deepseek-harness": protocols[4]
-    }[provider.id];
-    // The four newly-covered providers have provider-native protocol fixtures
-    // in runtime-protocol-missing-providers.test.mjs. This block retains the
-    // mixed-fidelity assertions for the original five builders.
-    if (!byId) continue;
     for (const [domain, key] of domains) {
       const descriptor = descriptors[domain];
       if (descriptor.support === "none") continue;
-      const values = byId[key] || [];
+      const values = protocol[key] || [];
       const hasRecorded = values.some((value) => value.provenance?.fidelity === "recorded");
       const hasDerived = values.some((value) => value.provenance?.fidelity === "derived");
       if (descriptor.provenance === "recorded") {
@@ -491,7 +493,7 @@ test("descriptor provenance never overclaims recorded for mixed-fidelity domains
         assert.equal(hasRecorded || hasDerived, values.length > 0, provider.id);
       }
     }
-    if (provider.id !== "deepseek-harness") {
+    if (providerId !== "deepseek-harness") {
       assert.equal(
         descriptors.sessionEvents.provenance,
         "derived",
@@ -1278,137 +1280,6 @@ test("Pi parentSession yields a derived parent relationship, never a subagent cl
   assert.ok(!relationship.type.includes("spawn"), "not a subagent claim");
 });
 
-// ---------------------------------------------------------------------------
-// Hermes
-// ---------------------------------------------------------------------------
-
-function hermesEntry(id, parentId = null, compressionParentId = null, source = "cli", title = id) {
-  return {
-    session: {
-      id,
-      provider: "hermes",
-      parentId,
-      title,
-      directory: null,
-      timeCreated: 1000,
-      timeUpdated: 1100,
-      messageCount: 1,
-      tokenCount: null,
-      metadata: {
-        source,
-        model: "deepseek-v4-flash",
-        endReason: compressionParentId ? "compression" : "stop",
-        compressionParentId,
-        billingProvider: null
-      }
-    },
-    messages: [message(`${id}-msg`, "assistant", 1050)],
-    rawSession: {
-      id,
-      end_reason: compressionParentId ? "compression" : "stop",
-      ended_at: 1100
-    }
-  };
-}
-
-test("Hermes compression lineage becomes compacted-into relationships and compaction events", () => {
-  const root = hermesEntry("hermes-root");
-  const continuation = hermesEntry("hermes-continuation", null, "hermes-root");
-  const protocol = buildHermesSessionProtocol({
-    ...root,
-    family: [root, continuation]
-  });
-
-  const relationships = protocol.relationships.filter((relationship) => relationship.type === "compacted-into");
-  assert.equal(relationships.length, 1);
-  assert.equal(relationships[0].fromSessionId, "hermes-root");
-  assert.equal(relationships[0].toSessionId, "hermes-continuation");
-  assert.equal(relationships[0].provenance.fidelity, "derived");
-  assert.equal(relationships[0].correlationId, "hermes-continuation");
-
-  const compactionEvents = protocol.events.filter((event) => event.kind === "context.compaction");
-  assert.equal(compactionEvents.length, 1);
-  assert.equal(compactionEvents[0].compaction.strategy, "opaque");
-  assert.equal(compactionEvents[0].compaction.trigger, "automatic");
-  assert.equal(compactionEvents[0].compaction.continuationSessionId, "hermes-continuation");
-  assert.equal(compactionEvents[0].provenance.fidelity, "derived");
-
-  assert.equal(protocol.tasks.length, 0, "compression continuations are never tasks");
-  assert.equal(protocol.contextArtifacts.length, 1);
-  const artifact = protocol.contextArtifacts[0];
-  assert.equal(artifact.kind, "summary");
-  assert.equal(artifact.scope, "session");
-  assert.equal(artifact.origin, "provider-generated");
-  assert.equal(artifact.contentAccess, "metadata-only");
-  assert.equal(artifact.summary, null);
-  assert.deepEqual(artifact.sourceSessionIds, ["hermes-root"]);
-  assert.equal(artifact.lifecycle, undefined, "lifecycle is not an artifact field");
-  assert.equal(artifact.contentRef, undefined);
-  assert.equal(artifact.metadata.continuationSessionId, "hermes-continuation");
-  assert.equal(
-    protocol.events.some((event) => isContextLifecycleEventKind(event.kind)),
-    false,
-    "compression is context.compaction, not a memory lifecycle observation"
-  );
-
-  // The continuation's own protocol names the edge too.
-  const continuationProtocol = buildHermesSessionProtocol({
-    ...continuation,
-    family: [root, continuation]
-  });
-  assert.equal(continuationProtocol.relationships.some((relationship) => (
-    relationship.type === "compacted-into"
-    && relationship.fromSessionId === "hermes-root"
-    && relationship.toSessionId === "hermes-continuation"
-  )), true);
-  // No outgoing edge: no compaction event on the continuation.
-  assert.equal(
-    continuationProtocol.events.filter((event) => event.kind === "context.compaction").length,
-    0
-  );
-});
-
-test("Hermes delegates yield spawned relationships plus Task and AgentRun pairs", () => {
-  const root = hermesEntry("hermes-root");
-  const delegate = hermesEntry("hermes-delegate", "hermes-root", null, "delegate", "Review delegate");
-  const protocol = buildHermesSessionProtocol({
-    ...root,
-    family: [root, delegate]
-  });
-
-  const spawned = protocol.relationships.filter((relationship) => relationship.type === "spawned");
-  assert.equal(spawned.length, 1);
-  assert.equal(spawned[0].fromSessionId, "hermes-root");
-  assert.equal(spawned[0].toSessionId, "hermes-delegate");
-  assert.equal(spawned[0].provenance.sourceType, "hermes.model_config._delegate_from");
-
-  assert.equal(protocol.tasks.length, 1);
-  assert.equal(protocol.tasks[0].kind, "delegate");
-  assert.equal(protocol.tasks[0].status, "completed");
-  assert.equal(protocol.tasks[0].mode, undefined, "execution mode belongs to AgentRun, not Task");
-  assert.equal(protocol.tasks[0].dependencies.length, 0);
-  assert.equal(protocol.tasks[0].assignee, null);
-  assert.equal(protocol.agentRuns.length, 1);
-  assert.equal(protocol.agentRuns[0].childSessionId, "hermes-delegate");
-  assert.equal(protocol.agentRuns[0].taskId, "hermes-delegate");
-  assert.equal(protocol.agentRuns[0].model, "deepseek-v4-flash");
-  const openDelegate = {
-    ...delegate,
-    rawSession: { ...delegate.rawSession, ended_at: null },
-    session: { ...delegate.session, timeUpdated: 1100 }
-  };
-  const openProtocol = buildHermesSessionProtocol({
-    ...root,
-    family: [root, openDelegate]
-  });
-  assert.equal(openProtocol.tasks[0].status, "running");
-  assert.equal(openProtocol.agentRuns[0].status, "running");
-  assert.equal(openProtocol.tasks[0].timeCompleted, null);
-  // Delegates are not compaction: no artifacts, no compaction events.
-  assert.equal(protocol.contextArtifacts.length, 0);
-  assert.equal(protocol.events.some((event) => event.kind === "context.compaction"), false);
-});
-
 test("Claude interleaves a compact record between messages in source order", () => {
   const records = [
     { type: "user", uuid: "u1", timestamp: "2026-07-19T00:10:00Z", message: { content: [{ type: "text", text: "hello" }] } },
@@ -1476,33 +1347,6 @@ test("Pi interleaves a compaction entry between messages in source order", () =>
   assert.equal(compactionEvent.timestamp, Date.parse("2026-07-19T01:00:01.000Z"));
   assert.equal(userEvent.timestamp, Date.parse("2026-07-19T01:00:04.000Z"));
   assert.equal(compactionEvent.timestamp < userEvent.timestamp, true, "earlier timestamp, later sequence");
-});
-
-test("Hermes places compression boundary events after the compacted session's message rows", () => {
-  const rootMessages = [
-    { ...message("5", "user", 1000), id: "5" },
-    // Row id 7 with an EARLIER timestamp: row order still wins.
-    { ...message("7", "assistant", 900), id: "7" }
-  ];
-  const root = { ...hermesEntry("hermes-root"), messages: rootMessages };
-  const continuation = hermesEntry("hermes-continuation", null, "hermes-root");
-  const protocol = buildHermesSessionProtocol({
-    ...root,
-    family: [root, continuation]
-  });
-  const compactionEvent = protocol.events.find((event) => event.kind === "context.compaction");
-  const messageEvents = protocol.events.filter((event) => event.kind.startsWith("message."));
-  assert.equal(messageEvents.length, 2);
-  assert.ok(compactionEvent);
-  assert.deepEqual(
-    protocol.events.map((event) => event.id),
-    [...messageEvents.map((event) => event.id), compactionEvent.id],
-    "compaction boundary follows the last message row"
-  );
-  assert.deepEqual(protocol.events.map((event) => event.sequence), [1, 2, 3], "gap-free 1..n");
-  assert.equal(compactionEvent.providerData.sourceSequence, 8000, "row 7 + 1, ordinal 0");
-  assert.equal(compactionEvent.compaction.continuationSessionId, "hermes-continuation");
-  assert.equal(messageEvents[1].timestamp < messageEvents[0].timestamp, true, "row order wins over timestamps");
 });
 
 // ---------------------------------------------------------------------------

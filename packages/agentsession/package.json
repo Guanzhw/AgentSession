@@ -1,6 +1,6 @@
 {
   "name": "@acetamido/agentsession",
-  "version": "1.10.1",
+  "version": "2.0.0",
   "description": "AgentSession — a local-first multi-provider viewer and manager for AI coding sessions.",
   "type": "module",
   "bin": {
@@ -30,8 +30,6 @@
     "opencode",
     "claude-code",
     "codex",
-    "openclaw",
-    "hermes-agent",
     "pi-coding-agent",
     "deepseek-harness",
     "session-viewer",

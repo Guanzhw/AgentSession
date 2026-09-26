@@ -639,10 +639,11 @@ function escapeHtmlClient(str) {
 }
 
 const scrollSentinel = document.getElementById("scroll-sentinel");
+const sessionResultCount = document.querySelector("[data-session-result-count]");
 let libraryLoadMore;
 if (scrollSentinel && sessionList) {
   let scrollOffset = Number(scrollSentinel.dataset.offset) || 0;
-  const scrollTotal = Number(scrollSentinel.dataset.total) || 0;
+  let scrollTotal = scrollSentinel.dataset.total === "" ? null : Number(scrollSentinel.dataset.total);
   const scrollRange = scrollSentinel.dataset.range || "";
   const scrollQuery = scrollSentinel.dataset.query || "";
   const scrollProject = scrollSentinel.dataset.project || "";
@@ -653,7 +654,7 @@ if (scrollSentinel && sessionList) {
   const scrollHasSubagent = scrollSentinel.dataset.hasSubagent || "";
   const isGlobalSessions = scrollSentinel.dataset.global === "true";
   let pendingLoad;
-  let exhausted = scrollOffset >= scrollTotal;
+  let exhausted = scrollTotal !== null && scrollOffset >= scrollTotal;
   let observer = null;
 
   const setSentinelState = (className, text, disabled = false) => {
@@ -677,7 +678,11 @@ if (scrollSentinel && sessionList) {
       if (scrollSort) params.set("sort", scrollSort);
       if (scrollStarred) params.set("starred", scrollStarred);
       if (scrollHasSubagent) params.set("has-subagent", scrollHasSubagent);
-      if (scrollSentinel.dataset.returnTo) params.set("returnTo", scrollSentinel.dataset.returnTo);
+      if (scrollSentinel.dataset.returnTo) {
+        const returnUrl = new URL(scrollSentinel.dataset.returnTo, location.origin);
+        returnUrl.searchParams.set("offset", String(scrollOffset));
+        params.set("returnTo", `${returnUrl.pathname}${returnUrl.search}${returnUrl.hash}`);
+      }
       if (scrollProviders) scrollProviders.split(",").filter(Boolean).forEach((provider) => params.append("provider", provider));
       const isFamilyLibrary = sessionList.hasAttribute("data-library-families");
       if (isFamilyLibrary && !isGlobalSessions) params.set("provider", PROVIDER);
@@ -694,8 +699,14 @@ if (scrollSentinel && sessionList) {
       updateBatchCount();
       scrollOffset = (Number(data.offset) || 0) + (Array.isArray(data.sessions) ? data.sessions.length : 0);
       scrollSentinel.dataset.offset = String(scrollOffset);
+      scrollTotal = data.total === null ? null : Number(data.total);
+      if (sessionResultCount) {
+        const known = scrollTotal !== null;
+        const template = known ? sessionResultCount.dataset.countKnown : sessionResultCount.dataset.countAtLeast;
+        sessionResultCount.textContent = template.replace("{count}", String(known ? scrollTotal : scrollOffset + (data.hasMore ? 1 : 0)));
+      }
 
-      if (!data.hasMore || scrollOffset >= scrollTotal) {
+      if (!data.hasMore || (scrollTotal !== null && scrollOffset >= scrollTotal)) {
         exhausted = true;
         observer?.disconnect();
         setSentinelState("scroll-done", ft("scroll_all_loaded"), true);
@@ -718,7 +729,7 @@ if (scrollSentinel && sessionList) {
 
   scrollSentinel.addEventListener("click", loadMoreSessions);
 
-  if (scrollOffset < scrollTotal) {
+  if (!exhausted) {
     setSentinelState("scroll-load-more", ft("scroll_load_more"));
     if ("IntersectionObserver" in window) {
       observer = new IntersectionObserver(async (entries) => {
