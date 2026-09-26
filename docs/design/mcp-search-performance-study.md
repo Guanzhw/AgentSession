@@ -87,12 +87,11 @@ ignored `tmp/bench-session-search/<run-id>/result.json`; A0 is clean
 `d047100f2a2275283fd972a13b4f51c8c56c26b2`, and A1's measured core
 artifact SHA-256 is
 `f63d2e6142bd2662295983d50048f14ae264d867426c4bf0ac8da2e42ba882a8`.
-The five A1 runs used the portable SQLite `instr()` candidate check. A later
-guard for half-surrogate queries and removal of an unnecessary index-format
-bump leave the measured `codex` query path unchanged. A separate warm check of
-the final core artifact
-`f819686df76d94395e74953cf0dc1da9e3bf8b969030ccdbbde0b57e9006cb4e`
-returned the same hashes in 78.7 ms and 70.5 ms for first and repeated search.
+The five A1 runs used the portable SQLite `instr()` candidate check. Later
+correctness fixes preserve half-surrogate queries and read embedded-NUL text
+fully under Node 22. A separate warm check of the resulting core artifact
+`1d5d57401b7bc08aed5b36e780ed9753d21f0f2e86942524a63ec660ef1e5efe`
+returned the same hashes in 85.9 ms and 70.5 ms for first and repeated search.
 
 | Repetition | A0 startup (s) | A1 startup (s) | A0 first search (s) | A1 first search (ms) | A0 repeat (s) | A1 repeat (ms) |
 |:---:|---:|---:|---:|---:|---:|---:|

@@ -176,8 +176,9 @@ export function* findSearchDocuments(
   // SQLite compares UTF-8 code points; JavaScript can match half of a surrogate pair.
   const candidate = terms.filter(term => !/[\u0000\uD800-\uDFFF]/.test(term)).sort((a, b) => b.length - a.length)[0];
   const candidateWhere = candidate ? "AND instr(d.folded, ?) > 0" : "";
+  // Node 22's SQLite text conversion truncates values at embedded NUL bytes.
   const statement = db.prepare(`
-    SELECT d.session_id, d.message_id, d.field, d.role, d.timestamp, d.text,
+    SELECT d.session_id, d.message_id, d.field, d.role, d.timestamp, CAST(d.text AS BLOB) AS text,
       s.title, s.directory, s.parent_id, s.time_created, s.time_updated, s.message_count, s.token_count
     FROM search_document AS d
     JOIN search_index_source AS s ON s.provider = d.provider AND s.session_id = d.session_id
@@ -188,14 +189,15 @@ export function* findSearchDocuments(
     ? [provider, JSON.stringify(fields), candidate]
     : [provider, JSON.stringify(fields)];
   for (const row of statement.iterate(...params) as Iterable<Record<string, any>>) {
-    if (!matchesSearchQuery(row.text, query)) continue;
+    const text = Buffer.from(row.text as Uint8Array).toString("utf8");
+    if (!matchesSearchQuery(text, query)) continue;
     yield {
       provider,
       sessionId: row.session_id,
       messageId: row.message_id,
       field: row.field,
       role: row.role,
-      text: row.text,
+      text,
       timestamp: Number(row.timestamp) || 0,
       title: row.title,
       directory: row.directory,
