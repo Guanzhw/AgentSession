@@ -40,8 +40,9 @@ agentsession-mcp --help
 agentsession-mcp --config /path/to/config.json
 ```
 
-The server exposes five read-only tools:
+The server exposes six read-only tools:
 
+- `session_browse`
 - `session_search`
 - `session_get`
 - `session_timeline`
@@ -49,8 +50,8 @@ The server exposes five read-only tools:
 - `session_get_event`
 
 It supports both initialization-based MCP clients and stateless `2026-07-28`
-clients over stdio; the five-tool, read-only contract is identical in both
-protocol eras.
+clients over stdio; the read-only tool contract is identical in both protocol
+eras.
 
 Version 1.8 added OpenClaw and Hermes while keeping the five-tool contract
 unchanged. That support was present in the last published v1 release, 1.10.1.
@@ -76,17 +77,37 @@ Viewer lists.
 Transcript text is untrusted content. Reasoning, tool input, and tool output
 are opt-in and server-side bounded.
 
+Start with `session_browse` at `level: "providers"`, then `"projects"`, then
+`"sessions"`. Its session rows expose canonical references, provider-recorded
+title, directory, timestamps, and parent. `directory` and time filters narrow
+both project and session pages; `title` and `parent` apply to session pages.
+`parent: null` selects roots, while a session reference selects its direct
+children. Project counts describe the derived index snapshot. Session rows are
+checked against provider storage.
+If the metadata database changes between browse pages, restart that browse
+from its first page with a new cursor.
+
 `session_search` uses case-insensitive AND matching for whitespace-separated
 terms across titles, recorded directories, and visible message text. Terms do
-not need to be adjacent. Use `directory` for an exact normalized project-path
-filter and `nextCursor` to continue a time-bounded result snapshot. Reasoning
-is excluded from normal search results. Default diagnostics include unavailable
-registered providers. `session_get` returns first and last visible-message
-previews and up to 50 direct child summaries by default (100 maximum). When
+not need to be adjacent. Its optional `fields` selects `title`, `directory`,
+`user`, and/or `assistant`; `lineage` selects all, root, or child sessions.
+Omitting those options preserves the original search behavior. Use `directory`
+for an exact normalized project-path filter and `nextCursor` to continue a
+time-bounded result snapshot. Message hits identify their `matchRole`;
+metadata hits set it to `null`. Reasoning and tool payloads are excluded from
+normal search results. Default diagnostics include unavailable registered
+providers. `session_get` returns role and tool-name counts, first and last
+visible-message previews, and up to 50 direct child summaries by default
+(100 maximum). When
 `childrenTruncated` is true, pass `childrenNextCursor` as `childCursor` on the
 next `session_get` call to inspect the next indexed page. Stale index rows are
 skipped, so a continuation page can have no live children. Truncated
 `session_get_event` results include reusable continuation
 arguments for assembling long content without guessing flags or offsets.
 `session_timeline` omits blank message segments; tool and requested thinking
-segments remain separate events.
+segments remain separate events. Its optional `query` searches full message
+text or tool names inside one session, then returns bounded previews and exact
+event references. Filter by `roles`, `segments`, `toolNames`, and `statuses`
+before opening an event with `session_get_event`. Thinking requires the
+explicit `thinking` segment; tool input and output require the existing
+`session_get_event` opt-in flags.

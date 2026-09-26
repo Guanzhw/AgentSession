@@ -1,13 +1,17 @@
 import { createHash } from "node:crypto";
 import {
+  browseIndexedProjects,
+  browseIndexedSessions,
   findIndexedSessionMetadata,
+  getIndexedCatalogRevision,
   getIndexedSessionChildren,
   indexProvider as defaultIndexProvider
 } from "./index-db.js";
 import { normalizeCrossProviderProjectPath } from "./project-filter.js";
 import { getAllProviders, getAvailableProviders } from "./providers/index.js";
 import type { Message, MessageRole, ProviderAdapter, ProviderId, RawSession } from "./providers/interface.js";
-import { matchesSearchQuery } from "./providers/shared/parser.js";
+import { createSnippet, matchesSearchQuery } from "./providers/shared/parser.js";
+import { questionAnswersText } from "./providers/shared/question-answers.js";
 
 function providerIds(): ProviderId[] {
   return getAllProviders().map(provider => provider.id);
@@ -24,6 +28,8 @@ const HARD_LIMITS = {
 };
 const DEFAULT_CHILD_LIMIT = 50;
 const MAX_CHILD_LIMIT = 100;
+const SEARCH_FIELDS = ["title", "directory", "user", "assistant"] as const;
+const MAX_TOOL_FACETS = 50;
 
 export type EventSegment = typeof EVENT_SEGMENTS[number];
 export type EventStatus = typeof EVENT_STATUSES[number];
@@ -85,6 +91,9 @@ export interface SessionHistoryDependencies {
   indexProvider?: (adapter: ProviderAdapter) => Promise<number>;
   findIndexedSessionMetadata?: typeof findIndexedSessionMetadata;
   getIndexedSessionChildren?: typeof getIndexedSessionChildren;
+  browseIndexedProjects?: typeof browseIndexedProjects;
+  browseIndexedSessions?: typeof browseIndexedSessions;
+  getIndexedCatalogRevision?: typeof getIndexedCatalogRevision;
 }
 
 export interface SessionHistoryServiceOptions {
@@ -190,6 +199,15 @@ function resolveTime(value: unknown, field: string): number | undefined {
     throw new SessionHistoryError("invalid_input", `${field} must be a finite Unix-millisecond timestamp.`);
   }
   return value;
+}
+
+function optionalQuery(value: unknown, field: string): string | undefined {
+  if (value === undefined) return undefined;
+  const query = asNonEmptyString(value)?.trim();
+  if (!query || query.length > HARD_LIMITS.queryChars) {
+    throw new SessionHistoryError("invalid_input", `${field} must contain between 1 and ${HARD_LIMITS.queryChars} characters.`);
+  }
+  return query;
 }
 
 function eventStatus(message: Message): EventStatus {
@@ -385,6 +403,9 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
   const refreshProviderIndex = dependencies.indexProvider || defaultIndexProvider;
   const findIndexed = dependencies.findIndexedSessionMetadata || findIndexedSessionMetadata;
   const indexedChildren = dependencies.getIndexedSessionChildren || getIndexedSessionChildren;
+  const browseSessions = dependencies.browseIndexedSessions || browseIndexedSessions;
+  const browseProjects = dependencies.browseIndexedProjects || browseIndexedProjects;
+  const catalogRevision = dependencies.getIndexedCatalogRevision || getIndexedCatalogRevision;
 
   function availableProviderMap() {
     return new Map(providers().map((provider) => [provider.id, provider]));
@@ -449,12 +470,106 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
       return diagnostics;
     },
 
+    browse(input: Record<string, unknown>) {
+      const level = input?.level;
+      if (level !== "providers" && level !== "projects" && level !== "sessions") {
+        throw new SessionHistoryError("invalid_input", "level must be providers, projects, or sessions.");
+      }
+      const unsupportedFields = level === "providers"
+        ? ["directory", "title", "updatedAfter", "updatedBefore", "parent", "cursor", "limit"]
+        : level === "projects" ? ["title", "parent"] : [];
+      for (const field of unsupportedFields) {
+        if (input[field] !== undefined) {
+          throw new SessionHistoryError("invalid_input", `${field} is not supported at the ${level} level.`);
+        }
+      }
+      const selectedIds = assertStringArray(input?.providers, "providers", providerIds()) as ProviderId[] | undefined
+        || [...new Set(allProviders().map((provider) => provider.id))];
+      const available = availableProviderMap();
+      const diagnostics: ProviderDiagnostic[] = selectedIds.map((provider) => ({
+        provider, status: available.has(provider) ? "ok" : "unavailable"
+      }));
+      const availableIds = selectedIds.filter((provider) => available.has(provider));
+      const updatedAfter = resolveTime(input?.updatedAfter, "updatedAfter");
+      const updatedBefore = resolveTime(input?.updatedBefore, "updatedBefore");
+      if (updatedAfter !== undefined && updatedBefore !== undefined && updatedAfter > updatedBefore) {
+        throw new SessionHistoryError("invalid_input", "updatedAfter must not be later than updatedBefore.");
+      }
+      const requestedDirectory = input?.directory;
+      if (requestedDirectory !== undefined && (typeof requestedDirectory !== "string"
+        || requestedDirectory !== "" && !requestedDirectory.trim())) {
+        throw new SessionHistoryError("invalid_input", "directory must be a recorded project path or an empty string for an unrecorded directory.");
+      }
+      const directory = requestedDirectory === undefined ? undefined : normalizeCrossProviderProjectPath(requestedDirectory);
+      const title = optionalQuery(input?.title, "title");
+      const parent = input?.parent === undefined ? undefined : input.parent === null ? null : assertSessionRef(input.parent);
+      const limit = resolveLimit(input?.limit, limits.searchLimit, HARD_LIMITS.searchLimit, "limit");
+      const indexRevision = level === "providers" ? undefined : catalogRevision();
+      const fingerprint = createHash("sha256").update(cursorFingerprint({
+        level, providers: selectedIds, availableProviders: availableIds, directory, title, updatedAfter, updatedBefore, parent,
+        ...(indexRevision === undefined ? {} : { indexRevision })
+      })).digest("base64url");
+      const offset = input?.cursor === undefined ? 0 : decodeCursor(input.cursor, fingerprint);
+      if (level === "providers") {
+        return {
+          level,
+          providers: selectedIds.map((provider) => ({ provider, available: available.has(provider) })),
+          diagnostics, nextCursor: null, truncated: false, untrustedContent: true
+        };
+      }
+      if (level === "projects") {
+        const projects = browseProjects({ providers: availableIds, directory, updatedAfter, updatedBefore, limit: limit + 1, offset });
+        if (catalogRevision() !== indexRevision) throw new SessionHistoryError("index_changed", "The session index changed; restart this browse.");
+        const page = projects.slice(0, limit);
+        const truncated = projects.length > limit;
+        return {
+          level, projects: page, diagnostics,
+          nextCursor: truncated ? encodeCursor(offset + limit, fingerprint) : null,
+          truncated, untrustedContent: true
+        };
+      }
+      const candidates = browseSessions({ providers: availableIds, directory, title, updatedAfter, updatedBefore, parent, limit: limit + 1, offset });
+      if (catalogRevision() !== indexRevision) throw new SessionHistoryError("index_changed", "The session index changed; restart this browse.");
+      const sessions = candidates.slice(0, limit).flatMap((row) => {
+        const provider = available.get(row.provider as ProviderId)!;
+        let source: RawSession | Record<string, unknown> | null;
+        try {
+          source = provider.getSession(row.id);
+        } catch (error: any) {
+          const diagnostic = diagnostics.find((entry) => entry.provider === provider.id)!;
+          diagnostic.status = "error";
+          diagnostic.message = error?.message || String(error);
+          return [];
+        }
+        if (!source || source.id !== row.id) return [];
+        const summary = sessionSummary(provider.id, source);
+        if (!isWithinRange(summary.updatedAt, updatedAfter, updatedBefore)) return [];
+        if (directory !== undefined && normalizeCrossProviderProjectPath(summary.directory) !== directory) return [];
+        if (title !== undefined && !matchesSearchQuery(summary.title, title)) return [];
+        if (parent === null && summary.parent !== null) return [];
+        if (parent && (provider.id !== parent.provider || summary.parent?.sessionId !== parent.sessionId)) return [];
+        return [summary];
+      });
+      const truncated = candidates.length > limit;
+      return {
+        level, sessions, diagnostics,
+        nextCursor: truncated ? encodeCursor(offset + limit, fingerprint) : null,
+        truncated, untrustedContent: true
+      };
+    },
+
     search(input: Record<string, unknown>) {
       const query = asNonEmptyString(input?.query)?.trim();
       if (!query || query.length > HARD_LIMITS.queryChars) {
         throw new SessionHistoryError("invalid_input", `query must contain between 1 and ${HARD_LIMITS.queryChars} characters.`);
       }
       const requestedProviders = assertStringArray(input?.providers, "providers", providerIds()) as ProviderId[] | undefined;
+      const requestedFields = assertStringArray(input?.fields, "fields", SEARCH_FIELDS);
+      const fields = requestedFields || [...SEARCH_FIELDS];
+      const lineage = input?.lineage ?? "all";
+      if (lineage !== "all" && lineage !== "roots" && lineage !== "children") {
+        throw new SessionHistoryError("invalid_input", "lineage must be all, roots, or children.");
+      }
       const updatedAfter = resolveTime(input?.updatedAfter, "updatedAfter");
       const requestedUpdatedBefore = resolveTime(input?.updatedBefore, "updatedBefore");
       const requestedDirectory = input?.directory === undefined ? undefined : asNonEmptyString(input.directory)?.trim();
@@ -471,7 +586,9 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
         || [...new Set(allProviders().map((provider) => provider.id))];
       const fingerprint = createHash("sha256").update(cursorFingerprint({
         query, providers: selectedIds, availableProviders: selectedIds.filter((id) => available.has(id)),
-        updatedAfter, updatedBefore: requestedUpdatedBefore, directory
+        updatedAfter, updatedBefore: requestedUpdatedBefore, directory,
+        ...(requestedFields !== undefined ? { fields } : {}),
+        ...(input?.lineage !== undefined ? { lineage } : {})
       })).digest("base64url");
       const cursorPage = input?.cursor === undefined ? null : decodeSearchCursor(input.cursor, fingerprint);
       const updatedBefore = cursorPage?.snapshotUpdatedBefore ?? requestedUpdatedBefore ?? Date.now();
@@ -508,15 +625,18 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
           return session;
         };
         try {
-          const add = (session: RawSession | Record<string, unknown>, field: "title" | "directory" | "message", snippet: string, messageId: string | null = null) => {
+          const add = (session: RawSession | Record<string, unknown>, field: "title" | "directory" | "message", snippet: string,
+            messageId: string | null = null, matchRole: MessageRole | null = null) => {
             const summary = sessionSummary(providerId, session);
             if (!summary.session.sessionId || !isWithinRange(summary.updatedAt, updatedAfter, updatedBefore)) return;
             if (directory && normalizeCrossProviderProjectPath(summary.directory) !== directory) return;
-            const bestField = field === "message" && matchesSearchQuery(summary.title, query) ? "title"
-              : field === "message" && matchesSearchQuery(summary.directory, query) ? "directory" : field;
+            if (lineage === "roots" && summary.parent || lineage === "children" && !summary.parent) return;
+            const bestField = field === "message" && fields.includes("title") && matchesSearchQuery(summary.title, query) ? "title"
+              : field === "message" && fields.includes("directory") && matchesSearchQuery(summary.directory, query) ? "directory" : field;
             if (bestField !== field) {
               snippet = bestField === "title" ? summary.title : summary.directory || "";
               messageId = null;
+              matchRole = null;
             }
             const rank = bestField === "title" ? 0 : bestField === "directory" ? 1 : 2;
             const key = `${providerId}\u0000${summary.session.sessionId}`;
@@ -524,6 +644,7 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
               session: summary.session,
               event: messageId ? { ...summary.session, messageId, segment: "message" } : null,
               matchField: bestField,
+              matchRole,
               snippet: boundedText(snippet, HARD_LIMITS.previewChars),
               title: summary.title,
               directory: summary.directory,
@@ -533,8 +654,9 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
             retain(providerResults, { key, rank, updatedAt: summary.updatedAt, value });
           };
 
-          for (let metadataOffset = 0;; metadataOffset += perProviderLimit) {
-            const metadataMatches = findIndexed(providerId, query, perProviderLimit, updatedAfter, updatedBefore, metadataOffset);
+          for (let metadataOffset = 0; fields.includes("title") || fields.includes("directory"); metadataOffset += perProviderLimit) {
+            const metadataMatches = findIndexed(providerId, query, perProviderLimit, updatedAfter, updatedBefore, metadataOffset,
+              fields.filter((field): field is "title" | "directory" => field === "title" || field === "directory"));
             for (const indexed of metadataMatches) {
               const row = indexed as Record<string, unknown>;
               const sessionId = asNonEmptyString(row.id);
@@ -542,23 +664,26 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
               if (!session) continue;
               const title = String(session.title || "");
               const recordedDirectory = String(session.directory || "");
-              if (matchesSearchQuery(title, query)) add(session, "title", title);
-              else if (matchesSearchQuery(recordedDirectory, query)) add(session, "directory", recordedDirectory);
+              if (fields.includes("title") && matchesSearchQuery(title, query)) add(session, "title", title);
+              else if (fields.includes("directory") && matchesSearchQuery(recordedDirectory, query)) add(session, "directory", recordedDirectory);
             }
             if (metadataMatches.length < perProviderLimit) break;
           }
 
-          if (provider.iterateSearchMessages) {
+          const searchMessages = fields.includes("user") || fields.includes("assistant");
+          if (searchMessages && provider.iterateSearchMessages) {
             for (const { session, match } of provider.iterateSearchMessages(query)) {
-              add(session, "message", String(match.snippet || ""), asNonEmptyString(match.messageId));
+              if (requestedFields && !fields.includes(match.role)) continue;
+              add(session, "message", String(match.snippet || ""), asNonEmptyString(match.messageId), match.role);
             }
-          } else {
+          } else if (searchMessages) {
             for (let messageOffset = 0;; messageOffset += perProviderLimit) {
               const messageMatches = provider.searchMessages(query, perProviderLimit, messageOffset);
               for (const match of messageMatches) {
                 if (!match?.sessionId) continue;
+                if (requestedFields && !fields.includes(match.role)) continue;
                 const session = cachedSession(match.sessionId);
-                if (session) add(session, "message", String(match.snippet || ""), asNonEmptyString(match.messageId));
+                if (session) add(session, "message", String(match.snippet || ""), asNonEmptyString(match.messageId), match.role);
               }
               if (messageMatches.length < perProviderLimit) break;
             }
@@ -619,11 +744,25 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
       const messageEvents = projectEvents(ref, messages)
         .filter((event) => event.event.segment === "message" && event.preview.trim())
         .map(({ sourceIndex: _sourceIndex, ...event }) => event);
+      const roleCounts: Record<MessageRole, number> = { user: 0, assistant: 0, system: 0, tool: 0 };
+      const toolCounts = new Map<string, number>();
+      for (const message of messages) {
+        roleCounts[normalizedRole(message.role)] += 1;
+        if (isToolMessage(message)) {
+          const toolName = asNonEmptyString(message.toolName) || "tool";
+          toolCounts.set(toolName, (toolCounts.get(toolName) || 0) + 1);
+        }
+      }
+      const toolNames = [...toolCounts].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+        .slice(0, MAX_TOOL_FACETS).map(([toolName, count]) => ({ toolName, count }));
       return {
         ...sessionSummary(ref.provider, session),
         messageCount: messages.length,
         firstMessage: messageEvents[0] || null,
         lastMessage: messageEvents.at(-1) || null,
+        roleCounts,
+        toolNames,
+        toolNamesTruncated: toolCounts.size > MAX_TOOL_FACETS,
         children,
         childrenNextCursor,
         childrenTruncated: childrenNextCursor !== null,
@@ -637,17 +776,27 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
       const requestedRoles = assertStringArray(input?.roles, "roles", ["user", "assistant", "system", "tool"]) as MessageRole[] | undefined;
       const toolNames = assertStringArray(input?.toolNames, "toolNames");
       const statuses = assertStringArray(input?.statuses, "statuses", EVENT_STATUSES) as EventStatus[] | undefined;
+      const query = optionalQuery(input?.query, "query");
       const limit = resolveLimit(input?.limit, limits.timelineLimit, limits.timelineLimit, "limit");
       const segments = requestedSegments || ["message", "tool"];
       const messages = getProviderMessages(ref);
-      const filters = { session: ref, segments, roles: requestedRoles || [], toolNames: toolNames || [], statuses: statuses || [] };
+      const filters = { session: ref, segments, roles: requestedRoles || [], toolNames: toolNames || [], statuses: statuses || [], query };
       const fingerprint = cursorFingerprint(filters as unknown as Record<string, unknown>);
       const offset = input?.cursor === undefined ? 0 : decodeCursor(input.cursor, fingerprint);
       const events = projectEvents(ref, messages)
         .filter((event) => segments.includes(event.event.segment))
         .filter((event) => !requestedRoles || requestedRoles.includes(event.role))
         .filter((event) => !toolNames || (event.toolName !== null && toolNames.includes(event.toolName)))
-        .filter((event) => !statuses || (event.status !== null && statuses.includes(event.status)));
+        .filter((event) => !statuses || (event.status !== null && statuses.includes(event.status)))
+        .flatMap((event) => {
+          if (query === undefined) return [event];
+          const message = messages[event.sourceIndex];
+          const text = event.event.segment === "tool" ? event.toolName
+            : event.event.segment === "thinking" ? message.thinking
+            : message.questionAnswers ? questionAnswersText(message.questionAnswers) : message.content;
+          if (!matchesSearchQuery(text, query)) return [];
+          return [{ ...event, preview: event.event.segment === "tool" ? event.preview : createSnippet(text, query) }];
+        });
       const page = events.slice(offset, offset + limit).map(({ sourceIndex: _sourceIndex, ...event }) => event);
       const nextOffset = offset + page.length;
       return {

@@ -2,7 +2,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { getConfig } from "./config.js";
 import { isEmptyProjectFilter, normalizeCrossProviderProjectPath } from "./project-filter.js";
-import { escapeSqlLikePattern, splitSearchTerms } from "./providers/shared/parser.js";
+import { matchesSearchQuery, splitSearchTerms } from "./providers/shared/parser.js";
 import {
   getSearchMatchingOverrideIds,
   normalizeSessionTitleOverrides,
@@ -44,8 +44,17 @@ export function getIndexDb() {
     indexDb.exec("CREATE INDEX IF NOT EXISTS idx_session_provider ON session_index(provider)");
     indexDb.exec("CREATE INDEX IF NOT EXISTS idx_session_updated ON session_index(time_updated DESC)");
     indexDb.function("normalize_cross_provider_project", { deterministic: true }, normalizeCrossProviderProjectPath);
+    indexDb.function("matches_search_query", { deterministic: true }, (text: string, query: string) => matchesSearchQuery(text, query) ? 1 : 0);
   }
   return indexDb;
+}
+
+/** Invalidate offset cursors when this process or another connection changes the shared metadata DB. */
+export function getIndexedCatalogRevision(): string {
+  const db = getIndexDb();
+  const external = db.prepare("PRAGMA data_version").get().data_version;
+  const local = db.prepare("SELECT total_changes() AS value").get().value;
+  return `${external}:${local}`;
 }
 
 /** Startup totals only include providers that completed this indexing pass. */
@@ -381,17 +390,15 @@ export function findIndexedSessionMetadata(
   limit = 20,
   updatedAfter: number | undefined = undefined,
   updatedBefore: number | undefined = undefined,
-  offset = 0
+  offset = 0,
+  fields: Array<"title" | "directory"> = ["title", "directory"]
 ) {
   const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 100));
-  const terms = splitSearchTerms(query).map(escapeSqlLikePattern);
-  if (!terms.length) return [];
+  if (!splitSearchTerms(query).length || !fields.length) return [];
   const where = ["provider = ?"];
   const params: any[] = [provider];
-  for (const term of terms) {
-    where.push("(COALESCE(title, '') LIKE ? ESCAPE '\\' OR COALESCE(directory, '') LIKE ? ESCAPE '\\')");
-    params.push(`%${term}%`, `%${term}%`);
-  }
+  where.push(`(${fields.map((field) => `matches_search_query(COALESCE(${field}, ''), ?) = 1`).join(" OR ")})`);
+  params.push(...fields.map(() => query));
   if (Number.isFinite(updatedAfter)) {
     where.push("time_updated >= ?");
     params.push(updatedAfter);
@@ -407,6 +414,108 @@ export function findIndexedSessionMetadata(
     ORDER BY time_updated DESC, time_created DESC, id ASC
     LIMIT ? OFFSET ?
   `).all(...params, safeLimit, offset);
+}
+
+export interface BrowseIndexedSessionsQuery {
+  providers: string[];
+  directory?: string;
+  title?: string;
+  updatedAfter?: number;
+  updatedBefore?: number;
+  parent?: { provider: string; sessionId: string } | null;
+  limit: number;
+  offset: number;
+}
+
+export interface IndexedSessionRow {
+  id: string;
+  provider: string;
+  parent_id: string | null;
+  title: string | null;
+  directory: string | null;
+  time_created: number | null;
+  time_updated: number | null;
+  message_count: number | null;
+  token_count: number | null;
+  library_evidence: string | null;
+  last_indexed: number;
+}
+
+/** Browse provider-owned session identities from the viewer's derived index. */
+export function browseIndexedSessions(query: BrowseIndexedSessionsQuery): IndexedSessionRow[] {
+  const where = ["provider IN (SELECT value FROM json_each(?))"];
+  const params: Array<string | number> = [JSON.stringify(query.providers)];
+  if (query.directory !== undefined) {
+    where.push("normalize_cross_provider_project(COALESCE(directory, '')) = ?");
+    params.push(normalizeCrossProviderProjectPath(query.directory));
+  }
+  if (query.title !== undefined) {
+    where.push("matches_search_query(COALESCE(title, ''), ?) = 1");
+    params.push(query.title);
+  }
+  if (query.updatedAfter !== undefined) {
+    where.push("time_updated >= ?");
+    params.push(query.updatedAfter);
+  }
+  if (query.updatedBefore !== undefined) {
+    where.push("time_updated <= ?");
+    params.push(query.updatedBefore);
+  }
+  if (query.parent === null) {
+    where.push("parent_id IS NULL");
+  } else if (query.parent !== undefined) {
+    where.push("provider = ? AND parent_id = ?");
+    params.push(query.parent.provider, query.parent.sessionId);
+  }
+  return getIndexDb().prepare(`
+    SELECT * FROM session_index
+    WHERE ${where.join(" AND ")}
+    ORDER BY time_updated DESC, time_created DESC, provider ASC, id ASC
+    LIMIT ? OFFSET ?
+  `).all(...params, query.limit, query.offset) as IndexedSessionRow[];
+}
+
+export interface BrowseIndexedProjectsQuery {
+  providers: string[];
+  directory?: string;
+  updatedAfter?: number;
+  updatedBefore?: number;
+  limit: number;
+  offset: number;
+}
+
+export interface IndexedProjectCount {
+  provider: string;
+  directory: string;
+  indexedCount: number;
+}
+
+/** Count indexed sessions by provider and normalized project directory. */
+export function browseIndexedProjects(query: BrowseIndexedProjectsQuery): IndexedProjectCount[] {
+  const where = ["provider IN (SELECT value FROM json_each(?))"];
+  const params: Array<string | number> = [JSON.stringify(query.providers)];
+  if (query.directory !== undefined) {
+    where.push("normalize_cross_provider_project(COALESCE(directory, '')) = ?");
+    params.push(normalizeCrossProviderProjectPath(query.directory));
+  }
+  if (query.updatedAfter !== undefined) {
+    where.push("time_updated >= ?");
+    params.push(query.updatedAfter);
+  }
+  if (query.updatedBefore !== undefined) {
+    where.push("time_updated <= ?");
+    params.push(query.updatedBefore);
+  }
+  return getIndexDb().prepare(`
+    SELECT provider,
+           normalize_cross_provider_project(COALESCE(directory, '')) AS directory,
+           COUNT(*) AS indexedCount
+    FROM session_index
+    WHERE ${where.join(" AND ")}
+    GROUP BY provider, normalize_cross_provider_project(COALESCE(directory, ''))
+    ORDER BY provider ASC, directory ASC
+    LIMIT ? OFFSET ?
+  `).all(...params, query.limit, query.offset) as IndexedProjectCount[];
 }
 
 /**

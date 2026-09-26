@@ -29,6 +29,7 @@ const { Client, InMemoryTransport } = await import("@modelcontextprotocol/client
 const { StdioClientTransport } = await import("@modelcontextprotocol/client/stdio");
 
 function createFixture() {
+  let catalogVersion = 1;
   const sessions = new Map([
     ["root", {
       id: "root", provider: "codex", parentId: null, title: "Needle title", directory: "/work/root",
@@ -69,6 +70,7 @@ function createFixture() {
       { id: "hidden-1", sessionId: "hidden", role: "user", content: "Needle in a viewer-excluded session", thinking: null, toolName: null, toolInput: null, toolOutput: null, timestamp: 50, tokens: null, metadata: null }
     ]]
   ]);
+  const searchMessageCalls = { count: 0 };
   const adapter = {
     id: "codex",
     name: "Fixture Codex",
@@ -79,18 +81,45 @@ function createFixture() {
     getSession: (sessionId) => sessions.get(sessionId) || null,
     getMessages: (sessionId) => messages.get(sessionId) || [],
     getTokenStats: () => [],
-    searchMessages: (query) => query.toLowerCase().includes("needle")
-      ? [
+    searchMessages: (query) => {
+      searchMessageCalls.count += 1;
+      return query.toLowerCase().includes("needle")
+        ? [
+          { sessionId: "root", messageId: "m1", role: "user", snippet: "Needle in a user message", timestamp: 10 },
           { sessionId: "content", messageId: "m4", role: "assistant", snippet: "Needle appears only in content", timestamp: 40 },
           { sessionId: "content-z", messageId: "m5", role: "assistant", snippet: "Needle appears in tied content", timestamp: 40 },
-          { sessionId: "hidden", messageId: "hidden-1", role: "assistant", snippet: "hidden Needle", timestamp: 50 }
+          { sessionId: "hidden", messageId: "hidden-1", role: "user", snippet: "hidden Needle", timestamp: 50 }
         ]
-      : []
+        : [];
+    }
   };
-  const findIndexedSessionMetadata = (_provider, query) => query.toLowerCase().includes("needle")
-    ? [sessions.get("root"), sessions.get("hidden")]
-    : [];
+  const findIndexedSessionMetadata = (_provider, query) => [...sessions.values()]
+    .filter((session) => `${session.title} ${session.directory}`.toLowerCase().includes(query.toLowerCase()));
   const getIndexedSessionChildren = (_provider, parentId) => parentId === "root" ? [sessions.get("child")] : [];
+  const indexedSessions = ({ providers, directory, title, parent, updatedAfter, updatedBefore, limit, offset }) => [...sessions.values()]
+    .filter((session) => providers.includes(session.provider))
+    .filter((session) => directory === undefined || session.directory === directory)
+    .filter((session) => title === undefined || session.title.toLowerCase().includes(title.toLowerCase()))
+    .filter((session) => parent === undefined || (parent === null ? session.parentId === null : session.parentId === parent.sessionId && session.provider === parent.provider))
+    .filter((session) => updatedAfter === undefined || session.timeUpdated >= updatedAfter)
+    .filter((session) => updatedBefore === undefined || session.timeUpdated <= updatedBefore)
+    .sort((left, right) => right.timeUpdated - left.timeUpdated || right.timeCreated - left.timeCreated || left.id.localeCompare(right.id))
+    .slice(offset, offset + limit);
+  const indexedProjects = ({ providers, directory, updatedAfter, updatedBefore, limit, offset }) => {
+    const counts = new Map();
+    for (const session of sessions.values()) {
+      if (!providers.includes(session.provider) || updatedAfter !== undefined && session.timeUpdated < updatedAfter
+        || updatedBefore !== undefined && session.timeUpdated > updatedBefore) continue;
+      const key = `${session.provider}\0${session.directory}`;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return [...counts].map(([key, indexedCount]) => {
+      const [provider, directory] = key.split("\0");
+      return { provider, directory, indexedCount };
+    }).filter((project) => directory === undefined || project.directory === directory)
+      .sort((left, right) => left.provider.localeCompare(right.provider) || left.directory.localeCompare(right.directory))
+      .slice(offset, offset + limit);
+  };
   const service = createSessionHistoryService({
     dependencies: {
       getAvailableProviders: () => [adapter],
@@ -101,10 +130,13 @@ function createFixture() {
         return count;
       },
       findIndexedSessionMetadata,
-      getIndexedSessionChildren
+      getIndexedSessionChildren,
+      browseIndexedSessions: indexedSessions,
+      browseIndexedProjects: indexedProjects,
+      getIndexedCatalogRevision: () => String(catalogVersion)
     }
   });
-  return { service };
+  return { service, searchMessageCalls, advanceCatalogRevision: () => { catalogVersion += 1; } };
 }
 
 test("session-history service keeps retrieval bounded, canonical, and read-only", async () => {
@@ -116,12 +148,87 @@ test("session-history service keeps retrieval bounded, canonical, and read-only"
   assert.equal(typeof diagnostics[0].durationMs, "number");
 });
 
-test("session-history service searches, pages events, exposes every provider-stored session, and requires explicit sensitive-content opt-in", () => {
+test("session_browse navigates provider, project, and session metadata with canonical parent filters", () => {
   const { service } = createFixture();
+  const providers = service.browse({ level: "providers" });
+  assert.deepEqual(providers.providers, [{ provider: "codex", available: true }]);
+  assert.equal(providers.nextCursor, null);
+
+  const projects = service.browse({ level: "projects", limit: 2 });
+  assert.deepEqual(projects.projects.map((project) => project.directory), ["/secret", "/work/content"]);
+  assert.ok(projects.nextCursor);
+  const nextProjects = service.browse({ level: "projects", limit: 2, cursor: projects.nextCursor });
+  assert.deepEqual(nextProjects.projects.map((project) => project.directory), ["/work/content-z", "/work/root"]);
+  assert.equal(nextProjects.projects.at(-1).indexedCount, 2);
+  assert.equal(nextProjects.nextCursor, null);
+
+  const first = service.browse({ level: "sessions", title: "Needle", parent: null, limit: 1 });
+  assert.deepEqual(first.sessions.map((session) => session.session.sessionId), ["hidden"]);
+  assert.ok(first.nextCursor);
+  const second = service.browse({ level: "sessions", title: "Needle", parent: null, limit: 1, cursor: first.nextCursor });
+  assert.deepEqual(second.sessions.map((session) => session.session.sessionId), ["root"]);
+  assert.equal(second.nextCursor, null);
+  assert.deepEqual(
+    service.browse({ level: "sessions", parent: { provider: "codex", sessionId: "root" } }).sessions.map((session) => session.session.sessionId),
+    ["child"]
+  );
+  assert.throws(
+    () => service.browse({ level: "projects", title: "Needle" }),
+    (error) => error instanceof SessionHistoryError && error.code === "invalid_input"
+  );
+  assert.throws(
+    () => service.browse({ level: "sessions", title: "Needle", cursor: projects.nextCursor }),
+    (error) => error instanceof SessionHistoryError && error.code === "invalid_cursor"
+  );
+});
+
+test("session_browse skips stale indexed rows without hiding later provider sessions", () => {
+  const live = { id: "live", provider: "codex", parentId: null, title: "Live", directory: "/work", timeCreated: 1, timeUpdated: 10, messageCount: 1, tokenCount: null };
+  const adapter = { id: "codex", name: "Codex", icon: "", detect: () => true, getDataPath: () => null,
+    async *scan() { yield live; }, getSession: (id) => id === "live" ? live : null,
+    getMessages: () => [], getTokenStats: () => [], searchMessages: () => [] };
+  const indexed = [{ id: "stale", provider: "codex" }, { id: "live", provider: "codex" }];
+  const service = createSessionHistoryService({ dependencies: {
+    getAvailableProviders: () => [adapter], getAllProviders: () => [adapter],
+    browseIndexedSessions: ({ limit, offset }) => indexed.slice(offset, offset + limit),
+    browseIndexedProjects: () => [], getIndexedSessionChildren: () => [], findIndexedSessionMetadata: () => [],
+    getIndexedCatalogRevision: () => "1"
+  } });
+  const first = service.browse({ level: "sessions", limit: 1 });
+  assert.deepEqual(first.sessions, []);
+  assert.ok(first.nextCursor);
+  const second = service.browse({ level: "sessions", limit: 1, cursor: first.nextCursor });
+  assert.deepEqual(second.sessions.map((session) => session.session.sessionId), ["live"]);
+  assert.equal(second.nextCursor, null);
+});
+
+test("session_browse rejects a continuation after the index revision changes", () => {
+  const { service, advanceCatalogRevision } = createFixture();
+  const first = service.browse({ level: "sessions", limit: 1 });
+  assert.ok(first.nextCursor);
+  advanceCatalogRevision();
+  assert.throws(
+    () => service.browse({ level: "sessions", limit: 1, cursor: first.nextCursor }),
+    (error) => error instanceof SessionHistoryError && error.code === "invalid_cursor"
+  );
+});
+
+test("session-history service searches, pages events, exposes every provider-stored session, and requires explicit sensitive-content opt-in", () => {
+  const { service, searchMessageCalls } = createFixture();
   const search = service.search({ query: "Needle" });
   assert.deepEqual(search.matches.map((match) => match.session.sessionId), ["hidden", "root", "content", "content-z"]);
   assert.equal(search.matches[0].matchField, "title");
   assert.equal(search.matches.some((match) => match.session.sessionId === "hidden"), true);
+  const callsBeforeMetadataSearch = searchMessageCalls.count;
+  assert.deepEqual(service.search({ query: "Needle", fields: ["title"] }).matches.map((match) => match.session.sessionId), ["hidden", "root"]);
+  assert.deepEqual(service.search({ query: "Needle", fields: ["title", "directory"] }).matches.map((match) => match.session.sessionId), ["hidden", "root"]);
+  assert.equal(searchMessageCalls.count, callsBeforeMetadataSearch, "metadata-only searches must not read provider message history");
+  assert.deepEqual(service.search({ query: "Needle", fields: ["user"] }).matches.map((match) => match.session.sessionId), ["hidden", "root"]);
+  assert.deepEqual(service.search({ query: "Needle", fields: ["user"] }).matches.map((match) => match.matchRole), ["user", "user"]);
+  assert.deepEqual(service.search({ query: "Needle", fields: ["assistant"] }).matches.map((match) => match.session.sessionId), ["content", "content-z"]);
+  assert.deepEqual(service.search({ query: "Needle", fields: ["assistant"] }).matches.map((match) => match.matchRole), ["assistant", "assistant"]);
+  assert.deepEqual(service.search({ query: "Child", fields: ["title"], lineage: "children" }).matches.map((match) => match.session.sessionId), ["child"]);
+  assert.deepEqual(service.search({ query: "Needle", fields: ["title"], lineage: "children" }).matches, []);
 
   const firstSearchPage = service.search({ query: "Needle", limit: 2 });
   assert.deepEqual(firstSearchPage.matches.map((match) => match.session.sessionId), ["hidden", "root"]);
@@ -147,6 +254,9 @@ test("session-history service searches, pages events, exposes every provider-sto
   assert.equal(overview.lastMessage.event.messageId, "m2");
   assert.equal(overview.lastMessage.preview, "I will inspect it");
   assert.deepEqual(overview.children.map((child) => child.session.sessionId), ["child"]);
+  assert.deepEqual(overview.roleCounts, { user: 1, assistant: 2, system: 0, tool: 1 });
+  assert.deepEqual(overview.toolNames, [{ toolName: "Read", count: 1 }]);
+  assert.equal(overview.toolNamesTruncated, false);
 
   const timeline = service.timeline({ session: { provider: "codex", sessionId: "root" }, limit: 2 });
   assert.deepEqual(timeline.events.map((event) => event.event.segment), ["message", "message"]);
@@ -169,6 +279,10 @@ test("session-history service searches, pages events, exposes every provider-sto
 
   const thinking = service.timeline({ session: { provider: "codex", sessionId: "root" }, segments: ["thinking"] });
   assert.equal(thinking.events.length, 1);
+  assert.deepEqual(service.timeline({ session: { provider: "codex", sessionId: "root" }, query: "Needle" }).events.map((event) => event.event.messageId), ["m1"]);
+  assert.deepEqual(service.timeline({ session: { provider: "codex", sessionId: "root" }, query: "Read" }).events.map((event) => event.event.messageId), ["m3"]);
+  assert.deepEqual(service.timeline({ session: { provider: "codex", sessionId: "root" }, query: "secret.txt" }).events, []);
+  assert.deepEqual(service.timeline({ session: { provider: "codex", sessionId: "root" }, segments: ["thinking"], query: "bounded" }).events.map((event) => event.event.messageId), ["m2"]);
   const context = service.getContext({ event: next.events[0].event, before: 1, after: 1 });
   assert.equal(context.target.segment, "tool");
   assert.equal(context.events.length, 2);
@@ -632,7 +746,7 @@ test("OpenCode SQLite message search continues after 100 duplicate session hits"
   closeDb(dbPath);
 });
 
-test("AgentSession-MCP lists exactly five read-only tools over the MCP protocol", async (t) => {
+test("AgentSession-MCP exposes hierarchical read-only tools over the MCP protocol", async (t) => {
   const { service } = createFixture();
   const server = createSessionHistoryMcpServer(service);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -651,6 +765,7 @@ test("AgentSession-MCP lists exactly five read-only tools over the MCP protocol"
 
   const tools = await client.listTools();
   assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
+    "session_browse",
     "session_get",
     "session_get_context",
     "session_get_event",
@@ -672,11 +787,53 @@ test("AgentSession-MCP lists exactly five read-only tools over the MCP protocol"
   );
   assert.ok(searchTool.inputSchema.properties.directory);
   assert.ok(searchTool.inputSchema.properties.cursor);
-  assert.match(searchTool.description, /every session still present/i);
+  assert.ok(searchTool.inputSchema.properties.fields);
+  assert.ok(searchTool.inputSchema.properties.lineage);
   assert.match(searchTool.description, /Viewer hidden, deleted, and excluded metadata is ignored/i);
+  const browseTool = tools.tools.find((tool) => tool.name === "session_browse");
+  assert.deepEqual(browseTool.inputSchema.properties.level.enum, ["providers", "projects", "sessions"]);
   const contextTool = tools.tools.find((tool) => tool.name === "session_get_context");
   assert.equal(contextTool.inputSchema.properties.includeThinking.type, "boolean");
 
+  const browsedProviders = await client.callTool({ name: "session_browse", arguments: { level: "providers" } });
+  assert.equal(browsedProviders.isError, undefined);
+  assert.deepEqual(browsedProviders.structuredContent.result.providers, [{ provider: "codex", available: true }]);
+  const browsedProjects = await client.callTool({ name: "session_browse", arguments: {
+    level: "projects", providers: ["codex"], directory: "/work/root"
+  } });
+  assert.equal(browsedProjects.isError, undefined);
+  assert.deepEqual(browsedProjects.structuredContent.result.projects, [
+    { provider: "codex", directory: "/work/root", indexedCount: 2 }
+  ]);
+  const browsedSessions = await client.callTool({ name: "session_browse", arguments: {
+    level: "sessions", providers: ["codex"], directory: browsedProjects.structuredContent.result.projects[0].directory, parent: null
+  } });
+  assert.equal(browsedSessions.isError, undefined);
+  assert.deepEqual(browsedSessions.structuredContent.result.sessions.map((session) => session.session.sessionId), ["root"]);
+
+  const browse = await client.callTool({ name: "session_browse", arguments: { level: "sessions", title: "Needle", parent: null, limit: 1 } });
+  assert.equal(browse.isError, undefined);
+  assert.deepEqual(browse.structuredContent.result.sessions.map((session) => session.session.sessionId), ["hidden"]);
+  assert.ok(browse.structuredContent.result.nextCursor);
+  const searchedUsers = await client.callTool({ name: "session_search", arguments: { query: "Needle", fields: ["user"] } });
+  assert.equal(searchedUsers.isError, undefined);
+  assert.deepEqual(searchedUsers.structuredContent.result.matches.map((match) => match.session.sessionId), ["hidden", "root"]);
+  const searchedAssistant = await client.callTool({ name: "session_search", arguments: { query: "Needle", fields: ["assistant"] } });
+  assert.equal(searchedAssistant.isError, undefined);
+  assert.deepEqual(searchedAssistant.structuredContent.result.matches.map((match) => match.session.sessionId), ["content", "content-z"]);
+  const searchedDirectory = await client.callTool({ name: "session_search", arguments: { query: "/work/root", fields: ["directory"] } });
+  assert.equal(searchedDirectory.isError, undefined);
+  assert.deepEqual(searchedDirectory.structuredContent.result.matches.map((match) => match.session.sessionId), ["root", "child"]);
+  assert.ok(searchedDirectory.structuredContent.result.matches.every((match) => match.matchField === "directory" && match.matchRole === null));
+  const sessionOverview = await client.callTool({ name: "session_get", arguments: { session: { provider: "codex", sessionId: "root" } } });
+  assert.equal(sessionOverview.isError, undefined);
+  assert.deepEqual(sessionOverview.structuredContent.result.roleCounts, { user: 1, assistant: 2, system: 0, tool: 1 });
+  assert.deepEqual(sessionOverview.structuredContent.result.toolNames, [{ toolName: "Read", count: 1 }]);
+  assert.equal(sessionOverview.structuredContent.result.toolNamesTruncated, false);
+  const timelineQuery = await client.callTool({ name: "session_timeline", arguments: {
+    session: { provider: "codex", sessionId: "root" }, query: "Read", segments: ["tool"]
+  } });
+  assert.deepEqual(timelineQuery.structuredContent.result.events.map((entry) => entry.event.messageId), ["m3"]);
   const response = await client.callTool({ name: "session_search", arguments: { query: "Needle" } });
   assert.equal(response.isError, undefined);
   assert.equal(response.structuredContent.result.matches.length, 4);
@@ -770,7 +927,7 @@ test("compiled stdio executable serves legacy and 2026-07-28 MCP without polluti
   t.after(async () => legacyClient.close());
   assert.equal(legacyClient.getProtocolEra(), "legacy");
   const legacyTools = await legacyClient.listTools();
-  assert.equal(legacyTools.tools.length, 5);
+  assert.equal(legacyTools.tools.length, 6);
 
   const modernClient = new Client(
     { name: "agentsession-mcp-modern-stdio-test", version: "1.0.0" },
@@ -780,7 +937,7 @@ test("compiled stdio executable serves legacy and 2026-07-28 MCP without polluti
   t.after(async () => modernClient.close());
   assert.equal(modernClient.getProtocolEra(), "modern");
   const tools = await modernClient.listTools();
-  assert.equal(tools.tools.length, 5);
+  assert.equal(tools.tools.length, 6);
   const search = await modernClient.callTool({ name: "session_search", arguments: { query: "does-not-exist" } });
   assert.equal(search.isError, undefined);
 });

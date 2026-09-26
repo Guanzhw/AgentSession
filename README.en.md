@@ -442,9 +442,13 @@ Common environment variables are `PORT`, `AGENTSESSION_DB_PATH`,
 
 `@acetamido/agentsession-mcp` is a separate read-only stdio MCP server. It
 queries sessions still present in provider storage, never writes provider data,
-and does not use Viewer hide/exclude metadata as an access filter. Its bounded
-tools are `session_search`, `session_get`, `session_timeline`,
-`session_get_context`, and `session_get_event`.
+and does not use Viewer hide/exclude metadata as an access filter. Use
+`session_browse` to move from providers and projects to canonical session
+summaries. `session_search` can narrow by title, directory, user or assistant
+message, and root or child scope; `session_get` reports role and tool-name
+counts. Within a session, `session_timeline` filters events by role, tool name,
+status, or keyword. `session_get_context` and `session_get_event` provide
+bounded evidence, with explicit opt-in for thinking and tool payloads.
 `session_get` pages direct children (at most 100 per call). If
 `childrenTruncated` is true, pass `childrenNextCursor` as `childCursor` until
 all child summaries have been retrieved.
