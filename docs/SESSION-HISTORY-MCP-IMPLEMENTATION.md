@@ -26,11 +26,12 @@ untrusted content, not instructions.
 
 ## Tools
 
-The server exposes exactly five bounded tools:
+The server exposes six bounded tools:
 
-- `session_search` — keyword search over title, message text, and recorded directory;
-- `session_get` — canonical session metadata with first/last visible-message previews and paged direct-child summaries (`childCursor`, `childLimit`, `childrenNextCursor`, `childrenTruncated`);
-- `session_timeline` — bounded message, reasoning, and tool event timeline;
+- `session_browse` — provider, indexed project, and source-checked session pages; directory and time filters apply to project and session pages, while title and parent filters apply to session pages;
+- `session_search` — keyword search over title, message text, and recorded directory, optionally scoped to title, directory, user, assistant, root, or child matches;
+- `session_get` — canonical session metadata, role/tool-name facets, first/last visible-message previews, and paged direct-child summaries (`childCursor`, `childLimit`, `childrenNextCursor`, `childrenTruncated`);
+- `session_timeline` — bounded message, reasoning, and tool event timeline with role, tool-name, status, and in-session keyword filters;
 - `session_get_context` — bounded context around a canonical event;
 - `session_get_event` — one event with continuation parameters when content is truncated.
 
@@ -59,7 +60,13 @@ parsers own source interpretation; MCP code does not branch on provider ID.
 
 ## Safety and bounds
 
-Search uses case-insensitive AND matching for whitespace-separated keywords.
+Search uses case-insensitive AND substring matching for whitespace-separated
+keywords. Metadata-only field searches skip the full transcript scan; scoped
+message searches still read provider histories until a persistent content
+index is added. Project counts are derived-index candidate counts, while
+returned session rows are checked against current provider storage.
+Browse cursors include the metadata database revision, so concurrent updates
+reject a continuation instead of silently duplicating or skipping rows.
 Timeline, context, and event content are length-limited and server-capped.
 Reasoning, tool input, and tool output are returned only when explicitly
 requested. Truncation includes reusable continuation offsets until no further
@@ -85,11 +92,11 @@ required before a host can connect it.
 
 ## Verification
 
-Test the five tools against an unavailable provider, a malformed source, a
+Test the six tools against an unavailable provider, a malformed source, a
 long event, a canonical nested session, and a real local provider. Confirm
 that provider files remain byte-for-byte untouched and that every bound is
 enforced by the server.
 
 Related source: `packages/agentsession-mcp/src/session-history-server.ts`,
-`src/providers/interface.ts`, `src/providers/index.ts`, `src/session-queries.ts`,
-and `src/meta.ts`.
+`src/session-history.ts`, `src/index-db.ts`, `src/providers/interface.ts`,
+`src/providers/index.ts`, `src/session-queries.ts`, and `src/meta.ts`.
