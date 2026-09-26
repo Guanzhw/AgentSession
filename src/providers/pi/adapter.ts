@@ -222,6 +222,10 @@ const pi = {
     return sessionFiles.get(sessionId)?.messages || [];
   },
 
+  getSearchIndexSources() {
+    return sessionFiles.getSearchIndexSources();
+  },
+
   getSessionProtocol(sessionId) {
     return buildPiSessionProtocolFor(sessionId);
   },

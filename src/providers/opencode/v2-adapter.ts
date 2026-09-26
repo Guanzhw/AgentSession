@@ -92,6 +92,11 @@ export function createOpenCodeV2Adapter(dataPath: () => string): ProviderAdapter
     detect: () => true, getDataPath: dataPath,
     async *scan() { yield* list(); },
     getLibrarySessions() { return db().prepare("SELECT * FROM session_v2 WHERE time_archived IS NULL ORDER BY time_updated DESC, id").all().map(identity); },
+    getSearchIndexSources() {
+      const revision = openCodeStorageRevision(dataPath());
+      return db().prepare("SELECT id FROM session_v2 WHERE time_archived IS NULL ORDER BY id").all()
+        .map((row: Row) => ({ sessionId: row.id, revision }));
+    },
     getSession, getMessages: messages, getSessionProtocol: protocol,
     getOwnedReaderProjection(id) {
       const current = getSession(id);

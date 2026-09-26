@@ -294,6 +294,14 @@ export function createSessionFileStore<
       refresh();
       return [...entriesByPath.values()].map(({ filePath, signature }) => ({ filePath, signature }));
     },
+    getSearchIndexSources() {
+      refresh();
+      const canonical = new Map([...entriesByPath.values()].map(entry => [String(entry.session.id), entry]));
+      return [...canonical.values()].map(entry => ({
+        sessionId: String(entry.session.id),
+        revision: entry.signature
+      }));
+    },
     getFamily(rootSessionId: string) {
       refresh();
       const family: IndexedSessionFile<TSession, TRecords, TMessages>[] = [];

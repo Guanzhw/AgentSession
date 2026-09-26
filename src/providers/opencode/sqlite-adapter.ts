@@ -12,6 +12,7 @@ import {
 } from "../../db.js";
 import { parseJson } from "../shared/parser.js";
 import type { ProviderAdapter, ProviderId, LibrarySessionMetadata } from "../interface.js";
+import { openCodeStorageRevision } from "./storage.js";
 
 function stringifyMessageContent(value: any) {
   if (value == null) {
@@ -98,6 +99,13 @@ export function createOpenCodeSqliteAdapter({
     `).all().map(librarySessionMetadata);
   },
 
+  getSearchIndexSources() {
+    const dbPath = getAdapterDataPath();
+    const revision = openCodeStorageRevision(dbPath);
+    return getDb(dbPath).prepare("SELECT id FROM session ORDER BY id").all()
+      .map((row: any) => ({ sessionId: row.id, revision }));
+  },
+
   getSession(sessionId) {
     return dbGetSession(sessionId, getAdapterDataPath());
   },
@@ -156,6 +164,13 @@ export function createOpenCodeSqliteAdapter({
       }
     }
     return results;
+  },
+
+  getSearchIndexMessages(sessionId) {
+    const partId = (message: { id: string }) => message.id.slice(message.id.lastIndexOf(":") + 1);
+    return this.getMessages(sessionId).sort((left, right) =>
+      right.timestamp - left.timestamp
+      || (partId(right) > partId(left) ? 1 : partId(right) < partId(left) ? -1 : 0));
   },
 
   getTokenStats(days = 30) {

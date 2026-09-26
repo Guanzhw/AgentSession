@@ -445,7 +445,8 @@ queries sessions still present in provider storage, never writes provider data,
 and does not use Viewer hide/exclude metadata as an access filter. Use
 `session_browse` to move from providers and projects to canonical session
 summaries. `session_search` can narrow by title, directory, user or assistant
-message, and root or child scope; `session_get` reports role and tool-name
+message, or explicitly search tool names across sessions with `fields: ["toolName"]`.
+It can also select root or child scope; `session_get` reports role and tool-name
 counts. Within a session, `session_timeline` filters events by role, tool name,
 status, or keyword. `session_get_context` and `session_get_event` provide
 bounded evidence, with explicit opt-in for thinking and tool payloads.

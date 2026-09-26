@@ -263,6 +263,10 @@ const claudeCode = {
     return sessionFiles.get(sessionId)?.messages || [];
   },
 
+  getSearchIndexSources() {
+    return sessionFiles.getSearchIndexSources();
+  },
+
   getSessionProtocol(sessionId) {
     return buildClaudeSessionProtocolFor(sessionId);
   },

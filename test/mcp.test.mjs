@@ -13,6 +13,7 @@ const { initConfig, parseArgs, validateUserConfig } = await import("../dist/src/
 initConfig([]);
 const { closeDb } = await import("../dist/src/db.js");
 const { closeIndexDb, findIndexedSessionMetadata, upsertIndex } = await import("../dist/src/index-db.js");
+const { closeSearchDb } = await import("../dist/src/search-index.js");
 const { closeMetaDb, getMetaDb, getExcludedIds, permanentDelete, softDelete } = await import("../dist/src/meta.js");
 const { createSessionHistoryService, SessionHistoryError } = await import("../dist/src/session-history.js");
 const { createOpenCodeSqliteAdapter } = await import("../dist/src/providers/opencode/sqlite-adapter.js");
@@ -213,6 +214,35 @@ test("session_browse rejects a continuation after the index revision changes", (
   );
 });
 
+test("session_search returns only normalized user and assistant message hits by default", () => {
+  const sessions = new Map(["user", "assistant", "system", "tool"].map((role, index) => [role, {
+    id: role, provider: "codex", title: "Other", directory: "/work", timeCreated: index,
+    timeUpdated: 100 - index, messageCount: 1, tokenCount: null
+  }]));
+  const adapter = {
+    id: "codex", name: "Fixture Codex", detect: () => true, getDataPath: () => null,
+    async *scan() { yield* sessions.values(); },
+    getSession: (id) => sessions.get(id) || null,
+    getMessages: () => [], getTokenStats: () => [],
+    searchMessages: () => [...sessions.keys()].map((role) => ({
+      sessionId: role, messageId: `${role}-message`, role, snippet: `Needle in ${role}`, timestamp: 1
+    }))
+  };
+  const service = createSessionHistoryService({ dependencies: {
+    getAvailableProviders: () => [adapter], getAllProviders: () => [adapter],
+    findIndexedSessionMetadata: () => [], getIndexedSessionChildren: () => [],
+    getIndexedCatalogRevision: () => "1"
+  } });
+
+  const search = service.search({ query: "Needle" });
+  assert.deepEqual(search.matches.map((match) => match.matchRole), ["user", "assistant"]);
+  assert.deepEqual(search.matches[0].event, {
+    provider: "codex", sessionId: "user", messageId: "user-message", segment: "message"
+  });
+  assert.deepEqual(service.search({ query: "Needle", fields: ["user"] }).matches.map((match) => match.session.sessionId), ["user"]);
+  assert.deepEqual(service.search({ query: "Needle", fields: ["assistant"] }).matches.map((match) => match.session.sessionId), ["assistant"]);
+});
+
 test("session-history service searches, pages events, exposes every provider-stored session, and requires explicit sensitive-content opt-in", () => {
   const { service, searchMessageCalls } = createFixture();
   const search = service.search({ query: "Needle" });
@@ -383,6 +413,17 @@ test("session_search pages beyond 100 candidates with duplicate messages, cross-
   const first = service.search({ query: "Needle", providers: ["codex"], limit: 1 });
   assert.throws(
     () => service.search({ query: "Needle", providers: ["pi"], limit: 1, cursor: first.nextCursor }),
+    (error) => error instanceof SessionHistoryError && error.code === "invalid_cursor"
+  );
+});
+
+test("session_search rejects a continuation after the index revision changes", () => {
+  const { service, advanceCatalogRevision } = createFixture();
+  const first = service.search({ query: "Needle", limit: 1 });
+  assert.ok(first.nextCursor);
+  advanceCatalogRevision();
+  assert.throws(
+    () => service.search({ query: "Needle", limit: 1, cursor: first.nextCursor }),
     (error) => error instanceof SessionHistoryError && error.code === "invalid_cursor"
   );
 });
@@ -684,6 +725,18 @@ test("OpenCode SQLite search event references round-trip and session_get reports
     .run("prt_sqlite", "msg_sqlite", "ses_sqlite", JSON.stringify({ type: "text", text: "Needle in SQLite" }));
   db.prepare("INSERT INTO part VALUES (?, ?, ?, ?)")
     .run("prt_reasoning", "msg_sqlite", "ses_sqlite", JSON.stringify({ type: "reasoning", text: "PrivateReasoningNeedle" }));
+  db.prepare("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .run("ses_system", null, "project", "System session", "system-session", "D:\\Work\\sqlite", 11, 21, null);
+  db.prepare("INSERT INTO message VALUES (?, ?, ?)")
+    .run("msg_system", "ses_system", JSON.stringify({ role: "system", time: { created: 16 } }));
+  db.prepare("INSERT INTO part VALUES (?, ?, ?, ?)")
+    .run("prt_system", "msg_system", "ses_system", JSON.stringify({ type: "text", text: "SystemOnlyNeedle" }));
+  db.prepare("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .run("ses_tool", null, "project", "Tool session", "tool-session", "D:\\Work\\sqlite", 12, 22, null);
+  db.prepare("INSERT INTO message VALUES (?, ?, ?)")
+    .run("msg_tool", "ses_tool", JSON.stringify({ role: "tool", time: { created: 17 } }));
+  db.prepare("INSERT INTO part VALUES (?, ?, ?, ?)")
+    .run("prt_tool", "msg_tool", "ses_tool", JSON.stringify({ type: "text", text: "ToolOnlyNeedle" }));
   db.close();
 
   const adapter = createOpenCodeSqliteAdapter({
@@ -710,6 +763,8 @@ test("OpenCode SQLite search event references round-trip and session_get reports
   const overview = service.get({ session: { provider: "opencode", sessionId: "ses_sqlite" } });
   assert.equal(overview.messageCount, 1);
   assert.equal(service.search({ query: "PrivateReasoningNeedle" }).matches.length, 0);
+  assert.equal(service.search({ query: "SystemOnlyNeedle" }).matches.length, 0);
+  assert.equal(service.search({ query: "ToolOnlyNeedle" }).matches.length, 0);
   assert.equal(service.search({ query: "%" }).matches.length, 0);
   closeDb(dbPath);
 });
@@ -747,7 +802,7 @@ test("OpenCode SQLite message search continues after 100 duplicate session hits"
 });
 
 test("AgentSession-MCP exposes hierarchical read-only tools over the MCP protocol", async (t) => {
-  const { service } = createFixture();
+  const { service, advanceCatalogRevision } = createFixture();
   const server = createSessionHistoryMcpServer(service);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "agentsession-mcp-test", version: "1.0.0" });
@@ -837,6 +892,16 @@ test("AgentSession-MCP exposes hierarchical read-only tools over the MCP protoco
   const response = await client.callTool({ name: "session_search", arguments: { query: "Needle" } });
   assert.equal(response.isError, undefined);
   assert.equal(response.structuredContent.result.matches.length, 4);
+  const firstSearchPage = await client.callTool({ name: "session_search", arguments: { query: "Needle", limit: 1 } });
+  assert.equal(firstSearchPage.isError, undefined);
+  const staleCursor = firstSearchPage.structuredContent.result.nextCursor;
+  assert.ok(staleCursor);
+  advanceCatalogRevision();
+  const staleContinuation = await client.callTool({ name: "session_search", arguments: {
+    query: "Needle", limit: 1, cursor: staleCursor
+  } });
+  assert.equal(staleContinuation.isError, true);
+  assert.match(staleContinuation.content[0].text, /cursor is invalid for this search request/);
   const event = { provider: "codex", sessionId: "root", messageId: "m2", segment: "message" };
   const context = await client.callTool({ name: "session_get_context", arguments: { event, after: 2 } });
   assert.equal(context.isError, undefined);
@@ -1113,6 +1178,8 @@ test("AgentSession metadata DB path also scopes the default configuration", () =
 });
 
 test.after(() => {
+  closeSearchDb();
+  closeIndexDb();
   closeMetaDb();
   rmSync(temp, { recursive: true, force: true });
 });

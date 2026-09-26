@@ -8,6 +8,7 @@ import {
   indexProvider as defaultIndexProvider
 } from "./index-db.js";
 import { normalizeCrossProviderProjectPath } from "./project-filter.js";
+import { findSearchDocuments, getSearchIndexRevision, refreshSearchIndex, type SearchDocumentField } from "./search-index.js";
 import { getAllProviders, getAvailableProviders } from "./providers/index.js";
 import type { Message, MessageRole, ProviderAdapter, ProviderId, RawSession } from "./providers/interface.js";
 import { createSnippet, matchesSearchQuery } from "./providers/shared/parser.js";
@@ -28,7 +29,8 @@ const HARD_LIMITS = {
 };
 const DEFAULT_CHILD_LIMIT = 50;
 const MAX_CHILD_LIMIT = 100;
-const SEARCH_FIELDS = ["title", "directory", "user", "assistant"] as const;
+const SEARCH_FIELDS = ["title", "directory", "user", "assistant", "toolName"] as const;
+const DEFAULT_SEARCH_FIELDS = ["title", "directory", "user", "assistant"] as const;
 const MAX_TOOL_FACETS = 50;
 
 export type EventSegment = typeof EVENT_SEGMENTS[number];
@@ -94,6 +96,9 @@ export interface SessionHistoryDependencies {
   browseIndexedProjects?: typeof browseIndexedProjects;
   browseIndexedSessions?: typeof browseIndexedSessions;
   getIndexedCatalogRevision?: typeof getIndexedCatalogRevision;
+  refreshSearchIndex?: typeof refreshSearchIndex;
+  findSearchDocuments?: typeof findSearchDocuments;
+  getSearchIndexRevision?: typeof getSearchIndexRevision;
 }
 
 export interface SessionHistoryServiceOptions {
@@ -324,7 +329,7 @@ function decodeSearchCursor(cursor: unknown, fingerprint: string): { after: Sear
   }
   try {
     const payload = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
-    if (payload?.version !== 3 || !Number.isInteger(payload.after?.rank) || payload.after.rank < 0 || payload.after.rank > 2
+    if (payload?.version !== 3 || !Number.isInteger(payload.after?.rank) || payload.after.rank < 0 || payload.after.rank > 3
       || typeof payload.after?.updatedAt !== "number" || !Number.isFinite(payload.after.updatedAt)
       || typeof payload.after?.key !== "string" || !payload.after.key
       || typeof payload.snapshotUpdatedBefore !== "number" || !Number.isFinite(payload.snapshotUpdatedBefore)
@@ -406,6 +411,9 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
   const browseSessions = dependencies.browseIndexedSessions || browseIndexedSessions;
   const browseProjects = dependencies.browseIndexedProjects || browseIndexedProjects;
   const catalogRevision = dependencies.getIndexedCatalogRevision || getIndexedCatalogRevision;
+  const updateSearchIndex = dependencies.refreshSearchIndex || refreshSearchIndex;
+  const searchDocuments = dependencies.findSearchDocuments || findSearchDocuments;
+  const contentIndexRevision = dependencies.getSearchIndexRevision || getSearchIndexRevision;
 
   function availableProviderMap() {
     return new Map(providers().map((provider) => [provider.id, provider]));
@@ -565,7 +573,7 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
       }
       const requestedProviders = assertStringArray(input?.providers, "providers", providerIds()) as ProviderId[] | undefined;
       const requestedFields = assertStringArray(input?.fields, "fields", SEARCH_FIELDS);
-      const fields = requestedFields || [...SEARCH_FIELDS];
+      const fields = requestedFields || [...DEFAULT_SEARCH_FIELDS];
       const lineage = input?.lineage ?? "all";
       if (lineage !== "all" && lineage !== "roots" && lineage !== "children") {
         throw new SessionHistoryError("invalid_input", "lineage must be all, roots, or children.");
@@ -584,9 +592,37 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
       const available = availableProviderMap();
       const selectedIds = requestedProviders
         || [...new Set(allProviders().map((provider) => provider.id))];
+      const contentFields = fields.filter((field): field is SearchDocumentField => (
+        field === "user" || field === "assistant" || field === "toolName"
+      ));
+      const preparationErrors = new Map<ProviderId, string>();
+      const preparationDurations = new Map<ProviderId, number>();
+      const indexedProviders = new Set<ProviderId>();
+      if (contentFields.length) {
+        for (const providerId of selectedIds) {
+          const provider = available.get(providerId);
+          if (!provider) continue;
+          if (!provider.getSearchIndexSources) {
+            if (contentFields.includes("toolName")) preparationErrors.set(providerId, "Tool-name search is unavailable for this provider.");
+            continue;
+          }
+          const startedAt = Date.now();
+          try {
+            updateSearchIndex(provider);
+            indexedProviders.add(providerId);
+          } catch (error: any) {
+            preparationErrors.set(providerId, error?.message || String(error));
+          } finally {
+            preparationDurations.set(providerId, Date.now() - startedAt);
+          }
+        }
+      }
+      const revision = () => `${catalogRevision()}${indexedProviders.size ? `:${contentIndexRevision()}` : ""}`;
+      const indexRevision = revision();
       const fingerprint = createHash("sha256").update(cursorFingerprint({
         query, providers: selectedIds, availableProviders: selectedIds.filter((id) => available.has(id)),
         updatedAfter, updatedBefore: requestedUpdatedBefore, directory,
+        indexRevision,
         ...(requestedFields !== undefined ? { fields } : {}),
         ...(input?.lineage !== undefined ? { lineage } : {})
       })).digest("base64url");
@@ -613,6 +649,11 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
           diagnostics.push({ provider: providerId, status: "unavailable" });
           continue;
         }
+        if (preparationErrors.has(providerId)) {
+          diagnostics.push({ provider: providerId, status: "error", durationMs: preparationDurations.get(providerId),
+            message: preparationErrors.get(providerId) });
+          continue;
+        }
         const startedAt = Date.now();
         const perProviderLimit = HARD_LIMITS.searchLimit;
         const providerResults = new Map<string, SearchCandidate>();
@@ -625,24 +666,24 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
           return session;
         };
         try {
-          const add = (session: RawSession | Record<string, unknown>, field: "title" | "directory" | "message", snippet: string,
+          const add = (session: RawSession | Record<string, unknown>, field: "title" | "directory" | "message" | "toolName", snippet: string,
             messageId: string | null = null, matchRole: MessageRole | null = null) => {
             const summary = sessionSummary(providerId, session);
             if (!summary.session.sessionId || !isWithinRange(summary.updatedAt, updatedAfter, updatedBefore)) return;
             if (directory && normalizeCrossProviderProjectPath(summary.directory) !== directory) return;
             if (lineage === "roots" && summary.parent || lineage === "children" && !summary.parent) return;
-            const bestField = field === "message" && fields.includes("title") && matchesSearchQuery(summary.title, query) ? "title"
-              : field === "message" && fields.includes("directory") && matchesSearchQuery(summary.directory, query) ? "directory" : field;
+            const bestField = (field === "message" || field === "toolName") && fields.includes("title") && matchesSearchQuery(summary.title, query) ? "title"
+              : (field === "message" || field === "toolName") && fields.includes("directory") && matchesSearchQuery(summary.directory, query) ? "directory" : field;
             if (bestField !== field) {
               snippet = bestField === "title" ? summary.title : summary.directory || "";
               messageId = null;
               matchRole = null;
             }
-            const rank = bestField === "title" ? 0 : bestField === "directory" ? 1 : 2;
+            const rank = bestField === "title" ? 0 : bestField === "directory" ? 1 : bestField === "message" ? 2 : 3;
             const key = `${providerId}\u0000${summary.session.sessionId}`;
             const value = {
               session: summary.session,
-              event: messageId ? { ...summary.session, messageId, segment: "message" } : null,
+              event: messageId ? { ...summary.session, messageId, segment: bestField === "toolName" ? "tool" : "message" } : null,
               matchField: bestField,
               matchRole,
               snippet: boundedText(snippet, HARD_LIMITS.previewChars),
@@ -671,9 +712,19 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
           }
 
           const searchMessages = fields.includes("user") || fields.includes("assistant");
-          if (searchMessages && provider.iterateSearchMessages) {
+          if (contentFields.length && provider.getSearchIndexSources) {
+            for (const match of searchDocuments(providerId, query, contentFields)) {
+              add({
+                id: match.sessionId, provider: providerId, parentId: match.parentId,
+                title: match.title, directory: match.directory,
+                timeCreated: match.createdAt, timeUpdated: match.updatedAt,
+                messageCount: match.messageCount, tokenCount: match.tokenCount
+              }, match.field === "toolName" ? "toolName" : "message", createSnippet(match.text, query),
+              match.messageId, normalizedRole(match.role));
+            }
+          } else if (searchMessages && provider.iterateSearchMessages) {
             for (const { session, match } of provider.iterateSearchMessages(query)) {
-              if (requestedFields && !fields.includes(match.role)) continue;
+              if (!fields.includes(match.role)) continue;
               add(session, "message", String(match.snippet || ""), asNonEmptyString(match.messageId), match.role);
             }
           } else if (searchMessages) {
@@ -681,7 +732,7 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
               const messageMatches = provider.searchMessages(query, perProviderLimit, messageOffset);
               for (const match of messageMatches) {
                 if (!match?.sessionId) continue;
-                if (requestedFields && !fields.includes(match.role)) continue;
+                if (!fields.includes(match.role)) continue;
                 const session = cachedSession(match.sessionId);
                 if (session) add(session, "message", String(match.snippet || ""), asNonEmptyString(match.messageId), match.role);
               }
@@ -689,17 +740,20 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
             }
           }
           for (const candidate of providerResults.values()) retain(results, candidate);
-          diagnostics.push({ provider: providerId, status: "ok", durationMs: Date.now() - startedAt });
+          diagnostics.push({ provider: providerId, status: "ok", durationMs: Date.now() - startedAt + (preparationDurations.get(providerId) || 0) });
         } catch (error: any) {
           diagnostics.push({
             provider: providerId,
             status: "error",
-            durationMs: Date.now() - startedAt,
+            durationMs: Date.now() - startedAt + (preparationDurations.get(providerId) || 0),
             message: error?.message || String(error)
           });
         }
       }
 
+      if (revision() !== indexRevision) {
+        throw new SessionHistoryError("index_changed", "The session index changed; restart this search.");
+      }
       const sortedMatches = [...results.values()]
         .sort(compareSearchCandidates);
       const page = sortedMatches.slice(0, limit);
