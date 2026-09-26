@@ -97,7 +97,7 @@ export function createSessionHistoryMcpServer(service: SessionHistoryService) {
 
   server.registerTool("session_get", {
     title: "Get a local coding-agent session overview",
-    description: "Read-only session metadata, first/last non-blank message previews, and paged direct child-session summaries. When childrenTruncated is true, pass childrenNextCursor as childCursor to retrieve the next page. This never returns a full transcript.",
+    description: "Read-only session metadata, first/last non-blank message previews, and paged direct child-session summaries. When childrenTruncated is true, pass childrenNextCursor as childCursor to inspect the next indexed page; a page can be empty if indexed children are no longer present in provider data. This never returns a full transcript.",
     inputSchema: z.object({
       session: sessionRefSchema,
       childCursor: z.string().min(1).max(4000).optional(),
@@ -106,7 +106,7 @@ export function createSessionHistoryMcpServer(service: SessionHistoryService) {
     outputSchema: toolOutputSchema,
     annotations
   }, (input) => execute(
-    (result) => `Loaded session ${result?.session?.provider || ""}/${result?.session?.sessionId || ""} with ${result?.children?.length || 0} direct child summary(s)${result?.childrenTruncated ? "; more available via childrenNextCursor" : ""}.`,
+    (result) => `Loaded session ${result?.session?.provider || ""}/${result?.session?.sessionId || ""} with ${result?.children?.length || 0} direct child summary(s)${result?.childrenTruncated ? "; more indexed candidates via childrenNextCursor" : ""}.`,
     () => service.get(input)
   ));
 

@@ -118,8 +118,8 @@ sample, not a latency guarantee.
 
 ## Verification snapshot — 2026-09-26
 
-- `npm run ci:quality` passed with 1,059 tests after the MCP child-pagination
-  fix. `npm run qa:e2e` passed against a real OpenCode v2 session on the
+- `npm run ci:quality` passed with 1,060 tests after the MCP child-source
+  validation fix. `npm run qa:e2e` passed against a real OpenCode v2 session on the
   normal-mode isolated v2 server at port 3459, with no browser errors. An
   earlier rerun on an isolated server started with
   `--disable-terminal-launch` stopped at the expected Enabled-settings check;
@@ -171,6 +171,26 @@ sample, not a latency guarantee.
   `test/mcp.test.mjs` covers the same 172-child boundary and wrong-parent
   cursor rejection. The installed packed artifacts are in
   `tmp/v2-qa/mcp-child-audit-20260926/`.
+- A later MCP boundary review found that a retained derived-index row could
+  name a child session no longer present in provider data, or one whose parent
+  had changed. `session_get` now checks each page's indexed candidates against
+  the provider's current canonical session ID and parent relation before
+  returning a child summary. A regression covers missing and reparented rows,
+  including an empty continuation page, while preserving access to later live
+  children. The index and provider data are left unchanged. A newly packed and
+  installed 2.0.0 MCP again returned all 172 real Codex children in ordered
+  50/50/50/22 pages, with unique canonical IDs, matching parents, and no
+  stderr. Recorded OpenCode and DeepSeek Harness parent/child pairs also
+  round-tripped. The installed packages and rebuilt Windows Viewer/MCP SEA
+  binaries passed smoke; sanitized evidence is in
+  `tmp/v2-qa/mcp-child-source-final/acceptance.json`.
+- One ordered comparison used the previous packed MCP and the new build with
+  separate isolated metadata databases and the same 172-child Codex request.
+  Connect times were 29.673 and 29.792 seconds; all four child pages together
+  took 21.416 and 21.419 seconds, respectively. Individual page times varied
+  sharply, so this single run does not establish a latency change from source
+  validation. The earlier cold indexing and search costs remain the measured
+  optimization targets.
 - On the isolated live Viewer, content-search results for all five providers
   opened an existing source-message anchor whose message contained the query.
   The checked session ID suffixes were OpenCode `...WY1Ej`, Claude Code

@@ -84,7 +84,8 @@ is excluded from normal search results. Default diagnostics include unavailable
 registered providers. `session_get` returns first and last visible-message
 previews and up to 50 direct child summaries by default (100 maximum). When
 `childrenTruncated` is true, pass `childrenNextCursor` as `childCursor` on the
-next `session_get` call to retrieve the remaining children. Truncated
+next `session_get` call to inspect the next indexed page. Stale index rows are
+skipped, so a continuation page can have no live children. Truncated
 `session_get_event` results include reusable continuation
 arguments for assembling long content without guessing flags or offsets.
 `session_timeline` omits blank message segments; tool and requested thinking

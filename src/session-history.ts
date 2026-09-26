@@ -372,10 +372,6 @@ function sessionSummary(provider: ProviderId, session: RawSession | Record<strin
   };
 }
 
-function indexedSessionSummary(provider: ProviderId, session: Record<string, unknown>) {
-  return sessionSummary(provider, session);
-}
-
 function isWithinRange(updatedAt: number, updatedAfter: number | undefined, updatedBefore: number | undefined) {
   return (updatedAfter === undefined || updatedAt >= updatedAfter)
     && (updatedBefore === undefined || updatedAt <= updatedBefore);
@@ -601,13 +597,24 @@ export function createSessionHistoryService(options: SessionHistoryServiceOption
       const childLimit = resolveLimit(input?.childLimit, DEFAULT_CHILD_LIMIT, MAX_CHILD_LIMIT, "childLimit");
       const childFingerprint = cursorFingerprint({ session: ref });
       const childOffset = input?.childCursor === undefined ? 0 : decodeCursor(input.childCursor, childFingerprint);
-      const { session } = getProviderSession(ref);
+      const { provider, session } = getProviderSession(ref);
       const messages = getProviderMessages(ref);
       const indexedPage = indexedChildren(ref.provider, ref.sessionId, childLimit + 1, childOffset);
       const children = indexedPage.slice(0, childLimit)
-        .map((row: any) => indexedSessionSummary(ref.provider, row));
+        .flatMap((row: any) => {
+          let child: RawSession | Record<string, unknown> | null;
+          try {
+            child = provider.getSession(row.id);
+          } catch (error: any) {
+            throw new SessionHistoryError("provider_error", `Could not read ${ref.provider} child session: ${error?.message || String(error)}`);
+          }
+          if (!child) return [];
+          const source = child as Record<string, unknown>;
+          if (source.id !== row.id || (source.parentId ?? source.parent_id) !== ref.sessionId) return [];
+          return [sessionSummary(ref.provider, child)];
+        });
       const childrenNextCursor = indexedPage.length > childLimit
-        ? encodeCursor(childOffset + children.length, childFingerprint)
+        ? encodeCursor(childOffset + childLimit, childFingerprint)
         : null;
       const messageEvents = projectEvents(ref, messages)
         .filter((event) => event.event.segment === "message" && event.preview.trim())

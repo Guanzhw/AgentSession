@@ -480,7 +480,7 @@ test("session_get pages every indexed direct child through the MCP cursor", asyn
     pageSizes.push(result.children.length);
     observed.push(...result.children.map((child) => child.session.sessionId));
     assert.equal(result.childrenTruncated, result.childrenNextCursor !== null);
-    assert.equal(response.content[0].text.includes("more available"), result.childrenTruncated);
+    assert.equal(response.content[0].text.includes("more indexed candidates"), result.childrenTruncated);
     childCursor = result.childrenNextCursor;
     firstCursor ||= childCursor;
   } while (childCursor);
@@ -497,6 +497,51 @@ test("session_get pages every indexed direct child through the MCP cursor", asyn
   assert.match(wrongParent.content[0].text, /cursor is invalid for this request/);
   const invalid = await client.callTool({ name: "session_get", arguments: { session, childLimit: 101 } });
   assert.equal(invalid.isError, true);
+});
+
+test("session_get skips stale indexed children while advancing by index position", () => {
+  const parent = { id: "parent", provider: "opencode", parentId: null, title: "Parent", timeUpdated: 10 };
+  const first = { id: "first", provider: "opencode", parentId: parent.id, title: "Current first", timeUpdated: 9 };
+  const moved = { id: "moved", provider: "opencode", parentId: "another-parent", title: "Moved", timeUpdated: 7 };
+  const second = { id: "second", provider: "opencode", parent_id: parent.id, title: "Current second", timeUpdated: 5 };
+  const source = new Map([parent, first, moved, second].map((session) => [session.id, session]));
+  const indexed = [
+    { ...first, title: "Outdated first" },
+    { id: "missing", parentId: parent.id },
+    { ...moved, parentId: parent.id },
+    { id: "wrong-id", parentId: parent.id },
+    second
+  ];
+  const checkedChildren = [];
+  const adapter = {
+    id: "opencode", name: "OpenCode", detect: () => true, getDataPath: () => null,
+    async *scan() { yield* source.values(); },
+    getSession(id) {
+      if (id !== parent.id) checkedChildren.push(id);
+      return id === "wrong-id" ? { ...second, id: "different-id" } : source.get(id) || null;
+    },
+    getMessages: () => [], getTokenStats: () => [], searchMessages: () => []
+  };
+  const service = createSessionHistoryService({ dependencies: {
+    getAvailableProviders: () => [adapter], getAllProviders: () => [adapter],
+    getIndexedSessionChildren: (_provider, _parentId, limit, offset) => indexed.slice(offset, offset + limit)
+  } });
+  const session = { provider: "opencode", sessionId: parent.id };
+  const pages = [];
+  let childCursor;
+  do {
+    const previousChecks = checkedChildren.length;
+    const page = service.get({ session, childLimit: 2, ...(childCursor ? { childCursor } : {}) });
+    assert.ok(checkedChildren.length - previousChecks <= 2);
+    pages.push(page);
+    childCursor = page.childrenNextCursor;
+  } while (childCursor);
+  assert.deepEqual(pages.map((page) => page.children.map((child) => child.session.sessionId)),
+    [["first"], [], ["second"]]);
+  assert.equal(pages[0].children[0].title, "Current first");
+  assert.deepEqual(pages[2].children[0].parent, session);
+  assert.deepEqual(pages.map((page) => page.childrenTruncated), [true, true, false]);
+  assert.deepEqual(checkedChildren, ["first", "missing", "moved", "wrong-id", "second"]);
 });
 
 test("OpenCode SQLite search event references round-trip and session_get reports normalized message count", () => {
