@@ -27,8 +27,8 @@ function npmCli() {
   return found;
 }
 
-function run(command, args) {
-  const result = spawnSync(command, args, { encoding: 'utf8', timeout: 60_000,
+function run(command, args, cwd) {
+  const result = spawnSync(command, args, { cwd, encoding: 'utf8', timeout: 60_000,
     maxBuffer: 2_000_000 });
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(' ')} failed: ${result.stderr}\n${result.stdout}`);
@@ -99,7 +99,7 @@ async function main() {
       run(process.execPath, [npm, 'pack', '--offline', '--ignore-scripts',
         '--pack-destination', scratch, path.join(scratch, name)]);
     }
-    const archiveListing = run('tar', ['-tvzf', path.join(scratch, tarballs[0])]);
+    const archiveListing = run('tar', ['-tvzf', tarballs[0]], scratch);
     for (const platform of platforms.filter(target => target !== 'win32-x64')) {
       const binaryRow = archiveListing.split(/\r?\n/)
         .find(row => row.endsWith(`package/bin/${platform}/${nativeTargets[platform].executable}`));

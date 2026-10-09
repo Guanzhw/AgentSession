@@ -187,11 +187,11 @@ test('selected local npm candidate installs and launches Web and native stdio MC
       'Installed Unix executable retains executable mode');
   }
   const resolver = await import(pathToFileURL(path.join(native, 'binary.mjs')).href);
-  assert.equal(resolver.nativeBinary(), binary);
+  assert.equal(await realpath(resolver.nativeBinary()), await realpath(binary));
   for (const target of Object.keys(nativeTargets)) {
     const [platform, arch] = target.split('-');
-    if (provenance.platforms[target]) assert.equal(resolver.nativeBinary(platform, arch),
-      path.join(native, 'bin', target, nativeTargets[target].executable));
+    if (provenance.platforms[target]) assert.equal(await realpath(resolver.nativeBinary(platform, arch)),
+      await realpath(path.join(native, 'bin', target, nativeTargets[target].executable)));
     else assert.throws(() => resolver.nativeBinary(platform, arch), /missing for|unavailable for/);
   }
   assert.throws(() => resolver.nativeBinary('darwin', 'x64'), /unavailable for darwin-x64/);

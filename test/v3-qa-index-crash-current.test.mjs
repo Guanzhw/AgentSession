@@ -54,6 +54,10 @@ test('catalog snapshot distinguishes transaction rollback from a partial search 
   const dir = await owned(t), dbFile = path.join(dir, 'scope.sqlite');
   const db = new DatabaseSync(dbFile);
   try {
+    if (!db.prepare("SELECT sqlite_compileoption_used('ENABLE_FTS5') AS enabled").get().enabled) {
+      t.skip('This catalog snapshot oracle requires Node SQLite built with FTS5.');
+      return;
+    }
     db.exec(`CREATE TABLE catalog_state(provider TEXT, revision INTEGER);
       INSERT INTO catalog_state VALUES('codex',1);
       CREATE TABLE catalog_entry(provider TEXT,session_id TEXT,signature TEXT,summary_json TEXT);
