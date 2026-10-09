@@ -1,0 +1,26 @@
+{
+  "format": "agentsession-v3-public-search-expected/v1",
+  "matches": [
+    {
+      "session": {"provider": "codex", "sessionId": "alpha"},
+      "event": null,
+      "matchField": "title", "matchRole": null,
+      "snippet": "Alpha title OMEGA", "title": "Alpha title OMEGA",
+      "directory": "/alpha/omega", "updatedAt": 50, "untrustedContent": true
+    },
+    {
+      "session": {"provider": "codex", "sessionId": "beta"},
+      "event": {"provider": "codex", "sessionId": "beta", "messageId": "beta-first", "segment": "message"},
+      "matchField": "message", "matchRole": "user",
+      "snippet": "ALPHA across several words omega", "title": "Second",
+      "directory": "/public/beta", "updatedAt": 100, "untrustedContent": true
+    },
+    {
+      "session": {"provider": "codex", "sessionId": "gamma"},
+      "event": {"provider": "codex", "sessionId": "gamma", "messageId": "gamma-first", "segment": "message"},
+      "matchField": "message", "matchRole": "assistant",
+      "snippet": "Alpha\u0000middle 🙂 OMEGA", "title": "Third",
+      "directory": "/public/gamma", "updatedAt": 100, "untrustedContent": true
+    }
+  ]
+}

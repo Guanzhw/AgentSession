@@ -1,0 +1,16 @@
+{
+  "name": "@acetamido/agentsession-native",
+  "version": "3.0.0",
+  "private": true,
+  "description": "Local AgentSession 3.0 native candidate for Windows x64, Linux x64/arm64 and macOS arm64",
+  "type": "module",
+  "exports": {
+    "./binary": "./binary.mjs",
+    "./launch": "./launch.mjs"
+  },
+  "files": ["binary.mjs", "targets.mjs", "launch.mjs", "bin/", "provenance.json", "LICENSE"],
+  "os": ["win32", "linux", "darwin"],
+  "cpu": ["x64", "arm64"],
+  "engines": { "node": ">=22.15.0" },
+  "license": "MIT"
+}

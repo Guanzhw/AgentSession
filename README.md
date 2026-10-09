@@ -1,265 +1,48 @@
 # AgentSession
 
-AgentSession 是本地优先的 agent 工作历史阅读器：以完整记录为内容，以 runtime 关系组织工作过程，默认连续阅读。2.0 读取 OpenCode、Claude Code、Codex CLI、Pi 和 DeepSeek Harness 的本地记录，让读者同时了解说了什么、谁执行了什么，以及结果如何回到主任务。OpenClaw 与 Hermes Agent 最后包含于已发布的 v1.10.1，已从 2.0 Viewer 和 MCP 完全移除；旧 URL 在 2.0 不兼容。详细迁移步骤见[2.0 Provider 范围与交付计划](docs/design/agentsession-v2-provider-scope.md)。
+AgentSession 3.0 是本地优先的 AI 编程工作历史阅读器。此工作区唯一实现采用
+Rust、Axum、原生 rmcp stdio MCP 和 Svelte 前端，读取 OpenCode、Claude Code、
+Codex CLI、Pi 和 DeepSeek Harness 的记录，提供会话库、正文阅读、搜索、用量和
+Runtime 视图。
 
-所有 Provider 原始数据库、transcript 和事件日志都保持只读；收藏、自定义标题和排除状态写入独立的 AgentSession 元数据。
+Provider 数据库与 transcript 保持只读；收藏、标题和回收站状态写入独立的 Viewer
+元数据。阅读与 MCP 检索均保留 canonical provider/session 身份和已记录的证据。
 
-[English](./README.en.md) · [中文](./README.md)
+[English](README.en.md) · [原生 CLI、配置与 MCP](v3/README.md) ·
+[验收契约](docs/design/agentsession-v3-acceptance-contract.md)
 
-![Node.js >= 22.15.0](https://img.shields.io/badge/node-%3E%3D22.15.0-brightgreen?style=flat-square&logo=node.js)
-![Zero Runtime Dependencies](https://img.shields.io/badge/runtime_deps-0-blue?style=flat-square)
-![MIT License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
+## 从源码运行
 
-## 阅读工作历史
-
-顶层导航为 `会话库 | 用量 | 设置`（Library | Usage | Settings）。详情页以正文历史为主，在派发、跟进和返回的位置插入协作记录。打开子会话时，它的完整自有历史在当前位置展开，主会话继续保留；关闭后回到原来的阅读位置。搜索可明确选择主会话或已打开的子会话，并分别保留查询和结果位置。
-
-桌面正文旁的彩色成员侧轨将创建、成员间消息和返回连接到发生位置，正文自身就是主 Agent 的主线。节点可打开对应原文；折叠执行过程或展开子历史后，连线随内容重新对齐。默认聚焦附近最多四名成员，也可选择其他成员定位；左侧目录与完整历史保留。
-
-成员侧轨止于最后一次交互；滚动只裁剪连线，不改变卡片布局和保留成员的列位置。容量外的关系可在卡片就地聚焦。用户消息靠右、Agent 靠左，展开的子历史附着原协作卡片。目录中的“上下文压缩”可直接打开该次压缩保留的内容。
-
-就地阅读子历史时，页面地址、标题、导出和管理操作始终属于主页面；地址中的阅读位置可复现打开的子历史与来源。目录使用相同的就地阅读行为，没有发生位置证据的相关历史会明确标注；选择“单独阅读”才切换整个页面所属会话。
-子历史入口显示祖先路径，可直接返回某一层；窄屏下各层正文保持同一阅读宽度。Codex 的结构化问答显示为问题与回答，原始记录仍可展开查看。
-
-桌面目录常驻正文左侧。模型、请求用量和最新上下文长度直接显示在紧凑信息行；相邻纯执行记录合为一个入口，展开后保留每条原消息及工具详情。聚合只计算这些消息自身的请求，不加入子会话用量。
-`工作`与`事件`从“更多 → 技术详情”进入，正文底部默认不占位；事件分页、筛选与原有 `#tab-events` 链接保留。
-对话按 Provider 明确记录的回复阶段折叠已完成过程，保留最终回复、未分类通信和仍在进行的尾部进展；展开、搜索和锚点可访问过程内容。有来源标识的工具输入、输出和推理正文在展开时加载，失败可就地重试，长内容可继续读到末尾；搜索仍覆盖完整可用正文。
-普通工具过程按最多 20 项一段加载，来源和搜索可直接展开命中的片段；正文、协作入口及异常提示保留在原位置。
-已关联的异步调用在分离和返回处保留往返入口；展开后用共用时间轴显示主线与后台、同期执行及返回，全部等待步骤每页 50 项续读，并可跳回完整命令与输出。当前实源支持 Codex 外层 `exec` / `wait`，以及独立记录身份的 `exec_command` / `write_stdin` 后台命令；嵌套终端程序不凭脚本文本推断关联。没有保存返回时显示最后记录，发送输入、请求停止与实际结束分别表达。
-派发、跟进、成员交接和返回节点保留在正文对应位置，局部连接可跳转到同一工作的上一或下一条关键记录；展开节点可读当次完整往来，再进入完整子历史。成员间交接与父 Agent 的追加要求分别标注，子侧完成、发送结果和收到消息分别表达。
-“任务与协作”侧栏用于按需查找全体任务和成员，选择任务或连线后阅读逐次往来。图每组展示最多四条参与者与任务的关系；可搜索、分页的任务目录覆盖全部任务。同一子历史的多次运行归入一个任务，运行和消息分别续读，最初请求、最近回复与完整子历史均可展开。按需打开的活动时间窗另用于查看同时发生的工作；工具和推理仍可独立展开。
-宽桌面默认停靠右侧面板，普通桌面使用常驻贴边入口与浮层；记住主动收起/打开的选择。异步分离和返回在正文边缘用局部括线相连，默认显示动作/结果摘录，并区分“启动至收到结果”和“分离后”的时间跨度。长内容的 Show more 续接同一内容面，保留段落、列表、表格和代码围栏的连续结构；超出加载边界且无法拆分的 Markdown 块会明确标注为分页原文，全文仍可读。
-有明确团队记录时，侧栏另外提供团队成员分支图和成员间通信方向。选择成员可读分工和历次往来，选择通信边可读该方向的消息；任务和消息各自分页，完整正文逐层展开。普通父子任务保持原来的含义。原生 Teams 实源与隔离格式 fixture 的验证状态见[交付计划](docs/design/runtime-delivery-plan.md)。
-协作侧栏支持键盘打开及任务、来源导航；打开时焦点进入侧栏，按 Escape 或关闭按钮收起后，焦点返回入口。系统开启“减少动态效果”时，来源定位使用静态高亮，提示条和加载指示停止动画。
-会话库优先显示自定义或 provider 的可读标题；没有可读标题时显示“未命名会话”和短 ID，完整 canonical ID 不变。
-同标题、同项目的独立会话保留独立行，增加精确 UTC 时间、短 ID 和可用的差异摘录。Codex 扫描会把少量用户原文片段保存在 viewer 索引中供辨认；页面读取索引而不逐个重新解析 transcript。
-会话库按已记录的父子关系归组，展开后用分支连线显示相关历史，每次读取 20 条子记录。标题搜索和筛选也覆盖子会话，并保留通向命中项的父级路径；缺失或隐藏的父会话不会让子会话消失。独立阅读后返回保留筛选、已加载分支、位置与焦点。库页面仅读取会话元数据，用量详情仍在 Usage 和 Reader；OpenCode 元数据随页面刷新读取最新数据库。
-Codex 和 DeepSeek Harness 子会话中，已确认边界的继承背景单独折叠展示，每次加载 40 条消息，可继续读取到末尾。记录了来源会话 ID 时提供链接，父文件缺失仍保留该引用；未记录来源 ID 的 DSH seeded 背景也可读，并注明来源未知。晚加载的背景页仍归属当前阅读面板。这些背景不进入默认目录，也不增加子会话消息数或请求用量。
-Codex 已保存的记忆笔记和会话摘要可在“从这段历史保存的内容”中展开读取，分支连线标明输入历史与两个产物的关系。输入版本、生成时间和匹配的后台记录可查；输入会话不被当作生成会话，也不据此断言后续请求使用了这些内容。长产物可续读，版本更新后需刷新，来源缺失或不兼容会明确说明。
-
-摘要旁的“后续整理记录”按需检查保留日志，用局部分支连接摘要、整理活动及其读取/修改请求。每条请求可展开原文并续读，检查范围可以调整；执行结果与完整生成历史的缺失会明确说明。当前支持已验证的 Codex V1 产物与诊断记录格式，关联依据和范围见[呈现规范](docs/design/reader-memory-followups.md)。
-每个可读 session 都按协议证据展示；“不支持”“不可用”“缺失”“无效”不会被渲染成观测到的零值。
-
-浏览器代码高亮使用仓库内 vendored 的
-`@highlightjs/cdn-assets` 11.12.0 bundle，位于
-`src/static/vendor/highlight.js`；许可证与来源记录和资产并列，支持离线使用。
-
-次级工作台消费以下服务端派生证据：
-
-- **Work**：目标、Task、依赖关系，以及 Task 与每次 AgentRun 的明确关联。
-- **Execution**：参与者、运行尝试和当前 session 的请求用量；继承或共享的 input/cacheRead 仍归属发生它的真实请求并计一次，不会因共享上下文而在跨请求间去重（同一共享上下文在不同请求中的 cacheRead 各自计费一次）；继承的已存历史本身不另造一条新请求。
-- **Coordination**：已记录的协调观察，以及 parent、spawned、forked、continued、compacted-into、scheduled-run-of 和 handed-off 等 canonical session 关系。
-- **Context**：压缩结果、上下文版本和 memory、experience、user-info 等带 scope 的产物，并区分 direct、inherited 和 shared 来源。
-- **Evidence**：按来源顺序分页的标准化事件、协议状态、诊断和 provenance。
-
-从已记录的运行打开子会话时，子会话仍使用 canonical URL，并提供由查看器维护的返回链接，恢复到父级工作台的精确分页、页大小和运行选择。证据发生变化或锚点过期时会明确显示，不会按索引改选其他运行。
-
-已记录的等待和阻塞分别按会话、有界工作投影、当前运行页高亮。选中任务或运行可查看已记录的结果、失败原因和取消原因；历史失败或取消本身不会被当作仍需处理的事项。
-
-目标与参与者可联动到明确关联的任务、运行和上下文检查点。选中检查点可查看结果版本、保留摘要及记录的前后上下文大小；后续运行页携带本页结果证据。DSH 当前未决审批展示工具和原因，并精确跳转到关联事件；完整原因可展开，审批仍在原 harness 中处理。
-
-### Session Protocol v2 与 v3
-
-每个注册 Provider 都为每个可读 session 提供 `getSessionProtocol()`。协议边界使用 canonical composite `SessionRef`：`{ provider, sessionId }`；Provider 自己的 session ID 始终保留。
-
-v2 snapshot 包含：
-
-- `version: 2`、session descriptor（state、origin、created/updated、cwd、harness、terminal outcome、fork seed boundary、inherited event count）；
-- dense source-order `events`，带 `category`、`normalizedKind`、turn/step/correlation anchors 和 `provenance`；
-- typed session relationships、`tasks`、`agentRuns`、metadata-first `contextArtifacts` 和可选的 in-file `branches`；
-- `validation`、`completeness` 和 provider `revision`。
-
-事件的常见 category 是 `session`、`message`、`model`、`reasoning`、`tool`、`task`、`run`、`context`、`control`、`team` 和 `unknown`。`recorded` 表示来源直接记录，`derived` 表示适配器根据来源证据重建；两者不会混写。校验器检查序列稠密性、实体唯一性、引用完整性、Task/AgentRun 分离、lineage 冲突和 capability 声明。
-
-只要来源没有保存事实，适配器就不会发明 child session、隐藏 prompt、context 正文或 lifecycle。in-file message branch 是 branch topology，不会伪造成跨 session 关系。
-
-Session Protocol v3 在同一 canonical session 边界上增加 Work、Execution、Coordination 和 Context 四个领域，以及 request usage 的 direct、inherited、shared 来源切片。当前共享升级层保留 v2 事实并把未记录的 v3 覆盖状态标为 unknown；Provider 可以逐步提供原生 v3 证据，浏览器端不会推断 Provider 语义。
-
-## Read-only HTTP API
-
-会话库使用独立的 `GET /api/library/sessions` 家族分页与
-`GET /api/library/children?parentProvider=&parentId=&offset=` 子级分页。
-两者接收相同标题/项目/时间/收藏筛选；子级每页最多 20 条，返回 HTML 和续页信息。
-原有 `/api/sessions` 和 provider 会话列表 API 保持原来的平铺结构与统计语义。
-
-以下 API 都是 `GET`。阅读片段复用详情页渲染，其余接口提供服务端归一化的协议与有界投影：
-
-```text
-GET /api/:provider/session/:id/reader
-GET /api/:provider/session/:id/reader/coordination?runId=&taskId=&cursor=&size=
-GET /api/:provider/session/:id/reader/event/:eventId
-GET /api/:provider/session/:id/inherited-context?offset=
-GET /api/:provider/session/:id/search?q=&offset=&limit=
-GET /api/:provider/session/:id/context-result?checkpoint=&offset=&limit=
-GET /api/:provider/session/:id/protocol
-GET /api/:provider/session/:id/runtime/summary
-GET /api/:provider/session/:id/runtime/events?cursor=&limit=&category=&kind=&phase=&correlationId=
-GET /api/:provider/session/:id/runtime/graph?depth=&maxNodes=
-GET /api/:provider/session/:id/runtime/work?maxItems=
-GET /api/:provider/session/:id/runtime/execution?maxItems=
-GET /api/:provider/session/:id/runtime/coordination?maxItems=
-GET /api/:provider/session/:id/runtime/context?maxItems=
-```
-
-`/reader` 返回 `{ ok, provider, sessionId, title, html }`；`html` 是一个不含页面外壳或脚本的会话阅读片段，用于同页打开子会话。长正文继续使用现有内容展开接口。
-
-阅读器搜索覆盖当前会话完整可用的自有正文、推理和工具内容，包括尚未展开的部分；返回所属消息/内容块、源位置和有界片段，继承背景单独保留。`/context-result` 按需读取已记录的摘要及可用保留上下文，支持条目分页和正文续载；加密字段和仅有元数据的图片附件与可读正文分开标明。
-
-`/reader/coordination` 为阅读器的工作项提供有界交互续页；来源为完整的归一化记录，而非已经截断的概览。`/reader/event/:eventId` 解析所属会话中的准确事件：存在原文时返回阅读目标，否则返回有界事件证据。子会话完成与父会话收到结果保留为不同记录。
-
-完整 `/protocol` 返回 v2 snapshot、capability descriptors、validation 和可用的 storage diagnostic。四个领域 API 返回有界的 v3 投影；`events` 使用 cursor/limit，`graph` 使用 depth/maxNodes。响应会报告 truncation、缺失 session、不可用 Provider 和校验诊断。未知 session 返回 404；已知但不完整或无效的 session 保留诊断，不会被伪装成完整结果。
-
-## Provider coverage
-
-AgentSession 2.0 当前支持五个 Provider：OpenCode、Claude Code、Codex CLI、Pi 和 DeepSeek Harness。表中 OpenClaw 与 Hermes Agent 行记录的是 v1.10.1 的历史覆盖，不属于 2.0；能力表区分来源记录和适配器派生的事实，`partial` 不等于来源原生保存。
-
-| Provider | 生命周期 | 本地来源 | Protocol fidelity 与覆盖 |
-|:---|:---|:---|:---|
-| OpenCode | active | `$XDG_DATA_HOME/opencode/opencode.db` 或 `~/.local/share/opencode/opencode.db` | v1 保留基于 message/part 的 native v3 Work/Execution/Coordination/Usage；v2 按 `seq` 读取消息、工具、压缩及父子/分叉关系，并通过共享层投影 v3，不重建原生 task/run。按数据库 schema 选择读取器；本机 OpenCode v2.0.16 已验证。[范围与限制](docs/opencode-storage-compatibility.md)。 |
-| Claude Code | active | `~/.claude/transcripts/`、`~/.claude/projects/` | `partial/derived` transcript、`system/compact_boundary`（`compactMetadata`）和 sidechain/task-notification 证据；native v3 保留 finalized v2 snapshot，并按 canonical assistant response id 去重生成 request Usage。官方 npm latest/next 2.1.263 与 upstream 已核验，本机 2.1.207，暂无 live 2.1.263 transcript。 |
-| Codex CLI | active | `~/.codex/sessions/**/*.jsonl`、冷文件 `*.jsonl.zst` | `full/recorded` response/item、工具、compaction 和当前 `token_usage_record`；`inter_agent_communication` 只进入 Runtime v3 actors/coordination，不改变线性 transcript；`partial/derived` NEW_TASK 关系、Task、AgentRun。`close_agent` 归一化为 `interrupt`；本机 0.152.1 仍主要写旧 `token_count`/collaboration 形状，官方 0.153.0 release 与当前源码 HEAD 已验证新形状。 |
-| OpenClaw | v1.10.1 only; retired in 2.0 | `~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite`（agent schema 19，v2026.9.3 release commit `1391f7cd…`；独立审计 HEAD `0140d656…`；schema SQL sha256 `fe932174…`）；legacy/archive `sessions/*.jsonl` | v1.10.1 historical snapshot: v2 canonical events/branches + v3 recorded Goal、agent identity、spawn Run、compaction context、request usage；limited goal states map to shared `blocked`，raw status 通过 bounded provenance 保留。高级 task/run/delivery tables deferred。 |
-| Hermes Agent | v1.10.1 only; retired in 2.0 | `$HERMES_HOME/state.db` | v1.10.1 historical snapshot: `full/recorded` active-only SQLite transcript、异步 delegation handle/state；native v3 保留 v2 facts，并将 dispatch/lifecycle/delivery 分开投影为 Coordination；`partial/derived` 压缩延续/delegation lineage 与 metadata-only compaction，压缩不是 spawned。证据快照：v0.21.1 / `v2026.9.7`、schema 30，release commit `2237be35…`，独立 HEAD `6e2b8e07…`；本机仍为 v0.19.1、schema 23。 |
-| Pi | active | `~/.pi/agent/sessions/**/*.jsonl` | `full/recorded` branch/compaction 和 `partial/derived` parent lineage；不虚构 spawn。当前 upstream 为 `@earendil-works/pi-coding-agent`（npm 0.85.1，package tag/gitHead `d981de12…`；独立 upstream HEAD `f53ac113…`，官方 session format **v3**,2026-09-08 验证）；v3 保留 v2 facts，并按 assistant request 记录 Usage、把可读 branch/compaction summary 映射为 Context 结果。当前官方字段以 `firstKeptEntryId` 为边界；`retainedTail` 仅作为 historical/harness extension evidence，不作当前标准；本机 Pi 0.80.10，暂无 live 0.85.1 transcript。嵌套 `run-N/session.jsonl` 为 pi-subagents 产物（无 parentSession，不作 lineage）。 |
-| DeepSeek Harness | active preview | `$DSH_HOME/sessions/**/{session.jsonl,session.v1.jsonl,session.v2.jsonl,session.v3.jsonl}[.zstd]` 或 `~/.dsh/sessions/**` | `full/recorded` v0/v1/v2/v3 event/context；每个 session root 选择最高 generation，`partial/derived` workflow、team 和跨 session 关系。 |
-
-当前五个 Provider 也提供消息搜索、token 统计、导出和只修改 AgentSession 元数据的本地管理。Runtime Environment 与 system-prompt evidence 仍是独立的只读能力：只展示可解析的本地来源，不声称恢复隐藏 prompt。
-未检测到的安装会显示为 unavailable 并保留 Provider diagnostic，不会被报告为空的成功来源。
-
-## OpenClaw v1.10.1 SQLite compatibility snapshot
-
-以下是 v1.10.1 的历史兼容记录；AgentSession 2.0 不再注册 OpenClaw Provider。
-
-OpenClaw 自 2026.7.2-beta.1 起把 session/transcript 主存储迁入每 agent 的 SQLite（agent schema 19）；`sessions/*.jsonl` 与 `sessions.json` 是 legacy/archive（doctor 迁移输入）。v1.10.1 的 AgentSession adapter 实现（v2026.9.3 release commit `1391f7cd…`，并单独记录审计 HEAD `0140d656…`）：
-
-- 主存储：`~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite`（只读打开，支持 WAL 快照签名），canonical session id = `session_nodes.session_key`（如 `agent:main:main`）；`session_windows` 是 transcript 代数（`previous_session_id` + `reason`：initial/reset/rollover/fork/rewind/switch/recovery/compaction），展示层只暴露 live 窗口并记录代数链（`metadata.windowLineage`，有界 20）。
-- `transcript_events.event_json` 与 legacy JSONL record 同形，parser 复用不变；active path 直接由 raw events 计算（`session_transcript_active_events` 是派生投影，不可依赖）。
-- Protocol 关系只来自记录的字段：`parent_session_key` 产生 `parent` 边，`spawned_by` 产生 `spawned` 边（两者不同时都发出，相同时去重为 `parent`）；tree/family 视图使用已记录的 structural-parent 优先级。
-- legacy JSONL 保持可读；与 SQLite 暴露同一 canonical session（任意代数 window id，或 registry sessionKey）时以 SQLite 表示为准，恰好一次，不重复计数。覆盖按 agent 限定：另一 agent 记录的相同 id 不会隐藏本 agent 的 legacy session；被覆盖的旧代数 window id 仍可解析到 canonical session。
-- 诊断：current SQLite / legacy-only JSONL / unsupported schema（版本 >19 或形状缺失）/ unreadable（损坏/权限）/ unavailable（无 agents 目录）状态显式区分；单个 agent 坏库不隐藏其余 agent 的可用数据。
-- v3 只在 provider 边界规范化 `entry_json` 的 goal、createdActor/owner、spawn/runtime/status、swarm、completion owner 与 usage lineage；goal 的 `usage_limited`/`budget_limited` 共享映射为 `blocked`，原值通过 bounded provenance 保留。请求 usage 不推断 shared/inherited origin，也不把 aggregate tokens 当 request。
-- 验证基线：agent schema 19，schema SQL sha256 `fe932174…`。本机安装 2026.7.1-2 为 pre-flip，仅有一个 legacy JSONL `agentsession-openclaw-smoke-20260802`，没有 current SQLite live sample；真实本地 SQLite v3 验证未完成（已显式记录）。
-
-## DeepSeek Harness compatibility
-
-2026-09-20 已针对最新官方 `dsh-v0.1.6-alpha.2` 局部复核团队成员、分工与消息正文格式，
-默认本机安装仍为 `0.1.5-rc.1`；另在独立 `0.1.6-alpha.2` 环境取得两成员原生 Teams 实录，
-仅使用 `deepseek-flash`，已在 Reader 读取各自分工、成员间交接及返回主 Agent 的完整正文。
-这次字段核验与下方完整 provider 快照分别维护，详见[provider 说明](docs/CONTRIBUTING-PROVIDER.md#deepseek-harness-requirements)。
-
-DSH 适配器当前跟随官方 `dsh-v0.1.5-alpha.2`（commit
-`b2e3b2a0125854567a4a5fcba75782e42fe84901`，package
-`@deepseek-ai/dsh@0.1.5-alpha.2`）并读取 session format v0、v1、v2、v3。每个
-session root 只选择数值最高的 canonical generation：`session.jsonl`、
-`session.v1.jsonl`、`session.v2.jsonl` 或 `session.v3.jsonl`（均支持 raw 与 `.zstd`）；同一代双编码
-或 raw/zstd 混用会显式诊断，不回退到旧文件，也不迁移 provider 数据。
-
-JSONL 是当前只读主后端。v2 使用每个 event 一行；v0/v1 保留 released 的
-packed-row 解码。`user/message`、`assistant/message`、`tool/result` 的
-append-origin 事件生成普通 transcript；surface replacement 只保留为
-model/context evidence，`assistant/attempt` 及 control、workflow、team 事件
-不会伪造成普通 conversation message。Runtime Protocol v3 另外投影官方记录的
-goal、team/task/mailbox、workflow、可读 compaction 与每请求 usage；未有证据的
-token origin、memory/experience/user-info 和 async 语义保持 unknown。也保留
-parent-owned direct-child catalog 及 presented deliverable 的 call/file metadata；
-只有子 session 存在时才绑定 actor/session，不推断 terminal run/task。官方
-headless CLI 没有声明默认 resume 参数，因此 AgentSession 不伪造 DSH resume 命令。
-
-## Installation
-
-需要 Node.js `>= 22.15.0`。也可以使用 GitHub Releases 中的 standalone binary。
+开发需要 Node.js 22.15 或更新版本，以及支持 edition 2024 的 Rust 工具链。
 
 ```bash
-npm install --global @acetamido/agentsession
-agentsession
-```
-
-源码运行：
-
-```bash
-git clone https://github.com/Guanzhw/AgentSession.git
-cd AgentSession
 npm install
+npm --prefix v3/ui ci
+npm run build
 npm start
 ```
 
-服务只监听 loopback，默认地址为 `http://127.0.0.1:3456`。
+打开[本地 Viewer](http://127.0.0.1:3457)。根目录安装没有 prepare 构建步骤；
+UI 依赖需明确安装。`npm run build` 构建 UI 和锁定依赖的 Rust release；
+`npm start` 构建并启动该原生 Viewer。参数可通过
+`npm start -- --port 3458 --disable-terminal-launch` 转发。
 
-## CLI
+已构建的原生程序可用 `v3/target/release/agentsession-v3 serve` 直接启动
+（Windows 文件名带 `.exe`），用 `mcp` 子命令启动原生 stdio MCP。
+独立程序运行时无需 Node 或 Cargo。
 
-```text
-agentsession [options]
-
---port <number>       服务端口（默认 3456）
---opencode-db <path>  OpenCode 数据库
---claude-dir <path>   Claude Code 数据目录
---codex-dir <path>    Codex CLI 数据目录
---pi-dir <path>       Pi agent 数据目录
---dsh-dir <path>      DeepSeek Harness 数据目录（默认 $DSH_HOME 或 ~/.dsh）
---config <path>       AgentSession JSON 配置
---disable-terminal-launch  禁止 resume command 启动
---reindex             启动时重建索引
---lang <en|zh>        界面语言
---open                启动后打开浏览器
--h, --help            显示帮助
-```
-
-终端启动只用于用户明确请求的 provider resume command。命令由结构化 executable/args/cwd 组成，并受 loopback、same-origin 和 `--disable-terminal-launch` 约束；AgentSession 不提供写入 Provider 数据的终端控制面。
-
-## Configuration
-
-用户配置文件默认为元数据目录下的 `config.json`，也可以用 `AGENTSESSION_CONFIG` 或 `--config` 指定。项目目录映射现在是顶层 `projectPaths`，不是 Provider 私有的旧嵌套设置：
-
-```json
-{
-  "projectPaths": {
-    "codex": {
-      "opaque-project-key": "C:\\work\\project"
-    }
-  },
-  "resumeCommands": {
-    "claude-code": {
-      "executable": "claude",
-      "args": ["--resume", "{sessionId}"]
-    }
-  },
-  "resumeShell": {
-    "executable": "powershell.exe",
-    "args": ["-NoLogo", "-NoProfile"]
-  }
-}
-```
-
-`projectPaths.<provider>` 的 key 必须是来源提供的稳定 opaque project key，value 必须是已存在的绝对目录；AgentSession 不猜测或写回该映射。`resumeCommands` 只覆盖 resume 命令，`resumeShell` 只定义受信任的本地宿主。`allowTerminalLaunch` 是启动时开关，不写入保存配置。
-
-常用环境变量：`PORT`、`AGENTSESSION_DB_PATH`、`XDG_DATA_HOME`、`CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`PI_CODING_AGENT_DIR`、`DSH_HOME`、`AGENTSESSION_META_PATH`、`AGENTSESSION_CONFIG`。
-
-## AgentSession-MCP
-
-`@acetamido/agentsession-mcp` 是独立的 read-only stdio MCP server。它查询 Provider 本地仍存在的 session，不写入 Provider 数据，也不受 Viewer 隐藏或排除元数据影响。`session_browse` 按 Provider、项目、会话逐层定位，`session_search` 可指定标题、目录、用户或助手消息以及根/子会话范围，也可显式用 `fields: ["toolName"]` 跨会话检索工具名。`session_get` 展示角色与工具名分布，`session_timeline` 可在会话内按消息、工具名和关键词筛选；`session_get_context` 和 `session_get_event` 用于继续读取证据。返回内容带有长度上限和不可信来源边界；思考内容与工具输入/输出仍需显式选择。
-`session_get` 的直属子会话每页最多返回 100 条；若 `childrenTruncated` 为真，可将 `childrenNextCursor` 作为下一次请求的 `childCursor`，直到取完。
+## 开发与状态
 
 ```bash
-npx --yes --prefer-online @acetamido/agentsession-mcp@latest install
-```
-
-## Development and verification
-
-```bash
-npm run typecheck
+npm run review
 npm test
-npm run build
 ```
 
-真实数据验证应检查 `/api/providers`、一个代表性 session 的 `/protocol` 和四个 Runtime API，并运行桌面验收 `npm run qa:e2e`。产品面向桌面，已有响应式改进保留，窄屏不再是开发和验收范围。请使用 [provider contribution guide](./docs/CONTRIBUTING-PROVIDER.md) 添加 Provider；协议规格位于 [`docs/specs/runtime-protocol-workbench/`](./docs/specs/runtime-protocol-workbench/)。
+[开发指南](AGENTS.md)规定代码归属和验证要求；
+[交付计划](docs/design/agentsession-v3-delivery-plan.md)记录剩余来源、性能、产品和
+平台门槛。本次工作区整合不代表 3.0 已发布或完成全部验收。2.0 的历史证据和迁移
+决策保留原有范围，其实现可从 Git 历史恢复。
 
-### OpenCode v1 / v2 数据库兼容
-
-按实际数据库 schema 自动选择读取器，保留 v1 支持，并增加 OpenCode v2
-的会话、消息、工具、压缩、分叉继承上下文和用量读取。无法读取的数据库会给出诊断，
-不会阻止其他 provider 启动。源数据库始终只读。
-完整范围及暂不支持的能力见 [OpenCode 存储兼容说明](docs/opencode-storage-compatibility.md)。
-
-## License
+## 许可证
 
 MIT

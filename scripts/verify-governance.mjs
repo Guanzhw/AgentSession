@@ -19,7 +19,9 @@ const markdownRoots = [
   "CHANGELOG.md",
   "Skills-evolve.md",
   "docs",
-  "packages",
+  "v3/AGENTS.md",
+  "v3/README.md",
+  "v3/npm/README.md",
   ".agents",
   ".github"
 ];
@@ -139,12 +141,11 @@ export function verifyMarkdownLinks(files = collectMarkdown()) {
   return errors;
 }
 
-export function concreteProviderImports(text) {
+export function concreteRustProviderImports(text) {
   const imports = [];
-  const pattern = /(?:\bfrom\s+|\bimport\s*\(\s*|\bimport\s*)["']([^"']+)["']/g;
+  const pattern = /\b(?:crate|super)::providers::(opencode|claude_code|codex|pi|deepseek_harness)(?=::|\b)/g;
   for (const match of text.matchAll(pattern)) {
-    const segments = match[1].split(/[\\/]/);
-    if (segments.some((segment) => concreteProviderIds.has(segment))) imports.push(match[1]);
+    imports.push(match[0]);
   }
   return imports;
 }
@@ -159,20 +160,16 @@ export function concreteProviderIdLiterals(text) {
 
 export function verifyArchitectureBoundaries() {
   const errors = [];
-  const sharedRoot = join(repoRoot, "src", "providers", "shared");
-  for (const file of walkFiles(sharedRoot).filter((path) => /\.tsx?$/.test(path))) {
+  const protocolRoot = join(repoRoot, "v3", "crates", "core", "src", "protocol");
+  for (const file of walkFiles(protocolRoot).filter((path) => /\.rs$/.test(path) && !/(?:^|[/\\])(?:tests|.*_tests)\.rs$/.test(path))) {
     const text = readFileSync(file, "utf8");
-    const imports = concreteProviderImports(text);
+    const imports = concreteRustProviderImports(text);
     if (imports.length) {
-      errors.push(`${relative(repoRoot, file)}: shared provider code imports concrete provider path '${imports[0]}'`);
+      errors.push(`${relative(repoRoot, file)}: protocol projection imports concrete provider path '${imports[0]}'`);
     }
-  }
-  const runtime = join(repoRoot, "src", "protocol-runtime.ts");
-  if (existsSync(runtime)) {
-    const text = readFileSync(runtime, "utf8");
     const literals = concreteProviderIdLiterals(text);
     if (literals.length) {
-      errors.push(`src/protocol-runtime.ts: runtime projections contain concrete provider ID '${literals[0]}'`);
+      errors.push(`${relative(repoRoot, file)}: protocol projection contains concrete provider ID '${literals[0]}'`);
     }
   }
   return errors;

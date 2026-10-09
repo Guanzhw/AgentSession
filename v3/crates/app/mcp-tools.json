@@ -1,0 +1,684 @@
+{
+  "tools": [
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "directory": {
+            "anyOf": [
+              {
+                "const": "",
+                "type": "string"
+              },
+              {
+                "maxLength": 4000,
+                "minLength": 1,
+                "type": "string"
+              }
+            ]
+          },
+          "level": {
+            "enum": [
+              "providers",
+              "projects",
+              "sessions"
+            ],
+            "type": "string"
+          },
+          "limit": {
+            "exclusiveMinimum": 0,
+            "maximum": 100,
+            "type": "integer"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "provider": {
+                    "enum": [
+                      "opencode",
+                      "claude-code",
+                      "codex",
+                      "pi",
+                      "deepseek-harness"
+                    ],
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "provider",
+                  "sessionId"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "providers": {
+            "items": {
+              "enum": [
+                "opencode",
+                "claude-code",
+                "codex",
+                "pi",
+                "deepseek-harness"
+              ],
+              "type": "string"
+            },
+            "maxItems": 5,
+            "type": "array"
+          },
+          "title": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "updatedAfter": {
+            "type": "number"
+          },
+          "updatedBefore": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "level"
+        ],
+        "type": "object"
+      },
+      "name": "session_browse",
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "result": {},
+          "untrustedContent": {
+            "const": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "result",
+          "untrustedContent"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "directory": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "fields": {
+            "items": {
+              "enum": [
+                "title",
+                "directory",
+                "user",
+                "assistant",
+                "toolName"
+              ],
+              "type": "string"
+            },
+            "maxItems": 5,
+            "minItems": 1,
+            "type": "array"
+          },
+          "limit": {
+            "exclusiveMinimum": 0,
+            "maximum": 100,
+            "type": "integer"
+          },
+          "lineage": {
+            "enum": [
+              "all",
+              "roots",
+              "children"
+            ],
+            "type": "string"
+          },
+          "providers": {
+            "items": {
+              "enum": [
+                "opencode",
+                "claude-code",
+                "codex",
+                "pi",
+                "deepseek-harness"
+              ],
+              "type": "string"
+            },
+            "maxItems": 5,
+            "type": "array"
+          },
+          "query": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "updatedAfter": {
+            "type": "number"
+          },
+          "updatedBefore": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "name": "session_search",
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "result": {},
+          "untrustedContent": {
+            "const": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "result",
+          "untrustedContent"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "childCursor": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "childLimit": {
+            "exclusiveMinimum": 0,
+            "maximum": 100,
+            "type": "integer"
+          },
+          "session": {
+            "additionalProperties": false,
+            "properties": {
+              "provider": {
+                "enum": [
+                  "opencode",
+                  "claude-code",
+                  "codex",
+                  "pi",
+                  "deepseek-harness"
+                ],
+                "type": "string"
+              },
+              "sessionId": {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "provider",
+              "sessionId"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "session"
+        ],
+        "type": "object"
+      },
+      "name": "session_get",
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "result": {},
+          "untrustedContent": {
+            "const": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "result",
+          "untrustedContent"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "limit": {
+            "exclusiveMinimum": 0,
+            "maximum": 200,
+            "type": "integer"
+          },
+          "query": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "enum": [
+                "user",
+                "assistant",
+                "system",
+                "tool"
+              ],
+              "type": "string"
+            },
+            "maxItems": 4,
+            "type": "array"
+          },
+          "segments": {
+            "items": {
+              "enum": [
+                "message",
+                "thinking",
+                "tool",
+                "context"
+              ],
+              "type": "string"
+            },
+            "maxItems": 4,
+            "type": "array"
+          },
+          "session": {
+            "additionalProperties": false,
+            "properties": {
+              "provider": {
+                "enum": [
+                  "opencode",
+                  "claude-code",
+                  "codex",
+                  "pi",
+                  "deepseek-harness"
+                ],
+                "type": "string"
+              },
+              "sessionId": {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "provider",
+              "sessionId"
+            ],
+            "type": "object"
+          },
+          "statuses": {
+            "items": {
+              "enum": [
+                "error",
+                "completed",
+                "unknown"
+              ],
+              "type": "string"
+            },
+            "maxItems": 3,
+            "type": "array"
+          },
+          "toolNames": {
+            "items": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array"
+          }
+        },
+        "required": [
+          "session"
+        ],
+        "type": "object"
+      },
+      "name": "session_timeline",
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "result": {},
+          "untrustedContent": {
+            "const": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "result",
+          "untrustedContent"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "after": {
+            "maximum": 20,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "before": {
+            "maximum": 20,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "event": {
+            "additionalProperties": false,
+            "properties": {
+              "messageId": {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              "provider": {
+                "enum": [
+                  "opencode",
+                  "claude-code",
+                  "codex",
+                  "pi",
+                  "deepseek-harness"
+                ],
+                "type": "string"
+              },
+              "segment": {
+                "enum": [
+                  "message",
+                  "thinking",
+                  "tool",
+                  "context"
+                ],
+                "type": "string"
+              },
+              "sessionId": {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "provider",
+              "sessionId",
+              "messageId",
+              "segment"
+            ],
+            "type": "object"
+          },
+          "includeThinking": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "event"
+        ],
+        "type": "object"
+      },
+      "name": "session_get_context",
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "result": {},
+          "untrustedContent": {
+            "const": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "result",
+          "untrustedContent"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "event": {
+            "additionalProperties": false,
+            "properties": {
+              "messageId": {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              "provider": {
+                "enum": [
+                  "opencode",
+                  "claude-code",
+                  "codex",
+                  "pi",
+                  "deepseek-harness"
+                ],
+                "type": "string"
+              },
+              "segment": {
+                "enum": [
+                  "message",
+                  "thinking",
+                  "tool",
+                  "context"
+                ],
+                "type": "string"
+              },
+              "sessionId": {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "provider",
+              "sessionId",
+              "messageId",
+              "segment"
+            ],
+            "type": "object"
+          },
+          "includeThinking": {
+            "type": "boolean"
+          },
+          "includeToolInput": {
+            "type": "boolean"
+          },
+          "includeToolOutput": {
+            "type": "boolean"
+          },
+          "maxChars": {
+            "exclusiveMinimum": 0,
+            "maximum": 20000,
+            "type": "integer"
+          },
+          "offset": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "revision": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "event"
+        ],
+        "type": "object"
+      },
+      "name": "session_get_event",
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "result": {},
+          "untrustedContent": {
+            "const": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "result",
+          "untrustedContent"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "List provider-recorded queued team messages for a session, then read exact-revision content in bounded pages. This native mailbox evidence is separate from conversation events.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "action": { "enum": ["list", "read"], "type": "string" },
+          "session": {
+            "additionalProperties": false,
+            "properties": {
+              "provider": { "enum": ["opencode", "claude-code", "codex", "pi", "deepseek-harness"], "type": "string" },
+              "sessionId": { "minLength": 1, "maxLength": 1000, "type": "string" }
+            },
+            "required": ["provider", "sessionId"],
+            "type": "object"
+          },
+          "message": {
+            "additionalProperties": false,
+            "properties": {
+              "provider": { "enum": ["opencode", "claude-code", "codex", "pi", "deepseek-harness"], "type": "string" },
+              "sessionId": { "minLength": 1, "maxLength": 1000, "type": "string" },
+              "sourceId": { "minLength": 1, "maxLength": 1000, "type": "string" },
+              "messageId": { "minLength": 1, "maxLength": 1000, "type": "string" }
+            },
+            "required": ["provider", "sessionId", "sourceId", "messageId"],
+            "type": "object"
+          },
+          "revision": { "minLength": 1, "type": "string" },
+          "limit": { "exclusiveMinimum": 0, "maximum": 100, "type": "integer" },
+          "cursor": { "minLength": 1, "type": "string" },
+          "offset": { "minimum": 0, "maximum": 9007199254740991, "type": "integer" },
+          "maxChars": { "exclusiveMinimum": 0, "maximum": 20000, "type": "integer" }
+        },
+        "oneOf": [
+          {
+            "properties": { "action": { "const": "list" } },
+            "required": ["action", "session"],
+            "not": {
+              "anyOf": [
+                { "required": ["message"] },
+                { "required": ["revision"] },
+                { "required": ["offset"] },
+                { "required": ["maxChars"] }
+              ]
+            }
+          },
+          {
+            "properties": { "action": { "const": "read" } },
+            "required": ["action", "message", "revision"],
+            "not": {
+              "anyOf": [
+                { "required": ["session"] },
+                { "required": ["limit"] },
+                { "required": ["cursor"] }
+              ]
+            }
+          }
+        ],
+        "required": ["action"],
+        "type": "object"
+      },
+      "name": "session_team_messages",
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "result": {},
+          "untrustedContent": { "const": true, "type": "boolean" }
+        },
+        "required": ["result", "untrustedContent"],
+        "type": "object"
+      }
+    }
+  ]
+}

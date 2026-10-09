@@ -6,6 +6,33 @@ Runtime Workbench, and read-only MCP consume normalized contracts. Provider
 databases, transcripts, and event logs must never be written, migrated,
 deleted, or repaired.
 
+## Current native implementation
+
+AgentSession 3.0 is the sole workspace runtime. The Rust
+[`ProviderAdapter` contract](../v3/crates/core/src/providers/mod.rs) owns provider
+reads and capabilities. Decoding, source revisions, paths, resume defaults and
+provider vocabulary belong in the owning files under
+[`v3/crates/core/src/providers/`](../v3/crates/core/src/providers/).
+Shared [Protocol projections](../v3/crates/core/src/protocol/) consume normalized
+facts. Axum and rmcp translate those facts, while Svelte renders them.
+
+Keep canonical provider/session IDs and recorded provenance. Verify current
+upstream and real local source evidence before changing a schema; preserve
+unavailable or invalid diagnostics. Add Rust behavior tests and relevant
+[`v3/test/`](../v3/test/) integration checks, then validate a real provider read
+and the affected Web or native MCP flow. Run `npm run review`; the
+[development validation matrix](../AGENTS.md#validation-matrix) owns the full
+checks appropriate to the change.
+
+## Historical provider evidence and implementation examples
+
+The remaining sections preserve the 2.0 adapter knowledge and dated source
+observations used during reconstruction. TypeScript paths and interfaces below
+describe that historical baseline, recoverable from Git revision
+`50a32e7c5b3fdaa1d335771da80d6c919d4ab536`. They are evidence references; current
+implementation and validation use the Rust owners above. Recheck upstream and
+local samples before promoting a dated observation to a current support claim.
+
 AgentSession 2.0 supports OpenCode, Claude Code, Codex CLI, Pi, and DeepSeek
 Harness. OpenClaw and Hermes Agent were last included in published v1.10.1 and
 are fully removed from both the 2.0 Viewer and MCP. Their entries below are

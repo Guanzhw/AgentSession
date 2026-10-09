@@ -1,0 +1,2 @@
+{"type":"session_meta","timestamp":"2026-09-27T00:00:00.000Z","payload":{"id":"88888888-8888-4888-8888-888888888888","cwd":"/synthetic/codex"}}
+{"type":"response_item","timestamp":"2026-09-27T00:00:01.000Z","payload":{"type":"message","role":"user","id":"question-reply","content":[{"type":"input_text","text":"<send_user_message_question_reply>[{\"questionItemId\":\"q1\",\"question\":\"Which 中文 mode?\",\"answer\":\"Both 中 options\"}]</send_user_message_question_reply>"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}}}

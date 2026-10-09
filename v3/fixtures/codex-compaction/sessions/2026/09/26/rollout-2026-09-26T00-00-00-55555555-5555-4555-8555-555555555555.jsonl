@@ -1,0 +1,7 @@
+{"type":"session_meta","timestamp":"2026-09-26T00:00:00.000Z","payload":{"id":"55555555-5555-4555-8555-555555555555","cwd":"/example"}}
+{"type":"event_msg","timestamp":"2026-09-26T00:00:01.000Z","payload":{"type":"user_message","message":"Record the compact checkpoint."}}
+{"type":"event_msg","timestamp":"2026-09-26T00:00:02.000Z","payload":{"type":"agent_message","message":"I will keep the source order."}}
+{"type":"compacted","timestamp":"2026-09-26T00:00:03.000Z","payload":{"message":"Recorded summary begins. Alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega. Recorded summary ends.","replacement_history":[{"type":"message","role":"user","content":[{"type":"input_text","text":"First retained request."}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Last retained answer."}]},{"type":"compaction","encrypted_content":"secret-ciphertext"}]}}
+{"type":"event_msg","timestamp":"2026-09-26T00:00:03.001Z","payload":{"type":"context_compacted"}}
+{"type":"event_msg","timestamp":"2026-09-26T00:00:04.000Z","payload":{"type":"user_message","message":"Continue after compact."}}
+{"type":"event_msg","timestamp":"2026-09-26T00:00:05.000Z","payload":{"type":"agent_message","message":"The continuation is recorded."}}

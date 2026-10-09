@@ -1,0 +1,3 @@
+{"type":"session_meta","timestamp":10,"payload":{"id":"unresolved","parent_thread_id":"parent","cwd":"/fixture"}}
+{"type":"session_meta","timestamp":10,"payload":{"id":"parent"}}
+{"type":"event_msg","timestamp":11,"payload":{"type":"user_message","message":"possibly inherited needle"}}

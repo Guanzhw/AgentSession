@@ -1,0 +1,73 @@
+{
+  "status": "complete",
+  "binarySha256": "2641ab076ce233056a3c3caf26411e4d652485963fdf7bb97128b552fcb2cf66",
+  "binaryBytes": 25262080,
+  "sourceHashes": {
+    "v3/crates/core/src/providers/codex.rs": "2a1301e6fad746b0a1a40d00ca081b03f5b25ef6e30fc759d716288127331865",
+    "v3/crates/core/src/stats.rs": "0a8fae22b3461a49bdca688fadf50b11fb74a623bb3a4714ec8d869e62a6c0fc",
+    "v3/crates/core/src/lib.rs": "4174f6e1f4ae8fb22d8cb2c64e5e259661ac33057eafd5f1f63a5524127f9d81",
+    "v3/crates/app/src/web.rs": "d4359a759c94dd9305e42fa520989e17254d301c297ed9eca6770ab59ba2e389",
+    "v3/Cargo.lock": "951832589a56428953c1b7b19a13c39daf0cc27718e1373e9358832238ff2acf",
+    "src/providers/codex/adapter.ts": "4e70fcc1bfb6ed6179fac3934f39764296b9efad1236374cea20a8b89b19d41c",
+    "src/providers/shared/file-adapter-helpers.ts": "9e05e648f8acfe1f62e68530210b4e155caf34cecc237f1230979a3a1a9f62ec"
+  },
+  "inputSourceHashes": [
+    {
+      "sha256": "22df7d750f193647a7f21cdbe3e736c5cc9f1b892b5d598af3db27c9d13cf33a",
+      "bytes": 34674014
+    },
+    {
+      "sha256": "514b8a4405e9cf1848d878242caf864ca2d64425369240ead9b3a30f2389cb4f",
+      "bytes": 24507721
+    }
+  ],
+  "rawProvedCanonicalRequestUnion": 206,
+  "selectedSessions": 1,
+  "protocolValidationOk": true,
+  "protocolUsageRecords": 112,
+  "protocolCanonicalUsageRecords": 59,
+  "rawCanonicalResponsesReturned": 59,
+  "rawCanonicalResponsesMissing": 147,
+  "unexpectedCanonicalResponses": 0,
+  "statsOverview": {
+    "totalSessions": 1,
+    "totalMessages": 36,
+    "totalTokens": null,
+    "recordedRequestCount": 112,
+    "knownTokenCount": 14153109,
+    "unknownTokenRequestCount": 0,
+    "untimedRequestCount": 0
+  },
+  "readerCanonicalIdentityMatches": true,
+  "serviceIsolation": "temporary two-file copied root; original source and existing services untouched",
+  "responseDigests": [
+    {
+      "name": "sessions",
+      "status": 200,
+      "sha256": "5a1159a0bc16e3648da909d518d6d7b7c2a7907fd4f8993153be88ef8c0ad3fa",
+      "bytes": 594
+    },
+    {
+      "name": "protocol",
+      "status": 200,
+      "sha256": "af0319d9442afc9411b45d90c3bcfadfa55bd2720eff7c5be5cfa92d9ed72c54",
+      "bytes": 243664
+    },
+    {
+      "name": "stats",
+      "status": 200,
+      "sha256": "1c9d2a7eea950c76ebdc4c2bab71db952664f21b16c07eaffad5ec52bdbc5a92",
+      "bytes": 7874
+    },
+    {
+      "name": "reader",
+      "status": 200,
+      "sha256": "f944753a808a1a50bdaf19dc3380d45cd3867807998abbe552b05bec82e8a906",
+      "bytes": 51742
+    }
+  ],
+  "sourceHashesPreserved": true,
+  "processStopped": true,
+  "protocolLegacyUsageRecords": 53,
+  "firstPassCorrection": "Original helper used exact sourceType without +thread_settings_applied and an incorrect Reader envelope field; retained original report is superseded by this offline recomputation from preserved HTTP responses."
+}

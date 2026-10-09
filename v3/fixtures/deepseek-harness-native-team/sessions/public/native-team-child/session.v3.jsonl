@@ -1,0 +1,4 @@
+{"type":"session","version":3,"id":"native-team-child","createdAt":104,"parentSession":"native-team-parent","isSeeded":false,"origin":"subagent","delegationDepth":1}
+{"type":"subagent/descriptor","seq":0,"time":105,"data":{"version":3,"mode":"continuable","provider":"spawn","label":"Public reviewer","agentProvider":"public","agentModel":"synthetic","agentReasoningEffort":"low"}}
+{"type":"user/message","seq":1,"time":106,"data":{"id":"public-child-request","source":{"kind":"user"},"content":[{"type":"text","text":"Review the public synthetic task."}]},"surfaceOp":"append"}
+{"type":"assistant/message","seq":2,"time":110,"data":{"turn":0,"step":0,"message":{"id":"public-child-final","role":"assistant","source":{"provider":"public","model":"synthetic"},"content":[{"type":"text","text":"Public child final source body."}]}},"surfaceOp":"append"}

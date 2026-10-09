@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en" data-theme="system">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#eef1ed" />
+    <meta name="description" content="A quiet place to return to your agent sessions." />
+    <script>
+      (() => {
+        try {
+          const saved = localStorage.getItem('agentsession-v3-theme');
+          document.documentElement.dataset.theme = saved === 'light' || saved === 'dark' || saved === 'system'
+            ? saved : 'system';
+          document.documentElement.lang = localStorage.getItem('agentsession-v3-language') === 'zh' ? 'zh-CN' : 'en';
+        } catch {
+          document.documentElement.dataset.theme = 'system';
+        }
+      })();
+    </script>
+    <title>AgentSession</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

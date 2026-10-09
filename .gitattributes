@@ -2,5 +2,7 @@
 *.sh text eol=lf
 
 # Official snapshots are verified against upstream byte hashes.
+test/fixtures/claude-current-v259-synthetic.jsonl -text
 test/fixtures/dsh-alpha15-v3-preview-showcase.jsonl -text
 test/fixtures/dsh-alpha5-fresh-round-trip.jsonl -text
+test/fixtures/v3-usage-certificates/*.jsonl -text

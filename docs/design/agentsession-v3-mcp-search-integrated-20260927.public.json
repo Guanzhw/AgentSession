@@ -1,0 +1,711 @@
+{
+  "format": "agentsession-v3-matched-performance/v1",
+  "generatedAtUtc": "2026-09-27T00:31:36.779Z",
+  "searchParityPassed": true,
+  "searchGoldenPassed": true,
+  "searchSpeedupEligible": true,
+  "input": {
+    "codexStat": {
+      "fileCount": 840,
+      "totalBytes": 3400267634,
+      "statManifestSha256": "0819d9d3232a22252a2dfcc4ae29463583678c3aea6ca5d96d9d5ba2193d7db0"
+    },
+    "providerStatSha256": {
+      "opencode": "3ce3bcd86449cf683e9ecf2e028fc548d2a7cff4088e86938f800eaf7595f842",
+      "claude-code": "ba7c8b9ea0562128788598516319d7c451745394efdebc0a693e67198f9444c1",
+      "codex": "0819d9d3232a22252a2dfcc4ae29463583678c3aea6ca5d96d9d5ba2193d7db0",
+      "pi": "c4ff505fa2b6a989d4fe7a69e527874512f456b6b330375c8af1165cbfd2f3e4",
+      "deepseek-harness": "b32b95bce960827b0b739075dcb82fdce7a8a1c53f9c5f31e02d8e11378c307e"
+    },
+    "providerContentSha256": {
+      "opencode": "9f51f96bb5abd7b0244f956b1818683db9300d5186ac812aa0bec2703545e041",
+      "claude-code": "9268905217558d28c804b09ddf90ef7a6ba2524277a9c593f60359a9e6884ba5",
+      "pi": "ad0516c9432667780faf061e5202e3a3d302410619ae158fc727041cce1b5a66",
+      "deepseek-harness": "267eff59e90eae518b93361094a733b33e809aa4fe7905cf74e1c048576c7c01"
+    },
+    "unchanged": true,
+    "queryLabels": [
+      {
+        "label": "codex-user-assistant",
+        "querySha256": "57de4cf40144bdf7d00010f2f5557a7d642c2b9705309bfade167dd313e2ca93"
+      },
+      {
+        "label": "chinese-one",
+        "querySha256": "a567bdaa11367f260f0708391f4d10766b5962f565d9e432f17981a3584fe1e2"
+      },
+      {
+        "label": "chinese-two",
+        "querySha256": "72726d8818f693066ceb69afa364218b692e62ea92b385782363780f47529c21"
+      },
+      {
+        "label": "literal-percent",
+        "querySha256": "bbf3f11cb5b43e700273a78d12de55e4a7eab741ed2abf13787a4d2dc832b8ec"
+      },
+      {
+        "label": "multi-term",
+        "querySha256": "aa2847189a9f9b9a4ee49d0f18f05a56efdaeaa71861922d40a89984bfd67dcb"
+      },
+      {
+        "label": "common-one",
+        "querySha256": "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb"
+      },
+      {
+        "label": "no-hit",
+        "querySha256": "3a12a2146ee37bb358af3a2c440346fa3ece9bfdf3e9e9f009b3fa00e293ffb8"
+      },
+      {
+        "label": "metadata-title-directory",
+        "querySha256": "0e8d965c175e2f5c37e39194e0661e84eed1c263c0e5a7887bb64cb8a21970f2"
+      },
+      {
+        "label": "tool-name",
+        "querySha256": "3316348dbadfb7b11c7c2ea235949419e23f9fa898ad2c198f999617912a9925"
+      }
+    ],
+    "cacheLabel": "likely-warm-uncontrolled-os-cache",
+    "repetitions": 5,
+    "pairedOrder": [
+      "v2",
+      "v3",
+      "v3",
+      "v2",
+      "v2",
+      "v3",
+      "v3",
+      "v2",
+      "v2",
+      "v3"
+    ],
+    "goldenSha256": "ad65fc5aa00382300c622501cc9946313f4c08599bd09dffa0ad4f0b2088cae1"
+  },
+  "artifacts": {
+    "v2": {
+      "revision": "50a32e7c5b3fdaa1d335771da80d6c919d4ab536",
+      "fileCount": 443,
+      "sha256": "d01277bcd9b69de6cb1faf6d536be28f8aae8f658950a544039de3da969d92b4"
+    },
+    "v3": {
+      "revision": "50a32e7c5b3fdaa1d335771da80d6c919d4ab536",
+      "fileCount": 1,
+      "sha256": "dcbc48f7985af9391a07201f4b48e3e5dc0a133f401b27350a8bd63532ebf50c"
+    }
+  },
+  "artifactsUnchanged": true,
+  "metrics": {
+    "v2": {
+      "attempts": [
+        {
+          "repetition": 1,
+          "status": "ok",
+          "freshObservedFirstAnswerMs": 23162.7608,
+          "restartObservedFirstAnswerMs": 11403.36110000001,
+          "freshAnswerReadyMs": 23162.7608,
+          "restartAnswerReadyMs": 11403.36110000001,
+          "freshHandshakeMs": 12171.4721,
+          "restartHandshakeMs": 11345.641200000013,
+          "peakRssBytes": 3414691840,
+          "cpuMs": 273843.75,
+          "processCountObserved": 2,
+          "processExits": [
+            {
+              "code": 0,
+              "signal": null
+            },
+            {
+              "code": 0,
+              "signal": null
+            }
+          ],
+          "stateBytes": 40443904,
+          "mcpInputPayloadBytes": 59714,
+          "mcpOutputPayloadBytes": 1753453,
+          "retries": 0,
+          "errors": []
+        },
+        {
+          "repetition": 2,
+          "status": "ok",
+          "freshObservedFirstAnswerMs": 22556.35189999995,
+          "restartObservedFirstAnswerMs": 11425.460100000026,
+          "freshAnswerReadyMs": 22556.35189999995,
+          "restartAnswerReadyMs": 11425.460100000026,
+          "freshHandshakeMs": 11465.54429999995,
+          "restartHandshakeMs": 11367.769900000014,
+          "peakRssBytes": 3420258304,
+          "cpuMs": 275046.875,
+          "processCountObserved": 2,
+          "processExits": [
+            {
+              "code": 0,
+              "signal": null
+            },
+            {
+              "code": 0,
+              "signal": null
+            }
+          ],
+          "stateBytes": 40443904,
+          "mcpInputPayloadBytes": 59714,
+          "mcpOutputPayloadBytes": 1753453,
+          "retries": 0,
+          "errors": []
+        },
+        {
+          "repetition": 3,
+          "status": "ok",
+          "freshObservedFirstAnswerMs": 22431.21549999999,
+          "restartObservedFirstAnswerMs": 11392.170900000026,
+          "freshAnswerReadyMs": 22431.21549999999,
+          "restartAnswerReadyMs": 11392.170900000026,
+          "freshHandshakeMs": 11305.165700000012,
+          "restartHandshakeMs": 11334.763000000035,
+          "peakRssBytes": 3447771136,
+          "cpuMs": 271625,
+          "processCountObserved": 2,
+          "processExits": [
+            {
+              "code": 0,
+              "signal": null
+            },
+            {
+              "code": 0,
+              "signal": null
+            }
+          ],
+          "stateBytes": 40443904,
+          "mcpInputPayloadBytes": 59714,
+          "mcpOutputPayloadBytes": 1753453,
+          "retries": 0,
+          "errors": []
+        },
+        {
+          "repetition": 4,
+          "status": "ok",
+          "freshObservedFirstAnswerMs": 22353.56819999998,
+          "restartObservedFirstAnswerMs": 11435.305399999954,
+          "freshAnswerReadyMs": 22353.56819999998,
+          "restartAnswerReadyMs": 11435.305399999954,
+          "freshHandshakeMs": 11320.706100000069,
+          "restartHandshakeMs": 11376.718499999959,
+          "peakRssBytes": 3493003264,
+          "cpuMs": 272171.875,
+          "processCountObserved": 2,
+          "processExits": [
+            {
+              "code": 0,
+              "signal": null
+            },
+            {
+              "code": 0,
+              "signal": null
+            }
+          ],
+          "stateBytes": 40443904,
+          "mcpInputPayloadBytes": 59714,
+          "mcpOutputPayloadBytes": 1753453,
+          "retries": 0,
+          "errors": []
+        },
+        {
+          "repetition": 5,
+          "status": "ok",
+          "freshObservedFirstAnswerMs": 22416.670799999963,
+          "restartObservedFirstAnswerMs": 11493.709199999925,
+          "freshAnswerReadyMs": 22416.670799999963,
+          "restartAnswerReadyMs": 11493.709199999925,
+          "freshHandshakeMs": 11384.366299999994,
+          "restartHandshakeMs": 11435.26379999984,
+          "peakRssBytes": 3446255616,
+          "cpuMs": 276937.5,
+          "processCountObserved": 2,
+          "processExits": [
+            {
+              "code": 0,
+              "signal": null
+            },
+            {
+              "code": 0,
+              "signal": null
+            }
+          ],
+          "stateBytes": 40443904,
+          "mcpInputPayloadBytes": 59714,
+          "mcpOutputPayloadBytes": 1753453,
+          "retries": 0,
+          "errors": []
+        }
+      ],
+      "startup": {
+        "fresh-build": {
+          "samples": [
+            23162.7608,
+            22556.35189999995,
+            22431.21549999999,
+            22353.56819999998,
+            22416.670799999963
+          ],
+          "medianMs": 22431.21549999999,
+          "p95Ms": 23162.7608
+        },
+        "unchanged-restart": {
+          "samples": [
+            11403.36110000001,
+            11425.460100000026,
+            11392.170900000026,
+            11435.305399999954,
+            11493.709199999925
+          ],
+          "medianMs": 11425.460100000026,
+          "p95Ms": 11493.709199999925
+        }
+      },
+      "queries": [
+        {
+          "label": "codex-user-assistant",
+          "samples": [
+            46.66070000000036,
+            46.041199999977835,
+            48.1252000000095,
+            45.975100000039674,
+            48.4706999999471
+          ],
+          "medianMs": 46.66070000000036,
+          "p95Ms": 48.4706999999471,
+          "count": 689,
+          "orderedKeySha256": "7f0ea992508c0f8fef428becf7e94e9a1ea7d1dea9755170961e20815344fcfb",
+          "orderedSemanticSha256": "d0f200c80a3c19c5f9263017b183f0c3493d0719bb5020a42d4e05f8af6e8aa4"
+        },
+        {
+          "label": "chinese-one",
+          "samples": [
+            47.963800000001356,
+            47.37989999999991,
+            48.822199999936856,
+            48.399399999994785,
+            50.079800000065006
+          ],
+          "medianMs": 48.399399999994785,
+          "p95Ms": 50.079800000065006,
+          "count": 340,
+          "orderedKeySha256": "c67ebc73808df72b9f6197490f3d937c1ea6a71434543a8076c60059d80c4f10",
+          "orderedSemanticSha256": "e77d968ce66c4c070636ba0ea3e4a79842ae738c47f09c2db896cd8051fb7bfb"
+        },
+        {
+          "label": "chinese-two",
+          "samples": [
+            27.06460000000152,
+            27.0908000000054,
+            27.042200000025332,
+            27.20919999992475,
+            27.053200000082143
+          ],
+          "medianMs": 27.06460000000152,
+          "p95Ms": 27.20919999992475,
+          "count": 46,
+          "orderedKeySha256": "7bdfd734c8521701e556bd4e593d0cd3241ef672c2bf259b5a856189cb12338c",
+          "orderedSemanticSha256": "fad9542dc08f1a34abb58af252e12ecdafb6c817bbb01fb6c52502d8fb8cd823"
+        },
+        {
+          "label": "literal-percent",
+          "samples": [
+            26.752000000000407,
+            27.505700000037905,
+            27.058399999979883,
+            27.958100000047125,
+            27.317099999985658
+          ],
+          "medianMs": 27.317099999985658,
+          "p95Ms": 27.958100000047125,
+          "count": 90,
+          "orderedKeySha256": "395b571aa2dc4e71c86d9170a0596a0a7574cdac8b87c25c5fc3b808ef9695e1",
+          "orderedSemanticSha256": "07c7f07b6a1454ee6c4ea0e7935168bd0ad39548c35ea7ea0c6a96a79d7972dd"
+        },
+        {
+          "label": "multi-term",
+          "samples": [
+            53.26139999999941,
+            52.86190000001807,
+            52.40379999997094,
+            55.14280000003055,
+            52.34799999999814
+          ],
+          "medianMs": 52.86190000001807,
+          "p95Ms": 55.14280000003055,
+          "count": 260,
+          "orderedKeySha256": "0cd92b4ed5b9d81dcb645b7d62c0c9cd97876cbf22fde950a7e34d27bf2ab4fd",
+          "orderedSemanticSha256": "ce6aafa5e8a8877079e9aab92ca532a77e88343689b24fac5c738519d7af97c3"
+        },
+        {
+          "label": "common-one",
+          "samples": [
+            118.38820000000123,
+            116.58679999999003,
+            120.15179999999236,
+            115.28980000002775,
+            118.7552999999607
+          ],
+          "medianMs": 118.38820000000123,
+          "p95Ms": 120.15179999999236,
+          "count": 830,
+          "orderedKeySha256": "81bfc0dc9298c494ceac1be6b5d6d4dcc8b69a58d1bc531b60e828fbbbdf64df",
+          "orderedSemanticSha256": "eb8b798c43cb27cc38f28065860183c0f7b21668b8f38ef4b850e92caf4f8e85"
+        },
+        {
+          "label": "no-hit",
+          "samples": [
+            27.363699999994424,
+            27.04619999998249,
+            26.92739999992773,
+            26.575599999981932,
+            27.43640000000596
+          ],
+          "medianMs": 27.04619999998249,
+          "p95Ms": 27.43640000000596,
+          "count": 0,
+          "orderedKeySha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "orderedSemanticSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "label": "metadata-title-directory",
+          "samples": [
+            7378.728999999992,
+            7207.691399999952,
+            7403.807499999995,
+            7242.273300000001,
+            7230.146300000139
+          ],
+          "medianMs": 7242.273300000001,
+          "p95Ms": 7403.807499999995,
+          "count": 478,
+          "orderedKeySha256": "65e81a468c707172762a0dca44e73c8e0ef27bf283b05765ae72cf332c59591b",
+          "orderedSemanticSha256": "0676cfe281fcb5090f2f9dbf310c3d60f101504f6282298447b823110e5df052"
+        },
+        {
+          "label": "tool-name",
+          "samples": [
+            28.176600000006147,
+            28.028899999975692,
+            27.753900000010617,
+            28.54859999998007,
+            27.51560000004247
+          ],
+          "medianMs": 28.028899999975692,
+          "p95Ms": 28.54859999998007,
+          "count": 123,
+          "orderedKeySha256": "d983044019f1cd940b0a506a7d3459b29580964cae9ddad5fda9105146b2f957",
+          "orderedSemanticSha256": "0f26b20d270bf3a9cfc84b48e5f1f333ee9c78f3d7dcc28e019affd2539b542b"
+        }
+      ]
+    },
+    "v3": {
+      "attempts": [
+        {
+          "repetition": 1,
+          "status": "ok",
+          "freshObservedFirstAnswerMs": 10095.143000000011,
+          "restartObservedFirstAnswerMs": 110.37109999998938,
+          "freshAnswerReadyMs": 10095.143000000011,
+          "restartAnswerReadyMs": 110.37109999998938,
+          "freshHandshakeMs": 19.96259999999893,
+          "restartHandshakeMs": 18.683499999984633,
+          "peakRssBytes": 1288781824,
+          "cpuMs": 19781.25,
+          "processCountObserved": 2,
+          "processExits": [
+            {
+              "code": 0,
+              "signal": null
+            },
+            {
+              "code": 0,
+              "signal": null
+            }
+          ],
+          "stateBytes": 71102464,
+          "mcpInputPayloadBytes": 81250,
+          "mcpOutputPayloadBytes": 1780685,
+          "retries": 0,
+          "errors": []
+        },
+        {
+          "repetition": 2,
+          "status": "ok",
+          "freshObservedFirstAnswerMs": 10186.570899999992,
+          "restartObservedFirstAnswerMs": 107.23349999997299,
+          "freshAnswerReadyMs": 10186.570899999992,
+          "restartAnswerReadyMs": 107.23349999997299,
+          "freshHandshakeMs": 18.50769999998738,
+          "restartHandshakeMs": 17.31649999995716,
+          "peakRssBytes": 1290149888,
+          "cpuMs": 19843.75,
+          "processCountObserved": 2,
+          "processExits": [
+            {
+              "code": 0,
+              "signal": null
+            },
+            {
+              "code": 0,
+              "signal": null
+            }
+          ],
+          "stateBytes": 71102464,
+          "mcpInputPayloadBytes": 81250,
+          "mcpOutputPayloadBytes": 1780685,
+          "retries": 0,
+          "errors": []
+        },
+        {
+          "repetition": 3,
+          "status": "ok",
+          "freshObservedFirstAnswerMs": 10128.145200000028,
+          "restartObservedFirstAnswerMs": 108.0614999999525,
+          "freshAnswerReadyMs": 10128.145200000028,
+          "restartAnswerReadyMs": 108.0614999999525,
+          "freshHandshakeMs": 21.459200000041164,
+          "restartHandshakeMs": 17.399399999994785,
+          "peakRssBytes": 1288622080,
+          "cpuMs": 20015.625,
+          "processCountObserved": 2,
+          "processExits": [
+            {
+              "code": 0,
+              "signal": null
+            },
+            {
+              "code": 0,
+              "signal": null
+            }
+          ],
+          "stateBytes": 71102464,
+          "mcpInputPayloadBytes": 81250,
+          "mcpOutputPayloadBytes": 1780685,
+          "retries": 0,
+          "errors": []
+        },
+        {
+          "repetition": 4,
+          "status": "ok",
+          "freshObservedFirstAnswerMs": 10185.290099999984,
+          "restartObservedFirstAnswerMs": 108.375400000019,
+          "freshAnswerReadyMs": 10185.290099999984,
+          "restartAnswerReadyMs": 108.375400000019,
+          "freshHandshakeMs": 22.11579999991227,
+          "restartHandshakeMs": 16.944900000002235,
+          "peakRssBytes": 1288744960,
+          "cpuMs": 19937.5,
+          "processCountObserved": 2,
+          "processExits": [
+            {
+              "code": 0,
+              "signal": null
+            },
+            {
+              "code": 0,
+              "signal": null
+            }
+          ],
+          "stateBytes": 71102464,
+          "mcpInputPayloadBytes": 81250,
+          "mcpOutputPayloadBytes": 1780686,
+          "retries": 0,
+          "errors": []
+        },
+        {
+          "repetition": 5,
+          "status": "ok",
+          "freshObservedFirstAnswerMs": 10162.147499999963,
+          "restartObservedFirstAnswerMs": 108.84530000016093,
+          "freshAnswerReadyMs": 10162.147499999963,
+          "restartAnswerReadyMs": 108.84530000016093,
+          "freshHandshakeMs": 23.07909999997355,
+          "restartHandshakeMs": 18.267800000030547,
+          "peakRssBytes": 1289625600,
+          "cpuMs": 19828.125,
+          "processCountObserved": 2,
+          "processExits": [
+            {
+              "code": 0,
+              "signal": null
+            },
+            {
+              "code": 0,
+              "signal": null
+            }
+          ],
+          "stateBytes": 71102464,
+          "mcpInputPayloadBytes": 81250,
+          "mcpOutputPayloadBytes": 1780685,
+          "retries": 0,
+          "errors": []
+        }
+      ],
+      "startup": {
+        "fresh-build": {
+          "samples": [
+            10095.143000000011,
+            10186.570899999992,
+            10128.145200000028,
+            10185.290099999984,
+            10162.147499999963
+          ],
+          "medianMs": 10162.147499999963,
+          "p95Ms": 10186.570899999992
+        },
+        "unchanged-restart": {
+          "samples": [
+            110.37109999998938,
+            107.23349999997299,
+            108.0614999999525,
+            108.375400000019,
+            108.84530000016093
+          ],
+          "medianMs": 108.375400000019,
+          "p95Ms": 110.37109999998938
+        }
+      },
+      "queries": [
+        {
+          "label": "codex-user-assistant",
+          "samples": [
+            46.11060000001453,
+            46.675800000026356,
+            44.99690000002738,
+            49.911100000026636,
+            46.12099999981001
+          ],
+          "medianMs": 46.12099999981001,
+          "p95Ms": 49.911100000026636,
+          "count": 689,
+          "orderedKeySha256": "7f0ea992508c0f8fef428becf7e94e9a1ea7d1dea9755170961e20815344fcfb",
+          "orderedSemanticSha256": "d0f200c80a3c19c5f9263017b183f0c3493d0719bb5020a42d4e05f8af6e8aa4"
+        },
+        {
+          "label": "chinese-one",
+          "samples": [
+            71.79639999999199,
+            71.2275999999838,
+            71.90869999991264,
+            76.68680000002496,
+            71.39369999989867
+          ],
+          "medianMs": 71.79639999999199,
+          "p95Ms": 76.68680000002496,
+          "count": 340,
+          "orderedKeySha256": "c67ebc73808df72b9f6197490f3d937c1ea6a71434543a8076c60059d80c4f10",
+          "orderedSemanticSha256": "e77d968ce66c4c070636ba0ea3e4a79842ae738c47f09c2db896cd8051fb7bfb"
+        },
+        {
+          "label": "chinese-two",
+          "samples": [
+            65.14439999999013,
+            63.76370000001043,
+            67.23259999998845,
+            63.55590000003576,
+            64.24509999994189
+          ],
+          "medianMs": 64.24509999994189,
+          "p95Ms": 67.23259999998845,
+          "count": 46,
+          "orderedKeySha256": "7bdfd734c8521701e556bd4e593d0cd3241ef672c2bf259b5a856189cb12338c",
+          "orderedSemanticSha256": "fad9542dc08f1a34abb58af252e12ecdafb6c817bbb01fb6c52502d8fb8cd823"
+        },
+        {
+          "label": "literal-percent",
+          "samples": [
+            66.88479999999981,
+            66.44610000000102,
+            71.57970000000205,
+            66.65020000003278,
+            68.88449999992736
+          ],
+          "medianMs": 66.88479999999981,
+          "p95Ms": 71.57970000000205,
+          "count": 90,
+          "orderedKeySha256": "395b571aa2dc4e71c86d9170a0596a0a7574cdac8b87c25c5fc3b808ef9695e1",
+          "orderedSemanticSha256": "07c7f07b6a1454ee6c4ea0e7935168bd0ad39548c35ea7ea0c6a96a79d7972dd"
+        },
+        {
+          "label": "multi-term",
+          "samples": [
+            47.84679999999935,
+            50.00489999999991,
+            47.806899999966845,
+            51.32550000003539,
+            47.529800000134856
+          ],
+          "medianMs": 47.84679999999935,
+          "p95Ms": 51.32550000003539,
+          "count": 260,
+          "orderedKeySha256": "0cd92b4ed5b9d81dcb645b7d62c0c9cd97876cbf22fde950a7e34d27bf2ab4fd",
+          "orderedSemanticSha256": "ce6aafa5e8a8877079e9aab92ca532a77e88343689b24fac5c738519d7af97c3"
+        },
+        {
+          "label": "common-one",
+          "samples": [
+            71.09969999999157,
+            72.43920000002254,
+            71.22950000001583,
+            72.2436999999918,
+            70.09799999999814
+          ],
+          "medianMs": 71.22950000001583,
+          "p95Ms": 72.43920000002254,
+          "count": 830,
+          "orderedKeySha256": "81bfc0dc9298c494ceac1be6b5d6d4dcc8b69a58d1bc531b60e828fbbbdf64df",
+          "orderedSemanticSha256": "eb8b798c43cb27cc38f28065860183c0f7b21668b8f38ef4b850e92caf4f8e85"
+        },
+        {
+          "label": "no-hit",
+          "samples": [
+            44.771999999997206,
+            46.08099999994738,
+            45.19229999999516,
+            45.131999999983236,
+            43.88789999997243
+          ],
+          "medianMs": 45.131999999983236,
+          "p95Ms": 46.08099999994738,
+          "count": 0,
+          "orderedKeySha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "orderedSemanticSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "label": "metadata-title-directory",
+          "samples": [
+            49.967399999994086,
+            50.45699999999488,
+            48.9993999999715,
+            49.99460000009276,
+            49.42599999997765
+          ],
+          "medianMs": 49.967399999994086,
+          "p95Ms": 50.45699999999488,
+          "count": 478,
+          "orderedKeySha256": "65e81a468c707172762a0dca44e73c8e0ef27bf283b05765ae72cf332c59591b",
+          "orderedSemanticSha256": "0676cfe281fcb5090f2f9dbf310c3d60f101504f6282298447b823110e5df052"
+        },
+        {
+          "label": "tool-name",
+          "samples": [
+            51.60709999999381,
+            51.975299999990966,
+            50.15419999998994,
+            51.01200000010431,
+            55.89280000003055
+          ],
+          "medianMs": 51.60709999999381,
+          "p95Ms": 55.89280000003055,
+          "count": 123,
+          "orderedKeySha256": "d983044019f1cd940b0a506a7d3459b29580964cae9ddad5fda9105146b2f957",
+          "orderedSemanticSha256": "0f26b20d270bf3a9cfc84b48e5f1f333ee9c78f3d7dcc28e019affd2539b542b"
+        }
+      ]
+    }
+  },
+  "limitations": [
+    "OS file cache was not controlled; source preflight reads non-Codex content and may warm file data and metadata.",
+    "This runner measures stdio MCP search and process readiness. Browser, source changes, and parallel Web/MCP workloads need separate measurements.",
+    "Process resource counters cover the MCP process; child processes and physical disk reads are not measured. Exit codes and signals come from the pinned MCP SDK child handle."
+  ]
+}

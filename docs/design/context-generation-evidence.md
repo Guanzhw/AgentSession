@@ -156,26 +156,26 @@ memories/rollout_summaries/2026-09-16T13-22-28-TI4c-dark_theme_autonomous_drivin
 
 ## 当前代码与其他 provider 的边界
 
-[Codex adapter](../../src/providers/codex/adapter.ts) 的 `discoverSessionFiles()`
+[Codex adapter](https://github.com/Guanzhw/AgentSession/blob/50a32e7c5b3fdaa1d335771da80d6c919d4ab536/src/providers/codex/adapter.ts) 的 `discoverSessionFiles()`
 只发现 `sessions` 下的 JSONL / Zstd rollouts；当前没有读取上述 memory/job/log
-表。[parser](../../src/providers/codex/parser.ts) 的 `extractMeta()` 保存
+表。[parser](https://github.com/Guanzhw/AgentSession/blob/50a32e7c5b3fdaa1d335771da80d6c919d4ab536/src/providers/codex/parser.ts) 的 `extractMeta()` 保存
 `threadSource` 和已记录的 parent/spawn 字段，没有 memory 生成映射。
 
-共享 [ContextArtifact](../../src/providers/shared/session-protocol.ts) 已有
+共享 [ContextArtifact](https://github.com/Guanzhw/AgentSession/blob/50a32e7c5b3fdaa1d335771da80d6c919d4ab536/src/providers/shared/session-protocol.ts) 已有
 `producerRunId`、`producerEventId`、`sourcePath`、`hash`、`sourceSessionIds`。
 其中 `sourceSessionIds` 的定义是**产物总结或派生内容的输入来源会话**。
-[ContextTransformation](../../src/providers/shared/session-protocol-v3.ts) 已支持
+[ContextTransformation](https://github.com/Guanzhw/AgentSession/blob/50a32e7c5b3fdaa1d335771da80d6c919d4ab536/src/providers/shared/session-protocol-v3.ts) 已支持
 memory / experience / dream 及输入、结果 artifact、run/event/turn。
 这些字段可以承载同一已归一化 snapshot 内的生产链；没有独立的跨 session
-producer reference，且[输入 session 投影](../../src/protocol-runtime-v3.ts)
+producer reference，且[输入 session 投影](https://github.com/Guanzhw/AgentSession/blob/50a32e7c5b3fdaa1d335771da80d6c919d4ab536/src/protocol-runtime-v3.ts)
 使用当前 provider。不要用 `sourceSessionIds` 代替 generator。
 
 | Provider | 调查时已确认的证据 | 调查时缺口 |
 | --- | --- | --- |
 | OpenClaw | [冻结 schema v19](../../test/fixtures/openclaw-agent-schema-v19.sql) 有 `memory_index_chunks`、`memory_index_chunk_provenance`、`memory_entry_origins`，包含 path/hash、origin_class、session_kind、session_id/session_key | [调查时的 protocol](https://github.com/Guanzhw/AgentSession/blob/c27315d/src/providers/openclaw/protocol.ts) 的 `artifactsFor()` 只处理 compact/branch summary；来源列本身不证明生成 run。需先核实 provider 写入语义 |
-| DSH | [protocol](../../src/providers/deepseek-harness/protocol.ts) 保留 compact 的 `sourceCommandId`、shadowed 范围和 summary transformation event | 这些是 compact 输入与结果证据，不是 memory / dream / experience 生成记录 |
+| DSH | [protocol](https://github.com/Guanzhw/AgentSession/blob/50a32e7c5b3fdaa1d335771da80d6c919d4ab536/src/providers/deepseek-harness/protocol.ts) 保留 compact 的 `sourceCommandId`、shadowed 范围和 summary transformation event | 这些是 compact 输入与结果证据，不是 memory / dream / experience 生成记录 |
 | Hermes | [调查时的 protocol](https://github.com/Guanzhw/AgentSession/blob/c27315d/src/providers/hermes/protocol.ts) 有 compression continuation 和 opaque summary | continuation 身份不能替代生成者/输入产物链 |
-| Claude | [protocol](../../src/providers/claude-code/protocol.ts) 有 compactUuid、trigger、strategy | 尚无上述辅助产物的归一化生产链 |
+| Claude | [protocol](https://github.com/Guanzhw/AgentSession/blob/50a32e7c5b3fdaa1d335771da80d6c919d4ab536/src/providers/claude-code/protocol.ts) 有 compactUuid、trigger、strategy | 尚无上述辅助产物的归一化生产链 |
 
 本机 OpenClaw 的配置路径是 `C:\Users\QQ110\.openclaw`，仅发现 agent `main`，
 但 `agents/main/agent/openclaw-agent.sqlite` 不存在，所以没有 live memory 表或

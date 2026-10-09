@@ -1,0 +1,9 @@
+{"timestamp":"2026-09-27T03:00:00.000Z","type":"session_meta","payload":{"id":"99999999-9999-4999-8999-999999999999","cwd":"/synthetic/process"}}
+{"timestamp":"2026-09-27T03:00:01.000Z","type":"response_item","payload":{"type":"function_call","call_id":"command","name":"exec_command","arguments":"{\"cmd\":\"npm run build\",\"yield_time_ms\":10000}"}}
+{"timestamp":"2026-09-27T03:00:02.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"command","output":"Chunk ID: 884062\nWall time: 10.0015 seconds\nProcess running with session ID 97155\nOriginal token count: 0\nOutput:\n"}}
+{"timestamp":"2026-09-27T03:00:03.000Z","type":"response_item","payload":{"type":"function_call","call_id":"poll","name":"write_stdin","arguments":"{\"session_id\":97155,\"chars\":\"\"}"}}
+{"timestamp":"2026-09-27T03:00:04.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"poll","output":"Chunk ID: 884063\nWall time: 10.0015 seconds\nProcess running with session ID 97155\nOriginal token count: 0\nOutput:\n"}}
+{"timestamp":"2026-09-27T03:00:05.000Z","type":"response_item","payload":{"type":"function_call","call_id":"input","name":"write_stdin","arguments":"{\"session_id\":97155,\"chars\":\"y\\n\"}"}}
+{"timestamp":"2026-09-27T03:00:06.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"input","output":"Chunk ID: 884064\nWall time: 10.0015 seconds\nProcess running with session ID 97155\nOriginal token count: 0\nOutput:\n"}}
+{"timestamp":"2026-09-27T03:00:07.000Z","type":"response_item","payload":{"type":"function_call","call_id":"stop","name":"write_stdin","arguments":"{\"session_id\":97155,\"chars\":\"\\u0003\"}"}}
+{"timestamp":"2026-09-27T03:00:08.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"stop","output":"Chunk ID: 272c54\nWall time: 0.0000 seconds\nProcess exited with code 0\nOriginal token count: 3\nOutput:\nfull output"}}

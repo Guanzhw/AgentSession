@@ -1,480 +1,231 @@
 # AgentSession Development Guide
 
-This file is the repository-level source of truth for coding agents and
-contributors working on AgentSession. AgentSession names are the only supported
-public configuration and runtime interface.
-
-## Project Summary
-
-AgentSession is a local-first, multi-provider viewer for AI coding
-sessions. It reads provider-owned session data, builds a cross-provider index,
-renders server-side HTML, exposes JSON APIs, and stores viewer-only metadata
-such as stars, custom titles, and deletion state in a separate local database.
-AgentSession 2.0 supports OpenCode, Claude Code, Codex CLI, Pi, and DeepSeek
-Harness. OpenClaw and Hermes Agent were last included in published v1.10.1 and
-are fully removed from both the 2.0 Viewer and MCP, with no compatibility path.
+This file is the repository-level source of truth for contributors and coding
+agents. AgentSession 3.0 is the sole implementation and default runtime in this
+workspace. It uses one Rust core, Axum Web routes, native rmcp stdio MCP, and a
+static Svelte frontend. OpenCode, Claude Code, Codex CLI, Pi, and DeepSeek Harness
+are the five supported providers.
 
 The Web UI serves people revisiting complete conversations and understanding
-how agents worked. Default to readable requests, replies, and meaningful
-turning points; progressively reveal the full execution and child history.
-Explain assignments, team collaboration, and asynchronous/background work from
-dispatch or separation to returned results. Evidence is a data-quality
-requirement; raw records and diagnostics belong in technical details. The MCP
-retains its separate machine-oriented interface. Product requirements and
-acceptance criteria live in the
-[presentation contract](docs/design/runtime-presentation-contract.md); the
-[delivery plan](docs/design/runtime-delivery-plan.md) owns the finite stages,
-current progress and next action. The [2.0 provider scope and migration
-plan](docs/design/agentsession-v2-provider-scope.md) owns the five-provider
-boundary and release gates.
+how agents worked. Lead with readable requests, replies, and meaningful turning
+points; progressively reveal execution and child history. Explain assignments,
+collaboration, and background work from dispatch to returned results. Raw
+records and diagnostics belong in technical details. MCP has its own bounded,
+machine-oriented interface.
 
-The package is intentionally small:
+The [3.0 acceptance contract](docs/design/agentsession-v3-acceptance-contract.md)
+owns observable behavior; the [delivery plan](docs/design/agentsession-v3-delivery-plan.md)
+owns stage status, remaining gates, and next action. Historical 2.0 evidence
+remains useful within its recorded scope. Removing its implementation does not
+close open product, source, performance, or platform acceptance gates.
 
-- Node.js 22.15 or newer.
-- TypeScript compiled as ESM with `NodeNext`.
-- No runtime npm dependencies.
-- Server-rendered HTML with plain browser JavaScript and CSS.
-- Node's built-in test runner.
-- Provider adapters for OpenCode, Claude Code, Codex CLI, Pi, and DeepSeek
-  Harness. OpenClaw and Hermes Agent were last included in published v1.10.1
-  and are outside the 2.0 runtime.
+## Purposeful Directness
+
+State the positive truth, recommendation, or action first. Mention limitations
+when they change a decision or mark actual uncertainty or an authority boundary.
+Keep explanations proportionate and concrete. Simplify unnecessary rules after
+feedback rather than adding defensive prohibitions.
 
 ## Non-Negotiable Invariants
 
 ### Provider data is read-only
 
-- Do not write to, migrate, delete from, or otherwise mutate provider-owned
-  databases and transcript files.
-- Viewer state belongs in `src/meta.ts` and the AgentSession metadata
-  database.
-- A version upgrade must not automatically delete or migrate provider source
-  records, viewer metadata, or a v1 session index. Treat v1.10.1 as historical;
-  AgentSession 2.0 has no compatibility path for OpenClaw or Hermes Agent.
-- "Permanent delete" currently means permanently excluding a session in viewer
-  metadata. It does not delete the source session.
+- Provider-owned databases, transcripts, and event logs remain read-only.
+- Viewer stars, titles, and exclusion state belong in
+  `v3/crates/core/src/meta.rs` and scope-isolated Viewer metadata.
+- A version upgrade must preserve provider records, existing Viewer metadata,
+  retired-provider rows, and historical indexes. OpenClaw and Hermes were last
+  published in v1.10.1 and remain outside the five-provider runtime.
+- Permanent deletion means permanently excluding a session in Viewer metadata.
+- Test transcript mutation only on task-owned copies under ignored `tmp/`.
 
 ### Provider behavior stays provider-owned
 
-- Keep default data paths, resume commands, schema handling, parsing, and
-  provider-specific structured views in the provider adapter or provider
-  directory.
-- Route behavior through `ProviderAdapter` methods and declared capabilities.
-  Do not add central `if (provider.id === "...")` branches when a capability or
-  optional adapter method can express the behavior.
-- Shared provider code under `src/providers/shared/` must be genuinely
-  schema-neutral. Keep provider field assumptions in the owning provider.
+Provider decoding, schemas, default paths, revision evidence, resume defaults,
+and event vocabulary belong in `v3/crates/core/src/providers/`. Shared core
+projections consume normalized facts; they must not interpret provider schemas
+or branch on provider identity. Axum and rmcp translate transports, while Svelte
+renders and navigates core-owned facts.
 
 ### Session identity must remain canonical
 
-- Use the provider's canonical session ID throughout URLs, metadata keys,
-  exports, resume commands, protocol projections, and session relationships.
-- Parsers may normalize raw records, but must not invent a second ID that
-  breaks lookup in `getSession()`.
-- Metadata keys always include both provider and session ID.
+Use provider plus canonical session ID in URLs, metadata keys, exports, MCP,
+resume commands, and relationships. Source-scope fingerprints isolate derived
+state internally and never replace public identity.
 
 ### Structured rendering has stable semantics
 
-- The session detail page groups tools under the assistant turn that produced
-  them.
-- Reasoning stays attached to the relevant assistant, tool, or subagent output
-  and must not cross assistant-message boundaries.
-- The table of contents contains user messages, assistant/agent messages,
-  task/subtask entries, and distinct context-compaction checkpoints. Checkpoint
-  ordering and anchors must match the transcript's placement projection.
-- Runtime Workbench renders protocol events, work, relationships, and context
-  from normalized provider evidence; it must not infer provider semantics in
-  browser code.
-- Keep HTML structure, `data-*` hooks in `src/views/`, selectors in
-  `src/static/app.js`, styles in `src/static/style.css`, and E2E assertions in
-  sync.
+Group tools and reasoning with their producing assistant turn. Keep reasoning
+within its message boundary. The TOC includes user, assistant, assignment, and
+distinct compaction checkpoints in transcript order. Reader collaboration and
+Runtime projections use recorded normalized evidence. Browser code must not
+infer provider semantics. Keep Rust response contracts, Svelte consumers,
+locales, and browser assertions synchronized.
 
 ### System prompt claims must be evidence-based
 
-- OpenCode system prompts are reconstructed from resolvable local sources such
-  as `AGENTS.md`, `CLAUDE.md`, configured instructions, agent files, and
-  configuration.
-- Do not claim to recover hidden provider prompts that are not present in local
-  data.
-- Preserve source paths and resolution metadata so the UI can distinguish
-  resolved content from unavailable content.
+Recorded prompts and currently resolvable instructions have distinct provenance.
+Keep source paths and resolution metadata. Current files do not prove historical
+use; hidden or unrecorded prompts remain explicitly unavailable.
 
 ### Session Protocol is the runtime inspection boundary
 
-- Every readable provider exposes a finalized, validated Session Protocol v2
-  snapshot or an explicit unavailable/invalid diagnostic.
-- Preserve recorded versus derived provenance. Missing evidence stays missing;
-  do not fabricate tasks, runs, branches, context lifecycle, or child sessions.
-- Keep summary, event, and graph projections bounded. Cursor filters are part
-  of cursor identity, and graph node limits must also bound construction work.
-- Provider-specific event vocabulary belongs in the provider protocol builder.
-  Shared runtime projections must not branch on provider id.
+Native fact documents expose validated Protocol versions 2 and 3; these schema
+numbers do not retain the removed TypeScript runtime. Native v3 preserves
+same-source v2 facts and adds recorded domains. Preserve recorded versus derived
+provenance. Missing tasks, runs, branches, lifecycle, or child evidence stay
+missing. Bound construction work as well as output; continuation identity
+includes source scope, revision, and filters.
 
 ### Terminal launch is explicitly trusted local behavior
 
-- Resume launch endpoints are enabled by default for this
-  loopback-only local server. `--disable-terminal-launch` disables them for the
-  current process.
-- Keep launch requests restricted to same-origin JSON requests from loopback.
-- Build commands as structured executable/argument/cwd objects. Do not
-  concatenate user or session data into an unquoted shell command.
-- Provider default resume commands belong on adapters. User overrides belong in
-  `resumeCommands` and `resumeShell`.
+The server binds to `127.0.0.1`. Launch is enabled by default and
+`--disable-terminal-launch` disables it for the process. Launch requests require
+same-origin loopback JSON. Build structured executable/argument/cwd commands;
+never concatenate session data into shell text. Provider defaults remain
+adapter-owned; user overrides use `resumeCommands` and `resumeShell`.
 
 ## Repository Map
 
 ```text
-bin/
-  cli.ts                         CLI entry point; initializes config first
-src/
-  config.ts                      defaults, CLI/env/config parsing and validation
-  server.ts                      loopback HTTP server, routes, APIs, startup index
-  db.ts                          OpenCode-compatible SQLite reads
-  meta.ts                        viewer-owned stars/titles/deletion metadata
-  index-db.ts                    cross-provider startup/search index
-  resume.ts                      structured resume command resolution and launch
-  protocol-runtime.ts            validated protocol cache and bounded projections
-  providers/
-    interface.ts                 ProviderAdapter and normalized data contracts
-    kinds.ts                     capability helpers
-    index.ts                     provider registration
-    shared/                      schema-neutral provider helpers
-    opencode/                    OpenCode adapter and structured views
-    claude-code/                 Claude transcript adapter/parser
-    codex/                       Codex JSONL adapter/parser
-    pi/                          Pi branch-aware JSONL adapter/parser
-    deepseek-harness/            DSH multi-frame Zstd adapter/parser/protocol
-  views/                         server-rendered page and component templates
-  static/                        browser JavaScript and CSS copied during build
-  locales/                       English and Chinese UI strings
-scripts/
-  copy-static.mjs                copies src/static into dist
-  qa-agent-browser.cmd           Windows Bash selection wrapper
-  qa-agent-browser.sh            live browser/API E2E suite
-test/
-  core.test.mjs                  parser, provider, config, and render tests
-docs/
-  CONTRIBUTING-PROVIDER.md       detailed provider contribution walkthrough
-dist/                            generated build output; never edit directly
-packages/
-  agentsession/                  publishable Viewer package assembled from dist
-  agentsession-mcp/              publishable read-only stdio MCP server
-tmp/, logs/, .agentsession/ runtime and QA artifacts; do not commit
+v3/
+  Cargo.toml, Cargo.lock           locked Rust workspace
+  crates/core/src/                 facts, providers, Reader, Runtime, search, metadata
+  crates/app/src/                  CLI, config, Axum, rmcp, resume transport
+  ui/src/                         Svelte desktop interface and localization
+  fixtures/                       public source fixtures
+  test/                           Node-driven Web, MCP, provider and artifact checks
+  npm/                            local native Viewer/MCP package templates
+scripts/                          root launch/build, governance and packaging helpers
+test/governance.test.mjs           repository guidance and governance checks
+docs/                             acceptance, architecture, historical evidence
+.agents/                          decision lifecycle and review/pre-push workflows
+tmp/, logs/, v3/target/, v3/ui/dist/ ignored runtime and generated output
 ```
-
-OpenClaw and Hermes adapters documented in v1.10.1 history are outside the
-AgentSession 2.0 runtime.
 
 ## Source And Build Conventions
 
-- Edit `src/`, `bin/`, `scripts/`, `test/`, and documentation. Never patch
-  `dist/`; `npm run build` recreates it.
-- Use ESM imports and include `.js` in relative TypeScript import specifiers so
-  emitted Node ESM resolves correctly.
-- Prefer Node built-ins and existing helpers. Adding a runtime dependency
-  changes a deliberate project constraint and requires clear justification.
-- `tsconfig.json` currently has `strict: false`, but new code should still use
-  concrete interfaces and avoid unnecessary `any`.
-- Use Unix milliseconds for normalized timestamps.
-- Return `null` or empty arrays for unavailable optional provider data when that
-  is part of the adapter contract. Do not hide unexpected failures that should
-  be diagnosable.
-- Handle corrupt individual transcript files defensively so one bad file does
-  not prevent the provider from loading.
-- Preserve Windows, Linux, and macOS path behavior. Use `node:path`, `node:os`,
-  and URL/path helpers rather than manual separators.
-- Keep comments focused on non-obvious constraints. Prefer descriptive code over
-  narration.
-
-## Architecture And Change Boundaries
-
-### Provider adapters
-
-`src/providers/interface.ts` is the authoritative contract. A provider must
-implement detection, data path reporting, scanning, session lookup, normalized
-messages, token stats, search, and export. Optional structured views and system
-prompt evidence are adapter methods. Tree, Container, and Metrics remain the
-conversation-oriented view projections; runtime inspection uses Session
-Protocol v2 rather than a separate Trace accessor.
-
-When adding or changing a provider:
-
-1. Update `ProviderId` when adding a new provider.
-2. Implement the provider in `src/providers/<id>/`.
-3. Declare a provider-owned default `resumeCommand` when the provider supports
-   session resume.
-4. Declare capabilities instead of relying on provider-name checks.
-5. Register the adapter in `src/providers/index.ts`.
-6. Normalize IDs, roles, timestamps, token fields, tool input/output, model
-   metadata, and parent relationships at the adapter/parser boundary.
-7. Add fixtures and tests for current and legacy transcript shapes where
-   applicable.
-8. Verify unavailable-provider behavior as well as the installed-data path.
-9. Update the provider table and `docs/CONTRIBUTING-PROVIDER.md` when the
-   contract or supported capabilities change.
-
-Use Claude and Codex as linear JSONL examples, Pi as a branch-tree JSONL
-example, and OpenCode as the structured SQLite example. Read the actual
-adapter before copying a pattern because provider capabilities differ.
-
-### Server and APIs
-
-- `src/server.ts` uses Node's `http` module and route matching in one request
-  handler. Keep route order in mind: API routes are handled before provider page
-  routes.
-- Provider URLs use `/:provider/...`; APIs use `/api/:provider/...`.
-- Validate and safely decode session IDs before lookup.
-- Management routes must check `supportsLocalManagement()`.
-- Structured metrics and session-tree views must use adapter capabilities or
-  optional methods.
-- Mutating local settings or launching commands must preserve loopback and
-  same-origin checks.
-- The server binds to `127.0.0.1`. Do not broaden the bind address without an
-  explicit security review.
-- Provider availability is indexed and cached at startup. Changes to provider
-  paths or startup-only config generally require a restart.
-
-### Configuration
-
-- CLI flags override environment variables and file configuration where
-  implemented.
-- The default config file is `config.json` under the metadata directory;
-`AGENTSESSION_CONFIG` and `--config` select another file.
-- `projectPaths`, `resumeCommands`, and `resumeShell` can be applied to a running
-  server through the settings API. Data directories, port, and other
-  startup-owned settings require restart.
-- `allowTerminalLaunch` is startup-only and intentionally ignored from saved
-  JSON configuration.
-- Update `validateUserConfig()`, settings UI, README examples, and tests
-  together when changing the config schema.
-
-### Views, browser code, and localization
-
-- Page structure belongs in `src/views/`; browser-only interaction belongs in
-  `src/static/app.js`; visual rules belong in `src/static/style.css`.
-- Do not move data interpretation into the browser when the server already has
-  normalized provider data.
-- Escape untrusted content through existing rendering helpers. Do not insert
-  raw provider text into HTML.
-- Add or update both `src/locales/en.ts` and `src/locales/zh.ts` for user-facing
-  strings.
-- For detail-page changes, test long sessions, tool-only assistant turns,
-  reasoning placement, nested subagents, and desktop keyboard/theme behavior.
-  Product scope is desktop: preserve existing responsive improvements, but do
-  not add narrow-screen work or validation. See the current
-  [presentation contract](docs/design/runtime-presentation-contract.md).
-
-### Runtime protocol subsystem
-
-Provider adapters own protocol construction and revision evidence.
-`src/protocol-runtime.ts` owns the bounded cache plus summary, event-page, and
-graph projections. The Runtime Workbench consumes only those normalized facts.
-Update provider fixtures, route tests, list-stat tests, and browser assertions
-together when changing this contract.
+- Edit Rust, Svelte, scripts, tests, and documentation; rebuild generated assets.
+- Use Node.js 22.15 or newer for development tooling and a Rust toolchain
+  supporting edition 2024. Native Web/MCP binaries run without Node or Cargo.
+- Keep Web and stdio MCP independent processes calling the same Rust library.
+  MCP stdout carries protocol only; diagnostics go to stderr.
+- Use concrete contracts and platform path helpers. Normalize timestamps to Unix
+  milliseconds and strings/offsets to each API's declared units.
+- Keep unavailable, invalid, unsupported, and unknown evidence explicit.
+- Validate provider files, configuration, HTTP requests, and external output at
+  their owning boundary; trust established typed in-process contracts afterward.
+- Add abstractions, compatibility paths, and defensive tests only for an actual
+  consumer or observed boundary failure.
+- Preserve Windows, Linux, and macOS behavior. Platform support claims require
+  actual affected-host evidence.
 
 ## Local Development
 
-### Pi helper routing
-
-- When Pi is explicitly requested but high-level Pi tools are not in the
-  explicit tool list, search the deferred catalog for `mcp__pi_wsl__*` before
-  falling back to raw WSL commands.
-
-Install dependencies:
+From the repository root:
 
 ```powershell
 npm install
-```
-
-Useful commands:
-
-```powershell
-npm run typecheck  # TypeScript check without emitting files
-npm run build      # Compile TypeScript and copy static assets
-npm test           # Build, then run all Node tests
-npm start          # Build, then start on 127.0.0.1:3456
-npm run dev        # Build, start, and open the browser
-```
-
-Tests import compiled files from `dist/`, so use `npm test` for the normal
-suite. For a focused iteration, build first and then use Node's test-name
-filter:
-
-```powershell
+npm --prefix v3/ui ci
 npm run build
-node --test --test-name-pattern="runtime protocol" test/protocol-runtime.test.mjs
+npm start
 ```
 
-Use real provider data for final verification when the change depends on
-provider schemas, path detection, nested sessions, token accounting, or browser
-rendering. Fixtures alone are not enough for those changes.
+Root installation does not build the removed TypeScript application or trigger a
+prepare hook. UI dependencies are installed explicitly. `npm run build` builds
+the Svelte UI and the locked Rust release; `npm start` builds and serves the
+native Viewer on `http://127.0.0.1:3457`. Forward options with
+`npm start -- --port 3458 --disable-terminal-launch`.
+See [native CLI and configuration](v3/README.md) for source/state overrides,
+stdio MCP, metadata-copy import, and packaging.
+
+```powershell
+npm run review
+npm test
+cargo test --workspace --manifest-path v3/Cargo.toml --locked
+```
+
+Use the actual root scripts as the command contract. The review gate checks
+governance, Rust formatting, and Rust compilation. The full test gate covers
+Rust and retained native integration tests; host/source-specific skips remain
+explicit. Reuse successful evidence only when its covered inputs and runtime
+state still match.
 
 ## Validation Matrix
 
-Choose validation based on the affected surface:
-
 | Change | Minimum validation |
-|:---|:---|
-| Documentation only | Re-read changed sections; verify commands, paths, links, and names |
-| Types/config/helper code | `npm run typecheck` and relevant focused tests |
-| Provider/parser/schema | `npm test` plus a real-data adapter or page check |
-| Server/API/meta/index | `npm test`, restart, and direct API checks |
-| Views/static/locales | `npm test`, restart, and `npm run qa:e2e` |
-| Resume/terminal launch | Tests plus a real descendant-process launch check |
-| Session Protocol/runtime | `npm test`, real provider/API checks, and browser QA |
-| Cross-provider/refactor | Full build/test/E2E and unavailable-provider coverage |
+| --- | --- |
+| Documentation | Re-read commands, paths, names, and links; `npm run check:governance` |
+| Rust types/config/helper | `npm run review` and relevant Rust or integration tests |
+| Provider/parser/schema | Rust tests, relevant `v3/test` tests, and a real-data read |
+| Web/API/meta/index | Relevant tests, task-owned restart, and direct API checks |
+| Svelte/styles/locales | UI build, relevant tests, and desktop browser QA |
+| Resume launch | Tests and actual descendant-process launch evidence |
+| Protocol/Runtime | Tests, real provider/API checks, and desktop browser QA |
+| MCP retrieval | Tests and actual read-only native MCP calls |
+| Installer/package | Relevant tests and installed/packed-artifact checks |
+| Cross-provider/refactor | Full build/test, affected Web/MCP checks, unavailable-source coverage |
+
+A compiler or fixture result alone does not establish real provider or product
+behavior. Product scope is desktop; preserve existing responsive behavior and
+focus validation on the specified desktop flow. Do not close platform gates
+using another host's result.
 
 ## Restart AgentSession
 
-Run these commands from the repository root after server-affecting changes.
-
-### 1. Build
-
-```powershell
-npm run build
-```
-
-### 2. Find and stop the listener on port 3456
-
-PowerShell:
+Build first. Inspect the listener and command line before stopping anything;
+restart only the instance owned by this task. Use a separate port when an
+existing service belongs to other work.
 
 ```powershell
-$listeners = Get-NetTCPConnection -LocalPort 3456 -State Listen -ErrorAction SilentlyContinue
+$listeners = Get-NetTCPConnection -LocalPort 3457 -State Listen -ErrorAction SilentlyContinue
 $listeners | Select-Object LocalAddress, LocalPort, OwningProcess
-$listeners | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
-```
-
-Git Bash alternative:
-
-```bash
-netstat -ano | grep :3456
-pwsh -C 'taskkill /F /PID <PID>'
-```
-
-Do not use `$pid` as a PowerShell loop variable; `$PID` is a read-only built-in.
-
-### 3. Start in the background
-
-PowerShell:
-
-```powershell
-Start-Process -FilePath node `
-  -ArgumentList "dist/bin/cli.js" `
-  -WorkingDirectory (Get-Location) `
-  -RedirectStandardOutput "app.log" `
-  -RedirectStandardError "app-error.log" `
+Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -in $listeners.OwningProcess } |
+  Select-Object ProcessId, ExecutablePath, CommandLine
+# Stop-Process -Id <verified-task-owned-process-id>
+Start-Process -FilePath (Join-Path (Get-Location) 'v3/target/release/agentsession-v3.exe') `
+  -ArgumentList 'serve' -WorkingDirectory (Get-Location) `
+  -RedirectStandardOutput 'app.log' -RedirectStandardError 'app-error.log' `
   -WindowStyle Hidden
+Get-NetTCPConnection -LocalPort 3457 -State Listen
+Invoke-RestMethod http://127.0.0.1:3457/api/providers
 ```
 
-Git Bash alternative:
+Do not use `$pid` as a PowerShell loop variable. Inspect logs if startup fails.
+Existing listeners and user state require their own ownership evidence.
 
-```bash
-node dist/bin/cli.js > app.log 2>&1 &
-```
+## Implementation and Review
 
-For the normal resume launch path, start without an extra launch
-flag. Add `--disable-terminal-launch` when testing the opt-out path.
-
-### 4. Verify
-
-```powershell
-Get-NetTCPConnection -LocalPort 3456 -State Listen
-Invoke-RestMethod http://127.0.0.1:3456/api/providers
-```
-
-Inspect `app.log` and `app-error.log` if startup or indexing fails.
-
-## Repeatable E2E QA
-
-The QA suite assumes a compatible server is already running. It checks the
-dashboard, search, statistics, settings, detail rendering, exports, Runtime, and
-terminal-launch-disabled behavior.
-
-```powershell
-$env:AGENTSESSION_QA_BASE_URL = 'http://127.0.0.1:3456'
-$env:AGENTSESSION_QA_SESSION_ID = '<real-session-id>'
-npm run qa:e2e
-```
-
-Set `AGENTSESSION_QA_SESSION_ID` to a real OpenCode session that includes
-reasoning, tools, tokens, and subagent activity. It is intentionally required:
-the repository does not embed a machine-specific session ID.
-
-On Windows, `npm run qa:e2e` calls `scripts/qa-agent-browser.cmd`, which selects
-Git Bash or Cygwin Bash. If Bash is elsewhere:
-
-```powershell
-$env:AGENTSESSION_QA_BASH_PATH = 'C:\path\to\bash.exe'
-```
-
-The script uses `tmp/npm-cache` to avoid global npm cache permission issues and
-cleans up its browser session. A transient browser transport timeout should be
-retried once before being classified as a product regression.
+Delegate independently scoped work when it materially improves speed or quality.
+Keep tiny or tightly coupled work in the main agent. Use an independent review
+when risk or a fresh perspective warrants it; verify findings against source and
+retain final judgment. Every handoff states objective, owned scope, constraints,
+acceptance checks, concrete evidence, and unresolved assumptions.
 
 ## Working Tree And Documentation Hygiene
 
-- Check `git status --short` before editing and before reporting completion.
-- Preserve unrelated user changes. Do not reset or rewrite files outside the
-  requested scope.
-- Do not commit generated `dist/`, runtime databases, logs, screenshots, or QA
-  output.
-- Keep `README.md`, `README.en.md`, CLI help, settings labels, and examples in
-  sync when changing user-visible behavior.
-- `origin` and the publish remote may not refer to the same repository. Inspect
-  `git remote -v` before fetch, rebase, or push operations.
-- Prefer source and tests over old prose when documentation disagrees with
-  current behavior, then update the stale documentation in the same change.
-
-## Completion Checklist
-
-Before declaring a development task complete:
-
-1. Confirm the implementation respects provider ownership and read-only source
-   data.
-2. Add or update focused regression tests.
-3. Run the validation level required by the matrix.
-4. Restart and exercise the live app when behavior is user-visible.
-5. Check browser/API output, server logs, and protocol validation diagnostics.
-6. Review `git diff --check` and `git diff`.
-7. Update relevant README, config, provider, and architecture documentation.
-8. Report commands run, exact results, and any verification that could not be
-   completed.
+Check `git status --short` before editing and completion. Preserve unrelated
+changes and task-owned evidence. Do not commit generated assets, runtime
+databases, logs, screenshots, or private corpora. Keep both READMEs, CLI help,
+and settings labels aligned when behavior changes. Inspect `git remote -v`
+before remote operations. Source and tests override stale prose.
 
 ## Agent-native change governance
 
-Use the lightweight decision lifecycle in [`.agents/decisions/README.md`](.agents/decisions/README.md).
-Create a decision record only for a non-trivial change: a cross-module
-invariant, provider or Session Protocol contract, public configuration or API,
-persistence/release behavior, or a security boundary. Small fixes and local
-refactors do not need a note.
+Use the [decision lifecycle](.agents/decisions/README.md) for non-trivial
+cross-module, provider/protocol, public configuration/API, persistence/release,
+or security choices. Move an unsettled proposed record to implemented or
+rejected when resolved. Reversals need a new linked record; historical evidence
+retains its original scope. Pin links to removed historical source to its Git
+revision.
 
-For a non-trivial change, start in `proposed/` when the choice is unsettled and
-move the record to `implemented/` or `rejected/` in the same change once the
-outcome is known. A reversal requires a new record; update the implemented
-record's factual paths and verification when its mechanism changes.
-
-Before handoff, use the [review Skill](.agents/skills/review/SKILL.md) and run
-the [pre-push Skill](.agents/skills/pre-push/SKILL.md) when publishing or
-handing off a branch. The mechanical governance check is
-`npm run check:governance`; it validates decision lifecycle records, local
-Markdown file targets, and provider architecture boundaries.
+Use the [review Skill](.agents/skills/review/SKILL.md) for scope and evidence
+reuse, and the [pre-push Skill](.agents/skills/pre-push/SKILL.md) immediately before
+a user-authorized push or release handoff. Run `git diff --check`, inspect the
+intended diff, and report commands/results, reused evidence, and material gaps.
 
 ## Evidence-bounded defensive engineering
 
-Defensive code must follow evidence and ownership boundaries:
-
-- Validate data at real untrusted boundaries: provider files and databases,
-  user configuration, HTTP requests, and subprocess or external-provider
-  output. Normalize it once before it enters the typed in-process contract.
-- Trust a typed same-process contract after its boundary normalization. Do not
-  repeat shape checks, copies, or sanitization in every downstream consumer;
-  strengthen the owning contract or boundary when evidence requires it.
-- Do not add an abstraction without a real consumer, a compatibility layer
-  without current source evidence, or a silent fallback that hides missing or
-  invalid data. Preserve explicit unavailable/invalid diagnostics.
-- Tests should cover observed inputs and meaningful boundary failures. Do not
-  add branches, compatibility fixtures, or tests solely for impossible states
-  that the owning typed contract cannot produce.
-
-When a defensive change crosses module, provider, protocol, configuration, or
-security boundaries, record the evidence and ownership decision under
-`.agents/decisions/`.
+Validate at real untrusted boundaries, then trust normalized typed contracts.
+Preserve unexpected failures rather than introducing silent fallback behavior.
+Record consequential ownership or contract changes under `.agents/decisions/`.

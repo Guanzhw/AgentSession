@@ -1,0 +1,7 @@
+[
+  {"type":"tool","id":"call-exact","name":"task","state":{"status":"completed","input":{},"content":[{"type":"text","text":"Synthetic result"}],"metadata":{"parentSessionId":"oc-v2-root","sessionId":"oc-v2-child","model":"synthetic","truncated":false}},"time":{"created":300,"completed":310}},
+  {"type":"tool","id":"call-no-parent","name":"task","state":{"status":"completed","input":{},"content":[],"metadata":{"sessionId":"oc-v2-child-2"}},"time":{"created":315}},
+  {"type":"tool","id":"call-error","name":"task","state":{"status":"error","input":{},"error":"Synthetic error"},"time":{"created":320}},
+  {"type":"tool","id":"call-other","name":"task","state":{"status":"completed","input":{},"content":[],"metadata":{"parentSessionId":"oc-v2-root","sessionId":"oc-v2-other"}},"time":{"created":330}},
+  {"type":"tool","id":"call-parent","name":"task","state":{"status":"completed","input":{},"content":[],"metadata":{"parentSessionId":"different-root","sessionId":"oc-v2-child"}},"time":{"created":340}}
+]

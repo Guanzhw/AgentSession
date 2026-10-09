@@ -1,0 +1,10 @@
+{"type":"session_meta","timestamp":1,"payload":{"id":"positive","cwd":"/fixture"}}
+{"type":"response_item","timestamp":2,"payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"injected needle"}]}}
+{"type":"event_msg","timestamp":3,"payload":{"type":"user_message","message":"User needle"}}
+{"type":"response_item","timestamp":4,"payload":{"type":"message","id":"recorded-user","role":"user","internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]},"content":[{"type":"input_text","text":"User needle"}]}}
+{"type":"response_item","timestamp":5,"payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"think"}]}}
+{"type":"response_item","timestamp":6,"payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"think more"}]}}
+{"type":"event_msg","timestamp":7,"payload":{"type":"agent_message","message":"The answer"}}
+{"type":"response_item","timestamp":8,"payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"The answer"}]}}
+{"type":"response_item","timestamp":9,"payload":{"type":"function_call","name":"read_file"}}
+{"type":"response_item","timestamp":10,"payload":{"type":"message","role":"user","internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]},"content":[{"type":"input_text","text":"<send_user_message_question_reply>[{\"questionItemId\":\"private-id\",\"question\":\"option\",\"answer\":\"yes\"}]</send_user_message_question_reply>"}]}}

@@ -1,0 +1,78 @@
+{
+  "binarySha256": "cb30d8977ec8ec8ba5e66f534041150305dbd709ba5712c0b621a38a6ab9614e",
+  "status": "ok",
+  "errors": [],
+  "sourcesUnchanged": true,
+  "sourceFilesHashed": 840,
+  "goldenStatus": "source-verified",
+  "allQueriesMatch": true,
+  "queries": [
+    {
+      "label": "codex-user-assistant",
+      "count": 689,
+      "pages": 35,
+      "elapsedMs": 1695.745799999997,
+      "match": true
+    },
+    {
+      "label": "chinese-one",
+      "count": 340,
+      "pages": 17,
+      "elapsedMs": 1256.5843999999997,
+      "match": true
+    },
+    {
+      "label": "chinese-two",
+      "count": 46,
+      "pages": 3,
+      "elapsedMs": 199.73919999999998,
+      "match": true
+    },
+    {
+      "label": "literal-percent",
+      "count": 90,
+      "pages": 5,
+      "elapsedMs": 348.14890000000014,
+      "match": true
+    },
+    {
+      "label": "multi-term",
+      "count": 260,
+      "pages": 13,
+      "elapsedMs": 647.1198999999979,
+      "match": true
+    },
+    {
+      "label": "common-one",
+      "count": 830,
+      "pages": 42,
+      "elapsedMs": 3243.7495999999774,
+      "match": true
+    },
+    {
+      "label": "no-hit",
+      "count": 0,
+      "pages": 1,
+      "elapsedMs": 51.84609999999884,
+      "match": true
+    },
+    {
+      "label": "metadata-title-directory",
+      "count": 478,
+      "pages": 24,
+      "elapsedMs": 2480.4333999999944,
+      "match": true
+    },
+    {
+      "label": "tool-name",
+      "count": 123,
+      "pages": 7,
+      "elapsedMs": 766.6695,
+      "match": true
+    }
+  ],
+  "peakRssBytes": [
+    1288892416,
+    17887232
+  ]
+}

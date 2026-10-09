@@ -1,0 +1,30 @@
+{
+  "format": "agentsession-v3-public-search-source/v1",
+  "query": "omega alpha",
+  "fields": ["title", "directory", "user", "assistant"],
+  "updatedBefore": 100,
+  "sessions": [
+    {
+      "sessionId": "gamma", "title": "Third", "directory": "/public/gamma", "updatedAt": 100,
+      "messages": [
+        {"id": "gamma-first", "role": "assistant", "text": "Alpha\u0000middle 🙂 OMEGA"},
+        {"id": "gamma-second", "role": "user", "text": "alpha later omega"}
+      ]
+    },
+    {
+      "sessionId": "alpha", "title": "Alpha title OMEGA", "directory": "/alpha/omega", "updatedAt": 50,
+      "messages": [
+        {"id": "alpha-first", "role": "user", "text": "alpha message omega"},
+        {"id": "alpha-second", "role": "assistant", "text": "omega another alpha"}
+      ]
+    },
+    {
+      "sessionId": "beta", "title": "Second", "directory": "/public/beta", "updatedAt": 100,
+      "messages": [
+        {"id": "beta-no-hit", "role": "user", "text": "alpha alone"},
+        {"id": "beta-first", "role": "user", "text": "ALPHA across several words omega"},
+        {"id": "beta-second", "role": "assistant", "text": "omega later alpha"}
+      ]
+    }
+  ]
+}

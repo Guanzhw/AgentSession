@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   concreteProviderIdLiterals,
-  concreteProviderImports,
+  concreteRustProviderImports,
   runChecks,
   validateDecisionFile,
   verifyMarkdownLinks
@@ -82,11 +82,11 @@ test("Markdown checks cover inline and reference-style local targets", () => {
 });
 
 test("architecture probes reject concrete provider paths and identifiers", () => {
-  assert.deepEqual(concreteProviderImports('import { build } from "../codex/protocol.js";'), ["../codex/protocol.js"]);
-  assert.deepEqual(concreteProviderImports('const value = await import("../../deepseek-harness/parser.js");'), ["../../deepseek-harness/parser.js"]);
-  assert.deepEqual(concreteProviderImports('import type { ProviderAdapter } from "../interface.js";'), []);
-  assert.deepEqual(concreteProviderIdLiterals('if (id !== "codex") return;'), ["codex"]);
-  assert.deepEqual(concreteProviderIdLiterals('switch (provider.id) { case "pi": break; }'), ["pi"]);
+  assert.deepEqual(concreteRustProviderImports('use crate::providers::codex::parse;'), ["crate::providers::codex"]);
+  assert.deepEqual(concreteRustProviderImports('use super::providers::deepseek_harness::parse;'), ["super::providers::deepseek_harness"]);
+  assert.deepEqual(concreteRustProviderImports('use crate::providers::NormalizedEvent;'), []);
+  assert.deepEqual(concreteProviderIdLiterals('if provider == "codex" { return; }'), ["codex"]);
+  assert.deepEqual(concreteProviderIdLiterals('match provider { "pi" => {}, _ => {} }'), ["pi"]);
 });
 
 test("local pre-push and CI quality gates have distinct evidence scopes", () => {
@@ -95,6 +95,9 @@ test("local pre-push and CI quality gates have distinct evidence scopes", () => 
   assert.equal(packageJson.scripts["ci:quality"], "npm run review && npm test");
 
   const workflow = readFileSync(join(repoRoot, ".github", "workflows", "quality.yml"), "utf8");
-  assert.match(workflow, /run: npm run ci:quality/);
+  assert.match(workflow, /run: npm run review/);
   assert.doesNotMatch(workflow, /run: npm run pre-push/);
+  const nativeWorkflow = readFileSync(join(repoRoot, ".github", "workflows", "v3-native.yml"), "utf8");
+  assert.match(nativeWorkflow, /cargo test/);
+  assert.match(nativeWorkflow, /v3\/test/);
 });

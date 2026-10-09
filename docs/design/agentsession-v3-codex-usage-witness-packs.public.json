@@ -1,0 +1,75 @@
+{
+  "format": "agentsession-codex-raw-witness-public/v1",
+  "globalProof": {
+    "ledgerSha256": "ae3c0082387b47536ba56d7c155ac16a09ba812788bc210d0aced50ace04e0a8",
+    "manifestSha256": "29e3cff3ac5f0178e8dca1883bcb0c8b99fca2b5cb4e510747eb86725ba8b010",
+    "declaredRootInventoryProofSha256": "2103b61c9f1cc27ad5fd6bc0b823e895c42687e7296b9319d555ced36faa758c",
+    "files": 840,
+    "usageOccurrences": 115370,
+    "canonicalOccurrences": 41373,
+    "legacyOccurrences": 73997,
+    "legacyExplicitResponseIds": 0,
+    "sameOwnerSameSixFieldRequestDistinctCanonicalResponseGroups": 0,
+    "scope": "Complete ledger only; no provider-source rescan. Six-field key includes missing/invalid/zero/positive states."
+  },
+  "selectedSourceFiles": 8,
+  "selectedSourceBytes": 66662990,
+  "exploratorySourcesNotPromoted": 2,
+  "sourceReads": "Eight distinct ledger-selected files were read and verified against frozen manifest hashes. Pack checks used private copies. The runtime follow-up rehashed its two original and copied files before and after execution.",
+  "packs": [
+    {
+      "name": "01-mixed-owner",
+      "sha256": "9b9200d7bfe1f2a4e422a8d42fb4e8901176acf3fe65007584102b3592f2ad6c",
+      "bytes": 157022,
+      "sourceFiles": 1,
+      "usageOccurrences": 2,
+      "provedCanonicalRequests": 1,
+      "unresolvedLegacy": 1,
+      "provedLegacyMirrors": 0,
+      "positiveMirrorCandidates": 1
+    },
+    {
+      "name": "02-compaction",
+      "sha256": "641429bbc51af258c15e0d74c56c3b2043ea9f9a8cd8863d8b02c83439790111",
+      "bytes": 1801379,
+      "sourceFiles": 1,
+      "usageOccurrences": 225,
+      "provedCanonicalRequests": 106,
+      "unresolvedLegacy": 119,
+      "provedEmbeddedRequestSnapshots": 1,
+      "contextSnapshotCandidates": 1,
+      "formatSwitchProved": false
+    },
+    {
+      "name": "03-parent-child",
+      "sha256": "7e184b36c98a8afe734a7f657754433e6dcc4fca15558f5c9b4e51a559dcc1a4",
+      "bytes": 677050,
+      "sourceFiles": 2,
+      "usageOccurrences": 6,
+      "provedCanonicalRequests": 3,
+      "unresolvedLegacy": 3,
+      "copiedParentPayloads": 18,
+      "copiedPrefixUsageOccurrences": 0,
+      "metadataEpochConflictResolved": 3
+    },
+    {
+      "name": "04-same-id-multi-file",
+      "sha256": "71418df6aea4b91f98b5e8762a1070aff81edb374b563475879a75e912f5dcb1",
+      "bytes": 13531406,
+      "sourceFiles": 2,
+      "usageOccurrences": 421,
+      "provedCanonicalRequests": 206,
+      "unresolvedLegacy": 215,
+      "sharedCanonicalResponses": 0,
+      "multiFileCanonicalRequestsProved": 206
+    }
+  ],
+  "totalWitnessUsageOccurrences": 654,
+  "provedCanonicalRequests": 316,
+  "unresolvedLegacy": 338,
+  "additionalCanonicalEvidenceBeyondFirstDisposition": 209,
+  "runtimeReconciliation": "bounded two-file follow-up: 59 of 206 raw-proved canonical requests returned, 147 absent; 53 extra legacy-derived rows remain unresolved",
+  "productionChanges": false,
+  "publicSyntheticFixture": "not-added; legacy identity and format-switch evidence remain incomplete",
+  "runtimeResultSha256": "8d7f2d8e271b920fcdba6b5916480ece29e78ff9aefa55163d645561c88ba997"
+}

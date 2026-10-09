@@ -1,0 +1,2 @@
+{"type":"session_meta","timestamp":10,"payload":{"id":"shared-session","cwd":"/segment"}}
+{"type":"event_msg","timestamp":100,"payload":{"type":"user_message","message":"Earlier discovered"}}

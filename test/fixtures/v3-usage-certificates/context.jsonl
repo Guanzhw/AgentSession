@@ -1,0 +1,4 @@
+{"kind":"owner","ownerId":"compact"}
+{"kind":"legacy","ownerId":"compact","request":{"input_tokens":10,"cached_input_tokens":2,"cache_write_input_tokens":1,"output_tokens":6,"reasoning_output_tokens":1,"total_tokens":16},"cumulative":{"input_tokens":10,"cached_input_tokens":2,"cache_write_input_tokens":1,"output_tokens":6,"reasoning_output_tokens":1,"total_tokens":16}}
+{"kind":"compaction","ownerId":"compact","marker":"compacted"}
+{"kind":"legacy","ownerId":"compact","request":{"input_tokens":0,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0,"total_tokens":42},"cumulative":{"input_tokens":10,"cached_input_tokens":2,"cache_write_input_tokens":1,"output_tokens":6,"reasoning_output_tokens":1,"total_tokens":16}}

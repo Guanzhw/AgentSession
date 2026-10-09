@@ -8,7 +8,8 @@ and evidence needed to verify the result.
 Use one of these lifecycle directories:
 
 - `proposed/` — an unresolved choice under discussion.
-- `implemented/` — a shipped choice and its current factual realization.
+- `implemented/` — a choice implemented in the repository and its current
+  factual realization; record publication status separately when relevant.
 - `rejected/` — a considered choice that was explicitly declined.
 
 Name records `YYYY-MM-DD-short-kebab-title.md`. Every record has front matter

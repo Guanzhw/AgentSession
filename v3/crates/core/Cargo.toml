@@ -1,0 +1,25 @@
+[package]
+name = "agentsession-core"
+version.workspace = true
+edition.workspace = true
+
+[features]
+crash-test-hook = []
+stats-phase-probe = []
+search-phase-probe = []
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+walkdir = "2"
+zstd = "0.13"
+jiff = { version = "=0.2.35", default-features = false, features = ["std", "tz-system", "tzdb-bundle-platform"] }
+rusqlite = { version = "0.37", features = ["bundled", "backup"] }
+tempfile = "3"
+icu_collator = "=2.2.1"
+icu_locale_core = "=2.3.0"
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Globalization"] }

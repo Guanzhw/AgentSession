@@ -1,0 +1,14 @@
+{
+  "name": "@acetamido/agentsession-mcp",
+  "version": "3.0.0",
+  "private": true,
+  "description": "Local AgentSession 3.0 native stdio MCP install candidate",
+  "type": "module",
+  "bin": { "agentsession-mcp": "bin/agentsession-mcp.mjs" },
+  "files": ["bin/", "LICENSE"],
+  "dependencies": { "@acetamido/agentsession-native": "3.0.0" },
+  "os": ["win32", "linux", "darwin"],
+  "cpu": ["x64", "arm64"],
+  "engines": { "node": ">=22.15.0" },
+  "license": "MIT"
+}

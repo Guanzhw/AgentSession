@@ -1,0 +1,196 @@
+{
+  "format": "agentsession-codex-other-duplicate-seams/v1",
+  "readScope": "Only manifest-selected four source files; byte-identical private copies retained. No global transcript scan, runtime invocation or source modification.",
+  "selectedSourceFiles": 4,
+  "selectedSourceBytes": 48710590,
+  "pairs": [
+    {
+      "name": "fork-prefix",
+      "sources": [
+        {
+          "sha256": "253a192dcc389c8eb9a1d144b9ef0897d3d64063f40956b6319128f8910b2525",
+          "bytes": 136584,
+          "completeRecords": 13,
+          "malformedRecords": 0,
+          "newlineTerminated": true,
+          "canonical": 0,
+          "explicitCanonicalOwnerMatches": 0,
+          "explicitCanonicalOwnerConflicts": 0,
+          "missingCanonicalOwner": 0,
+          "legacy": 0,
+          "legacyExplicitResponseIds": 0
+        },
+        {
+          "sha256": "87a8e2a1c60aa39ceba1e855e636f2afa8c50335845e2015f2a7632aa56c1c4d",
+          "bytes": 3413627,
+          "completeRecords": 718,
+          "malformedRecords": 0,
+          "newlineTerminated": true,
+          "canonical": 0,
+          "explicitCanonicalOwnerMatches": 0,
+          "explicitCanonicalOwnerConflicts": 0,
+          "missingCanonicalOwner": 0,
+          "legacy": 100,
+          "legacyExplicitResponseIds": 0
+        }
+      ],
+      "sameFirstCanonicalId": true,
+      "headerSourceTimestampsIncreasing": true,
+      "allEarlierEnvelopesBeforeLater": true,
+      "envelopeRangeGapMs": 7588,
+      "envelopeTimestampReversals": [
+        0,
+        0
+      ],
+      "missingOrInvalidEnvelopeTimestamps": [
+        0,
+        0
+      ],
+      "earlierHistoryBasePresent": true,
+      "laterHistoryBasePresent": true,
+      "laterHistoryBaseMatchesEarlierCanonicalId": true,
+      "historyBaseExactByteBoundary": true,
+      "localIncludedEarlierRecords": 3,
+      "ordinalMatchesAfterEarlierInheritedBase": true,
+      "excludedEarlierRecords": 10,
+      "excludedEarlierUsage": 0,
+      "excludedEarlierStartsTask": true,
+      "excludedEarlierEndsAborted": true,
+      "compactionCounts": [
+        0,
+        0
+      ],
+      "crossFileCompactionWindowLinkAvailable": false,
+      "crossFileCompactionWindowLinkMatches": null,
+      "nativeIds": {
+        "canonicalResponses": {
+          "earlierUnique": 0,
+          "laterUnique": 0,
+          "intersection": 0,
+          "earlierSetSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "laterSetSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "intersectionSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "messages": {
+          "earlierUnique": 5,
+          "laterUnique": 49,
+          "intersection": 0,
+          "earlierSetSha256": "19efe2e12c4636d413781a5740b2650d29b4e03965f4c43b543a09e9fe76381f",
+          "laterSetSha256": "92feb8e18cb35f7fad8acc0cb9e8fe43e60f9fae7de3d0052492c6b2c36662d3",
+          "intersectionSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "calls": {
+          "earlierUnique": 0,
+          "laterUnique": 95,
+          "intersection": 0,
+          "earlierSetSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "laterSetSha256": "4f2dcede37d2c0641ad8e01bcc640bcf8cabd2c1504f6f2772bf1636c1f59aa1",
+          "intersectionSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        }
+      },
+      "exactRawRecordHashIntersection": 0,
+      "localSourceBackedPrefixContinuation": true,
+      "fullHistoryLineageResolved": false,
+      "straightforwardWholeFileConcatenationSafe": false,
+      "conclusion": "A local prefix+later link is source-backed: byte cutoff includes three earlier records and the declared global ordinal equals the earlier inherited base plus three. The excluded ten-record aborted turn has no usage. The earlier inherited parent source is outside this bounded read, so full ancestry stays unresolved.",
+      "privateEvidenceSha256": "76e7076d1b6db92d24fda6e05ef25acea10b5fce3ae30606c95d4a78acfca19f",
+      "earlierHistoryBaseRefersToExternalCanonicalId": true,
+      "earlierHistoryBaseMatchesRecordedFork": true
+    },
+    {
+      "name": "unanchored-same-id",
+      "sources": [
+        {
+          "sha256": "da03f0c381242bd300d65e2516b99065142b959e48745d41b417f9dab5e207fe",
+          "bytes": 168074,
+          "completeRecords": 12,
+          "malformedRecords": 0,
+          "newlineTerminated": true,
+          "canonical": 0,
+          "explicitCanonicalOwnerMatches": 0,
+          "explicitCanonicalOwnerConflicts": 0,
+          "missingCanonicalOwner": 0,
+          "legacy": 0,
+          "legacyExplicitResponseIds": 0
+        },
+        {
+          "sha256": "f0b114afbea3994e778a4385edc4269d811607e4cb1fb2f15284bef471d444d4",
+          "bytes": 44992305,
+          "completeRecords": 14921,
+          "malformedRecords": 0,
+          "newlineTerminated": true,
+          "canonical": 1839,
+          "explicitCanonicalOwnerMatches": 1839,
+          "explicitCanonicalOwnerConflicts": 0,
+          "missingCanonicalOwner": 0,
+          "legacy": 1965,
+          "legacyExplicitResponseIds": 0
+        }
+      ],
+      "sameFirstCanonicalId": true,
+      "headerSourceTimestampsIncreasing": true,
+      "allEarlierEnvelopesBeforeLater": true,
+      "envelopeRangeGapMs": 1753,
+      "envelopeTimestampReversals": [
+        0,
+        0
+      ],
+      "missingOrInvalidEnvelopeTimestamps": [
+        0,
+        0
+      ],
+      "earlierHistoryBasePresent": false,
+      "laterHistoryBasePresent": false,
+      "laterHistoryBaseMatchesEarlierCanonicalId": null,
+      "historyBaseExactByteBoundary": null,
+      "localIncludedEarlierRecords": null,
+      "ordinalMatchesAfterEarlierInheritedBase": null,
+      "excludedEarlierRecords": null,
+      "excludedEarlierUsage": null,
+      "excludedEarlierStartsTask": null,
+      "excludedEarlierEndsAborted": null,
+      "compactionCounts": [
+        0,
+        12
+      ],
+      "crossFileCompactionWindowLinkAvailable": false,
+      "crossFileCompactionWindowLinkMatches": null,
+      "nativeIds": {
+        "canonicalResponses": {
+          "earlierUnique": 0,
+          "laterUnique": 1839,
+          "intersection": 0,
+          "earlierSetSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "laterSetSha256": "aee34d295093d138cbd7a518d957175e4436b9525ce2e00216d86ecbd671b694",
+          "intersectionSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "messages": {
+          "earlierUnique": 5,
+          "laterUnique": 501,
+          "intersection": 0,
+          "earlierSetSha256": "5f595bf8f0a3dade1f2f66146ce559797f80ed21e3642a7484eb06cdc7711ece",
+          "laterSetSha256": "21534d43e74e01de4cdf316925dc3544b2159bbe982ce7936b4151b66411ac0f",
+          "intersectionSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "calls": {
+          "earlierUnique": 0,
+          "laterUnique": 1805,
+          "intersection": 0,
+          "earlierSetSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "laterSetSha256": "637ecc3cc4e928dc78b4f9842456eb129c73829db9e110eb8f7b2c0954f00f91",
+          "intersectionSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        }
+      },
+      "exactRawRecordHashIntersection": 0,
+      "localSourceBackedPrefixContinuation": false,
+      "fullHistoryLineageResolved": false,
+      "straightforwardWholeFileConcatenationSafe": false,
+      "conclusion": "The files have ordered times and one canonical ID, but neither header records history_base and the earlier file has no compaction window to link. Chronology and disjoint IDs do not establish a history prefix or authorize concatenation. Earlier file has no usage, so no canonical-usage loss is demonstrated by this pair.",
+      "privateEvidenceSha256": "4179f178b6843a64f40118fd080af74391ad140c211333f4fe6f7fe026659372",
+      "earlierHistoryBaseRefersToExternalCanonicalId": null,
+      "earlierHistoryBaseMatchesRecordedFork": null
+    }
+  ],
+  "generalMergeRuleSupported": false,
+  "generalConclusion": "Same canonical session ID is insufficient. One pair has an explicit local prefix link with inherited ordinal offset; the other lacks a recorded link. The previously audited nonempty pair has a direct explicit prefix link. Preserve unresolved source sets and use an explicit diagnostic until provider-owned source-set semantics cover these shapes."
+}

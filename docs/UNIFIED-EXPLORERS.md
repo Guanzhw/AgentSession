@@ -18,13 +18,19 @@ applies time, title/directory, project, and sort filters in one bounded SQL
 query. Viewer deletion metadata is translated into provider-aware
 exclusions, so equal session IDs from two providers cannot hide each other.
 
-The page and `/api/sessions` return the source provider with every row. Infinite
-scroll receives a server-rendered `html` card fragment alongside the stable JSON
-fields, so the browser inserts the same canonical card markup as the initial
-response, including provider badges, management controls, and return navigation.
-Provider-specific pages
-and APIs remain available for compatibility and for provider-owned operations
-such as starring, renaming, deletion, content search, and resume.
+In the fixed 2.0 Viewer, the page and `/api/sessions` return the source provider
+with every row. Infinite scroll receives a server-rendered `html` card fragment
+alongside the stable JSON fields, so the browser inserts the same canonical card
+markup as the initial response, including provider badges, management controls,
+and return navigation. Provider-specific pages and APIs remain available in 2.0
+for provider-owned operations such as starring, renaming, deletion, content
+search, and resume.
+
+The 3.0 candidate keeps the four documented list paths as JSON-only migration
+adapters. Its Svelte client uses the versioned `/api/v3/library` API, while the
+legacy paths return data without HTML fragments. See the [3.0 list-route
+migration](../v3/README.md#legacy-list-route-migration) for response shapes and
+the [decision record](../.agents/decisions/implemented/2026-09-28-v3-json-only-list-responses.md).
 
 ## Usage pipeline
 

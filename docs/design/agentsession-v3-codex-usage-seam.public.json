@@ -1,0 +1,159 @@
+{
+  "format": "agentsession-codex-two-segment-seam/v1",
+  "sourceDigests": [
+    {
+      "sha256": "22df7d750f193647a7f21cdbe3e736c5cc9f1b892b5d598af3db27c9d13cf33a",
+      "bytes": 34674014,
+      "completeRecords": 1304,
+      "malformedRecords": 0,
+      "newlineTerminated": true,
+      "missingOrInvalidEnvelopeTimestamps": 0,
+      "timestampReversals": 0
+    },
+    {
+      "sha256": "514b8a4405e9cf1848d878242caf864ca2d64425369240ead9b3a30f2389cb4f",
+      "bytes": 24507721,
+      "completeRecords": 536,
+      "malformedRecords": 0,
+      "newlineTerminated": true,
+      "missingOrInvalidEnvelopeTimestamps": 0,
+      "timestampReversals": 0
+    }
+  ],
+  "orderEvidence": {
+    "sameCanonicalSessionId": true,
+    "headerSourceTimestampsIncreasing": true,
+    "allEarlierEventsBeforeLaterEvents": true,
+    "historyBaseMatchesEarlierCanonicalId": true,
+    "historyBaseByteOffsetMatchesExactRecordBoundary": true,
+    "historyBaseOrdinalMatchesCompleteRecordCount": true,
+    "compactionWindowChainLinked": true,
+    "gapBetweenCompleteRecordRangesMs": 6066,
+    "gapBetweenEventMsgRangesMs": 6325
+  },
+  "nativeIds": {
+    "messages": {
+      "earlierUnique": 80,
+      "laterUnique": 35,
+      "intersection": 0,
+      "earlierSetSha256": "8c1e6540bfa63ef998d1d2e551ce5498d2c9ffa796d791f2521db0d09b0fbf0c",
+      "laterSetSha256": "b9f537df234ff454e86232b435583ff307fdf64d586625c85086a6073d1cfd6a",
+      "intersectionSetSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "calls": {
+      "earlierUnique": 133,
+      "laterUnique": 53,
+      "intersection": 0,
+      "earlierSetSha256": "b40892f16422d5aa183bff23a09c0e2f53392c46f9c8df0f76d82ade63d96586",
+      "laterSetSha256": "77a90bc68bcebddbedbd1e9a2e1950b4559eaff591ae25ea11f8ad520fd89d89",
+      "intersectionSetSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "canonicalResponses": {
+      "earlierUnique": 147,
+      "laterUnique": 59,
+      "intersection": 0,
+      "earlierSetSha256": "45c84fe25c36c348c6d65bd4c93a4958967bf9d2b8d52ce0b52788a51c65e7de",
+      "laterSetSha256": "983ca9c7c6bdedb44709671a3763310f55c237c5ce240a82e962194e9188aad3",
+      "intersectionSetSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "responseItems": {
+      "earlierUnique": 471,
+      "laterUnique": 195,
+      "intersection": 0,
+      "earlierSetSha256": "55e271bc6558876ec1ddbf71adc61013f41e559504b384582448956302bc69d1",
+      "laterSetSha256": "acfd95f638bcb8b809348fe5aae6354e9e4d19cd4e775bf1b2125439d59bb0d6",
+      "intersectionSetSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "completedItems": {
+      "earlierUnique": 444,
+      "laterUnique": 179,
+      "intersection": 0,
+      "earlierSetSha256": "119fa3c403382c025b4d0848ff597990e52cc44578cd150644a1e78932142036",
+      "laterSetSha256": "5f8dfaa58f14864aaf4a123a3a443df75356a9dededd33da21e04c9516315c1b",
+      "intersectionSetSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "snapshotMessages": {
+      "earlierUnique": 35,
+      "laterUnique": 29,
+      "intersection": 12,
+      "earlierSetSha256": "826db25e2268cc1349260f16fac33b1d7369f0e92ad0181e91c1bbd640f5c30b",
+      "laterSetSha256": "452e211945cbb1046467ca7e153c5d0be4beaf9a74698bdfa87f541bf514f3b0",
+      "intersectionSetSha256": "e7c1f17b762d85daa42d37a31eba13ab10c30de1e4691fc6fd28abfded8f7604"
+    },
+    "snapshotCalls": {
+      "earlierUnique": 39,
+      "laterUnique": 5,
+      "intersection": 0,
+      "earlierSetSha256": "9546e5e2784a5815051945e50d10fe83c7f5667dfbbdded9714b4255bd680320",
+      "laterSetSha256": "7ff54dafdf0169929ca73d45cf7f7268522e98974a1220758d7bd4e2720a77d1",
+      "intersectionSetSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "snapshotResponses": {
+      "earlierUnique": 2,
+      "laterUnique": 1,
+      "intersection": 0,
+      "earlierSetSha256": "2d9b96f4e1c33d572d0343e4d01ea3dc6a761ad7d09e100626d158daf14f1b30",
+      "laterSetSha256": "02a1e1dbf3aba1079074c7dfaed1d8f458bc163640de85d2b5fc9bd20b576348",
+      "intersectionSetSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    }
+  },
+  "rawRecordHashIntersection": {
+    "uniqueHashes": 0,
+    "laterOccurrences": 0,
+    "evidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "payloadHashIntersection": {
+    "uniqueHashes": 3,
+    "laterOccurrences": 12,
+    "evidenceSha256": "302464e3eb8ef6f7108416ca16a6f3314a2c751754583900633be71c0416573e",
+    "recordKinds": [
+      "event_msg:thread_settings_applied",
+      "world_state",
+      "inter_agent_communication_metadata"
+    ]
+  },
+  "seam": {
+    "historyBaseIncludedEarlierRecords": 1296,
+    "excludedEarlierSuffixRecords": 8,
+    "excludedSuffixUsageOccurrences": 0,
+    "excludedSuffixStartsWithTaskStarted": true,
+    "excludedSuffixEndsWithTurnAborted": true,
+    "distinctExcludedVsLaterFirstTurnId": true,
+    "earlierCanonicalRequestsInsideDeclaredBase": 147,
+    "laterCanonicalRequests": 59
+  },
+  "straightforwardWholeFileConcatenationSafe": false,
+  "conclusion": "Order is source-backed. The later header names a strict prefix of the earlier file; appending the entire earlier file would add an eight-record aborted turn outside that declared base. Preserve those records as evidence. General history merge/dedupe remains unproved. The 206 explicitly identified canonical requests all remain within the declared prefix plus later segment.",
+  "privateEvidenceSha256": "9abda83fa1062d8bcf71dd2e8af277b53e4c59f42f6f3d8c187230a0bdb7fbf8",
+  "readScope": "Only two retained runtime source copies; no original provider reads, services or corpus rescan.",
+  "nativeIdsIncludingSnapshots": {
+    "messages": {
+      "earlierIncludingSnapshots": 88,
+      "laterIncludingSnapshots": 53,
+      "intersection": 14,
+      "intersectionSha256": "c64ef8dd5a28de74db84c9e6a90fece7ddd1790f9b02190b4e680ca0932fa74e",
+      "laterSnapshotEarlierTopLevel": 14
+    },
+    "calls": {
+      "earlierIncludingSnapshots": 133,
+      "laterIncludingSnapshots": 53,
+      "intersection": 0,
+      "intersectionSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "laterSnapshotEarlierTopLevel": 0
+    },
+    "canonicalResponses": {
+      "earlierIncludingSnapshots": 147,
+      "laterIncludingSnapshots": 59,
+      "intersection": 0,
+      "intersectionSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "laterSnapshotEarlierTopLevel": 0
+    }
+  },
+  "tailIntegrity": {
+    "truncatedUtf8": 0,
+    "malformedJson": 0,
+    "unterminatedFinalRecords": 0,
+    "blankRecords": 0
+  },
+  "idDomains": "Top-level message/call/canonical response IDs and item-completed IDs are counted separately from nested compaction snapshot IDs; snapshot references are not new requests."
+}

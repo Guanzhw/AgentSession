@@ -1,31 +1,23 @@
 {
   "name": "agentsession-workspace",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "AgentSession — a local-first multi-provider viewer and manager for AI coding sessions.",
   "type": "module",
   "private": true,
   "scripts": {
-    "build": "npm run build:core && npm run build --workspace=@acetamido/agentsession-mcp",
-    "build:binary": "node scripts/build-sea.mjs",
-    "smoke:binary": "node scripts/smoke-sea.mjs",
-    "build:core": "node scripts/clean-dist.mjs && tsc && node scripts/copy-static.mjs && node scripts/copy-package-dist.mjs",
-    "test": "npm run build && node --test test/*.test.mjs",
-    "start": "npm run build && node dist/bin/cli.js",
-    "dev": "npm run build && node dist/bin/cli.js --open",
-    "typecheck": "tsc --noEmit",
+    "build": "node scripts/v3-workspace.mjs build",
+    "test": "node scripts/v3-workspace.mjs test",
+    "start": "node scripts/v3-workspace.mjs start",
+    "dev": "node scripts/v3-workspace.mjs dev",
+    "typecheck": "cargo check --manifest-path v3/Cargo.toml --workspace --locked",
     "check:governance": "node scripts/verify-governance.mjs",
-    "review": "npm run check:governance && npm run typecheck",
+    "review": "npm run check:governance && cargo fmt --manifest-path v3/Cargo.toml --all -- --check && npm run typecheck",
     "pre-push": "npm run review",
-    "ci:quality": "npm run review && npm test",
-    "qa:e2e": "scripts\\qa-agent-browser.cmd",
-    "prepare": "npm run build"
+    "ci:quality": "npm run review && npm test"
   },
   "engines": {
     "node": ">=22.15.0"
   },
-  "workspaces": [
-    "packages/*"
-  ],
   "keywords": [
     "agentsession",
     "agent-session",
@@ -48,8 +40,7 @@
   "homepage": "https://github.com/Guanzhw/AgentSession",
   "devDependencies": {
     "@modelcontextprotocol/client": "2.0.0",
-    "@types/node": "^24.10.1",
-    "esbuild": "0.28.1",
-    "typescript": "^5.9.3"
+    "@modelcontextprotocol/server": "2.0.0",
+    "zod": "4.4.3"
   }
 }

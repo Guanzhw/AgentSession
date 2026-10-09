@@ -1,0 +1,4 @@
+{"kind":"owner","ownerId":"child","parentId":"parent","parentTaskId":"task-1"}
+{"kind":"content","ownerId":"child","text":"NEW_TASK: inspect the east route"}
+{"kind":"usage","ownerId":"child","request":{"input_tokens":10,"cached_input_tokens":2,"cache_write_input_tokens":1,"output_tokens":6,"reasoning_output_tokens":1,"total_tokens":16},"cumulative":{"input_tokens":10,"cached_input_tokens":2,"cache_write_input_tokens":1,"output_tokens":6,"reasoning_output_tokens":1,"total_tokens":16}}
+{"kind":"content","ownerId":"child","text":"The east route is clear."}

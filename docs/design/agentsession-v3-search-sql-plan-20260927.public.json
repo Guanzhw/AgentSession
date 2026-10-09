@@ -1,0 +1,301 @@
+{
+  "format": "agentsession-v3-search-page-fix/v1",
+  "scope": [
+    "v3/crates/core/src/search_index.rs"
+  ],
+  "rootCause": "Bundled SQLite chooses provider-order index as outer loop for multiple selected fields and reruns rowid-constrained FTS MATCH per document.",
+  "red": {
+    "command": "cargo test --manifest-path v3/Cargo.toml --release --target-dir tmp/v3-performance/v3-search-profile-target -p agentsession-core trigram_candidates_are_selective_and_preserve_unicode_and_nul_matches -- --nocapture",
+    "status": "failed as expected",
+    "plan": [
+      "SEARCH d USING INDEX sqlite_autoindex_search_doc_1 (provider=?)",
+      "SCAN search_doc_fts VIRTUAL TABLE INDEX 0:=M1"
+    ]
+  },
+  "green": {
+    "command": "cargo test --manifest-path v3/Cargo.toml --release --target-dir tmp/v3-performance/v3-search-profile-target -p agentsession-core",
+    "passed": 67,
+    "ignored": 6,
+    "failed": 0,
+    "mcpFocused": {
+      "passed": 8,
+      "skipped": 1,
+      "failed": 0
+    }
+  },
+  "inputs": {
+    "before": {
+      "binarySha256": "1c83972e1cbda1619b1350d6397f586a99cbe3d6974cc08da0dcfd136d9d04a0",
+      "sourceHashes": {
+        "v3/crates/core/src/search.rs": "fcf79c7b913710fc1f0eae2d58dfc819206c55bb0d7472f14882824712ebfd43",
+        "v3/crates/core/src/search_index.rs": "259aa7f588f273983482ec469cacf6d961b1cab594dfc94fcf83a198d3bf644c",
+        "v3/crates/core/src/index.rs": "29e086dd6bd2dcfdd141007520cdcef92707320c71323c662cd9580f4e0311af",
+        "v3/crates/core/src/providers/codex.rs": "564a2667336508dac54a928ca5cbf7b66a68e87c1145468704625e9087ed7fae",
+        "v3/crates/core/src/providers/mod.rs": "f20821de55738791ae88ece9acb83ebdfdae617302db5f234f9be6a6e3f2f682",
+        "v3/Cargo.lock": "005ff98e53a8a433f17884b1990b53909a33c2ae24f742b7c8152bcda3d71a59"
+      },
+      "runnerSha256": "644fac68a8f8768f40a2a1eb512383ee8afe70bdd217fb506931cdd9e5aeeb4d",
+      "corpus": {
+        "opencode": {
+          "fileCount": 3,
+          "totalBytes": 149368832,
+          "statManifestSha256": "3ce3bcd86449cf683e9ecf2e028fc548d2a7cff4088e86938f800eaf7595f842",
+          "contentManifestSha256": "9f51f96bb5abd7b0244f956b1818683db9300d5186ac812aa0bec2703545e041"
+        },
+        "claude-code": {
+          "fileCount": 1,
+          "totalBytes": 20543,
+          "statManifestSha256": "ba7c8b9ea0562128788598516319d7c451745394efdebc0a693e67198f9444c1",
+          "contentManifestSha256": "9268905217558d28c804b09ddf90ef7a6ba2524277a9c593f60359a9e6884ba5"
+        },
+        "codex": {
+          "fileCount": 840,
+          "totalBytes": 3400267634,
+          "statManifestSha256": "0819d9d3232a22252a2dfcc4ae29463583678c3aea6ca5d96d9d5ba2193d7db0"
+        },
+        "pi": {
+          "fileCount": 1,
+          "totalBytes": 1220,
+          "statManifestSha256": "c4ff505fa2b6a989d4fe7a69e527874512f456b6b330375c8af1165cbfd2f3e4",
+          "contentManifestSha256": "ad0516c9432667780faf061e5202e3a3d302410619ae158fc727041cce1b5a66"
+        },
+        "deepseek-harness": {
+          "fileCount": 3,
+          "totalBytes": 12363920,
+          "statManifestSha256": "b32b95bce960827b0b739075dcb82fdce7a8a1c53f9c5f31e02d8e11378c307e",
+          "contentManifestSha256": "267eff59e90eae518b93361094a733b33e809aa4fe7905cf74e1c048576c7c01"
+        }
+      },
+      "goldenSha256": "73a9bfce28bc08a06167e13ff61d7385fca28035f77c4c941504c79323f86676"
+    },
+    "after": {
+      "binarySha256": "2cd3bde6a7d741bc20cdbd693e548fa20837e7bd33784850ae49049bfb23eb80",
+      "sourceHashes": {
+        "v3/crates/core/src/search.rs": "0c8ffccc265852dac6a233f06b3722dcf0c72ff4f2870aef387bbedecb89746d",
+        "v3/crates/core/src/search_index.rs": "2a9b80d1f1001d551a9e1cce7fe007aaeee625973085c79e759c83c214211e07",
+        "v3/crates/core/src/index.rs": "978abb0029047aa516f6b0331de2d8576f3ee13dded4812d38517111e5f7a810",
+        "v3/crates/core/src/providers/codex.rs": "564a2667336508dac54a928ca5cbf7b66a68e87c1145468704625e9087ed7fae",
+        "v3/crates/core/src/providers/mod.rs": "f20821de55738791ae88ece9acb83ebdfdae617302db5f234f9be6a6e3f2f682",
+        "v3/Cargo.lock": "005ff98e53a8a433f17884b1990b53909a33c2ae24f742b7c8152bcda3d71a59"
+      },
+      "runnerSha256": "644fac68a8f8768f40a2a1eb512383ee8afe70bdd217fb506931cdd9e5aeeb4d",
+      "corpus": {
+        "opencode": {
+          "fileCount": 3,
+          "totalBytes": 149368832,
+          "statManifestSha256": "3ce3bcd86449cf683e9ecf2e028fc548d2a7cff4088e86938f800eaf7595f842",
+          "contentManifestSha256": "9f51f96bb5abd7b0244f956b1818683db9300d5186ac812aa0bec2703545e041"
+        },
+        "claude-code": {
+          "fileCount": 1,
+          "totalBytes": 20543,
+          "statManifestSha256": "ba7c8b9ea0562128788598516319d7c451745394efdebc0a693e67198f9444c1",
+          "contentManifestSha256": "9268905217558d28c804b09ddf90ef7a6ba2524277a9c593f60359a9e6884ba5"
+        },
+        "codex": {
+          "fileCount": 840,
+          "totalBytes": 3400267634,
+          "statManifestSha256": "0819d9d3232a22252a2dfcc4ae29463583678c3aea6ca5d96d9d5ba2193d7db0"
+        },
+        "pi": {
+          "fileCount": 1,
+          "totalBytes": 1220,
+          "statManifestSha256": "c4ff505fa2b6a989d4fe7a69e527874512f456b6b330375c8af1165cbfd2f3e4",
+          "contentManifestSha256": "ad0516c9432667780faf061e5202e3a3d302410619ae158fc727041cce1b5a66"
+        },
+        "deepseek-harness": {
+          "fileCount": 3,
+          "totalBytes": 12363920,
+          "statManifestSha256": "b32b95bce960827b0b739075dcb82fdce7a8a1c53f9c5f31e02d8e11378c307e",
+          "contentManifestSha256": "267eff59e90eae518b93361094a733b33e809aa4fe7905cf74e1c048576c7c01"
+        }
+      },
+      "goldenSha256": "73a9bfce28bc08a06167e13ff61d7385fca28035f77c4c941504c79323f86676"
+    }
+  },
+  "readonly": {
+    "before": true,
+    "after": true,
+    "binariesUnchanged": true
+  },
+  "measurements": [
+    {
+      "label": "codex-user-assistant",
+      "before": {
+        "pageCount": 35,
+        "count": 689,
+        "wallMs": 8662.528499999997,
+        "medianPageMs": 244.45349999999962,
+        "goldenPassed": true,
+        "orderedSemanticSha256": "d0f200c80a3c19c5f9263017b183f0c3493d0719bb5020a42d4e05f8af6e8aa4"
+      },
+      "after": {
+        "pageCount": 35,
+        "count": 689,
+        "wallMs": 2792.4115000000006,
+        "medianPageMs": 78.75860000000011,
+        "goldenPassed": true,
+        "orderedSemanticSha256": "d0f200c80a3c19c5f9263017b183f0c3493d0719bb5020a42d4e05f8af6e8aa4"
+      }
+    },
+    {
+      "label": "chinese-one",
+      "before": {
+        "pageCount": 17,
+        "count": 340,
+        "wallMs": 1745.3926999999949,
+        "medianPageMs": 102.14999999999964,
+        "goldenPassed": true,
+        "orderedSemanticSha256": "e77d968ce66c4c070636ba0ea3e4a79842ae738c47f09c2db896cd8051fb7bfb"
+      },
+      "after": {
+        "pageCount": 17,
+        "count": 340,
+        "wallMs": 1752.1902000000005,
+        "medianPageMs": 103.16190000000006,
+        "goldenPassed": true,
+        "orderedSemanticSha256": "e77d968ce66c4c070636ba0ea3e4a79842ae738c47f09c2db896cd8051fb7bfb"
+      }
+    },
+    {
+      "label": "chinese-two",
+      "before": {
+        "pageCount": 3,
+        "count": 46,
+        "wallMs": 289.3282999999992,
+        "medianPageMs": 96.22439999999915,
+        "goldenPassed": true,
+        "orderedSemanticSha256": "fad9542dc08f1a34abb58af252e12ecdafb6c817bbb01fb6c52502d8fb8cd823"
+      },
+      "after": {
+        "pageCount": 3,
+        "count": 46,
+        "wallMs": 283.54779999999937,
+        "medianPageMs": 94.61290000000008,
+        "goldenPassed": true,
+        "orderedSemanticSha256": "fad9542dc08f1a34abb58af252e12ecdafb6c817bbb01fb6c52502d8fb8cd823"
+      }
+    },
+    {
+      "label": "literal-percent",
+      "before": {
+        "pageCount": 5,
+        "count": 90,
+        "wallMs": 484.8393999999971,
+        "medianPageMs": 97.14559999999983,
+        "goldenPassed": true,
+        "orderedSemanticSha256": "07c7f07b6a1454ee6c4ea0e7935168bd0ad39548c35ea7ea0c6a96a79d7972dd"
+      },
+      "after": {
+        "pageCount": 5,
+        "count": 90,
+        "wallMs": 484.5710000000008,
+        "medianPageMs": 96.56909999999971,
+        "goldenPassed": true,
+        "orderedSemanticSha256": "07c7f07b6a1454ee6c4ea0e7935168bd0ad39548c35ea7ea0c6a96a79d7972dd"
+      }
+    },
+    {
+      "label": "multi-term",
+      "before": {
+        "pageCount": 13,
+        "count": 260,
+        "wallMs": 3164.517600000003,
+        "medianPageMs": 243.64049999999952,
+        "goldenPassed": true,
+        "orderedSemanticSha256": "ce6aafa5e8a8877079e9aab92ca532a77e88343689b24fac5c738519d7af97c3"
+      },
+      "after": {
+        "pageCount": 13,
+        "count": 260,
+        "wallMs": 1032.5976,
+        "medianPageMs": 78.91630000000077,
+        "goldenPassed": true,
+        "orderedSemanticSha256": "ce6aafa5e8a8877079e9aab92ca532a77e88343689b24fac5c738519d7af97c3"
+      }
+    },
+    {
+      "label": "common-one",
+      "before": {
+        "pageCount": 42,
+        "count": 830,
+        "wallMs": 4387.496699999992,
+        "medianPageMs": 104.36359999999695,
+        "goldenPassed": true,
+        "orderedSemanticSha256": "eb8b798c43cb27cc38f28065860183c0f7b21668b8f38ef4b850e92caf4f8e85"
+      },
+      "after": {
+        "pageCount": 42,
+        "count": 830,
+        "wallMs": 4497.075599999997,
+        "medianPageMs": 105.90070000000014,
+        "goldenPassed": true,
+        "orderedSemanticSha256": "eb8b798c43cb27cc38f28065860183c0f7b21668b8f38ef4b850e92caf4f8e85"
+      }
+    },
+    {
+      "label": "no-hit",
+      "before": {
+        "pageCount": 1,
+        "count": 0,
+        "wallMs": 265.97190000000046,
+        "medianPageMs": 265.97190000000046,
+        "goldenPassed": true,
+        "orderedSemanticSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "after": {
+        "pageCount": 1,
+        "count": 0,
+        "wallMs": 81.03250000000116,
+        "medianPageMs": 81.03250000000116,
+        "goldenPassed": true,
+        "orderedSemanticSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      }
+    },
+    {
+      "label": "metadata-title-directory",
+      "before": {
+        "pageCount": 24,
+        "count": 478,
+        "wallMs": 3022.1640999999945,
+        "medianPageMs": 121.61499999999796,
+        "goldenPassed": true,
+        "orderedSemanticSha256": "0676cfe281fcb5090f2f9dbf310c3d60f101504f6282298447b823110e5df052"
+      },
+      "after": {
+        "pageCount": 24,
+        "count": 478,
+        "wallMs": 2003.2707999999966,
+        "medianPageMs": 83.53269999999975,
+        "goldenPassed": true,
+        "orderedSemanticSha256": "0676cfe281fcb5090f2f9dbf310c3d60f101504f6282298447b823110e5df052"
+      }
+    },
+    {
+      "label": "tool-name",
+      "before": {
+        "pageCount": 7,
+        "count": 123,
+        "wallMs": 587.345699999998,
+        "medianPageMs": 83.78310000000056,
+        "goldenPassed": true,
+        "orderedSemanticSha256": "0f26b20d270bf3a9cfc84b48e5f1f333ee9c78f3d7dcc28e019affd2539b542b"
+      },
+      "after": {
+        "pageCount": 7,
+        "count": 123,
+        "wallMs": 581.8659000000007,
+        "medianPageMs": 83.23949999999968,
+        "goldenPassed": true,
+        "orderedSemanticSha256": "0f26b20d270bf3a9cfc84b48e5f1f333ee9c78f3d7dcc28e019affd2539b542b"
+      }
+    }
+  ],
+  "limitations": [
+    "Single pilot per arm; no new five-pair formal performance claim.",
+    "Before has temporary timing instrumentation (per-row Instant calls); after is uninstrumented release. Instrumentation snapshots are preserved in the private profiling directory.",
+    "Two optimized pilots retained: first briefly overlapped separate fixture tests; the second shown here ran without this agent launching other work.",
+    "OS cache and activity of other work are uncontrolled.",
+    "Codex inventory still rereads canonical headers per page; approximately 42 ms in before stage measurements."
+  ]
+}

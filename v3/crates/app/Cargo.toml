@@ -1,0 +1,22 @@
+[package]
+name = "agentsession-v3"
+version.workspace = true
+edition = "2024"
+
+[features]
+crash-test-hook = ["agentsession-core/crash-test-hook"]
+stats-phase-probe = ["agentsession-core/stats-phase-probe"]
+search-phase-probe = ["agentsession-core/search-phase-probe"]
+
+[dependencies]
+base64 = "0.23"
+agentsession-core = { path = "../core" }
+axum = "0.8"
+clap = { version = "4.5", features = ["derive"] }
+rmcp = { version = "3.4.1", features = ["server", "transport-io"] }
+include_dir = "0.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_urlencoded = "0.7"
+tokio = { version = "1", features = ["full"] }
+url = "=2.5.8"

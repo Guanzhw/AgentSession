@@ -1,0 +1,5 @@
+{"timestamp":"2026-09-29T12:00:00.000Z","ordinal":0,"type":"session_meta","payload":{"id":"90222222-2222-4222-8222-222222222222","cwd":"/synthetic/legacy-only"}}
+{"timestamp":"2026-09-29T12:00:01.000Z","ordinal":1,"type":"event_msg","payload":{"type":"thread_settings_applied","thread_settings":{"model":"synthetic-legacy-model"}}}
+{"timestamp":"2026-09-29T12:00:02.000Z","ordinal":2,"type":"event_msg","payload":{"type":"turn_context","turn_id":"legacy-only-turn"}}
+{"timestamp":"2026-09-29T12:00:03.000Z","ordinal":3,"type":"event_msg","payload":{"type":"token_count","turn_id":"legacy-only-turn","info":{"last_token_usage":{"input_tokens":7,"cached_input_tokens":1,"cache_write_input_tokens":0,"output_tokens":2,"reasoning_output_tokens":0,"total_tokens":9},"total_token_usage":{"input_tokens":7,"cached_input_tokens":1,"cache_write_input_tokens":0,"output_tokens":2,"reasoning_output_tokens":0,"total_tokens":9}}}}
+{"timestamp":"2026-09-29T12:00:04.000Z","ordinal":4,"type":"event_msg","payload":{"type":"turn_completed","turn_id":"legacy-only-turn"}}

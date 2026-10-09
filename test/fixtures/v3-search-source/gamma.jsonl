@@ -1,0 +1,2 @@
+{"type":"session_meta","timestamp":"1970-01-01T00:00:00.010Z","payload":{"id":"gamma","cwd":"/alpha/omega"}}
+{"type":"response_item","timestamp":"1970-01-01T00:00:00.100Z","payload":{"type":"message","role":"user","internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]},"content":[{"type":"input_text","text":"Third"}]}}

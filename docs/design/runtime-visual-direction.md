@@ -59,7 +59,7 @@
 参考图库用于学习层级、密度和流程；截图不是默认可再分发的产品素材。
 本轮不需要照片、宣传插画或新 logo；图标与排版才是主要素材需求。
 新增素材记录来源、许可证、用途及实际本地文件；运行时保持离线可用，不依赖外部字体或图标 CDN。
-本轮图标目录为 [`src/static/vendor/lucide/`](../../src/static/vendor/lucide/)，具体来源见其 README.md；
+本轮图标目录为 [`src/static/vendor/lucide/`](https://github.com/Guanzhw/AgentSession/tree/50a32e7c5b3fdaa1d335771da80d6c919d4ab536/src/static/vendor/lucide)，具体来源见其 README.md；
 `src/ui-icons.ts` 为现有 SSR 页面提供图标入口。
 
 2026-09-17，Product Design 根据当时实页截图展示三个独立候选。用户选择了下方索引中的第 3 张：

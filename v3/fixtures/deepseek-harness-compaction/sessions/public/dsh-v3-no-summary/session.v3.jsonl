@@ -1,0 +1,5 @@
+{"type":"session","version":3,"id":"dsh-v3-no-summary","createdAt":1780000000000,"cwd":"/synthetic/compaction","isSeeded":false,"delegationDepth":0}
+{"type":"user/message","seq":0,"time":1780000000001,"surfaceOp":"append","data":{"id":"before","role":"user","source":{"kind":"user"},"content":[{"type":"text","text":"Before an opaque compaction."}]}}
+{"type":"compaction/start","seq":1,"time":1780000000002,"data":{"compactionId":"opaque-one"}}
+{"type":"compaction/end","seq":2,"time":1780000000003,"data":{"compactionId":"opaque-one"}}
+{"type":"assistant/message","seq":3,"time":1780000000004,"surfaceOp":"append","data":{"turn":1,"step":1,"message":{"id":"after","role":"assistant","source":{"kind":"model","provider":"synthetic","model":"fixture-only"},"content":[{"type":"text","text":"After an opaque compaction."}]}}}

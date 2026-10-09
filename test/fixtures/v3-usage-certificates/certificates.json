@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "scope": "public-challenge",
+  "sources": [
+    { "id": "mixed", "path": "mixed.jsonl", "sourceSha256": "c740dfb4b21fa6c411f66506436be1410ef10d57348440f4fc42d4de363dc3ae" },
+    { "id": "parent", "path": "parent.jsonl", "sourceSha256": "f83670b76b751cd91d966d98dd8c7f992b27f1d0707b2bef82ec74ad77c040d5" },
+    { "id": "child", "path": "child.jsonl", "sourceSha256": "b3275b6e1e137bf3ff538e8954a08002c4fbaac6ebdaec8644991f78a55d6ad1" },
+    { "id": "context", "path": "context.jsonl", "sourceSha256": "239b76d26789b2f0704ea185dafbf328d6da9d62f33d84a1fa8b99e494b3cdc0" }
+  ],
+  "certificates": [
+    {
+      "source": "mixed", "sourceSha256": "c740dfb4b21fa6c411f66506436be1410ef10d57348440f4fc42d4de363dc3ae", "line": 3,
+      "rawHash": "3fc2fad60e441d4e9062ac51531dd9f9ba5fd528231ef6f510ebd261c834c476", "classification": "proved-request",
+      "ownerEvidence": { "ownerId": "mixed" }, "identityEvidence": { "responseId": "resp-1" },
+      "witnessRefs": [
+        { "source": "mixed", "sourceSha256": "c740dfb4b21fa6c411f66506436be1410ef10d57348440f4fc42d4de363dc3ae", "line": 1, "rawHash": "a34da46381c797961d7e82dcf7facd9b806f019766e3709606dbd8d2ae3ba7bb", "role": "owner" }
+      ],
+      "reason": "The explicit owner and canonical response identity are unique within this supplied source bundle."
+    },
+    {
+      "source": "mixed", "sourceSha256": "c740dfb4b21fa6c411f66506436be1410ef10d57348440f4fc42d4de363dc3ae", "line": 4,
+      "rawHash": "b5d8589068ca7c82ce852a9e171f65f4d3a699134292661f3da391d19bae3108", "classification": "proved-mirror",
+      "ownerEvidence": { "ownerId": "mixed" }, "identityEvidence": { "responseId": "resp-1" },
+      "witnessRefs": [
+        { "source": "mixed", "sourceSha256": "c740dfb4b21fa6c411f66506436be1410ef10d57348440f4fc42d4de363dc3ae", "line": 1, "rawHash": "a34da46381c797961d7e82dcf7facd9b806f019766e3709606dbd8d2ae3ba7bb", "role": "owner" },
+        { "source": "mixed", "sourceSha256": "c740dfb4b21fa6c411f66506436be1410ef10d57348440f4fc42d4de363dc3ae", "line": 2, "rawHash": "e663b665081d07e764d162f9b917aac6ef9b7119b21ea624bc4b85c9698322ea", "role": "baseline" },
+        { "source": "mixed", "sourceSha256": "c740dfb4b21fa6c411f66506436be1410ef10d57348440f4fc42d4de363dc3ae", "line": 3, "rawHash": "3fc2fad60e441d4e9062ac51531dd9f9ba5fd528231ef6f510ebd261c834c476", "role": "canonical-request" }
+      ],
+      "reason": "Owner, response identity, complete request and cumulative vectors, and an additive baseline prove this mixed-format mirror."
+    },
+    {
+      "source": "mixed", "sourceSha256": "c740dfb4b21fa6c411f66506436be1410ef10d57348440f4fc42d4de363dc3ae", "line": 5,
+      "rawHash": "cd98b0400345483ca23f03ea7c20af94281ef408922a0f47208c22c841dceaf7", "classification": "proved-request",
+      "ownerEvidence": { "ownerId": "mixed" }, "identityEvidence": { "responseId": "resp-2" },
+      "witnessRefs": [
+        { "source": "mixed", "sourceSha256": "c740dfb4b21fa6c411f66506436be1410ef10d57348440f4fc42d4de363dc3ae", "line": 1, "rawHash": "a34da46381c797961d7e82dcf7facd9b806f019766e3709606dbd8d2ae3ba7bb", "role": "owner" }
+      ],
+      "reason": "A distinct recorded response remains a request even though its six request values match an earlier response."
+    },
+    {
+      "source": "mixed", "sourceSha256": "c740dfb4b21fa6c411f66506436be1410ef10d57348440f4fc42d4de363dc3ae", "line": 6,
+      "rawHash": "1d9da7cc228ec42d3984c8fc44a4ac27f2feda5ff762db2cf1f4c108b84586d4", "classification": "proved-mirror",
+      "ownerEvidence": { "ownerId": "mixed" }, "identityEvidence": { "responseId": "resp-2" },
+      "witnessRefs": [
+        { "source": "mixed", "sourceSha256": "c740dfb4b21fa6c411f66506436be1410ef10d57348440f4fc42d4de363dc3ae", "line": 1, "rawHash": "a34da46381c797961d7e82dcf7facd9b806f019766e3709606dbd8d2ae3ba7bb", "role": "owner" },
+        { "source": "mixed", "sourceSha256": "c740dfb4b21fa6c411f66506436be1410ef10d57348440f4fc42d4de363dc3ae", "line": 4, "rawHash": "b5d8589068ca7c82ce852a9e171f65f4d3a699134292661f3da391d19bae3108", "role": "baseline" },
+        { "source": "mixed", "sourceSha256": "c740dfb4b21fa6c411f66506436be1410ef10d57348440f4fc42d4de363dc3ae", "line": 5, "rawHash": "cd98b0400345483ca23f03ea7c20af94281ef408922a0f47208c22c841dceaf7", "role": "canonical-request" }
+      ],
+      "reason": "The second distinct response has its own additive baseline and a complete legacy mirror."
+    },
+    {
+      "source": "mixed", "sourceSha256": "c740dfb4b21fa6c411f66506436be1410ef10d57348440f4fc42d4de363dc3ae", "line": 9,
+      "rawHash": "544439eead3369a28410ce354d7bd0c42a4c219bb149e70c3c86afa0e9ef1972", "classification": "proved-mirror",
+      "ownerEvidence": { "ownerId": "mixed" }, "identityEvidence": { "responseId": "resp-3" },
+      "witnessRefs": [
+        { "source": "mixed", "sourceSha256": "c740dfb4b21fa6c411f66506436be1410ef10d57348440f4fc42d4de363dc3ae", "line": 1, "rawHash": "a34da46381c797961d7e82dcf7facd9b806f019766e3709606dbd8d2ae3ba7bb", "role": "owner" },
+        { "source": "mixed", "sourceSha256": "c740dfb4b21fa6c411f66506436be1410ef10d57348440f4fc42d4de363dc3ae", "line": 5, "rawHash": "cd98b0400345483ca23f03ea7c20af94281ef408922a0f47208c22c841dceaf7", "role": "baseline" },
+        { "source": "mixed", "sourceSha256": "c740dfb4b21fa6c411f66506436be1410ef10d57348440f4fc42d4de363dc3ae", "line": 8, "rawHash": "f8ef99c8b625f31bffedd56be3b216c0c61a1800e9d9a676c4f24df326859d35", "role": "canonical-request" }
+      ],
+      "reason": "The repeated values resemble a mirror, but the intervening cumulative decrease breaks the baseline proof."
+    },
+    {
+      "source": "mixed", "sourceSha256": "c740dfb4b21fa6c411f66506436be1410ef10d57348440f4fc42d4de363dc3ae", "line": 11,
+      "rawHash": "e0ed1625f71db092add563daafdd3e7e5b433be2c589fe5050ab8c673aecb49b", "classification": "unresolved",
+      "ownerEvidence": { "ownerId": null }, "identityEvidence": { "responseId": "anonymous-response" },
+      "witnessRefs": [
+        { "source": "mixed", "sourceSha256": "c740dfb4b21fa6c411f66506436be1410ef10d57348440f4fc42d4de363dc3ae", "line": 10, "rawHash": "0a0e9b0d657a9d66cab0dd849718b97088a3b640a734613a629fcdf47aa3758d", "role": "owner" }
+      ],
+      "reason": "Both source owner values are absent; equality of two unknowns does not prove ownership."
+    },
+    {
+      "source": "child", "sourceSha256": "b3275b6e1e137bf3ff538e8954a08002c4fbaac6ebdaec8644991f78a55d6ad1", "line": 3,
+      "rawHash": "8f4d0ba8ff2a320d4bf7abfa7ddb8b414998efac6e9fb6788ac5e5697d7bae23", "classification": "proved-parent-copy",
+      "ownerEvidence": { "parentOwner": "parent", "childOwner": "child" }, "identityEvidence": { "contentSha256": "56a8289c0a95b1dd8524466b79285e3bda398e83052f48706347dfad568c8c4f", "taskId": "task-1" },
+      "witnessRefs": [
+        { "source": "parent", "sourceSha256": "f83670b76b751cd91d966d98dd8c7f992b27f1d0707b2bef82ec74ad77c040d5", "line": 1, "rawHash": "47e1ba673c76aa39d12f7c59d452b63c71067c6e3519a9d7b0c9be7fe72e5ed8", "role": "parent-owner" },
+        { "source": "child", "sourceSha256": "b3275b6e1e137bf3ff538e8954a08002c4fbaac6ebdaec8644991f78a55d6ad1", "line": 1, "rawHash": "1827054fba6b78d4063501f49081c9fb16b3c9dde6fe7cd4e7d9ffec9da1d835", "role": "child-owner" },
+        { "source": "parent", "sourceSha256": "f83670b76b751cd91d966d98dd8c7f992b27f1d0707b2bef82ec74ad77c040d5", "line": 2, "rawHash": "dc2948a4699a61cddc5fe68ccc568a347968b4798df6aecb26cf519399266867", "role": "parent-content" },
+        { "source": "child", "sourceSha256": "b3275b6e1e137bf3ff538e8954a08002c4fbaac6ebdaec8644991f78a55d6ad1", "line": 2, "rawHash": "19b593972e6c2ae3dfa8391951f1feaa31e4aa71d9e72596cc37e20a27d02562", "role": "child-content" },
+        { "source": "parent", "sourceSha256": "f83670b76b751cd91d966d98dd8c7f992b27f1d0707b2bef82ec74ad77c040d5", "line": 3, "rawHash": "c3a4ea4e187279150345b74589a767d8509ba8dd0d2fb5a2134542b653bcaddd", "role": "parent-usage" },
+        { "source": "parent", "sourceSha256": "f83670b76b751cd91d966d98dd8c7f992b27f1d0707b2bef82ec74ad77c040d5", "line": 4, "rawHash": "6ea392b74df356f39d97411eab5950afbf0e6d17155840d90b583db0c4b94f53", "role": "dispatch-boundary" }
+      ],
+      "reason": "A unique ordered content match and recorded NEW_TASK boundary connect the complete parent usage to the child copy."
+    },
+    {
+      "source": "context", "sourceSha256": "239b76d26789b2f0704ea185dafbf328d6da9d62f33d84a1fa8b99e494b3cdc0", "line": 4,
+      "rawHash": "32dd4bff3a94b478cbd9c766b3bce37f5b1d6eb94bcdd1b22c991e4cd605d9e5", "classification": "proved-context-snapshot",
+      "ownerEvidence": { "ownerId": "compact" }, "identityEvidence": { "baselineLine": 2, "compactionLine": 3 },
+      "witnessRefs": [
+        { "source": "context", "sourceSha256": "239b76d26789b2f0704ea185dafbf328d6da9d62f33d84a1fa8b99e494b3cdc0", "line": 1, "rawHash": "3279b6ba0124f1c15ec88c6c2a3cf436c9ec2400cae813dc2bacc68de2b9a6c7", "role": "owner" },
+        { "source": "context", "sourceSha256": "239b76d26789b2f0704ea185dafbf328d6da9d62f33d84a1fa8b99e494b3cdc0", "line": 2, "rawHash": "b81bcc32597af337767223cf6f0ba268c3c1dc1bb1c3203c1fff6a2e58474811", "role": "baseline" },
+        { "source": "context", "sourceSha256": "239b76d26789b2f0704ea185dafbf328d6da9d62f33d84a1fa8b99e494b3cdc0", "line": 3, "rawHash": "3a551cb9d49117296271679aaf4b4843765af3b35b984a163a2c4bac26790b7d", "role": "compaction" }
+      ],
+      "reason": "An explicit compact event, complete unchanged cumulative baseline, and total-only row identify a context snapshot."
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "format": "agentsession-v3-volatile-policy/v1",
+  "cases": [
+    {
+      "id": "mcp.search.codex.user-assistant",
+      "ignore": [
+        "/response/structuredContent/result/snapshotUpdatedBefore",
+        "/response/structuredContent/result/diagnostics/0/durationMs"
+      ]
+    }
+  ]
+}

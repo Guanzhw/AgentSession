@@ -1,0 +1,4 @@
+{"kind":"owner","ownerId":"parent"}
+{"kind":"content","ownerId":"parent","text":"NEW_TASK: inspect the east route"}
+{"kind":"usage","ownerId":"parent","request":{"input_tokens":10,"cached_input_tokens":2,"cache_write_input_tokens":1,"output_tokens":6,"reasoning_output_tokens":1,"total_tokens":16},"cumulative":{"input_tokens":10,"cached_input_tokens":2,"cache_write_input_tokens":1,"output_tokens":6,"reasoning_output_tokens":1,"total_tokens":16}}
+{"kind":"boundary","ownerId":"parent","childId":"child","taskId":"task-1","marker":"NEW_TASK"}

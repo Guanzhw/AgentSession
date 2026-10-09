@@ -1,0 +1,14 @@
+{
+  "name": "@acetamido/agentsession",
+  "version": "3.0.0",
+  "private": true,
+  "description": "Local AgentSession 3.0 Viewer install candidate",
+  "type": "module",
+  "bin": { "agentsession": "bin/agentsession.mjs" },
+  "files": ["bin/", "LICENSE"],
+  "dependencies": { "@acetamido/agentsession-native": "3.0.0" },
+  "os": ["win32", "linux", "darwin"],
+  "cpu": ["x64", "arm64"],
+  "engines": { "node": ">=22.15.0" },
+  "license": "MIT"
+}

@@ -1,6 +1,9 @@
 # AgentSession 呈现重构：分阶段交付计划
 
-更新：2026-09-23。当前执行入口；产品要求见[呈现规范](runtime-presentation-contract.md)。
+历史更新：2026-09-23。本文件保留旧呈现重构的阶段与实测证据；原端口、源码、
+测试和服务状态只描述当时的运行。当前工作区唯一 3.0 runtime 的执行入口与下一动作
+见 [3.0 交付计划](agentsession-v3-delivery-plan.md)，启动命令见
+[开发指南](../../AGENTS.md)。产品阅读要求仍见[呈现规范](runtime-presentation-contract.md)。
 
 ## 当前修订入口：R6 实页反馈 specs
 

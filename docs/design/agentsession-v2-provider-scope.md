@@ -1,5 +1,11 @@
 # AgentSession 2.0 provider scope and delivery plan
 
+Historical 2.0 scope and evidence record. The five-provider boundary is retained
+by the sole 3.0 runtime; former source, tests, listener and release-status claims
+below describe their recorded dates. Current commands and progress belong to
+the [development guide](../../AGENTS.md) and
+[3.0 delivery plan](agentsession-v3-delivery-plan.md).
+
 **Status:** branch implementation and local release acceptance complete. The
 five-provider and search decisions are implemented in this branch. Version
 2.0.0 has not been released.
