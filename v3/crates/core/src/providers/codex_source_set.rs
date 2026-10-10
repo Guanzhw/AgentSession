@@ -20,6 +20,7 @@ pub(super) fn before_pair_publication() {
 pub(super) struct Sources {
     pub paths: BTreeMap<String, PathBuf>,
     pub pairs: BTreeMap<String, DirectPair>,
+    pub recorded: BTreeMap<String, rollout_authority::RecordedRollout>,
 }
 impl std::ops::Deref for Sources {
     type Target = BTreeMap<String, PathBuf>;
@@ -32,6 +33,7 @@ impl From<BTreeMap<String, PathBuf>> for Sources {
         Self {
             paths,
             pairs: BTreeMap::new(),
+            recorded: BTreeMap::new(),
         }
     }
 }
@@ -343,7 +345,18 @@ pub(super) fn load_selected(
     if let Some(pair) = sources.and_then(|sources| sources.pairs.get(id)) {
         pair.load(scope, id)
     } else {
-        load_codex(path, scope, id)
+        let mut loaded = load_codex(path, scope, id)?;
+        if sources.is_some_and(|sources| sources.recorded.contains_key(id)) {
+            loaded.observations.facts.diagnostics.push(Diagnostic {
+                code: "codex_recorded_rollout_selected",
+                event_id: None,
+            });
+            loaded.observations.facts.coverage.insert("sourceHistory".into(), DomainCoverage {
+                state: ObservationState::Unknown,
+                details: "Reading the current rollout recorded in Codex threads.rollout_path; continuity with other same-ID source files is unrecorded.".into(),
+            });
+        }
+        Ok(loaded)
     }
 }
 

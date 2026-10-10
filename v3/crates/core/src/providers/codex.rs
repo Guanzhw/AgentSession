@@ -10,6 +10,8 @@ pub(super) fn default_data_path(home: &std::path::Path) -> std::path::PathBuf {
     )
 }
 
+#[path = "codex_rollout_authority.rs"]
+mod rollout_authority;
 #[path = "codex_source_set.rs"]
 mod source_set;
 #[path = "codex_tool_presentation.rs"]
@@ -146,7 +148,45 @@ struct CodexSourceScan {
     grouped: BTreeMap<String, Vec<SourceEntry>>,
     unresolved: Vec<PathBuf>,
 }
+enum CodexSourceSelection {
+    Pair(DirectPair),
+    Recorded(rollout_authority::RecordedRollout),
+    Collision,
+}
 impl CodexAdapter<'_> {
+    fn resolve_multiple_sources(
+        &self,
+        id: &str,
+        entries: &[SourceEntry],
+    ) -> Result<CodexSourceSelection> {
+        if let Some(pair) = DirectPair::resolve(entries, id)? {
+            return Ok(CodexSourceSelection::Pair(pair));
+        }
+        Ok(match rollout_authority::resolve(self.root, id, entries)? {
+            Some(recorded) => CodexSourceSelection::Recorded(recorded),
+            None => CodexSourceSelection::Collision,
+        })
+    }
+
+    fn recorded_signature(
+        recorded: &rollout_authority::RecordedRollout,
+        entries: &[SourceEntry],
+    ) -> Result<String> {
+        let mut digest = Sha256::new();
+        digest.update(b"codex-recorded-rollout-v1\0");
+        digest.update(recorded.database.to_string_lossy().as_bytes());
+        digest.update(recorded.path.to_string_lossy().as_bytes());
+        let (size, bytes) = codex_usage_file_digest(&recorded.path)?;
+        digest.update(size.to_le_bytes());
+        digest.update(bytes);
+        for entry in entries {
+            let path = entry.path.to_string_lossy();
+            digest.update((path.len() as u64).to_le_bytes());
+            digest.update(path.as_bytes());
+        }
+        Ok(format!("recorded-rollout:{:x}", digest.finalize()))
+    }
+
     fn source_entries(&self) -> Result<CodexSourceScan> {
         let mut grouped = BTreeMap::<String, Vec<SourceEntry>>::new();
         let mut unresolved = Vec::new();
@@ -234,9 +274,13 @@ impl CodexAdapter<'_> {
         for (id, entries) in scan.grouped {
             let mut entry = entries.last().expect("grouped source entry").clone();
             if entries.len() > 1 {
-                entry.signature = match DirectPair::resolve(&entries, &id)? {
-                    Some(pair) => pair.revision(self.scope)?,
-                    None => Self::collision_signature(&entries)?,
+                entry.signature = match self.resolve_multiple_sources(&id, &entries)? {
+                    CodexSourceSelection::Pair(pair) => pair.revision(self.scope)?,
+                    CodexSourceSelection::Recorded(recorded) => {
+                        entry.path = recorded.path.clone();
+                        Self::recorded_signature(&recorded, &entries)?
+                    }
+                    CodexSourceSelection::Collision => Self::collision_signature(&entries)?,
                 };
             }
             if let Some(unresolved) = &unresolved {
@@ -344,13 +388,19 @@ impl CodexAdapter<'_> {
                 if target.is_some_and(|target| target != id) {
                     continue;
                 }
-                if let Some(pair) = DirectPair::resolve(&entries, &id)? {
-                    selected.paths.insert(id.clone(), pair.first.clone());
-                    selected.pairs.insert(id, pair);
-                    continue;
-                }
-                if target == Some(id.as_str()) {
-                    return Err(Self::collision_error(&id));
+                match self.resolve_multiple_sources(&id, &entries)? {
+                    CodexSourceSelection::Pair(pair) => {
+                        selected.paths.insert(id.clone(), pair.first.clone());
+                        selected.pairs.insert(id, pair);
+                    }
+                    CodexSourceSelection::Recorded(recorded) => {
+                        selected.paths.insert(id.clone(), recorded.path.clone());
+                        selected.recorded.insert(id, recorded);
+                    }
+                    CodexSourceSelection::Collision if target == Some(id.as_str()) => {
+                        return Err(Self::collision_error(&id));
+                    }
+                    CodexSourceSelection::Collision => {}
                 }
             } else {
                 selected.paths.insert(id, entries[0].path.clone());
@@ -363,6 +413,20 @@ impl CodexAdapter<'_> {
     }
 
     fn validate_source_set_membership(&self, sources: &CodexSources, id: &str) -> Result<()> {
+        if let Some(recorded) = sources.recorded.get(id) {
+            #[cfg(test)]
+            source_set::before_pair_publication();
+            let scan = self.source_entries()?;
+            if !scan.unresolved.is_empty() {
+                return Err(CoreError::SourceChanged);
+            }
+            let entries = scan.grouped.get(id).ok_or(CoreError::SourceChanged)?;
+            if !matches!(self.resolve_multiple_sources(id, entries)?, CodexSourceSelection::Recorded(current) if &current == recorded)
+            {
+                return Err(CoreError::SourceChanged);
+            }
+            return Ok(());
+        }
         let Some(pair) = sources.pairs.get(id) else {
             return Ok(());
         };
@@ -559,6 +623,8 @@ impl CodexNativeTitles {
         hash.update(self.stamp(id).as_bytes());
         let prefix = if base.starts_with("source-set:") {
             "source-set:"
+        } else if base.starts_with("recorded-rollout:") {
+            "recorded-rollout:"
         } else {
             ""
         };
@@ -592,9 +658,9 @@ impl ProviderAdapter for CodexAdapter<'_> {
                     if entries.len() <= 1 {
                         continue;
                     }
-                    match DirectPair::resolve(entries, id) {
-                        Ok(Some(_)) => {}
-                        Ok(None) => affected += 1,
+                    match self.resolve_multiple_sources(id, entries) {
+                        Ok(CodexSourceSelection::Pair(_) | CodexSourceSelection::Recorded(_)) => {}
+                        Ok(CodexSourceSelection::Collision) => affected += 1,
                         Err(_) => {
                             return Some(serde_json::json!({
                                 "code": "codex_source_set_read_failed",
@@ -638,13 +704,27 @@ impl ProviderAdapter for CodexAdapter<'_> {
         if !scan.unresolved.is_empty() {
             return Err(Self::unresolved_error());
         }
+        let mut digest = Sha256::new();
+        digest.update(b"codex-stats-recorded-rollout-v1\0");
+        for (id, entries) in &scan.grouped {
+            if entries.len() > 1
+                && let CodexSourceSelection::Recorded(recorded) =
+                    self.resolve_multiple_sources(id, entries)?
+            {
+                digest.update((id.len() as u64).to_le_bytes());
+                digest.update(id.as_bytes());
+                digest.update(recorded.database.to_string_lossy().as_bytes());
+                digest.update(recorded.path.to_string_lossy().as_bytes());
+            }
+        }
         let sources = scan
             .grouped
             .into_values()
             .flatten()
             .map(|entry| (entry.path.to_string_lossy().into_owned(), entry.path))
             .collect();
-        Ok(Some(codex_usage_source_revision(&sources)?))
+        digest.update(codex_usage_source_revision(&sources)?.as_bytes());
+        Ok(Some(format!("{:x}", digest.finalize())))
     }
     fn stats_observation_batch(
         &self,
@@ -659,11 +739,20 @@ impl ProviderAdapter for CodexAdapter<'_> {
         for (id, entries) in scan.grouped {
             if entries.len() == 1 {
                 sources.paths.insert(id, entries[0].path.clone());
-            } else if let Some(pair) = DirectPair::resolve(&entries, &id)? {
-                sources.paths.insert(id.clone(), pair.first.clone());
-                sources.pairs.insert(id, pair);
             } else {
-                collisions.insert(id);
+                match self.resolve_multiple_sources(&id, &entries)? {
+                    CodexSourceSelection::Pair(pair) => {
+                        sources.paths.insert(id.clone(), pair.first.clone());
+                        sources.pairs.insert(id, pair);
+                    }
+                    CodexSourceSelection::Recorded(recorded) => {
+                        sources.paths.insert(id.clone(), recorded.path.clone());
+                        sources.recorded.insert(id, recorded);
+                    }
+                    CodexSourceSelection::Collision => {
+                        collisions.insert(id);
+                    }
+                }
             }
         }
         let source_revision = match source_revision {
@@ -735,11 +824,21 @@ impl ProviderAdapter for CodexAdapter<'_> {
                 continue;
             }
             if entries.len() > 1 {
-                if let Some(pair) = DirectPair::resolve(&entries, &id)? {
-                    rows.push(summarize(&pair.load(self.scope, &id)?));
-                    continue;
+                match self.resolve_multiple_sources(&id, &entries)? {
+                    CodexSourceSelection::Pair(pair) => {
+                        rows.push(summarize(&pair.load(self.scope, &id)?))
+                    }
+                    CodexSourceSelection::Recorded(_) => {
+                        let sources = self.selected_sources(false, Some(&id))?;
+                        let path = sources.get(&id).ok_or(CoreError::SourceChanged)?;
+                        let loaded = load_selected(path, self.scope, &id, Some(&sources))?;
+                        self.validate_source_set_membership(&sources, &id)?;
+                        rows.push(summarize(&loaded));
+                    }
+                    CodexSourceSelection::Collision => {
+                        rows.push(collision_snapshot(&id, "unindexed", &entries).summary)
+                    }
                 }
-                rows.push(collision_snapshot(&id, "unindexed", &entries).summary);
                 continue;
             }
             let path = &entries[0].path;
@@ -891,14 +990,22 @@ impl ProviderAdapter for CodexAdapter<'_> {
         })?;
         let dependencies = codex_child_dependencies(&sources, session_id);
         let parent_revision = format!("{:x}", hasher.finalize());
-        Ok(Some(super::ReaderStamp {
+        let mut stamp = super::ReaderStamp {
             revision: codex_revision_with_dependencies(&parent_revision, &dependencies),
             dependencies: format!(
                 "{}:native-title:{}",
                 dependencies,
                 CodexNativeTitles::read(self.root).stamp(session_id)
             ),
-        }))
+        };
+        if let Some(recorded) = sources.recorded.get(session_id) {
+            stamp.dependencies.push_str(&format!(
+                ":recorded-rollout:{}",
+                recorded.database.display()
+            ));
+            self.validate_source_set_membership(&sources, session_id)?;
+        }
+        Ok(Some(stamp))
     }
     fn list_stats_revision(&self, session_id: &str) -> Result<Option<super::ReaderStamp>> {
         let Some(mut stamp) = self.reader_revision(session_id)? else {
@@ -993,6 +1100,10 @@ impl ProviderAdapter for CodexAdapter<'_> {
             provider: "codex".into(),
             session_id: session_id.into(),
         })?;
+        if reader_parent_fact_from_path(path, session_id)?.is_none() {
+            self.validate_source_set_membership(&sources, session_id)?;
+            return Ok(None);
+        }
         let source_bytes = fs::read(path).map_err(|source| CoreError::Io {
             path: path.into(),
             source,
@@ -1092,16 +1203,15 @@ impl ProviderAdapter for CodexAdapter<'_> {
                 entries,
             ));
         }
-        if entry.signature.starts_with("source-set:") {
+        if entry.signature.starts_with("source-set:")
+            || entry.signature.starts_with("recorded-rollout:")
+        {
             let sources = self.selected_sources(true, Some(&entry.session_id))?;
-            let pair = sources
-                .pairs
-                .get(&entry.session_id)
-                .ok_or(CoreError::SourceChanged)?;
             if self.source_signature(entry)? != entry.signature {
                 return Err(CoreError::SourceChanged);
             }
-            let mut loaded = pair.load(self.scope, &entry.session_id)?;
+            let mut loaded =
+                load_selected(&entry.path, self.scope, &entry.session_id, Some(&sources))?;
             resolve_spawn_children(&mut loaded, &sources);
             codex_apply_child_revision(&mut loaded, &sources);
             let mut snapshot = codex_snapshot_from_loaded(loaded)?;
@@ -1139,6 +1249,20 @@ impl ProviderAdapter for CodexAdapter<'_> {
             let base = DirectPair::resolve(entries, &entry.session_id)?
                 .ok_or(CoreError::SourceChanged)?
                 .revision(self.scope)?;
+            return Ok(CodexNativeTitles::read(self.root).signature(&entry.session_id, &base));
+        }
+        if entry.signature.starts_with("recorded-rollout:") {
+            let scan = self.source_entries()?;
+            let entries = scan
+                .grouped
+                .get(&entry.session_id)
+                .ok_or(CoreError::SourceChanged)?;
+            let CodexSourceSelection::Recorded(recorded) =
+                self.resolve_multiple_sources(&entry.session_id, entries)?
+            else {
+                return Err(CoreError::SourceChanged);
+            };
+            let base = Self::recorded_signature(&recorded, entries)?;
             return Ok(CodexNativeTitles::read(self.root).signature(&entry.session_id, &base));
         }
         if !entry.signature.starts_with("collision:") {

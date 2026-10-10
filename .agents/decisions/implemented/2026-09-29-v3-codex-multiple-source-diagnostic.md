@@ -20,7 +20,9 @@ Those records do not justify whole-file concatenation or legacy request inferenc
 
 Current scope: the [direct history-base source-set decision](2026-09-29-v3-codex-direct-history-base-source-set.md)
 now permits the proved two-file direct root prefix. The collision policy below
-continues for unsupported source groups. The [partial Stats decision](2026-09-29-v3-stats-partial-source-coverage.md)
+continues for unsupported source groups. The [recorded-rollout decision](2026-10-10-v3-codex-recorded-rollout-selection.md)
+also permits reading the native recorded current file of an unanchored root;
+continuity with its other files stays unknown. The [partial Stats decision](2026-09-29-v3-stats-partial-source-coverage.md)
 replaces provider-wide refusal with explicitly incomplete healthy-session
 totals; unattributable unreadable headers still block Codex history globally.
 The provider-owned implementation is in

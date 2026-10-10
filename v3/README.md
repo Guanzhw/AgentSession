@@ -140,6 +140,12 @@ partial Session Protocol v2 foundation for the five supported providers;
 `version=3` preserves those same-source facts and reports actual domain
 coverage. Full v2/v3 parity remains open.
 
+For unanchored root Codex chats with multiple same-ID files, the adapter can
+read the current rollout recorded by native `state_5.sqlite` when its path and
+header match the scanned sources. Explicit history-base pairs retain precedence;
+unsupported mappings remain unavailable. Other files stay preserved, and their
+continuity with the current rollout remains unknown in protocol coverage.
+
 Codex Reader lists recorded `raw_memory` and `rollout_summary` artifacts when
 `memories_1.sqlite` contains the selected canonical thread row. The artifact
 metadata and source state are available at
