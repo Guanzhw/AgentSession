@@ -54,8 +54,20 @@ async function harness(t) {
       rows.push({ timestamp: '2026-10-09T00:00:04.200Z', type: 'response_item', payload: {
         type: 'function_call_output', call_id: 'reader-tool', output: toolOutput } });
     }
-    if (i === 5) rows.push({ timestamp: '2026-10-09T00:00:06.100Z', type: 'compacted',
-      payload: { message: 'Synthetic recorded compaction checkpoint', replacement_history: [] } });
+    if (i === 5) {
+      rows.push({ timestamp: '2026-10-09T00:00:06.100Z', type: 'compacted',
+        payload: { message: 'Synthetic recorded compaction checkpoint', replacement_history: [] } });
+      for (let reply = 0; reply < 3; reply++) rows.push({ timestamp: `2026-10-09T00:00:06.${200 + reply}Z`,
+        type: 'response_item', payload: { type: 'message', role: 'assistant', id: `checkpoint-reply-${reply}`,
+          content: [{ type: 'output_text', text: `Reply ${reply} continues the same request after compaction.` }] } });
+    }
+    if (i === 121) {
+      rows.push({ timestamp: '2026-10-09T00:02:02.050Z', type: 'response_item', payload: {
+        type: 'message', role: 'assistant', id: 'boundary-before-checkpoint',
+        content: [{ type: 'output_text', text: 'The same user request continues before the boundary checkpoint.' }] } });
+      rows.push({ timestamp: '2026-10-09T00:02:02.100Z', type: 'compacted',
+        payload: { message: 'Page-boundary recorded compaction checkpoint', replacement_history: [] } });
+    }
   }
   await writeFile(sourceFile, rows.map(row => JSON.stringify(row)).join('\n') + '\n');
   const digest = createHash('sha256').update(await readFile(sourceFile)).digest('hex');
@@ -72,7 +84,10 @@ async function harness(t) {
   child.stdout.on('data', value => { logs += value; });
   child.stderr.on('data', value => { logs += value; });
   let server;
+  let releaseToc = null;
+  let delayedToc = null;
   t.after(async () => {
+    releaseToc?.();
     if (server) await new Promise(resolve => server.close(resolve));
     if (child.exitCode === null) { child.kill(); await new Promise(resolve => child.once('exit', resolve)); }
     await writeFile(path.join(scratch, `native-${process.pid}.log`), logs);
@@ -90,6 +105,14 @@ async function harness(t) {
   const bootstrap = await (await fetch(`${backendOrigin}/api/v3/reader/codex/${sessionId}/bootstrap`)).json();
   assert.ok(bootstrap.segments.at(-1).nextCursor, 'real fixture spans multiple bounded Reader pages');
   t.diagnostic(`source SHA-256 ${digest}; backend ${binary}; initial items ${bootstrap.segments.flatMap(s => s.items).length}`);
+  let fixtureToc = bootstrap.toc;
+  while (!fixtureToc.entries.some(entry => entry.event.segment === 'context' && entry.ordinal === 128)) {
+    assert.ok(fixtureToc.nextCursor);
+    fixtureToc = (await (await fetch(`${backendOrigin}/api/v3/reader/codex/${sessionId}/toc?` +
+      new URLSearchParams({ cursor: fixtureToc.nextCursor }))).json()).toc;
+  }
+  const boundaryCheckpoint = fixtureToc.entries.find(entry => entry.event.segment === 'context' && entry.ordinal === 128);
+  assert.equal(boundaryCheckpoint.ordinal, 128, 'checkpoint begins a TOC page with its user on the preceding page');
   const buildDir = path.join(root, 'ui');
   const { build } = createRequire(path.join(uiDir, 'package.json'))('vite');
   await build({ root: uiDir, configFile: path.join(uiDir, 'vite.config.ts'),
@@ -105,6 +128,10 @@ async function harness(t) {
         contentRevision: requestUrl.searchParams.get('contentRevision') });
       try {
         const result = await fetch(backendOrigin + request.url);
+        if (delayedToc && requestUrl.pathname.endsWith('/toc')) {
+          const payload = await result.clone().json();
+          if (payload.toc.entries[0]?.ordinal === 64) await delayedToc;
+        }
         response.writeHead(result.status, { 'content-type': result.headers.get('content-type') || 'application/json' });
         response.end(Buffer.from(await result.arrayBuffer()));
       } catch (error) { response.writeHead(502).end(String(error)); }
@@ -119,6 +146,12 @@ async function harness(t) {
   const port = await freeFetchSafePort();
   await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
   return { url: `http://127.0.0.1:${port}/codex/session/${sessionId}`, contentRequests, bootstrapRequests,
+    boundaryCheckpointHash: '#event?' + new URLSearchParams({ messageId: boundaryCheckpoint.event.messageId, segment: 'context' }),
+    delayOutlineGap: () => {
+      delayedToc = new Promise(resolve => { releaseToc = resolve; });
+      const resolve = releaseToc;
+      return () => { resolve(); delayedToc = null; releaseToc = null; };
+    },
     appendSource: async () => {
       const row = { timestamp: '2026-10-09T00:05:00.000Z', type: 'response_item', payload: {
         type: 'message', id: 'appended-live-message', role: 'assistant',
@@ -157,14 +190,14 @@ async function waitFor(command, expression) {
 const evaluate = async (command, expression) => JSON.parse(await command('eval', expression));
 
 test('Reader reading experience on current UI and isolated native provider data', { skip, timeout: 180_000 }, async t => {
-  const { url, contentRequests, bootstrapRequests, appendSource } = await harness(t);
+  const { url, contentRequests, bootstrapRequests, appendSource, boundaryCheckpointHash, delayOutlineGap } = await harness(t);
   await t.test('scrolling continues the transcript, follows the outline and exposes context checkpoints', async t => {
     const command = await browser(t, url);
     const before = await evaluate(command, `document.querySelectorAll('.transcript article.event-card').length`);
     await command('eval', `document.querySelector('[data-reader-continuation]').scrollIntoView({block:'center',behavior:'instant'})`);
-    const scroll = await evaluate(command, `({ y: scrollY, top: document.querySelector('.transcript article[data-message-id="message-28"]').getBoundingClientRect().top })`);
+    const scroll = await evaluate(command, `({ y: scrollY, top: document.querySelector('.transcript article[data-message-id="message-20"]').getBoundingClientRect().top })`);
     await waitFor(command, `document.querySelectorAll('.transcript article.event-card').length > ${before}`);
-    const continued = await evaluate(command, `({ y: scrollY, top: document.querySelector('.transcript article[data-message-id="message-28"]').getBoundingClientRect().top })`);
+    const continued = await evaluate(command, `({ y: scrollY, top: document.querySelector('.transcript article[data-message-id="message-20"]').getBoundingClientRect().top })`);
     t.diagnostic(`automatic continuation: ${JSON.stringify({ before: scroll, after: continued })}`);
     assert.ok(Math.abs(continued.top - scroll.top) < 4, 'automatic continuation preserves the visible message position');
     await command('eval', `document.querySelector('.transcript article[data-message-id="message-20"]').scrollIntoView({block:'start',behavior:'instant'})`);
@@ -173,17 +206,14 @@ test('Reader reading experience on current UI and isolated native provider data'
       const current = document.querySelector('.reader-outline a[aria-current="location"]');
       const pane = document.querySelector('.reader-outline nav').getBoundingClientRect();
       const rect = current.getBoundingClientRect();
-      const compact = document.querySelector('.reader-outline a.context-outline');
       return { progress: Number(document.querySelector('[role="progressbar"]').getAttribute('aria-valuenow')),
         currentVisible: rect.top >= pane.top && rect.bottom <= pane.bottom,
-        compactHidden: compact?.closest('.outline-children')?.hidden,
         nonMessages: document.querySelectorAll('.reader-outline a[href*="segment=tool"], .reader-outline a[href*="segment=thinking"]').length,
         userLeft: document.querySelector('.user-card').getBoundingClientRect().left,
         assistantLeft: document.querySelector('.assistant-card').getBoundingClientRect().left };
     })()`);
     assert.ok(state.progress > 0 && state.progress < 100);
     assert.equal(state.currentVisible, true);
-    assert.equal(state.compactHidden, false, 'context checkpoint is independent of folded request replies');
     assert.equal(state.nonMessages, 0);
     assert.ok(state.userLeft > state.assistantLeft, 'user messages align to the right of assistant replies');
   });
@@ -331,6 +361,56 @@ test('Reader reading experience on current UI and isolated native provider data'
     await command('click', '.outline-request');
     await waitFor(command, `location.hash === ${JSON.stringify(initial.requestHref)}`);
   });
+  await t.test('compaction checkpoint and following replies fold with their request and retain canonical navigation', async t => {
+    const command = await browser(t, url);
+    await waitFor(command, `document.querySelector('.reader-outline a[href*="messageId=checkpoint-reply-2&"]')`);
+    const checkpoint = await evaluate(command, `(() => {
+      const link = document.querySelector('.reader-outline a.context-outline');
+      return { href: link.getAttribute('href'), label: link.textContent.trim(), title: link.title };
+    })()`);
+    assert.match(checkpoint.href, /segment=context/);
+    assert.match(checkpoint.label, /Context checkpoint/);
+    const turnState = `(() => {
+      const request = document.querySelector('.reader-outline a[href*="messageId=message-4&"]');
+      const group = request.closest('.outline-turn');
+      const entries = [document.querySelector('.reader-outline a[href*="messageId=message-5&"]'),
+        document.querySelector('.reader-outline a.context-outline'),
+        ...[0, 1, 2].map(i => document.querySelector('.reader-outline a[href*="messageId=checkpoint-reply-' + i + '&"]'))];
+      return { sameGroup: entries.every(link => link.closest('.outline-turn') === group),
+        visible: entries.map(link => link.getClientRects().length > 0),
+        ordered: [...group.querySelectorAll('.outline-children a')].map(link => link.getAttribute('href')),
+        expandedRequests: [...document.querySelectorAll('.outline-turn.has-request')]
+          .filter(turn => !turn.querySelector('.outline-children').hidden)
+          .map(turn => turn.querySelector('.outline-request').getAttribute('href')) };
+    })()`;
+    await command('click', '.outline-actions button:first-child');
+    let state = await evaluate(command, turnState);
+    assert.deepEqual(state.visible, [false, false, false, false, false],
+      'Collapse all hides the reply, checkpoint and every reply following the checkpoint');
+    assert.equal(state.sameGroup, true, 'checkpoint preserves the preceding request through the next user message');
+    await command('click', '.outline-actions button:last-child');
+    state = await evaluate(command, turnState);
+    assert.deepEqual(state.visible, [true, true, true, true, true], 'Expand all exposes the complete compacted turn');
+    assert.equal(state.ordered[1], checkpoint.href, 'checkpoint retains its distinct anchor and transcript order');
+    await command('click', '.outline-actions button:first-child');
+    await command('eval', `document.querySelector('.reader-outline a[href*="messageId=message-4&"]').closest('.outline-turn').querySelector('.outline-turn-toggle').click()`);
+    state = await evaluate(command, turnState);
+    assert.deepEqual(state.visible, [true, true, true, true, true], 'one request toggle reveals its checkpoint and following replies');
+    assert.equal(state.expandedRequests.length, 1);
+    assert.match(state.expandedRequests[0], /messageId=message-4&/);
+    await command('click', '.outline-actions button:first-child');
+    await command('eval', `document.querySelector('.reader-outline a.context-outline').click()`);
+    await waitFor(command, `location.hash === ${JSON.stringify(checkpoint.href)}`);
+    await waitFor(command, `!!document.querySelector('.reader-outline a.context-outline').getClientRects().length`);
+    state = await evaluate(command, turnState);
+    assert.deepEqual(state.visible, [true, true, true, true, true], 'canonical checkpoint jump expands its owning request');
+    assert.equal(await evaluate(command, `document.querySelector('.reader-outline a.context-outline').title`), checkpoint.title);
+    assert.equal(await evaluate(command, `(() => {
+      const target = document.querySelector('.transcript article[data-segment="context"]');
+      return !!target?.getClientRects().length && target.textContent.includes(${JSON.stringify(checkpoint.title)});
+    })()`), true,
+      'canonical checkpoint anchor reveals the actual transcript checkpoint');
+  });
   await t.test('outline loads continuously and retains earlier anchors after a later destination', async t => {
     const command = await browser(t, url);
     await waitFor(command, `document.querySelector('.reader-outline a[href*="messageId=message-239&"]')`);
@@ -351,5 +431,35 @@ test('Reader reading experience on current UI and isolated native provider data'
     await command('eval', `document.querySelector('.reader-outline nav a').click()`);
     await waitFor(command, `location.hash === ${JSON.stringify(initial.links[0])}`);
     await waitFor(command, `document.getElementById(${JSON.stringify(initial.firstAnchor)})`);
+  });
+  await t.test('targeted checkpoint expansion survives delayed outline ownership hydration and respects Collapse all', async t => {
+    for (const collapse of [false, true]) {
+      const release = delayOutlineGap();
+      try {
+        const command = await browser(t, url + boundaryCheckpointHash);
+        const selector = `.reader-outline a[href="${boundaryCheckpointHash}"]`;
+        await waitFor(command, `document.querySelector(${JSON.stringify(selector)})?.getClientRects().length > 0`);
+        assert.equal(await evaluate(command, `!!document.querySelector('.reader-outline a[href*="messageId=message-120&"]')`), false,
+          'direct canonical opening exposes the checkpoint while its owning user page is missing');
+        assert.equal(await evaluate(command, `document.querySelector(${JSON.stringify(selector)}).closest('.outline-turn').classList.contains('has-request')`), false,
+          'the ordinal gap retains explicit parentless continuation until ownership evidence arrives');
+        if (collapse) await command('click', '.outline-actions button:first-child');
+        release();
+        await waitFor(command, `document.querySelector('.reader-outline a[href*="messageId=message-120&"]')`);
+        await waitFor(command, `document.querySelector('.reader-outline nav').getAttribute('aria-busy') === 'false'`);
+        const state = await evaluate(command, `(() => {
+          const link = document.querySelector(${JSON.stringify(selector)});
+          const group = link.closest('.outline-turn');
+          return { request: group.querySelector('.outline-request')?.getAttribute('href'),
+            hidden: group.querySelector('.outline-children').hidden, visible: link.getClientRects().length > 0,
+            href: link.getAttribute('href'), label: link.textContent.trim() };
+        })()`);
+        assert.match(state.request, /messageId=message-120&/);
+        assert.equal(state.hidden, collapse, 'hydration transfers active expansion and respects explicit Collapse all');
+        assert.equal(state.visible, !collapse);
+        assert.equal(state.href, boundaryCheckpointHash);
+        assert.match(state.label, /Context checkpoint/);
+      } finally { release(); }
+    }
   });
 });

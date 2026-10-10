@@ -101,7 +101,10 @@ same message ID therefore requires reopening, rather than jumping to old text.
 Reader publication reuses unchanged normalized content chunks by field
 fingerprint while replacing metadata and execution facts in one transaction.
 Contents automatically collects its remaining pages and provides **Collapse
-all** and **Expand all** for request/reply groups. Tool calls default to compact
+all** and **Expand all** for request/reply groups. Context checkpoints and later
+agent/assistant replies stay in their request's group until the next request;
+checkpoint anchors retain their own position and reveal the group when opened.
+Tool calls default to compact
 rows with a recorded command or task summary and background/result phase where
 available; input, output and recorded execution links remain inside their
 disclosure. Codex `exec` headers decode literal commands from supported recorded

@@ -722,12 +722,6 @@
       if (entry.event.segment !== 'message' && entry.event.segment !== 'context') {
         continue;
       }
-      if (entry.event.segment === 'context') {
-        turns.push({ key: eventKey(entry.event), request: null,
-          children: [{ key: eventKey(entry.event), entry }] });
-        turn = null;
-        continue;
-      }
       if (entry.role === 'user' && entry.event.segment === 'message') {
         turn = { key: eventKey(entry.event), request: entry, children: [] };
         turns.push(turn);
@@ -745,6 +739,16 @@
   function mergeToc(current: ReaderTocEntry[], added: ReaderTocEntry[]): ReaderTocEntry[] {
     return [...new Map([...current, ...added].map(entry => [eventKey(entry.event), entry])).values()]
       .sort((a, b) => a.ordinal - b.ordinal);
+  }
+
+  function mergeOutlineEntries(added: ReaderTocEntry[]): ReaderTocEntry[] {
+    const expandedChildren = new Set(groupOutline(toc.entries)
+      .filter(turn => expandedOutlineTurns.has(turn.key)).flatMap(turn => turn.children.map(node => node.key)));
+    const entries = mergeToc(toc.entries, added);
+    expandedOutlineTurns = new Set(groupOutline(entries)
+      .filter(turn => expandedOutlineTurns.has(turn.key) || turn.children.some(node => expandedChildren.has(node.key)))
+      .map(turn => turn.key));
+    return entries;
   }
 
   function toggleOutlineTurn(key: string): void {
@@ -822,7 +826,7 @@
       if (!toc.entries.some(entry => eventKey(entry.event) === eventKey(location.event))) {
         const response = await getReaderToc(provider, sessionId, location.tocCursor);
         if (!active || request !== locationGeneration || !stillCurrent()) return false;
-        toc = { ...toc, entries: mergeToc(toc.entries, response.toc.entries) };
+        toc = { ...toc, entries: mergeOutlineEntries(response.toc.entries) };
       }
       if (updateHistory) {
         const hash = hashFor(location.event);
@@ -875,7 +879,7 @@
     try {
       const response = await getReaderToc(provider, sessionId, cursor);
       if (active && request === tocGeneration) {
-        toc = { entries: mergeToc(toc.entries, response.toc.entries),
+        toc = { entries: mergeOutlineEntries(response.toc.entries),
           previousCursor: null, nextCursor: response.toc.nextCursor };
         tocCursor = response.toc.nextCursor;
       }
