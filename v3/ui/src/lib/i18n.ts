@@ -4,6 +4,11 @@ export type Language = 'en' | 'zh';
 const storageKey = 'agentsession-v3-language';
 
 const chinese = {
+  'Collapse all': '全部收起', 'Expand all': '全部展开', 'Loading contents…': '正在加载目录…',
+  'Return destinations': '回传位置',
+  'Dispatch destinations': '派遣位置', 'Collaboration destinations': '协作位置',
+  'Background': '后台执行', 'Checking result': '等待结果', 'Input sent': '已发送输入',
+  'Unknown outcome': '结果未知', 'Interruption requested': '已请求中断',
   'Recorded tool input': '已记录的工具输入',
   'Agent launch': '派发 Agent', 'Reading progress': '阅读进度',
   'Conversation span': '对话跨度', 'Tokens': 'Token 数', 'Cost': '费用',

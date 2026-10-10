@@ -31,7 +31,8 @@ const bootstrap = {
   revision: 'prompt-ui-revision', totalItems: 1,
   segments: [{ id: 'segment-1', pageId: 'page-1', startOrdinal: 0,
     items: [{ event, ordinal: 0, owner: null, role: 'assistant', timestamp: 1,
-      preview: 'Reader content', totalChars: 14, toolName: null, ownerMessageId: null, replyMetadata: null }],
+      preview: 'Reader content', totalChars: 14, toolName: null, ownerMessageId: null, replyMetadata: null,
+      contentRevisions: {} }],
     ownerContext: null, previousCursor: null, nextCursor: null }],
   toc: { entries: [{ event, ordinal: 0, owner: null, label: 'Reader content' }],
     previousCursor: null, nextCursor: null },
@@ -106,6 +107,10 @@ async function harness(t) {
     };
     if (url.pathname === '/api/providers') return json([{ id: 'codex', available: true }]);
     if (url.pathname === `/api/v3/reader/codex/${sessionId}/bootstrap`) return json(bootstrap);
+    if (url.pathname === `/api/v3/reader/codex/${sessionId}/executions`) {
+      return json({ session: ref, revision: bootstrap.revision, coverage: 'partial',
+        events: [], nextCursor: null, scannedEvents: 0 });
+    }
     if (url.pathname === `/api/v3/runtime/codex/${sessionId}/events`) {
       return json({ session: ref, revision: bootstrap.revision, coverage: 'partial', events: [], nextCursor: null, scannedEvents: 0 });
     }

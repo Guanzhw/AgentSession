@@ -369,13 +369,12 @@ export async function getRuntimeEvents(
   return runtimeJson<RuntimeEventPage>(url);
 }
 
-export function getRuntimeExecutionEvents(
-  provider: string, sessionId: string, query: { cursor?: string; limit?: number } = {},
+export function getReaderExecutionEvents(
+  provider: string, sessionId: string, revision: string, query: { cursor?: string; limit?: number } = {},
 ): Promise<RuntimeExecutionEventPage> {
-  const params = new URLSearchParams({ category: 'tool', executionOnly: 'true', limit: String(query.limit ?? 50) });
+  const params = new URLSearchParams({ revision, limit: String(query.limit ?? 200) });
   if (query.cursor) params.set('cursor', query.cursor);
-  const url = '/api/v3/runtime/' + encodeURIComponent(provider) + '/' + encodeURIComponent(sessionId) + '/events?' + params;
-  return runtimeJson<RuntimeExecutionEventPage>(url);
+  return getJson<RuntimeExecutionEventPage>(readerEndpoint(provider, sessionId, 'executions', params));
 }
 
 export function getRuntimeWork(
@@ -875,8 +874,10 @@ export function getReaderLocation(
   sessionId: string,
   revision: string,
   target: ReaderEventRef | 'end',
+  sourceRevision?: string,
 ): Promise<ReaderLocation> {
   const query = new URLSearchParams({ revision });
+  if (sourceRevision) query.set('sourceRevision', sourceRevision);
   if (target === 'end') query.set('edge', 'end');
   else {
     query.set('messageId', target.messageId);

@@ -84,6 +84,12 @@ async function harness(t) {
       return json({ session: session(id), revision: `revision-${id}`, coverage: 'partial',
         events: [], nextCursor: null, scannedEvents: 0 });
     }
+    const readerExecutionRoute = url.pathname.match(/^\/api\/v3\/reader\/codex\/(theme-root|theme-child)\/executions$/);
+    if (readerExecutionRoute) {
+      const [, id] = readerExecutionRoute;
+      return json({ session: session(id), revision: `revision-${id}`, coverage: 'partial',
+        events: [], nextCursor: null, scannedEvents: 0 });
+    }
     if (url.pathname.startsWith('/api/v3/resume/codex/')) {
       return json({ allowTerminalLaunch: false, available: false, diagnostic: null, command: null });
     }

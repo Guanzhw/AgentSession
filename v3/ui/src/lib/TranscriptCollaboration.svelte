@@ -19,6 +19,7 @@
   let disconnectObservers: () => void = () => {};
   $: handoffs = transcriptHandoffs(entries, { provider, sessionId });
   $: endpointGroups = transcriptEndpointGroups(layout);
+  $: connectors = connectorPaths(layout, width);
   $: if (mounted) observeHost(host);
   $: if (mounted && host && handoffs) void tick().then(scheduleMeasure);
 
@@ -53,19 +54,36 @@
     layout = layoutTranscriptHandoffs(handoffs, points);
   }
 
-  function laneX(lane: number): number {
-    const count = Math.max(1, ...layout.map(item => item.lane + 1));
-    return width - 20 - lane * Math.min(12, (width - 34) / count);
-  }
-
-  function path(item: TranscriptHandoffLayout): string {
-    const x = laneX(item.lane);
-    // Open spans show a short continuation, never an invented return at the page bottom.
-    if (item.returnY === null) return `M ${width} ${item.dispatchY} H ${x + 5} Q ${x} ${item.dispatchY} ${x} ${item.dispatchY! + 5} V ${item.dispatchY! + 32}`;
-    if (item.dispatchY === null) return `M ${x} ${item.returnY - 32} V ${item.returnY - 5} Q ${x} ${item.returnY} ${x + 5} ${item.returnY} H ${width}`;
-    const start = item.dispatchY;
-    const end = item.returnY;
-    return `M ${width} ${start} H ${x + 5} Q ${x} ${start} ${x} ${start + 5} V ${end - 5} Q ${x} ${end} ${x + 5} ${end} H ${width}`;
+  function connectorPaths(items: TranscriptHandoffLayout[], gutterWidth: number): { item: TranscriptHandoffLayout; d: string; open: boolean }[] {
+    const groups = new Map<string, TranscriptHandoffLayout[]>();
+    for (const item of items) {
+      const group = groups.get(item.correlationId) ?? [];
+      group.push(item);
+      groups.set(item.correlationId, group);
+    }
+    const count = Math.max(1, ...items.map(item => item.lane + 1));
+    return [...groups.values()].flatMap(group => {
+      const item = group[0];
+      const x = gutterWidth - 20 - item.lane * Math.min(12, (gutterWidth - 34) / count);
+      const dispatch = item.dispatchY;
+      const returns = [...new Set(group.flatMap(entry => entry.returnY !== null && entry.returnY !== dispatch ? [entry.returnY] : []))].sort((a, b) => a - b);
+      const missingReturn = group.some(entry => entry.returnY === null);
+      const paths: { item: TranscriptHandoffLayout; d: string; open: boolean }[] = [];
+      const branch = (y: number) => `M ${x} ${y - 5} Q ${x} ${y} ${x + 5} ${y} H ${gutterWidth}`;
+      if (returns.length) {
+        const last = returns.at(-1)!;
+        // A dispatch owns one trunk; each recorded return adds only its own branch.
+        const trunk = dispatch !== null
+          ? `M ${gutterWidth} ${dispatch} H ${x + 5} Q ${x} ${dispatch} ${x} ${dispatch + 5} V ${last - 5}`
+          : `M ${x} ${returns[0] - 5} V ${last - 5}`;
+        paths.push({ item, d: `${trunk} ${returns.map(branch).join(' ')}`, open: false });
+        if (dispatch === null) paths.push({ item, d: `M ${x} ${returns[0] - 32} V ${returns[0] - 5}`, open: true });
+        if (missingReturn) paths.push({ item, d: `M ${x} ${last - 5} V ${last + 32}`, open: true });
+      } else if (dispatch !== null && missingReturn) {
+        paths.push({ item, d: `M ${gutterWidth} ${dispatch} H ${x + 5} Q ${x} ${dispatch} ${x} ${dispatch + 5} V ${dispatch + 32}`, open: true });
+      }
+      return paths;
+    });
   }
 
   function eventHref(event: ReaderEventRef): string {
@@ -112,12 +130,10 @@
 {#if layout.length > 0}
   <div class="transcript-collaboration" style:width={`${width}px`} style:height={`${height}px`} aria-label={t($language, 'Delegated agents')}>
     <svg {width} {height} aria-hidden="true">
-      {#each layout as item (item.id)}
-        {#if item.dispatchY !== item.returnY}
-          <path data-collaboration-connector={item.correlationId} data-collaboration-lane={item.lane}
-            class:open-span={item.dispatchY === null || item.returnY === null}
-            style:stroke={agentAppearance(item.agentKey).color} d={path(item)} />
-        {/if}
+      {#each connectors as connector}
+        <path data-collaboration-connector={connector.item.correlationId} data-collaboration-lane={connector.item.lane}
+          class:open-span={connector.open}
+          style:stroke={agentAppearance(connector.item.agentKey).color} d={connector.d} />
       {/each}
     </svg>
     {#each endpointGroups as group (group.y)}
@@ -141,9 +157,15 @@
           </details>
         {/if}
       {:else}
+        {@const sameAgent = group.choices.every(choice => choice.agentKey === group.choices[0].agentKey)}
+        {@const appearance = agentAppearance(group.choices[0].agentKey)}
+        {@const destination = group.choices.every(choice => choice.kind === 'dispatch') ? 'Return destinations' : group.choices.every(choice => choice.kind === 'return') ? 'Dispatch destinations' : 'Collaboration destinations'}
+        {@const label = `${sameAgent ? (group.choices[0].agent ?? t($language, 'Unknown agent')) + ' · ' : ''}${t($language, destination)} · ${group.choices.length}`}
         <details class="collaboration-gutter-group" style:top={`${group.y - 11}px`} style:left={`${width - 31}px`}>
-          <summary class="collaboration-gutter-point" title={t($language, 'Delegated agents') + ' · ' + group.choices.length}
-            aria-label={t($language, 'Delegated agents') + ' · ' + group.choices.length}>{group.choices.length}</summary>
+          <summary class="collaboration-gutter-point" style:color={sameAgent ? appearance.color : undefined} style:border-color={sameAgent ? appearance.color : undefined}
+            title={label} aria-label={label}>
+            {#if sameAgent}<svg class="agent-icon" viewBox="0 0 5 5" aria-hidden="true"><path d={appearance.icon} /></svg>{:else}{group.choices.length}{/if}
+          </summary>
           <ul class="collaboration-gutter-choices">
             {#each group.choices as choice, index (choice.id)}
               {@const appearance = agentAppearance(choice.agentKey)}

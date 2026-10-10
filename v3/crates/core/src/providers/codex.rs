@@ -38,7 +38,7 @@ use source_set::{DirectPair, Sources as CodexSources, load_selected};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -795,6 +795,33 @@ impl ProviderAdapter for CodexAdapter<'_> {
         })
     }
 
+    fn resume_directory(&self, session_id: &str) -> Result<Option<String>> {
+        let sources = self.selected_sources(true, Some(session_id))?;
+        if sources.pairs.contains_key(session_id) {
+            return Ok(self.load(session_id)?.summary.directory);
+        }
+        let path = sources.get(session_id).ok_or_else(|| CoreError::NotFound {
+            provider: "codex".into(),
+            session_id: session_id.into(),
+        })?;
+        let (id, directory, _) = read_header(path)?.ok_or(CoreError::SourceChanged)?;
+        if id != session_id {
+            return Err(CoreError::SourceChanged);
+        }
+        // Resume consumes only canonical header metadata. Body appends do not
+        // affect it; reselect and reread those facts rather than hash the body.
+        let current = self.selected_sources(true, Some(session_id))?;
+        if current.get(session_id) != Some(path) || current.pairs.contains_key(session_id) {
+            return Err(CoreError::SourceChanged);
+        }
+        let (current_id, current_directory, _) =
+            read_header(path)?.ok_or(CoreError::SourceChanged)?;
+        if current_id != id || current_directory != directory {
+            return Err(CoreError::SourceChanged);
+        }
+        Ok(directory)
+    }
+
     fn available(&self) -> bool {
         self.root.join("sessions").is_dir() || self.root.join("archived_sessions").is_dir()
     }
@@ -953,6 +980,9 @@ impl ProviderAdapter for CodexAdapter<'_> {
         self.validate_source_set_membership(&sources, session_id)?;
         Ok(evidence)
     }
+    fn reader_snapshot_navigation(&self) -> bool {
+        true
+    }
     fn reader_revision(&self, session_id: &str) -> Result<Option<super::ReaderStamp>> {
         let sources = self.selected_sources(true, Some(session_id))?;
         let path = sources.get(session_id).ok_or_else(|| CoreError::NotFound {
@@ -976,10 +1006,17 @@ impl ProviderAdapter for CodexAdapter<'_> {
             self.validate_source_set_membership(&sources, session_id)?;
             return Ok(Some(stamp));
         }
-        let mut file = fs::File::open(path).map_err(|source| CoreError::Io {
-            path: path.clone(),
-            source,
-        })?;
+        let (file, length) = if path.to_string_lossy().ends_with(".zst") {
+            let file = fs::File::open(path).map_err(|source| codex_line_error(path, source))?;
+            let length = file
+                .metadata()
+                .map_err(|source| codex_line_error(path, source))?
+                .len();
+            (file, length)
+        } else {
+            open_codex_complete_prefix(path)?
+        };
+        let mut file = file.take(length);
         let mut hasher = Sha256::new();
         hasher.update(CODEX_REVISION_NAMESPACE);
         hasher.update(self.scope.as_bytes());
@@ -989,6 +1026,7 @@ impl ProviderAdapter for CodexAdapter<'_> {
             source,
         })?;
         let dependencies = codex_child_dependencies(&sources, session_id);
+
         let parent_revision = format!("{:x}", hasher.finalize());
         let mut stamp = super::ReaderStamp {
             revision: codex_revision_with_dependencies(&parent_revision, &dependencies),
@@ -1038,9 +1076,28 @@ impl ProviderAdapter for CodexAdapter<'_> {
             provider: "codex".into(),
             session_id: session_id.into(),
         })?;
-        let mut loaded = load_selected(path, self.scope, session_id, Some(&sources))?;
+        let bounded =
+            !sources.pairs.contains_key(session_id) && !path.to_string_lossy().ends_with(".zst");
+        let before_dependencies = bounded.then(|| codex_child_dependencies(&sources, session_id));
+        let (mut loaded, prefix) = if bounded {
+            let (loaded, bytes) = load_codex_reader_prefix(path, self.scope, session_id)?;
+            (loaded, Some(bytes))
+        } else {
+            (
+                load_selected(path, self.scope, session_id, Some(&sources))?,
+                None,
+            )
+        };
+        if bounded && sources.recorded.contains_key(session_id) {
+            source_set::mark_recorded_rollout(&mut loaded);
+        }
+        let parent_revision = loaded.revision.clone();
         resolve_spawn_children(&mut loaded, &sources);
-        codex_apply_child_revision(&mut loaded, &sources);
+        if let Some(dependencies) = &before_dependencies {
+            loaded.revision = codex_revision_with_dependencies(&loaded.revision, dependencies);
+        } else {
+            codex_apply_child_revision(&mut loaded, &sources);
+        }
         let stream = if !loaded.ownership_unavailable && loaded.protocol_parse_errors.is_empty() {
             finalize_events(
                 SessionRef {
@@ -1056,11 +1113,55 @@ impl ProviderAdapter for CodexAdapter<'_> {
             None
         };
         let mut capture = super::ReaderCapture {
+            stamp: None,
+            parent_facts: None,
             snapshot: codex_snapshot_from_loaded(loaded)?,
             protocol_stream: Some(stream),
         };
-        CodexNativeTitles::read(self.root).apply(&mut capture.snapshot.summary);
-        self.validate_source_set_membership(&sources, session_id)?;
+        let titles = CodexNativeTitles::read(self.root);
+        titles.apply(&mut capture.snapshot.summary);
+        if let Some(prefix) = prefix {
+            let mut parents = HashMap::new();
+            for entry in &capture.snapshot.relations {
+                if let RelationEntry::Coordination { observation } = entry
+                    && let Some(child) = &observation.to_session_ref
+                    && child.provider == "codex"
+                {
+                    parents.entry(child.clone()).or_insert_with(|| {
+                        sources.get(&child.session_id).and_then(|path| {
+                            reader_parent_fact_from_path(path, &child.session_id).ok()
+                        })
+                    });
+                }
+            }
+            let current = self.selected_sources(true, Some(session_id))?;
+            if current.get(session_id) != Some(path) || current.pairs.contains_key(session_id) {
+                return Err(CoreError::SourceChanged);
+            }
+            let dependencies = codex_child_dependencies(&current, session_id);
+            if before_dependencies.as_deref() != Some(&dependencies) {
+                return Err(CoreError::SourceChanged);
+            }
+            if codex_prefix_revision(path, self.scope, prefix)? != parent_revision {
+                return Err(CoreError::SourceChanged);
+            }
+            self.validate_source_set_membership(&sources, session_id)?;
+            let mut dependencies =
+                format!("{}:native-title:{}", dependencies, titles.stamp(session_id));
+            if let Some(recorded) = sources.recorded.get(session_id) {
+                dependencies.push_str(&format!(
+                    ":recorded-rollout:{}",
+                    recorded.database.display()
+                ));
+            }
+            capture.stamp = Some(super::ReaderStamp {
+                revision: capture.snapshot.revision.clone(),
+                dependencies,
+            });
+            capture.parent_facts = Some(parents);
+        } else {
+            self.validate_source_set_membership(&sources, session_id)?;
+        }
         Ok(capture)
     }
     fn reader_parent_fact(&self, session_id: &str) -> Result<Option<SessionRef>> {
@@ -1639,9 +1740,7 @@ fn reader_parent_fact_from_path(path: &Path, session_id: &str) -> Result<Option<
         return Ok(None);
     };
     if copied_parent_header(path, &parent)? {
-        #[cfg(test)]
-        COPIED_CHILD_PARSE_COUNT.with(|count| count.set(count.get() + 1));
-        if load_codex(path, "reader-parent-check", session_id)?.ownership_unavailable {
+        if !copied_child_parent_evidence(path, session_id)?.1 {
             return Err(CoreError::Unavailable(format!(
                 "codex/{session_id}: copied parent history has no recorded child task boundary"
             )));
@@ -1651,6 +1750,59 @@ fn reader_parent_fact_from_path(path: &Path, session_id: &str) -> Result<Option<
         provider: "codex".into(),
         session_id: parent,
     }))
+}
+
+/// Parent projections consume the child's canonical header and whether an owned
+/// NEW_TASK exists. Later child execution/body records do not alter those facts.
+fn copied_child_parent_evidence(path: &Path, session_id: &str) -> Result<(String, bool)> {
+    if path.to_string_lossy().ends_with(".zst") {
+        #[cfg(test)]
+        COPIED_CHILD_PARSE_COUNT.with(|count| count.set(count.get() + 1));
+        return Ok((
+            codex_revision_file(path, "child-parent-evidence-v2")?,
+            !load_codex(path, "reader-parent-check", session_id)?.ownership_unavailable,
+        ));
+    }
+    let file = fs::File::open(path).map_err(|source| codex_line_error(path, source))?;
+    let length = file
+        .metadata()
+        .map_err(|source| codex_line_error(path, source))?
+        .len();
+    let mut reader = BufReader::new(file.take(length));
+    let mut digest = codex_revision_hasher(path, "child-parent-evidence-v2");
+    let mut line = Vec::new();
+    let mut bytes = 0;
+    let mut primary = false;
+    let mut owned = false;
+    loop {
+        line.clear();
+        let count = reader
+            .read_until(b'\n', &mut line)
+            .map_err(|source| codex_line_error(path, source))?;
+        if count == 0 {
+            break;
+        }
+        bytes += count as u64;
+        digest.update(&line);
+        if let Ok(record) = serde_json::from_slice::<Value>(&line) {
+            if record["type"] == "session_meta" && record["payload"]["id"] == session_id {
+                primary = true;
+            }
+            if primary
+                && record["type"] == "response_item"
+                && record["payload"]["type"] == "agent_message"
+                && is_task_envelope(&record["payload"])
+            {
+                owned = true;
+                break;
+            }
+        }
+    }
+    let revision = format!("{:x}", digest.finalize());
+    if codex_prefix_revision(path, "child-parent-evidence-v2", bytes)? != revision {
+        return Err(CoreError::SourceChanged);
+    }
+    Ok((revision, owned))
 }
 
 fn copied_parent_header(path: &Path, parent: &str) -> Result<bool> {
@@ -1724,7 +1876,7 @@ fn codex_child_dependencies_with_identities(
     child_identities: Option<&SelectedChildIdentities>,
 ) -> String {
     let mut dependencies = Sha256::new();
-    dependencies.update(b"codex-reader-headers-v1\0");
+    dependencies.update(b"codex-reader-parent-evidence-v2\0");
     for (id, path) in sources {
         if id == session_id {
             continue;
@@ -1747,21 +1899,10 @@ fn codex_child_dependencies_with_identities(
                 dependencies.update(identity.2.as_deref().unwrap_or("").as_bytes());
                 dependencies.update([u8::from(identity.3)]);
                 dependencies.update(identity.4.to_le_bytes());
-                if identity.3 {
-                    match codex_revision_file(path, "child-header-dependency") {
-                        Ok(hash) => dependencies.update(hash.as_bytes()),
-                        Err(_) => dependencies.update(b"unreadable-child-declaration"),
-                    }
-                }
                 if copied_parent_header(path, session_id).unwrap_or(false) {
                     dependencies.update(b"copied-parent-prefix\0");
-                    let digest = fs::File::open(path).and_then(|mut file| {
-                        let mut hash = Sha256::new();
-                        std::io::copy(&mut file, &mut hash)?;
-                        Ok(hash.finalize())
-                    });
-                    match digest {
-                        Ok(hash) => dependencies.update(hash),
+                    match copied_child_parent_evidence(path, id) {
+                        Ok((hash, _)) => dependencies.update(hash.as_bytes()),
                         Err(_) => dependencies.update(b"unreadable-copied-child"),
                     }
                 }
@@ -2006,6 +2147,78 @@ fn load_codex(path: &Path, scope: &str, expected_id: &str) -> Result<LoadedSessi
     Ok(loaded)
 }
 
+/// Capture complete JSONL records present at the opening boundary. The caller
+/// verifies this exact prefix after collecting dependent facts.
+fn open_codex_complete_prefix(path: &Path) -> Result<(fs::File, u64)> {
+    let mut file = fs::File::open(path).map_err(|source| codex_line_error(path, source))?;
+    let mut end = file
+        .metadata()
+        .map_err(|source| codex_line_error(path, source))?
+        .len();
+    let opening_length = end;
+    let mut buffer = [0u8; 64 * 1024];
+    while end > 0 {
+        let start = end.saturating_sub(buffer.len() as u64);
+        file.seek(SeekFrom::Start(start))
+            .map_err(|source| codex_line_error(path, source))?;
+        let bytes = (end - start) as usize;
+        file.read_exact(&mut buffer[..bytes])
+            .map_err(|source| codex_line_error(path, source))?;
+        if let Some(last) = buffer[..bytes].iter().rposition(|byte| *byte == b'\n') {
+            end = start + last as u64 + 1;
+            break;
+        }
+        end = start;
+    }
+    if end < opening_length {
+        file.seek(SeekFrom::Start(end))
+            .map_err(|source| codex_line_error(path, source))?;
+        // A complete final JSON record is valid without a newline. Only an
+        // unfinished record is excluded from the captured prefix.
+        let tail = serde_json::from_reader::<_, serde::de::IgnoredAny>(
+            (&mut file).take(opening_length - end),
+        );
+        if tail.is_ok() || tail.as_ref().is_err_and(|error| !error.is_eof()) {
+            end = opening_length;
+        }
+    }
+    file.seek(SeekFrom::Start(0))
+        .map_err(|source| codex_line_error(path, source))?;
+    Ok((file, end))
+}
+
+fn load_codex_reader_prefix(
+    path: &Path,
+    scope: &str,
+    expected_id: &str,
+) -> Result<(LoadedSession, u64)> {
+    let (file, end) = open_codex_complete_prefix(path)?;
+    let mut hasher = codex_revision_hasher(path, scope);
+    let hashing = HashingReader {
+        inner: file.take(end),
+        hasher: &mut hasher,
+        #[cfg(test)]
+        read_count: 0,
+    };
+    let mut reader = BufReader::new(hashing);
+    let mut loaded = load_codex_reader(path, expected_id, String::new(), &mut reader, None)?;
+    drop(reader);
+    loaded.revision = format!("{:x}", hasher.finalize());
+    Ok((loaded, end))
+}
+
+fn codex_prefix_revision(path: &Path, scope: &str, length: u64) -> Result<String> {
+    let file = fs::File::open(path).map_err(|source| codex_line_error(path, source))?;
+    let mut reader = file.take(length);
+    let mut hasher = codex_revision_hasher(path, scope);
+    let read =
+        std::io::copy(&mut reader, &mut hasher).map_err(|source| codex_line_error(path, source))?;
+    if read != length {
+        return Err(CoreError::SourceChanged);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
 fn codex_revision(path: &Path, scope: &str, source_bytes: &[u8]) -> String {
     let mut hasher = codex_revision_hasher(path, scope);
     hasher.update(source_bytes);
@@ -2020,14 +2233,14 @@ fn codex_revision_hasher(path: &Path, scope: &str) -> Sha256 {
     hasher
 }
 
-struct HashingReader<'a> {
-    inner: fs::File,
+struct HashingReader<'a, R: Read> {
+    inner: R,
     hasher: &'a mut Sha256,
     #[cfg(test)]
     read_count: usize,
 }
 
-impl Read for HashingReader<'_> {
+impl<R: Read> Read for HashingReader<'_, R> {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
         #[cfg(test)]
         {
@@ -5827,6 +6040,298 @@ mod tests {
     }
 
     #[test]
+    fn resume_metadata_reads_current_canonical_header_without_loading_body() {
+        use std::io::Write;
+        let directory = tempfile::tempdir().unwrap();
+        let id = "abababab-abab-4bab-8bab-abababababab";
+        let path = reader_source_path(directory.path(), id);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let header = serde_json::json!({"type":"session_meta","payload":{"id":id,"cwd":r"D:\work space\project"}});
+        fs::write(
+            &path,
+            format!("{header}\n{}", "{\"type\":\"unfinished ".repeat(100_000)),
+        )
+        .unwrap();
+        let core = reader_core(directory.path());
+        CODEX_NORMALIZATION_COUNT.with(|count| count.set(0));
+        let body_reads = std::rc::Rc::new(std::cell::Cell::new(0));
+        let reads = body_reads.clone();
+        CODEX_STREAM_READ_HOOK
+            .with(|hook| *hook.borrow_mut() = Some(Box::new(move |_| reads.set(reads.get() + 1))));
+        let initial = core.resume_spec("codex", id);
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(b"more active body bytes")
+            .unwrap();
+        let appended = core.resume_spec("codex", id);
+        CODEX_STREAM_READ_HOOK.with(|hook| *hook.borrow_mut() = None);
+        let (command, cwd) = initial.unwrap();
+        assert_eq!(cwd.as_deref(), Some(r"D:\work space\project"));
+        let command = command.unwrap().command;
+        assert_eq!(command.executable, "codex");
+        assert_eq!(command.args, ["resume", "{sessionId}"]);
+        assert_eq!(appended.unwrap().1, cwd);
+        assert_eq!(CODEX_NORMALIZATION_COUNT.with(std::cell::Cell::get), 0);
+        assert_eq!(body_reads.get(), 0);
+        assert!(matches!(
+            core.resume_spec("codex", "../wrong"),
+            Err(CoreError::InvalidInput(_))
+        ));
+        fs::remove_file(&path).unwrap();
+        assert!(matches!(
+            core.resume_spec("codex", id),
+            Err(CoreError::NotFound { .. })
+        ));
+    }
+
+    #[test]
+    fn resume_metadata_rejects_same_stat_identity_change_and_ambiguous_selection() {
+        let directory = tempfile::tempdir().unwrap();
+        let id = "abababab-abab-4bab-8bab-abababababab";
+        let other = "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd";
+        let path = reader_source_path(directory.path(), id);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let bytes = format!(
+            "{}\n",
+            serde_json::json!({"type":"session_meta","payload":{"id":id,"cwd":"/canonical"}})
+        );
+        fs::write(&path, &bytes).unwrap();
+        let core = reader_core(directory.path());
+        assert_eq!(
+            core.resume_spec("codex", id).unwrap().1.as_deref(),
+            Some("/canonical")
+        );
+        let mtime = fs::metadata(&path).unwrap().modified().unwrap();
+        fs::write(&path, bytes.replace(id, other)).unwrap();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(mtime))
+            .unwrap();
+        let changed = core.resume_spec("codex", id);
+        assert!(
+            matches!(changed, Err(CoreError::NotFound { .. })),
+            "{changed:?}"
+        );
+        fs::write(&path, &bytes).unwrap();
+        fs::write(path.with_file_name("rollout-duplicate.jsonl"), &bytes).unwrap();
+        assert!(core.resume_spec("codex", id).is_err());
+        let missing_root = tempfile::tempdir().unwrap();
+        let unavailable = reader_core(missing_root.path());
+        assert!(matches!(
+            unavailable.resume_spec("codex", id),
+            Err(CoreError::Unavailable(_))
+        ));
+    }
+
+    #[test]
+    fn parent_dependency_tracks_owned_boundary_not_later_child_execution() {
+        use std::io::Write;
+        let directory = tempfile::tempdir().unwrap();
+        let parent = "abababab-abab-4bab-8bab-abababababab";
+        let child = "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd";
+        let parent_path = reader_source_path(directory.path(), parent);
+        let child_path = reader_source_path(directory.path(), child);
+        write_reader_source(&parent_path, parent, 1, "parent answer");
+        let header = serde_json::json!({"type":"session_meta","payload":{"id":child,"parent_thread_id":parent,"agent_path":"/root/worker","source":{"subagent":{"thread_spawn":{"parent_thread_id":parent}}}}});
+        let inherited = serde_json::json!({"type":"session_meta","payload":{"id":parent}});
+        let task = serde_json::json!({"type":"response_item","payload":{"type":"agent_message","content":[{"type":"text","text":"Message Type: NEW_TASK\nTask name: /root/worker"}]}});
+        fs::write(&child_path, format!("{header}\n{inherited}\n")).unwrap();
+        let root = directory.path().join("codex");
+        let adapter = CodexAdapter {
+            root: &root,
+            scope: "parent-boundary",
+        };
+        let missing = adapter.reader_revision(parent).unwrap().unwrap();
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&child_path)
+            .unwrap()
+            .write_all(format!("{task}\n").as_bytes())
+            .unwrap();
+        let established = adapter.reader_revision(parent).unwrap().unwrap();
+        assert_ne!(missing.revision, established.revision);
+        let child_before = adapter.reader_revision(child).unwrap().unwrap();
+        fs::OpenOptions::new().append(true).open(&child_path).unwrap().write_all(b"{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"later child body\"}}\n").unwrap();
+        let appended = adapter.reader_revision(parent).unwrap().unwrap();
+        assert_eq!(established.revision, appended.revision);
+        assert_ne!(
+            child_before.revision,
+            adapter.reader_revision(child).unwrap().unwrap().revision
+        );
+        assert_eq!(
+            reader_parent_fact_from_path(&child_path, child)
+                .unwrap()
+                .unwrap()
+                .session_id,
+            parent
+        );
+        let bytes = fs::read_to_string(&child_path).unwrap();
+        let modified = fs::metadata(&child_path).unwrap().modified().unwrap();
+        fs::write(&child_path, bytes.replace("NEW_TASK", "NEW_TASS")).unwrap();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&child_path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        assert_ne!(
+            appended.revision,
+            adapter.reader_revision(parent).unwrap().unwrap().revision
+        );
+        assert!(reader_parent_fact_from_path(&child_path, child).is_err());
+        fs::remove_file(&child_path).unwrap();
+        assert_ne!(
+            appended.revision,
+            adapter.reader_revision(parent).unwrap().unwrap().revision
+        );
+    }
+
+    #[test]
+    fn reader_capture_accepts_append_and_excludes_unfinished_tail() {
+        use std::io::Write;
+        let directory = tempfile::tempdir().unwrap();
+        let id = "abababab-abab-4bab-8bab-abababababab";
+        let path = reader_source_path(directory.path(), id);
+        write_reader_source(&path, id, 100, "captured answer");
+        let core = reader_core(directory.path());
+        let hook_path = path.clone();
+        let appended = std::rc::Rc::new(std::cell::Cell::new(false));
+        let flag = appended.clone();
+        CODEX_STREAM_READ_HOOK.with(|hook| *hook.borrow_mut() = Some(Box::new(move |read_count| {
+            if read_count == 2 && !flag.replace(true) {
+                let mut file = fs::OpenOptions::new().append(true).open(&hook_path).unwrap();
+                writeln!(file, "{{\"type\":\"event_msg\",\"payload\":{{\"type\":\"user_message\",\"message\":\"appended after capture\"}}}}").unwrap();
+                write!(file, "{{\"type\":").unwrap();
+            }
+        })));
+        let first = core.reader_bootstrap("codex", id);
+        CODEX_STREAM_READ_HOOK.with(|hook| *hook.borrow_mut() = None);
+        assert!(appended.get());
+        let first = first.unwrap();
+        assert!(
+            !first.segments[0]
+                .items
+                .iter()
+                .any(|item| item.preview.contains("appended after"))
+        );
+        let refreshed = core.reader_bootstrap("codex", id).unwrap();
+        assert!(refreshed.total_items > first.total_items);
+        assert_ne!(refreshed.revision, first.revision);
+        let normalizations = CODEX_NORMALIZATION_COUNT.with(std::cell::Cell::get);
+        assert_eq!(
+            core.reader_bootstrap("codex", id).unwrap().revision,
+            refreshed.revision
+        );
+        assert_eq!(
+            CODEX_NORMALIZATION_COUNT.with(std::cell::Cell::get),
+            normalizations,
+            "an unchanged incomplete tail must reuse its complete-record projection"
+        );
+    }
+
+    #[test]
+    fn reader_capture_rejects_truncation_and_removal_during_read() {
+        for remove in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let id = "abababab-abab-4bab-8bab-abababababab";
+            let path = reader_source_path(directory.path(), id);
+            write_reader_source(&path, id, 100, "captured answer");
+            let core = reader_core(directory.path());
+            let changed = std::rc::Rc::new(std::cell::Cell::new(false));
+            let flag = changed.clone();
+            CODEX_STREAM_READ_HOOK.with(|hook| {
+                *hook.borrow_mut() = Some(Box::new(move |read_count| {
+                    if read_count == 2 && !flag.replace(true) {
+                        if remove {
+                            fs::remove_file(&path).unwrap();
+                        } else {
+                            fs::OpenOptions::new()
+                                .write(true)
+                                .open(&path)
+                                .unwrap()
+                                .set_len(0)
+                                .unwrap();
+                        }
+                    }
+                }))
+            });
+            let result = core.reader_bootstrap("codex", id);
+            CODEX_STREAM_READ_HOOK.with(|hook| *hook.borrow_mut() = None);
+            assert!(changed.get());
+            assert!(result.is_err(), "{result:?}");
+        }
+    }
+
+    #[test]
+    fn reader_execution_pages_are_captured_and_revision_bound() {
+        let directory = tempfile::tempdir().unwrap();
+        let id = "abababab-abab-4bab-8bab-abababababab";
+        let path = reader_source_path(directory.path(), id);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let rows = [
+            serde_json::json!({"type":"session_meta","payload":{"id":id}}),
+            serde_json::json!({"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"a"}}),
+            serde_json::json!({"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"a","output":"Script running with cell ID 65\nWall time 1 seconds\nOutput:\n"}}),
+            serde_json::json!({"type":"response_item","payload":{"type":"function_call","name":"wait","call_id":"b","arguments":"{\"cell_id\":\"65\"}"}}),
+            serde_json::json!({"type":"response_item","payload":{"type":"function_call_output","call_id":"b","output":"Script completed\nWall time 1 seconds\nOutput:\n"}}),
+        ];
+        let bytes = rows
+            .iter()
+            .map(Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        fs::write(&path, &bytes).unwrap();
+        let core = reader_core(directory.path());
+        let bootstrap = core.reader_bootstrap("codex", id).unwrap();
+        let expected = core
+            .protocol_event_stream("codex", id)
+            .unwrap()
+            .execution_events()
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(expected.len(), 4);
+        fs::remove_file(&path).unwrap();
+        let first = core
+            .reader_executions("codex", id, &bootstrap.revision, None, 2)
+            .unwrap();
+        let second = core
+            .reader_executions(
+                "codex",
+                id,
+                &bootstrap.revision,
+                first.next_cursor.as_deref(),
+                2,
+            )
+            .unwrap();
+        let captured = first
+            .events
+            .into_iter()
+            .chain(second.events)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            serde_json::to_value(captured).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+        assert!(second.next_cursor.is_none());
+        fs::write(&path, bytes.replace("65", "69")).unwrap();
+        let new = core.reader_bootstrap("codex", id).unwrap();
+        assert_ne!(new.revision, bootstrap.revision);
+        assert!(matches!(
+            core.reader_executions("codex", id, &bootstrap.revision, None, 2),
+            Err(CoreError::SourceChanged)
+        ));
+        assert!(matches!(
+            core.reader_executions("codex", id, &new.revision, first.next_cursor.as_deref(), 2),
+            Err(CoreError::SourceChanged)
+        ));
+    }
+
+    #[test]
     fn plain_codex_rewrite_during_stream_cannot_publish_mixed_rows() {
         let directory = tempfile::tempdir().unwrap();
         let id = "9a9a9a9a-9a9a-4a9a-8a9a-9a9a9a9a9a9a";
@@ -8857,7 +9362,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(projection, 8);
+        assert_eq!(projection, 10);
         let row: String = db
             .query_row(
                 "SELECT item_json FROM reader_item WHERE provider='codex' AND session_id=?1 AND ordinal=0",
@@ -8932,10 +9437,12 @@ mod tests {
             .unwrap()
             .set_times(fs::FileTimes::new().set_modified(original_mtime))
             .unwrap();
-        assert!(matches!(
-            core.reader_relations("codex", parent, cursor),
-            Err(crate::CoreError::SourceChanged)
-        ));
+        assert_eq!(
+            core.reader_relations("codex", parent, cursor)
+                .unwrap()
+                .revision,
+            first.revision
+        );
         assert!(matches!(
             core.reader_search(
                 "codex",
@@ -8950,6 +9457,10 @@ mod tests {
             Err(crate::CoreError::SourceChanged)
         ));
         let rebuilt = core.reader_bootstrap("codex", parent).unwrap();
+        assert!(matches!(
+            core.reader_relations("codex", parent, cursor),
+            Err(crate::CoreError::SourceChanged)
+        ));
         assert_ne!(rebuilt.revision, first.revision);
         let page = core
             .reader_relations(
@@ -9088,11 +9599,17 @@ mod tests {
             .unwrap()
             .set_times(fs::FileTimes::new().set_modified(mtime))
             .unwrap();
+        assert_eq!(
+            core.reader_relations("codex", parent, cursor)
+                .unwrap()
+                .revision,
+            first.revision
+        );
+        let rebuilt = core.reader_bootstrap("codex", parent).unwrap();
         assert!(matches!(
             core.reader_relations("codex", parent, cursor),
             Err(crate::CoreError::SourceChanged)
         ));
-        let rebuilt = core.reader_bootstrap("codex", parent).unwrap();
         let after = core
             .reader_relations(
                 "codex",
@@ -9143,6 +9660,14 @@ mod tests {
         assert_eq!(after.len(), before_len);
         assert_eq!(after.modified().unwrap(), before_mtime);
 
+        assert_eq!(
+            core.reader_relations("codex", id, &cursor)
+                .unwrap()
+                .revision,
+            bootstrap.revision
+        );
+        let refreshed = core.reader_bootstrap("codex", id).unwrap();
+        assert_ne!(refreshed.revision, bootstrap.revision);
         assert!(matches!(
             core.reader_relations("codex", id, &cursor),
             Err(crate::CoreError::SourceChanged)

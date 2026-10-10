@@ -52,7 +52,7 @@ export const readerMetadataCases = [
   event: { ...session, messageId: item.messageId, segment: 'message' }, owner: null,
   timestamp: null, preview: item.body, totalChars: item.body.length, toolName: null,
   ownerMessageId: null, presentationPhase: item.role === 'assistant' ? 'final_answer' : null,
-  processId: null, processCount: null }));
+  processId: null, processCount: null, contentRevisions: {} }));
 
 export function readerMetadataBootstrap(mode = 'replies', forChild = false) {
   const target = forChild ? { provider: 'codex', sessionId: 'reply-metadata-child' } : session;
@@ -62,7 +62,7 @@ export function readerMetadataBootstrap(mode = 'replies', forChild = false) {
       role, preview: body, totalChars: body.length, timestamp: null, owner,
       toolName: role === 'tool' ? 'fixture-tool' : null, ownerMessageId: owner?.messageId ?? null,
       presentationPhase: processId !== null ? 'commentary' : role === 'assistant' ? 'final_answer' : null,
-      processId, processCount: processId !== null ? 6 : null, replyMetadata });
+      processId, processCount: processId !== null ? 6 : null, replyMetadata, contentRevisions: {} });
   };
   if (mode !== 'opening') append('process-request', 'user', 'Read the controlled process.', null);
   append('process-owner-a', 'assistant', mode === 'opening' ? 'Opening process reply.' : '', readerMetadataCases[1].replyMetadata, 'message', null, 1);
@@ -126,6 +126,13 @@ export async function readerMetadataHarness(t, mode = 'replies', options = {}) {
     }
     if (url.pathname === `/api/v3/reader/codex/${session.sessionId}/toc`) return json({ session, revision,
       toc: readerMetadataBootstrap(mode).toc });
+    if (url.pathname === `/api/v3/reader/codex/${session.sessionId}/executions`) {
+      const count = requests.filter(path => path.startsWith(url.pathname + '?')).length;
+      await options.beforeParentExecution?.(count);
+      return json({ session, revision, coverage: 'partial', events: [],
+        nextCursor: mode === 'child-return' && !url.searchParams.has('cursor') ? 'fixture-execution-next' : null,
+        scannedEvents: mode === 'child-return' ? 1024 : 0 });
+    }
     if (url.pathname === `/api/v3/runtime/codex/${session.sessionId}/events`) {
       const count = requests.filter(path => path.startsWith(url.pathname + '?')).length;
       await options.beforeParentExecution?.(count);
@@ -370,13 +377,13 @@ test('Back from a child source reloads the parent and waits for preceding placem
       'final restored focus waits for the preceding placements to settle');
     releaseRelations();
     await waitFor(command, `document.querySelectorAll('.transcript > .turn-block .inline-child-toggle').length === 3`);
-    assert.equal(await command('eval', `document.activeElement?.id === '${toggleId}'`), 'false',
-      'focus also waits for the first execution response that inserts controls above the transcript');
+    assert.equal(await command('eval', `document.activeElement?.id === '${toggleId}'`), 'true',
+      'the child return focus restores when preceding placements resolve; the pending empty execution page adds no controls');
     releaseExecution();
     await waitFor(command, `document.querySelectorAll('.transcript > .turn-block .inline-child-toggle').length === 3
       && document.activeElement?.id === '${toggleId}'`);
-    assert.equal(await command('eval', `Boolean(document.querySelector('.reader-session-details .reader-execution-details button.read-more'))`), 'true',
-      'the partial execution continuation remains available in Session details before final focus is measured');
+    assert.equal(await command('eval', `Boolean(document.querySelector('.reader-outline .outline-actions button'))`), 'true',
+      'the Reader outline exposes its first keyboard control after the restored child toggle');
     const focus = evalResult(await command('eval', `(() => {
       const target = document.getElementById('${toggleId}');
       const rect = target.getBoundingClientRect();
@@ -388,4 +395,9 @@ test('Back from a child source reloads the parent and waits for preceding placem
     // scrollIntoView uses integer scroll offsets while DOMRect retains subpixels.
     assert.ok(focus.top >= -1 && focus.bottom <= focus.viewport + 1,
       `restored child focus is visible after the earlier controls are inserted: ${JSON.stringify(focus)}`);
+    await command('press', 'Tab');
+    assert.equal(await command('eval', `document.activeElement === document.querySelector('.inline-child-heading-actions a')`), 'true',
+      'Tab advances to the next child navigation control');
+    assert.equal(await command('eval', `(() => { const rect = document.activeElement.getBoundingClientRect(); return rect.top >= 0 && rect.bottom <= innerHeight; })()`), 'true',
+      'the next outline control remains visible');
   });

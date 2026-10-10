@@ -134,12 +134,19 @@ export function layoutTranscriptHandoffs(handoffs: TranscriptHandoff[], points: 
   })).filter(item => item.dispatchY !== null || item.returnY !== null)
     .sort((a, b) => (a.dispatchY ?? -Infinity) - (b.dispatchY ?? -Infinity));
   const ends: number[] = [];
+  const correlations = new Map<string, TranscriptHandoffLayout[]>();
   for (const item of visible) {
-    const start = item.dispatchY === null ? -Infinity : Math.min(item.dispatchY, item.returnY ?? Infinity);
-    const end = item.returnY === null ? Infinity : Math.max(item.dispatchY ?? -Infinity, item.returnY);
+    const group = correlations.get(item.correlationId) ?? [];
+    group.push(item);
+    correlations.set(item.correlationId, group);
+  }
+  for (const group of correlations.values()) {
+    const start = Math.min(...group.map(item => item.dispatchY === null ? -Infinity : Math.min(item.dispatchY, item.returnY ?? Infinity)));
+    const end = Math.max(...group.map(item => item.returnY === null ? Infinity : Math.max(item.dispatchY ?? -Infinity, item.returnY)));
     const available = ends.findIndex(previous => previous < start);
-    item.lane = available < 0 ? ends.length : available;
-    ends[item.lane] = end;
+    const lane = available < 0 ? ends.length : available;
+    for (const item of group) item.lane = lane;
+    ends[lane] = end;
   }
   return visible;
 }

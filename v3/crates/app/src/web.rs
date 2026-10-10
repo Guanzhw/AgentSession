@@ -970,6 +970,34 @@ async fn relations(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReaderExecutionsQuery {
+    revision: String,
+    cursor: Option<String>,
+    limit: Option<usize>,
+}
+
+async fn reader_executions(
+    State(core): State<Arc<Core>>,
+    Path((provider, session_id)): Path<(String, String)>,
+    Query(query): Query<ReaderExecutionsQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        tokio::task::spawn_blocking(move || {
+            core.reader_executions(
+                &provider,
+                &session_id,
+                &query.revision,
+                query.cursor.as_deref(),
+                query.limit.unwrap_or(200),
+            )
+        })
+        .await
+        .map_err(joined_error)??,
+    ))
+}
+
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ChildLocationQuery {
     revision: String,
@@ -1163,6 +1191,10 @@ pub async fn serve(
         .route(
             "/api/v3/reader/{provider}/{session_id}/relations",
             get(relations),
+        )
+        .route(
+            "/api/v3/reader/{provider}/{session_id}/executions",
+            get(reader_executions),
         )
         .route(
             "/api/v3/reader/{provider}/{session_id}/child-location",

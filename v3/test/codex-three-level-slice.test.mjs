@@ -421,8 +421,14 @@ test('canonical child locator returns a late verified placement without relation
       payload: { type: 'agent_message', id: 'after-publication', message: 'Recorded source changed.' },
     }) + '\n');
     corpus.copiedHashes[0] = sha256(corpus.copiedFiles[0]);
+    const stillOpen = await getJson(`${base}/child-location?${query}`, 'child location from the open generation');
+    assert.deepEqual(stillOpen, located,
+      'A source append remains invisible to requests pinned to the already-published generation');
+    const refreshed = await getJson(`${base}/bootstrap`, 'fresh bootstrap after source append');
+    assert.notEqual(refreshed.revision, bootstrap.revision,
+      'A fresh bootstrap publishes the appended source as a new generation');
     assert.equal((await fetch(`${base}/child-location?${query}`)).status, 409,
-      'A real source append after publication rejects the previously valid revision');
+      'Publishing the new generation rejects the previously valid revision');
   });
 
 test('deep child restoration does not drain unrelated relation pages',

@@ -31,19 +31,26 @@ test('transcript gutter follows collapsed execution and returns to the canonical
     ...parallelEntries.filter(entry => entry.observation.kind === 'spawn').slice(0, 2),
     parallelEntries.find(entry => entry.observation.eventId === 'return-0'),
   ];
+  const repeatedEntries = [entries[0], ...['first', 'second', 'third'].map(id => ({
+    ...entries[1], observation: { ...entries[1].observation, eventId: id, readerEvent: event(id) },
+  }))];
   const server = await createServer({ root: ui, appType: 'custom', logLevel: 'error',
     server: { host: '127.0.0.1', port: await freeFetchSafePort(), strictPort: true } });
   server.middlewares.use(async (request, response, next) => {
-    if (!['/gutter-fixture', '/parallel-fixture', '/pending-fixture'].includes(request.url)) return next();
+    if (!['/gutter-fixture', '/parallel-fixture', '/pending-fixture', '/repeated-fixture'].includes(request.url)) return next();
     const parallel = request.url === '/parallel-fixture';
     const pending = request.url === '/pending-fixture';
+    const repeated = request.url === '/repeated-fixture';
     response.setHeader('content-type', 'text/html');
     response.end(await server.transformIndexHtml(request.url, `<!doctype html><html><head><style>
       :root { --muted:#555; --line:#aaa; --paper:#fff; --blue:#369; }
       .transcript {position:relative;padding-left:100px;margin:40px;width:500px}
       article {padding:20px;border:1px solid #ccc;margin:20px 0} summary{padding:10px}
       .inline-child-transcript {padding:20px} #return-card{margin-top:120px}
-      </style></head><body><div class="transcript"><div id="overlay"></div>${pending ? `
+      </style></head><body><div class="transcript"><div id="overlay"></div>${repeated ? `
+      <article data-message-id="dispatch" data-segment="tool">Recorded dispatch</article>
+      <article data-message-id="first" data-segment="message">First return</article>
+      <article data-message-id="second" data-segment="message">Second return</article>` : pending ? `
       <details id="process" open><summary>Pending parallel dispatches</summary>${[0, 1].map(index => `<article style="height:150px" data-message-id="dispatch-${index}" data-segment="tool">Dispatch ${index}</article>`).join('')}</details>` : parallel ? `
       <details id="process"><summary>Parallel dispatches</summary>${[0, 1, 2].map(index => `<article style="height:150px" data-message-id="dispatch-${index}" data-segment="tool">Dispatch ${index}</article>`).join('')}</details>
       ${[0, 1, 2].map(index => `<article data-message-id="return-${index}" data-segment="message">Return ${index}</article>`).join('')}` : `
@@ -51,7 +58,7 @@ test('transcript gutter follows collapsed execution and returns to the canonical
       <div class="inline-child-transcript"><article data-message-id="return" data-segment="message">A child with a reused message ID</article></div>
       <article id="return-card" data-message-id="return" data-segment="message">Returned agent answer</article>`}</div>
       <script type="module">import {mount} from 'svelte';import Gutter from '/src/lib/TranscriptCollaboration.svelte';
-      mount(Gutter,{target:document.querySelector('#overlay'),props:{entries:${JSON.stringify(pending ? pendingEntries : parallel ? parallelEntries : entries)},provider:'codex',sessionId:'parent',host:document.querySelector('.transcript'),onNavigate:event=>{window.returnedEvent=event}}});</script></body></html>`));
+      mount(Gutter,{target:document.querySelector('#overlay'),props:{entries:${JSON.stringify(repeated ? repeatedEntries : pending ? pendingEntries : parallel ? parallelEntries : entries)},provider:'codex',sessionId:'parent',host:document.querySelector('.transcript'),onNavigate:event=>{window.returnedEvent=event}}});</script></body></html>`));
   });
   await server.listen();
   t.after(() => server.close());
@@ -152,4 +159,35 @@ test('transcript gutter follows collapsed execution and returns to the canonical
   assert.equal(returnedPending.paths[1].open, true);
   assert.equal(returnedPending.markers[0].color, pending.markers[0].color);
   assert.equal(returnedPending.markers[0].icon, pending.markers[0].icon);
+  await command('open', server.resolvedUrls.local[0] + 'repeated-fixture');
+  for (let attempt = 0; attempt < 30; attempt++) {
+    if (await command('eval', "document.querySelectorAll('[data-collaboration-connector]').length") === '2') break;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  const repeated = JSON.parse(await command('eval', `(() => ({
+    paths:[...document.querySelectorAll('[data-collaboration-connector]')].map(path=>({d:path.getAttribute('d'),lane:path.dataset.collaborationLane,open:path.classList.contains('open-span')})),
+    hub:{label:document.querySelector('.collaboration-gutter-group > summary').getAttribute('aria-label'),text:document.querySelector('.collaboration-gutter-group > summary').textContent,icon:document.querySelector('.collaboration-gutter-group > summary .agent-icon path')?.getAttribute('d')},
+    targets:[...document.querySelectorAll('.collaboration-gutter-choices a')].map(link=>link.getAttribute('href'))
+  }))()`));
+  assert.deepEqual(repeated.paths.map(item => item.lane), ['0', '0'], 'one correlation owns one trunk and its continuation');
+  const trunk = repeated.paths.find(item => !item.open);
+  const continuation = repeated.paths.find(item => item.open);
+  assert.equal((trunk.d.match(/ V /g) || []).length, 1, 'visible return paths share a single vertical stroke');
+  assert.equal((trunk.d.match(/ H 88/g) || []).length, 2, 'each visible result has one distinct branch');
+  assert.match(continuation.d, /^M [\d.]+ [\d.]+ V [\d.]+$/, 'unloaded result adds only a short continuation, without redrawing dispatch or visible branches');
+  assert.match(repeated.hub.label, /\/root\/reviewer.*Return destinations.*3/);
+  assert.equal(repeated.hub.text.trim(), '', 'same-agent results show their stable icon instead of an apparent agent count');
+  assert.ok(repeated.hub.icon);
+  assert.equal(repeated.targets.length, 3, 'all recorded return destinations remain in the menu');
+  for (const [index, id] of ['first', 'second', 'third'].entries()) {
+    assert.match(repeated.targets[index], new RegExp(`messageId=${id}&segment=message`));
+    await command('eval', `document.querySelector('.collaboration-gutter-group').open=true;document.querySelectorAll('.collaboration-gutter-choices a')[${index}].focus()`);
+    await command('press', 'Enter');
+    assert.deepEqual(JSON.parse(await command('eval', 'window.returnedEvent')), event(id), 'keyboard navigation preserves the exact visible or unloaded destination');
+  }
+  await command('eval', "const returned=document.createElement('article');returned.dataset.messageId='third';returned.dataset.segment='message';returned.textContent='Third return';document.querySelector('.transcript').append(returned)");
+  await new Promise(resolve => setTimeout(resolve, 250));
+  assert.equal(await command('eval', "document.querySelectorAll('[data-collaboration-connector]').length"), '1', 'loading the last result leaves one completed shared trunk');
+  assert.equal(await command('eval', "document.querySelectorAll('[data-collaboration-connector].open-span').length"), '0');
+  assert.equal(await command('eval', "(document.querySelector('[data-collaboration-connector]').getAttribute('d').match(/ H 88/g)||[]).length"), '3');
 });

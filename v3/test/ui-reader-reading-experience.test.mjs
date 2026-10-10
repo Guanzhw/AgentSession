@@ -255,6 +255,7 @@ test('Reader reading experience on current UI and isolated native provider data'
       'closed tool fields do not fetch hidden payloads');
     const bootstraps = bootstrapRequests.length;
     await appendSource();
+    await command('click', 'article.tool-card .tool-disclosure > summary');
     for (const [index, field, expected] of [[1, 'toolInput', toolInput], [2, 'toolOutput', toolOutput]]) {
       const selector = `article.tool-card details.tool-field:nth-child(${index})`;
       await command('eval', `document.querySelector('${selector} summary').click()`);
@@ -322,23 +323,29 @@ test('Reader reading experience on current UI and isolated native provider data'
     assert.equal(await evaluate(command, `document.querySelector('.outline-turn .outline-children').hidden`), false);
     await command('click', '.outline-turn-toggle');
     assert.equal(await evaluate(command, `document.querySelector('.outline-turn .outline-children').hidden`), true);
+    await command('click', '.outline-actions button:last-child');
+    await waitFor(command, `[...document.querySelectorAll('.outline-turn.has-request')].every(group => !group.querySelector('.outline-children').hidden)`);
+    await command('click', '.outline-actions button:first-child');
+    assert.equal(await evaluate(command, `[...document.querySelectorAll('.outline-turn.has-request')].every(group => group.querySelector('.outline-children').hidden)`), true,
+      'one action folds every request group');
     await command('click', '.outline-request');
     await waitFor(command, `location.hash === ${JSON.stringify(initial.requestHref)}`);
   });
   await t.test('outline loads continuously and retains earlier anchors after a later destination', async t => {
     const command = await browser(t, url);
+    await waitFor(command, `document.querySelector('.reader-outline a[href*="messageId=message-239&"]')`);
+    await waitFor(command, `document.querySelector('.reader-outline nav').getAttribute('aria-busy') === 'false'`);
     const initial = await evaluate(command, `({ firstAnchor: document.querySelector('article.event-card').id,
       links: [...document.querySelectorAll('.reader-outline nav a')].map(a => a.getAttribute('href')) })`);
     assert.ok(initial.links.length > 0);
     const actions = await evaluate(command, `[...document.querySelectorAll('button')].filter(b => b.textContent.trim() === 'Load more messages').length`);
-    assert.equal(actions, 1, 'one continuous message loading control');
+    assert.equal(actions, 0, 'the complete outline needs no manual loading control');
     assert.equal(await evaluate(command, `[...document.querySelectorAll('.reader-main button, .toc-controls button')].some(b => /^(Previous|Next)( segment)?$/.test(b.textContent.trim()))`), false);
-    await command('eval', `[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Load more messages').click()`);
-    await waitFor(command, `document.querySelectorAll('.reader-outline nav a').length > ${initial.links.length}`);
     const current = await evaluate(command, `[...document.querySelectorAll('.reader-outline nav a')].map(a => a.getAttribute('href'))`);
     for (const href of initial.links) assert.ok(current.includes(href), `earlier outline anchor retained: ${href}`);
-    await command('eval', `document.querySelectorAll('.reader-outline nav a')[${initial.links.length}].click()`);
-    await waitFor(command, `location.hash === ${JSON.stringify(current[initial.links.length])}`);
+    const tailHref = current.find(href => href.includes('messageId=message-239&'));
+    await command('eval', `document.querySelector('.reader-outline a[href*="messageId=message-239&"]').click()`);
+    await waitFor(command, `location.hash === ${JSON.stringify(tailHref)}`);
     const afterJump = await evaluate(command, `[...document.querySelectorAll('.reader-outline nav a')].map(a => a.getAttribute('href'))`);
     for (const href of initial.links) assert.ok(afterJump.includes(href), `earlier anchor survives later navigation: ${href}`);
     await command('eval', `document.querySelector('.reader-outline nav a').click()`);

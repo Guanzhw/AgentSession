@@ -163,6 +163,9 @@ pub(crate) struct ReaderStamp {
     pub dependencies: String,
 }
 pub(crate) struct ReaderCapture {
+    /// A provider-validated capture boundary; later appends do not invalidate it.
+    pub stamp: Option<ReaderStamp>,
+    pub parent_facts: Option<std::collections::HashMap<SessionRef, Option<Option<SessionRef>>>>,
     pub snapshot: SessionSnapshot,
     /// Outer None asks the core for its existing protocol path. Some(None)
     /// records that the provider attempted capture but has no valid stream.
@@ -262,6 +265,10 @@ pub(crate) trait ProviderAdapter {
     fn resume_command(&self) -> Option<crate::DefaultResumeCommand> {
         None
     }
+    /// Current provider-owned working directory for a structured resume command.
+    fn resume_directory(&self, session_id: &str) -> Result<Option<String>> {
+        Ok(self.load(session_id)?.summary.directory)
+    }
     fn available(&self) -> bool;
     fn unavailable_diagnostic(&self) -> &'static str;
     fn list(&self) -> Result<Vec<SessionSummary>>;
@@ -269,6 +276,10 @@ pub(crate) trait ProviderAdapter {
     fn system_prompt_evidence(&self, session_id: &str) -> Result<SystemPromptEvidence> {
         let summary = self.load(session_id)?.summary;
         Ok(SystemPromptEvidence::new(&summary, "local-evidence"))
+    }
+    /// Navigation may serve an explicitly requested published Reader revision.
+    fn reader_snapshot_navigation(&self) -> bool {
+        false
     }
     /// Exact selected-source revision for durable Reader reuse. Providers
     /// without this hook keep the source-backed Reader path.
@@ -283,6 +294,8 @@ pub(crate) trait ProviderAdapter {
     }
     fn reader_capture(&self, session_id: &str) -> Result<ReaderCapture> {
         Ok(ReaderCapture {
+            stamp: None,
+            parent_facts: None,
             snapshot: self.reader_load(session_id)?,
             protocol_stream: None,
         })

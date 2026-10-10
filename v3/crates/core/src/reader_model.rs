@@ -1,5 +1,5 @@
-//! Rebuildable, scope-isolated Reader projection. A source probe precedes each
-//! source lookup; content-addressed fields can read a published snapshot.
+//! Rebuildable, scope-isolated Reader projection. Bootstrap probes source freshness;
+//! revision-bound navigation and content-addressed fields read published snapshots.
 //! Published rows are visible only after one SQLite transaction.
 use crate::providers::SessionSnapshot;
 use crate::{
@@ -16,8 +16,8 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::time::Duration;
 
-const PROJECTION: i64 = 8;
-const SCHEMA_VERSION: i64 = 1;
+const PROJECTION: i64 = 10;
+const SCHEMA_VERSION: i64 = 2;
 const CHUNK_UNITS: usize = 4096;
 
 pub(crate) fn project_process_items(
@@ -253,10 +253,11 @@ fn placement_pages(
     core: &Core,
     snapshot: &SessionSnapshot,
     captured_stream: Option<&Option<crate::protocol::EventStream>>,
+    captured_parents: Option<&HashMap<SessionRef, Option<Option<SessionRef>>>>,
 ) -> Vec<Vec<ReaderChildPlacement>> {
     let mut pages = Vec::new();
     let mut exact = Vec::new();
-    let mut parents: HashMap<SessionRef, Option<Option<SessionRef>>> = HashMap::new();
+    let mut parents = captured_parents.cloned().unwrap_or_default();
     let mut children: HashMap<String, Vec<String>> = HashMap::new();
     for entry in &snapshot.relations {
         let RelationEntry::Coordination { observation } = entry else {
@@ -279,6 +280,9 @@ fn placement_pages(
         }
     }
     for (provider, ids) in children {
+        if captured_parents.is_some() {
+            break;
+        }
         let facts = crate::providers::adapter(&core.config, &core.source_scope, &provider)
             .map(|adapter| adapter.reader_parent_facts(&ids));
         for id in ids {
@@ -455,6 +459,30 @@ impl ReaderModel {
         let Some(content_revision) = query.content_revision.as_ref() else {
             return Ok(None);
         };
+        let Some(model) = Self::open_published(core, provider, session_id)? else {
+            return Ok(None);
+        };
+        let matches = model
+            .item_by_ref(&query.message_id, &query.segment)?
+            .is_some_and(|item| item.content_revisions.get(&query.field) == Some(content_revision));
+        Ok(matches.then_some(model))
+    }
+
+    pub(crate) fn open_navigation(
+        core: &Core,
+        provider: &str,
+        session_id: &str,
+    ) -> Result<Option<Self>> {
+        let adapter = crate::providers::adapter(&core.config, &core.source_scope, provider)?;
+        if !adapter.reader_snapshot_navigation() {
+            return Ok(None);
+        }
+        Self::open_published(core, provider, session_id)?
+            .map(Some)
+            .ok_or(CoreError::SourceChanged)
+    }
+
+    fn open_published(core: &Core, provider: &str, session_id: &str) -> Result<Option<Self>> {
         let path = core
             .config
             .cache_dir
@@ -502,10 +530,7 @@ impl ReaderModel {
             relation_count,
             task_count,
         };
-        let matches = model
-            .item_by_ref(&query.message_id, &query.segment)?
-            .is_some_and(|item| item.content_revisions.get(&query.field) == Some(content_revision));
-        Ok(matches.then_some(model))
+        Ok(Some(model))
     }
 
     pub(crate) fn open(core: &Core, provider: &str, session_id: &str) -> Result<Option<Self>> {
@@ -513,10 +538,9 @@ impl ReaderModel {
         if !adapter.available() {
             return Err(CoreError::Unavailable(provider.into()));
         }
-        let Some(stamp) = adapter.reader_revision(session_id)? else {
+        let Some(mut stamp) = adapter.reader_revision(session_id)? else {
             return Ok(None);
         };
-        let revision = &stamp.revision;
         fs::create_dir_all(&core.config.cache_dir).map_err(|source| CoreError::Io {
             path: core.config.cache_dir.clone(),
             source,
@@ -552,7 +576,13 @@ impl ReaderModel {
                 dependencies TEXT NOT NULL,
                 summary_json TEXT NOT NULL, item_count INTEGER NOT NULL,
                 relation_count INTEGER NOT NULL, task_count INTEGER NOT NULL,
+                execution_available INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY(provider, session_id)
+            );
+            CREATE TABLE IF NOT EXISTS reader_execution (
+                provider TEXT NOT NULL, session_id TEXT NOT NULL,
+                ordinal INTEGER NOT NULL, event_json TEXT NOT NULL,
+                PRIMARY KEY(provider, session_id, ordinal)
             );
             CREATE TABLE IF NOT EXISTS reader_item (
                 provider TEXT NOT NULL, session_id TEXT NOT NULL,
@@ -583,6 +613,9 @@ impl ReaderModel {
                 (provider, session_id, ordinal, field, start_units);",
             )
             .map_err(storage)?;
+            if schema_version == 1 {
+                db.execute_batch("ALTER TABLE reader_session ADD COLUMN execution_available INTEGER NOT NULL DEFAULT 0;").map_err(storage)?;
+            }
             db.pragma_update(None, "user_version", SCHEMA_VERSION)
                 .map_err(storage)?;
         }
@@ -595,10 +628,19 @@ impl ReaderModel {
             )?;
             if !Self::published(&db, provider, session_id, &stamp)? {
                 let capture = adapter.reader_capture(session_id)?;
-                if capture.snapshot.revision != *revision {
+                if capture.stamp.is_none() && capture.snapshot.revision != stamp.revision {
                     return Err(CoreError::SourceChanged);
                 }
-                Self::publish(core, &mut db, &capture, adapter.as_ref(), &stamp)?;
+                Self::publish(
+                    core,
+                    &mut db,
+                    &capture,
+                    adapter.as_ref(),
+                    capture.stamp.as_ref().unwrap_or(&stamp),
+                )?;
+                if let Some(captured_stamp) = capture.stamp {
+                    stamp = captured_stamp;
+                }
             }
             drop(publication_lock);
         }
@@ -613,14 +655,14 @@ impl ReaderModel {
             params![provider, session_id, PROJECTION],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
         ).map_err(storage)?;
-        if stored_revision != *revision || stored_dependencies != stamp.dependencies {
+        if stored_revision != stamp.revision || stored_dependencies != stamp.dependencies {
             return Err(CoreError::SourceChanged);
         }
         Ok(Some(Self {
             db,
             scope: core.source_scope.clone(),
             summary: decode(summary)?,
-            revision: revision.clone(),
+            revision: stamp.revision,
             dependencies: stamp.dependencies,
             item_count: item_count as usize,
             relation_count: relation_count as usize,
@@ -655,7 +697,12 @@ impl ReaderModel {
         let session_id = &snapshot.summary.session.session_id;
         // Placement resolution is a cold-generation operation. Existing rules
         // verify the child's canonical parent and preserve source anchors.
-        let placements = placement_pages(core, snapshot, capture.protocol_stream.as_ref());
+        let placements = placement_pages(
+            core,
+            snapshot,
+            capture.protocol_stream.as_ref(),
+            capture.parent_facts.as_ref(),
+        );
         let mut boundaries = HashSet::new();
         for relation in &snapshot.relations {
             let RelationEntry::Coordination { observation } = relation else {
@@ -673,16 +720,54 @@ impl ReaderModel {
             boundaries.extend(stream.execution_boundary_refs());
         }
         let projected_items = project_process_items(snapshot, &boundaries);
-        if adapter.reader_revision(session_id)?.as_ref() != Some(stamp) {
+        if capture.stamp.is_none() && adapter.reader_revision(session_id)?.as_ref() != Some(stamp) {
             return Err(CoreError::SourceChanged);
         }
         let tx = db.transaction().map_err(storage)?;
+        // A freshly verified capture can reuse exact field bytes from the same
+        // projection. Metadata and chunks still publish in one WAL transaction.
+        let previous_projection: Option<i64> = tx
+            .query_row(
+                "SELECT projection FROM reader_session WHERE provider=?1 AND session_id=?2",
+                params![provider, session_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(storage)?;
+        let mut previous_fields = HashMap::new();
+        if previous_projection == Some(PROJECTION) {
+            let mut statement = tx
+                .prepare(
+                    "SELECT ordinal,item_json FROM reader_item WHERE provider=?1 AND session_id=?2",
+                )
+                .map_err(storage)?;
+            let rows = statement
+                .query_map(params![provider, session_id], |row| {
+                    Ok((row.get::<_, usize>(0)?, row.get::<_, String>(1)?))
+                })
+                .map_err(storage)?;
+            for row in rows {
+                let (ordinal, item) = row.map_err(storage)?;
+                previous_fields.insert(ordinal, decode::<ReaderItem>(item)?.content_revisions);
+            }
+            tx.execute(
+                "DELETE FROM reader_content WHERE provider=?1 AND session_id=?2 AND ordinal>=?3",
+                params![provider, session_id, snapshot.events.len() as i64],
+            )
+            .map_err(storage)?;
+        } else {
+            tx.execute(
+                "DELETE FROM reader_content WHERE provider=?1 AND session_id=?2",
+                params![provider, session_id],
+            )
+            .map_err(storage)?;
+        }
         for table in [
             "reader_session",
             "reader_item",
             "reader_relation",
             "reader_placement",
-            "reader_content",
+            "reader_execution",
         ] {
             tx.execute(
                 &format!("DELETE FROM {table} WHERE provider=?1 AND session_id=?2"),
@@ -697,7 +782,11 @@ impl ReaderModel {
             let mut content_insert = tx
                 .prepare("INSERT INTO reader_content VALUES (?1,?2,?3,?4,?5,?6,?7,?8)")
                 .map_err(storage)?;
+            let mut content_delete = tx.prepare(
+                "DELETE FROM reader_content WHERE provider=?1 AND session_id=?2 AND ordinal=?3 AND field=?4"
+            ).map_err(storage)?;
             for (ordinal, event) in snapshot.events.iter().enumerate() {
+                let mut old_fields = previous_fields.remove(&ordinal).unwrap_or_default();
                 item_insert
                     .execute(params![
                         provider,
@@ -716,6 +805,14 @@ impl ReaderModel {
                     _ => &[("body", &event.body)],
                 };
                 for (field, content) in fields {
+                    if let Some(previous) = old_fields.remove(*field) {
+                        if previous == projected_items[ordinal].content_revisions[*field] {
+                            continue;
+                        }
+                        content_delete
+                            .execute(params![provider, session_id, ordinal as i64, field])
+                            .map_err(storage)?;
+                    }
                     Self::store_content(
                         &mut content_insert,
                         provider,
@@ -724,6 +821,11 @@ impl ReaderModel {
                         field,
                         content,
                     )?;
+                }
+                for field in old_fields.keys() {
+                    content_delete
+                        .execute(params![provider, session_id, ordinal as i64, field])
+                        .map_err(storage)?;
                 }
             }
         }
@@ -757,13 +859,28 @@ impl ReaderModel {
                     .map_err(storage)?;
             }
         }
+        if let Some(Some(stream)) = &capture.protocol_stream {
+            let mut insert = tx
+                .prepare("INSERT INTO reader_execution VALUES (?1,?2,?3,?4)")
+                .map_err(storage)?;
+            for (ordinal, event) in stream.execution_events().enumerate() {
+                insert
+                    .execute(params![
+                        provider,
+                        session_id,
+                        ordinal as i64,
+                        encode(event)?
+                    ])
+                    .map_err(storage)?;
+            }
+        }
         let task_count = snapshot
             .relations
             .iter()
             .filter(|entry| matches!(entry, RelationEntry::Task { .. }))
             .count();
         tx.execute(
-            "INSERT INTO reader_session VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            "INSERT INTO reader_session VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
             params![
                 provider,
                 session_id,
@@ -773,7 +890,8 @@ impl ReaderModel {
                 encode(&snapshot.summary)?,
                 snapshot.events.len() as i64,
                 snapshot.relations.len() as i64,
-                task_count as i64
+                task_count as i64,
+                matches!(capture.protocol_stream, Some(Some(_)))
             ],
         )
         .map_err(storage)?;
@@ -874,6 +992,64 @@ impl ReaderModel {
         }
         Ok(cursor.position)
     }
+    pub(crate) fn executions(
+        &self,
+        revision: &str,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<crate::ReaderExecutionPage> {
+        if revision != self.revision {
+            return Err(CoreError::SourceChanged);
+        }
+        let available: bool = self.db.query_row(
+            "SELECT execution_available FROM reader_session WHERE provider=?1 AND session_id=?2",
+            params![self.summary.session.provider, self.summary.session.session_id], |row| row.get(0),
+        ).map_err(storage)?;
+        if !available {
+            return Err(CoreError::Unavailable(
+                "recorded Reader execution evidence is unavailable".into(),
+            ));
+        }
+        let start = match cursor {
+            Some(cursor) => self.check_cursor(
+                &self.summary.session.provider,
+                &self.summary.session.session_id,
+                "executions",
+                cursor,
+            )?,
+            None => 0,
+        };
+        let sql_start = i64::try_from(start).map_err(|_| CoreError::InvalidCursor)?;
+        let mut stmt = self.db.prepare("SELECT event_json FROM reader_execution WHERE provider=?1 AND session_id=?2 AND ordinal>=?3 ORDER BY ordinal LIMIT ?4").map_err(storage)?;
+        let rows = stmt
+            .query_map(
+                params![
+                    self.summary.session.provider,
+                    self.summary.session.session_id,
+                    sql_start,
+                    (limit + 1) as i64
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(storage)?;
+        let mut events: Vec<crate::protocol::ProtocolEvent> = rows
+            .map(|row| decode(row.map_err(storage)?))
+            .collect::<Result<_>>()?;
+        if cursor.is_some() && events.is_empty() {
+            return Err(CoreError::InvalidCursor);
+        }
+        let next_cursor = (events.len() > limit).then(|| self.cursor("executions", start + limit));
+        events.truncate(limit);
+        Ok(crate::ReaderExecutionPage {
+            session: self.reference(),
+            revision: self.revision.clone(),
+            coverage: crate::protocol::Coverage::Partial,
+            scanned_events: events.len(),
+            events,
+            next_cursor,
+        })
+    }
+
     fn items(&self, start: usize, size: usize) -> Result<Vec<ReaderItem>> {
         let mut stmt = self.db.prepare(
             "SELECT item_json FROM reader_item WHERE provider=?1 AND session_id=?2 AND ordinal>=?3 ORDER BY ordinal LIMIT ?4"
@@ -1019,6 +1195,7 @@ impl ReaderModel {
             .and_then(|row| row.after_event.as_ref())
             .map(|event| {
                 self.locate(ReaderLocateQuery {
+                    source_revision: None,
                     revision: revision.into(),
                     message_id: Some(event.message_id.clone()),
                     segment: Some(event.segment.clone()),
@@ -1395,6 +1572,157 @@ mod tests {
     }
 
     #[test]
+    fn navigation_reads_only_its_published_generation() {
+        let root = tempfile::tempdir().unwrap();
+        let id = "abababab-abab-4bab-8bab-abababababab";
+        let source_dir = root.path().join("codex/sessions");
+        fs::create_dir_all(&source_dir).unwrap();
+        let path = source_dir.join(format!("rollout-{id}.jsonl"));
+        fs::write(&path, source(id, "original answer")).unwrap();
+        let core = core(root.path());
+        let first = core.reader_bootstrap("codex", id).unwrap();
+        let model = ReaderModel::open_navigation(&core, "codex", id)
+            .unwrap()
+            .unwrap();
+        let segment = model.cursor("segments", 0);
+        let toc = model.cursor("toc", 0);
+        drop(model);
+        fs::write(&path, source(id, "updated answer")).unwrap();
+        assert_eq!(
+            core.reader_segments("codex", id, &segment)
+                .unwrap()
+                .revision,
+            first.revision
+        );
+        assert_eq!(
+            core.reader_toc("codex", id, &toc).unwrap().revision,
+            first.revision
+        );
+        let refreshed = core.reader_bootstrap("codex", id).unwrap();
+        assert_ne!(refreshed.revision, first.revision);
+        assert!(matches!(
+            core.reader_segments("codex", id, &segment),
+            Err(CoreError::SourceChanged)
+        ));
+        assert!(matches!(
+            core.reader_toc("codex", id, &toc),
+            Err(CoreError::SourceChanged)
+        ));
+        fs::remove_file(&path).unwrap();
+        assert!(core.reader_bootstrap("codex", id).is_err());
+        assert!(matches!(
+            ReaderModel::open_navigation(&core, "codex", "missing"),
+            Err(CoreError::SourceChanged)
+        ));
+    }
+
+    #[test]
+    fn publication_reuses_exact_chunks_and_replaces_only_changed_or_removed_fields() {
+        let root = tempfile::tempdir().unwrap();
+        let id = "abababab-abab-4bab-8bab-abababababab";
+        let source_dir = root.path().join("codex/sessions");
+        fs::create_dir_all(&source_dir).unwrap();
+        let path = source_dir.join(format!("rollout-{id}.jsonl"));
+        let stable = source(id, &"🙂 unchanged ".repeat(1000));
+        let call = serde_json::json!({"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"tool","input":"unchanged input"}});
+        let output = serde_json::json!({"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"tool","output":"old output"}});
+        let user = |body: &str| {
+            format!(
+                "{}\n",
+                serde_json::json!({"type":"event_msg","payload":{"type":"user_message","message":body}})
+            )
+        };
+        let original = format!("{stable}{call}\n{output}\n");
+        fs::write(&path, &original).unwrap();
+        let core = core(root.path());
+        let first = core.reader_bootstrap("codex", id).unwrap();
+        assert_eq!(first.total_items, 2);
+        let db = Connection::open(
+            root.path()
+                .join("cache")
+                .join(format!("reader-{}.sqlite", core.source_scope)),
+        )
+        .unwrap();
+        db.execute_batch(
+            "CREATE TABLE content_writes (operation TEXT, ordinal INTEGER, field TEXT);
+            CREATE TRIGGER count_content_insert AFTER INSERT ON reader_content BEGIN
+                INSERT INTO content_writes VALUES ('insert', NEW.ordinal, NEW.field); END;
+            CREATE TRIGGER count_content_delete AFTER DELETE ON reader_content BEGIN
+                INSERT INTO content_writes VALUES ('delete', OLD.ordinal, OLD.field); END;",
+        )
+        .unwrap();
+        let writes = || -> Vec<(String, usize, String)> {
+            db.prepare("SELECT operation,ordinal,field FROM content_writes ORDER BY rowid")
+                .unwrap()
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        let appended = format!("{original}{}", user("appended"));
+        fs::write(&path, &appended).unwrap();
+        let next = core.reader_bootstrap("codex", id).unwrap();
+        assert_eq!(next.total_items, 3);
+        assert_eq!(writes(), vec![("insert".into(), 2, "body".into())]);
+        db.execute("DELETE FROM content_writes", []).unwrap();
+        fs::write(&path, appended.replace("old output", "new output")).unwrap();
+        let changed = core.reader_bootstrap("codex", id).unwrap();
+        assert_eq!(
+            writes(),
+            vec![
+                ("delete".into(), 1, "toolOutput".into()),
+                ("insert".into(), 1, "toolOutput".into())
+            ]
+        );
+        let unchanged = &changed.segments[0].items[0];
+        let content = core
+            .reader_content(
+                "codex",
+                id,
+                ContentQuery {
+                    message_id: unchanged.event.message_id.clone(),
+                    segment: unchanged.event.segment.clone(),
+                    field: "body".into(),
+                    offset: 4095,
+                    max_chars: 120,
+                    revision: changed.revision,
+                    content_revision: Some(unchanged.content_revisions["body"].clone()),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            content.text,
+            crate::page_text(&"🙂 unchanged ".repeat(1000), 4095, 120)
+                .unwrap()
+                .text
+        );
+        db.execute("DELETE FROM content_writes", []).unwrap();
+        let replaced = format!("{stable}{}{}", user("replacement"), user("appended"));
+        fs::write(&path, &replaced).unwrap();
+        core.reader_bootstrap("codex", id).unwrap();
+        let edits = writes();
+        assert_eq!(edits.len(), 3);
+        assert!(edits.iter().all(|(_, ordinal, _)| *ordinal == 1));
+        assert!(edits.contains(&("delete".into(), 1, "toolInput".into())));
+        assert!(edits.contains(&("delete".into(), 1, "toolOutput".into())));
+        assert!(edits.contains(&("insert".into(), 1, "body".into())));
+        db.execute("DELETE FROM content_writes", []).unwrap();
+        fs::write(&path, format!("{stable}{}", user("replacement"))).unwrap();
+        core.reader_bootstrap("codex", id).unwrap();
+        assert_eq!(writes(), vec![("delete".into(), 2, "body".into())]);
+        db.execute("DELETE FROM content_writes", []).unwrap();
+        db.execute("UPDATE reader_session SET projection=?1", [PROJECTION - 1])
+            .unwrap();
+        core.reader_bootstrap("codex", id).unwrap();
+        assert!(
+            writes()
+                .iter()
+                .any(|(operation, ordinal, _)| operation == "insert" && *ordinal == 0),
+            "an older projection must rebuild even unchanged content"
+        );
+    }
+
+    #[test]
     fn wal_reader_holds_one_generation_during_concurrent_publication() {
         let root = tempfile::tempdir().unwrap();
         let id = "abababab-abab-4bab-8bab-abababababab";
@@ -1577,7 +1905,7 @@ mod tests {
                 "codex",
                 &id,
                 ContentQuery {
-                    content_revision: None,
+                    content_revision: item.content_revisions.get(field).cloned(),
                     message_id: item.event.message_id.clone(),
                     segment: item.event.segment.clone(),
                     field: field.into(),
@@ -1588,6 +1916,42 @@ mod tests {
             )
             .unwrap();
         let content_ms = content_started.elapsed().as_millis();
+        let toc_started = std::time::Instant::now();
+        let mut toc_entries = bootstrap.toc.entries.len();
+        let mut toc_cursor = bootstrap.toc.next_cursor.clone();
+        while let Some(cursor) = toc_cursor {
+            let page = core.reader_toc("codex", &id, &cursor).unwrap();
+            toc_entries += page.toc.entries.len();
+            toc_cursor = page.toc.next_cursor;
+        }
+        let toc_ms = toc_started.elapsed().as_millis();
+        let execution_started = std::time::Instant::now();
+        let mut execution_count = 0;
+        let mut execution_cursor = None;
+        loop {
+            let page = core
+                .reader_executions(
+                    "codex",
+                    &id,
+                    &bootstrap.revision,
+                    execution_cursor.as_deref(),
+                    200,
+                )
+                .unwrap();
+            execution_count += page.events.len();
+            execution_cursor = page.next_cursor;
+            if execution_cursor.is_none() {
+                break;
+            }
+        }
+        println!(
+            "reader_navigation toc_ms={} toc_entries={} executions_ms={} execution_count={}",
+            toc_ms,
+            toc_entries,
+            execution_started.elapsed().as_millis(),
+            execution_count
+        );
+
         let cache = state
             .join("cache")
             .join(format!("reader-{}.sqlite", core.source_scope()));

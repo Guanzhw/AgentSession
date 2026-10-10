@@ -21,7 +21,9 @@ The shared core reads the published, scope-isolated SQLite snapshot in one WAL
 transaction, checking canonical provider/session/event/field and fingerprint
 before paging. A cache miss tries the source-backed path with the same field
 check. Whole-session revision checks remain strict for tokenless content,
-pagination, search, collaboration, and MCP event retrieval.
+search and MCP event retrieval. The later
+[navigation snapshot decision](2026-10-10-reader-navigation-snapshots.md)
+changes explicit Reader navigation revisions without weakening those boundaries.
 
 ## Alternatives considered
 
@@ -37,8 +39,9 @@ rewrites, or source removal until a newer publication replaces that field.
 This is snapshot reading, not a claim of current source availability. Identical
 fields survive new generations and ordinal shifts; changed fields reject old
 fingerprints. UTF-16 pagination and source read-only ownership stay unchanged.
-Search reveals retain their search revision. Fresh bootstrap can still fail
-while its source changes during capture.
+Search reveals retain their search revision. The later navigation decision
+allows verified append during fresh ordinary Codex JSONL capture; conflicting
+changes still fail explicitly.
 
 ## Verification
 
@@ -56,5 +59,6 @@ Reader/search/MCP, and desktop tests pass, including the main and inline-child
 append regressions. One browser launch timeout passed on its isolated retry;
 the private frozen MCP corpus case remains skipped. Actual in-app Input/Output
 requests return 200; the original 11,990-unit output reconstructs in nine pages
-with the matching full fingerprint. Fresh bootstrap still returned 409 during
-this actively changing source, consistent with its separate freshness contract.
+with the matching full fingerprint. At that checkpoint, fresh bootstrap still
+returned 409 during the actively changing source. The later navigation decision
+above resolves append during capture while retaining checks for conflicting edits.

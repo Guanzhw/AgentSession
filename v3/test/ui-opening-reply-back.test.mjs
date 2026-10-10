@@ -59,6 +59,7 @@ function readerItem(ordinal, options = {}) {
     processId: options.processId ?? null,
     processCount: options.processCount ?? null,
     replyMetadata: null,
+    contentRevisions: {},
   };
 }
 
@@ -139,6 +140,7 @@ const tailPage = { id: 'segment-96', pageId: 'page-96', startOrdinal: 96,
     preview: `Recorded tail ${96 + index}.`,
   })), ownerContext: null, previousCursor: 'page-64', nextCursor: null };
 const targetToc = { entries: targetItems.map(tocEntry), previousCursor: 'opening-toc', nextCursor: null };
+const middleToc = { entries: nextItems.map(tocEntry), previousCursor: 'toc-page-32', nextCursor: 'toc-64' };
 const runtimeEvent = {
   id: 'runtime-tool-event',
   sequence: 1,
@@ -243,7 +245,13 @@ async function startHarness(t, holdDiscovery = false, rejectReaderOnce = false, 
     }
     if (url.pathname === `/api/v3/reader/${provider}/${sessionId}/toc`) {
       navigationRequests.toc++;
-      json({ session, revision, toc: url.searchParams.get('cursor') === 'toc-64' ? targetToc : toc });
+      const cursor = url.searchParams.get('cursor');
+      const page = cursor === 'toc-page-32' ? middleToc : cursor === 'toc-64' ? targetToc : toc;
+      json({ session, revision, toc: page });
+      return;
+    }
+    if (url.pathname === `/api/v3/reader/${provider}/${sessionId}/executions`) {
+      json({ session, revision, coverage: 'partial', events: [], nextCursor: null, scannedEvents: 0 });
       return;
     }
     if (url.pathname === `/api/v3/runtime/${provider}/${sessionId}/events`) {
@@ -414,8 +422,8 @@ test('initial canonical source fragment uses target bootstrap once and later has
     })()`;
     await waitForBrowser(command, targetVisible, 'the bootstrap-selected paragraph in the viewport');
     assert.equal(harness.targetedBootstrapRequests, 1);
-    assert.deepEqual(harness.navigationRequests, { locate: 0, segments: 0, toc: 0 },
-      'startup source navigation consumes the single target bootstrap without extra lookup/page requests');
+    assert.deepEqual(harness.navigationRequests, { locate: 0, segments: 0, toc: 2 },
+      'startup navigation uses the target bootstrap and automatically loads the remaining two TOC pages');
     assert.equal(await command('eval', 'location.hash'), JSON.stringify(initialHash));
     assert.equal(await command('eval', `document.querySelector('.reader-outline')?.textContent.includes('Selected public reply 70.')`), 'true');
     assert.equal(await command('eval', `document.querySelector('.reader-page-controls:not(.reader-continue) button').disabled`), 'false');

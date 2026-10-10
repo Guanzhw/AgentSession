@@ -31,7 +31,8 @@ function summary(title = 'Original title') {
 function bootstrap(title) {
   const event = { provider: 'codex', sessionId, messageId: 'assistant', segment: 'message' };
   const item = { event, ordinal: 0, owner: null, role: 'assistant', timestamp: null,
-    preview: 'The recorded response.', totalChars: 22, toolName: null, ownerMessageId: null, replyMetadata: null };
+    preview: 'The recorded response.', totalChars: 22, toolName: null, ownerMessageId: null, replyMetadata: null,
+    contentRevisions: {} };
   return { session: summary(title), revision: 'managed-revision', totalItems: 1,
     segments: [{ id: 'segment-0', pageId: 'page-0', startOrdinal: 0, items: [item],
       ownerContext: null, previousCursor: null, nextCursor: null }],

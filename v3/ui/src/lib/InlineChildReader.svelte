@@ -347,7 +347,7 @@
   {#if error}<p class="content-error" role="status">{error}</p>{/if}
   {#if bootstrap}
     {#if child.provider === 'codex' && bootstrap.session.parent?.provider === 'codex'}
-      <InheritedContext child={child} parent={bootstrap.session.parent} revision={bootstrap.revision} />
+      <InheritedContext child={child} parent={bootstrap.session.parent} />
     {/if}
     <div class="inline-child-actions">
       <span>{items.length} {t($language, 'of')} {bootstrap.totalItems} {t($language, 'events loaded')}</span>
@@ -402,7 +402,6 @@
           <div class="attached-tools" role="group" aria-label={t($language, 'Tool activity for this assistant message')}>
             <div class="tool-branch" aria-hidden="true"></div>
             <div class="tool-stack">
-              <p class="tool-stack-label">{t($language, 'Tool activity')}</p>
               {#each block.tools as tool (tool.main.key)}
                 <div class="tool-entry">
                   <EventCard display={tool.main} progress={content[tool.main.key + ':body']}

@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -69,9 +69,14 @@ test('real Axum Reader opens bounded partial Runtime events and returns to exact
     const work = await mkdtemp(path.join(repo, 'tmp', 'v3-ui-runtime-'));
     t.after(() => rm(work, { recursive: true, force: true }));
     for (const name of ['meta', 'index', 'cache', 'claude', 'pi']) await mkdir(path.join(work, name));
+    const sourceRoot = path.join(work, 'codex');
+    const source = path.join(sourceRoot, 'sessions', '2026', '09', '26', path.basename(fixture));
+    await mkdir(path.dirname(source), { recursive: true });
+    await writeFile(source, readFileSync(fixture, 'utf8') + '{"type":');
+    const sourceHash = sha256(source);
     const port = await freePort();
     const base = `http://127.0.0.1:${port}`;
-    const args = ['serve', '--port', String(port), '--codex-dir', path.join(repo, 'v3', 'fixtures', 'codex'),
+    const args = ['serve', '--port', String(port), '--codex-dir', sourceRoot,
       '--opencode-db', path.join(work, 'opencode.db'), '--claude-dir', path.join(work, 'claude'),
       '--pi-dir', path.join(work, 'pi'), '--dsh-dir', path.join(repo, 'v3', 'fixtures', 'deepseek-harness'),
       '--meta-dir', path.join(work, 'meta'), '--index-dir', path.join(work, 'index'),
@@ -86,6 +91,8 @@ test('real Axum Reader opens bounded partial Runtime events and returns to exact
     }
     const page = await (await fetch(`${base}/api/v3/runtime/codex/${sessionId}/events`)).json();
     assert.equal(page.coverage, 'partial');
+    const reader = await (await fetch(`${base}/api/v3/reader/codex/${sessionId}/bootstrap`)).json();
+    assert.notEqual(page.revision, reader.revision, 'Runtime hashes the full static unfinished tail while Reader captures complete records');
     assert.equal(page.events.find(event => event.kind === 'tool.call')?.readerEvent?.messageId, 'tool-call-1');
     const name = `v3-runtime-${process.pid}-${Date.now()}`;
     t.after(async () => { try { await browserCommand(name, 'close'); } catch { /* Already closed. */ } });
@@ -105,9 +112,16 @@ test('real Axum Reader opens bounded partial Runtime events and returns to exact
     await browserCommand(name, 'click', '.runtime-filters button');
     await waitFor(name, `document.querySelectorAll('.runtime-event').length === 1`, 'exact filtered event');
     assert.match(await browserCommand(name, 'get', 'text', '.runtime-event'), /tool.call/);
+    await browserCommand(name, 'eval', `window.__runtimeLocateRequests=[];
+      window.__runtimeNavigationFetch=window.fetch.bind(window);
+      window.fetch=(input,init)=>{if(String(input).includes('/locate?')) window.__runtimeLocateRequests.push(String(input));
+        return window.__runtimeNavigationFetch(input,init)}`);
     await browserCommand(name, 'click', '.runtime-event a');
     await waitFor(name, `document.querySelector('.transcript') && location.hash.includes('tool-call-1')`,
       'source anchor in Conversation');
+    assert.equal(await browserCommand(name, 'eval',
+      `window.__runtimeLocateRequests.some(url => new URL(url, location.origin).searchParams.get('sourceRevision') === ${JSON.stringify(page.revision)})`),
+    'true', 'the source jump passes the Runtime strict revision to the owning Reader locate boundary');
 
     // Inject transport failures only after exercising the real Axum route and source jump.
     const respond = (status, code, message) => browserCommand(name, 'eval',
@@ -119,6 +133,7 @@ test('real Axum Reader opens bounded partial Runtime events and returns to exact
       [422, 'protocol_invalid', 'Invalid protocol evidence'],
       [503, 'protocol_unavailable', 'Runtime events unavailable'],
       [500, 'source_error', 'Runtime request failed'],
+      [409, 'source_changed', 'Source revision changed'],
     ]) {
       await respond(status, code, `${code} from test transport`);
       await browserCommand(name, 'click', '.runtime-filters button');
@@ -162,6 +177,16 @@ test('real Axum Reader opens bounded partial Runtime events and returns to exact
       'next page replaces the current bounded page');
 
     await browserCommand(name, 'eval',
+      `window.fetch = async (input, init) => String(input).includes('/api/v3/runtime/') ?
+        new Response(String(input).includes('cursor=') ? ${JSON.stringify(JSON.stringify({ ...second, revision: 'changed-continuation' }))} : ${JSON.stringify(JSON.stringify(first))},
+          {status:200,headers:{'content-type':'application/json'}}) : window.__realFetch(input,init)`);
+    await browserCommand(name, 'click', '.runtime-filters button');
+    await waitFor(name, `document.querySelector('.runtime-event strong')?.textContent === 'session.meta'`, 'first page before changed continuation');
+    await browserCommand(name, 'click', '.runtime-pagination button');
+    await waitFor(name, `document.querySelector('.runtime-state strong')?.textContent === 'Source revision changed'`, 'changed Runtime continuation');
+    assert.equal(Number(await browserCommand(name, 'get', 'count', '.runtime-event a')), 0);
+
+    await browserCommand(name, 'eval',
       `window.__raceCalls=0; window.fetch=(input,init)=>{
         if(!String(input).includes('/api/v3/runtime/')) return window.__realFetch(input,init);
         if(++window.__raceCalls===1) return new Promise(resolve=>{window.__releaseRuntime=()=>resolve(new Response(${JSON.stringify(JSON.stringify(first))},{status:200,headers:{'content-type':'application/json'}}))});
@@ -190,5 +215,33 @@ test('real Axum Reader opens bounded partial Runtime events and returns to exact
     await browserCommand(name, 'eval', 'window.__releaseSessionRuntime()');
     assert.equal(Number(await browserCommand(name, 'get', 'count', '.runtime-event')), 0,
       'an old session response cannot appear in the changed session');
+    // Fresh cross-domain source jumps must not resolve changed facts into the opened Reader snapshot.
+    const baselineSource = readFileSync(fixture, 'utf8') + '{"type":';
+    async function assertChangedSourceJump(sourceText, targetId, marker) {
+      await writeFile(source, baselineSource);
+      await browserCommand(name, 'open', `${base}/codex/session/${sessionId}`);
+      await waitFor(name, `location.pathname.includes('/codex/session/${sessionId}') && document.querySelector('#reader-title')`, 'fresh Reader before source change');
+      await writeFile(source, sourceText);
+      const updated = await (await fetch(`${base}/api/v3/runtime/codex/${sessionId}/events`)).json();
+      assert.notEqual(updated.revision, page.revision);
+      assert.ok(updated.events.some(event => event.readerEvent?.messageId === targetId));
+      await browserCommand(name, 'click', 'button.runtime-tab');
+      const targetSelector = `.runtime-event a[href*="${targetId}"]`;
+      await waitFor(name, `document.querySelector(${JSON.stringify(targetSelector)})`, 'strict Runtime event from changed source');
+      await browserCommand(name, 'click', targetSelector);
+      await waitFor(name, `document.querySelector('.reader-main .content-error')?.textContent.includes('Refresh this session')`, 'explicit cross-domain source change');
+      assert.equal(await browserCommand(name, 'eval', `location.hash.includes(${JSON.stringify(targetId)})`), 'false',
+        'a changed Runtime fact cannot become a successful Reader source anchor');
+      assert.equal(await browserCommand(name, 'eval', `document.querySelector('.transcript').textContent.includes(${JSON.stringify(marker)})`), 'false');
+    }
+    await assertChangedSourceJump(readFileSync(fixture, 'utf8') + JSON.stringify({ type: 'response_item',
+      payload: { type: 'message', id: 'after-open-event', role: 'assistant',
+        content: [{ type: 'output_text', text: 'AFTER_OPEN_EVENT_MARKER' }] } }) + '\n',
+    'after-open-event', 'AFTER_OPEN_EVENT_MARKER');
+    await assertChangedSourceJump(baselineSource.replace('Hello 🙂 from the Rust slice. Continue to the complete ending.',
+      'SAME_ID_REWRITTEN_MARKER'), 'assistant-1', 'SAME_ID_REWRITTEN_MARKER');
+    await writeFile(source, baselineSource);
+
+    assert.equal(sha256(source), sourceHash, 'the task-owned unfinished tail remains unchanged');
     assert.equal(sha256(fixture), before, 'Runtime reads must preserve the provider source');
   });

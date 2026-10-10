@@ -347,17 +347,21 @@ pub(super) fn load_selected(
     } else {
         let mut loaded = load_codex(path, scope, id)?;
         if sources.is_some_and(|sources| sources.recorded.contains_key(id)) {
-            loaded.observations.facts.diagnostics.push(Diagnostic {
-                code: "codex_recorded_rollout_selected",
-                event_id: None,
-            });
-            loaded.observations.facts.coverage.insert("sourceHistory".into(), DomainCoverage {
-                state: ObservationState::Unknown,
-                details: "Reading the current rollout recorded in Codex threads.rollout_path; continuity with other same-ID source files is unrecorded.".into(),
-            });
+            mark_recorded_rollout(&mut loaded);
         }
         Ok(loaded)
     }
+}
+
+pub(super) fn mark_recorded_rollout(loaded: &mut LoadedSession) {
+    loaded.observations.facts.diagnostics.push(Diagnostic {
+        code: "codex_recorded_rollout_selected",
+        event_id: None,
+    });
+    loaded.observations.facts.coverage.insert("sourceHistory".into(), DomainCoverage {
+        state: ObservationState::Unknown,
+        details: "Reading the current rollout recorded in Codex threads.rollout_path; continuity with other same-ID source files is unrecorded.".into(),
+    });
 }
 
 #[cfg(test)]

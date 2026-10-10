@@ -60,32 +60,76 @@ fn line_summary(text: &str) -> Option<String> {
 }
 
 fn code_summary(code: &str) -> Option<String> {
-    let line = code
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty() && !line.starts_with("//"))?;
+    let mut statement = code.trim_start();
+    while statement.starts_with("//") {
+        statement = statement.split_once('\n')?.1.trim_start();
+    }
+    if let Some(assignment) = statement
+        .strip_prefix("const ")
+        .or_else(|| statement.strip_prefix("let "))
+    {
+        let (identifier, value) = assignment.split_once('=')?;
+        let identifier = identifier.trim();
+        if identifier.is_empty()
+            || !identifier.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '_' | '$')
+            })
+        {
+            return None;
+        }
+        statement = value.trim_start();
+    }
     // Current functions.exec records these JavaScript orchestration calls as
     // raw input. Decode only a literal cmd in the known exec_command wrapper;
-    // expressions and other tool calls retain their recorded code summary.
-    let call = line
+    // expressions and orchestration code remain available in the full input.
+    let call = statement
         .strip_prefix("text(await tools.exec_command(")
-        .or_else(|| line.strip_prefix("await tools.exec_command("));
-    if let Some(object) = call.and_then(|call| call.trim_start().strip_prefix('{')) {
-        let field = object.trim_start();
-        let value = field
-            .strip_prefix("cmd")
-            .or_else(|| field.strip_prefix("\"cmd\""))
-            .and_then(|field| field.trim_start().strip_prefix(':'));
-        if let Some(command) = value.and_then(|value| {
-            serde_json::Deserializer::from_str(value.trim_start())
-                .into_iter::<String>()
-                .next()?
-                .ok()
-        }) {
-            return line_summary(&command);
+        .or_else(|| statement.strip_prefix("await tools.exec_command("))
+        .or_else(|| {
+            statement
+                .strip_prefix("await Promise.allSettled([")?
+                .trim_start()
+                .strip_prefix("tools.exec_command(")
+        });
+    literal_command(call?).and_then(|command| line_summary(&command))
+}
+
+fn literal_command(call: &str) -> Option<String> {
+    let mut fields = call.trim_start().strip_prefix('{')?.trim_start();
+    let mut command = None;
+    loop {
+        if let Some(rest) = fields.strip_prefix('}') {
+            return rest.trim_start().starts_with(')').then_some(command)?;
+        }
+        let (key, rest) = if fields.starts_with('"') {
+            let mut literal = serde_json::Deserializer::from_str(fields).into_iter::<String>();
+            let key = literal.next()?.ok()?;
+            (key, &fields[literal.byte_offset()..])
+        } else {
+            let end = fields.find(|character: char| {
+                !character.is_ascii_alphanumeric() && !matches!(character, '_' | '$')
+            })?;
+            if end == 0 {
+                return None;
+            }
+            (fields[..end].to_owned(), &fields[end..])
+        };
+        let value = rest.trim_start().strip_prefix(':')?.trim_start();
+        let mut literal = serde_json::Deserializer::from_str(value).into_iter::<Value>();
+        let parsed = literal.next()?.ok()?;
+        if key == "cmd" {
+            if command.is_some() {
+                return None;
+            }
+            command = Some(parsed.as_str()?.to_owned());
+        }
+        fields = value[literal.byte_offset()..].trim_start();
+        if let Some(rest) = fields.strip_prefix(',') {
+            fields = rest.trim_start();
+        } else if !fields.starts_with('}') {
+            return None;
         }
     }
-    line_summary(line)
 }
 
 #[cfg(test)]
@@ -131,11 +175,52 @@ mod tests {
     }
 
     #[test]
-    fn raw_exec_keeps_expressions_and_other_actions_as_recorded_code() {
+    fn raw_exec_keeps_expressions_and_orchestration_out_of_readable_headers() {
         let code = "text(await tools.exec_command({cmd: command}));";
-        assert_eq!(code_summary(code).as_deref(), Some(code));
+        assert_eq!(code_summary(code), None);
         let action = "const results = await Promise.allSettled([";
-        assert_eq!(code_summary(action).as_deref(), Some(action));
+        assert_eq!(code_summary(action), None);
+        assert_eq!(
+            code_summary("const r = await tools.exec_command({cmd: \"git\" + suffix});"),
+            None
+        );
+    }
+
+    #[test]
+    fn recorded_assignment_and_batch_headers_expose_the_first_literal_command() {
+        assert_eq!(
+            code_summary(
+                "const r = await tools.exec_command({cmd:\"git fetch opensession main\",workdir:\"D:\\\\WorkSpace\"}); text(r);"
+            ),
+            Some("git fetch opensession main".into())
+        );
+        assert_eq!(
+            code_summary(
+                "const results = await Promise.allSettled([\n  tools.exec_command({cmd:\"git status --short\"}),\n  tools.exec_command({cmd:\"git remote -v\"})\n]);"
+            ),
+            Some("git status --short".into())
+        );
+        assert_eq!(
+            code_summary("const r = await tools.exec_command({cmd: command});"),
+            None
+        );
+    }
+
+    #[test]
+    fn object_overrides_and_expressions_do_not_claim_a_literal_command() {
+        for fields in [
+            "cmd:\"git status\", cmd:\"cargo test\"",
+            "cmd:\"git status\", ...{cmd:\"cargo test\"}",
+            "cmd:\"git status\", [\"cmd\"]:\"cargo test\"",
+            "cmd:\"git status\", workdir: directory",
+        ] {
+            assert_eq!(
+                code_summary(&format!(
+                    "const r = await tools.exec_command({{{fields}}});"
+                )),
+                None
+            );
+        }
     }
 
     #[test]

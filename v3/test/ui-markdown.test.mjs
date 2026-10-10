@@ -67,10 +67,10 @@ async function harness(t) {
   const items = [
     { event: reference('assistant-markdown', 'message'), ordinal: 0, owner: null,
       role: 'assistant', timestamp: null, preview: markdown.slice(0, 240),
-      totalChars: markdown.length, toolName: null, ownerMessageId: null, replyMetadata: null },
+      totalChars: markdown.length, toolName: null, ownerMessageId: null, replyMetadata: null, contentRevisions: {} },
     { event: reference('tool-plain', 'tool'), ordinal: 1, owner: null,
       role: 'tool', timestamp: null, preview: 'read: ' + toolOutput.slice(0, 20),
-      totalChars: toolOutput.length, toolName: 'read', ownerMessageId: null, replyMetadata: null },
+      totalChars: toolOutput.length, toolName: 'read', ownerMessageId: null, replyMetadata: null, contentRevisions: {} },
   ];
   const summary = { session: { provider: 'codex', sessionId }, title: 'Markdown Reader',
     directory: null, createdAt: null, updatedAt: null, messageCount: 2,
@@ -178,6 +178,7 @@ test('Reader safely renders Markdown through continuation while tool output rema
     const text = await command('get', 'text', '.assistant-card .event-body');
     assert.match(text, /<img src=x onerror=alert\(1\)>/);
     assert.match(text, /MARKDOWN_END/);
+    await command('click', '.tool-card .tool-disclosure > summary');
     await command('click', '.tool-card details.tool-field:nth-child(2) summary');
     await waitFor(command, `document.querySelector('.tool-card details.tool-field:nth-child(2) .event-body')?.textContent === ${JSON.stringify(toolOutput)} &&
       !document.querySelector('.tool-card details.tool-field:nth-child(2) button.read-more')`);

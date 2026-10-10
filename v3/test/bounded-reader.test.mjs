@@ -14,9 +14,11 @@ function source(extra = '') {
   const records = [{ type: 'session_meta', payload: { id: sessionId } }];
   for (let i = 0; i < 100; i++) {
     records.push(i === 32
-      ? { type: 'response_item', payload: { type: 'function_call', call_id: 'tool-32', name: 'public_tool', arguments: '{}' } }
+      ? { type: 'response_item', payload: { type: 'function_call', call_id: 'tool-32', name: 'exec_command', arguments: '{"cmd":"git status --short"}' } }
       : { type: 'response_item', payload: { type: 'message', id: `message-${i}`, role: 'assistant', content: [{ type: 'output_text', text: `Public event ${i}. ${extra}` }] } });
   }
+  records.push({ type: 'response_item', payload: { type: 'function_call_output', call_id: 'tool-32',
+    output: 'Chunk ID: public\nWall time: 1.0 seconds\nProcess running with session ID 97155\nOutput:\n' } });
   return records.map(row => JSON.stringify(row)).join('\n') + '\n';
 }
 async function start(t, dir) {
@@ -37,7 +39,11 @@ async function start(t, dir) {
   }
   throw new Error('Reader did not start');
 }
-const get = async url => { const response = await fetch(url); return { status: response.status, body: await response.json() }; };
+const get = async url => {
+  const response = await fetch(url);
+  return { status: response.status, body: response.headers.get('content-type')?.includes('application/json')
+    ? await response.json() : await response.text() };
+};
 test('bounded Reader traverses source order, locates late events and rejects invalid/stale/scope cursors', { timeout: 45000 }, async t => {
   const dir = await mkdtemp(path.join(repo, 'tmp/v3-bounded-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
@@ -77,7 +83,7 @@ test('bounded Reader traverses source order, locates late events and rejects inv
     assert.equal(response.status, 400); assert.equal(response.body.error.code, 'invalid_cursor');
   }
   for (const changed of [
-    { version: 9 }, { projection: 9 }, { position: 1 }, { position: 128 },
+    { version: 9 }, { projection: 11 }, { position: 1 }, { position: 128 },
     { session: { provider: 'codex', sessionId: 'other' } },
   ]) {
     const token = JSON.stringify({ ...JSON.parse(initial.segments[0].nextCursor), ...changed });
@@ -87,14 +93,72 @@ test('bounded Reader traverses source order, locates late events and rejects inv
   assert.equal((await get(`${left.base}/locate?revision=${initial.revision}&messageId=missing&segment=message`)).status, 404);
   const right = await start(t, path.join(dir, 'right'));
   assert.equal((await get(`${right.base}/segments?cursor=${encodeURIComponent(initial.segments[0].nextCursor)}`)).body.error.code, 'invalid_cursor');
+  const executionsUrl = `${left.base}/executions?${new URLSearchParams({ revision: initial.revision, limit: '1' })}`;
+  const executions = await get(executionsUrl);
+  assert.equal(executions.status, 200);
+  assert.equal(executions.body.revision, initial.revision);
+  assert.ok(executions.body.events.length > 0);
+  for (const params of [{ limit: '0' }, { limit: '201' }, { cursor: 'broken' }, { unknown: 'true' }]) {
+    const rejected = await get(`${left.base}/executions?${new URLSearchParams({ revision: initial.revision, ...params })}`);
+    assert.equal(rejected.status, 400);
+  }
+  assert.equal((await get(`${left.base}/executions`)).status, 400);
   await writeFile(left.file, source('changed'));
   for (const url of [locateUrl, `${left.base}/segments?cursor=${encodeURIComponent(initial.segments[0].nextCursor)}`, `${left.base}/toc?cursor=${encodeURIComponent(initial.toc.nextCursor)}`]) {
-    const response = await get(url); assert.equal(response.status, 409); assert.equal(response.body.error.code, 'source_changed');
+    const response = await get(url);
+    assert.equal(response.status, 200);
+    assert.equal(response.body.revision, initial.revision, 'navigation retains the opened generation before bootstrap refresh');
   }
+  assert.deepEqual((await get(executionsUrl)).body, executions.body);
   const rewritten = (await get(`${left.base}/bootstrap`)).body;
+  assert.notEqual(rewritten.revision, initial.revision);
+  for (const url of [locateUrl, `${left.base}/segments?cursor=${encodeURIComponent(initial.segments[0].nextCursor)}`, executionsUrl]) {
+    const response = await get(url);
+    assert.equal(response.status, 409);
+    assert.equal(response.body.error.code, 'source_changed');
+  }
   await appendFile(left.file, '\n');
-  assert.equal((await get(`${left.base}/segments?cursor=${encodeURIComponent(rewritten.segments[0].nextCursor)}`)).status, 409);
+  assert.equal((await get(`${left.base}/segments?cursor=${encodeURIComponent(rewritten.segments[0].nextCursor)}`)).status, 200);
   await unlink(left.file);
   const missing = await get(`${left.base}/segments?cursor=${encodeURIComponent(rewritten.segments[0].nextCursor)}`);
-  assert.equal(missing.status, 404); assert.equal(missing.body.error.code, 'session_not_found');
+  assert.equal(missing.status, 200, 'published navigation remains readable after source removal');
+  assert.equal((await get(`${left.base}/bootstrap`)).status, 404, 'fresh opening still checks source availability');
+});
+
+test('Runtime source jumps verify their own revision and the current Reader generation', { timeout: 45000 }, async t => {
+  const dir = await mkdtemp(path.join(repo, 'tmp/v3-reader-source-jump-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const { base, file } = await start(t, dir);
+  const runtime = base.replace('/reader/', '/runtime/');
+  const runtimeRevision = async () => (await get(`${runtime}/events?limit=1`)).body.revision;
+  await writeFile(file, source() + '{"type":');
+  const opened = (await get(`${base}/bootstrap`)).body;
+  const strict = await runtimeRevision();
+  assert.notEqual(strict, opened.revision, 'an unfinished tail gives Runtime and Reader distinct valid revision identities');
+  const jump = (revision, sourceRevision, messageId = 'message-31') =>
+    `${base}/locate?${new URLSearchParams({ revision, sourceRevision, messageId, segment: 'message' })}`;
+  const stable = await get(jump(opened.revision, strict));
+  assert.equal(stable.status, 200);
+  assert.equal(stable.body.event.messageId, 'message-31');
+  assert.equal((await get(jump(opened.revision, 'different-runtime-revision'))).body.error.code, 'source_changed');
+
+  await writeFile(file, source('rewritten content'));
+  const rewrittenStrict = await runtimeRevision();
+  assert.equal((await get(jump(opened.revision, strict))).body.error.code, 'source_changed');
+  const staleReader = await get(jump(opened.revision, rewrittenStrict));
+  assert.equal(staleReader.status, 409, 'the same canonical message ID must not open text from an older generation');
+  assert.equal(staleReader.body.error.code, 'source_changed');
+  const rewritten = (await get(`${base}/bootstrap`)).body;
+  assert.equal((await get(jump(rewritten.revision, rewrittenStrict))).status, 200);
+
+  await appendFile(file, JSON.stringify({ type: 'response_item', payload: {
+    type: 'message', id: 'appended-runtime-message', role: 'assistant',
+    content: [{ type: 'output_text', text: 'New Runtime source event.' }],
+  } }) + '\n');
+  const appendedStrict = await runtimeRevision();
+  const absentFromSnapshot = await get(jump(rewritten.revision, appendedStrict, 'appended-runtime-message'));
+  assert.equal(absentFromSnapshot.status, 409);
+  assert.equal(absentFromSnapshot.body.error.code, 'source_changed');
+  const appended = (await get(`${base}/bootstrap`)).body;
+  assert.equal((await get(jump(appended.revision, appendedStrict, 'appended-runtime-message'))).status, 200);
 });

@@ -7,10 +7,10 @@
 
   export let provider: string;
   export let sessionId: string;
-  export let readerRevision: string;
   export let focusNodeId: string | null = null;
   export let onOpenSession: (session: SessionRef, nodeId: string) => void;
 
+  let sourceRevision: string | null = null;
   let graph: RuntimeGraph | null = null;
   let state: 'loading' | 'ready' | 'invalid' | 'unavailable' | 'stale' | 'request' = 'loading';
   let message = '';
@@ -30,10 +30,11 @@
     try {
       const result = await getRuntimeGraph(provider, sessionId, 100);
       if (!active || generation !== request) return;
-      if (result.revision !== readerRevision || result.focus.provider !== provider || result.focus.sessionId !== sessionId) {
+      if ((sourceRevision !== null && result.revision !== sourceRevision) || result.focus.provider !== provider || result.focus.sessionId !== sessionId) {
         state = 'stale';
         return;
       }
+      sourceRevision = result.revision;
       graph = result;
       state = 'ready';
       if (focusNodeId) {

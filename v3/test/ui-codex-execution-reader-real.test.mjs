@@ -223,6 +223,7 @@ async function readerSurface(command) {
       source: card.dataset.segment === 'tool' ? card.dataset.messageId + ' / tool' : null,
       visibleText: card.innerText,
       fullText: card.textContent,
+      rowPhase: card.querySelector('.tool-row .tool-execution-phase')?.dataset.phase ?? null,
     }));
     return { pathname: window.location.pathname, transcriptText: transcript?.innerText ?? '', cards };
   })()`));
@@ -264,6 +265,7 @@ async function openToolOutput(command, messageId, expectedOutput) {
     const card = [...document.querySelectorAll('article')].find(candidate =>
       candidate.dataset.segment === 'tool' && candidate.dataset.messageId === ${JSON.stringify(messageId)});
     if (!card) return { found: false };
+    card.querySelector('.tool-disclosure').open = true;
     const field = [...card.querySelectorAll('details')].find(detail =>
       detail.querySelector('summary')?.textContent.trim().toLowerCase() === 'output');
     if (!field) return { found: true, field: false };
@@ -431,8 +433,8 @@ test('public Codex execution facts have two visible Reader endpoints and retain 
     if (!long.transcriptText.includes('The main conversation kept moving while the job ran.')) {
       failures.push('The long-result Reader omits ordinary assistant work between its source and wait events.');
     }
-    const missingVisible = /no (?:returned )?result (?:is )?(?:saved|recorded)|result (?:is )?(?:unknown|not recorded|unavailable)/i
-      .test(long.transcriptText);
+    const missingTool = sourceTool(long, 'reader-missing');
+    const missingVisible = missingTool?.rowPhase === 'unknown' && /unknown outcome/i.test(missingTool.visibleText);
     if (!missingVisible) failures.push('The yielded execution with no return is not explicitly presented as unknown/unreturned.');
 
     const expectedOutput = fixtureToolOutput(fixtures[2], 'reader-wait');

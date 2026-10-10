@@ -18,6 +18,7 @@ const parentId = 'codex-inherited-ui-parent';
 const dshSeededId = 'dsh-seeded-no-parent-ui';
 const dshUnseededId = 'dsh-unseeded-ui';
 const revision = 'codex-inherited-ui-revision';
+const readerRevision = 'codex-complete-record-prefix-revision';
 const longBody = 'Inherited long field ' + 'x'.repeat(2_250) + ' END_OF_INHERITED_UI_FIELD';
 
 function agentBrowserBinary() {
@@ -58,7 +59,7 @@ function readerBootstrap(sessionId, provider = 'codex') {
         : sessionId === dshUnseededId ? 'DSH unseeded fixture' : 'Codex root fixture',
       directory: '/public/codex-fixture', createdAt: null, updatedAt: null,
       messageCount: 1, tokenCount: null, parent },
-    revision,
+    revision: readerRevision,
     totalItems: 1,
     segments: [{ id: 'segment-0', pageId: 'page-0', startOrdinal: 0, items: [item],
       ownerContext: null, previousCursor: null, nextCursor: null }],
@@ -88,7 +89,7 @@ function inheritedItems(start, end) {
   });
 }
 
-async function startHarness(t) {
+async function startHarness(t, { changedNextRevision = false, changedContentRevision = false, wrongSource = false } = {}) {
   const requireFromUi = createRequire(path.join(uiDir, 'package.json'));
   const { build } = requireFromUi('vite');
   const buildDir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-inherited-context-'));
@@ -97,7 +98,7 @@ async function startHarness(t) {
 
   const listRequests = [];
   const contentRequests = [];
-  let invalidCursorOnce = true;
+  let invalidCursorOnce = !changedNextRevision;
   const server = createHttpServer((request, response) => {
     const url = new URL(request.url || '/', 'http://' + (request.headers.host || '127.0.0.1'));
     const json = (body, status = 200) => {
@@ -122,7 +123,7 @@ async function startHarness(t) {
       return;
     }
     if (url.pathname === '/api/v3/reader/codex/' + rootId + '/relations') {
-      json({ session: { provider: 'codex', sessionId: rootId }, revision,
+      json({ session: { provider: 'codex', sessionId: rootId }, revision: readerRevision,
         entries: [], childPlacements: [{ child: { provider: 'codex', sessionId: childId },
           afterEvent: { provider: 'codex', sessionId: rootId, messageId: 'duplicate', segment: 'message' },
           sourceEventId: 'mock-spawn', diagnostic: null }], nextCursor: null });
@@ -155,8 +156,9 @@ async function startHarness(t) {
         return;
       }
       const items = cursor === 'page-40' ? inheritedItems(40, 51) : inheritedItems(0, 40);
-      json({ session: { provider, sessionId }, revision, scope: 'inherited-context',
-        sourceSession: { provider: 'codex', sessionId: parentId }, totalItems: 51, items,
+      json({ session: { provider, sessionId },
+        revision: changedNextRevision && cursor ? 'changed-inherited-revision' : revision, scope: 'inherited-context',
+        sourceSession: { provider: 'codex', sessionId: wrongSource ? 'different-parent' : parentId }, totalItems: 51, items,
         nextCursor: cursor === 'page-40' ? null : 'page-40' });
       return;
     }
@@ -181,7 +183,7 @@ async function startHarness(t) {
       const textSource = ordinal === 44 ? longBody : 'This is the content for repeated message row 45.';
       const text = textSource.slice(offset, offset + maxChars);
       const nextOffset = offset + text.length < textSource.length ? offset + text.length : null;
-      json({ revision, text, offset, totalChars: textSource.length, nextOffset, truncated: nextOffset !== null });
+      json({ revision: changedContentRevision ? 'changed-content-revision' : revision, text, offset, totalChars: textSource.length, nextOffset, truncated: nextOffset !== null });
       return;
     }
     if (url.pathname.startsWith('/api/')) {
@@ -327,6 +329,8 @@ test('Codex child Reader keeps inherited context separate, bounded, continuable,
     assert.deepEqual(harness.contentRequests.map(row => [row.ordinal, row.messageId, row.offset, row.maxChars]),
       [[44, 'duplicate', 0, 2048], [44, 'duplicate', 2048, 2048]],
       'Content continuation carries the selected ordinal to disambiguate repeated inherited message IDs');
+    assert.ok(harness.contentRequests.every(row => row.revision === revision),
+      'Inherited content uses the strict list revision rather than the differing Reader revision');
     assert.ok(longBody.endsWith('END_OF_INHERITED_UI_FIELD'));
 
     const changedRow = '.inherited-context-item[data-ordinal="46"]';
@@ -388,4 +392,46 @@ test('Codex child Reader keeps inherited context separate, bounded, continuable,
       'The UI uses one bounded request to check whether a DSH prefix exists');
     assert.equal(Number(await command('get', 'count', '.inherited-context')), 0,
       'A DSH source without a copied prefix does not show an empty disclosure or error');
+  });
+
+
+test('inherited pane rejects changed continuation revisions and exact source identity mismatches',
+  { skip: skipReason || false, timeout: 90_000 }, async t => {
+    const harness = await startHarness(t, { changedNextRevision: true });
+    const { command } = await startBrowser(t, harness.origin + '/codex/session/' + childId);
+    await waitForBrowser(command, "document.querySelector('.inherited-context-details')", 'child inherited disclosure');
+    await command('click', '.inherited-context-details > summary');
+    await waitForBrowser(command, "document.querySelectorAll('.inherited-context-item').length === 40", 'first inherited domain page');
+    await command('click', '.inherited-context-next');
+    await waitForBrowser(command, "document.querySelector('.inherited-context-error strong')?.textContent === 'Source revision changed'", 'changed inherited continuation');
+    assert.equal(Number(await command('get', 'count', '.inherited-context-item')), 40,
+      'a changed revision cannot append records to the established inherited generation');
+
+    const identityHarness = await startHarness(t, { wrongSource: true });
+    await command('eval', 'window.location.href = ' + JSON.stringify(identityHarness.origin + '/codex/session/' + childId));
+    await waitForBrowser(command, "document.querySelector('.inherited-context-details')", 'fresh child inherited disclosure');
+    await command('click', '.inherited-context-details > summary');
+    await waitForBrowser(command, "document.querySelector('.inherited-context-error')?.textContent.includes('recorded session identity')", 'exact parent identity rejection');
+    assert.equal(Number(await command('get', 'count', '.inherited-context-item')), 0);
+  });
+
+test('inherited content rejects a success response from a different revision',
+  { skip: skipReason || false, timeout: 90_000 }, async t => {
+    const harness = await startHarness(t, { changedContentRevision: true });
+    const { command } = await startBrowser(t, harness.origin + '/codex/session/' + childId);
+    await waitForBrowser(command, "document.querySelector('.inherited-context-details')", 'child inherited disclosure');
+    await command('click', '.inherited-context-details > summary');
+    await waitForBrowser(command, "document.querySelectorAll('.inherited-context-item').length === 40", 'first inherited domain page');
+    await command('click', '.inherited-context-next');
+    await waitForBrowser(command, "document.querySelector('.inherited-context-error button')", 'cursor restart');
+    await command('click', '.inherited-context-error button');
+    await waitForBrowser(command, "document.querySelectorAll('.inherited-context-item').length === 40 && !document.querySelector('.inherited-context-error')", 'restarted first page');
+    await command('click', '.inherited-context-next');
+    await waitForBrowser(command, "document.querySelectorAll('.inherited-context-item').length === 51", 'second inherited domain page');
+    const row = '.inherited-context-item[data-ordinal="44"]';
+    await command('click', row + ' > .inherited-context-record > summary');
+    await command('click', row + ' button.read-more');
+    await waitForBrowser(command, "document.querySelector('.inherited-context-error strong')?.textContent === 'Source revision changed'", 'changed inherited content revision');
+    assert.equal(harness.contentRequests[0].revision, revision);
+    assert.equal(await command('eval', 'document.querySelector(' + JSON.stringify(row + ' .inherited-context-body') + ').textContent.includes("END_OF_INHERITED_UI_FIELD")'), 'false');
   });

@@ -28,20 +28,20 @@ pub struct Provenance {
 
 /// Normalized source order. Recorded events retain native record and local event
 /// positions; derived dependency declarations use deterministic slots after native records.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct SourceOrder {
     pub record: u64,
     pub ordinal: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ExecutionKind {
     AsyncTool,
     Process,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ExecutionPhase {
     Started,
@@ -53,7 +53,7 @@ pub enum ExecutionPhase {
     Failed,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionObservation {
     pub id: String,
@@ -78,7 +78,7 @@ pub struct EventCandidate {
     pub execution: Option<ExecutionObservation>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProtocolEvent {
     pub id: String,
@@ -259,6 +259,12 @@ pub struct EventDetail {
 }
 
 impl EventStream {
+    pub(crate) fn execution_events(&self) -> impl Iterator<Item = &ProtocolEvent> {
+        self.events
+            .iter()
+            .filter(|event| event.category == "tool" && event.execution.is_some())
+    }
+
     pub fn execution_boundary_refs(&self) -> HashSet<EventRef> {
         self.events
             .iter()

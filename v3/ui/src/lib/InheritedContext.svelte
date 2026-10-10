@@ -12,7 +12,6 @@
 
   export let child: SessionRef;
   export let parent: SessionRef | null = null;
-  export let revision: string;
   export let discover = false;
 
   const pageSize = 40;
@@ -58,7 +57,7 @@
       page.scope !== 'inherited-context') {
       throw new ApiRequestError('invalid_response', 'The inherited-context response did not match this child session.');
     }
-    if (page.revision !== revision || (inheritedPage && page.revision !== inheritedPage.revision)) {
+    if (inheritedPage && page.revision !== inheritedPage.revision) {
       throw new ApiRequestError('source_changed',
         'The source changed while this Reader was open. Refresh this session before reading inherited context.');
     }
@@ -194,12 +193,13 @@
     if (current.loading || current.done || current.nextOffset === null) return;
     const offset = current.hasLoaded ? current.nextOffset : 0;
     const request = requestGeneration;
+    const sourceRevision = inheritedPage!.revision;
     content = { ...content, [key]: { ...current, loading: true, error: '' } };
     try {
       const page = await getInheritedContextContent(child, item,
-        inheritedPage?.revision ?? revision, field, offset, contentPageSize);
+        sourceRevision, field, offset, contentPageSize);
       if (!active || request !== requestGeneration) return;
-      if (page.revision !== (inheritedPage?.revision ?? revision)) {
+      if (page.revision !== sourceRevision) {
         throw new ApiRequestError('source_changed',
           'The source changed while this Reader was open. Refresh this session before continuing.');
       }

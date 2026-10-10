@@ -6,8 +6,8 @@
 
   export let provider: string;
   export let sessionId: string;
-  export let readerRevision: string;
 
+  let sourceRevision: string | null = null;
   let summary: Summary | null = null;
   let state: 'loading' | 'ready' | 'invalid' | 'unavailable' | 'stale' | 'request' = 'loading';
   let message = '';
@@ -27,10 +27,11 @@
     try {
       const result = await getRuntimeSummary(provider, sessionId);
       if (!active || generation !== request) return;
-      if (result.revision !== readerRevision || result.session.provider !== provider || result.session.sessionId !== sessionId) {
+      if ((sourceRevision !== null && result.revision !== sourceRevision) || result.session.provider !== provider || result.session.sessionId !== sessionId) {
         state = 'stale';
         return;
       }
+      sourceRevision = result.revision;
       summary = result;
       state = 'ready';
     } catch (cause) {

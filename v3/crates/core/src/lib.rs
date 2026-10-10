@@ -619,6 +619,17 @@ pub struct ReaderPageResponse {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ReaderExecutionPage {
+    pub session: SessionRef,
+    pub revision: String,
+    pub coverage: protocol::Coverage,
+    pub events: Vec<protocol::ProtocolEvent>,
+    pub next_cursor: Option<String>,
+    pub scanned_events: usize,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ReaderTocResponse {
     pub session: SessionRef,
     pub revision: String,
@@ -629,6 +640,7 @@ pub struct ReaderTocResponse {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ReaderLocateQuery {
     pub revision: String,
+    pub source_revision: Option<String>,
     pub message_id: Option<String>,
     pub segment: Option<String>,
     pub edge: Option<String>,
@@ -667,6 +679,7 @@ impl ReaderBootstrapQuery {
 
     fn location_query(self, revision: &str) -> Option<ReaderLocateQuery> {
         self.message_id.map(|message_id| ReaderLocateQuery {
+            source_revision: None,
             revision: self.revision.unwrap_or_else(|| revision.into()),
             message_id: Some(message_id),
             segment: self.segment,
@@ -1496,9 +1509,15 @@ impl Core {
         provider: &str,
         session_id: &str,
     ) -> Result<(Option<DefaultResumeCommand>, Option<String>)> {
-        let session = self.load_session(provider, session_id)?;
         let adapter = providers::adapter(&self.config, &self.source_scope, provider)?;
-        Ok((adapter.resume_command(), session.summary.directory.clone()))
+        if !adapter.available() {
+            return Err(CoreError::Unavailable(provider.into()));
+        }
+        validate_artifact_session_id(session_id)?;
+        Ok((
+            adapter.resume_command(),
+            adapter.resume_directory(session_id)?,
+        ))
     }
 
     pub fn reader_bootstrap(&self, provider: &str, session_id: &str) -> Result<ReaderBootstrap> {
@@ -1559,13 +1578,52 @@ impl Core {
         Ok(bootstrap)
     }
 
+    pub fn reader_executions(
+        &self,
+        provider: &str,
+        session_id: &str,
+        revision: &str,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<ReaderExecutionPage> {
+        if !(1..=200).contains(&limit) {
+            return Err(CoreError::InvalidInput(
+                "limit must be between 1 and 200".into(),
+            ));
+        }
+        if let Some(model) = reader_model::ReaderModel::open_navigation(self, provider, session_id)?
+        {
+            return model.executions(revision, cursor, limit);
+        }
+        let stream = self.protocol_event_stream(provider, session_id)?;
+        if stream.revision() != revision {
+            return Err(CoreError::SourceChanged);
+        }
+        let page = stream.events(protocol::EventQuery {
+            category: Some("tool".into()),
+            kind: None,
+            execution_only: true,
+            limit,
+            cursor: cursor.map(str::to_owned),
+        })?;
+        Ok(ReaderExecutionPage {
+            session: page.session.clone(),
+            revision: page.revision.into(),
+            coverage: page.coverage,
+            events: page.events.into_iter().cloned().collect(),
+            next_cursor: page.next_cursor,
+            scanned_events: page.scanned_events,
+        })
+    }
+
     pub fn reader_relations(
         &self,
         provider: &str,
         session_id: &str,
         cursor: &str,
     ) -> Result<ReaderRelationsPage> {
-        if let Some(model) = reader_model::ReaderModel::open(self, provider, session_id)? {
+        if let Some(model) = reader_model::ReaderModel::open_navigation(self, provider, session_id)?
+        {
             let start = model.check_cursor(provider, session_id, "relations", cursor)?;
             return model.relations(start);
         }
@@ -1593,7 +1651,8 @@ impl Core {
         revision: &str,
         child: &SessionRef,
     ) -> Result<ReaderChildLocation> {
-        if let Some(model) = reader_model::ReaderModel::open(self, provider, session_id)? {
+        if let Some(model) = reader_model::ReaderModel::open_navigation(self, provider, session_id)?
+        {
             return model.child_location(revision, child);
         }
         let session = self.load_session(provider, session_id)?;
@@ -1611,6 +1670,7 @@ impl Core {
                 self.locate_session(
                     &session,
                     ReaderLocateQuery {
+                        source_revision: None,
                         revision: revision.into(),
                         message_id: Some(event.message_id.clone()),
                         segment: Some(event.segment.clone()),
@@ -1873,7 +1933,8 @@ impl Core {
         session_id: &str,
         cursor: &str,
     ) -> Result<ReaderPageResponse> {
-        if let Some(model) = reader_model::ReaderModel::open(self, provider, session_id)? {
+        if let Some(model) = reader_model::ReaderModel::open_navigation(self, provider, session_id)?
+        {
             let start = model.check_cursor(provider, session_id, "segments", cursor)?;
             return model.segments(start);
         }
@@ -1895,7 +1956,8 @@ impl Core {
         session_id: &str,
         cursor: &str,
     ) -> Result<ReaderTocResponse> {
-        if let Some(model) = reader_model::ReaderModel::open(self, provider, session_id)? {
+        if let Some(model) = reader_model::ReaderModel::open_navigation(self, provider, session_id)?
+        {
             let start = model.check_cursor(provider, session_id, "toc", cursor)?;
             return model.toc(start);
         }
@@ -1915,13 +1977,33 @@ impl Core {
         &self,
         provider: &str,
         session_id: &str,
-        query: ReaderLocateQuery,
+        mut query: ReaderLocateQuery,
     ) -> Result<ReaderLocation> {
-        if let Some(model) = reader_model::ReaderModel::open(self, provider, session_id)? {
-            return model.locate(query);
+        let source_revision = query.source_revision.take();
+        if let Some(expected) = &source_revision
+            && self.protocol_event_stream(provider, session_id)?.revision() != expected
+        {
+            return Err(CoreError::SourceChanged);
         }
-        let session = self.load_session(provider, session_id)?;
-        self.locate_session(&session, query)
+        let model = if source_revision.is_some() {
+            // Runtime links require both current source evidence and the Reader
+            // generation the caller displays. Their revision domains may differ.
+            reader_model::ReaderModel::open(self, provider, session_id)?
+        } else {
+            reader_model::ReaderModel::open_navigation(self, provider, session_id)?
+        };
+        let location = if let Some(model) = model {
+            model.locate(query)?
+        } else {
+            let session = self.load_session(provider, session_id)?;
+            self.locate_session(&session, query)?
+        };
+        if let Some(expected) = &source_revision
+            && self.protocol_event_stream(provider, session_id)?.revision() != expected
+        {
+            return Err(CoreError::SourceChanged);
+        }
+        Ok(location)
     }
 
     fn locate_session(
@@ -3165,6 +3247,158 @@ mod tests {
             "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"test-id\"}}}}\n{{\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"id\":\"assistant-1\",\"role\":\"assistant\",\"content\":[{{\"type\":\"output_text\",\"text\":{}}}]}}}}\n",
             serde_json::to_string(body).unwrap()
         )).unwrap();
+    }
+
+    fn runtime_locate_fixture(root: &Path, output: &str, extra_call: bool, partial: bool) {
+        let mut rows = vec![
+            serde_json::json!({"type":"session_meta","payload":{"id":"runtime-locate"}}),
+            serde_json::json!({"type":"response_item","payload":{"type":"function_call","call_id":"same-call","name":"exec_command","arguments":"{}"}}),
+            serde_json::json!({"type":"response_item","payload":{"type":"function_call_output","call_id":"same-call","output":output}}),
+        ];
+        if extra_call {
+            rows.push(serde_json::json!({"type":"response_item","payload":{"type":"function_call","call_id":"new-call","name":"exec_command","arguments":"{}"}}));
+        }
+        let mut text = rows
+            .iter()
+            .map(|row| format!("{row}\n"))
+            .collect::<String>();
+        if partial {
+            text.push_str("{\"type\":");
+        }
+        fs::create_dir_all(root.join("sessions")).unwrap();
+        fs::write(root.join("sessions/runtime-locate.jsonl"), text).unwrap();
+    }
+
+    fn runtime_locate_query(reader: &str, source: Option<&str>, id: &str) -> ReaderLocateQuery {
+        ReaderLocateQuery {
+            revision: reader.into(),
+            source_revision: source.map(str::to_owned),
+            message_id: Some(id.into()),
+            segment: Some("tool".into()),
+            edge: None,
+        }
+    }
+
+    #[test]
+    fn runtime_locate_rejects_same_call_id_rewritten_since_reader_capture() {
+        let root = tempdir().unwrap();
+        runtime_locate_fixture(root.path(), "old output", false, false);
+        let core = Core::new(config(root.path())).unwrap();
+        let first = core.reader_bootstrap("codex", "runtime-locate").unwrap();
+        runtime_locate_fixture(root.path(), "new output", false, false);
+        let current_source = core
+            .protocol_event_stream("codex", "runtime-locate")
+            .unwrap()
+            .revision()
+            .to_owned();
+        // Ordinary Reader navigation remains a request for its published snapshot.
+        core.reader_locate(
+            "codex",
+            "runtime-locate",
+            runtime_locate_query(&first.revision, None, "same-call"),
+        )
+        .unwrap();
+        assert!(matches!(
+            core.reader_locate(
+                "codex",
+                "runtime-locate",
+                runtime_locate_query(&first.revision, Some(&current_source), "same-call")
+            ),
+            Err(CoreError::SourceChanged)
+        ));
+        let reopened = core.reader_bootstrap("codex", "runtime-locate").unwrap();
+        assert_ne!(reopened.revision, first.revision);
+        let location = core
+            .reader_locate(
+                "codex",
+                "runtime-locate",
+                runtime_locate_query(&reopened.revision, Some(&current_source), "same-call"),
+            )
+            .unwrap();
+        let item = &reopened.segments[0].items[location.ordinal];
+        let content = core
+            .reader_content(
+                "codex",
+                "runtime-locate",
+                ContentQuery {
+                    revision: reopened.revision,
+                    content_revision: Some(item.content_revisions["toolOutput"].clone()),
+                    message_id: "same-call".into(),
+                    segment: "tool".into(),
+                    field: "toolOutput".into(),
+                    offset: 0,
+                    max_chars: 100,
+                },
+            )
+            .unwrap();
+        assert_eq!(content.text, "new output");
+    }
+
+    #[test]
+    fn runtime_locate_accepts_distinct_complete_prefix_and_strict_source_revisions() {
+        let root = tempdir().unwrap();
+        runtime_locate_fixture(root.path(), "recorded output", false, true);
+        let core = Core::new(config(root.path())).unwrap();
+        let reader = core.reader_bootstrap("codex", "runtime-locate").unwrap();
+        let source = core
+            .protocol_event_stream("codex", "runtime-locate")
+            .unwrap()
+            .revision()
+            .to_owned();
+        assert_ne!(reader.revision, source);
+        let location = core
+            .reader_locate(
+                "codex",
+                "runtime-locate",
+                runtime_locate_query(&reader.revision, Some(&source), "same-call"),
+            )
+            .unwrap();
+        assert_eq!(location.revision, reader.revision);
+        assert_eq!(location.event.message_id, "same-call");
+    }
+
+    #[test]
+    fn runtime_locate_requires_reopening_reader_for_a_new_runtime_event() {
+        let root = tempdir().unwrap();
+        runtime_locate_fixture(root.path(), "recorded output", false, false);
+        let core = Core::new(config(root.path())).unwrap();
+        let reader = core.reader_bootstrap("codex", "runtime-locate").unwrap();
+        let old_source = core
+            .protocol_event_stream("codex", "runtime-locate")
+            .unwrap()
+            .revision()
+            .to_owned();
+        runtime_locate_fixture(root.path(), "recorded output", true, false);
+        let current = core
+            .protocol_event_stream("codex", "runtime-locate")
+            .unwrap()
+            .revision()
+            .to_owned();
+        assert!(matches!(
+            core.reader_locate(
+                "codex",
+                "runtime-locate",
+                runtime_locate_query(&reader.revision, Some(&old_source), "same-call")
+            ),
+            Err(CoreError::SourceChanged)
+        ));
+        assert!(matches!(
+            core.reader_locate(
+                "codex",
+                "runtime-locate",
+                runtime_locate_query(&reader.revision, Some(&current), "new-call")
+            ),
+            Err(CoreError::SourceChanged)
+        ));
+        let reopened = core.reader_bootstrap("codex", "runtime-locate").unwrap();
+        let location = core
+            .reader_locate(
+                "codex",
+                "runtime-locate",
+                runtime_locate_query(&reopened.revision, Some(&current), "new-call"),
+            )
+            .unwrap();
+        assert_eq!(location.event.message_id, "new-call");
     }
 
     #[test]

@@ -37,9 +37,13 @@
   export let onReadMore: (display: DisplayItem, field: ContentField) => void;
   export let onOpenCounterpart: ((event: ReaderEventRef) => void) | undefined = undefined;
 
+  let toolOpen = false;
   $: item = display.item;
   $: role = item.role;
   $: toolMetadata = item.toolMetadata;
+  $: toolSummary = toolMetadata?.summary || toolMetadata?.taskName || toolMetadata?.directory;
+  $: executionPhase = executionLandmarks.at(-1);
+  $: if (searchReveal) toolOpen = true;
   $: encryptedInput = toolMetadata?.inputState === 'encrypted';
   $: agentKey = role === 'agent' ? collaborationIdentity?.fromKey ?? collaborationIdentity?.from
     : toolMetadata ? collaborationIdentity?.toKey ?? toolMetadata.taskName : null;
@@ -96,6 +100,15 @@
     return t($language, 'Show more');
   }
 
+  function executionPhaseLabel(phase: ExecutionLandmark['phase']): string {
+    const labels: Record<ExecutionLandmark['phase'], string> = {
+      started: 'Started', yielded: 'Background', polled: 'Checking result', input: 'Input sent',
+      'interruption-requested': 'Interruption requested', completed: 'Returned result',
+      failed: 'Failed', unknown: 'Unknown outcome',
+    };
+    return t($language, labels[phase]);
+  }
+
   function openToolField(event: Event, field: 'toolInput' | 'toolOutput', current: ContentProgress | undefined): void {
     if ((event.currentTarget as HTMLDetailsElement).open && !current?.hasLoaded && !current?.loading) {
       onReadMore(display, field);
@@ -104,68 +117,94 @@
 </script>
 
 <article id={display.anchor} data-message-id={item.event.messageId} data-segment={item.event.segment} data-total-chars={item.totalChars} class="event-card" class:user-card={role === 'user'} class:assistant-card={role === 'assistant' && item.event.segment !== 'thinking'} class:agent-card={role === 'agent'} class:thinking-card={item.event.segment === 'thinking'} class:tool-card={role === 'tool' && item.event.segment !== 'thinking'} class:other-card={role !== 'user' && role !== 'assistant' && role !== 'agent' && role !== 'tool'}>
-  <header class="event-header">
-    <span class="role-mark" class:agent-identity-mark={appearance !== null} style:color={appearance?.color} aria-hidden="true">
-      {#if appearance}<svg viewBox="0 0 5 5"><path d={appearance.icon} fill="currentColor" /></svg>{/if}
-    </span>
-    <strong title={role === 'agent' ? collaborationIdentity?.from ?? undefined : undefined}>{displayedRole}</strong>
-    {#if role === 'agent' && collaborationIdentity?.to}<span class="agent-recipient" title={collaborationIdentity.to}>→ {actorLabel(collaborationIdentity.to, $language)}</span>{/if}
-    {#if timeLabel(item.timestamp, $language)}<time>{timeLabel(item.timestamp, $language)}</time>{/if}
-    {#if role === 'tool' && item.event.segment !== 'thinking'}<span class="tool-kind">{t($language, 'Tool')}</span>{/if}
-    {#if toolMetadata && (toolMetadata.taskName || toolMetadata.model || toolMetadata.reasoningEffort || toolMetadata.forkTurns)}
-      <div class="tool-metadata" aria-label={t($language, 'Agent launch')}>
-        {#if toolMetadata.taskName}<span class="tool-agent-name" style:color={appearance?.color}>{t($language, 'Agent')}: {toolMetadata.taskName}</span>{/if}
-        {#if toolMetadata.model}<span>{t($language, 'Model')}: {toolMetadata.model}</span>{/if}
-        {#if toolMetadata.reasoningEffort}<span>{t($language, 'Reasoning')}: {toolMetadata.reasoningEffort}</span>{/if}
-        {#if toolMetadata.forkTurns}<span>{t($language, 'Context')}: {toolMetadata.forkTurns}</span>{/if}
-      </div>
-    {/if}
-    {#if toolMetadata?.summary || toolMetadata?.directory}
-      <div class="tool-summary" aria-label={t($language, 'Recorded tool input')}>
-        {#if toolMetadata.summary}<span class="tool-command-summary">{toolMetadata.summary}</span>{/if}
-        {#if toolMetadata.directory}<span class="tool-directory" title={toolMetadata.directory}>{t($language, 'Directory')}: {toolMetadata.directory}</span>{/if}
-      </div>
-    {/if}
-  </header>
-
   {#if role === 'tool' && item.event.segment !== 'thinking'}
-    <div class="tool-fields">
-      <details class="tool-field" ontoggle={(event) => { if (!encryptedInput) openToolField(event, 'toolInput', toolInputProgress); }}>
-        <summary>{t($language, 'Input')}{#if encryptedInput}<span class="tool-input-state"> · {t($language, 'Encrypted task message')}</span>{/if}</summary>
-        {#if encryptedInput}
-          <p class="tool-input-notice">{t($language, 'The task message is encrypted in the recorded source.')}</p>
-          <details class="technical-raw-input" ontoggle={(event) => openToolField(event, 'toolInput', toolInputProgress)}>
-            <summary>{t($language, 'Raw input')}</summary>
-            {#if toolInputProgress?.hasLoaded}
-              <div class="event-body">{toolInputProgress.text || t($language, 'No input text was recorded.')}</div>
-            {/if}
-            {#if toolInputProgress?.error}<p class="content-error" role="status">{toolInputProgress.error}</p>{/if}
-            {#if !toolInputProgress?.done}
-              <button class="read-more" disabled={toolInputProgress?.loading} onclick={() => onReadMore(display, 'toolInput')}>{toolActionLabel(toolInputProgress)}</button>
+    <details class="tool-disclosure" bind:open={toolOpen}>
+      <summary class="tool-row">
+        <span class="tool-chevron" aria-hidden="true">›</span>
+        <span class="role-mark" class:agent-identity-mark={appearance !== null} style:color={appearance?.color} aria-hidden="true">
+          {#if appearance}<svg viewBox="0 0 5 5"><path d={appearance.icon} fill="currentColor" /></svg>{/if}
+        </span>
+        <strong title={displayedRole}>{displayedRole}</strong>
+        {#if toolSummary}<span class="tool-command-summary" title={toolSummary}>{toolSummary}</span>{/if}
+        {#if executionPhase}
+          <span class="tool-execution-phase" class:execution-returned={executionPhase.phase === 'completed'} class:execution-failed={executionPhase.phase === 'failed'} class:execution-unknown={executionPhase.phase === 'unknown'} data-phase={executionPhase.phase} title={executionPhase.label}>{executionPhaseLabel(executionPhase.phase)}</span>
+        {/if}
+        {#if timeLabel(item.timestamp, $language)}<time>{timeLabel(item.timestamp, $language)}</time>{/if}
+      </summary>
+      <div class="tool-detail-body">
+        {#if toolMetadata && (toolMetadata.taskName || toolMetadata.model || toolMetadata.reasoningEffort || toolMetadata.forkTurns)}
+          <div class="tool-metadata" aria-label={t($language, 'Agent launch')}>
+            {#if toolMetadata.taskName}<span class="tool-agent-name" style:color={appearance?.color}>{t($language, 'Agent')}: {toolMetadata.taskName}</span>{/if}
+            {#if toolMetadata.model}<span>{t($language, 'Model')}: {toolMetadata.model}</span>{/if}
+            {#if toolMetadata.reasoningEffort}<span>{t($language, 'Reasoning')}: {toolMetadata.reasoningEffort}</span>{/if}
+            {#if toolMetadata.forkTurns}<span>{t($language, 'Context')}: {toolMetadata.forkTurns}</span>{/if}
+          </div>
+        {/if}
+        {#if toolMetadata?.directory}
+          <div class="tool-summary" aria-label={t($language, 'Recorded tool input')}>
+            <span class="tool-directory" title={toolMetadata.directory}>{t($language, 'Directory')}: {toolMetadata.directory}</span>
+          </div>
+        {/if}
+        <div class="tool-fields">
+          <details class="tool-field" ontoggle={(event) => { if (!encryptedInput) openToolField(event, 'toolInput', toolInputProgress); }}>
+            <summary>{t($language, 'Input')}{#if encryptedInput}<span class="tool-input-state"> · {t($language, 'Encrypted task message')}</span>{/if}</summary>
+            {#if encryptedInput}
+              <p class="tool-input-notice">{t($language, 'The task message is encrypted in the recorded source.')}</p>
+              <details class="technical-raw-input" ontoggle={(event) => openToolField(event, 'toolInput', toolInputProgress)}>
+                <summary>{t($language, 'Raw input')}</summary>
+                {#if toolInputProgress?.hasLoaded}
+                  <div class="event-body">{toolInputProgress.text || t($language, 'No input text was recorded.')}</div>
+                {/if}
+                {#if toolInputProgress?.error}<p class="content-error" role="status">{toolInputProgress.error}</p>{/if}
+                {#if !toolInputProgress?.done}
+                  <button class="read-more" disabled={toolInputProgress?.loading} onclick={() => onReadMore(display, 'toolInput')}>{toolActionLabel(toolInputProgress)}</button>
+                {/if}
+              </details>
+            {:else}
+              {#if toolInputProgress?.hasLoaded}
+                <div class="event-body">{toolInputProgress.text || t($language, 'No input text was recorded.')}</div>
+              {/if}
+              {#if toolInputProgress?.error}<p class="content-error" role="status">{toolInputProgress.error}</p>{/if}
+              {#if !toolInputProgress?.done}
+                <button class="read-more" disabled={toolInputProgress?.loading} onclick={() => onReadMore(display, 'toolInput')}>{toolActionLabel(toolInputProgress)}</button>
+              {/if}
             {/if}
           </details>
-        {:else}
-          {#if toolInputProgress?.hasLoaded}
-            <div class="event-body">{toolInputProgress.text || t($language, 'No input text was recorded.')}</div>
-          {/if}
-          {#if toolInputProgress?.error}<p class="content-error" role="status">{toolInputProgress.error}</p>{/if}
-          {#if !toolInputProgress?.done}
-            <button class="read-more" disabled={toolInputProgress?.loading} onclick={() => onReadMore(display, 'toolInput')}>{toolActionLabel(toolInputProgress)}</button>
-          {/if}
+          <details class="tool-field" ontoggle={(event) => openToolField(event, 'toolOutput', toolOutputProgress)}>
+            <summary>{t($language, 'Output')}</summary>
+            {#if toolOutputProgress?.hasLoaded}
+              <div class="event-body">{toolOutputProgress.text || t($language, 'No output text was recorded.')}</div>
+            {/if}
+            {#if toolOutputProgress?.error}<p class="content-error" role="status">{toolOutputProgress.error}</p>{/if}
+            {#if !toolOutputProgress?.done}
+              <button class="read-more" disabled={toolOutputProgress?.loading} onclick={() => onReadMore(display, 'toolOutput')}>{toolActionLabel(toolOutputProgress)}</button>
+            {/if}
+          </details>
+        </div>
+        {#if executionLandmarks.length > 0}
+          <div class="execution-landmarks" aria-label={t($language, 'Recorded execution')}>
+            {#each executionLandmarks as landmark, index (index)}
+              <p class:execution-returned={landmark.phase === 'completed'} class:execution-failed={landmark.phase === 'failed'} class:execution-unknown={landmark.phase === 'unknown'} data-phase={landmark.phase}>
+                {landmark.label}
+                {#if landmark.counterpart && onOpenCounterpart}
+                  <button type="button" class="execution-counterpart" data-execution-counterpart={landmark.counterpart.messageId}
+                    onclick={() => onOpenCounterpart?.(landmark.counterpart!)}>{landmark.counterpartLabel}</button>
+                {/if}
+              </p>
+            {/each}
+          </div>
         {/if}
-      </details>
-      <details class="tool-field" ontoggle={(event) => openToolField(event, 'toolOutput', toolOutputProgress)}>
-        <summary>{t($language, 'Output')}</summary>
-        {#if toolOutputProgress?.hasLoaded}
-          <div class="event-body">{toolOutputProgress.text || t($language, 'No output text was recorded.')}</div>
-        {/if}
-        {#if toolOutputProgress?.error}<p class="content-error" role="status">{toolOutputProgress.error}</p>{/if}
-        {#if !toolOutputProgress?.done}
-          <button class="read-more" disabled={toolOutputProgress?.loading} onclick={() => onReadMore(display, 'toolOutput')}>{toolActionLabel(toolOutputProgress)}</button>
-        {/if}
-      </details>
-    </div>
+      </div>
+    </details>
   {:else}
+    <header class="event-header">
+      <span class="role-mark" class:agent-identity-mark={appearance !== null} style:color={appearance?.color} aria-hidden="true">
+        {#if appearance}<svg viewBox="0 0 5 5"><path d={appearance.icon} fill="currentColor" /></svg>{/if}
+      </span>
+      <strong title={role === 'agent' ? collaborationIdentity?.from ?? undefined : undefined}>{displayedRole}</strong>
+      {#if role === 'agent' && collaborationIdentity?.to}<span class="agent-recipient" title={collaborationIdentity.to}>→ {actorLabel(collaborationIdentity.to, $language)}</span>{/if}
+      {#if timeLabel(item.timestamp, $language)}<time>{timeLabel(item.timestamp, $language)}</time>{/if}
+    </header>
     {#if shownText}
       {#if markdownBody}
         <div class="event-body markdown-body" class:body-preview={bodyIncomplete}>{@html markdownBody}</div>
@@ -182,19 +221,6 @@
       </div>
       {#if progress?.error}<p class="content-error" role="status">{progress.error}</p>{/if}
     {/if}
-  {/if}
-  {#if role === 'tool' && executionLandmarks.length > 0}
-    <div class="execution-landmarks" aria-label={t($language, 'Recorded execution')}>
-      {#each executionLandmarks as landmark, index (index)}
-        <p class:execution-returned={landmark.phase === 'completed'} class:execution-failed={landmark.phase === 'failed'} class:execution-unknown={landmark.phase === 'unknown'} data-phase={landmark.phase}>
-          {landmark.label}
-          {#if landmark.counterpart && onOpenCounterpart}
-            <button type="button" class="execution-counterpart" data-execution-counterpart={landmark.counterpart.messageId}
-              onclick={() => onOpenCounterpart?.(landmark.counterpart!)}>{landmark.counterpartLabel}</button>
-          {/if}
-        </p>
-      {/each}
-    </div>
   {/if}
   {#if searchReveal}
     <section class="search-reveal" tabindex="-1" data-field={searchReveal.field} aria-label={t($language, 'Recorded content at search match')}>

@@ -597,7 +597,21 @@ h1, h2, p { margin-top: 0; }
 .user-card { background: var(--surface-blue); border-radius: 10px; padding: 18px 22px; width: 100%; }
 .agent-card { background: var(--surface-subtle); border-radius: 8px; border-left: 2px solid var(--blue); padding: 18px 22px; }
 .agent-card .role-mark { border-color: var(--blue); background: var(--blue); }
-.tool-card { background: var(--surface-subtle); border: 1px solid var(--line); border-left: 2px solid var(--amber); border-radius: 8px; padding: 15px 18px; }
+.tool-card { background: var(--surface-subtle); border: 1px solid var(--line); border-radius: 5px; padding: 0; }
+.tool-row { display: flex; align-items: center; gap: 9px; min-width: 0; min-height: 38px; padding: 8px 12px; color: var(--text-mid); font-size: 11px; cursor: pointer; list-style: none; }
+.tool-row::-webkit-details-marker { display: none; }
+.tool-row:hover { background: var(--surface-hover); }
+.tool-row:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 4px; }
+.tool-row strong { flex: 0 1 auto; min-width: 0; max-width: 38%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-weight: 600; }
+.tool-row .role-mark { flex-shrink: 0; }
+.tool-chevron { flex-shrink: 0; width: 8px; color: var(--text-quiet); font: 17px/1 var(--mono); transition: transform .12s; }
+.tool-disclosure[open] > .tool-row .tool-chevron { transform: rotate(90deg); }
+.tool-row .tool-command-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-row time { margin-left: auto; flex-shrink: 0; color: var(--text-quiet); font-size: 10px; font-variant-numeric: tabular-nums; }
+.tool-execution-phase { flex-shrink: 0; margin-left: auto; font-size: 10px; }
+.tool-row .execution-returned { color: var(--success); }
+.tool-row .execution-failed, .tool-row .execution-unknown { color: var(--danger); }
+.tool-detail-body { padding: 3px 14px 12px 30px; }
 .other-card { border-left: 3px solid #8b948e; }
 .event-header { min-height: 20px; display: flex; align-items: center; gap: 8px; color: var(--text-subtle); font-size: 12px; }
 .event-header strong { font-weight: 650; }
@@ -605,7 +619,7 @@ h1, h2, p { margin-top: 0; }
 .role-mark { width: 8px; height: 8px; border: 1px solid var(--moss); border-radius: 50%; display: block; }
 .user-card .role-mark { border-color: var(--blue); background: var(--blue); }
 .tool-card .role-mark { border-radius: 1px; transform: rotate(45deg); border-color: var(--amber); }
-.tool-kind { margin-left: auto; color: var(--amber); font-size: 9px; }
+.tool-card .agent-identity-mark { transform: none; }
 .event-body { color: var(--text-body); font-size: 15px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 14px; font-family: "Aptos", "Segoe UI", sans-serif; }
 .body-preview::after { content: "…"; color: var(--muted); }
 .reply-metadata { display: flex; flex-wrap: wrap; gap: 5px 13px; margin-top: 9px; color: var(--text-quiet); font: 10px/1.45 var(--mono); }
@@ -647,7 +661,7 @@ h1, h2, p { margin-top: 0; }
 .tool-field { border-top: 1px solid var(--border-warning); padding-top: 8px; color: var(--amber); }
 .tool-field summary { cursor: pointer; font-size: 10px; font-weight: 600; }
 .tool-field-note { color: var(--text-secondary); font-size: 10px; margin: 10px 0; }
-.tool-field .event-body { margin-top: 9px; padding: 10px 11px; background: var(--surface-hover); border-radius: 3px; }
+.tool-field .event-body { margin-top: 9px; padding: 10px 11px; background: var(--surface-hover); border-radius: 3px; font: 11px/1.6 var(--mono); }
 .tool-field .read-more { margin-top: 9px; margin-right: 12px; }
 .tool-field .content-progress { display: inline-block; }
 .tool-preview { color: var(--text-secondary); }
@@ -669,7 +683,6 @@ h1, h2, p { margin-top: 0; }
 .attached-reasoning .event-card { margin: 8px 0 0 13px; }
 .tool-branch { border-left: 1px solid var(--amber); border-bottom: 1px solid var(--amber); min-height: 24px; width: 13px; }
 .tool-stack { border-left: 1px solid var(--border-warning); padding-left: 15px; }
-.tool-stack-label { color: var(--amber); font-size: 10px; margin: 0 0 8px; }
 .tool-stack .event-card + .event-card { margin-top: 8px; }
 .reader-empty { padding: 34px 0; }
 .reader-empty h2 { font-family: var(--serif); font-weight: 500; font-size: 23px; margin: 0 0 7px; }
@@ -731,11 +744,18 @@ h1, h2, p { margin-top: 0; }
 .outline-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .outline-copy strong { font-size: 12px; font-weight: 500; line-height: 1.55; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .outline-copy span { color: var(--text-faint); font-size: 10px; line-height: 1.4; }
+.outline-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.outline-heading h2 { margin: 0; }
+.outline-actions { display: flex; gap: 10px; }
+.outline-actions button, .outline-retry { padding: 3px 0; border: 0; background: transparent; color: var(--text-secondary); font: inherit; font-size: 11px; cursor: pointer; }
+.outline-actions button:hover, .outline-retry:hover { color: var(--forest-soft); }
+.outline-actions button:focus-visible, .outline-retry:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+.outline-loading { color: var(--muted); font-size: 11px; padding: 8px 0; }
 .transcript, .inline-child-transcript { position: relative; }
 .has-collaboration-gutter { padding-left: 100px; }
 .agent-recipient { font-size: 11px; color: var(--muted); }
 .tool-metadata { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; color: var(--text-mid); font-size: 11px; }
-.tool-summary { min-width: 0; flex: 1; padding: 0 12px; color: var(--text-mid); font-size: 12px; }
+.tool-summary { min-width: 0; color: var(--text-mid); font-size: 12px; }
 .tool-command-summary { overflow-wrap: anywhere; font-family: var(--mono); font-size: 11px; }
 .tool-directory { display: block; font-size: 10px; color: var(--muted); margin-top: 3px; }
 .tool-agent-name { font-weight: 650; }

@@ -189,6 +189,7 @@ test('inline child Reader groups normalized process work like its direct Reader'
     await waitFor(command, `document.querySelector(${JSON.stringify(processGroup)})?.open === true`,
       'expand child process before opening its tool fields');
     const toolCard = '.inline-child-transcript article[data-message-id="CHILD_PROCESS_TOOL"]';
+    await command('click', `${toolCard} .tool-disclosure > summary`);
     const inputField = `${toolCard} .tool-field:first-child`;
     const outputField = `${toolCard} .tool-field:last-child`;
     for (const [field, expected, selector] of [

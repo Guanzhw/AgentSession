@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import type { ContentField, ContentProgress, ReaderBootstrap, ReaderChildPlacement, ReaderCollaborationSnapshot, ReaderEventRef, ReaderItem, ReaderSearchMatch, ReaderSearchTarget, ReaderSegment, ReaderTocEntry, ReaderTocPage, RelationEntry, RelationParticipant, RuntimeExecutionEvent, SessionRef, ViewerMeta } from './api';
-  import { getContentPage, getReaderChildLocation, getReaderLocation, getReaderRelations, getReaderSegment, getReaderToc, getRuntimeExecutionEvents, getTeamMessageContentPage, getViewerMeta, mutateViewer } from './api';
+  import { getContentPage, getReaderChildLocation, getReaderLocation, getReaderRelations, getReaderSegment, getReaderToc, getReaderExecutionEvents, getTeamMessageContentPage, getViewerMeta, mutateViewer } from './api';
   import EventCard, { type DisplayItem, type ExecutionLandmark, type SearchReveal } from './EventCard.svelte';
   import InheritedContext from './InheritedContext.svelte';
   import InlineChildReader from './InlineChildReader.svelte';
@@ -31,9 +31,11 @@
     ? [bootstrap.segments[bootstrap.segments.length - 1]] : [...bootstrap.segments];
   let toc: ReaderTocPage = bootstrap.openingToc ? { ...bootstrap.openingToc,
     entries: mergeToc(bootstrap.openingToc.entries, bootstrap.toc.entries) } : bootstrap.toc;
+  let tocCursor = bootstrap.openingToc?.nextCursor ?? bootstrap.toc.nextCursor;
   let searchOpen = false;
   let sessionDetailsOpen = false;
   let expandedOutlineTurns = new Set<string>();
+  let outlineExpandAll = false;
   let transcriptElement: HTMLElement | null = null;
   let outlineElement: HTMLElement | null = null;
   let readingKey = '';
@@ -158,11 +160,13 @@
   $: blocks = groupReaderItems(items, makeDisplay);
   $: processUnits = groupReaderProcesses(blocks);
   $: outlineTurns = groupOutline(toc.entries);
+  $: if (outlineExpandAll) expandedOutlineTurns = new Set(outlineTurns.map(turn => turn.key));
   $: executionLandmarksByAnchor = createExecutionLandmarks(executionEvents, executionComplete, executionCursor !== null);
+  $: if (readerMounted && executionCursor && !executionLoading && !executionError) void loadExecutionFacts(executionCursor);
   $: firstPage = orderedSegments[0];
   $: lastPage = orderedSegments[orderedSegments.length - 1];
   $: if (readerMounted && items && view === 'conversation') void tick().then(() => scheduleReading(false));
-  $: if (readerMounted && readingOrdinal > (toc.entries.at(-1)?.ordinal ?? -1) && !tocLoading && !tocError && toc.nextCursor) void loadToc();
+  $: if (readerMounted && tocCursor && !tocLoading && !tocError && !locationLoading) void loadToc();
   $: panelSource = activeChildPath.at(-1) ?? bootstrap.session.session;
   $: hasCollaboration = activeChildPath.length > 0 ||
     Boolean(bootstrap.relations && (bootstrap.relations.taskCount > 0 || bootstrap.relations.observationCount > 0));
@@ -476,7 +480,7 @@
     executionLoading = true;
     executionError = '';
     try {
-      const page = await getRuntimeExecutionEvents(provider, sessionId, { cursor, limit: 200 });
+      const page = await getReaderExecutionEvents(provider, sessionId, bootstrap.revision, { cursor, limit: 200 });
       if (!active) return;
       if (page.revision !== bootstrap.revision || page.session.provider !== provider || page.session.sessionId !== sessionId) {
         throw new Error('Source revision changed or session identity differs; reload this session.');
@@ -744,9 +748,15 @@
   }
 
   function toggleOutlineTurn(key: string): void {
+    outlineExpandAll = false;
     const expanded = new Set(expandedOutlineTurns);
     if (expanded.has(key)) expanded.delete(key); else expanded.add(key);
     expandedOutlineTurns = expanded;
+  }
+
+  function setOutlineExpanded(expanded: boolean): void {
+    outlineExpandAll = expanded;
+    expandedOutlineTurns = expanded ? new Set(outlineTurns.map(turn => turn.key)) : new Set();
   }
 
   function expandOutlineFor(event: ReaderEventRef): void {
@@ -794,14 +804,15 @@
   }
 
   async function revealTarget(target: ReaderEventRef | 'end', updateHistory: boolean,
-    stillCurrent: () => boolean = () => true, restoringSearch = false): Promise<boolean> {
+    stillCurrent: () => boolean = () => true, restoringSearch = false,
+    sourceRevision?: string): Promise<boolean> {
     const request = ++locationGeneration;
     ++pageGeneration;
     pageLoading = false;
     locationLoading = true;
     locationError = '';
     try {
-      const location = await getReaderLocation(provider, sessionId, bootstrap.revision, target);
+      const location = await getReaderLocation(provider, sessionId, bootstrap.revision, target, sourceRevision);
       if (!active || request !== locationGeneration || !stillCurrent()) return false;
       const alreadyLoaded = segments.some(page => location.ordinal >= page.startOrdinal &&
         location.ordinal < page.startOrdinal + page.items.length);
@@ -856,7 +867,7 @@
   }
 
   async function loadToc(): Promise<void> {
-    const cursor = toc.nextCursor;
+    const cursor = tocCursor;
     if (!cursor || tocLoading || locationLoading) return;
     const request = ++tocGeneration;
     tocLoading = true;
@@ -866,6 +877,7 @@
       if (active && request === tocGeneration) {
         toc = { entries: mergeToc(toc.entries, response.toc.entries),
           previousCursor: null, nextCursor: response.toc.nextCursor };
+        tocCursor = response.toc.nextCursor;
       }
     } catch (cause) {
       if (active && request === tocGeneration) tocError = cause instanceof Error ? cause.message : 'The outline could not be loaded.';
@@ -947,10 +959,10 @@
     }
   }
 
-  async function openRuntimeSource(target: ReaderEventRef): Promise<void> {
+  async function openRuntimeSource(target: ReaderEventRef, sourceRevision: string): Promise<void> {
     view = 'conversation';
     await tick();
-    if (active) await revealTarget(target, true);
+    if (active) await revealTarget(target, true, undefined, false, sourceRevision);
   }
 
   function openRuntimeSession(session: SessionRef, nodeId: string): void {
@@ -1091,10 +1103,10 @@
             <dt>{t($language, 'Session ID')}</dt><dd><code>{sessionId}</code></dd>
             <dt>{t($language, 'Source revision')}</dt><dd><code>{bootstrap.revision}</code></dd></dl>
           {#if resumeInfo?.diagnostic}<p>{resumeInfo.diagnostic}</p>{/if}
-          {#if executionCursor || executionError}
+          {#if executionError}
             <details class="reader-execution-details"><summary>{t($language, 'Tool execution details')}</summary>
               <button class="read-more" disabled={executionLoading} onclick={() => void loadExecutionFacts(executionCursor ?? undefined)}>
-                {executionLoading ? t($language, 'Loading…') : executionError ? t($language, 'Retry') : t($language, 'More tool execution records')}
+                {executionLoading ? t($language, 'Loading…') : t($language, 'Retry')}
               </button>
               {#if executionError}<p class="content-error" role="status">{executionError}</p>{/if}
             </details>
@@ -1136,14 +1148,14 @@
     </header>
 
     {#if provider === 'codex' && bootstrap.session.parent?.provider === 'codex'}
-      <InheritedContext child={bootstrap.session.session} parent={bootstrap.session.parent} revision={bootstrap.revision} />
+      <InheritedContext child={bootstrap.session.session} parent={bootstrap.session.parent} />
     {:else if provider === 'deepseek-harness'}
       <InheritedContext child={bootstrap.session.session} parent={bootstrap.session.parent}
-        revision={bootstrap.revision} discover />
+        discover />
     {/if}
 
     {#if view === 'runtime'}
-      <RuntimeEvents {provider} {sessionId} readerRevision={bootstrap.revision} onOpenReader={openRuntimeSource}
+      <RuntimeEvents {provider} {sessionId} onOpenReader={openRuntimeSource}
         onOpenSession={openRuntimeSession} />
     {:else}
     {#if hasCollaboration}
@@ -1260,7 +1272,6 @@
             <div class="attached-tools" role="group" aria-label={t($language, 'Tool activity for this assistant message')}>
               <div class="tool-branch" aria-hidden="true"></div>
               <div class="tool-stack">
-                <p class="tool-stack-label">{t($language, 'Tool activity')}</p>
                 {#each block.tools as tool (tool.main.key)}
                   <div class="tool-entry">
                     <EventCard
@@ -1390,11 +1401,14 @@
   <div class="reading-progress" role="progressbar" aria-label={t($language, 'Reading progress')}
     aria-valuemin="0" aria-valuemax="100" aria-valuenow={readingPercent} style:--reading-progress={`${readingPercent}%`}><span></span></div>
   <aside class="reader-outline" aria-label={t($language, 'In this session')}>
-    <h2>{t($language, 'Contents')}</h2>
-    <nav bind:this={outlineElement} aria-label={t($language, 'Jump to message')} onscroll={(event) => {
-      const pane = event.currentTarget;
-      if (!tocError && pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 120) void loadToc();
-    }}>
+    <div class="outline-heading">
+      <h2>{t($language, 'Contents')}</h2>
+      <div class="outline-actions">
+        <button type="button" onclick={() => setOutlineExpanded(false)}>{t($language, 'Collapse all')}</button>
+        <button type="button" onclick={() => setOutlineExpanded(true)}>{t($language, 'Expand all')}</button>
+      </div>
+    </div>
+    <nav bind:this={outlineElement} aria-label={t($language, 'Jump to message')} aria-busy={tocLoading}>
       {#each outlineTurns as turn (turn.key)}
         <div class="outline-turn" class:has-request={Boolean(turn.request)}>
           {#if turn.request}
@@ -1423,10 +1437,9 @@
           </div>
         </div>
       {/each}
-      {#if toc.nextCursor}
-        <button type="button" class="outline-more" disabled={tocLoading || locationLoading} onclick={() => void loadToc()}>{tocLoading ? t($language, 'Loading…') : t($language, 'Load more messages')}</button>
-      {/if}
-      {#if tocError}<p class="content-error" role="status">{tocError}</p>{/if}
+      {#if tocError}<p class="content-error" role="status">{tocError}</p>
+        <button type="button" class="outline-retry" disabled={tocLoading || locationLoading} onclick={() => void loadToc()}>{t($language, 'Retry')}</button>
+      {:else if tocLoading}<p class="outline-loading" role="status">{t($language, 'Loading contents…')}</p>{/if}
     </nav>
   </aside>
   {:else}<aside class="reader-outline runtime-outline" aria-label={t($language, 'Runtime')}><p class="rail-label">{t($language, 'Runtime')}</p><p>{t($language, 'Recorded event metadata for this session.')}</p></aside>{/if}

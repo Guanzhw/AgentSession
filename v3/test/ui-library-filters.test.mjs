@@ -143,6 +143,10 @@ async function harness(t, { opencodeInitiallyAvailable = false, collisionRow = f
     const reader = url.pathname.match(/^\/api\/v3\/reader\/codex\/codex-alpha-root\/bootstrap$/);
     if (reader) return json({ session: roots[0].session, revision: 'public-filter-reader', totalItems: 0,
       segments: [], toc: { entries: [], previousCursor: null, nextCursor: null }, relations: null });
+    if (url.pathname === '/api/v3/reader/codex/codex-alpha-root/executions') return json({
+      session: { provider: 'codex', sessionId: 'codex-alpha-root' }, revision: 'public-filter-reader',
+      coverage: 'partial', events: [], nextCursor: null, scannedEvents: 0,
+    });
     if (url.pathname === '/api/v3/runtime/codex/codex-alpha-root/events') return json({
       session: { provider: 'codex', sessionId: 'codex-alpha-root' }, revision: 'public-filter-reader',
       coverage: 'partial', events: [], nextCursor: null, scannedEvents: 0,

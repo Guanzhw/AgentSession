@@ -70,7 +70,7 @@ test('real Axum Work view shows observed runs and exact evidence with revision-s
   { skip: !existsSync(binary) || !browser ? 'Build the v3 binary and install agent-browser' : false, timeout: 90_000 },
   async t => {
     const originalHash = sha256(original);
-    const work = await mkdtemp(path.join(os.tmpdir(), 'v3-ui-work-'));
+    const work = await mkdtemp(path.join(repo, 'tmp', 'v3-ui-work-'));
     t.after(() => rm(work, { recursive: true, force: true }));
     const sourceRoot = path.join(work, 'codex');
     const source = path.join(sourceRoot, 'sessions', '2026', '09', '26', path.basename(original));
@@ -84,7 +84,7 @@ test('real Axum Work view shows observed runs and exact evidence with revision-s
     await writeFile(source, readFileSync(original, 'utf8').trimEnd() + '\n' + [
       lifecycle('task_started', 'finished', 1000), lifecycle('task_complete', 'finished', 1000, 2000),
       lifecycle('task_started', 'failed', 3000), lifecycle('task_complete', 'failed', 3000, 4000, true),
-    ].join('\n') + '\n');
+    ].join('\n') + '\n' + '{"type":');
     const sourceHash = sha256(source);
     const port = await freePort();
     const base = `http://127.0.0.1:${port}`;
@@ -102,6 +102,8 @@ test('real Axum Work view shows observed runs and exact evidence with revision-s
     }
     const first = await (await fetch(`${base}/api/v3/runtime/codex/${sessionId}/work?limit=1`)).json();
     assert.equal(first.coverage, 'partial');
+    const reader = await (await fetch(`${base}/api/v3/reader/codex/${sessionId}/bootstrap`)).json();
+    assert.notEqual(first.revision, reader.revision, 'Work establishes its own full-source revision despite the Reader complete-record prefix');
     assert.ok(first.nextCursor);
     const name = `v3-work-${process.pid}-${Date.now()}`;
     t.after(async () => { try { await browserCommand(name, 'close'); } catch { /* Already closed. */ } });
@@ -116,6 +118,8 @@ test('real Axum Work view shows observed runs and exact evidence with revision-s
     assert.match(await browserCommand(name, 'get', 'text', '.runtime-work'), /Provenance: recorded/i);
     assert.equal(Number(await browserCommand(name, 'get', 'count', '.runtime-work-entry > a')), 0,
       'lifecycle facts without Reader references cannot offer a conversation jump');
+    assert.match(await browserCommand(name, 'get', 'attr', '.runtime-evidence-links a', 'href'),
+      new RegExp('revision=' + first.revision), 'strict evidence links carry the Work revision');
     await browserCommand(name, 'click', '.runtime-evidence-links a');
     await waitFor(name, `document.querySelector('.runtime-evidence-detail')`, 'exact evidence detail');
     assert.match(await browserCommand(name, 'get', 'text', '.runtime-evidence-detail'), /Recorded event/);
@@ -124,7 +128,36 @@ test('real Axum Work view shows observed runs and exact evidence with revision-s
     await waitFor(name, `document.querySelectorAll('.runtime-work-entry').length >= 1 && !document.querySelector('.runtime-work-entry')?.textContent.includes('completed')`, 'failed filter');
     assert.match(await browserCommand(name, 'get', 'text', '.runtime-work-entry'), /failed/);
 
+    const detail = await (await fetch(`${base}/api/v3/runtime/codex/${sessionId}/events/${encodeURIComponent(first.entries[0].evidence.eventId)}?revision=${first.revision}`)).json();
+    const next = await (await fetch(`${base}/api/v3/runtime/codex/${sessionId}/work?` + new URLSearchParams({ limit: '1', cursor: first.nextCursor }))).json();
+    assert.equal(next.revision, first.revision, 'real Work continuation uses the established strict revision');
     await browserCommand(name, 'eval', 'window.__realFetch = window.fetch.bind(window)');
+    await browserCommand(name, 'eval',
+      `window.fetch=(input,init)=>String(input).includes('/work?') ? new Response(${JSON.stringify(JSON.stringify(first))},{status:200,headers:{'content-type':'application/json'}}) :
+        String(input).includes('/events/') ? new Response(${JSON.stringify(JSON.stringify({ ...detail, revision: 'changed-detail' }))},{status:200,headers:{'content-type':'application/json'}}) : window.__realFetch(input,init)`);
+    await browserCommand(name, 'click', '.runtime-work .runtime-filters button');
+    await waitFor(name, `document.querySelectorAll('.runtime-work-entry').length === 1`, 'bounded Work page before changed detail');
+    await browserCommand(name, 'click', '.runtime-evidence-links a');
+    await waitForText(name, '.runtime-work .runtime-state strong', 'Source revision changed');
+    assert.equal(Number(await browserCommand(name, 'get', 'count', '.runtime-evidence-detail')), 0,
+      'changed evidence revision cannot be shown as part of the established Work page');
+    await browserCommand(name, 'eval',
+      `window.fetch=(input,init)=>String(input).includes('/work?') ?
+        new Response(String(input).includes('cursor=') ? ${JSON.stringify(JSON.stringify(next))} : ${JSON.stringify(JSON.stringify(first))},
+          {status:200,headers:{'content-type':'application/json'}}) : window.__realFetch(input,init)`);
+    await browserCommand(name, 'click', '.runtime-work .runtime-filters button');
+    await waitFor(name, `document.querySelector('.runtime-work .runtime-pagination button')`, 'first Work continuation');
+    await browserCommand(name, 'click', '.runtime-work .runtime-pagination button');
+    await waitFor(name, `document.querySelectorAll('.runtime-work-entry').length === 1 && document.querySelector('.runtime-evidence-links a')?.getAttribute('href').includes(${JSON.stringify(encodeURIComponent(next.entries[0].evidence.eventId))})`, 'stable Work continuation');
+    await browserCommand(name, 'eval',
+      `window.fetch=(input,init)=>String(input).includes('/work?') ?
+        new Response(String(input).includes('cursor=') ? ${JSON.stringify(JSON.stringify({ ...next, revision: 'changed-work-page' }))} : ${JSON.stringify(JSON.stringify(first))},
+          {status:200,headers:{'content-type':'application/json'}}) : window.__realFetch(input,init)`);
+    await browserCommand(name, 'click', '.runtime-work .runtime-filters button');
+    await waitFor(name, `document.querySelector('.runtime-work .runtime-pagination button')`, 'Work page before changed continuation');
+    await browserCommand(name, 'click', '.runtime-work .runtime-pagination button');
+    await waitForText(name, '.runtime-work .runtime-state strong', 'Source revision changed');
+
     await browserCommand(name, 'eval',
       `window.fetch=(input,init)=>String(input).includes('/work?') ? new Response(JSON.stringify({error:{code:'invalid_cursor',message:'stale cursor'}}),{status:400,headers:{'content-type':'application/json'}}) : window.__realFetch(input,init)`);
     await browserCommand(name, 'click', '.runtime-work .runtime-filters button');

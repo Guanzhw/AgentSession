@@ -239,6 +239,7 @@ function bootstrap(id) {
     toolName: isToolSession ? 'orphan-tool' : null,
     ownerMessageId: null,
     replyMetadata: null,
+    contentRevisions: {},
   };
   const title = isToolSession ? 'Session B' : 'Session A';
   const entry = {
@@ -737,6 +738,9 @@ test('standalone tool cards continue loading complete multi-page input and outpu
   await waitForBrowser(command, `document.querySelector('#reader-title')?.textContent.trim() === 'Session B'`, 'session B Reader');
   assert.equal(Number(await command('get', 'count', '.reader-main article.tool-card')), 1, 'The unowned tool must render as a standalone card');
   assert.equal(Number(await command('get', 'count', '.reader-main .attached-tools')), 0, 'The unowned tool must not be placed under an assistant');
+  await command('eval', `document.querySelector('article.tool-card .tool-disclosure > summary').click()`);
+  await waitForBrowser(command, `document.querySelector('article.tool-card .tool-disclosure')?.open`,
+    'expanded standalone tool card');
 
   for (const [index, field, value] of [[1, 'toolInput', toolInput], [2, 'toolOutput', toolOutput]]) {
     const details = `article.tool-card details.tool-field:nth-child(${index})`;

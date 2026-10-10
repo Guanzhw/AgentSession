@@ -6,14 +6,14 @@
 
   export let provider: string;
   export let sessionId: string;
-  export let readerRevision: string;
-  export let onOpenReader: (event: ReaderEventRef) => void;
+  export let onOpenReader: (event: ReaderEventRef, sourceRevision: string) => void;
 
   type WorkDomainCoverage = RuntimeWorkPage['domainCoverage'];
 
   type State = 'loading' | 'ready' | 'empty' | 'invalid' | 'unavailable' | 'request' | 'cursor' | 'stale';
   let state: State = 'loading';
   let message = '';
+  let sourceRevision: string | null = null;
   let page: RuntimeWorkPage | null = null;
   let workCoverage: WorkDomainCoverage | null = null;
   let kindDraft = '';
@@ -40,7 +40,7 @@
         kind: kind || undefined, status: status || undefined, cursor: cursor || undefined,
       });
       if (!active || request !== generation) return;
-      if (result.revision !== readerRevision || result.session.provider !== provider ||
+      if ((sourceRevision !== null && result.revision !== sourceRevision) || result.session.provider !== provider ||
         result.session.sessionId !== sessionId) {
         page = null;
         state = 'stale';
@@ -50,6 +50,7 @@
         typeof result.domainCoverage.details !== 'string') {
         throw new RuntimeApiError('protocol_invalid', 'The Work page has no valid domain coverage.');
       }
+      sourceRevision = result.revision;
       workCoverage = result.domainCoverage;
       page = result;
       state = result.entries.length ? 'ready' : 'empty';
@@ -90,9 +91,9 @@
     const request = generation;
     evidence = { ...evidence, [eventId]: { loading: true, error: '', detail: null } };
     try {
-      const detail = await getRuntimeEventDetail(provider, sessionId, eventId, readerRevision);
+      const detail = await getRuntimeEventDetail(provider, sessionId, eventId, page!.revision);
       if (!active || request !== generation) return;
-      if (detail.revision !== readerRevision || detail.session.provider !== provider || detail.session.sessionId !== sessionId) {
+      if (detail.revision !== sourceRevision || detail.session.provider !== provider || detail.session.sessionId !== sessionId) {
         page = null;
         state = 'stale';
         return;
@@ -113,7 +114,7 @@
   function openReader(click: MouseEvent, event: ReaderEventRef): void {
     if (click.metaKey || click.ctrlKey || click.shiftKey || click.altKey) return;
     click.preventDefault();
-    onOpenReader(event);
+    onOpenReader(event, page!.revision);
   }
 </script>
 
@@ -166,7 +167,7 @@
             <p>{t($language, 'Provenance:')} {protocolLabel(entry.evidence.provenance.fidelity, $language)} · {entry.evidence.provenance.sourceType} #{entry.evidence.provenance.sourceId ?? '?'}</p>
             <div class="runtime-evidence-links">
               {#each [entry.evidence, ...(entry.terminalEvidence ? [entry.terminalEvidence] : [])] as source (source.eventId)}
-                <a href={runtimeEventDetailUrl(provider, sessionId, source.eventId, readerRevision)} onclick={(click) => void inspectEvidence(click, source.eventId)}>{t($language, 'Inspect')} {source === entry.evidence ? t($language, 'start') : t($language, 'terminal')} {t($language, 'evidence')}</a>
+                <a href={runtimeEventDetailUrl(provider, sessionId, source.eventId, page!.revision)} onclick={(click) => void inspectEvidence(click, source.eventId)}>{t($language, 'Inspect')} {source === entry.evidence ? t($language, 'start') : t($language, 'terminal')} {t($language, 'evidence')}</a>
                 {#if evidence[source.eventId]?.loading}<span role="status">{t($language, 'Loading evidence…')}</span>{/if}
                 {#if evidence[source.eventId]?.error}<span class="content-error" role="alert">{evidence[source.eventId].error}</span>{/if}
                 {#if evidence[source.eventId]?.detail}

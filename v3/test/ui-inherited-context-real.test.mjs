@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { appendFile, copyFile, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -56,6 +56,8 @@ async function startAxum(t) {
   const childSource = path.join(sessionDir, path.basename(fixture));
   await copyFile(fixture, childSource);
   assert.equal(await digest(childSource), fixtureDigest, 'the isolated child begins as a byte-identical fixture copy');
+  await appendFile(childSource, '{"type":');
+  const sourceDigest = await digest(childSource);
 
   const resolvedTemp = path.resolve(temp);
   const resolvedTmp = path.resolve(repo, 'tmp');
@@ -87,7 +89,7 @@ async function startAxum(t) {
     if (process.exitCode !== null) throw new Error('The pinned Axum Reader exited before readiness: ' + stderr);
     try {
       if ((await fetch(base + '/api/providers', { signal: AbortSignal.timeout(500) })).ok) {
-        return { base, childSource, fixtureDigest };
+        return { base, childSource, fixtureDigest, sourceDigest };
       }
     } catch { /* Axum is starting and indexing the isolated fixture copy. */ }
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -160,10 +162,13 @@ test('public Codex inherited context renders and continues in the embedded Axum 
   const firstListResponse = await fetch(inheritedUrl(harness.base, { limit: 40 }));
   assert.equal(firstListResponse.status, 200);
   const firstList = await firstListResponse.json();
+  assert.notEqual(firstList.revision, bootstrap.revision,
+    'The strict inherited list hashes the unfinished tail while Reader captures complete records');
   const secondListResponse = await fetch(inheritedUrl(harness.base,
     { limit: 40, cursor: firstList.nextCursor }));
   assert.equal(secondListResponse.status, 200);
   const secondList = await secondListResponse.json();
+  assert.equal(secondList.revision, firstList.revision, 'inherited continuation retains its own domain revision');
   const allRows = [...firstList.items, ...secondList.items];
   const duplicateRows = allRows.filter(item => item.messageId === 'shared-body');
   assert.equal(duplicateRows.length, 2, 'The inherited source repeats shared-body twice');
@@ -268,7 +273,7 @@ test('public Codex inherited context renders and continues in the embedded Axum 
     'document.querySelectorAll(\".inherited-context-item[id^=event-], .reader-outline nav a\").length === 2'),
   'true', 'The inherited records did not add owned anchors or outline entries');
 
-  assert.equal(await digest(harness.childSource), harness.fixtureDigest,
+  assert.equal(await digest(harness.childSource), harness.sourceDigest,
     'The isolated provider source copy stayed byte-for-byte unchanged');
   assert.equal(await digest(fixture), harness.fixtureDigest,
     'The checked-in public provider fixture stayed byte-for-byte unchanged');

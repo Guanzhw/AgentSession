@@ -10,13 +10,13 @@
 
   export let provider: string;
   export let sessionId: string;
-  export let readerRevision: string;
-  export let onOpenReader: (event: ReaderEventRef) => void;
+  export let onOpenReader: (event: ReaderEventRef, sourceRevision: string) => void;
   export let onOpenSession: (session: SessionRef, nodeId: string) => void;
 
   type State = 'loading' | 'ready' | 'empty' | 'invalid' | 'unavailable' | 'request' | 'cursor' | 'stale';
   let state: State = 'loading';
   let message = '';
+  let sourceRevision: string | null = null;
   let page: RuntimeEventPage | null = null;
   let categoryDraft = '';
   let kindDraft = '';
@@ -46,12 +46,13 @@
         cursor: cursor || undefined,
       });
       if (!active || request !== generation) return;
-      if (result.revision !== readerRevision || result.session.provider !== provider ||
+      if ((sourceRevision !== null && result.revision !== sourceRevision) || result.session.provider !== provider ||
         result.session.sessionId !== sessionId) {
         page = null;
         state = 'stale';
         return;
       }
+      sourceRevision = result.revision;
       page = result;
       state = result.events.length ? 'ready' : 'empty';
     } catch (cause) {
@@ -61,7 +62,8 @@
       message = cause instanceof Error ? cause.message : String(cause);
       state = code === 'protocol_invalid' ? 'invalid'
         : code === 'protocol_unavailable' || code === 'provider_unavailable' ? 'unavailable'
-          : code === 'invalid_cursor' && cursor ? 'cursor' : 'request';
+          : code === 'source_changed' ? 'stale'
+            : code === 'invalid_cursor' && cursor ? 'cursor' : 'request';
     }
   }
 
@@ -83,7 +85,7 @@
   function openSource(click: MouseEvent, event: RuntimeEvent): void {
     if (!event.readerEvent || click.metaKey || click.ctrlKey || click.shiftKey || click.altKey) return;
     click.preventDefault();
-    onOpenReader(event.readerEvent);
+    onOpenReader(event.readerEvent, page!.revision);
   }
 </script>
 
@@ -156,14 +158,14 @@
     </div>
   {/if}
   {:else if lens === 'work'}
-    <RuntimeWork {provider} {sessionId} {readerRevision} {onOpenReader} />
+    <RuntimeWork {provider} {sessionId} {onOpenReader} />
   {:else if lens === 'summary'}
-    <RuntimeSummary {provider} {sessionId} {readerRevision} />
+    <RuntimeSummary {provider} {sessionId} />
   {:else if lens === 'sessions'}
-    <RuntimeSessions {provider} {sessionId} {readerRevision} {focusNodeId} {onOpenSession} />
+    <RuntimeSessions {provider} {sessionId} {focusNodeId} {onOpenSession} />
   {:else}
     {#key lens}
-      <RuntimeDomain {provider} {sessionId} {readerRevision} domain={lens} {onOpenReader} />
+      <RuntimeDomain {provider} {sessionId} domain={lens} {onOpenReader} />
     {/key}
   {/if}
 </section>

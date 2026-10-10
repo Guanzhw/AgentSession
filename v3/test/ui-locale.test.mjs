@@ -56,7 +56,8 @@ async function harness(t) {
     if (url.pathname === '/api/v3/reader/codex/locale-root/bootstrap') {
       const event = { provider: 'codex', sessionId: 'locale-root', messageId: 'message-1', segment: 'message' };
       const item = { event, ordinal: 0, owner: null, role: 'assistant', timestamp: localeTimestamp,
-        preview: 'Provider-owned body', totalChars: 19, toolName: null, ownerMessageId: null, replyMetadata: null };
+        preview: 'Provider-owned body', totalChars: 19, toolName: null, ownerMessageId: null, replyMetadata: null,
+        contentRevisions: {} };
       return json({ session: summary, revision: 'locale-revision', totalItems: 1,
         segments: [{ id: 'segment-0', pageId: 'page-0', startOrdinal: 0,
           items: [item], ownerContext: null, previousCursor: null, nextCursor: null }],
@@ -66,6 +67,8 @@ async function harness(t) {
     }
     if (url.pathname === '/api/v3/reader/codex/locale-root/relations')
       return json({ session, revision: 'locale-revision', entries: [], childPlacements: [], nextCursor: null });
+    if (url.pathname === '/api/v3/reader/codex/locale-root/executions')
+      return json({ session, revision: 'locale-revision', coverage: 'partial', events: [], nextCursor: null, scannedEvents: 0 });
     if (url.pathname.startsWith('/api/v3/runtime/codex/locale-root/'))
       return json({ session, revision: 'locale-revision', coverage: 'partial', events: [], nextCursor: null, scannedEvents: 0 });
     if (url.pathname.startsWith('/api/v3/resume/codex/'))

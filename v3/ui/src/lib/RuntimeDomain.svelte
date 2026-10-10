@@ -7,10 +7,10 @@
 
   export let provider: string;
   export let sessionId: string;
-  export let readerRevision: string;
   export let domain: RuntimeDomain;
-  export let onOpenReader: (event: ReaderEventRef) => void;
+  export let onOpenReader: (event: ReaderEventRef, sourceRevision: string) => void;
 
+  let sourceRevision: string | null = null;
   let page: DomainPage | null = null;
   let state: 'loading' | 'ready' | 'empty' | 'invalid' | 'unavailable' | 'stale' | 'cursor' | 'request' = 'loading';
   let message = '';
@@ -33,10 +33,11 @@
       const result = await getRuntimeDomain(provider, sessionId, domain,
         { kind: kind || undefined, cursor: cursor || undefined, limit: 25 });
       if (!active || request !== generation) return;
-      if (result.revision !== readerRevision || result.session.provider !== provider || result.session.sessionId !== sessionId) {
+      if ((sourceRevision !== null && result.revision !== sourceRevision) || result.session.provider !== provider || result.session.sessionId !== sessionId) {
         state = 'stale';
         return;
       }
+      sourceRevision = result.revision;
       page = result;
       state = result.entries.length ? 'ready' : 'empty';
     } catch (cause) {
@@ -87,7 +88,7 @@
   function openReader(click: MouseEvent, event: ReaderEventRef): void {
     if (click.metaKey || click.ctrlKey || click.shiftKey || click.altKey) return;
     click.preventDefault();
-    onOpenReader(event);
+    onOpenReader(event, page!.revision);
   }
 </script>
 
@@ -151,7 +152,7 @@
                 onclick={(click) => openReader(click, readerEvent)}>{t($language, 'Open in conversation')}</a>
             {/if}
             {#if entry.fact.transformation?.eventId ?? entry.fact.evidence?.eventId}
-              <a href={runtimeEventDetailUrl(provider, sessionId, (entry.fact.transformation?.eventId ?? entry.fact.evidence?.eventId)!, readerRevision)} target="_blank" rel="noopener noreferrer">{t($language, 'Inspect source event')}</a>
+              <a href={runtimeEventDetailUrl(provider, sessionId, (entry.fact.transformation?.eventId ?? entry.fact.evidence?.eventId)!, page.revision)} target="_blank" rel="noopener noreferrer">{t($language, 'Inspect source event')}</a>
             {/if}
           </li>
         {/each}

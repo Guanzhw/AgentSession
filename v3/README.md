@@ -75,7 +75,40 @@ fields remain readable even if the live source disappears; this does not assert
 current source availability. Requests without the fingerprint keep strict
 whole-session revision checks. `R/locate` requires `messageId`, `segment` and `revision`.
 TOC, segments and relations take a continuation `cursor`, without a `limit`
-parameter.
+parameter. Navigation with a cursor or explicit revision reads the opened,
+published Reader generation. Source additions therefore do not interrupt
+continuation or directory navigation. A fresh bootstrap checks current source
+evidence and replaces the generation; references to a replaced generation
+return `source_changed`. Search and Runtime/MCP retrieval retain their source
+freshness checks.
+
+For an ordinary Codex JSONL source, bootstrap captures and verifies a bounded
+prefix of complete records. Records appended after capture appear on the next
+bootstrap. An unfinished final record is excluded; rewriting, truncating or
+removing the captured prefix fails explicitly. This permits opening actively
+written sessions without mixing records from different captures.
+
+`R/executions?revision=&limit=&cursor=` pages the captured Reader generation's
+normalized tool execution events (1–200 events per page). The Reader uses these
+facts to associate recorded starts, background yields, polls and returned
+results. The endpoint does not weaken the separate Runtime freshness contract.
+Runtime and inherited-context panes use their own first response's revision
+for continuation and evidence/content inspection.
+Runtime conversation jumps supply that source revision to `R/locate` as
+`sourceRevision`; the boundary verifies both current source evidence and the
+opened Reader revision before returning a location. A source rewrite with the
+same message ID therefore requires reopening, rather than jumping to old text.
+Reader publication reuses unchanged normalized content chunks by field
+fingerprint while replacing metadata and execution facts in one transaction.
+Contents automatically collects its remaining pages and provides **Collapse
+all** and **Expand all** for request/reply groups. Tool calls default to compact
+rows with a recorded command or task summary and background/result phase where
+available; input, output and recorded execution links remain inside their
+disclosure. Codex `exec` headers decode literal commands from supported recorded
+wrappers; arbitrary JavaScript remains in the full input.
+Resume availability resolves current provider-owned directory metadata; ordinary
+Codex headers avoid another full transcript parse while preserving canonical
+identity and selected-source checks.
 
 The public `/sessions/search?q=` and `/:provider/search?q=` pages open the
 current content search, retaining the query and source scope across refresh

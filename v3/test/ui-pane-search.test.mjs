@@ -68,6 +68,7 @@ async function harness(t, options = {}) {
   const bootstraps = [];
   const contents = [];
   const delayedSearchResponses = [];
+  const executionUrls = [];
   const releaseDelayedSearch = () => {
     for (const release of delayedSearchResponses.splice(0)) release();
   };
@@ -83,9 +84,12 @@ async function harness(t, options = {}) {
       response.end(JSON.stringify(value));
     };
     if (url.pathname === '/api/providers') return json([{ id: 'codex', available: true }]);
-    if (url.pathname === `/api/v3/runtime/codex/${rootId}/events` &&
-        (options.executionRevision || options.executionFailOnce || options.executionContinuation || options.beforeRootExecution)) {
+    if (url.pathname === `/api/v3/reader/codex/${rootId}/executions`) {
+      const trackExecution = options.executionRevision || options.executionFailOnce || options.executionContinuation || options.beforeRootExecution;
+      if (!trackExecution) return json({ session: session(rootId), revision: revision(rootId),
+        coverage: 'partial', events: [], nextCursor: null, scannedEvents: 0 });
       executionRequests++;
+      executionUrls.push(url);
       await options.beforeRootExecution?.(executionRequests);
       if (options.executionFailOnce && executionRequests === 1) {
         return json({ error: { code: 'unavailable', message: 'temporary source read failure' } }, 503);
@@ -97,7 +101,7 @@ async function harness(t, options = {}) {
           provenance: { fidelity: 'recorded', sourceType: 'public-fixture', sourceId: '1' },
           readerEvent: ref(rootId, 'start'),
           execution: { id: 'changed-execution', kind: 'process', phase: 'yielded',
-            handle: 'public-process', toolName: 'shell' } }] : [], nextCursor: options.beforeRootExecution || (options.executionContinuation && executionRequests === 1) ? 'remaining-execution' : null, scannedEvents: 1 });
+        handle: 'public-process', toolName: 'shell' } }] : [], nextCursor: options.executionContinuation && executionRequests === 1 ? 'remaining-execution' : null, scannedEvents: 1 });
     }
     const route = url.pathname.match(/^\/api\/v3\/reader\/codex\/(pane-root|pane-child)\/(bootstrap|relations|child-location|search|locate|segments|toc|content)$/);
     if (route) {
@@ -208,6 +212,7 @@ async function harness(t, options = {}) {
   });
   return { origin: `http://127.0.0.1:${port}`, searches, contents, bootstraps,
     get executionRequests() { return executionRequests; },
+    executionUrls,
     changeSourceRevision: () => { sourceRevision++; },
     releaseDelayedSearch: () => releaseDelayedSearch?.(),
     delayNextLocate: () => { delayLocate = true; },
@@ -289,7 +294,7 @@ for (const scope of ['session', 'child']) {
         assert.ok(focused.top >= 0 && focused.bottom <= focused.height, 'the matched text is visible');
         const nextControl = scope === 'child'
           ? '.reader-main > .transcript > .turn-block > article[data-message-id="tail"] .event-footer .read-more'
-          : '.reader-outline nav a';
+          : '.reader-outline .outline-actions button';
         await waitFor(command, `document.querySelector('${nextControl}') && !document.querySelector('${nextControl}').disabled`);
         await command('press', 'Tab');
         await waitFor(command, `(() => { const rect = document.activeElement.getBoundingClientRect();
@@ -358,19 +363,21 @@ test('Reader can retry its first execution-facts read after a transient failure'
     await command('click', '.reader-execution-details button');
     await waitFor(command, `!document.querySelector('.reader-execution-details .content-error')`);
     assert.equal(app.executionRequests, 2);
+    assert.deepEqual(app.executionUrls.map(url => [url.pathname, url.searchParams.get('revision'), url.searchParams.get('limit')]), [
+      ['/api/v3/reader/codex/pane-root/executions', 'revision-pane-root', '200'],
+      ['/api/v3/reader/codex/pane-root/executions', 'revision-pane-root', '200'],
+    ]);
   });
 
-test('Reader continues execution records through Session details without collaboration',
+test('Reader eagerly fetches execution continuations without collaboration',
   { skip, timeout: 60_000 }, async t => {
     const app = await harness(t, { executionContinuation: true, noCollaboration: true });
     const command = await browser(t, `${app.origin}/codex/session/${rootId}`);
     assert.equal(Number(await command('get', 'count', '.collaboration-launcher')), 0);
-    await command('click', '.reader-session-details summary');
-    await waitFor(command, `document.querySelector('.reader-execution-details')`);
-    await command('click', '.reader-execution-details summary');
-    await command('click', '.reader-execution-details button');
-    await waitFor(command, `!document.querySelector('.reader-execution-details')`);
+    const deadline = Date.now() + 8_000;
+    while (app.executionRequests < 2 && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 50));
     assert.equal(app.executionRequests, 2, 'the recorded continuation is fetched exactly once');
+    assert.deepEqual(app.executionUrls.map(url => url.searchParams.get('cursor')), [null, 'remaining-execution']);
   });
 
 test('a delayed old pane query cannot replace the current search results',

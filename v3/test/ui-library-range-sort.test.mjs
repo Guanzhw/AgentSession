@@ -146,6 +146,10 @@ async function harness(t) {
       return json({ session, revision: 'range-sort-reader', totalItems: 0, segments: [],
         toc: { entries: [], previousCursor: null, nextCursor: null }, relations: null });
     }
+    if (/^\/api\/v3\/reader\/[^/]+\/[^/]+\/executions$/.test(url.pathname)) return json({
+      session: { provider, sessionId: 'range-zulu-today' }, revision: 'range-sort-reader',
+      coverage: 'partial', events: [], nextCursor: null, scannedEvents: 0,
+    });
     if (url.pathname.startsWith('/api/v3/runtime/')) return json({
       session: { provider, sessionId: 'range-zulu-today' }, revision: 'range-sort-reader',
       coverage: 'partial', events: [], nextCursor: null, scannedEvents: 0,

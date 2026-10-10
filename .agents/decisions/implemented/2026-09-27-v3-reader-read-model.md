@@ -38,6 +38,11 @@ and a deterministic repeated-normalization RED test; add append, rewrite,
 truncate, same-size/same-mtime rewrite, source-selection, scope, child-parent
 dependency and crash/lock cases before claiming a durable read model.
 
+The later [Reader navigation decision](2026-10-10-reader-navigation-snapshots.md)
+changes explicit navigation to the opened published generation and permits
+verified append during ordinary Codex capture. Current search, Runtime and MCP
+queries retain source freshness checks.
+
 ## Alternatives considered
 
 - A process-local `LoadedSession` cache cannot serve independent Web and MCP

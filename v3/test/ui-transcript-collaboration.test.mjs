@@ -137,3 +137,31 @@ test('overlapping handoffs use separate gutter lanes and reuse lanes after retur
     assert.equal(shared.length, 4, 'one dispatch hub retains all three independent return controls');
   } finally { await server.close(); }
 });
+
+test('one dispatch shares its lane across repeated returns and reserves unloaded continuation', async () => {
+  const server = await createServer({ root: ui, server: { middlewareMode: true }, appType: 'custom', logLevel: 'error' });
+  try {
+    const { transcriptHandoffs, layoutTranscriptHandoffs, collaborationEventKey, transcriptEndpointGroups } = await server.ssrLoadModule('/src/lib/transcript-collaboration.ts');
+    const entries = [
+      relation('spawn', 'requested', 'review', event('review-dispatch', 'tool')),
+      relation('spawn', 'started', 'review', event('review-started', 'tool'), { toActorPath: '/root/reviewer' }),
+      ...['first', 'second', 'third'].map(id => relation('result', 'completed', 'review', event(id), { eventId: `return-${id}`, fromActorPath: '/root/reviewer' })),
+      relation('spawn', 'started', 'other', event('other-dispatch', 'tool'), { toActorPath: '/root/other' }),
+      relation('result', 'completed', 'other', event('other-return'), { fromActorPath: '/root/other' }),
+      relation('spawn', 'started', 'later', event('later-dispatch', 'tool')),
+      relation('result', 'completed', 'later', event('later-return')),
+    ];
+    const points = new Map([['review-dispatch', 10], ['first', 50], ['second', 100], ['other-dispatch', 20], ['other-return', 80], ['later-dispatch', 120], ['later-return', 140]].map(([id, y]) => [collaborationEventKey(event(id, id.endsWith('dispatch') ? 'tool' : 'message')), y]));
+    const handoffs = transcriptHandoffs(entries, { provider: 'codex', sessionId: 'parent' });
+    const layout = layoutTranscriptHandoffs(handoffs, points);
+    const repeated = layout.filter(item => item.correlationId === 'review');
+    assert.deepEqual(repeated.map(item => item.lane), [0, 0, 0], 'all returns share their recorded dispatch lane');
+    assert.equal(layout.find(item => item.correlationId === 'other').lane, 1, 'an independent overlapping dispatch keeps another lane');
+    assert.equal(layout.find(item => item.correlationId === 'later').lane, 1, 'unloaded review return reserves its lane beyond visible results');
+    const dispatchHub = transcriptEndpointGroups(layout).find(group => group.y === 10);
+    assert.deepEqual(dispatchHub.choices.map(choice => choice.event.messageId), ['first', 'second', 'third'], 'every canonical return remains navigable');
+    assert.equal(new Set(dispatchHub.choices.map(choice => choice.agentKey)).size, 1);
+    points.set(collaborationEventKey(event('third')), 110);
+    assert.equal(layoutTranscriptHandoffs(handoffs, points).find(item => item.correlationId === 'later').lane, 0, 'the exact final visible return permits lane reuse');
+  } finally { await server.close(); }
+});
