@@ -1414,6 +1414,7 @@ fn push_event(
         process_count: None,
         tool_metadata: None,
         reply_metadata: None,
+        content_revisions: Default::default(),
     };
     events.push(NormalizedEvent {
         item,

@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -59,6 +59,7 @@ async function harness(t) {
   }
   await writeFile(sourceFile, rows.map(row => JSON.stringify(row)).join('\n') + '\n');
   const digest = createHash('sha256').update(await readFile(sourceFile)).digest('hex');
+  let expectedDigest = digest;
   await writeFile(path.join(root, 'config.json'), '{}\n');
   const backendPort = await freeFetchSafePort();
   const backendOrigin = `http://127.0.0.1:${backendPort}`;
@@ -75,7 +76,7 @@ async function harness(t) {
     if (server) await new Promise(resolve => server.close(resolve));
     if (child.exitCode === null) { child.kill(); await new Promise(resolve => child.once('exit', resolve)); }
     await writeFile(path.join(scratch, `native-${process.pid}.log`), logs);
-    assert.equal(createHash('sha256').update(await readFile(sourceFile)).digest('hex'), digest,
+    assert.equal(createHash('sha256').update(await readFile(sourceFile)).digest('hex'), expectedDigest,
       'Reader UI, content loads, pagination and search leave provider source bytes unchanged');
     await rm(root, { recursive: true, force: true });
   });
@@ -94,11 +95,14 @@ async function harness(t) {
   await build({ root: uiDir, configFile: path.join(uiDir, 'vite.config.ts'),
     build: { outDir: buildDir, emptyOutDir: true }, logLevel: 'error' });
   const contentRequests = [];
+  const bootstrapRequests = [];
   server = createServer(async (request, response) => {
     if (request.url.startsWith('/api/')) {
       const requestUrl = new URL(request.url, backendOrigin);
+      if (requestUrl.pathname.endsWith('/bootstrap')) bootstrapRequests.push(requestUrl.pathname);
       if (requestUrl.pathname.endsWith('/content')) contentRequests.push({
-        field: requestUrl.searchParams.get('field'), offset: Number(requestUrl.searchParams.get('offset')) });
+        field: requestUrl.searchParams.get('field'), offset: Number(requestUrl.searchParams.get('offset')),
+        contentRevision: requestUrl.searchParams.get('contentRevision') });
       try {
         const result = await fetch(backendOrigin + request.url);
         response.writeHead(result.status, { 'content-type': result.headers.get('content-type') || 'application/json' });
@@ -114,7 +118,15 @@ async function harness(t) {
   });
   const port = await freeFetchSafePort();
   await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
-  return { url: `http://127.0.0.1:${port}/codex/session/${sessionId}`, contentRequests };
+  return { url: `http://127.0.0.1:${port}/codex/session/${sessionId}`, contentRequests, bootstrapRequests,
+    appendSource: async () => {
+      const row = { timestamp: '2026-10-09T00:05:00.000Z', type: 'response_item', payload: {
+        type: 'message', id: 'appended-live-message', role: 'assistant',
+        content: [{ type: 'output_text', text: 'New live reply appended after the Reader opened.' }] } };
+      await appendFile(sourceFile, JSON.stringify(row) + '\n');
+      expectedDigest = createHash('sha256').update(await readFile(sourceFile)).digest('hex');
+      assert.notEqual(expectedDigest, digest, 'test-owned append changes the provider revision');
+    } };
 }
 
 async function browser(t, url) {
@@ -145,7 +157,7 @@ async function waitFor(command, expression) {
 const evaluate = async (command, expression) => JSON.parse(await command('eval', expression));
 
 test('Reader reading experience on current UI and isolated native provider data', { skip, timeout: 180_000 }, async t => {
-  const { url, contentRequests } = await harness(t);
+  const { url, contentRequests, bootstrapRequests, appendSource } = await harness(t);
   await t.test('scrolling continues the transcript, follows the outline and exposes context checkpoints', async t => {
     const command = await browser(t, url);
     const before = await evaluate(command, `document.querySelectorAll('.transcript article.event-card').length`);
@@ -235,12 +247,14 @@ test('Reader reading experience on current UI and isolated native provider data'
     await command('click', '.reader-session-details > summary');
     assert.equal(await evaluate(command, `document.querySelector('.reader-session-details').open`), true);
   });
-  await t.test('opening tool input and output loads the first bounded chunk immediately', async t => {
+  await t.test('opening and paginating tool fields after a live append retains the loaded Reader snapshot', async t => {
     const start = contentRequests.length;
     const command = await browser(t, url);
     await waitFor(command, `document.querySelector('article.tool-card details.tool-field')`);
     assert.deepEqual(contentRequests.slice(start).filter(row => row.field === 'toolInput' || row.field === 'toolOutput'), [],
       'closed tool fields do not fetch hidden payloads');
+    const bootstraps = bootstrapRequests.length;
+    await appendSource();
     for (const [index, field, expected] of [[1, 'toolInput', toolInput], [2, 'toolOutput', toolOutput]]) {
       const selector = `article.tool-card details.tool-field:nth-child(${index})`;
       await command('eval', `document.querySelector('${selector} summary').click()`);
@@ -248,13 +262,18 @@ test('Reader reading experience on current UI and isolated native provider data'
       assert.equal(await evaluate(command, `document.querySelector('${selector} .event-body').textContent`), expected.slice(0, 1400));
       assert.equal(await evaluate(command, `[...document.querySelectorAll('${selector} button')].some(b => /^Load tool/.test(b.textContent.trim()))`), false,
         'opening the field is the content-loading action');
-      assert.deepEqual(contentRequests.slice(start).filter(row => row.field === field), [{ field, offset: 0 }]);
+      const contentRevision = createHash('sha256').update(expected).digest('hex');
+      assert.deepEqual(contentRequests.slice(start).filter(row => row.field === field), [{ field, offset: 0, contentRevision }]);
       await command('eval', `document.querySelector('${selector} summary').click(); document.querySelector('${selector} summary').click()`);
-      assert.deepEqual(contentRequests.slice(start).filter(row => row.field === field), [{ field, offset: 0 }], 'reopening retains already loaded content');
+      assert.deepEqual(contentRequests.slice(start).filter(row => row.field === field), [{ field, offset: 0, contentRevision }], 'reopening retains already loaded content');
       await command('eval', `document.querySelector('${selector} button.read-more').click()`);
       await waitFor(command, `document.querySelector('${selector} .event-body')?.textContent.length === ${expected.length}`);
       assert.equal(await evaluate(command, `document.querySelector('${selector} .event-body').textContent`), expected);
+      assert.deepEqual(contentRequests.slice(start).filter(row => row.field === field), [
+        { field, offset: 0, contentRevision }, { field, offset: 1400, contentRevision },
+      ], 'each bounded request carries the original field hash');
     }
+    assert.equal(bootstrapRequests.length, bootstraps, 'field loads succeed without reloading the Reader');
   });
   await t.test('session search opens on demand and keyboard activation reaches exact destination', async t => {
     const command = await browser(t, url);

@@ -38,7 +38,8 @@ const summary = id => ({ session: session(id), title: id, directory: '/public-fi
 const item = (id, name, ordinal) => {
   const text = name === 'tail' ? body[id] : id === rootId ? 'Root dispatch' : 'Child first answer';
   return { event: ref(id, name), ordinal, owner: null, role: 'assistant', timestamp: null,
-    preview: text.slice(0, 120), totalChars: text.length, toolName: null, ownerMessageId: null, replyMetadata: null };
+    preview: text.slice(0, 120), totalChars: text.length, toolName: null, ownerMessageId: null,
+    replyMetadata: null, contentRevisions: {} };
 };
 const segment = (id, tail = false) => ({ id: tail ? 'segment-tail' : 'segment-first',
   pageId: `${id}-${tail ? 'tail' : 'first'}`, startOrdinal: tail ? 1 : 0,

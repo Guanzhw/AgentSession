@@ -317,7 +317,8 @@
     content = { ...content, [id]: { ...current, loading: true, error: '' } };
     try {
       const page = await getContentPage(child.provider, child.sessionId, shown.item.event,
-        bootstrap.revision, current.hasLoaded ? current.nextOffset : 0, field);
+        bootstrap.revision, current.hasLoaded ? current.nextOffset : 0, field, 1400,
+        shown.item.contentRevisions[field]);
       if (!active) return;
       const previous = content[id] ?? current;
       content = { ...content, [id]: { text: previous.text + page.text, hasLoaded: true,

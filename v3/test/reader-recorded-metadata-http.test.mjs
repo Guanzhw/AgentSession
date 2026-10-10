@@ -341,7 +341,7 @@ test('Reader keeps Codex request usage unattributed across child and context bou
     assert.deepEqual(await json(`${base}/api/v3/reader/codex/${id}/segments?cursor=${encodeURIComponent(retainedCursor)}`), continuation,
       'The cursor retains source revision and position because the new nullable DTO changes neither');
     const reopened = new DatabaseSync(path.join(dirs.cache, caches[0]));
-    assert.equal(reopened.prepare('SELECT projection FROM reader_session WHERE provider=? AND session_id=?').get('codex', id).projection, 7);
+    assert.equal(reopened.prepare('SELECT projection FROM reader_session WHERE provider=? AND session_id=?').get('codex', id).projection, 8);
     reopened.close();
   });
 

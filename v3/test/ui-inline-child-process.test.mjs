@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { appendFile, cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { createServer as createHttpServer } from 'node:http';
 import os from 'node:os';
@@ -94,6 +94,8 @@ test('inline child Reader groups normalized process work like its direct Reader'
     await cp(fixture, path.join(codex, 'sessions'), { recursive: true });
     const copiedChild = path.join(codex, 'sessions', '2026', '09', '27', childFile);
     const rows = (await readFile(copiedChild, 'utf8')).trimEnd().split('\n');
+    const toolInput = JSON.stringify({ cmd: 'echo child process', detail: 'CHILD_PROCESS_INPUT '.repeat(180) });
+    const toolOutput = 'CHILD_PROCESS_OUTPUT '.repeat(180);
     const record = (timestamp, payload) => JSON.stringify({ timestamp, type: 'response_item', payload });
     rows.push(
       record('2026-09-27T00:02:00.000Z', { type: 'message', id: 'child-process-request', role: 'user',
@@ -103,16 +105,16 @@ test('inline child Reader groups normalized process work like its direct Reader'
       record('2026-09-27T00:02:02.000Z', { type: 'reasoning', id: 'child-process-reasoning',
         summary: [{ type: 'summary_text', text: 'Child process recorded reasoning' }] }),
       record('2026-09-27T00:02:03.000Z', { type: 'function_call', call_id: 'CHILD_PROCESS_TOOL',
-        name: 'exec_command', arguments: '{"cmd":"echo child process"}' }),
+        name: 'exec_command', arguments: toolInput }),
       record('2026-09-27T00:02:04.000Z', { type: 'function_call_output', call_id: 'CHILD_PROCESS_TOOL',
-        output: 'Child process tool output' }),
+        output: toolOutput }),
       record('2026-09-27T00:02:05.000Z', { type: 'message', id: 'child-process-final', role: 'assistant',
         content: [{ type: 'output_text', text: 'Child process final reply' }], phase: 'final_answer' }),
       record('2026-09-27T00:02:06.000Z', { type: 'message', id: 'child-process-unknown', role: 'assistant',
         content: [{ type: 'output_text', text: 'Child unknown phase stays visible' }], phase: 'future_phase' }),
     );
     await writeFile(copiedChild, rows.join('\n') + '\n');
-    const copiedHash = sha256(copiedChild);
+    let copiedHash = sha256(copiedChild);
     const dirs = ['claude', 'pi', 'dsh', 'meta', 'index', 'cache'];
     await Promise.all(dirs.map(name => mkdir(path.join(scratch, name))));
     const port = await freePort();
@@ -175,6 +177,41 @@ test('inline child Reader groups normalized process work like its direct Reader'
     assert.equal(inline.unknownVisible, true);
     assert.equal(inline.reasoningSources, 1, 'The original reasoning source card occurs once');
     assert.equal(inline.toolSources, 1, 'The original tool source card occurs once');
+
+    await appendFile(copiedChild, record('2026-09-27T00:03:00.000Z', { type: 'message',
+      id: 'child-process-appended-after-load', role: 'assistant',
+      content: [{ type: 'output_text', text: 'Child record appended after the inline Reader loaded.' }] }) + '\n');
+    copiedHash = sha256(copiedChild);
+    assert.match(await readFile(copiedChild, 'utf8'), /child-process-appended-after-load/,
+      'A task-owned child JSONL record was appended after the inline Reader loaded');
+    const processGroup = '.inline-child-transcript details.reader-process';
+    await command('click', `${processGroup} > summary`);
+    await waitFor(command, `document.querySelector(${JSON.stringify(processGroup)})?.open === true`,
+      'expand child process before opening its tool fields');
+    const toolCard = '.inline-child-transcript article[data-message-id="CHILD_PROCESS_TOOL"]';
+    const inputField = `${toolCard} .tool-field:first-child`;
+    const outputField = `${toolCard} .tool-field:last-child`;
+    for (const [field, expected, selector] of [
+      ['input', toolInput, inputField],
+      ['output', toolOutput, outputField],
+    ]) {
+      await command('click', `${selector} > summary`);
+      await waitFor(command, `document.querySelector(${JSON.stringify(`${selector} .event-body`)})?.textContent.length === 1400`,
+        `${field} snapshot first page after append`);
+      for (const length of [2800, expected.length]) {
+        await command('click', `${selector} .read-more`);
+        await waitFor(command, `document.querySelector(${JSON.stringify(`${selector} .event-body`)})?.textContent.length === ${length}`,
+          `${field} snapshot continuation at ${length} characters`);
+      }
+      const actual = JSON.parse(await command('eval',
+        `document.querySelector(${JSON.stringify(`${selector} .event-body`)})?.textContent`));
+      assert.equal(actual, expected, `The complete ${field} remains readable from the published child snapshot`);
+      assert.equal(await command('eval', `Boolean(document.querySelector(${JSON.stringify(`${selector} .read-more`)}))`), 'false',
+        `The ${field} continuation ends at the complete snapshot`);
+    }
+    await command('click', `${processGroup} > summary`);
+    await waitFor(command, `document.querySelector(${JSON.stringify(processGroup)})?.open === false`,
+      'restore the collapsed child process after reading its tool fields');
     const source = JSON.parse(await command('eval', `(() => {
       const card = [...document.querySelectorAll('.inline-child-transcript article.event-card')].find(article =>
         article.dataset.messageId + ' / ' + article.dataset.segment === 'CHILD_PROCESS_TOOL / tool');
@@ -199,6 +236,7 @@ test('retained empty assistant, owned reasoning and tool stay inside the inline 
       timestamp: null, totalChars: preview.length, toolName: segment === 'tool' ? 'exec_command' : null,
       presentationPhase: processId === null ? (messageId === 'reply' ? 'final_answer' : null) : 'commentary',
       processId, processCount: processId === null ? null : 3, replyMetadata: null,
+      contentRevisions: {},
     });
     const parent = [item(parentId, 'dispatch', 'message', 0, 'assistant', 'Parent dispatch')];
     const assistant = event(childId, 'empty');

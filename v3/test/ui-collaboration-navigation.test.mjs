@@ -26,7 +26,7 @@ const rows = id => ['request', 'dispatch', 'returned', 'message'].map((name, ord
   const preview = `${id} ${name} recorded content`;
   return { event: event(id, name), ordinal, owner: null, role: ordinal === 0 ? 'user' : 'assistant',
     timestamp: null, preview, totalChars: preview.length, toolName: null, replyMetadata: null,
-    presentationPhase: null, processId: null, processCount: null };
+    presentationPhase: null, processId: null, processCount: null, contentRevisions: {} };
 });
 const nextChild = id => id === root ? child : id === child ? grandchild : null;
 const placement = id => nextChild(id) ? [{ child: session(nextChild(id)), afterEvent: event(id, 'dispatch'),

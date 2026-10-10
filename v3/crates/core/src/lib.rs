@@ -386,6 +386,8 @@ pub struct ReaderItem {
     pub timestamp: Option<i64>,
     pub preview: String,
     pub total_chars: usize,
+    #[serde(default)]
+    pub content_revisions: BTreeMap<String, String>,
     pub tool_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_metadata: Option<ReaderToolMetadata>,
@@ -770,6 +772,7 @@ pub struct ContentQuery {
     pub offset: usize,
     pub max_chars: usize,
     pub revision: String,
+    pub content_revision: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1965,11 +1968,16 @@ impl Core {
         session_id: &str,
         query: ContentQuery,
     ) -> Result<ContentPage> {
+        if let Some(model) =
+            reader_model::ReaderModel::open_content_snapshot(self, provider, session_id, &query)?
+        {
+            return model.content(provider, session_id, query);
+        }
         if let Some(model) = reader_model::ReaderModel::open(self, provider, session_id)? {
             return model.content(provider, session_id, query);
         }
         let session = self.load_session(provider, session_id)?;
-        if session.revision != query.revision {
+        if query.content_revision.is_none() && session.revision != query.revision {
             return Err(CoreError::SourceChanged);
         }
         let event = EventRef {
@@ -1989,6 +1997,11 @@ impl Core {
                 ));
             }
         };
+        if query.content_revision.as_ref().is_some_and(|revision| {
+            *revision != format!("{:x}", Sha256::digest(content.as_bytes()))
+        }) {
+            return Err(CoreError::SourceChanged);
+        }
         page_text(content, query.offset, query.max_chars)
     }
 
@@ -3420,6 +3433,7 @@ mod tests {
                 "codex",
                 "test-id",
                 ContentQuery {
+                    content_revision: None,
                     message_id: "assistant-1".into(),
                     segment: "message".into(),
                     field: "body".into(),

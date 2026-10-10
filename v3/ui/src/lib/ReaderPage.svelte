@@ -987,7 +987,8 @@
     const offset = current.hasLoaded ? current.nextOffset : 0;
     content = { ...content, [key]: { ...current, loading: true, error: '' } };
     try {
-      const page = await getContentPage(provider, sessionId, display.item.event, bootstrap.revision, offset, field);
+      const page = await getContentPage(provider, sessionId, display.item.event, bootstrap.revision,
+        offset, field, 1400, display.item.contentRevisions[field]);
       if (!active) return;
       const previous = content[key] ?? current;
       content = {

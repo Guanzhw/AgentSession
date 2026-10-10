@@ -37,7 +37,7 @@ function bootstrap(sessionId) {
   const event = reference(sessionId);
   const item = { event, ordinal: 0, owner: null, role: 'assistant', timestamp: null,
     preview: `A recorded finding in ${sessionId}`, totalChars: 31,
-    toolName: null, ownerMessageId: null, replyMetadata: null };
+    toolName: null, ownerMessageId: null, replyMetadata: null, contentRevisions: {} };
   const toc = { entries: [{ event, ordinal: 0, owner: null, label: item.preview }],
     previousCursor: null, nextCursor: null };
   return { session: summary(sessionId), revision: `revision-${sessionId}`, totalItems: 1,

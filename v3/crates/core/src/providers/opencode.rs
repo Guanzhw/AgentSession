@@ -1900,6 +1900,7 @@ fn push(
             process_count: None,
             tool_metadata: None,
             reply_metadata: None,
+            content_revisions: Default::default(),
         },
         body: if segment == "tool" {
             String::new()

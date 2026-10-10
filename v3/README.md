@@ -67,7 +67,13 @@ Pane search returns native source references and UTF-16 occurrence offsets.
 It requires `q` and the current `revision`; the old `query` alias, result-count
 envelope, part IDs and offset pagination are retired. Reader content uses
 `messageId`, `segment`, `field`, `offset`, `maxChars` and `revision` to retrieve
-bounded source text. `R/locate` requires `messageId`, `segment` and `revision`.
+bounded source text. Items also expose `contentRevisions`: an optional
+`contentRevision` request reads that exact normalized field from its published
+snapshot, so new records do not interrupt expansion or continuation. A newer
+publication replacing the field rejects its old fingerprint. Matching cached
+fields remain readable even if the live source disappears; this does not assert
+current source availability. Requests without the fingerprint keep strict
+whole-session revision checks. `R/locate` requires `messageId`, `segment` and `revision`.
 TOC, segments and relations take a continuation `cursor`, without a `limit`
 parameter.
 

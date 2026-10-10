@@ -33,7 +33,7 @@ const summary = id => ({ session: session(id), title: id, directory: '/theme-fix
 const bootstrap = id => {
   const item = { event: event(id, 'message-1'), ordinal: 0, owner: null, role: 'assistant',
     timestamp: Date.UTC(2026, 8, 28, 12, 34), preview: 'Theme fixture conversation.', totalChars: 27,
-    toolName: null, ownerMessageId: null, replyMetadata: null };
+    toolName: null, ownerMessageId: null, replyMetadata: null, contentRevisions: {} };
   return { session: summary(id), revision: `revision-${id}`, totalItems: 1,
     segments: [{ id: 'segment-0', pageId: `page-${id}-0`, startOrdinal: 0,
       items: [item], ownerContext: null, previousCursor: null, nextCursor: null }],

@@ -1,5 +1,6 @@
 //! Rebuildable, scope-isolated Reader projection. A source probe precedes each
-//! lookup; published rows are visible only after one SQLite transaction.
+//! source lookup; content-addressed fields can read a published snapshot.
+//! Published rows are visible only after one SQLite transaction.
 use crate::providers::SessionSnapshot;
 use crate::{
     ContentPage, ContentQuery, Core, CoreError, EventRef, ReaderBootstrap, ReaderChildLocation,
@@ -10,11 +11,12 @@ use crate::{
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::de::DeserializeOwned;
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::time::Duration;
 
-const PROJECTION: i64 = 7;
+const PROJECTION: i64 = 8;
 const SCHEMA_VERSION: i64 = 1;
 const CHUNK_UNITS: usize = 4096;
 
@@ -58,6 +60,23 @@ pub(crate) fn project_process_items(
         .enumerate()
         .map(|(index, entry)| {
             let mut item = entry.item.clone();
+            let fields: &[(&str, &str)] = if item.event.segment == "tool" {
+                &[
+                    ("toolInput", &entry.tool_input),
+                    ("toolOutput", &entry.tool_output),
+                ]
+            } else {
+                &[("body", &entry.body)]
+            };
+            item.content_revisions = fields
+                .iter()
+                .map(|(field, text)| {
+                    (
+                        (*field).to_owned(),
+                        format!("{:x}", Sha256::digest(text.as_bytes())),
+                    )
+                })
+                .collect();
             let eligible = if boundaries.contains(&item.event) {
                 false
             } else {
@@ -427,6 +446,68 @@ pub(crate) struct ReaderModel {
 }
 
 impl ReaderModel {
+    pub(crate) fn open_content_snapshot(
+        core: &Core,
+        provider: &str,
+        session_id: &str,
+        query: &ContentQuery,
+    ) -> Result<Option<Self>> {
+        let Some(content_revision) = query.content_revision.as_ref() else {
+            return Ok(None);
+        };
+        let path = core
+            .config
+            .cache_dir
+            .join(format!("reader-{}.sqlite", core.source_scope));
+        if !path.try_exists().map_err(|source| CoreError::Io {
+            path: path.clone(),
+            source,
+        })? {
+            return Ok(None);
+        }
+        let db = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(storage)?;
+        db.busy_timeout(Duration::from_secs(30)).map_err(storage)?;
+        let version: i64 = db
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .map_err(storage)?;
+        if version > SCHEMA_VERSION {
+            return Err(CoreError::Storage(
+                "Reader cache schema is newer than this binary".into(),
+            ));
+        }
+        if version < SCHEMA_VERSION {
+            return Ok(None);
+        }
+        db.execute_batch("BEGIN DEFERRED TRANSACTION")
+            .map_err(storage)?;
+        let stored: Option<(String, String, String, usize, usize, usize)> = db.query_row(
+            "SELECT revision, dependencies, summary_json, item_count, relation_count, task_count
+             FROM reader_session WHERE provider=?1 AND session_id=?2 AND projection=?3",
+            params![provider, session_id, PROJECTION],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
+        ).optional().map_err(storage)?;
+        let Some((revision, dependencies, summary, item_count, relation_count, task_count)) =
+            stored
+        else {
+            return Ok(None);
+        };
+        let model = Self {
+            db,
+            scope: core.source_scope.clone(),
+            summary: decode(summary)?,
+            revision,
+            dependencies,
+            item_count,
+            relation_count,
+            task_count,
+        };
+        let matches = model
+            .item_by_ref(&query.message_id, &query.segment)?
+            .is_some_and(|item| item.content_revisions.get(&query.field) == Some(content_revision));
+        Ok(matches.then_some(model))
+    }
+
     pub(crate) fn open(core: &Core, provider: &str, session_id: &str) -> Result<Option<Self>> {
         let adapter = crate::providers::adapter(&core.config, &core.source_scope, provider)?;
         if !adapter.available() {
@@ -1208,7 +1289,7 @@ impl ReaderModel {
         session_id: &str,
         query: ContentQuery,
     ) -> Result<ContentPage> {
-        if query.revision != self.revision {
+        if query.content_revision.is_none() && query.revision != self.revision {
             return Err(CoreError::SourceChanged);
         }
         let item = self
@@ -1224,6 +1305,13 @@ impl ReaderModel {
             return Err(CoreError::InvalidInput(
                 "unsupported content field for event segment".into(),
             ));
+        }
+        if query
+            .content_revision
+            .as_ref()
+            .is_some_and(|revision| item.content_revisions.get(&query.field) != Some(revision))
+        {
+            return Err(CoreError::SourceChanged);
         }
         if query.max_chars == 0 || query.max_chars > 100_000 {
             return Err(CoreError::InvalidInput(
@@ -1316,7 +1404,19 @@ mod tests {
         fs::write(&path, source(id, "original answer")).unwrap();
         let core = core(root.path());
         let initial = core.reader_bootstrap("codex", id).unwrap();
-        let held = ReaderModel::open(&core, "codex", id).unwrap().unwrap();
+        let item = &initial.segments[0].items[0];
+        let query = ContentQuery {
+            message_id: item.event.message_id.clone(),
+            segment: item.event.segment.clone(),
+            field: "body".into(),
+            offset: 0,
+            max_chars: 100,
+            revision: initial.revision.clone(),
+            content_revision: Some(item.content_revisions["body"].clone()),
+        };
+        let held = ReaderModel::open_content_snapshot(&core, "codex", id, &query)
+            .unwrap()
+            .unwrap();
         let old = held.item_at(0).unwrap().unwrap();
         fs::write(&path, source(id, "updated answer")).unwrap();
         let (sent, received) = std::sync::mpsc::channel();
@@ -1335,6 +1435,14 @@ mod tests {
         assert_eq!(held.revision, initial.revision);
         assert_eq!(held.item_at(0).unwrap().unwrap().preview, old.preview);
         assert_ne!(updated.segments[0].items[0].preview, old.preview);
+        assert_eq!(
+            held.content("codex", id, query.clone()).unwrap().text,
+            "original answer"
+        );
+        assert!(matches!(
+            core.reader_content("codex", id, query),
+            Err(CoreError::SourceChanged)
+        ));
     }
 
     #[test]
@@ -1469,6 +1577,7 @@ mod tests {
                 "codex",
                 &id,
                 ContentQuery {
+                    content_revision: None,
                     message_id: item.event.message_id.clone(),
                     segment: item.event.segment.clone(),
                     field: field.into(),

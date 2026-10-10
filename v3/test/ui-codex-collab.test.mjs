@@ -48,15 +48,15 @@ function fixture(withChild = false) {
   const toolEvent = messageId => ({ provider, sessionId, messageId, segment: 'tool' });
   const items = [
     { event: event('user-1'), ordinal: 0, owner: null, role: 'user', timestamp: null,
-      preview: 'Inspect this code with a delegated agent.', totalChars: 40, toolName: null, replyMetadata: null },
+      preview: 'Inspect this code with a delegated agent.', totalChars: 40, toolName: null, replyMetadata: null, contentRevisions: {} },
     { event: event('spawn-request'), ordinal: 1, owner: null, role: 'assistant', timestamp: null,
-      preview: 'I am starting a focused child inspection.', totalChars: 40, toolName: null, replyMetadata: null },
+      preview: 'I am starting a focused child inspection.', totalChars: 40, toolName: null, replyMetadata: null, contentRevisions: {} },
     { event: toolEvent('spawn:delegate:1'), ordinal: 2, owner: event('spawn-request'), role: 'tool', timestamp: null,
-      preview: 'Started a delegated inspection.', totalChars: 31, toolName: 'spawn_agent', replyMetadata: null },
+      preview: 'Started a delegated inspection.', totalChars: 31, toolName: 'spawn_agent', replyMetadata: null, contentRevisions: {} },
     { event: toolEvent('wait:foreground:1'), ordinal: 3, owner: event('spawn-request'), role: 'tool', timestamp: null,
-      preview: 'No child result in this wait window.', totalChars: 36, toolName: 'wait_agent', replyMetadata: null },
+      preview: 'No child result in this wait window.', totalChars: 36, toolName: 'wait_agent', replyMetadata: null, contentRevisions: {} },
     { event: event('agent-final'), ordinal: 4, owner: null, role: 'agent', timestamp: null,
-      preview: finalAnswer.slice(0, 84), totalChars: finalAnswer.length, toolName: null, replyMetadata: null },
+      preview: finalAnswer.slice(0, 84), totalChars: finalAnswer.length, toolName: null, replyMetadata: null, contentRevisions: {} },
   ];
   return {
     event,
@@ -149,7 +149,7 @@ async function startHarness(t, withChild = false, withoutCollaboration = false) 
       segments: [{ id: 'child-segment', pageId: 'child-page', startOrdinal: 0,
         items: [{ event: { provider, sessionId: childSessionId, messageId: 'child-answer', segment: 'message' },
           ordinal: 0, owner: null, role: 'assistant', timestamp: null,
-          preview: 'The child checked the source.', totalChars: 29, toolName: null, replyMetadata: null }],
+          preview: 'The child checked the source.', totalChars: 29, toolName: null, replyMetadata: null, contentRevisions: {} }],
         ownerContext: null, previousCursor: null, nextCursor: null }],
       toc: { entries: [], previousCursor: null, nextCursor: null },
       relations: { taskCount: 0, observationCount: 1, firstCursor: 'child-relations-0' } });

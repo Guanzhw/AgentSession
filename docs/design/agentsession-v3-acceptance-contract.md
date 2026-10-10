@@ -5,6 +5,11 @@
 证据，源码链接固定到原 Git 修订；现有验收状态不因移除旧 runtime 自动改变。
 原生 Protocol 2/3 和 provider 自有格式版本继续属于 3.0 的已记录事实契约。
 
+2026-10-10 HTTP-04 的内容续读增加[字段快照契约](../../.agents/decisions/implemented/2026-10-10-reader-content-snapshots.md)：
+页面提供的 `contentRevision` 将读取绑定到该字段的完整规范化内容；新增事件不使已有
+Input/Output 失效。缓存中的匹配字段可独立于当前来源状态读取，新发布替换字段后
+拒绝旧指纹。未提供字段指纹的请求，以及段落、搜索和 MCP，保留原来源修订检查。
+
 状态：候选验收中；各行 P/U/F/B 记录整项结论与剩余证据。更新：2026-10-02。
 
 2026-10-02当前正常双x64候选为Windows `caffb72b`／Linux `d22c4989`，绑定相同70生产输入及三UI资产；当前报告 (`../../tmp/v3-delivery/CURRENT-CANDIDATE-20261002.md`, local evidence)给出精确包、运行入口和未解决差异。Windows完整Node430/462 pass、0 fail、32 skip，另同PE alternate-selector Library单例1/1；Linux404/456 pass、0 fail、52 skip，实际来源聚焦11/11；Rust192 core＋5 app pass、14 ignore。相同三个npm tarball两宿主离线安装P。当前完整C在原10秒门槛下append/rewrite/delete全部P，三完整transition为4.712/4.566/4.340s。五组当前A/B十臂完整gold通过：357有序根/六facet、507 tool events、10,577单位正文；重复browse更快，首次browse/timeline/body更慢，完整session_get五对均不等价且速度比较不合格。当前一次Web＋2MCP的initial/warm/force/post/restart完整gold P，但wrapper因default meta.db字节/mtime变化exit1、writer unknown；STATE-01保持F。固定2.0／caff在38994／25066实际并排，五源API、Library→Reader→Runtime→native来源引用和Stop/Status/Start P，856来源bytes保全；当前截图失败。DEL-01/03整项U、SRC/平台B、人类偏好U；旧30d2/20db/83/70及ENOSPC失败保留各自身份。

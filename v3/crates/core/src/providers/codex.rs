@@ -5367,6 +5367,7 @@ fn project_items(session: &LoadedSession) -> Vec<ReaderItem> {
                             .map(|owner| owner.message_id.clone())
                     })
                     .flatten(),
+                content_revisions: Default::default(),
             });
         }
     }
@@ -8514,6 +8515,7 @@ mod tests {
                     offset: 0,
                     max_chars: 100,
                     revision: bootstrap.revision,
+                    content_revision: None,
                 },
             )
             .unwrap();
@@ -8562,6 +8564,7 @@ mod tests {
                     offset: 0,
                     max_chars: 100,
                     revision: bootstrap.revision.clone(),
+                    content_revision: None,
                 },
             )
             .unwrap();
@@ -8670,6 +8673,7 @@ mod tests {
                         offset,
                         max_chars: 1001,
                         revision: bootstrap.revision.clone(),
+                        content_revision: None,
                     },
                 )
                 .unwrap();
@@ -8726,6 +8730,7 @@ mod tests {
                     offset: hit.offset,
                     max_chars: hit.match_length,
                     revision: revision.clone(),
+                    content_revision: None,
                 }
             )
             .unwrap()
@@ -8852,7 +8857,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(projection, 7);
+        assert_eq!(projection, 8);
         let row: String = db
             .query_row(
                 "SELECT item_json FROM reader_item WHERE provider='codex' AND session_id=?1 AND ordinal=0",

@@ -40,7 +40,7 @@ test('collaboration overview updates when canonical Reader items arrive after re
   const item = {
     event, ordinal: 0, owner: null, role: 'agent', timestamp: null,
     preview: rootPreview, totalChars: rootPreview.length, toolName: null,
-    presentationPhase: null, processId: null, processCount: null, replyMetadata: null,
+    presentationPhase: null, processId: null, processCount: null, replyMetadata: null, contentRevisions: {},
   };
   const childItem = { ...item, event: { ...event, sessionId: 'different-child' },
     preview: childPreview, totalChars: childPreview.length };

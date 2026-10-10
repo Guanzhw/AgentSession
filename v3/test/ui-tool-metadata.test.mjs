@@ -10,7 +10,7 @@ const event = { provider: 'codex', sessionId: 'controlled-parent', messageId: 's
 const item = metadata => ({ event, ordinal: 1, owner: null, role: 'tool', timestamp: null,
   preview: 'spawn_agent: recorded result', totalChars: 15, toolName: 'spawn_agent',
   presentationPhase: null, processId: null, processCount: null, replyMetadata: null,
-  toolMetadata: metadata });
+  toolMetadata: metadata, contentRevisions: {} });
 const progress = text => ({ text, hasLoaded: true, totalChars: text.length,
   nextOffset: null, done: true, loading: false, error: '' });
 const metadata = { summary: null, directory: null, taskName: 'reviewer<&>', model: 'gpt-6-luna', reasoningEffort: 'max', forkTurns: 'none', inputState: 'encrypted' };

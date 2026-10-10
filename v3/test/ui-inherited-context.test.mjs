@@ -50,7 +50,8 @@ function readerBootstrap(sessionId, provider = 'codex') {
   const parent = provider === 'codex' && sessionId === childId ? { provider: 'codex', sessionId: parentId } : null;
   const event = { provider, sessionId, messageId: 'duplicate', segment: 'message' };
   const item = { event, ordinal: 0, owner: null, role: 'user', timestamp: null,
-    preview: 'Owned child conversation stays in the Reader.', totalChars: 45, toolName: null, replyMetadata: null };
+    preview: 'Owned child conversation stays in the Reader.', totalChars: 45, toolName: null, replyMetadata: null,
+    contentRevisions: {} };
   return {
     session: { session: { provider, sessionId }, title: sessionId === childId ? 'Codex child fixture'
       : sessionId === dshSeededId ? 'DSH seeded fixture'

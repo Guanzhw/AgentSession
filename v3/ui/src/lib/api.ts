@@ -445,6 +445,7 @@ export interface ReaderItem {
   timestamp: number | null;
   preview: string;
   totalChars: number;
+  contentRevisions: Partial<Record<ContentField, string>>;
   toolName: string | null;
   toolMetadata?: ReaderToolMetadata | null;
   ownerMessageId?: string | null;
@@ -892,6 +893,7 @@ export function getContentPage(
   offset: number,
   field: ContentField = 'body',
   maxChars = 1400,
+  contentRevision?: string,
 ): Promise<ContentPage> {
   const query = new URLSearchParams({
     messageId: event.messageId,
@@ -901,6 +903,7 @@ export function getContentPage(
     maxChars: String(maxChars),
     revision,
   });
+  if (contentRevision) query.set('contentRevision', contentRevision);
   return getJson<ContentPage>(
     readerEndpoint(provider, sessionId, 'content', query),
   );
