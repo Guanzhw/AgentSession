@@ -509,6 +509,8 @@ test('Reader reading experience on current UI and isolated native provider data'
 
     await command('focus', '.context-card .context-disclosure > summary');
     await command('press', 'Enter');
+    await waitFor(command, `!document.querySelector('.context-card .context-disclosure').open &&
+      document.querySelector('.context-card .context-preview')`);
     assert.equal(await evaluate(command, `(() => { const card = document.querySelector('.context-card');
       return !card.querySelector('.context-disclosure').open && card.id === ${JSON.stringify(initial.id)} &&
         card.querySelector('.context-preview').textContent.includes('Synthetic recorded compaction checkpoint'); })()`), true,
@@ -539,6 +541,7 @@ test('Reader reading experience on current UI and isolated native provider data'
     const initial = await evaluate(command, `({ firstAnchor: document.querySelector('article.event-card').id,
       links: [...document.querySelectorAll('.reader-outline nav a')].map(a => a.getAttribute('href')) })`);
     assert.ok(initial.links.length > 0);
+    assert.equal(new Set(initial.links).size, initial.links.length, 'complete automatic hydration retains unique canonical links');
     const actions = await evaluate(command, `[...document.querySelectorAll('button')].filter(b => b.textContent.trim() === 'Load more messages').length`);
     assert.equal(actions, 0, 'the complete outline needs no manual loading control');
     assert.equal(await evaluate(command, `[...document.querySelectorAll('.reader-main button, .toc-controls button')].some(b => /^(Previous|Next)( segment)?$/.test(b.textContent.trim()))`), false);
@@ -548,7 +551,7 @@ test('Reader reading experience on current UI and isolated native provider data'
     await command('eval', `document.querySelector('.reader-outline a[href*="messageId=message-239&"]').click()`);
     await waitFor(command, `location.hash === ${JSON.stringify(tailHref)}`);
     const afterJump = await evaluate(command, `[...document.querySelectorAll('.reader-outline nav a')].map(a => a.getAttribute('href'))`);
-    for (const href of initial.links) assert.ok(afterJump.includes(href), `earlier anchor survives later navigation: ${href}`);
+    assert.deepEqual(afterJump, initial.links, 'exact-target overlap preserves every canonical link in source order');
     await command('eval', `document.querySelector('.reader-outline nav a').click()`);
     await waitFor(command, `location.hash === ${JSON.stringify(initial.links[0])}`);
     await waitFor(command, `document.getElementById(${JSON.stringify(initial.firstAnchor)})`);

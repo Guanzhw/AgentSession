@@ -1506,28 +1506,44 @@ fn codex_snapshot_from_loaded(session: LoadedSession) -> Result<SessionSnapshot>
             diagnostic: format!("child_ownership_boundary_unavailable: codex/{session_id}"),
         }));
     }
-    let fields = session.messages.iter().flat_map(|message| {
-        message_segments(message)
+    let summary = summarize(&session);
+    let items = project_items(&session);
+    let fields = session.messages.into_iter().flat_map(|mut message| {
+        let segments = message_segments(&message);
+        let segment_count = segments.len();
+        segments
             .into_iter()
-            .map(move |segment| (message, segment))
+            .enumerate()
+            .map(move |(index, segment)| {
+                let body = match segment {
+                    "message" | "context" => std::mem::take(&mut message.body),
+                    "thinking" => std::mem::take(&mut message.thinking),
+                    _ => String::new(),
+                };
+                let (tool_input, tool_output) = if index + 1 == segment_count {
+                    (
+                        std::mem::take(&mut message.tool_input),
+                        std::mem::take(&mut message.tool_output),
+                    )
+                } else {
+                    (message.tool_input.clone(), message.tool_output.clone())
+                };
+                (body, tool_input, tool_output)
+            })
     });
-    let events = project_items(&session)
+    let events = items
         .into_iter()
         .zip(fields)
-        .map(|(item, (message, segment))| NormalizedEvent {
-            body: if segment == "tool" {
-                String::new()
-            } else {
-                segment_content(message, segment).into()
-            },
-            tool_input: message.tool_input.clone(),
-            tool_output: message.tool_output.clone(),
+        .map(|(item, (body, tool_input, tool_output))| NormalizedEvent {
+            body,
+            tool_input,
+            tool_output,
             tool_status: None,
             item,
         })
         .collect();
     Ok(SessionSnapshot {
-        summary: summarize(&session),
+        summary,
         revision: session.revision,
         events,
         relations: session.relations,
@@ -2464,7 +2480,14 @@ fn load_codex_reader_positioned(
                 }
             }
         }
-        observations.observe_positioned(&record, line_index, expected_id, &source_id, &event_key);
+        observations.observe_positioned(
+            &record,
+            line_index,
+            expected_id,
+            &source_id,
+            &event_key,
+            event_timestamp,
+        );
         let mut messages_before = messages.len();
         if kind == "response_item"
             && payload["type"] == "agent_message"
@@ -3843,6 +3866,7 @@ impl CodexObservations {
             session_id,
             &index.to_string(),
             &index.to_string(),
+            record["timestamp"].as_str().and_then(timestamp_ms),
         );
     }
 
@@ -3853,11 +3877,11 @@ impl CodexObservations {
         session_id: &str,
         source_id: &str,
         event_key: &str,
+        timestamp: Option<i64>,
     ) {
         let kind = record["type"].as_str().unwrap_or("");
         let payload = &record["payload"];
         let payload_type = payload["type"].as_str().unwrap_or("");
-        let timestamp = record["timestamp"].as_str().and_then(timestamp_ms);
         if kind == "event_msg"
             && payload_type == "token_count"
             && codex_usage_payload(record).is_none()
@@ -3926,7 +3950,7 @@ impl CodexObservations {
                 },
             });
         }
-        let evidence = Evidence {
+        let evidence = || Evidence {
             event_id: format!("event:codex:{event_key}"),
             provenance: Provenance {
                 fidelity: Fidelity::Recorded,
@@ -3956,7 +3980,7 @@ impl CodexObservations {
                 } else {
                     "parent"
                 };
-                let mut relation_evidence = evidence.clone();
+                let mut relation_evidence = evidence();
                 if relationship_kind != "spawned" {
                     relation_evidence.provenance.fidelity = Fidelity::Derived;
                 }
@@ -3992,7 +4016,7 @@ impl CodexObservations {
                     kind: "subagent-task".into(),
                     status: RunStatus::Unknown,
                     time_created: timestamp,
-                    evidence: evidence.clone(),
+                    evidence: evidence(),
                 });
             }
         }
@@ -4018,14 +4042,14 @@ impl CodexObservations {
                 time_end: epoch_millis(&payload["completed_at"]),
                 timestamp,
                 status,
-                evidence: evidence.clone(),
+                evidence: evidence(),
             });
         }
         let is_compaction = |value: &str| {
-            matches!(
-                value.to_ascii_lowercase().as_str(),
-                "compacted" | "context_compacted" | "contextcompaction" | "compact"
-            )
+            value.eq_ignore_ascii_case("compacted")
+                || value.eq_ignore_ascii_case("context_compacted")
+                || value.eq_ignore_ascii_case("contextcompaction")
+                || value.eq_ignore_ascii_case("compact")
         };
         if is_compaction(kind) || is_compaction(payload_type) {
             let source = if payload.is_object() { payload } else { record };
@@ -4044,7 +4068,7 @@ impl CodexObservations {
                     .iter()
                     .any(|key| nonempty(&source[*key]).is_some()),
                 reader_event: None,
-                evidence,
+                evidence: evidence(),
             });
         }
     }
@@ -4604,6 +4628,12 @@ impl CodexExecutionTracker {
         let payload_type = payload["type"].as_str();
         if payload_type == Some("function_call") {
             if !payload["namespace"].is_null() && payload["namespace"] != "" {
+                return;
+            }
+            if !matches!(
+                payload["name"].as_str(),
+                Some("exec_command" | "write_stdin")
+            ) {
                 return;
             }
             let Some(args) = payload["arguments"]
@@ -5602,6 +5632,9 @@ thread_local! {
 #[cfg(test)]
 #[path = "../protocol/codex_snapshot_tests.rs"]
 mod snapshot_tests;
+
+#[cfg(test)]
+mod codex_projection_tests;
 
 #[cfg(test)]
 mod tests {

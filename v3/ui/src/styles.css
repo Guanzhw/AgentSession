@@ -166,7 +166,7 @@
 }
 
 * { box-sizing: border-box; }
-html { min-width: 1040px; scroll-behavior: smooth; }
+html { min-width: 1040px; }
 body { margin: 0; min-width: 1040px; min-height: 100vh; background: var(--canvas); }
 button, input, select { font: inherit; }
 a { color: inherit; }

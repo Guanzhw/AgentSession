@@ -31,6 +31,7 @@
     ? [bootstrap.segments[bootstrap.segments.length - 1]] : [...bootstrap.segments];
   let toc: ReaderTocPage = bootstrap.openingToc ? { ...bootstrap.openingToc,
     entries: mergeToc(bootstrap.openingToc.entries, bootstrap.toc.entries) } : bootstrap.toc;
+  const tocEntriesByEvent = new Map(toc.entries.map(entry => [eventKey(entry.event), entry]));
   let tocCursor = bootstrap.openingToc?.nextCursor ?? bootstrap.toc.nextCursor;
   let searchOpen = false;
   let sessionDetailsOpen = false;
@@ -745,9 +746,18 @@
   }
 
   function mergeOutlineEntries(added: ReaderTocEntry[]): ReaderTocEntry[] {
+    let append = added.length > 0 && toc.entries.length === tocEntriesByEvent.size &&
+      (!toc.entries.length || toc.entries[toc.entries.length - 1].ordinal < added[0].ordinal);
+    for (const entry of added) {
+      const key = eventKey(entry.event);
+      append &&= !tocEntriesByEvent.has(key);
+      tocEntriesByEvent.set(key, entry);
+    }
+    const entries = append ? toc.entries.concat(added)
+      : [...tocEntriesByEvent.values()].sort((a, b) => a.ordinal - b.ordinal);
+    if (!expandedOutlineTurns.size) return entries;
     const expandedChildren = new Set(outlineTurns
       .filter(turn => expandedOutlineTurns.has(turn.key)).flatMap(turn => turn.children.map(node => node.key)));
-    const entries = mergeToc(toc.entries, added);
     expandedOutlineTurns = new Set(groupOutline(entries)
       .filter(turn => expandedOutlineTurns.has(turn.key) || turn.children.some(node => expandedChildren.has(node.key)))
       .map(turn => turn.key));

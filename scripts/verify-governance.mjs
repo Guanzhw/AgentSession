@@ -17,7 +17,6 @@ const markdownRoots = [
   "README.md",
   "README.en.md",
   "CHANGELOG.md",
-  "Skills-evolve.md",
   "docs",
   "v3/AGENTS.md",
   "v3/README.md",
