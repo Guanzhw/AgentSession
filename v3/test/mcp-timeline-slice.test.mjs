@@ -221,6 +221,29 @@ for (const era of ['legacy', 'modern']) {
       assert.deepEqual(resized.structuredContent.result.events.map(row => row.event.messageId),
         ['root-continues', 'root-check', 'root-final']);
 
+      const terminal = { ...JSON.parse(pages[0].nextCursor), offset: events.length };
+      const emptyEnd = await timeline(client, { ...request, cursor: JSON.stringify(terminal) });
+      assert.notEqual(emptyEnd.isError, true, 'An offset exactly at the filtered end is valid');
+      assert.deepEqual(emptyEnd.structuredContent.result.events, []);
+      assert.equal(emptyEnd.structuredContent.result.nextCursor, null);
+      assert.equal(emptyEnd.structuredContent.result.truncated, false);
+      const beyondEnd = await timeline(client, { ...request,
+        cursor: JSON.stringify({ ...terminal, offset: events.length + 1 }) });
+      assert.equal(beyondEnd.isError, true, 'Offsets beyond the filtered end remain invalid');
+      assert.match(beyondEnd.content[0].text, /^invalid_cursor: /);
+
+      const filteredFirst = await timeline(client, { session: dshRef(rootId),
+        segments: ['message'], roles: ['assistant'], limit: 2 });
+      const filteredNext = await timeline(client, { session: dshRef(rootId),
+        segments: ['message'], roles: ['assistant'], limit: 1,
+        cursor: filteredFirst.structuredContent.result.nextCursor });
+      assert.deepEqual([
+        ...filteredFirst.structuredContent.result.events,
+        ...filteredNext.structuredContent.result.events,
+      ].map(row => row.event.messageId), ['root-dispatch', 'root-continues', 'root-final'],
+      'Pagination offsets count matching events while skipping intervening tools');
+      assert.equal(filteredNext.structuredContent.result.nextCursor, null);
+
       const { args: otherArgs } = await setup(t);
       const otherClient = await connect(t, otherArgs);
       const wrongScope = await timeline(otherClient, { ...request, cursor: pages[0].nextCursor });

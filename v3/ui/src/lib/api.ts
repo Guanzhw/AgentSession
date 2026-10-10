@@ -858,8 +858,8 @@ export function getReaderSegment(provider: string, sessionId: string, cursor: st
   return getJson<ReaderSegmentResponse>(readerEndpoint(provider, sessionId, 'segments', new URLSearchParams({ cursor })));
 }
 
-export function getReaderToc(provider: string, sessionId: string, cursor: string): Promise<ReaderTocResponse> {
-  return getJson<ReaderTocResponse>(readerEndpoint(provider, sessionId, 'toc', new URLSearchParams({ cursor })));
+export function getReaderToc(provider: string, sessionId: string, cursor: string, limit = 64): Promise<ReaderTocResponse> {
+  return getJson<ReaderTocResponse>(readerEndpoint(provider, sessionId, 'toc', new URLSearchParams({ cursor, limit: String(limit) })));
 }
 
 export function getReaderSearch(provider: string, sessionId: string, revision: string,

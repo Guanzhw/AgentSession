@@ -45,8 +45,6 @@ use std::sync::{Mutex, OnceLock};
 use walkdir::WalkDir;
 const PREVIEW_CHARS: usize = 240;
 const CODEX_REVISION_NAMESPACE: &[u8] = b"codex-jsonl-v3-s2-6\0";
-const HEADER_CACHE_LIMIT: usize = 4096;
-static HEADER_CACHE: OnceLock<Mutex<HashMap<PathBuf, (String, String)>>> = OnceLock::new();
 const MULTIPLE_SOURCE_DIAGNOSTIC: &str = "codex_multiple_source_files_unmerged";
 const UNRESOLVED_SOURCE_DIAGNOSTIC: &str = "codex_source_inventory_incomplete";
 const INHERITED_PARSER_VERSION: &str = "codex-inherited-v1";
@@ -191,7 +189,7 @@ impl CodexAdapter<'_> {
         let mut grouped = BTreeMap::<String, Vec<SourceEntry>>::new();
         let mut unresolved = Vec::new();
         for path in self.codex_files()? {
-            match cached_header_entry(path.clone(), true) {
+            match header_entry(path.clone()) {
                 Ok(Some(entry)) => grouped
                     .entry(entry.session_id.clone())
                     .or_default()
@@ -304,7 +302,7 @@ impl CodexAdapter<'_> {
         Ok(self.codex_inventory_observation()?.entries)
     }
     pub(crate) fn native_protocol_snapshot(&self, session_id: &str) -> Result<ObservationSnapshot> {
-        let sources = self.selected_sources(false, Some(session_id))?;
+        let sources = self.selected_sources(Some(session_id))?;
         self.native_protocol_snapshot_with_sources(session_id, &sources)
     }
     fn native_protocol_snapshot_with_sources(
@@ -371,11 +369,7 @@ impl CodexAdapter<'_> {
         Ok(files)
     }
 
-    fn selected_sources(
-        &self,
-        _reread_headers: bool,
-        target: Option<&str>,
-    ) -> Result<CodexSources> {
+    fn selected_sources(&self, target: Option<&str>) -> Result<CodexSources> {
         let scan = self.source_entries()?;
         if !scan.unresolved.is_empty() {
             return Err(Self::unresolved_error());
@@ -409,7 +403,7 @@ impl CodexAdapter<'_> {
         Ok(selected)
     }
     fn reader_sources(&self) -> Result<CodexSources> {
-        self.selected_sources(true, None)
+        self.selected_sources(None)
     }
 
     fn validate_source_set_membership(&self, sources: &CodexSources, id: &str) -> Result<()> {
@@ -796,7 +790,7 @@ impl ProviderAdapter for CodexAdapter<'_> {
     }
 
     fn resume_directory(&self, session_id: &str) -> Result<Option<String>> {
-        let sources = self.selected_sources(true, Some(session_id))?;
+        let sources = self.selected_sources(Some(session_id))?;
         if sources.pairs.contains_key(session_id) {
             return Ok(self.load(session_id)?.summary.directory);
         }
@@ -810,7 +804,7 @@ impl ProviderAdapter for CodexAdapter<'_> {
         }
         // Resume consumes only canonical header metadata. Body appends do not
         // affect it; reselect and reread those facts rather than hash the body.
-        let current = self.selected_sources(true, Some(session_id))?;
+        let current = self.selected_sources(Some(session_id))?;
         if current.get(session_id) != Some(path) || current.pairs.contains_key(session_id) {
             return Err(CoreError::SourceChanged);
         }
@@ -856,7 +850,7 @@ impl ProviderAdapter for CodexAdapter<'_> {
                         rows.push(summarize(&pair.load(self.scope, &id)?))
                     }
                     CodexSourceSelection::Recorded(_) => {
-                        let sources = self.selected_sources(false, Some(&id))?;
+                        let sources = self.selected_sources(Some(&id))?;
                         let path = sources.get(&id).ok_or(CoreError::SourceChanged)?;
                         let loaded = load_selected(path, self.scope, &id, Some(&sources))?;
                         self.validate_source_set_membership(&sources, &id)?;
@@ -881,7 +875,7 @@ impl ProviderAdapter for CodexAdapter<'_> {
         Ok(rows)
     }
     fn load(&self, session_id: &str) -> Result<SessionSnapshot> {
-        let sources = self.selected_sources(false, Some(session_id))?;
+        let sources = self.selected_sources(Some(session_id))?;
         let path = sources.get(session_id).ok_or_else(|| CoreError::NotFound {
             provider: "codex".into(),
             session_id: session_id.into(),
@@ -895,7 +889,7 @@ impl ProviderAdapter for CodexAdapter<'_> {
         Ok(snapshot)
     }
     fn system_prompt_evidence(&self, session_id: &str) -> Result<crate::SystemPromptEvidence> {
-        let sources = self.selected_sources(false, Some(session_id))?;
+        let sources = self.selected_sources(Some(session_id))?;
         let path = sources.get(session_id).ok_or_else(|| CoreError::NotFound {
             provider: "codex".into(),
             session_id: session_id.into(),
@@ -984,7 +978,7 @@ impl ProviderAdapter for CodexAdapter<'_> {
         true
     }
     fn reader_revision(&self, session_id: &str) -> Result<Option<super::ReaderStamp>> {
-        let sources = self.selected_sources(true, Some(session_id))?;
+        let sources = self.selected_sources(Some(session_id))?;
         let path = sources.get(session_id).ok_or_else(|| CoreError::NotFound {
             provider: "codex".into(),
             session_id: session_id.into(),
@@ -1057,7 +1051,7 @@ impl ProviderAdapter for CodexAdapter<'_> {
         Ok(Some(stamp))
     }
     fn reader_load(&self, session_id: &str) -> Result<SessionSnapshot> {
-        let sources = self.selected_sources(true, Some(session_id))?;
+        let sources = self.selected_sources(Some(session_id))?;
         let path = sources.get(session_id).ok_or_else(|| CoreError::NotFound {
             provider: "codex".into(),
             session_id: session_id.into(),
@@ -1071,7 +1065,7 @@ impl ProviderAdapter for CodexAdapter<'_> {
         Ok(snapshot)
     }
     fn reader_capture(&self, session_id: &str) -> Result<super::ReaderCapture> {
-        let sources = self.selected_sources(true, Some(session_id))?;
+        let sources = self.selected_sources(Some(session_id))?;
         let path = sources.get(session_id).ok_or_else(|| CoreError::NotFound {
             provider: "codex".into(),
             session_id: session_id.into(),
@@ -1134,7 +1128,7 @@ impl ProviderAdapter for CodexAdapter<'_> {
                     });
                 }
             }
-            let current = self.selected_sources(true, Some(session_id))?;
+            let current = self.selected_sources(Some(session_id))?;
             if current.get(session_id) != Some(path) || current.pairs.contains_key(session_id) {
                 return Err(CoreError::SourceChanged);
             }
@@ -1165,7 +1159,7 @@ impl ProviderAdapter for CodexAdapter<'_> {
         Ok(capture)
     }
     fn reader_parent_fact(&self, session_id: &str) -> Result<Option<SessionRef>> {
-        let sources = self.selected_sources(true, Some(session_id))?;
+        let sources = self.selected_sources(Some(session_id))?;
         let path = sources.get(session_id).ok_or_else(|| CoreError::NotFound {
             provider: "codex".into(),
             session_id: session_id.into(),
@@ -1193,7 +1187,7 @@ impl ProviderAdapter for CodexAdapter<'_> {
             .collect()
     }
     fn inherited_context(&self, session_id: &str) -> Result<Option<InheritedContextSnapshot>> {
-        let sources = self.selected_sources(true, Some(session_id))?;
+        let sources = self.selected_sources(Some(session_id))?;
         if sources.pairs.contains_key(session_id) {
             return Ok(None);
         }
@@ -1244,7 +1238,7 @@ impl ProviderAdapter for CodexAdapter<'_> {
         Ok(Some(snapshot))
     }
     fn protocol_event_stream(&self, session_id: &str) -> Result<EventStream> {
-        let sources = self.selected_sources(false, Some(session_id))?;
+        let sources = self.selected_sources(Some(session_id))?;
         let path = sources.get(session_id).ok_or_else(|| CoreError::NotFound {
             provider: "codex".into(),
             session_id: session_id.into(),
@@ -1258,7 +1252,7 @@ impl ProviderAdapter for CodexAdapter<'_> {
         self.native_protocol_snapshot(session_id)
     }
     fn protocol_bundle(&self, session_id: &str) -> Result<ProtocolBundle> {
-        let sources = self.selected_sources(false, Some(session_id))?;
+        let sources = self.selected_sources(Some(session_id))?;
         let path = sources.get(session_id).ok_or_else(|| CoreError::NotFound {
             provider: "codex".into(),
             session_id: session_id.into(),
@@ -1307,7 +1301,7 @@ impl ProviderAdapter for CodexAdapter<'_> {
         if entry.signature.starts_with("source-set:")
             || entry.signature.starts_with("recorded-rollout:")
         {
-            let sources = self.selected_sources(true, Some(&entry.session_id))?;
+            let sources = self.selected_sources(Some(&entry.session_id))?;
             if self.source_signature(entry)? != entry.signature {
                 return Err(CoreError::SourceChanged);
             }
@@ -1591,32 +1585,13 @@ fn is_compressed(path: &Path) -> bool {
     path.to_string_lossy().ends_with(".jsonl.zst")
 }
 
-fn cached_header_entry(path: PathBuf, reread_header: bool) -> Result<Option<SourceEntry>> {
+fn header_entry(path: PathBuf) -> Result<Option<SourceEntry>> {
     // SourceEntry's signature is the catalog's stat identity. Capture still
     // checks the canonical ID and hashes source bytes for the Reader revision.
     let mut entry = SourceEntry::new(String::new(), path.clone())?;
-    let cache = HEADER_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if !reread_header {
-        if let Some((signature, id)) = cache.lock().unwrap().get(&path) {
-            if signature == &entry.signature {
-                entry.session_id = id.clone();
-                return Ok(Some(entry));
-            }
-        }
-    }
-    let header = read_header(&path);
-    if header.is_err() {
-        cache.lock().unwrap().remove(&path);
-    }
-    let Some((id, _, _)) = header? else {
-        cache.lock().unwrap().remove(&path);
+    let Some((id, _, _)) = read_header(&path)? else {
         return Ok(None);
     };
-    let mut entries = cache.lock().unwrap();
-    if entries.len() >= HEADER_CACHE_LIMIT {
-        entries.clear();
-    }
-    entries.insert(path, (entry.signature.clone(), id.clone()));
     entry.session_id = id;
     Ok(Some(entry))
 }
@@ -8206,20 +8181,6 @@ mod tests {
             assert_eq!(adapter.inventory().unwrap().unwrap().len(), 837);
         }
         eprintln!("Codex 35 inventories: {:?}", started.elapsed());
-        let cache = HEADER_CACHE.get().unwrap().lock().unwrap();
-        let approximate_bytes = cache.capacity()
-            * (std::mem::size_of::<(PathBuf, (String, String))>() + 1)
-            + cache
-                .iter()
-                .map(|(path, (signature, id))| {
-                    path.as_os_str().len() + signature.capacity() + id.capacity()
-                })
-                .sum::<usize>();
-        eprintln!(
-            "Codex header cache: {} entries, {} estimated bytes",
-            cache.len(),
-            approximate_bytes
-        );
     }
 
     #[test]

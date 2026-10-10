@@ -154,12 +154,15 @@
 
   $: orderedSegments = [...segments].sort((a, b) => a.startOrdinal - b.startOrdinal);
   $: items = orderedSegments.flatMap(segment => segment.items);
+  $: itemsByAnchor = new Map(items.map(item => [stableAnchor(item.event), item]));
   $: hasTranscriptHandoffs = transcriptHandoffs(relationEntries, { provider, sessionId }).length > 0;
   $: if (relationCursor && !relationLoading && !relationError && items.some(item =>
     item.role === 'agent' && !readerCollaborationIdentity(relationEntries, item.event))) void loadRelations();
   $: blocks = groupReaderItems(items, makeDisplay);
   $: processUnits = groupReaderProcesses(blocks);
   $: outlineTurns = groupOutline(toc.entries);
+  $: outlineTurnByEvent = new Map(outlineTurns.flatMap(turn =>
+    turn.children.map(node => [node.key, turn] as const)));
   $: if (outlineExpandAll) expandedOutlineTurns = new Set(outlineTurns.map(turn => turn.key));
   $: executionLandmarksByAnchor = createExecutionLandmarks(executionEvents, executionComplete, executionCursor !== null);
   $: if (readerMounted && executionCursor && !executionLoading && !executionError) void loadExecutionFacts(executionCursor);
@@ -661,7 +664,7 @@
     const top = 125;
     const card = cards.filter(card => card.getBoundingClientRect().top <= top).at(-1) ?? cards[0];
     if (!card) return;
-    const item = items.find(item => item.event.messageId === card.dataset.messageId && item.event.segment === card.dataset.segment);
+    const item = itemsByAnchor.get(card.id);
     if (!item) return;
     const nextKey = eventKey(item.event);
     const changed = nextKey !== readingKey;
@@ -742,7 +745,7 @@
   }
 
   function mergeOutlineEntries(added: ReaderTocEntry[]): ReaderTocEntry[] {
-    const expandedChildren = new Set(groupOutline(toc.entries)
+    const expandedChildren = new Set(outlineTurns
       .filter(turn => expandedOutlineTurns.has(turn.key)).flatMap(turn => turn.children.map(node => node.key)));
     const entries = mergeToc(toc.entries, added);
     expandedOutlineTurns = new Set(groupOutline(entries)
@@ -765,7 +768,7 @@
 
   function expandOutlineFor(event: ReaderEventRef): void {
     const key = eventKey(event);
-    const turn = groupOutline(toc.entries).find(turn => turn.children.some(node => eventKey(node.entry.event) === key));
+    const turn = outlineTurnByEvent.get(key);
     if (turn && !expandedOutlineTurns.has(turn.key)) {
       expandedOutlineTurns = new Set([...expandedOutlineTurns, turn.key]);
     }
@@ -833,9 +836,9 @@
         if (window.location.hash !== hash) window.history.pushState(window.history.state, '', hash);
         lastHandledHash = window.location.hash;
       }
-      expandOutlineFor(location.event);
       await tick();
       if (!active || request !== locationGeneration || !stillCurrent()) return false;
+      expandOutlineFor(location.event);
       if (!restoringSearch) scrollToEvent(location.event);
       return true;
     } catch (cause) {
@@ -877,7 +880,7 @@
     tocLoading = true;
     tocError = '';
     try {
-      const response = await getReaderToc(provider, sessionId, cursor);
+      const response = await getReaderToc(provider, sessionId, cursor, 512);
       if (active && request === tocGeneration) {
         toc = { entries: mergeOutlineEntries(response.toc.entries),
           previousCursor: null, nextCursor: response.toc.nextCursor };
@@ -1421,8 +1424,8 @@
               onclick={() => toggleOutlineTurn(turn.key)}>
               <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg>
             </button>
-            <a class="outline-request" class:current-reading={readingKey === eventKey(turn.request.event)}
-              aria-current={readingKey === eventKey(turn.request.event) ? 'location' : undefined} href={hashFor(turn.request.event)} title={turn.request.label}
+            <a class="outline-request" class:current-reading={readingKey === turn.key}
+              aria-current={readingKey === turn.key ? 'location' : undefined} href={hashFor(turn.request.event)} title={turn.request.label}
               onclick={(event) => jumpTo(event, turn.request!.event)}>
               <span class="outline-copy"><strong>{outlineLabel(turn.request)}</strong><span>{t($language, 'You')}</span></span>
             </a>
@@ -1431,7 +1434,7 @@
             hidden={Boolean(turn.request) && !expandedOutlineTurns.has(turn.key)}>
             {#each turn.children as node (node.key)}
                 <a class:context-outline={node.entry.event.segment === 'context'}
-                  class:current-reading={readingKey === eventKey(node.entry.event)} aria-current={readingKey === eventKey(node.entry.event) ? 'location' : undefined} href={hashFor(node.entry.event)}
+                  class:current-reading={readingKey === node.key} aria-current={readingKey === node.key ? 'location' : undefined} href={hashFor(node.entry.event)}
                   title={node.entry.label} onclick={(event) => jumpTo(event, node.entry.event)}>
                   <span class="outline-mark" aria-hidden="true"></span>
                   <span class="outline-copy"><strong>{outlineLabel(node.entry)}</strong><span>{outlineHeading(node.entry, $language)}</span></span>

@@ -71,6 +71,16 @@ for (const era of ['legacy', 'modern']) {
         event, before: 0, after: 0,
       } });
       assert.deepEqual(zero.structuredContent.result.events.map(row => row.event.messageId), ['root-check']);
+      const start = await client.callTool({ name: 'session_get_context', arguments: {
+        event: { ...root, messageId: 'root-user', segment: 'message' }, before: 2, after: 1,
+      } });
+      assert.deepEqual(start.structuredContent.result.events.map(row => row.event.messageId),
+        ['root-user', 'root-dispatch']);
+      const end = await client.callTool({ name: 'session_get_context', arguments: {
+        event: { ...root, messageId: 'root-final', segment: 'message' }, before: 1, after: 2,
+      } });
+      assert.deepEqual(end.structuredContent.result.events.map(row => row.event.messageId),
+        ['root-check', 'root-final']);
       const missing = await client.callTool({ name: 'session_get_context', arguments: {
         event: { ...event, messageId: 'absent' },
       } });
@@ -111,4 +121,10 @@ test('session_get_context requires thinking opt-in and filters nearby thinking b
     } });
     assert.notEqual(defaultContext.isError, true, defaultContext.content?.[0]?.text);
     assert.doesNotMatch(JSON.stringify(defaultContext.structuredContent), /PRIVATE-CONTEXT-THINKING/);
+    const lastVisible = await client.callTool({ name: 'session_get_context', arguments: {
+      event: thinking, includeThinking: true, before: 2, after: 2,
+    } });
+    assert.deepEqual(lastVisible.structuredContent.result.events.map(row => row.event.messageId),
+      ['assistant-1', 'tool-call-1', 'reasoning-1'],
+      'Context takes preceding visible events in their recorded order');
   });

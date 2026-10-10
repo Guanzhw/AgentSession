@@ -474,7 +474,8 @@ test('Reader reading experience on current UI and isolated native provider data'
     assert.deepEqual(contextRequests, [
       { field: 'body', offset: 0, contentRevision: compactedRevision },
     ], 'keyboard opening invokes the body loader once against the bootstrap revision');
-    await command('click', '.context-card .context-disclosure button.read-more');
+    await command('focus', '.context-card .context-disclosure button.read-more');
+    await command('press', 'Enter');
     const retryDeadline = Date.now() + 10_000;
     let retryState;
     while (Date.now() < retryDeadline) {
@@ -496,7 +497,8 @@ test('Reader reading experience on current UI and isolated native provider data'
       'the first content page remains bounded');
     while (await evaluate(command, `!!document.querySelector('.context-card .context-disclosure button.read-more')`)) {
       const length = await evaluate(command, `document.querySelector('.context-card .context-disclosure .event-body').textContent.length`);
-      await command('click', '.context-card .context-disclosure button.read-more');
+      await command('focus', '.context-card .context-disclosure button.read-more');
+      await command('press', 'Enter');
       await waitFor(command, `document.querySelector('.context-card .context-disclosure .event-body').textContent.length > ${length}`);
     }
     assert.equal(await evaluate(command, `document.querySelector('.context-card .context-disclosure .event-body').textContent.includes('COMPACTED-BODY-COMPLETE')`), true);

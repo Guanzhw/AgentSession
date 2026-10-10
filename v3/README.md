@@ -74,13 +74,20 @@ publication replacing the field rejects its old fingerprint. Matching cached
 fields remain readable even if the live source disappears; this does not assert
 current source availability. Requests without the fingerprint keep strict
 whole-session revision checks. `R/locate` requires `messageId`, `segment` and `revision`.
-TOC, segments and relations take a continuation `cursor`, without a `limit`
-parameter. Navigation with a cursor or explicit revision reads the opened,
+TOC takes a continuation `cursor` and an optional `limit` from 64 through 512,
+in multiples of 64 (default 64). Automatic full-outline hydration uses 512;
+bootstrap and source-target lookup retain 64. Segments and relations take a
+continuation `cursor` without a `limit` parameter. Navigation with a cursor or
+explicit revision reads the opened,
 published Reader generation. Source additions therefore do not interrupt
 continuation or directory navigation. A fresh bootstrap checks current source
 evidence and replaces the generation; references to a replaced generation
 return `source_changed`. Search and Runtime/MCP retrieval retain their source
 freshness checks.
+
+The [Reader and MCP performance pass](../docs/design/performance-pass-20261011.md)
+records bounded outline batching, projection checks, measurements and remaining
+source-loading costs.
 
 For an ordinary Codex JSONL source, bootstrap captures and verifies a bounded
 prefix of complete records. Records appended after capture appear on the next

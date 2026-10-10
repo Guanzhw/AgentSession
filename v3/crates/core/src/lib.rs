@@ -1548,7 +1548,7 @@ impl Core {
             revision: session.revision.clone(),
             segments: vec![self.reader_page(&session, &items, 0)],
             total_items: items.len(),
-            toc: self.toc_page(&session, &items, 0),
+            toc: self.toc_page(&session, &items, 0, 64),
             relations: RelationSummary {
                 task_count,
                 observation_count,
@@ -1570,7 +1570,7 @@ impl Core {
             if toc_start > 0 {
                 bootstrap.opening_toc = Some(std::mem::replace(
                     &mut bootstrap.toc,
-                    self.toc_page(&session, &items, toc_start),
+                    self.toc_page(&session, &items, toc_start, 64),
                 ));
             }
             bootstrap.target_location = Some(location);
@@ -1906,8 +1906,9 @@ impl Core {
         session: &SessionSnapshot,
         items: &[ReaderItem],
         start: usize,
+        limit: usize,
     ) -> ReaderTocPage {
-        let end = (start + 64).min(items.len());
+        let end = (start + limit).min(items.len());
         ReaderTocPage {
             entries: items[start..end]
                 .iter()
@@ -1922,7 +1923,7 @@ impl Core {
                 })
                 .collect(),
             previous_cursor: (start > 0)
-                .then(|| self.cursor(session, "toc", start.saturating_sub(64))),
+                .then(|| self.cursor(session, "toc", start.saturating_sub(limit))),
             next_cursor: (end < items.len()).then(|| self.cursor(session, "toc", end)),
         }
     }
@@ -1956,10 +1957,25 @@ impl Core {
         session_id: &str,
         cursor: &str,
     ) -> Result<ReaderTocResponse> {
+        self.reader_toc_with_limit(provider, session_id, cursor, 64)
+    }
+
+    pub fn reader_toc_with_limit(
+        &self,
+        provider: &str,
+        session_id: &str,
+        cursor: &str,
+        limit: usize,
+    ) -> Result<ReaderTocResponse> {
+        if !(64..=512).contains(&limit) || limit % 64 != 0 {
+            return Err(CoreError::InvalidInput(
+                "TOC limit must be a multiple of 64 between 64 and 512".into(),
+            ));
+        }
         if let Some(model) = reader_model::ReaderModel::open_navigation(self, provider, session_id)?
         {
             let start = model.check_cursor(provider, session_id, "toc", cursor)?;
-            return model.toc(start);
+            return model.toc(start, limit);
         }
         let (session, start) = self.read_cursor(provider, session_id, "toc", cursor)?;
         let items = project_items(&session);
@@ -1969,7 +1985,7 @@ impl Core {
         Ok(ReaderTocResponse {
             session: Self::reader_ref(&session),
             revision: session.revision.clone(),
-            toc: self.toc_page(&session, &items, start),
+            toc: self.toc_page(&session, &items, start, limit),
         })
     }
 
@@ -2638,93 +2654,55 @@ impl Core {
             return Err(CoreError::SourceChanged);
         }
         let offset = saved.map_or(0, |cursor| cursor.offset);
-        let events: Vec<_> = session
-            .events
-            .iter()
-            .filter_map(|entry| {
-                let segment = entry.item.event.segment.as_str();
-                if !filters
-                    .segments
-                    .as_ref()
-                    .expect("default segments applied")
-                    .iter()
-                    .any(|value| value == segment)
-                    || segment == "message" && entry.body.trim().is_empty()
-                    || filters.roles.as_ref().is_some_and(|roles| {
-                        !roles.contains(&entry.item.role)
-                            && !(entry.item.role == "agent"
-                                && roles.iter().any(|role| role == "assistant"))
-                    })
-                {
-                    return None;
-                }
-                let tool_name = (segment == "tool").then(|| {
-                    entry
-                        .item
-                        .tool_name
-                        .clone()
-                        .unwrap_or_else(|| "tool".into())
-                });
-                if filters.tool_names.as_ref().is_some_and(|names| {
-                    !tool_name.as_ref().is_some_and(|name| names.contains(name))
-                }) {
-                    return None;
-                }
-                let status = (segment == "tool").then(|| {
-                    entry
-                        .tool_status
-                        .clone()
-                        .unwrap_or_else(|| "unknown".into())
-                });
-                if filters.statuses.as_ref().is_some_and(|statuses| {
-                    !status
-                        .as_ref()
-                        .is_some_and(|value| statuses.contains(value))
-                }) {
-                    return None;
-                }
-                let search_text = if segment == "tool" {
-                    tool_name.as_deref().unwrap_or("tool")
-                } else {
-                    &entry.body
-                };
-                if filters
-                    .query
-                    .as_ref()
-                    .is_some_and(|query| !timeline_matches(search_text, query))
-                {
-                    return None;
-                }
-                let preview = if segment == "tool" {
-                    bounded_preview(
-                        &format!(
-                            "{} ({})",
-                            search_text,
-                            status.as_deref().unwrap_or("unknown")
-                        ),
-                        240,
-                    )
-                } else if let Some(query) = &filters.query {
-                    timeline_snippet(search_text, query)
-                } else {
-                    bounded_preview(search_text, 240)
-                };
-                Some(TimelineEvent {
-                    event: entry.item.event.clone(),
-                    timestamp: entry.item.timestamp,
-                    role: entry.item.role.clone(),
-                    tool_name,
-                    status,
-                    preview,
-                    untrusted_content: true,
+        let mut matching = session.events.iter().filter(|entry| {
+            let segment = entry.item.event.segment.as_str();
+            if !filters
+                .segments
+                .as_ref()
+                .expect("default segments applied")
+                .iter()
+                .any(|value| value == segment)
+                || segment == "message" && entry.body.trim().is_empty()
+                || filters.roles.as_ref().is_some_and(|roles| {
+                    !roles.contains(&entry.item.role)
+                        && !(entry.item.role == "agent"
+                            && roles.iter().any(|role| role == "assistant"))
                 })
-            })
-            .collect();
-        if offset > events.len() {
-            return Err(CoreError::InvalidCursor);
+            {
+                return false;
+            }
+            let tool_name =
+                (segment == "tool").then(|| entry.item.tool_name.as_deref().unwrap_or("tool"));
+            if filters.tool_names.as_ref().is_some_and(|names| {
+                !tool_name.is_some_and(|name| names.iter().any(|value| value == name))
+            }) {
+                return false;
+            }
+            let status =
+                (segment == "tool").then(|| entry.tool_status.as_deref().unwrap_or("unknown"));
+            if filters.statuses.as_ref().is_some_and(|statuses| {
+                !status.is_some_and(|status| statuses.iter().any(|value| value == status))
+            }) {
+                return false;
+            }
+            let search_text = tool_name.unwrap_or(&entry.body);
+            filters
+                .query
+                .as_ref()
+                .is_none_or(|query| timeline_matches(search_text, query))
+        });
+        for _ in 0..offset {
+            if matching.next().is_none() {
+                return Err(CoreError::InvalidCursor);
+            }
         }
-        let end = offset.saturating_add(limit).min(events.len());
-        let truncated = end < events.len();
+        let events: Vec<_> = matching
+            .by_ref()
+            .take(limit)
+            .map(|entry| project_timeline_event(entry, filters.query.as_deref()))
+            .collect();
+        let end = offset + events.len();
+        let truncated = matching.next().is_some();
         let next_cursor = truncated.then(|| {
             serde_json::to_string(&TimelineCursor {
                 version: 1,
@@ -2738,7 +2716,7 @@ impl Core {
             .expect("timeline cursor serialization")
         });
         Ok(TimelinePage {
-            events: events[offset..end].to_vec(),
+            events,
             next_cursor,
             truncated,
             untrusted_content: true,
@@ -3095,44 +3073,48 @@ fn project_timeline(session: &SessionSnapshot) -> Vec<TimelineEvent> {
     session
         .events
         .iter()
-        .map(|entry| {
-            let tool = entry.item.event.segment == "tool";
-            let tool_name = tool.then(|| {
-                entry
-                    .item
-                    .tool_name
-                    .clone()
-                    .unwrap_or_else(|| "tool".into())
-            });
-            let status = tool.then(|| {
-                entry
-                    .tool_status
-                    .clone()
-                    .unwrap_or_else(|| "unknown".into())
-            });
-            let preview = if tool {
-                bounded_preview(
-                    &format!(
-                        "{} ({})",
-                        tool_name.as_deref().unwrap_or("tool"),
-                        status.as_deref().unwrap_or("unknown")
-                    ),
-                    240,
-                )
-            } else {
-                bounded_preview(&entry.body, 240)
-            };
-            TimelineEvent {
-                event: entry.item.event.clone(),
-                timestamp: entry.item.timestamp,
-                role: entry.item.role.clone(),
-                tool_name,
-                status,
-                preview,
-                untrusted_content: true,
-            }
-        })
+        .map(|entry| project_timeline_event(entry, None))
         .collect()
+}
+
+fn project_timeline_event(entry: &NormalizedEvent, query: Option<&str>) -> TimelineEvent {
+    let tool = entry.item.event.segment == "tool";
+    let tool_name = tool.then(|| {
+        entry
+            .item
+            .tool_name
+            .clone()
+            .unwrap_or_else(|| "tool".into())
+    });
+    let status = tool.then(|| {
+        entry
+            .tool_status
+            .clone()
+            .unwrap_or_else(|| "unknown".into())
+    });
+    let preview = if tool {
+        bounded_preview(
+            &format!(
+                "{} ({})",
+                tool_name.as_deref().unwrap_or("tool"),
+                status.as_deref().unwrap_or("unknown")
+            ),
+            240,
+        )
+    } else if let Some(query) = query {
+        timeline_snippet(&entry.body, query)
+    } else {
+        bounded_preview(&entry.body, 240)
+    };
+    TimelineEvent {
+        event: entry.item.event.clone(),
+        timestamp: entry.item.timestamp,
+        role: entry.item.role.clone(),
+        tool_name,
+        status,
+        preview,
+        untrusted_content: true,
+    }
 }
 
 fn project_message_preview(entry: &NormalizedEvent) -> TimelineEvent {

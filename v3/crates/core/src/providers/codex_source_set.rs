@@ -626,7 +626,7 @@ mod tests {
             scope: "source-set-targeted",
         };
         PAIR_RESOLVE_COUNT.with(|count| count.set(0));
-        let sources = adapter.selected_sources(true, Some(healthy)).unwrap();
+        let sources = adapter.selected_sources(Some(healthy)).unwrap();
         assert!(sources.contains_key(healthy));
         assert!(sources.pairs.is_empty());
         PAIR_RESOLVE_COUNT.with(|count| assert_eq!(count.get(), 0));

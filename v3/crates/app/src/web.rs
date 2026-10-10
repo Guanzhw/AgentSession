@@ -1037,15 +1037,29 @@ async fn child_location(
     ))
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TocQuery {
+    cursor: String,
+    limit: Option<usize>,
+}
+
 async fn toc(
     State(core): State<Arc<Core>>,
     Path((provider, session_id)): Path<(String, String)>,
-    Query(query): Query<CursorQuery>,
+    Query(query): Query<TocQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     Ok(Json(
-        tokio::task::spawn_blocking(move || core.reader_toc(&provider, &session_id, &query.cursor))
-            .await
-            .map_err(joined_error)??,
+        tokio::task::spawn_blocking(move || {
+            core.reader_toc_with_limit(
+                &provider,
+                &session_id,
+                &query.cursor,
+                query.limit.unwrap_or(64),
+            )
+        })
+        .await
+        .map_err(joined_error)??,
     ))
 }
 

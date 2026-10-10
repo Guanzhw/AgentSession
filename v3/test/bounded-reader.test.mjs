@@ -1,8 +1,9 @@
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdtemp, mkdir, writeFile, rm, appendFile, unlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, appendFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -10,22 +11,22 @@ import test from 'node:test';
 const repo = fileURLToPath(new URL('../../', import.meta.url));
 const binary = process.env.AGENTSESSION_V3_BIN || path.join(repo, 'v3/target/debug', process.platform === 'win32' ? 'agentsession-v3.exe' : 'agentsession-v3');
 const sessionId = 'bounded-public-session';
-function source(extra = '') {
+function source(extra = '', count = 100) {
   const records = [{ type: 'session_meta', payload: { id: sessionId } }];
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < count; i++) {
     records.push(i === 32
       ? { type: 'response_item', payload: { type: 'function_call', call_id: 'tool-32', name: 'exec_command', arguments: '{"cmd":"git status --short"}' } }
       : { type: 'response_item', payload: { type: 'message', id: `message-${i}`, role: 'assistant', content: [{ type: 'output_text', text: `Public event ${i}. ${extra}` }] } });
   }
-  records.push({ type: 'response_item', payload: { type: 'function_call_output', call_id: 'tool-32',
+  if (count > 32) records.push({ type: 'response_item', payload: { type: 'function_call_output', call_id: 'tool-32',
     output: 'Chunk ID: public\nWall time: 1.0 seconds\nProcess running with session ID 97155\nOutput:\n' } });
   return records.map(row => JSON.stringify(row)).join('\n') + '\n';
 }
-async function start(t, dir) {
+async function start(t, dir, count = 100) {
   const sessionDir = path.join(dir, 'source', 'sessions', '2026', '09', '27');
   await mkdir(sessionDir, { recursive: true });
   const file = path.join(sessionDir, 'rollout-public.jsonl');
-  await writeFile(file, source());
+  await writeFile(file, source('', count));
   const port = await freeFetchSafePort();
   const child = spawn(binary, ['serve', '--port', String(port), '--codex-dir', path.join(dir, 'source'),
     '--opencode-db', path.join(dir, 'absent.db'), '--claude-dir', path.join(dir, 'claude'), '--pi-dir', path.join(dir, 'pi'),
@@ -123,6 +124,83 @@ test('bounded Reader traverses source order, locates late events and rejects inv
   const missing = await get(`${left.base}/segments?cursor=${encodeURIComponent(rewritten.segments[0].nextCursor)}`);
   assert.equal(missing.status, 200, 'published navigation remains readable after source removal');
   assert.equal((await get(`${left.base}/bootstrap`)).status, 404, 'fresh opening still checks source availability');
+});
+
+test('Reader TOC batching preserves complete entries and bounded canonical cursor navigation', { timeout: 45000 }, async t => {
+  const dir = await mkdtemp(path.join(repo, 'tmp/v3-batched-toc-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const { base, file } = await start(t, dir, 1300);
+  const sourceHash = async () => createHash('sha256').update(await readFile(file)).digest('hex');
+  const beforeHash = await sourceHash();
+  const initial = (await get(`${base}/bootstrap`)).body;
+  assert.equal(initial.totalItems, 1300);
+  assert.equal(initial.toc.entries.length, 64, 'bootstrap retains its default bound');
+  const tocUrl = (cursor, limit) => `${base}/toc?${new URLSearchParams({ cursor,
+    ...(limit === undefined ? {} : { limit: String(limit) }) })}`;
+  const ordinary = (await get(tocUrl(initial.toc.nextCursor))).body.toc;
+  assert.equal(ordinary.entries.length, 64, 'omitting limit retains the existing page size');
+  const explicitMinimum = await get(tocUrl(initial.toc.nextCursor, 64));
+  assert.equal(explicitMinimum.status, 200);
+  assert.deepEqual(explicitMinimum.body.toc, ordinary);
+  const expected = [...initial.toc.entries];
+  for (let cursor = initial.toc.nextCursor; cursor;) {
+    const response = await get(tocUrl(cursor));
+    assert.equal(response.status, 200);
+    expected.push(...response.body.toc.entries);
+    cursor = response.body.toc.nextCursor;
+  }
+  const actual = [...initial.toc.entries];
+  let requests = 0;
+  for (let cursor = initial.toc.nextCursor; cursor;) {
+    const position = JSON.parse(cursor).position;
+    const response = await get(tocUrl(cursor, 512));
+    assert.equal(response.status, 200);
+    assert.equal(response.body.revision, initial.revision);
+    const page = response.body.toc;
+    assert.equal(page.entries[0].ordinal, position);
+    assert.ok(page.entries.length <= 512);
+    assert.equal(JSON.parse(page.previousCursor).position, Math.max(0, position - 512));
+    if (page.nextCursor) assert.equal(JSON.parse(page.nextCursor).position, position + 512);
+    actual.push(...page.entries);
+    cursor = page.nextCursor;
+    requests++;
+  }
+  assert.equal(requests, 3);
+  assert.deepEqual(actual, expected, 'batching retains every entry, source reference, label and process fact');
+  assert.deepEqual(actual.map(entry => entry.ordinal), Array.from({ length: 1300 }, (_, i) => i));
+  assert.deepEqual(actual.map(entry => entry.event.messageId), Array.from({ length: 1300 }, (_, i) => i === 32 ? 'tool-32' : `message-${i}`));
+  for (const limit of [0, 63, 65, 513, 1024]) {
+    const response = await get(tocUrl(initial.toc.nextCursor, limit));
+    assert.equal(response.status, 400);
+    assert.equal(response.body.error.code, 'invalid_request');
+  }
+  assert.equal((await get(tocUrl('broken', 63))).body.error.code, 'invalid_request', 'limit is validated at the request boundary');
+  assert.equal((await get(`${tocUrl(initial.toc.nextCursor, 512)}&unknown=true`)).status, 400);
+  for (const position of [1, 1344]) {
+    const cursor = JSON.stringify({ ...JSON.parse(initial.toc.nextCursor), position });
+    assert.equal((await get(tocUrl(cursor, 512))).body.error.code, 'invalid_cursor');
+  }
+  const scoped = JSON.stringify({ ...JSON.parse(initial.toc.nextCursor), scope: 'different-source-scope' });
+  assert.equal((await get(tocUrl(scoped, 512))).body.error.code, 'invalid_cursor');
+  const target = (await get(`${base}/bootstrap?${new URLSearchParams({ messageId: 'message-1299', segment: 'message' })}`)).body;
+  assert.equal(target.toc.entries.length, 20, 'targeted bootstrap retains its 64-entry page');
+  assert.equal(target.toc.entries.at(-1).event.messageId, 'message-1299');
+  assert.equal(target.toc.nextCursor, null);
+  assert.equal(await sourceHash(), beforeHash, 'TOC reads preserve provider source bytes');
+  await writeFile(file, source('rewritten', 1300));
+  const rewritten = (await get(`${base}/bootstrap`)).body;
+  assert.notEqual(rewritten.revision, initial.revision);
+  assert.equal((await get(tocUrl(initial.toc.nextCursor, 512))).body.error.code, 'source_changed');
+  await writeFile(file, source('', 0));
+  const empty = (await get(`${base}/bootstrap`)).body;
+  assert.equal(empty.totalItems, 0);
+  assert.deepEqual(empty.toc.entries, []);
+  assert.equal(empty.toc.nextCursor, null);
+  assert.equal(empty.toc.previousCursor, null);
+  const emptyCursor = JSON.stringify({ ...JSON.parse(initial.toc.nextCursor), revision: empty.revision, position: 0 });
+  const emptyPage = await get(tocUrl(emptyCursor, 512));
+  assert.equal(emptyPage.status, 200);
+  assert.deepEqual(emptyPage.body.toc, empty.toc, 'the empty generation stays an empty bounded page');
 });
 
 test('Runtime source jumps verify their own revision and the current Reader generation', { timeout: 45000 }, async t => {

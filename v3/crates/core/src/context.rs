@@ -27,20 +27,36 @@ impl Core {
                 "thinking event requires explicit opt-in".into(),
             ));
         }
-        let events: Vec<_> = self
-            .timeline(&target.provider, &target.session_id)?
-            .into_iter()
-            .filter(|row| include_thinking || row.event.segment != "thinking")
-            .collect();
-        let position = events
+        let session = self.load_session(&target.provider, &target.session_id)?;
+        let position = session
+            .events
             .iter()
-            .position(|row| row.event == *target)
+            .position(|entry| entry.item.event == *target)
             .ok_or_else(|| CoreError::EventNotFound(target.message_id.clone()))?;
+        let visible = |entry: &&crate::providers::NormalizedEvent| {
+            include_thinking || entry.item.event.segment != "thinking"
+        };
+        let mut preceding: Vec<_> = session.events[..position]
+            .iter()
+            .rev()
+            .filter(visible)
+            .take(before)
+            .collect();
+        preceding.reverse();
+        let events = preceding
+            .into_iter()
+            .chain(std::iter::once(&session.events[position]))
+            .chain(
+                session.events[position + 1..]
+                    .iter()
+                    .filter(visible)
+                    .take(after),
+            )
+            .map(|entry| crate::project_timeline_event(entry, None))
+            .collect();
         Ok(SessionContext {
             target: target.clone(),
-            events: events
-                [position.saturating_sub(before)..(position + after + 1).min(events.len())]
-                .to_vec(),
+            events,
             untrusted_content: true,
         })
     }

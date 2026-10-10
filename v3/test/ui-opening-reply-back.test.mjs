@@ -152,7 +152,7 @@ const runtimeEvent = {
   readerEvent: firstItems[10].event,
 };
 
-async function startHarness(t, holdDiscovery = false, rejectReaderOnce = false, targetAware = false) {
+async function startHarness(t, holdDiscovery = false, rejectReaderOnce = false, targetAware = false, holdTocHydration = false) {
   const requireFromUi = createRequire(path.join(uiDir, 'package.json'));
   const { build } = requireFromUi('vite');
   const buildDir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-opening-back-'));
@@ -163,6 +163,8 @@ async function startHarness(t, holdDiscovery = false, rejectReaderOnce = false, 
   let discoveryRequests = 0;
   let readerRequests = 0;
   const navigationRequests = { locate: 0, segments: 0, toc: 0 };
+  const tocRequests = [];
+  let releaseTocHydration;
   let targetedBootstrapRequests = 0;
   let discoveryPending = false;
   let bootstrapWhileDiscoveryPending = false;
@@ -246,7 +248,13 @@ async function startHarness(t, holdDiscovery = false, rejectReaderOnce = false, 
     if (url.pathname === `/api/v3/reader/${provider}/${sessionId}/toc`) {
       navigationRequests.toc++;
       const cursor = url.searchParams.get('cursor');
+      const limit = Number(url.searchParams.get('limit'));
+      tocRequests.push({ cursor, limit });
       const page = cursor === 'toc-page-32' ? middleToc : cursor === 'toc-64' ? targetToc : toc;
+      if (holdTocHydration && cursor === 'toc-page-32' && limit === 512) {
+        releaseTocHydration = () => json({ session, revision, toc: page });
+        return;
+      }
       json({ session, revision, toc: page });
       return;
     }
@@ -308,6 +316,8 @@ async function startHarness(t, holdDiscovery = false, rejectReaderOnce = false, 
     get bootstrapWhileDiscoveryPending() { return bootstrapWhileDiscoveryPending; },
     get targetedBootstrapRequests() { return targetedBootstrapRequests; },
     navigationRequests,
+    tocRequests,
+    releaseTocHydration: () => releaseTocHydration(),
   };
 }
 
@@ -424,6 +434,8 @@ test('initial canonical source fragment uses target bootstrap once and later has
     assert.equal(harness.targetedBootstrapRequests, 1);
     assert.deepEqual(harness.navigationRequests, { locate: 0, segments: 0, toc: 2 },
       'startup navigation uses the target bootstrap and automatically loads the remaining two TOC pages');
+    assert.deepEqual(harness.tocRequests.map(request => request.limit), [512, 512],
+      'continuous full-outline hydration uses bounded 512-entry requests');
     assert.equal(await command('eval', 'location.hash'), JSON.stringify(initialHash));
     assert.equal(await command('eval', `document.querySelector('.reader-outline')?.textContent.includes('Selected public reply 70.')`), 'true');
     assert.equal(await command('eval', `document.querySelector('.reader-page-controls:not(.reader-continue) button').disabled`), 'false');
@@ -453,6 +465,29 @@ test('initial canonical source fragment uses target bootstrap once and later has
     await command('click', retainedTarget);
     await waitForBrowser(command, `${targetVisible} && location.hash === ${JSON.stringify(initialHash)}`,
       'the retained outline link reopens the exact recorded target in the viewport');
+  });
+
+test('full-outline hydration uses 512 entries while an unseen canonical target keeps the default page size',
+  { skip: skipReason || false, timeout: 90_000 }, async t => {
+    const harness = await startHarness(t, false, false, false, true);
+    const command = await startBrowser(t, `${harness.origin}/${provider}/session/${sessionId}`);
+    await waitForBrowser(command,
+      `document.querySelector('#reader-title') && document.querySelector('.reader-outline nav')?.getAttribute('aria-busy') === 'true'`,
+      'the Reader with continuous outline hydration pending');
+    assert.deepEqual(harness.tocRequests, [{ cursor: 'toc-page-32', limit: 512 }]);
+    await command('eval', `location.hash = '#event?messageId=target-reply-70&segment=message'`);
+    await waitForBrowser(command,
+      `document.querySelector('.transcript [data-message-id="target-reply-70"]') && !document.querySelector('.content-error')`,
+      'the unseen canonical target while full-outline hydration is pending');
+    assert.ok(harness.tocRequests.some(request => request.cursor === 'toc-64' && request.limit === 64),
+      'targeted outline lookup retains the bounded default 64-entry page');
+    harness.releaseTocHydration();
+    await waitForBrowser(command,
+      `document.querySelector('.reader-outline nav')?.getAttribute('aria-busy') === 'false' && document.querySelector('.reader-outline a[href*="messageId=target-reply-95&"]')`,
+      'the complete outline after continuous hydration resumes');
+    assert.deepEqual(harness.tocRequests, [
+      { cursor: 'toc-page-32', limit: 512 }, { cursor: 'toc-64', limit: 64 }, { cursor: 'toc-64', limit: 512 },
+    ]);
   });
 
 test('an explicitly empty initial source fragment preserves the invalid-target error',

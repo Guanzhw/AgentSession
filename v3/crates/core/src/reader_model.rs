@@ -1100,8 +1100,8 @@ impl ReaderModel {
             next_cursor: (end < self.item_count).then(|| self.cursor("segments", end)),
         })
     }
-    fn toc_page(&self, start: usize) -> Result<ReaderTocPage> {
-        let items = self.items(start, 64)?;
+    fn toc_page(&self, start: usize, limit: usize) -> Result<ReaderTocPage> {
+        let items = self.items(start, limit)?;
         let end = start + items.len();
         Ok(ReaderTocPage {
             entries: items
@@ -1116,7 +1116,7 @@ impl ReaderModel {
                     label: item.preview.chars().take(80).collect(),
                 })
                 .collect(),
-            previous_cursor: (start > 0).then(|| self.cursor("toc", start.saturating_sub(64))),
+            previous_cursor: (start > 0).then(|| self.cursor("toc", start.saturating_sub(limit))),
             next_cursor: (end < self.item_count).then(|| self.cursor("toc", end)),
         })
     }
@@ -1126,7 +1126,7 @@ impl ReaderModel {
             revision: self.revision.clone(),
             segments: vec![self.reader_page(0)?],
             total_items: self.item_count,
-            toc: self.toc_page(0)?,
+            toc: self.toc_page(0, 64)?,
             relations: RelationSummary {
                 task_count: self.task_count,
                 observation_count: self.relation_count - self.task_count,
@@ -1151,7 +1151,7 @@ impl ReaderModel {
             if toc_start > 0 {
                 bootstrap.opening_toc = Some(std::mem::replace(
                     &mut bootstrap.toc,
-                    self.toc_page(toc_start)?,
+                    self.toc_page(toc_start, 64)?,
                 ));
             }
             bootstrap.target_location = Some(location);
@@ -1262,14 +1262,14 @@ impl ReaderModel {
             page: self.reader_page(start)?,
         })
     }
-    pub(crate) fn toc(&self, start: usize) -> Result<ReaderTocResponse> {
+    pub(crate) fn toc(&self, start: usize, limit: usize) -> Result<ReaderTocResponse> {
         if start % 64 != 0 || start >= self.item_count.max(1) {
             return Err(CoreError::InvalidCursor);
         }
         Ok(ReaderTocResponse {
             session: self.reference(),
             revision: self.revision.clone(),
-            toc: self.toc_page(start)?,
+            toc: self.toc_page(start, limit)?,
         })
     }
     pub(crate) fn locate(&self, query: ReaderLocateQuery) -> Result<ReaderLocation> {
@@ -1526,11 +1526,12 @@ impl ReaderModel {
             )
             .map_err(storage)?;
         let mut text = String::new();
+        let mut text_units = 0;
         for row in rows {
-            text.push_str(&row.map_err(storage)?);
-            if first_start as usize + text.encode_utf16().count()
-                > query.offset.saturating_add(query.max_chars)
-            {
+            let chunk = row.map_err(storage)?;
+            text_units += chunk.encode_utf16().count();
+            text.push_str(&chunk);
+            if first_start as usize + text_units > query.offset.saturating_add(query.max_chars) {
                 break;
             }
         }
@@ -1538,8 +1539,8 @@ impl ReaderModel {
             crate::page_text(&text, query.offset - first_start as usize, query.max_chars)?;
         page.offset = query.offset;
         page.total_chars = total as usize;
-        page.next_offset = (query.offset + page.text.encode_utf16().count() < total as usize)
-            .then_some(query.offset + page.text.encode_utf16().count());
+        let end = query.offset + page.text.encode_utf16().count();
+        page.next_offset = (end < total as usize).then_some(end);
         page.truncated = page.next_offset.is_some();
         Ok(page)
     }

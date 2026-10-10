@@ -30,13 +30,20 @@
 
   function measure(): void {
     if (!host) return;
+    if (handoffs.length === 0) {
+      layout = [];
+      return;
+    }
     const bounds = host.getBoundingClientRect();
     const points = new Map<string, number>();
     const cards = [...host.querySelectorAll<HTMLElement>('[data-message-id][data-segment]')]
       .filter(card => card.closest('.transcript, .inline-child-transcript') === host);
+    const cardsByEvent = new Map(cards.map(card => [
+      [provider, sessionId, card.dataset.messageId, card.dataset.segment].join('\0'), card,
+    ]));
     for (const handoff of handoffs) for (const event of [handoff.dispatch, handoff.returned]) {
       if (!event) continue;
-      const card = cards.find(item => item.dataset.messageId === event.messageId && item.dataset.segment === event.segment);
+      const card = cardsByEvent.get(collaborationEventKey(event));
       if (!card) continue;
       let target: HTMLElement = card;
       // Hidden work still has a visible execution disclosure as its recorded anchor.
