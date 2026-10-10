@@ -606,7 +606,8 @@ test('deep child URL restores late root and nested spawn anchors after refresh a
         errors: [...document.querySelectorAll('.content-error')].map(el => el.textContent),
         loaded: document.querySelector('.reader-actions')?.textContent,
         cards: [...document.querySelectorAll('article.event-card')].map(article => article.dataset.messageId + ' / ' + article.dataset.segment).slice(-8),
-        relation: document.querySelector('.collaboration-counts')?.textContent,
+        collaborationGraphNodes: [...document.querySelectorAll('.collaboration-child-node')]
+          .map(node => node.textContent.trim()),
         requests: performance.getEntriesByType('resource').map(row => row.name).filter(name => name.includes('/reader/')).slice(-12),
         body: document.body.textContent.slice(-500) })`);
       throw new Error(`${error.message}; state=${state}`);

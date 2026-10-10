@@ -276,11 +276,9 @@ test('public DSH sessions work through the real Axum Library and Reader',
     if (await command('eval', `Boolean(document.querySelector('.collaboration-launcher:not([hidden])'))`) === 'true') {
       await command('click', '.collaboration-launcher');
     }
-    await waitForBrowser(command, `Boolean(document.querySelector('.collaboration-counts'))`,
-      'the recorded collaboration panel');
-    const counts = await command('get', 'text', '.collaboration-counts');
-    assert.match(counts, /^\s*4\s+tasks\s+·\s+12\s+coordination observations\s*$/i,
-      'The root Reader shows four tasks and twelve coordination observations');
+    assert.doesNotMatch(await command('get', 'text', '#collaboration-panel'),
+      /Collaboration sources|Inspect recorded tasks and handoffs|Load more recorded work/,
+      'The Reader keeps the relationship graph without the source and inspection sections');
     await waitForBrowser(command,
       `document.querySelector('[data-member-id="${ids.alpha}"]') && document.querySelector('[data-member-id="${ids.beta}"]')`,
       'recorded alpha and beta participant choices');
@@ -317,8 +315,8 @@ test('public DSH sessions work through the real Axum Library and Reader',
     assert.doesNotMatch(await command('get', 'text', '.collaboration-thread'),
       /Also check the alpha ending marker\./);
     await waitForBrowser(command,
-      `document.querySelector('a[href="${alphaHref}"]') && document.querySelector('a[href="${betaHref}"]')`,
-      'the child links derived from the recorded relations');
+      `document.querySelector('[data-collaboration-handoff="parallel-inspection:1"] .collaboration-child-node') && document.querySelector('[data-collaboration-handoff="parallel-inspection:2"] .collaboration-child-node')`,
+      'both recorded child nodes in the relationship graph');
     for (const [name, href] of [['alpha', alphaHref], ['beta', betaHref]]) {
       await command('eval', `(() => {
         const node = [...document.querySelectorAll('.collaboration-child-node')].find(button =>
@@ -333,15 +331,6 @@ test('public DSH sessions work through the real Axum Library and Reader',
       assert.equal(Number(await command('get', 'count', '.collaboration-timeline .collaboration-selected-details')), 1,
         'One selected agent owns the progressive handoff details');
     }
-    assert.equal(Number(await command('get', 'count', `.collaboration-reference-details .related-sessions a[href="${alphaHref}"]`)), 1,
-      'The source details retain alpha’s canonical DSH session reference');
-    assert.equal(Number(await command('get', 'count', `.collaboration-reference-details .related-sessions a[href="${betaHref}"]`)), 1,
-      'The source details retain beta’s canonical DSH session reference');
-
-    await command('eval', `document.querySelector('.collaboration-reference-details').open = true`);
-    await command('click', '.relation-details summary');
-    await waitForBrowser(command, 'document.querySelectorAll(".relation-details li").length === 16',
-      'all source-backed task and coordination rows');
     const rootPath = `/api/v3/reader/${provider}/${ids.root}`;
     const rootCalls = JSON.parse(await command('eval', 'window.__agentsessionApiCalls'));
     const rootBootstrap = rootCalls.find(call => call.path === `${rootPath}/bootstrap` && call.status === 200);

@@ -305,7 +305,7 @@ test('Claude sidechain without a usable parent keeps relationship coverage unkno
     assert.deepEqual(protocol.agentRuns, []);
   });
 
-test('Claude task notification opens its exact Reader body and Back restores panel focus', {
+test('Claude Runtime graph opens the canonical parent Reader and restores graph focus', {
   timeout: 90_000, skip: browserSkip,
 }, async t => {
   const f = await fixture();
@@ -334,34 +334,6 @@ test('Claude task notification opens its exact Reader body and Back restores pan
     await browserCommand(session, 'set', 'viewport', '1280', '900');
     phase = 'wait for the root Reader';
     await waitForBrowser(session, "document.querySelector('#reader-title')", 'the Claude Reader');
-    phase = 'open the collaboration panel';
-    await browserCommand(session, 'eval', "document.querySelector('.collaboration-launcher')?.click()");
-    await waitForBrowser(session, "document.querySelector('#collaboration-panel')", 'the task panel');
-    phase = 'expand the recorded task list';
-    await browserCommand(session, 'click', '.collaboration-reference-details > summary');
-    await browserCommand(session, 'eval', "document.querySelector('.relation-details summary')?.click()");
-    const sourceSelector = '[data-task-source-id="task-without-status"]';
-    phase = 'find the exact root notification link';
-    await waitForBrowser(session, `document.querySelector(${JSON.stringify(sourceSelector)})`,
-      'the exact task notification source link');
-    phase = 'open the root notification';
-    await browserCommand(session, 'click', sourceSelector);
-    const anchor = 'event-' + Buffer.from(JSON.stringify([
-      provider, rootId, 'task-without-status', 'tool',
-    ]), 'utf8').toString('hex');
-    const card = JSON.stringify(`#${anchor}`);
-    phase = 'verify the exact root notification body and anchor';
-    await waitForBrowser(session, `location.hash.includes('messageId=task-without-status') && document.querySelector(${card})`,
-      'the exact notification Reader card');
-    await browserCommand(session, 'click', `#${anchor} .tool-field:nth-child(2) > summary`);
-    await waitForBrowser(session, `location.hash.includes('messageId=task-without-status') &&
-      document.querySelector(${card})?.textContent.includes('Waiting for an update')`,
-    'the exact notification body and Reader anchor');
-    phase = 'return to the root task panel';
-    await browserCommand(session, 'back');
-    await waitForBrowser(session, `location.hash === '' &&
-      document.activeElement?.getAttribute('data-task-source-id') === 'task-without-status'`,
-    'the originating task panel link focus after Back');
     phase = 'open the session library';
     await browserCommand(session, 'click', 'a.reader-back-link');
     await waitForBrowser(session, `location.pathname === '/sessions' &&
@@ -375,35 +347,6 @@ test('Claude task notification opens its exact Reader body and Back restores pan
     await browserCommand(session, 'click', childSessionLink);
     await waitForBrowser(session, `location.pathname === '/${provider}/session/child-a' &&
       document.querySelector('#reader-title')`, 'the canonical child Reader route');
-    await waitForBrowser(session, "document.querySelector('#collaboration-panel')",
-      'the child task panel');
-    phase = 'expand the child task list';
-    await browserCommand(session, 'click', '.collaboration-reference-details > summary');
-    await browserCommand(session, 'eval', "document.querySelector('.relation-details summary')?.click()");
-    const childSourceSelector = '[data-task-source-id="child-notification"]';
-    phase = 'find the exact child notification link';
-    await waitForBrowser(session, `document.querySelector(${JSON.stringify(childSourceSelector)})`,
-      'the exact child task notification source link');
-    phase = 'open the child notification in its canonical Reader';
-    await browserCommand(session, 'click', childSourceSelector);
-    const childAnchor = 'event-' + Buffer.from(JSON.stringify([
-      provider, 'child-a', 'child-notification', 'tool',
-    ]), 'utf8').toString('hex');
-    const childCard = JSON.stringify(`#${childAnchor}`);
-    phase = 'verify the exact child notification body and canonical route';
-    await waitForBrowser(session, `location.hash.includes('messageId=child-notification') && document.querySelector(${childCard})`,
-      'the exact child notification Reader card');
-    await browserCommand(session, 'click', `#${childAnchor} .tool-field:nth-child(2) > summary`);
-    await waitForBrowser(session, `location.pathname === '/${provider}/session/child-a' &&
-      location.hash.includes('messageId=child-notification') &&
-      document.querySelector(${childCard})?.textContent.includes('Child notification returned')`,
-    'the child notification body and canonical Reader route');
-    phase = 'return to the child task panel';
-    await browserCommand(session, 'back');
-    await waitForBrowser(session, `location.pathname === '/${provider}/session/child-a' &&
-      location.hash === '' &&
-      document.activeElement?.getAttribute('data-task-source-id') === 'child-notification'`,
-    'the originating child panel link focus after Back');
     phase = 'open the child Runtime Sessions graph';
     await browserCommand(session, 'click', '.runtime-tab');
     await browserCommand(session, 'click', '.runtime-lens-sessions');

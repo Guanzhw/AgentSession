@@ -927,7 +927,7 @@ test('Library preserves an expanded DSH family and child query across Reader Bac
     assert.equal(await command('errors'), '');
   });
 
-test('Library routes DSH roots and children with source-backed task and coordination links', { skip: skipReason || false, timeout: 60_000 }, async t => {
+test('Library routes DSH roots and opens child sessions from the relationship graph', { skip: skipReason || false, timeout: 60_000 }, async t => {
   const harness = await startHarness(t);
   const rootHref = `/${dshProvider}/session/${dshIds.root}`;
   const alphaHref = `/${dshProvider}/session/${dshIds.alpha}`;
@@ -955,17 +955,13 @@ test('Library routes DSH roots and children with source-backed task and coordina
   if (await command('eval', `Boolean(document.querySelector('.collaboration-launcher:not([hidden])'))`) === 'true') {
     await command('click', '.collaboration-launcher');
   }
-  await waitForBrowser(command, `Boolean(document.querySelector('.collaboration-counts'))`,
-    'the source-backed collaboration panel');
-  const collaborationCounts = await command('get', 'text', '.collaboration-counts');
-  assert.match(collaborationCounts, /\b4\b\s+tasks?\b/i,
-    'The Reader displays the four source-backed tasks');
-  assert.match(collaborationCounts, /\b12\b\s+coordination observations?\b/i,
-    'The Reader displays the twelve source-backed coordination observations');
+  assert.doesNotMatch(await command('get', 'text', '#collaboration-panel'),
+    /Collaboration sources|Inspect recorded tasks and handoffs|Load more recorded work/,
+    'The Reader retains the collaboration graph without its removed source sections');
 
   await waitForBrowser(command,
-    `document.querySelector('a[href="${alphaHref}"]') && document.querySelector('a[href="${betaHref}"]')`,
-    'canonical links to both DSH child sessions');
+    `document.querySelector('[data-collaboration-handoff="parallel-inspection:1"] .collaboration-child-node') && document.querySelector('[data-collaboration-handoff="parallel-inspection:2"] .collaboration-child-node')`,
+    'both child nodes in the DSH relationship graph');
   for (const [correlationId, href] of [['parallel-inspection:1', alphaHref], ['parallel-inspection:2', betaHref]]) {
     await command('eval', `document.querySelector('[data-collaboration-handoff="${correlationId}"] .collaboration-child-node').click()`);
     await waitForBrowser(command, `Boolean(document.querySelector('.collaboration-timeline a[href="${href}"]'))`,
@@ -976,14 +972,15 @@ test('Library routes DSH roots and children with source-backed task and coordina
       'Recorded handoff details belong to the selected child');
   }
 
-  await command('eval', `document.querySelector('.collaboration-reference-details').open = true`);
-  await command('eval', `document.querySelector('.related-sessions a[href="${alphaHref}"]').scrollIntoView({block:'center',behavior:'instant'})`);
-  await command('click', `.related-sessions a[href="${alphaHref}"]`);
+  await command('eval', `document.querySelector('[data-collaboration-handoff="parallel-inspection:1"] .collaboration-child-node').click()`);
+  await waitForBrowser(command, `Boolean(document.querySelector('.collaboration-timeline a[href="${alphaHref}"]'))`,
+    'the selected graph node’s canonical child link');
+  await command('click', `.collaboration-timeline a[href="${alphaHref}"]`);
   await waitForBrowser(command,
-    `document.querySelector('#reader-title')?.textContent.trim() === 'DSH S2 alpha child'`,
-    'the DSH alpha child Reader');
-  assert.equal(await command('get', 'url'), `${harness.origin}${alphaHref}`,
-    'Opening a child preserves the DSH provider and canonical session ID in its URL');
+    `(() => { const query = new URLSearchParams(location.hash.slice(7)); const path = JSON.parse(query.get('path') ?? '[]'); return location.hash.startsWith('#child?') && query.get('provider') === '${dshProvider}' && query.get('sessionId') === '${dshIds.alpha}' && path.length === 1 && path[0].provider === '${dshProvider}' && path[0].sessionId === '${dshIds.alpha}'; })()`,
+    'the graph link records the canonical DSH alpha child path');
+  assert.equal(new URL(await command('get', 'url')).pathname, rootHref,
+    'Opening the child from the graph keeps the root Reader route active');
 });
 
 test('Library retains readable providers and reports a DSH source failure', { skip: skipReason || false, timeout: 60_000 }, async t => {

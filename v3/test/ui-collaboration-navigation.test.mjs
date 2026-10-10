@@ -144,8 +144,8 @@ test('child collaboration timeline preserves nested paths and canonical event na
   await t.test('opening a grandchild preserves both inline ancestors', async t => {
     const command = await browser(t, `${app.origin}/codex/session/${root}`);
     await openChildTimeline(command);
-    assert.equal(await evaluate(command, `document.querySelector('.collaboration-reference-details').open`), false,
-      'source identifiers remain in the collapsed sources disclosure');
+    assert.equal(await evaluate(command, `Boolean(document.querySelector('.collaboration-timeline .collaboration-handoff'))`), true,
+      'the recorded child remains visible in the collaboration graph');
     assert.equal(await evaluate(command, `document.querySelector('.collaboration-handoff-actions a').getAttribute('href')`),
       `/codex/session/${grandchild}`, 'the visible child action retains a canonical link');
     await command('click', `.collaboration-handoff[data-collaboration-handoff="${child}-spawn"] .collaboration-handoff-actions a`);

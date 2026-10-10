@@ -536,16 +536,8 @@ h1, h2, p { margin-top: 0; }
 .collaboration-launcher[hidden] { display: none; }
 .collaboration-close { flex: none; align-self: start; width: 28px; height: 28px; border: 1px solid var(--line-dark); border-radius: 4px; background: var(--surface-control); color: var(--forest-soft); cursor: pointer; font-size: 19px; line-height: 1; }
 .collaboration-close:hover, .collaboration-launcher:hover { background: var(--surface-active); }
-.collaboration-owner, .collaboration-child-path { color: var(--text-subtle); font-size: 10px; overflow-wrap: anywhere; }
-.collaboration-owner code { font: 10px var(--mono); }
 .collaboration-heading { display: flex; justify-content: space-between; align-items: end; gap: 18px; }
 .collaboration-heading h2 { font: 500 21px/1.15 var(--serif); margin: 0; }
-.collaboration-counts { color: var(--text-subtle); font-size: 11px; white-space: nowrap; margin: 0; }
-.collaboration-counts strong { font-size: 15px; font-weight: 650; }
-.related-sessions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; border-top: 1px solid var(--line); margin-top: 17px; padding-top: 13px; }
-.related-sessions > span { color: var(--muted); font-size: 10px; margin-right: 4px; }
-.related-sessions a { color: var(--forest-soft); background: var(--paper); border: 1px solid var(--border-soft); border-radius: 4px; padding: 5px 8px; font: 10px/1.4 var(--mono); text-decoration: none; overflow-wrap: anywhere; }
-.related-sessions a:hover { border-color: var(--moss); }
 .collaboration-participants { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 14px; }
 .collaboration-participant-choices { display: flex; flex-wrap: wrap; gap: 7px; }
 .collaboration-participant-choices button { border: 1px solid var(--border-soft); border-radius: 4px; background: var(--paper); color: var(--forest-soft); padding: 6px 10px; cursor: pointer; font-size: 11px; }
@@ -561,18 +553,6 @@ h1, h2, p { margin-top: 0; }
 .collaboration-message-more:disabled { color: var(--text-faint); cursor: default; }
 .collaboration-thread li small, .relation-unavailable-history { display: block; color: var(--text-faint); font: 9px/1.45 var(--mono); margin-top: 5px; }
 .collaboration-thread li a { display: inline-block; margin-top: 5px; color: var(--forest-soft); text-underline-offset: 3px; }
-.relation-details { margin-top: 13px; color: var(--text-secondary); font-size: 11px; }
-.relation-details summary { cursor: pointer; width: fit-content; }
-.relation-details ol { display: grid; gap: 8px; padding-left: 20px; margin: 12px 0 0; max-height: 300px; overflow: auto; }
-.relation-details li { line-height: 1.4; overflow-wrap: anywhere; }
-.relation-details li small { display: block; color: var(--text-faint); font: 9px/1.45 var(--mono); }
-.relation-actors { display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px 9px; margin-top: 6px; color: var(--text-secondary); font-size: 10px; }
-.relation-actors code { color: var(--forest-soft); font: 10px/1.45 var(--mono); overflow-wrap: anywhere; }
-.relation-direction { color: var(--text-faint); }
-.relation-unresolved-child { margin: 5px 0 0; color: var(--warning); font-size: 10px; }
-.relation-source-link { display: inline-block; margin: 6px 0 2px; color: var(--forest-soft); font-size: 10px; text-underline-offset: 3px; }
-.relation-source-link:hover { color: var(--blue); }
-.collaboration-summary > .read-more { margin-top: 13px; }
 .owner-context { color: var(--warning); font-size: 11px; line-height: 1.5; margin: 0 0 0 4px; }
 .owner-context a { color: var(--amber); text-decoration: underline; text-underline-offset: 2px; }
 .transcript { display: flex; flex-direction: column; gap: 28px; }

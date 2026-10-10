@@ -59,7 +59,7 @@
   let locationError = '';
   let relationEntries: RelationEntry[] = [];
   let childPlacements: ReaderChildPlacement[] = [];
-  let childCollaboration: Record<string, { snapshot: ReaderCollaborationSnapshot; loadMore: () => void }> = {};
+  let childCollaboration: Record<string, ReaderCollaborationSnapshot> = {};
   let executionEvents: RuntimeExecutionEvent[] = [];
   let executionComplete = false;
   let executionCursor: string | null = null;
@@ -170,13 +170,11 @@
     items[0].role === 'user' && items[1].role === 'assistant' &&
     !hasCollaboration && !firstPage?.previousCursor && !lastPage?.nextCursor;
   $: childPanel = activeChildPath.length > 0 ? childCollaboration[childKey(panelSource)] : null;
-  $: panelSummary = activeChildPath.length > 0 ? childPanel?.snapshot.summary ?? null : bootstrap.relations;
-  $: panelEntries = activeChildPath.length > 0 ? childPanel?.snapshot.entries ?? [] : relationEntries;
-  $: panelCursor = activeChildPath.length > 0 ? childPanel?.snapshot.nextCursor ?? null : relationCursor;
-  $: panelLoading = activeChildPath.length > 0 ? childPanel?.snapshot.loading ?? false : relationLoading;
-  $: panelError = activeChildPath.length > 0 ? childPanel?.snapshot.error ?? '' : relationError;
-  $: panelRevision = activeChildPath.length > 0 ? childPanel?.snapshot.revision ?? '' : bootstrap.revision;
-  $: panelChildRefs = directChildren(panelEntries, panelSource);
+  $: panelEntries = activeChildPath.length > 0 ? childPanel?.entries ?? [] : relationEntries;
+  $: panelCursor = activeChildPath.length > 0 ? childPanel?.nextCursor ?? null : relationCursor;
+  $: panelLoading = activeChildPath.length > 0 ? childPanel?.loading ?? false : relationLoading;
+  $: panelError = activeChildPath.length > 0 ? childPanel?.error ?? '' : relationError;
+  $: panelRevision = activeChildPath.length > 0 ? childPanel?.revision ?? '' : bootstrap.revision;
   $: panelParticipants = recordedParticipants(panelEntries);
   $: selectedParticipant = panelParticipants.find(participant => participant.id === selectedParticipantId) ?? panelParticipants[0];
   $: participantEntries = selectedParticipant ? panelEntries.filter(entry =>
@@ -388,32 +386,14 @@
     void setChildPath([], anchor, child);
   }
 
-  function onChildCollaborationUpdate(session: SessionRef, snapshot: ReaderCollaborationSnapshot | null,
-    loadMore?: () => void): void {
+  function onChildCollaborationUpdate(session: SessionRef, snapshot: ReaderCollaborationSnapshot | null): void {
     const key = childKey(session);
-    if (snapshot && loadMore) childCollaboration = { ...childCollaboration, [key]: { snapshot, loadMore } };
+    if (snapshot) childCollaboration = { ...childCollaboration, [key]: snapshot };
     else {
       const next = { ...childCollaboration };
       delete next[key];
       childCollaboration = next;
     }
-  }
-
-  function loadPanelRelations(): void {
-    if (activeChildPath.length > 0) childPanel?.loadMore();
-    else void loadRelations();
-  }
-
-  function directChildren(entries: RelationEntry[], owner: SessionRef): SessionRef[] {
-    const children = new Map<string, SessionRef>();
-    for (const entry of entries) {
-      if (entry.type !== 'coordination') continue;
-      const { fromSessionRef, toSessionRef } = entry.observation;
-      if (fromSessionRef?.provider !== owner.provider || fromSessionRef.sessionId !== owner.sessionId ||
-        !toSessionRef || (toSessionRef.provider === owner.provider && toSessionRef.sessionId === owner.sessionId)) continue;
-      children.set(toSessionRef.provider + '\0' + toSessionRef.sessionId, toSessionRef);
-    }
-    return [...children.values()];
   }
 
   function openRelated(event: MouseEvent, session: SessionRef): void {
@@ -1182,24 +1162,6 @@
         {#if activeChildPath.length > 0 && !childPanel}<p role="status">{t($language, 'Opening child collaboration…')}</p>{/if}
         <CollaborationTimeline entries={panelEntries} session={panelSource} items={activeChildPath.length > 0 ? [] : items} complete={!panelCursor && !panelLoading}
           onOpenChild={openCollaborationChild} onNavigate={openCollaborationEvent} />
-        <details class="collaboration-reference-details">
-          <summary>{t($language, 'Collaboration sources')}</summary>
-          {#if panelSummary}
-            <p class="collaboration-counts"><strong>{panelSummary.taskCount}</strong> {t($language, 'tasks')} · <strong>{panelSummary.observationCount}</strong> {t($language, 'coordination observations')}</p>
-          {/if}
-          <p class="collaboration-owner">{t($language, 'Source session')} <code>{panelSource.sessionId}</code></p>
-          {#if activeChildPath.length > 0}
-            <p class="collaboration-child-path">{t($language, 'Reading child')} {activeChildPath.map(step => step.sessionId).join(' → ')}</p>
-          {/if}
-          {#if panelChildRefs.length > 0}
-          <div class="related-sessions" aria-label={t($language, 'Child sessions')}>
-            <span>{t($language, 'Child sessions')}</span>
-            {#each panelChildRefs as child (child.provider + '/' + child.sessionId)}
-              <a href={sessionHref(child)} onclick={(event) => openRelated(event, child)}>{child.sessionId} <span aria-hidden="true">↗</span></a>
-            {/each}
-          </div>
-          {/if}
-        </details>
         {#if panelParticipants.length > 0}
           <section class="collaboration-participants" aria-label={t($language, 'Recorded participants')}>
             <div class="collaboration-participant-choices">
@@ -1263,52 +1225,6 @@
             {/if}
           </section>
         {/if}
-        {#if panelEntries.length > 0}
-          <details class="relation-details">
-            <summary>{t($language, 'Inspect recorded tasks and handoffs')}</summary>
-            <ol>
-              {#each panelEntries as entry, index (index)}
-                {#if entry.type === 'task'}
-                  <li><strong>{entry.task.kind}</strong> · {entry.task.id} · {entry.task.status}{entry.task.owner ? ` · ${entry.task.owner}` : ''}
-                    {#if entry.task.readerEvent}
-                      <a class="relation-source-link" data-task-source-id={entry.task.readerEvent.messageId}
-                        href={readerEventHref(entry.task.readerEvent)}
-                        onclick={(event) => {
-                          if (entry.task.readerEvent!.provider === provider && entry.task.readerEvent!.sessionId === sessionId) {
-                            jumpTo(event, entry.task.readerEvent!, event.currentTarget as HTMLElement); return;
-                          }
-                          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-                          event.preventDefault(); openCollaborationEvent(entry.task.readerEvent!);
-                        }}>
-                        {t($language, 'Open notification in Reader')}
-                      </a>
-                    {/if}
-                    <small>{entry.task.provenance.sourceType} #{entry.task.provenance.sourceId}</small>
-                  </li>
-                {:else}
-                  <li class="relation-observation" data-kind={entry.observation.kind} data-correlation-id={entry.observation.correlationId} data-event-id={entry.observation.eventId}>
-                    <strong>{entry.observation.kind === 'wait' ? t($language, 'Recorded wait') : entry.observation.kind}</strong> · {entry.observation.state} · {entry.observation.correlationId}
-                    {#if entry.observation.fromActorPath || entry.observation.toActorPath}
-                      <div class="relation-actors" aria-label={t($language, 'Recorded actor path')}>
-                        {#if entry.observation.fromActorPath}<span>{t($language, 'From')} <code>{entry.observation.fromActorPath}</code></span>{/if}
-                        {#if entry.observation.fromActorPath && entry.observation.toActorPath}<span class="relation-direction" aria-hidden="true">→</span>{/if}
-                        {#if entry.observation.toActorPath}<span>{t($language, 'To')} <code>{entry.observation.toActorPath}</code></span>{/if}
-                      </div>
-                    {/if}
-                    {#if entry.observation.kind === 'spawn' && !entry.observation.toSessionRef && entry.observation.toActorPath}
-                      <p class="relation-unresolved-child">{t($language, 'Child session unresolved: no canonical session reference was recorded. The actor path does not identify a session link.')}</p>
-                    {/if}
-                    {#if entry.observation.readerEvent}
-                      <a class="relation-source-link" href={readerEventHref(entry.observation.readerEvent)}>{t($language, 'Open Reader event:')} {entry.observation.readerEvent.messageId} / {entry.observation.readerEvent.segment}</a>
-                    {/if}
-                    <small>{entry.observation.provenance.sourceType} #{entry.observation.provenance.sourceId}</small>
-                  </li>
-                {/if}
-              {/each}
-            </ol>
-          </details>
-        {/if}
-        {#if panelCursor}<button class="read-more" disabled={panelLoading} onclick={loadPanelRelations}>{panelLoading ? t($language, 'Loading recorded work…') : t($language, 'Load more recorded work')}</button>{/if}
         {#if panelError}<p class="content-error" role="status">{panelError}</p>{/if}
       </section>
       {/if}

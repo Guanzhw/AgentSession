@@ -21,7 +21,7 @@
   export let onPaneSearchChange: (source: SessionRef, state: PaneSearchState) => void;
   export let onSearchSelection: (target: ReaderSearchTarget) => void;
   export let onCollaborationUpdate: (session: SessionRef,
-    snapshot: ReaderCollaborationSnapshot | null, loadMore?: () => void) => void;
+    snapshot: ReaderCollaborationSnapshot | null) => void;
   export let onChildPathChange: (path: SessionRef[], fallbackEvent?: ReaderEventRef, focusChild?: SessionRef) => void | Promise<void>;
   export let onCollapse: () => void;
 
@@ -141,7 +141,7 @@
       nextCursor: relationCursor,
       loading: relationLoading,
       error: relationError,
-    }, () => { void loadRelations(); });
+    });
   }
 
   async function restoreNestedAnchor(targetKey: string): Promise<void> {

@@ -107,7 +107,7 @@ function stableAnchor(sessionId, messageId, segment) {
   return `event-${Buffer.from(key, 'utf8').toString('hex')}`;
 }
 
-test('real Axum Reader links Codex collaboration rows to exact source events',
+test('real Axum Reader preserves Codex source facts and graph dispatch-return navigation',
   { skip: skipReason || false, timeout: 120_000 }, async t => {
     assert.ok(existsSync(binary), `Build the current v3 debug binary at ${binary}`);
     const fixture = await loadPublicFixture();
@@ -230,8 +230,8 @@ test('real Axum Reader links Codex collaboration rows to exact source events',
     assert.equal(await command('eval', `Boolean(document.querySelector('#collaboration-panel:not([hidden])'))`),
       'false', 'The collaboration overview starts collapsed');
     await command('click', '.collaboration-launcher');
-    await waitFor(command, `Boolean(document.querySelector('.relation-details > summary'))`,
-      'the real Codex collaboration section');
+    await waitFor(command, `Boolean(document.querySelector('.collaboration-child-node'))`,
+      'the real Codex collaboration graph');
 
     const resultAnchor = stableAnchor(fixture.sessionId, 'agent-result', 'message');
     await waitFor(command,
@@ -327,39 +327,27 @@ test('real Axum Reader links Codex collaboration rows to exact source events',
       .find(link => link.getAttribute('href') === '#event?messageId=agent-result&segment=message')?.getClientRects().length)`),
     'true', 'Search opens the exact returned-result outline link');
 
-    await command('eval', "document.querySelector('.relation-details > summary').click()");
-    await waitFor(command, `document.querySelector('.relation-details')?.open`, 'the five recorded source rows');
-    assert.equal(Number(await command('get', 'count', '.relation-observation')), 5);
-
-    for (const row of expectedRows) {
-      const eventId = `event:codex:${row.sourceId}`;
-      const rowSelector = `.relation-observation[data-event-id=${JSON.stringify(eventId)}]`;
-      const sourceLink = `${rowSelector} .relation-source-link`;
-      assert.equal(Number(await command('get', 'count', rowSelector)), 1,
-        `${row.kind} ${row.state} has one source-backed row`);
-      assert.equal(Number(await command('get', 'count', sourceLink)), 1,
-        `${row.kind} ${row.state} has a named Reader source link`);
-      assert.equal(await command('get', 'text', sourceLink),
-        `Open Reader event: ${row.messageId} / ${row.segment}`);
-
-      const expectedHash = `#event?${new URLSearchParams({ messageId: row.messageId, segment: row.segment })}`;
-      const href = JSON.parse(await command('eval',
-        `document.querySelector(${JSON.stringify(sourceLink)})?.getAttribute('href')`));
-      assert.equal(href, `${sessionUrl}${expectedHash}`,
-        `${row.kind} ${row.state} links to the exact Reader event hash`);
-
-      await command('eval', `document.querySelector(${JSON.stringify(sourceLink)}).click()`);
+    for (const [selector, messageId, segment] of [
+      ['.collaboration-handoff-actions button', 'spawn-1', 'tool'],
+      ['.collaboration-return button', 'agent-result', 'message'],
+    ]) {
+      if (await command('eval', `Boolean(document.querySelector('.collaboration-selected-details'))`) === 'false') {
+        await command('click', '.collaboration-launcher');
+        await command('click', '.collaboration-child-node');
+      }
+      const expectedHash = `#event?${new URLSearchParams({ messageId, segment })}`;
+      await command('eval', `document.querySelector(${JSON.stringify(selector)}).click()`);
       await waitFor(command, `location.hash === ${JSON.stringify(expectedHash)}`,
-        `${row.kind} ${row.state} source navigation`);
-      const anchor = stableAnchor(fixture.sessionId, row.messageId, row.segment);
-      const cardClass = row.segment === 'tool' ? '.tool-card' : '.agent-card';
+        `graph navigation to the recorded ${segment} event`);
+      const anchor = stableAnchor(fixture.sessionId, messageId, segment);
+      const cardClass = segment === 'tool' ? '.tool-card' : '.agent-card';
       await waitFor(command,
         `document.getElementById(${JSON.stringify(anchor)})?.matches(${JSON.stringify(cardClass)})`,
-        `${row.kind} ${row.state} exact source card`);
+        'the exact graph source card');
       const cardSource = JSON.parse(await command('eval',
         `(() => { const article = document.getElementById(${JSON.stringify(anchor)}); return article ? article.dataset.messageId + ' / ' + article.dataset.segment : null; })()`));
-      assert.equal(cardSource, `${row.messageId} / ${row.segment}`,
-        `${row.kind} ${row.state} lands on the exact Reader source card`);
+      assert.equal(cardSource, `${messageId} / ${segment}`,
+        'The graph action lands on its exact recorded Reader card');
     }
 
     const result = expectedRows.at(-1);

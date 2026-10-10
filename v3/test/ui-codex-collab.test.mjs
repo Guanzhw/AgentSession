@@ -297,34 +297,31 @@ test('the collaboration panel follows the deepest open child and its recorded fa
     await waitForBrowser(command, `document.querySelector('.collaboration-launcher')`,
       'the child fixture collaboration entry');
     await command('click', '.collaboration-launcher');
-    await waitForBrowser(command, `document.querySelector('.collaboration-owner')?.textContent.includes('${sessionId}')`,
+    await waitForBrowser(command, `document.querySelector('.collaboration-handoff[data-collaboration-handoff="spawn:delegate:1"]')`,
       'the root collaboration owner');
     await waitForBrowser(command, `document.querySelector('.inline-child-toggle')`,
       'the recorded child insertion point');
     await command('eval', `document.querySelector('.inline-child-toggle').click()`);
     await waitForBrowser(command, `document.querySelector('.inline-child-reader') &&
-      document.querySelector('.collaboration-owner')?.textContent.includes('${childSessionId}') &&
-      document.querySelector('.relation-observation[data-event-id="child-result"]')`,
+      document.querySelector('.collaboration-handoff[data-collaboration-handoff="child-source-result"]')`,
       'the child-owned panel after expanding its inline pane');
-    assert.equal(Number(await command('get', 'count', '.relation-observation[data-event-id="event-spawn-1"]')), 0,
+    assert.equal(Number(await command('get', 'count', '.collaboration-handoff[data-collaboration-handoff="spawn:delegate:1"]')), 0,
       'Root facts are not presented as child facts');
     await command('eval', `document.querySelector('.inline-child-collapse').click()`);
     await waitForBrowser(command, `!document.querySelector('.inline-child-reader') &&
-      document.querySelector('.collaboration-owner')?.textContent.includes('${sessionId}') &&
-      document.querySelector('.relation-observation[data-event-id="event-spawn-1"]')`,
+      document.querySelector('.collaboration-handoff[data-collaboration-handoff="spawn:delegate:1"]')`,
       'the root-owned panel after collapsing the child');
     await command('back');
     await waitForBrowser(command, `document.querySelector('.inline-child-reader') &&
-      document.querySelector('.collaboration-owner')?.textContent.includes('${childSessionId}') &&
-      document.querySelector('.relation-observation[data-event-id="child-result"]')`,
+      document.querySelector('.collaboration-handoff[data-collaboration-handoff="child-source-result"]')`,
       'Back restores the child-owned panel');
     await command('forward');
     await waitForBrowser(command, `!document.querySelector('.inline-child-reader') &&
-      document.querySelector('.collaboration-owner')?.textContent.includes('${sessionId}')`,
+      document.querySelector('.collaboration-handoff[data-collaboration-handoff="spawn:delegate:1"]')`,
       'Forward restores the root-owned panel');
   });
 
-test('Codex collaboration shows actor paths, resolves the exact Reader source, and keeps agent answers distinct',
+test('Codex collaboration graph resolves dispatch and return while keeping agent answers distinct',
   { skip: skipReason || false, timeout: 60_000 }, async t => {
     const harness = await startHarness(t);
     const { command } = await startBrowser(t, `${harness.origin}/${provider}/session/${sessionId}`);
@@ -347,58 +344,28 @@ test('Codex collaboration shows actor paths, resolves the exact Reader source, a
       'the recorded collaboration entry');
     await command('click', '.collaboration-launcher');
     await waitForBrowser(command, `document.querySelector('.collaboration-summary')`, 'recorded collaboration panel');
-    await command('click', '.collaboration-reference-details > summary');
-    await command('eval', "document.querySelector('.relation-details > summary').click()");
-    await waitForBrowser(command, "document.querySelector('.relation-details')?.open", 'the recorded handoffs');
-    const spawnRow = '.relation-observation[data-event-id="event-spawn-1"]';
-    assert.match(await command('get', 'text', spawnRow), /\/root.*\/root\/inspector/s,
-      'The spawn observation shows its parent-to-child actor path');
-    assert.match(await command('get', 'text', spawnRow), /canonical session reference was recorded/i,
-      'The spawn is clearly unresolved as a canonical child session');
-    assert.equal(Number(await command('get', 'count', '.related-sessions a')), 0,
-      'The actor path does not become a fabricated child-session link');
-    assert.equal(Number(await command('get', 'count', '.relation-observation .relation-source-link')), 5,
-      'Every recorded collaboration observation links to its exact Reader evidence');
-    for (const [source, messageId] of [
-      ['event-spawn-request', 'spawn:delegate:1'],
-      ['event-spawn-1', 'spawn:delegate:1'],
-      ['event-wait-call', 'wait:foreground:1'],
-      ['event-wait-timeout', 'wait:foreground:1'],
-    ]) {
-      const link = `.relation-observation[data-event-id="${source}"] .relation-source-link`;
-      const href = await command('eval', `document.querySelector(${JSON.stringify(link)})?.getAttribute('href')`);
-      assert.match(href, new RegExp(`messageId=${encodeURIComponent(messageId)}&segment=tool`),
-        'The tool relation targets its exact tool Reader card');
-    }
-
-    const waitCall = '.relation-observation[data-event-id="event-wait-call"]';
-    const waitTimeout = '.relation-observation[data-event-id="event-wait-timeout"]';
-    assert.match(await command('get', 'text', waitCall), /Recorded wait · waiting/,
-      'The untargeted wait call is shown as recorded waiting');
-    assert.match(await command('get', 'text', waitTimeout), /Recorded wait · timed_out/,
-      'The wait output is shown without assigning it to a child');
-    for (const selector of [waitCall, waitTimeout]) {
-      assert.match(await command('get', 'text', `${selector} .relation-actors`), /From\s+\/root/,
-        'The recorded parent initiated the wait without a named child target');
-      assert.equal(Number(await command('get', 'count', `${selector} .relation-unresolved-child`)), 0);
-      assert.equal(Number(await command('get', 'count', `${selector} a:not(.relation-source-link)`)), 0,
-        'Untargeted waiting evidence does not imply a canonical child session');
-    }
-
-    const resultRow = '.relation-observation[data-event-id="event-result-1"]';
-    assert.match(await command('get', 'text', resultRow), /\/root\/inspector.*\/root/s,
-      'The result observation shows the child-author-to-parent path');
-    const sourceLink = `${resultRow} a.relation-source-link`;
-    assert.match(await command('get', 'text', sourceLink), /Open Reader event.*agent-final/,
-      'The result names its exact Reader source event');
-    const sourceHref = await command('eval',
-      `document.querySelector(${JSON.stringify(sourceLink)})?.getAttribute('href')`);
-    assert.match(sourceHref, new RegExp(`/codex/session/${sessionId}#event\\?messageId=agent-final&segment=message`),
-      'The source link targets the agent message and segment');
-
-    await command('eval', `document.querySelector(${JSON.stringify(sourceLink)}).click()`);
-    await waitForBrowser(command, "window.location.hash.includes('messageId=agent-final')",
-      'navigation to the exact agent Reader event');
+    assert.equal(await command('get', 'text', '.collaboration-parent strong'), 'Main assistant',
+      'The graph names the recorded parent');
+    assert.equal(await command('get', 'text', '.collaboration-child-node strong'), 'inspector',
+      'The graph names the recorded delegate');
+    assert.equal(JSON.parse(await command('eval', `document.querySelector('.collaboration-child-node strong')?.title`)),
+      '/root/inspector', 'The graph retains the recorded delegate actor path');
+    await command('click', '.collaboration-child-node');
+    await waitForBrowser(command, `document.querySelector('.collaboration-selected-details')`,
+      'the selected delegate actions');
+    assert.equal(Number(await command('get', 'count', '.collaboration-handoff-actions a')), 0,
+      'An actor path without a canonical child session does not create a child conversation link');
+    await command('click', '.collaboration-handoff-actions button');
+    await waitForBrowser(command,
+      `location.hash === '#event?messageId=spawn%3Adelegate%3A1&segment=tool'`,
+      'graph navigation to the exact dispatch tool');
+    assert.equal(await command('eval', `Boolean(document.querySelector('.tool-card[data-message-id="spawn:delegate:1"][data-segment="tool"]'))`),
+      'true', 'The dispatch action resolves its recorded tool card');
+    await command('click', '.collaboration-launcher');
+    await command('click', '.collaboration-child-node');
+    await command('click', '.collaboration-return button');
+    await waitForBrowser(command, `location.hash === '#event?messageId=agent-final&segment=message'`,
+      'graph navigation to the exact returned agent message');
 
     await waitForBrowser(command,
       `document.querySelector('.agent-card .event-body')?.textContent === ${JSON.stringify(finalAnswer)}`,
