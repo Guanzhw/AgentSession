@@ -104,8 +104,11 @@ Contents automatically collects its remaining pages and provides **Collapse
 all** and **Expand all** for request/reply groups. Context checkpoints and later
 agent/assistant replies stay in their request's group until the next request;
 checkpoint anchors retain their own position and reveal the group when opened.
-Tool calls default to compact
-rows with a recorded command or task summary and background/result phase where
+Compaction checkpoints use distinct cards with a short preview; the recorded
+context opens on demand and retains bounded continuation. Tool ownership uses
+indentation alongside the colored agent collaboration connections.
+Tool calls default to compact rows with a recorded command or task summary,
+agent model and reasoning level, and background/result phase where
 available; input, output and recorded execution links remain inside their
 disclosure. Codex `exec` headers decode literal commands from supported recorded
 wrappers; arbitrary JavaScript remains in the full input.

@@ -27,6 +27,8 @@ const sessionId = 'reader-feedback-acceptance';
 const shortBody = 'A short answer should be readable immediately. '.repeat(6).padEnd(283, 'x') + ' SHORT-ANSWER-COMPLETE';
 const longBody = Array.from({ length: 50 }, (_, i) =>
   `Paragraph ${i + 1} explains the source-backed reading experience with enough context to follow the whole argument.`).join('\n\n') + '\n\nLONG-ANSWER-COMPLETE';
+const compactedBody = Array.from({ length: 24 }, (_, i) =>
+  `Retained context paragraph ${i + 1} preserves the recorded context needed to continue the conversation.`).join('\n\n') + '\n\nCOMPACTED-BODY-COMPLETE';
 const tailMarker = 'TAIL-DESTINATION-UNIQUE';
 const toolInput = JSON.stringify({ command: 'INPUT-START ' + 'x'.repeat(1700) + ' INPUT-COMPLETE' });
 const toolOutput = 'OUTPUT-START ' + 'y'.repeat(1700) + ' OUTPUT-COMPLETE';
@@ -56,7 +58,9 @@ async function harness(t) {
     }
     if (i === 5) {
       rows.push({ timestamp: '2026-10-09T00:00:06.100Z', type: 'compacted',
-        payload: { message: 'Synthetic recorded compaction checkpoint', replacement_history: [] } });
+        payload: { message: 'Synthetic recorded compaction checkpoint', replacement_history: [
+          { type: 'message', role: 'user', content: [{ type: 'input_text', text: compactedBody }] },
+        ] } });
       for (let reply = 0; reply < 3; reply++) rows.push({ timestamp: `2026-10-09T00:00:06.${200 + reply}Z`,
         type: 'response_item', payload: { type: 'message', role: 'assistant', id: `checkpoint-reply-${reply}`,
           content: [{ type: 'output_text', text: `Reply ${reply} continues the same request after compaction.` }] } });
@@ -67,6 +71,12 @@ async function harness(t) {
         content: [{ type: 'output_text', text: 'The same user request continues before the boundary checkpoint.' }] } });
       rows.push({ timestamp: '2026-10-09T00:02:02.100Z', type: 'compacted',
         payload: { message: 'Page-boundary recorded compaction checkpoint', replacement_history: [] } });
+      rows.push({ timestamp: '2026-10-09T00:02:02.150Z', type: 'response_item', payload: {
+        type: 'function_call', call_id: 'reader-spawn', name: 'spawn_agent', namespace: 'collaboration',
+        arguments: JSON.stringify({ task_name: 'reader-reviewer', message: 'Review the Reader fixture.',
+          model: 'gpt-6-luna', reasoning_effort: 'high', fork_turns: 'none' }) } });
+      rows.push({ timestamp: '2026-10-09T00:02:02.200Z', type: 'response_item', payload: {
+        type: 'function_call_output', call_id: 'reader-spawn', output: JSON.stringify({ task_name: '/root/reader-reviewer' }) } });
     }
   }
   await writeFile(sourceFile, rows.map(row => JSON.stringify(row)).join('\n') + '\n');
@@ -104,6 +114,9 @@ async function harness(t) {
   }
   const bootstrap = await (await fetch(`${backendOrigin}/api/v3/reader/codex/${sessionId}/bootstrap`)).json();
   assert.ok(bootstrap.segments.at(-1).nextCursor, 'real fixture spans multiple bounded Reader pages');
+  const compactedCheckpoint = bootstrap.segments.flatMap(segment => segment.items)
+    .find(item => item.event.segment === 'context' && item.preview.includes('Synthetic recorded compaction checkpoint'));
+  assert.ok(compactedCheckpoint, 'the synthetic compaction checkpoint is in the initial Reader page');
   t.diagnostic(`source SHA-256 ${digest}; backend ${binary}; initial items ${bootstrap.segments.flatMap(s => s.items).length}`);
   let fixtureToc = bootstrap.toc;
   while (!fixtureToc.entries.some(entry => entry.event.segment === 'context' && entry.ordinal === 128)) {
@@ -118,7 +131,9 @@ async function harness(t) {
   await build({ root: uiDir, configFile: path.join(uiDir, 'vite.config.ts'),
     build: { outDir: buildDir, emptyOutDir: true }, logLevel: 'error' });
   const contentRequests = [];
+  const contextRequests = [];
   const bootstrapRequests = [];
+  let failNextContent = false;
   server = createServer(async (request, response) => {
     if (request.url.startsWith('/api/')) {
       const requestUrl = new URL(request.url, backendOrigin);
@@ -126,6 +141,15 @@ async function harness(t) {
       if (requestUrl.pathname.endsWith('/content')) contentRequests.push({
         field: requestUrl.searchParams.get('field'), offset: Number(requestUrl.searchParams.get('offset')),
         contentRevision: requestUrl.searchParams.get('contentRevision') });
+      if (requestUrl.pathname.endsWith('/content') && requestUrl.searchParams.get('segment') === 'context') {
+        contextRequests.push({ field: requestUrl.searchParams.get('field'), offset: Number(requestUrl.searchParams.get('offset')),
+          contentRevision: requestUrl.searchParams.get('contentRevision') });
+      }
+      if (failNextContent && requestUrl.pathname.endsWith('/content') && requestUrl.searchParams.get('segment') === 'context') {
+        failNextContent = false;
+        response.writeHead(502).end('Synthetic one-time content failure');
+        return;
+      }
       try {
         const result = await fetch(backendOrigin + request.url);
         if (delayedToc && requestUrl.pathname.endsWith('/toc')) {
@@ -145,7 +169,9 @@ async function harness(t) {
   });
   const port = await freeFetchSafePort();
   await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
-  return { url: `http://127.0.0.1:${port}/codex/session/${sessionId}`, contentRequests, bootstrapRequests,
+  return { url: `http://127.0.0.1:${port}/codex/session/${sessionId}`, contentRequests, contextRequests, bootstrapRequests,
+    compactedRevision: compactedCheckpoint.contentRevisions.body,
+    failNextContent: () => { failNextContent = true; },
     boundaryCheckpointHash: '#event?' + new URLSearchParams({ messageId: boundaryCheckpoint.event.messageId, segment: 'context' }),
     delayOutlineGap: () => {
       delayedToc = new Promise(resolve => { releaseToc = resolve; });
@@ -190,7 +216,7 @@ async function waitFor(command, expression) {
 const evaluate = async (command, expression) => JSON.parse(await command('eval', expression));
 
 test('Reader reading experience on current UI and isolated native provider data', { skip, timeout: 180_000 }, async t => {
-  const { url, contentRequests, bootstrapRequests, appendSource, boundaryCheckpointHash, delayOutlineGap } = await harness(t);
+  const { url, contentRequests, contextRequests, bootstrapRequests, appendSource, boundaryCheckpointHash, delayOutlineGap, compactedRevision, failNextContent } = await harness(t);
   await t.test('scrolling continues the transcript, follows the outline and exposes context checkpoints', async t => {
     const command = await browser(t, url);
     const before = await evaluate(command, `document.querySelectorAll('.transcript article.event-card').length`);
@@ -410,6 +436,99 @@ test('Reader reading experience on current UI and isolated native provider data'
       return !!target?.getClientRects().length && target.textContent.includes(${JSON.stringify(checkpoint.title)});
     })()`), true,
       'canonical checkpoint anchor reveals the actual transcript checkpoint');
+  });
+  await t.test('compacted context opens on keyboard demand and pages the revision-pinned recorded body', async t => {
+    const command = await browser(t, url);
+    await waitFor(command, `document.querySelector('.context-card .context-disclosure > summary')`);
+    const initial = await evaluate(command, `(() => {
+      const card = document.querySelector('.context-card');
+      const summary = card.querySelector('.context-disclosure > summary');
+      const style = getComputedStyle(card);
+      return { id: card.id, preview: card.querySelector('.context-preview')?.textContent ?? '',
+        label: summary.textContent.trim(), open: card.querySelector('.context-disclosure').open,
+        detailsText: card.querySelector('.context-disclosure').innerText,
+        bodyVisible: card.querySelector('.context-disclosure .event-body').checkVisibility(),
+        rawVisible: card.textContent.includes('COMPACTED-BODY-COMPLETE'),
+        background: style.backgroundColor, border: style.borderStyle, padding: style.padding };
+    })()`);
+    assert.match(initial.id, /^event-/);
+    assert.match(initial.preview, /Synthetic recorded compaction checkpoint/);
+    assert.equal(initial.label, 'View compacted context');
+    assert.equal(initial.open, false);
+    assert.equal(initial.bodyVisible, false, 'the closed details body is not visible');
+    assert.equal(initial.rawVisible, false, 'recorded replacement history stays hidden while the disclosure is closed');
+    assert.doesNotMatch(initial.detailsText, /Retained context paragraph 24/,
+      'closed details do not expose the full recorded replacement history in rendered text');
+    assert.notEqual(initial.background, 'rgba(0, 0, 0, 0)');
+    assert.notEqual(initial.border, 'none');
+    assert.notEqual(initial.padding, '0px');
+    assert.deepEqual(contextRequests, [],
+      'the compact preview does not fetch the recorded body');
+
+    failNextContent();
+    await command('focus', '.context-card .context-disclosure > summary');
+    await command('press', 'Enter');
+    await waitFor(command, `document.querySelector('.context-card .context-disclosure').open &&
+      document.querySelector('.context-card .context-disclosure button.read-more')?.textContent.trim().startsWith('Retry') &&
+      !document.querySelector('.context-card .context-disclosure button.read-more').disabled`);
+    assert.deepEqual(contextRequests, [
+      { field: 'body', offset: 0, contentRevision: compactedRevision },
+    ], 'keyboard opening invokes the body loader once against the bootstrap revision');
+    await command('click', '.context-card .context-disclosure button.read-more');
+    const retryDeadline = Date.now() + 10_000;
+    let retryState;
+    while (Date.now() < retryDeadline) {
+      retryState = await evaluate(command, `(() => { const card = document.querySelector('.context-card .context-disclosure');
+        const more = card.querySelector('button.read-more');
+        return { open: card.open, button: more?.textContent.trim() ?? null, disabled: more?.disabled ?? false,
+          error: card.querySelector('.content-error')?.textContent.trim() ?? null,
+          bodyLength: card.querySelector('.event-body')?.textContent.length ?? 0,
+          complete: card.querySelector('.event-body')?.textContent.includes('COMPACTED-BODY-COMPLETE') ?? false }; })()`);
+      if (!retryState.error && (!retryState.button || (!retryState.disabled && retryState.button.startsWith('Show more')))) break;
+      await delay(75);
+    }
+    assert.ok(Date.now() < retryDeadline, `retry state did not settle: ${JSON.stringify({ retryState, contextRequests })}`);
+    assert.deepEqual(contextRequests, [
+      { field: 'body', offset: 0, contentRevision: compactedRevision },
+      { field: 'body', offset: 0, contentRevision: compactedRevision },
+    ], 'retry repeats the failed bounded page at the same pinned offset');
+    assert.equal(await evaluate(command, `document.querySelector('.context-card .context-disclosure .event-body').textContent.includes('COMPACTED-BODY-COMPLETE')`), false,
+      'the first content page remains bounded');
+    while (await evaluate(command, `!!document.querySelector('.context-card .context-disclosure button.read-more')`)) {
+      const length = await evaluate(command, `document.querySelector('.context-card .context-disclosure .event-body').textContent.length`);
+      await command('click', '.context-card .context-disclosure button.read-more');
+      await waitFor(command, `document.querySelector('.context-card .context-disclosure .event-body').textContent.length > ${length}`);
+    }
+    assert.equal(await evaluate(command, `document.querySelector('.context-card .context-disclosure .event-body').textContent.includes('COMPACTED-BODY-COMPLETE')`), true);
+    const pages = contextRequests;
+    assert.ok(pages.length > 1, 'long recorded context uses multiple content pages');
+    assert.deepEqual(pages.slice(1).map(row => row.offset), [0, ...pages.slice(2).map((_, index) => (index + 1) * 1400)]);
+    assert.ok(pages.every(row => row.contentRevision === compactedRevision), 'every page remains pinned to the same content revision');
+
+    await command('focus', '.context-card .context-disclosure > summary');
+    await command('press', 'Enter');
+    assert.equal(await evaluate(command, `(() => { const card = document.querySelector('.context-card');
+      return !card.querySelector('.context-disclosure').open && card.id === ${JSON.stringify(initial.id)} &&
+        card.querySelector('.context-preview').textContent.includes('Synthetic recorded compaction checkpoint'); })()`), true,
+      'closing retains the compact preview and canonical checkpoint anchor');
+  });
+  await t.test('canonical spawn-agent target shows model and reasoning in the collapsed launch row', async t => {
+    const target = '#event?' + new URLSearchParams({ messageId: 'reader-spawn', segment: 'tool' });
+    const command = await browser(t, url + target);
+    await waitFor(command, `document.querySelector('article.tool-card[data-message-id="reader-spawn"] .tool-launch-config')`);
+    const collapsed = await evaluate(command, `(() => { const card = document.querySelector('article.tool-card[data-message-id="reader-spawn"]');
+      return { hash: location.hash, open: card.querySelector('.tool-disclosure').open,
+        row: card.querySelector('.tool-launch-config').textContent.trim(),
+        agentMetadata: card.querySelector('.tool-metadata')?.textContent.trim() ?? '' }; })()`);
+    assert.equal(collapsed.hash, target, 'browser reached the canonical tool event target');
+    assert.equal(collapsed.open, false);
+    assert.match(collapsed.row, /gpt-6-luna/);
+    assert.match(collapsed.row, /high/);
+    await command('focus', 'article.tool-card[data-message-id="reader-spawn"] .tool-row');
+    await command('press', 'Enter');
+    await waitFor(command, `document.querySelector('article.tool-card[data-message-id="reader-spawn"] .tool-disclosure').open`);
+    const expandedMetadata = await evaluate(command, `document.querySelector('article.tool-card[data-message-id="reader-spawn"] .tool-metadata')?.textContent.trim() ?? ''`);
+    assert.doesNotMatch(expandedMetadata, /gpt-6-luna|high/, 'model and reasoning are not repeated in expanded metadata');
   });
   await t.test('outline loads continuously and retains earlier anchors after a later destination', async t => {
     const command = await browser(t, url);

@@ -344,6 +344,7 @@ const chinese = {
   'step': '步', 'steps': '步', 'loaded': '已加载',
   'In this session': '本会话中', 'Jump to message': '跳转到消息',
   'Context checkpoint': '上下文检查点', 'Event': '事件', 'Open event': '打开事件',
+  'View compacted context': '查看压缩后的上下文',
   'Previous': '上一页', 'Next': '下一页', 'Outline': '目录',
   'Recorded event metadata for this session.': '此会话已记录的事件元数据。',
   'Time unavailable': '时间不可用',

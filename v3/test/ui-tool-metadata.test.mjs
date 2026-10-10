@@ -36,12 +36,12 @@ test('tool cards expose one collapsed normalized row and reserve exact input for
     const row = html.slice(html.indexOf('<summary class="tool-row'), html.indexOf('</summary>'));
     assert.match(row, /spawn_agent/);
     assert.match(row, /reviewer&lt;&amp;>/);
+    assert.match(row, /tool-launch-config[\s\S]*gpt-6-luna[\s\S]*max/);
     assert.doesNotMatch(row, /Model:|Reasoning:|Context:|Encrypted|gAAAAA|tool-kind/);
     assert.doesNotMatch(html, /<details class="tool-disclosure[^"]*"[^>]*\bopen\b/);
     const detailStart = html.indexOf('<div class="tool-detail-body');
     assert.match(html.slice(detailStart), /Agent: reviewer&lt;&amp;>/);
-    assert.match(html.slice(detailStart), /Model: gpt-6-luna/);
-    assert.match(html.slice(detailStart), /Reasoning: max/);
+    assert.doesNotMatch(html.slice(detailStart), /gpt-6-luna|Reasoning: max/);
     assert.match(html.slice(detailStart), /Context: none/);
     assert.ok(row.includes(agentAppearance('codex\0recorded-child').icon), 'dispatch uses the recorded child visual identity');
     assert.match(html, /Encrypted task message/);

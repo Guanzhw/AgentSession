@@ -79,7 +79,10 @@ function presentation(scope, reasoning = 'child-process-reasoning / thinking', t
       reasoningSources: source(${JSON.stringify(reasoning)}).length,
       toolSources: source(${JSON.stringify(tool)}).length,
       reasoningAttached: source(${JSON.stringify(reasoning)})[0]?.closest('.attached-reasoning') !== null,
-      toolAttached: source(${JSON.stringify(tool)})[0]?.closest('.attached-tools') !== null };
+      toolAttached: source(${JSON.stringify(tool)})[0]?.closest('.attached-tools') !== null,
+      ownershipBranches: transcript?.querySelectorAll('.tool-branch').length,
+      ownershipBorders: [...(transcript?.querySelectorAll('.attached-tools, .tool-stack') ?? [])]
+        .map(node => getComputedStyle(node).borderLeftStyle) };
   })()`;
 }
 
@@ -366,6 +369,12 @@ test('retained empty assistant, owned reasoning and tool stay inside the inline 
     assert.equal(inline.reasoningSources, 1);
     assert.equal(inline.toolSources, 1);
     assert.equal(inline.reasoningAttached, true);
+    for (const state of [direct, inline]) {
+      assert.equal(state.toolAttached, true, 'normalized process tools retain their producing assistant group');
+      assert.equal(state.ownershipBranches, 0, 'tool ownership has no duplicate decorative branch');
+      assert.ok(state.ownershipBorders.length > 0, 'ownership styling is checked on actual attached tools');
+      assert.ok(state.ownershipBorders.every(border => border === 'none'), 'indentation replaces the two ownership borders');
+    }
     const accessibility = JSON.parse(await command('a11y', '--json'));
     assert.deepEqual(accessibility.data.violations.map(({ id, nodes }) => ({
       id, targets: nodes.map(({ target }) => target.join(',')),

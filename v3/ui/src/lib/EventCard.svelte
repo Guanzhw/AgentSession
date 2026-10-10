@@ -38,12 +38,15 @@
   export let onOpenCounterpart: ((event: ReaderEventRef) => void) | undefined = undefined;
 
   let toolOpen = false;
+  let contextOpen = false;
   $: item = display.item;
+  $: isContext = item.event.segment === 'context';
   $: role = item.role;
   $: toolMetadata = item.toolMetadata;
   $: toolSummary = toolMetadata?.summary || toolMetadata?.taskName || toolMetadata?.directory;
   $: executionPhase = executionLandmarks.at(-1);
   $: if (searchReveal) toolOpen = true;
+  $: if (searchReveal && isContext) contextOpen = true;
   $: encryptedInput = toolMetadata?.inputState === 'encrypted';
   $: agentKey = role === 'agent' ? collaborationIdentity?.fromKey ?? collaborationIdentity?.from
     : toolMetadata ? collaborationIdentity?.toKey ?? toolMetadata.taskName : null;
@@ -57,7 +60,7 @@
     ? renderMarkdown(shownText) : '';
 
   onMount(() => {
-    if ((role === 'user' || role === 'assistant' || role === 'agent') && hasFullBody &&
+    if (!isContext && (role === 'user' || role === 'assistant' || role === 'agent') && hasFullBody &&
       !progress?.hasLoaded && !progress?.loading) onReadMore(display, 'body');
   });
 
@@ -114,9 +117,33 @@
       onReadMore(display, field);
     }
   }
+
+  function openContext(event: Event): void {
+    if ((event.currentTarget as HTMLDetailsElement).open && hasFullBody &&
+      !progress?.hasLoaded && !progress?.loading) onReadMore(display, 'body');
+  }
 </script>
 
-<article id={display.anchor} data-message-id={item.event.messageId} data-segment={item.event.segment} data-total-chars={item.totalChars} class="event-card" class:user-card={role === 'user'} class:assistant-card={role === 'assistant' && item.event.segment !== 'thinking'} class:agent-card={role === 'agent'} class:thinking-card={item.event.segment === 'thinking'} class:tool-card={role === 'tool' && item.event.segment !== 'thinking'} class:other-card={role !== 'user' && role !== 'assistant' && role !== 'agent' && role !== 'tool'}>
+{#snippet renderBody()}
+  {#if shownText}
+    {#if markdownBody}
+      <div class="event-body markdown-body" class:body-preview={bodyIncomplete}>{@html markdownBody}</div>
+    {:else}
+      <div class="event-body" class:body-preview={bodyIncomplete}>{shownText}</div>
+    {/if}
+  {:else}
+    <div class="event-body empty-body">{t($language, 'No preview is available for this event.')}</div>
+  {/if}
+  <ReplyMetadata {item} />
+  {#if bodyIncomplete}
+    <div class="event-footer">
+      <button class="read-more" disabled={progress?.loading} onclick={() => onReadMore(display, 'body')}>{actionLabel(progress)}<span aria-hidden="true"> ↓</span></button>
+    </div>
+    {#if progress?.error}<p class="content-error" role="status">{progress.error}</p>{/if}
+  {/if}
+{/snippet}
+
+<article id={display.anchor} data-message-id={item.event.messageId} data-segment={item.event.segment} data-total-chars={item.totalChars} class="event-card" class:context-card={isContext} class:user-card={role === 'user' && !isContext} class:assistant-card={role === 'assistant' && item.event.segment !== 'thinking' && !isContext} class:agent-card={role === 'agent' && !isContext} class:thinking-card={item.event.segment === 'thinking'} class:tool-card={role === 'tool' && item.event.segment !== 'thinking' && !isContext} class:other-card={!isContext && role !== 'user' && role !== 'assistant' && role !== 'agent' && role !== 'tool'}>
   {#if role === 'tool' && item.event.segment !== 'thinking'}
     <details class="tool-disclosure" bind:open={toolOpen}>
       <summary class="tool-row">
@@ -126,17 +153,22 @@
         </span>
         <strong title={displayedRole}>{displayedRole}</strong>
         {#if toolSummary}<span class="tool-command-summary" title={toolSummary}>{toolSummary}</span>{/if}
+        {#if toolMetadata?.model || toolMetadata?.reasoningEffort}
+          <span class="tool-launch-config" aria-label={t($language, 'Agent launch')}>
+            {#if toolMetadata.model}<span title={t($language, 'Model')}>{toolMetadata.model}</span>{/if}
+            {#if toolMetadata.model && toolMetadata.reasoningEffort}<span aria-hidden="true">·</span>{/if}
+            {#if toolMetadata.reasoningEffort}<span title={t($language, 'Reasoning')}>{toolMetadata.reasoningEffort}</span>{/if}
+          </span>
+        {/if}
         {#if executionPhase}
           <span class="tool-execution-phase" class:execution-returned={executionPhase.phase === 'completed'} class:execution-failed={executionPhase.phase === 'failed'} class:execution-unknown={executionPhase.phase === 'unknown'} data-phase={executionPhase.phase} title={executionPhase.label}>{executionPhaseLabel(executionPhase.phase)}</span>
         {/if}
         {#if timeLabel(item.timestamp, $language)}<time>{timeLabel(item.timestamp, $language)}</time>{/if}
       </summary>
       <div class="tool-detail-body">
-        {#if toolMetadata && (toolMetadata.taskName || toolMetadata.model || toolMetadata.reasoningEffort || toolMetadata.forkTurns)}
+        {#if toolMetadata && (toolMetadata.taskName || toolMetadata.forkTurns)}
           <div class="tool-metadata" aria-label={t($language, 'Agent launch')}>
             {#if toolMetadata.taskName}<span class="tool-agent-name" style:color={appearance?.color}>{t($language, 'Agent')}: {toolMetadata.taskName}</span>{/if}
-            {#if toolMetadata.model}<span>{t($language, 'Model')}: {toolMetadata.model}</span>{/if}
-            {#if toolMetadata.reasoningEffort}<span>{t($language, 'Reasoning')}: {toolMetadata.reasoningEffort}</span>{/if}
             {#if toolMetadata.forkTurns}<span>{t($language, 'Context')}: {toolMetadata.forkTurns}</span>{/if}
           </div>
         {/if}
@@ -198,28 +230,23 @@
     </details>
   {:else}
     <header class="event-header">
-      <span class="role-mark" class:agent-identity-mark={appearance !== null} style:color={appearance?.color} aria-hidden="true">
-        {#if appearance}<svg viewBox="0 0 5 5"><path d={appearance.icon} fill="currentColor" /></svg>{/if}
+      <span class="role-mark" class:context-mark={isContext} class:agent-identity-mark={!isContext && appearance !== null} style:color={isContext ? undefined : appearance?.color} aria-hidden="true">
+        {#if isContext}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3h16M4 21h16M12 6v4m-3-3 3 3 3-3M12 18v-4m-3 3 3-3 3 3" /></svg>
+        {:else if appearance}<svg viewBox="0 0 5 5"><path d={appearance.icon} fill="currentColor" /></svg>{/if}
       </span>
       <strong title={role === 'agent' ? collaborationIdentity?.from ?? undefined : undefined}>{displayedRole}</strong>
       {#if role === 'agent' && collaborationIdentity?.to}<span class="agent-recipient" title={collaborationIdentity.to}>→ {actorLabel(collaborationIdentity.to, $language)}</span>{/if}
       {#if timeLabel(item.timestamp, $language)}<time>{timeLabel(item.timestamp, $language)}</time>{/if}
     </header>
-    {#if shownText}
-      {#if markdownBody}
-        <div class="event-body markdown-body" class:body-preview={bodyIncomplete}>{@html markdownBody}</div>
-      {:else}
-        <div class="event-body" class:body-preview={bodyIncomplete}>{shownText}</div>
-      {/if}
+    {#if isContext}
+      {#if !contextOpen && item.preview}<p class="context-preview">{item.preview}</p>{/if}
+      <details class="context-disclosure" bind:open={contextOpen} ontoggle={openContext}>
+        <summary>{t($language, 'View compacted context')}</summary>
+        {@render renderBody()}
+      </details>
     {:else}
-      <div class="event-body empty-body">{t($language, 'No preview is available for this event.')}</div>
-    {/if}
-    <ReplyMetadata {item} />
-    {#if bodyIncomplete}
-      <div class="event-footer">
-        <button class="read-more" disabled={progress?.loading} onclick={() => onReadMore(display, 'body')}>{actionLabel(progress)}<span aria-hidden="true"> ↓</span></button>
-      </div>
-      {#if progress?.error}<p class="content-error" role="status">{progress.error}</p>{/if}
+      {@render renderBody()}
     {/if}
   {/if}
   {#if searchReveal}

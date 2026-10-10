@@ -1274,7 +1274,6 @@
           {/if}
           {#if block.tools.length > 0}
             <div class="attached-tools" role="group" aria-label={t($language, 'Tool activity for this assistant message')}>
-              <div class="tool-branch" aria-hidden="true"></div>
               <div class="tool-stack">
                 {#each block.tools as tool (tool.main.key)}
                   <div class="tool-entry">
