@@ -1,6 +1,6 @@
 {
   "name": "@acetamido/agentsession-native",
-  "version": "3.0.0-rc.1",
+  "version": "3.0.0-rc.2",
   "private": true,
   "description": "AgentSession native runtime for Windows x64, Linux x64/arm64 and macOS arm64",
   "type": "module",

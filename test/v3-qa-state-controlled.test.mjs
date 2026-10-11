@@ -2,11 +2,17 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
 import { EventEmitter } from 'node:events';
-import { mkdtemp, mkdir, readFile, rename, rm } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
+import { mkdtemp, mkdir, readFile, rename, rm, symlink } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { assertMetadataTransition, assertPreservedDatabase, qualifyWatcher, isolatedEnvironment, inspectDatabase } from '../scripts/v3-qa-state-controlled.mjs';
 import { createCallEvidence } from '../scripts/v3-bench-call-evidence.mjs';
+
+async function ownedTempDirectory(prefix, root = os.tmpdir()) {
+  // OS temp roots can use aliases (/var on macOS, short names on Windows).
+  return realpathSync.native(await mkdtemp(path.join(root, prefix)));
+}
 
 const row = (provider = 'codex', session_id = 'one') => ({ provider, session_id, custom_title: 'old', starred: 0,
   deleted: 0, permanent: 0, time_starred: null, time_deleted: null, time_renamed: null });
@@ -105,7 +111,7 @@ test('watcher rejects a protected file moved outside its root and a control move
 });
 test('protected tree digest detects empty directory creation and rename', async () => {
   const { protectedTreeSnapshot } = await import('../scripts/v3-qa-state-controlled.mjs');
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-state-tree-'));
+  const dir = await ownedTempDirectory('agentsession-state-tree-');
   try {
     const before = await protectedTreeSnapshot(dir);
     await mkdir(path.join(dir, 'empty'));
@@ -116,8 +122,23 @@ test('protected tree digest detects empty directory creation and rename', async 
     assert.notEqual((await protectedTreeSnapshot(dir)).sha256, created.sha256);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+test('owned temp roots normalize aliases while protected paths still reject redirects', async () => {
+  const { protectedTreeSnapshot } = await import('../scripts/v3-qa-state-controlled.mjs');
+  const dir = await ownedTempDirectory('agentsession-state-temp-alias-');
+  try {
+    const backing = path.join(dir, 'backing'), alias = path.join(dir, 'alias');
+    await mkdir(backing);
+    await symlink(backing, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const owned = await ownedTempDirectory('owned-', alias);
+    assert.equal(path.dirname(owned), backing);
+    assert.equal((await protectedTreeSnapshot(owned)).exists, true);
+    await assert.rejects(protectedTreeSnapshot(alias), /link\/reparse path rejected/);
+    await assert.rejects(protectedTreeSnapshot(path.join(alias, path.basename(owned))), /resolved path differs|link\/reparse/);
+    await assert.rejects(protectedTreeSnapshot(dir), /source\/tree link rejected/);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
 test('complete database comparison includes SQLite autoincrement sequence state', async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-state-sequence-'));
+  const dir = await ownedTempDirectory('agentsession-state-sequence-');
   const source = path.join(dir, 'old.db'), inspection = path.join(dir, 'inspection');
   await mkdir(inspection);
   const db = new DatabaseSync(source);
@@ -135,7 +156,7 @@ test('complete database comparison includes SQLite autoincrement sequence state'
 });
 test('HTTP transport failures retain exact request and SDK error before a phase can fail', async () => {
   const { requestRecorded } = await import('../scripts/v3-qa-state-controlled.mjs');
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-state-http-'));
+  const dir = await ownedTempDirectory('agentsession-state-http-');
   try {
     const evidence = createCallEvidence({ directory: path.join(dir, 'calls') });
     const failure = Object.assign(new Error('controlled request failure'), { code: 'ECONNRESET', data: { marker: 'error data' } });
@@ -164,7 +185,7 @@ test('child spawn errors remain observed while closure waits for the actual clos
 });
 test('MCP failed connection retains terminal error and the owned child actual close', async () => {
   const { exerciseMcp } = await import('../scripts/v3-qa-state-controlled.mjs');
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-state-mcp-connect-'));
+  const dir = await ownedTempDirectory('agentsession-state-mcp-connect-');
   try {
     const evidence = createCallEvidence({ directory: path.join(dir, 'calls') }), report = { processes: [] };
     const plan = { exe: process.execPath, config: path.join(dir, 'unused.json'), sources: [], stateArgs: [],
@@ -179,7 +200,7 @@ test('MCP failed connection retains terminal error and the owned child actual cl
 });
 test('watcher stop timeout kills only its retained child, waits for close, and persists the original failure', async () => {
   const { startWatcher } = await import('../scripts/v3-qa-state-controlled.mjs');
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-state-watcher-timeout-'));
+  const dir = await ownedTempDirectory('agentsession-state-watcher-timeout-');
   let watcher;
   try {
     const code = `console.log(JSON.stringify({kind:'ready',root:process.argv[1]})); setInterval(()=>{},1000);`;
@@ -206,7 +227,7 @@ test('watcher stop timeout kills only its retained child, waits for close, and p
 });
 test('observer profile writes stay outside the protected candidate shadow tree', async () => {
   const { startWatcher, protectedTreeSnapshot } = await import('../scripts/v3-qa-state-controlled.mjs');
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-state-observer-isolation-'));
+  const dir = await ownedTempDirectory('agentsession-state-observer-isolation-');
   const protectedRoot = path.join(dir, 'shadow'); let watcher;
   try {
     for (const child of ['profile', 'roaming', 'local']) await mkdir(path.join(protectedRoot, child), { recursive: true });
@@ -240,7 +261,7 @@ test('child environment clears inherited AgentSession and provider overrides wit
 });
 
 test('SQLite validation reads an inspection copy with committed WAL and preserves the input family', async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-state-inspection-'));
+  const dir = await ownedTempDirectory('agentsession-state-inspection-');
   const source = path.join(dir, 'old.db'), inspection = path.join(dir, 'inspection');
   await mkdir(inspection);
   const db = new DatabaseSync(source);
@@ -263,7 +284,7 @@ test('SQLite validation reads an inspection copy with committed WAL and preserve
   } finally { db.close(); await rm(dir, { recursive: true, force: true }); }
 });
 test('real SQLite metadata rows normalize at inspection boundary before strict mutation comparison', async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-state-row-shape-'));
+  const dir = await ownedTempDirectory('agentsession-state-row-shape-');
   const source = path.join(dir, 'old.db'), inspection = path.join(dir, 'inspection');
   await mkdir(inspection);
   const db = new DatabaseSync(source);

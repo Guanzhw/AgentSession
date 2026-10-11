@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "agentsession-core"
-version = "3.0.0-rc.1"
+version = "3.0.0-rc.2"
 dependencies = [
  "icu_collator",
  "icu_locale_core",
@@ -22,7 +22,7 @@ dependencies = [
 
 [[package]]
 name = "agentsession-v3"
-version = "3.0.0-rc.1"
+version = "3.0.0-rc.2"
 dependencies = [
  "agentsession-core",
  "axum",

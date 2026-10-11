@@ -14,7 +14,7 @@ Historical Windows/Linux x64 candidate evidence covers actual Web, native MCP,
 desktop Reader and offline npm installation. The local handoff report (`../tmp/v3-delivery/CURRENT-CANDIDATE-20261002.md`, local evidence)
 identifies those exact binaries, fixed 2.0 comparison and measured tradeoffs.
 The [workspace consolidation decision](../.agents/decisions/implemented/2026-10-09-sole-v3-workspace.md)
-records the current default. The [3.0.0-rc.1 release notes](../docs/releases/3.0.0-rc.1.md)
+records the current default. The [3.0.0-rc.2 release notes](../docs/releases/3.0.0-rc.2.md)
 describe the prerelease distribution and upgrade from public v1.10.1.
 Remaining acceptance gates retain their recorded evidence scope.
 

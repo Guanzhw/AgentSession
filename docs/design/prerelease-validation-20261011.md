@@ -1,8 +1,8 @@
-# AgentSession 3.0.0-rc.1 validation
+# AgentSession 3.0 prerelease validation
 
 This prerelease compares product changes with the last public release,
 [v1.10.1](https://github.com/Guanzhw/AgentSession/releases/tag/v1.10.1).
-Its [release notes](../releases/3.0.0-rc.1.md) describe the upgrade and supported
+Its [release notes](../releases/3.0.0-rc.2.md) describe the upgrade and supported
 scope. Publication uses npm `next` and a GitHub prerelease.
 
 ## Current source and platform evidence
@@ -22,6 +22,32 @@ share one resolved source commit; aggregate npm packages retain platform hashes
 and source identity. The complete payloads are combined on Linux and installed
 offline before publishing. Published archive/tarball checksums are independent
 of the local Windows build hash below.
+
+The `v3.0.0-rc.1` publication run
+[38130369177](https://github.com/Guanzhw/AgentSession/actions/runs/38130369177)
+stopped before public publication: root preservation-helper tests passed aliased
+OS temporary paths to a boundary that requires physical paths. Windows short
+names and macOS `/var` aliases triggered five assertions on each host. Test-created
+temporary roots are now canonicalized once; the actual untrusted-path boundary
+retains its strict link checks. The unpublished tag remains immutable. The next
+candidate is `3.0.0-rc.2`, with the same runtime source and a full repeat of the
+tagged four-host publication gates.
+
+The RC.2 local UI/release build, review and Rust tests pass (244 passed,
+16 explicitly ignored). Its remapped Windows binary reports `3.0.0-rc.2` and
+has SHA-256 `5849ebfbb70c58890594e81f1b05b29bde6b062414446027e3c3ae57638cb482`.
+The full root-helper collection passes with 234 passed, two explicit existing
+skips and no failures. The affected preservation file passes all 24 checks on
+Windows and WSL/Linux. Using a genuine Windows 8.3 temporary alias reproduces
+five failures before the fixture fix and none after it; real junction redirects
+remain rejected. Actual macOS execution is a tagged publication gate.
+
+Targeted RC.2 MCP output, host installer, native target, packaging and mocked
+publication checks pass. An initial harness run supplied slash-form Windows
+binary paths to tests expecting native paths; rerunning with `Resolve-Path`
+corrects those assertions. One Windows staging-directory rename returned
+`EPERM`; the unchanged packaging file passes on isolated recheck. The final
+four-host run repeats these package checks before publishing.
 
 ## Windows real-data release check
 

@@ -15,15 +15,15 @@ evidence remain visible throughout the reading and MCP flows.
 ## 3.0 prerelease
 
 ```sh
-npm install -g @acetamido/agentsession@3.0.0-rc.1
-npm install -g @acetamido/agentsession-mcp@3.0.0-rc.1
+npm install -g @acetamido/agentsession@3.0.0-rc.2
+npm install -g @acetamido/agentsession-mcp@3.0.0-rc.2
 agentsession
 ```
 
-The prerelease uses npm's `next` channel. [Release and upgrade notes](docs/releases/3.0.0-rc.1.md)
+The prerelease uses npm's `next` channel. [Release and upgrade notes](docs/releases/3.0.0-rc.2.md)
 compare it with public v1.10.1, including the port change, metadata-copy import,
 and MCP/API migration. Four standalone platform bundles are available in the
-[GitHub Release](https://github.com/Guanzhw/AgentSession/releases/tag/v3.0.0-rc.1).
+[GitHub Release](https://github.com/Guanzhw/AgentSession/releases/tag/v3.0.0-rc.2).
 
 ## Run from source
 
