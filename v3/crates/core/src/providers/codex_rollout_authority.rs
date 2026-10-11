@@ -141,8 +141,12 @@ pub(super) fn resolve(
 
 #[cfg(test)]
 mod tests {
+    use super::super::{
+        CODEX_NORMALIZATION_COUNT, CODEX_REVISION_FILE_READS, CODEX_USAGE_DIGEST_READS,
+    };
     use super::super::{CODEX_STREAM_READ_HOOK, CodexAdapter, ProviderAdapter};
     use super::*;
+    use std::collections::BTreeMap;
 
     fn source(root: &Path, filename: &str, id: &str) -> SourceEntry {
         let path = root.join(filename);
@@ -363,6 +367,143 @@ mod tests {
         )
         .unwrap();
         SourceEntry::new(id.into(), entry.path).unwrap()
+    }
+
+    #[test]
+    fn recorded_index_capture_rejects_restored_inventory_generation() {
+        for with_native_title in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let id = "recorded-index-aba";
+            let first = adapter_source(root.path(), "first.jsonl", id, "first answer");
+            adapter_source(root.path(), "later.jsonl", id, "later answer");
+            let db = database(&root.path().join("state_5.sqlite"));
+            record(&db, id, &first.path);
+            if with_native_title {
+                fs::write(
+                    root.path().join("session_index.jsonl"),
+                    format!(
+                        "{}\n",
+                        serde_json::json!({"id": id, "thread_name": "native title", "updated_at": "2026-10-11T00:00:00Z"})
+                    ),
+                )
+                .unwrap();
+            }
+            let adapter = CodexAdapter {
+                root: root.path(),
+                scope: "recorded-index-aba",
+            };
+            let incoming: BTreeMap<_, _> = adapter
+                .inventory()
+                .unwrap()
+                .unwrap()
+                .into_iter()
+                .map(|entry| (entry.session_id.clone(), entry))
+                .collect();
+            let original = fs::read_to_string(&first.path).unwrap();
+            let replacement = original.replace("first answer", "other answer");
+            assert_ne!(replacement, original);
+            assert_eq!(replacement.len(), original.len());
+            let modified = fs::metadata(&first.path).unwrap().modified().unwrap();
+            let rewrite = |bytes: &str| {
+                fs::write(&first.path, bytes).unwrap();
+                fs::OpenOptions::new()
+                    .write(true)
+                    .open(&first.path)
+                    .unwrap()
+                    .set_times(fs::FileTimes::new().set_modified(modified))
+                    .unwrap();
+            };
+            rewrite(&replacement);
+            let captured = adapter.capture_for_index(&incoming[id]);
+            rewrite(&original);
+            adapter.validate_inventory(&incoming).unwrap();
+            assert!(
+                matches!(captured, Err(CoreError::SourceChanged)),
+                "a stable capture of B cannot publish with restored inventory A; native title: {with_native_title}"
+            );
+        }
+    }
+
+    #[test]
+    fn recorded_index_capture_reuses_final_inventory_verification() {
+        let root = tempfile::tempdir().unwrap();
+        let id = "recorded-index";
+        let first = adapter_source(root.path(), "first.jsonl", id, "first answer");
+        let later = adapter_source(root.path(), "later.jsonl", id, "later answer");
+        let db = database(&root.path().join("state_5.sqlite"));
+        record(&db, id, &first.path);
+        let adapter = CodexAdapter {
+            root: root.path(),
+            scope: "recorded-index-reuse",
+        };
+        let index = root.path().join("index");
+        CODEX_USAGE_DIGEST_READS.with(|count| count.set(0));
+        CODEX_REVISION_FILE_READS.with(|count| count.set(0));
+        let published = crate::index::refresh(&index, adapter.scope, "codex", &adapter)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            CODEX_USAGE_DIGEST_READS.with(std::cell::Cell::get),
+            0,
+            "catalog signatures reuse the parser's scoped digest rather than a separate raw SHA"
+        );
+        assert_eq!(
+            CODEX_REVISION_FILE_READS.with(std::cell::Cell::get),
+            3,
+            "initial inventory, parser verification and final inventory each read once"
+        );
+        assert_eq!(published.rows[0].message_count, 1);
+        CODEX_NORMALIZATION_COUNT.with(|count| count.set(0));
+        let unchanged = crate::index::refresh(&index, adapter.scope, "codex", &adapter)
+            .unwrap()
+            .unwrap();
+        assert_eq!(unchanged.revision, published.revision);
+        assert_eq!(
+            CODEX_NORMALIZATION_COUNT.with(std::cell::Cell::get),
+            0,
+            "exactly unchanged catalog reuses normalization"
+        );
+
+        let incoming: BTreeMap<_, _> = adapter
+            .inventory()
+            .unwrap()
+            .unwrap()
+            .into_iter()
+            .map(|entry| (entry.session_id.clone(), entry))
+            .collect();
+        let captured = adapter.capture_for_index(&incoming[id]).unwrap();
+        assert_eq!(captured.summary.message_count, 1);
+        assert!(
+            captured
+                .events
+                .iter()
+                .any(|event| event.body.contains("first answer"))
+        );
+        let bytes = fs::read_to_string(&first.path).unwrap();
+        let modified = fs::metadata(&first.path).unwrap().modified().unwrap();
+        fs::write(&first.path, bytes.replace("first answer", "other answer")).unwrap();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&first.path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        assert!(
+            matches!(
+                adapter.validate_inventory(&incoming),
+                Err(CoreError::SourceChanged)
+            ),
+            "same-size same-mtime rewrite after capture cannot publish an old catalog"
+        );
+        fs::write(&first.path, bytes).unwrap();
+        record(&db, id, &later.path);
+        assert!(
+            matches!(
+                adapter.validate_inventory(&incoming),
+                Err(CoreError::SourceChanged)
+            ),
+            "authority changes remain a catalog publication boundary"
+        );
     }
 
     #[test]

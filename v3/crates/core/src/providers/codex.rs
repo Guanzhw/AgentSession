@@ -126,6 +126,8 @@ thread_local! {
     static COPIED_CHILD_PARSE_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static CODEX_STREAM_READ_HOOK: std::cell::RefCell<Option<Box<dyn FnMut(usize)>>> = std::cell::RefCell::new(None);
     static CODEX_INVENTORY_WALKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static CODEX_USAGE_DIGEST_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static CODEX_REVISION_FILE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 #[cfg(test)]
 pub(super) fn inventory_walks() -> usize {
@@ -167,9 +169,21 @@ impl CodexAdapter<'_> {
     }
 
     fn recorded_signature(
+        &self,
         recorded: &rollout_authority::RecordedRollout,
         entries: &[SourceEntry],
     ) -> Result<String> {
+        if recorded
+            .path
+            .extension()
+            .is_some_and(|extension| extension == "jsonl")
+        {
+            return Ok(Self::recorded_signature_from_revision(
+                recorded,
+                entries,
+                &codex_revision_file(&recorded.path, self.scope)?,
+            ));
+        }
         let mut digest = Sha256::new();
         digest.update(b"codex-recorded-rollout-v1\0");
         digest.update(recorded.database.to_string_lossy().as_bytes());
@@ -183,6 +197,24 @@ impl CodexAdapter<'_> {
             digest.update(path.as_bytes());
         }
         Ok(format!("recorded-rollout:{:x}", digest.finalize()))
+    }
+
+    fn recorded_signature_from_revision(
+        recorded: &rollout_authority::RecordedRollout,
+        entries: &[SourceEntry],
+        revision: &str,
+    ) -> String {
+        let mut digest = Sha256::new();
+        digest.update(b"codex-recorded-rollout-v2\0");
+        digest.update(recorded.database.to_string_lossy().as_bytes());
+        digest.update(recorded.path.to_string_lossy().as_bytes());
+        digest.update(revision.as_bytes());
+        for entry in entries {
+            let path = entry.path.to_string_lossy();
+            digest.update((path.len() as u64).to_le_bytes());
+            digest.update(path.as_bytes());
+        }
+        format!("recorded-rollout:{:x}", digest.finalize())
     }
 
     fn source_entries(&self) -> Result<CodexSourceScan> {
@@ -276,7 +308,7 @@ impl CodexAdapter<'_> {
                     CodexSourceSelection::Pair(pair) => pair.revision(self.scope)?,
                     CodexSourceSelection::Recorded(recorded) => {
                         entry.path = recorded.path.clone();
-                        Self::recorded_signature(&recorded, &entries)?
+                        self.recorded_signature(&recorded, &entries)?
                     }
                     CodexSourceSelection::Collision => Self::collision_signature(&entries)?,
                 };
@@ -300,6 +332,42 @@ impl CodexAdapter<'_> {
 
     fn codex_inventory(&self) -> Result<Option<Vec<SourceEntry>>> {
         Ok(self.codex_inventory_observation()?.entries)
+    }
+    fn capture_selected_entry(
+        &self,
+        entry: &SourceEntry,
+        sources: &CodexSources,
+        expected_index_signature: Option<&str>,
+    ) -> Result<SessionSnapshot> {
+        let mut loaded = load_selected(&entry.path, self.scope, &entry.session_id, Some(sources))?;
+        let captured_signature = if let Some(expected) = expected_index_signature {
+            let recorded = sources
+                .recorded
+                .get(&entry.session_id)
+                .ok_or(CoreError::SourceChanged)?;
+            let entries = sources
+                .recorded_entries
+                .get(&entry.session_id)
+                .ok_or(CoreError::SourceChanged)?;
+            Some((
+                expected,
+                Self::recorded_signature_from_revision(recorded, entries, &loaded.revision),
+            ))
+        } else {
+            None
+        };
+        resolve_spawn_children(&mut loaded, sources);
+        codex_apply_child_revision(&mut loaded, sources);
+        let mut snapshot = codex_snapshot_from_loaded(loaded)?;
+        let native_titles = CodexNativeTitles::read(self.root);
+        if let Some((expected, base)) = captured_signature
+            && native_titles.signature(&entry.session_id, &base) != expected
+        {
+            return Err(CoreError::SourceChanged);
+        }
+        native_titles.apply(&mut snapshot.summary);
+        self.validate_source_set_membership(sources, &entry.session_id)?;
+        Ok(snapshot)
     }
     pub(crate) fn native_protocol_snapshot(&self, session_id: &str) -> Result<ObservationSnapshot> {
         let sources = self.selected_sources(Some(session_id))?;
@@ -389,6 +457,7 @@ impl CodexAdapter<'_> {
                     }
                     CodexSourceSelection::Recorded(recorded) => {
                         selected.paths.insert(id.clone(), recorded.path.clone());
+                        selected.recorded_entries.insert(id.clone(), entries);
                         selected.recorded.insert(id, recorded);
                     }
                     CodexSourceSelection::Collision if target == Some(id.as_str()) => {
@@ -474,6 +543,8 @@ fn codex_usage_source_revision(sources: &BTreeMap<String, PathBuf>) -> Result<St
 }
 
 fn codex_usage_file_digest(path: &Path) -> Result<(u64, [u8; 32])> {
+    #[cfg(test)]
+    CODEX_USAGE_DIGEST_READS.with(|count| count.set(count.get() + 1));
     let mut file = fs::File::open(path).map_err(|source| CoreError::Io {
         path: path.to_path_buf(),
         source,
@@ -1305,17 +1376,32 @@ impl ProviderAdapter for CodexAdapter<'_> {
             if self.source_signature(entry)? != entry.signature {
                 return Err(CoreError::SourceChanged);
             }
-            let mut loaded =
-                load_selected(&entry.path, self.scope, &entry.session_id, Some(&sources))?;
-            resolve_spawn_children(&mut loaded, &sources);
-            codex_apply_child_revision(&mut loaded, &sources);
-            let mut snapshot = codex_snapshot_from_loaded(loaded)?;
-            CodexNativeTitles::read(self.root).apply(&mut snapshot.summary);
-            self.validate_source_set_membership(&sources, &entry.session_id)?;
-            return Ok(snapshot);
+            return self.capture_selected_entry(entry, &sources, None);
         }
         let mut snapshot = codex_snapshot(&entry.path, self.scope, &entry.session_id)?;
         CodexNativeTitles::read(self.root).apply(&mut snapshot.summary);
+        Ok(snapshot)
+    }
+    fn capture_for_index(&self, entry: &SourceEntry) -> Result<SessionSnapshot> {
+        if entry.signature.starts_with("recorded-rollout:")
+            && entry
+                .path
+                .extension()
+                .is_some_and(|extension| extension == "jsonl")
+        {
+            // Bind the parser's exact-byte revision to the incoming authority,
+            // membership and native title. Final inventory validates publication
+            // without accepting a different captured generation after ABA restore.
+            let sources = self.selected_sources(Some(&entry.session_id))?;
+            if sources.get(&entry.session_id) != Some(&entry.path) {
+                return Err(CoreError::SourceChanged);
+            }
+            return self.capture_selected_entry(entry, &sources, Some(&entry.signature));
+        }
+        let snapshot = self.capture(entry)?;
+        if self.source_signature(entry)? != entry.signature {
+            return Err(CoreError::SourceChanged);
+        }
         Ok(snapshot)
     }
     fn index_capture_revision(&self, entry: &SourceEntry) -> Result<Option<String>> {
@@ -1357,7 +1443,7 @@ impl ProviderAdapter for CodexAdapter<'_> {
             else {
                 return Err(CoreError::SourceChanged);
             };
-            let base = Self::recorded_signature(&recorded, entries)?;
+            let base = self.recorded_signature(&recorded, entries)?;
             return Ok(CodexNativeTitles::read(self.root).signature(&entry.session_id, &base));
         }
         if !entry.signature.starts_with("collision:") {
@@ -2249,6 +2335,8 @@ impl<R: Read> Read for HashingReader<'_, R> {
 }
 
 fn codex_revision_file(path: &Path, scope: &str) -> Result<String> {
+    #[cfg(test)]
+    CODEX_REVISION_FILE_READS.with(|count| count.set(count.get() + 1));
     let mut file = fs::File::open(path).map_err(|source| CoreError::Io {
         path: path.into(),
         source,

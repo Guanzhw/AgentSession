@@ -214,16 +214,13 @@ fn publish(
                     continue;
                 }
             }
-            let snapshot = adapter.capture(entry)?;
+            let snapshot = adapter.capture_for_index(entry)?;
             if snapshot.summary.session.session_id != *id
                 || snapshot.summary.session.provider != provider
             {
                 return Err(CoreError::Storage(format!(
                     "capture identity differs from {provider}/{id} inventory"
                 )));
-            }
-            if adapter.source_signature(entry)? != entry.signature {
-                return Err(CoreError::SourceChanged);
             }
             captured.insert(id.clone(), snapshot);
         }

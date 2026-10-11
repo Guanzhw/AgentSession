@@ -21,6 +21,7 @@ pub(super) struct Sources {
     pub paths: BTreeMap<String, PathBuf>,
     pub pairs: BTreeMap<String, DirectPair>,
     pub recorded: BTreeMap<String, rollout_authority::RecordedRollout>,
+    pub recorded_entries: BTreeMap<String, Vec<SourceEntry>>,
 }
 impl std::ops::Deref for Sources {
     type Target = BTreeMap<String, PathBuf>;
@@ -34,6 +35,7 @@ impl From<BTreeMap<String, PathBuf>> for Sources {
             paths,
             pairs: BTreeMap::new(),
             recorded: BTreeMap::new(),
+            recorded_entries: BTreeMap::new(),
         }
     }
 }

@@ -358,6 +358,16 @@ pub(crate) trait ProviderAdapter {
     fn capture(&self, entry: &SourceEntry) -> Result<SessionSnapshot> {
         self.load(&entry.session_id)
     }
+    /// Capture for catalog publication, followed by `validate_inventory`.
+    /// The default preserves the selected entry's post-capture signature check.
+    /// Providers may combine that check with their final inventory verification.
+    fn capture_for_index(&self, entry: &SourceEntry) -> Result<SessionSnapshot> {
+        let snapshot = self.capture(entry)?;
+        if self.source_signature(entry)? != entry.signature {
+            return Err(CoreError::SourceChanged);
+        }
+        Ok(snapshot)
+    }
     /// A fresh exact source revision equal to `capture(entry).revision`.
     /// None keeps capture mandatory; this excludes dependencies not covered by the probe.
     fn index_capture_revision(&self, _entry: &SourceEntry) -> Result<Option<String>> {
