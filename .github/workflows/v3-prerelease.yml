@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Existing exact prerelease tag to validate (for example, v3.0.0-rc.3)"
+        description: "Existing exact prerelease tag to validate (for example, v3.0.0-rc.4)"
         required: true
         type: string
       publish:

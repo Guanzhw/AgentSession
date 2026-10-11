@@ -48,11 +48,11 @@ for (const manifest of Object.values(manifests)) {
     } while (Date.now() < deadline);
     if (visible !== integrity) throw new Error(`Published npm integrity is missing or differs: ${spec}`);
   }
-  const latestAfter = registryValue(manifest.name, 'dist-tags.latest');
+  const latestAfter = registryValue(spec, 'dist-tags.latest');
   if (latestAfter !== latestBefore[manifest.name]) {
     throw new Error(`npm latest changed during prerelease publication: ${manifest.name}`);
   }
-  if (registryValue(manifest.name, 'dist-tags.next') !== manifest.version) {
+  if (registryValue(spec, 'dist-tags.next') !== manifest.version) {
     throw new Error(`npm next does not identify the verified prerelease: ${manifest.name}`);
   }
 }

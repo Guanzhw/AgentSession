@@ -2,7 +2,7 @@
 
 This prerelease compares product changes with the last public release,
 [v1.10.1](https://github.com/Guanzhw/AgentSession/releases/tag/v1.10.1).
-Its [release notes](../releases/3.0.0-rc.3.md) describe the upgrade and supported
+Its [release notes](../releases/3.0.0-rc.4.md) describe the upgrade and supported
 scope. Publication uses npm `next` and a GitHub prerelease.
 
 ## Current source and platform evidence
@@ -67,6 +67,27 @@ reports `3.0.0-rc.3`, SHA-256
 Rust runtime and Svelte source files are unchanged across the candidate repairs;
 earlier real-data/browser evidence retains that source scope. Publication still
 requires the exact RC.3 tag's four-host build and installed-package checks.
+
+RC.3's [publication run](https://github.com/Guanzhw/AgentSession/actions/runs/38132079173)
+is cancelled before registry publication after a real npm CLI reproduction
+reveals a first-publish check issue. With a next-only package and no latest tag,
+`npm view <name> dist-tags.next` returns empty because npm selects latest first;
+`npm view <name>@<exact-version> dist-tags.next` returns the recorded next tag.
+Post-publication tag checks now select the exact immutable version and preserve
+the existing latest channel. RC.4 repeats the complete publication gates with
+this corrected publisher and retains all earlier unpublished tags.
+
+RC.4's remapped release build and standard pre-push review pass. Its binary
+reports `3.0.0-rc.4`, SHA-256
+`4ee6e642531e8b71f1c503f47f7710d7ef5a9686f1c3243542ebed45a7af3a33`.
+The focused publisher, installed-package contract and actual native MCP output
+checks pass: nine passed, one Linux aggregation-only check skipped on Windows.
+Both protocol eras initialize the exact candidate and read all seven tools.
+The new next-only publication regression records a failure before the fix and
+passes afterward; a disposable loopback registry independently reproduces the
+bare versus exact-version lookup with the actual npm CLI. Independent review
+finds no issue in the final publisher/version delta. Exact-tag four-host and
+published-artifact verification remain publication gates.
 
 ## Windows real-data release check
 

@@ -11,7 +11,7 @@ const repo = path.resolve(import.meta.dirname, '..');
 const templates = await readPackageManifests(path.join(repo, 'v3/npm'));
 const publish = path.join(repo, 'scripts/v3-publish-prerelease.mjs');
 
-async function registryFixture(t, mismatch = false) {
+async function registryFixture(t, { mismatch = false, firstPublication = false } = {}) {
   const parent = path.join(repo, 'tmp/prerelease-registry-contract');
   await mkdir(parent, { recursive: true });
   const root = await mkdtemp(path.join(parent, 'test-'));
@@ -37,7 +37,9 @@ async function registryFixture(t, mismatch = false) {
   await writeFile(path.join(root, 'native/provenance.json'), JSON.stringify({ schemaVersion: 1,
     version: templates.native.version, sourceCommit: 'a'.repeat(40),
     platforms: Object.fromEntries(Object.keys(nativeTargets).map(target => [target, { releaseSourceSha256: 'b'.repeat(64) }])) }));
-  const fixture = { expected, published: { [packageNames.native]: mismatch ? 'sha512-other-bytes' : expected[packageNames.native].integrity },
+  const fixture = { expected,
+    published: firstPublication ? {} : { [packageNames.native]: mismatch ? 'sha512-other-bytes' : expected[packageNames.native].integrity },
+    next: firstPublication ? {} : { [packageNames.native]: templates.native.version },
     latest: { [packageNames.native]: null, [packageNames.viewer]: '1.10.1', [packageNames.mcp]: '1.10.1' }, version: templates.native.version };
   const fixturePath = path.join(root, 'registry.json');
   await writeFile(fixturePath, JSON.stringify(fixture));
@@ -55,13 +57,21 @@ async function registryFixture(t, mismatch = false) {
         const name=Object.keys(fixture.expected).find(name=>fixture.expected[name].archive===args[1]);
         if(!name) throw new Error('Unexpected archive');
         fixture.published[name]=fixture.expected[name].integrity;
+        const tag=args[args.indexOf('--tag')+1];
+        if(tag==='next') fixture.next[name]=fixture.version;
+        else fixture.latest[name]=fixture.version;
+        writeFileSync(process.env.REGISTRY_FIXTURE,JSON.stringify(fixture));
         return {status:0,stdout:'published '+name+'\\n'};
       }
       const [operation,spec,field]=args;
       if(operation!=='view') throw new Error('Unexpected npm operation');
       const name=Object.keys(fixture.expected).find(name=>name===spec||fixture.expected[name].spec===spec);
-      if(field==='dist-tags.latest') return {status:0,stdout:JSON.stringify(fixture.latest[name])};
-      if(field==='dist-tags.next') return {status:0,stdout:JSON.stringify(fixture.version)};
+      // npm view resolves a bare package through latest, even when requesting dist-tags.
+      if(spec===name&&!fixture.latest[name]) return fixture.published[name]
+        ? {status:0,stdout:''}
+        : {status:1,stdout:JSON.stringify({error:{code:'E404'}}),stderr:'missing fixture package'};
+      if(field==='dist-tags.latest') return {status:0,stdout:fixture.latest[name]?JSON.stringify(fixture.latest[name]):''};
+      if(field==='dist-tags.next') return {status:0,stdout:JSON.stringify(fixture.next[name])};
       if(field==='dist.integrity'&&fixture.published[name]) return {status:0,stdout:JSON.stringify(fixture.published[name])};
       return {status:1,stdout:JSON.stringify({error:{code:'E404'}}),stderr:'missing fixture version'};
     };
@@ -71,7 +81,7 @@ async function registryFixture(t, mismatch = false) {
   const result = spawnSync(process.execPath, ['--input-type=module', '-e', mock, publish, '--stage-dir', root],
     { encoding: 'utf8', windowsHide: true, timeout: 10_000, env: { ...process.env,
       AGENTSESSION_RELEASE_COMMIT: 'a'.repeat(40), REGISTRY_FIXTURE: fixturePath, REGISTRY_CALLS: record } });
-  return { result, calls: JSON.parse(await readFile(record)) };
+  return { result, calls: JSON.parse(await readFile(record)), fixture: JSON.parse(await readFile(fixturePath)) };
 }
 
 test('partial prerelease rerun verifies immutable native integrity and publishes only missing wrappers to next', async t => {
@@ -90,7 +100,24 @@ test('partial prerelease rerun verifies immutable native integrity and publishes
 });
 
 test('existing npm version with different integrity fails before any further publication', async t => {
-  const { result, calls } = await registryFixture(t, true);
+  const { result, calls } = await registryFixture(t, { mismatch: true });
   assert.notEqual(result.status, 0); assert.match(result.stderr, /Existing immutable npm version differs/);
   assert.equal(calls.some(args => args[0] === 'publish'), false);
+});
+
+test('first native publication verifies next without creating latest when only next exists', async t => {
+  const { result, calls, fixture } = await registryFixture(t, { firstPublication: true });
+  assert.equal(result.status, 0, result.stderr);
+  const publishes = calls.filter(args => args[0] === 'publish');
+  assert.equal(publishes.length, 3);
+  for (const args of publishes) assert.equal(args[args.indexOf('--tag') + 1], 'next');
+  assert.deepEqual(fixture.latest, {
+    [packageNames.native]: null, [packageNames.viewer]: '1.10.1', [packageNames.mcp]: '1.10.1',
+  });
+  const nativeSpec = fixture.expected[packageNames.native].spec;
+  assert.deepEqual(calls.filter(args => args[2] === 'dist-tags.latest' && args[1].startsWith(packageNames.native))
+    .map(args => args[1]), [packageNames.native, nativeSpec]);
+  assert.ok(calls.some(args => args[1] === nativeSpec && args[2] === 'dist-tags.next'));
+  assert.equal(fixture.next[packageNames.native], templates.native.version);
+  assert.equal(fixture.published[packageNames.native], fixture.expected[packageNames.native].integrity);
 });
