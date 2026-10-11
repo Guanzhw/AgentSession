@@ -1,0 +1,224 @@
+name: AgentSession 3 prerelease
+
+on:
+  push:
+    tags:
+      - "v3.*-*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Existing exact prerelease tag to validate (for example, v3.0.0-rc.1)"
+        required: true
+        type: string
+      publish:
+        description: "Publish validated npm next packages and GitHub prerelease"
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v3-prerelease-${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  identity:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      commit: ${{ steps.release.outputs.commit }}
+      timestamp: ${{ steps.release.outputs.timestamp }}
+    env:
+      RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref_name }}
+    steps:
+      - name: Resolve exact prerelease identity once
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_REF }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26.5.0
+      - id: release
+        run: node scripts/v3-verify-prerelease.mjs "$RELEASE_REF" --remote >> "$GITHUB_OUTPUT"
+
+  native:
+    needs: identity
+    name: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: win32-x64
+            runner: windows-latest
+          - platform: linux-x64
+            runner: ubuntu-latest
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+          - platform: darwin-arm64
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref_name }}
+    steps:
+      - name: Check out exact release source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.identity.outputs.commit }}
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26.5.0
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            v3/ui/package-lock.json
+
+      - name: Verify prerelease tag and source versions
+        id: release
+        run: node scripts/v3-verify-prerelease.mjs "$RELEASE_REF" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Rust
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal --component rustfmt
+          rustup override set 1.95.0
+
+      - name: Install locked JavaScript dependencies
+        run: |
+          npm ci --ignore-scripts
+          npm --prefix v3/ui ci
+
+      - name: Validate source and build native release
+        run: |
+          npm --prefix v3/ui run build
+          npm run review
+          node --test --test-concurrency=1 test/*.test.mjs
+          cargo test --manifest-path v3/Cargo.toml --workspace --locked
+          source_root="$(node -p 'process.cwd()')"
+          build_home="$(node -p 'require("node:os").homedir()')"
+          export RUSTFLAGS="--remap-path-prefix=${source_root}=/agentsession-src --remap-path-prefix=${build_home}=/build-user"
+          cargo build --manifest-path v3/Cargo.toml --release --locked --bin agentsession-v3
+
+      - name: Prepare portable bundle and test actual packaged host
+        run: |
+          node -e 'require("node:assert/strict").equal(`${process.platform}-${process.arch}`, process.argv[1])' "${{ matrix.platform }}"
+          executable=agentsession-v3
+          if [[ "${{ matrix.platform }}" == "win32-x64" ]]; then executable=agentsession-v3.exe; fi
+          mkdir -p tmp
+          printf '{}' > tmp/v3-ci-config.json
+          node scripts/v3-package-portable.mjs --release-bin "v3/target/release/${executable}" --output-dir "tmp/v3-ci-${{ matrix.platform }}"
+          node --input-type=module -e 'import path from "node:path"; import {appendFileSync} from "node:fs"; const exe=process.platform==="win32"?"agentsession-v3.exe":"agentsession-v3"; const bundle=path.resolve(`tmp/v3-ci-${process.platform}-${process.arch}`); const binary=path.join(bundle,exe); appendFileSync(process.env.GITHUB_ENV, `AGENTSESSION_V3_BIN=${binary}\nAGENTSESSION_V3_BINARY=${binary}\nAGENTSESSION_V3_RELEASE_BIN=${binary}\nAGENTSESSION_CONFIG=${path.resolve("tmp/v3-ci-config.json")}\nAGENTSESSION_V3_NPM_HOST_BUNDLE=${bundle}\nAGENTSESSION_V3_NPM_CANDIDATE=1\n`);'
+
+      - name: Validate packaged HTTP, MCP, installer, and npm behavior
+        run: node --test --test-concurrency=1 v3/test/*.test.mjs
+
+      - name: Archive complete portable payload
+        env:
+          RELEASE_COMMIT: ${{ needs.identity.outputs.commit }}
+          RELEASE_VERSION: ${{ needs.identity.outputs.version }}
+          RELEASE_PLATFORM: ${{ matrix.platform }}
+        run: |
+          node --input-type=module -e 'import {writeFileSync} from "node:fs"; writeFileSync(`tmp/v3-ci-${process.env.RELEASE_PLATFORM}/release-source.json`, JSON.stringify({schemaVersion:1,version:process.env.RELEASE_VERSION,platform:process.env.RELEASE_PLATFORM,sourceCommit:process.env.RELEASE_COMMIT})+"\n");'
+          mkdir -p tmp/release-assets
+          tar -C "tmp/v3-ci-${{ matrix.platform }}" -czf "tmp/release-assets/agentsession-${{ steps.release.outputs.version }}-${{ matrix.platform }}.tar.gz" .
+
+      - name: Upload validated portable archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: prerelease-native-${{ matrix.platform }}
+          path: tmp/release-assets/*.tar.gz
+          if-no-files-found: error
+          overwrite: true
+
+  release:
+    needs: [identity, native]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref_name }}
+    steps:
+      - name: Check out exact release source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.identity.outputs.commit }}
+          fetch-depth: 0
+
+      - name: Set up Node.js and npm registry
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26.5.0
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Verify source tag again at publication boundary
+        id: release
+        run: node scripts/v3-verify-prerelease.mjs "$RELEASE_REF" --remote >> "$GITHUB_OUTPUT"
+
+      - name: Install locked test dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Download all four archives from this successful matrix
+        uses: actions/download-artifact@v4
+        with:
+          pattern: prerelease-native-*
+          path: tmp/release-assets
+          merge-multiple: true
+
+      - name: Combine verified native payloads and pack public prerelease
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          COMMIT_TIMESTAMP: ${{ needs.identity.outputs.timestamp }}
+        run: |
+          for platform in win32-x64 linux-x64 linux-arm64 darwin-arm64; do
+            mkdir -p "tmp/portable/$platform"
+            tar -xzf "tmp/release-assets/agentsession-${VERSION}-${platform}.tar.gz" -C "tmp/portable/$platform"
+          done
+          node scripts/v3-prepare-npm-candidate.mjs --public --source-commit "$RELEASE_COMMIT" --output-dir tmp/npm-prerelease --windows-bundle tmp/portable/win32-x64 --linux-bundle tmp/portable/linux-x64 --linux-arm64-bundle tmp/portable/linux-arm64 --macos-arm64-bundle tmp/portable/darwin-arm64
+          node scripts/v3-pack-npm-candidate.mjs --stage-dir tmp/npm-prerelease
+          for platform in win32-x64 linux-x64 linux-arm64 darwin-arm64; do
+            if [[ "$platform" != win32-x64 ]]; then chmod +x "tmp/portable/$platform/agentsession-v3"; fi
+            rm "tmp/release-assets/agentsession-${VERSION}-${platform}.tar.gz"
+            node scripts/v3-archive-prerelease.mjs "tmp/portable/$platform" "tmp/release-assets/agentsession-${VERSION}-${platform}.tar.gz" "$COMMIT_TIMESTAMP"
+          done
+          cp tmp/npm-prerelease/*.tgz tmp/release-assets/
+          cp tmp/npm-prerelease/native/provenance.json tmp/release-assets/npm-provenance.json
+          (cd tmp/release-assets && sha256sum *.tar.gz *.tgz npm-provenance.json > SHA256SUMS)
+
+      - name: Install and launch exact combined tarballs offline
+        env:
+          AGENTSESSION_V3_NPM_CANDIDATE: "1"
+          AGENTSESSION_V3_NPM_TARBALL_DIR: tmp/npm-prerelease
+        run: node --test v3/test/npm-candidate-install.test.mjs
+
+      - name: Upload exact publication assets before publishing
+        uses: actions/upload-artifact@v4
+        with:
+          name: prerelease-publication-assets-${{ github.run_attempt }}
+          path: tmp/release-assets/
+          if-no-files-found: error
+
+      - name: Publish verified npm packages with next and provenance
+        if: github.event_name == 'push' || inputs.publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          AGENTSESSION_RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+        run: |
+          node scripts/v3-verify-prerelease.mjs "$RELEASE_REF" --remote
+          node scripts/v3-publish-prerelease.mjs --stage-dir tmp/npm-prerelease
+
+      - name: Publish GitHub prerelease with immutable assets
+        if: github.event_name == 'push' || inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/v3-verify-prerelease.mjs "$RELEASE_REF" --remote
+          node scripts/v3-github-prerelease.mjs "$RELEASE_REF" tmp/release-assets "docs/releases/${{ steps.release.outputs.version }}.md"

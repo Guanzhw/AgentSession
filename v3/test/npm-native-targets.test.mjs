@@ -5,8 +5,11 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import test from 'node:test';
 import { nativeBinary } from '../npm/native/binary.mjs';
+import { readPackageManifests, tarballName } from '../../scripts/v3-npm-package-contract.mjs';
 
 const repo = path.resolve(import.meta.dirname, '../..');
+const manifests = await readPackageManifests(path.join(repo, 'v3/npm'));
+const version = manifests.native.version;
 const expected = ['win32-x64', 'linux-x64', 'linux-arm64', 'darwin-arm64'];
 const targets = () => import('../npm/native/targets.mjs');
 const bundle = process.env.AGENTSESSION_V3_NPM_HOST_BUNDLE;
@@ -78,7 +81,7 @@ test('supplied ARM64 bundle with missing executable fails explicitly without pub
     const source=path.join(root,target);await mkdir(source);
     const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
     const entry={path:'agentsession-v3',sizeBytes:0,sha256:sha(Buffer.alloc(0))};
-    const manifest=JSON.stringify({version:'3.0.0',platform:target,executable:entry.path,files:[entry]});
+    const manifest=JSON.stringify({version,platform:target,executable:entry.path,files:[entry]});
     await writeFile(path.join(source,'manifest.json'),manifest);
     await writeFile(path.join(source,'SHA256SUMS'),`${entry.sha256}  ${entry.path}\n${sha(manifest)}  manifest.json\n`);
     const candidate=path.join(root,target+'-candidate');
@@ -100,5 +103,5 @@ test('a real Windows-only candidate packs offline on its native host without WSL
     const packed=spawnSync(process.execPath,[path.join(repo,'scripts/v3-pack-npm-candidate.mjs'),
       '--stage-dir',stage],{encoding:'utf8',windowsHide:true});
     assert.equal(packed.status,0,packed.stderr);
-    assert.ok((await readFile(path.join(stage,'acetamido-agentsession-native-3.0.0.tgz'))).length>0);
+    assert.ok((await readFile(path.join(stage,tarballName(manifests.native)))).length>0);
   });

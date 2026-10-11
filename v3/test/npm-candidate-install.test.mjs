@@ -12,8 +12,11 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import { nativeTargets } from '../npm/native/targets.mjs';
+import { readPackageManifests, tarballName } from '../../scripts/v3-npm-package-contract.mjs';
 
 const repo = fileURLToPath(new URL('../../', import.meta.url));
+const manifests = await readPackageManifests(path.join(repo, 'v3/npm'));
+const version = manifests.native.version;
 const prepare = path.join(repo, 'scripts', 'v3-prepare-npm-candidate.mjs');
 const pack = path.join(repo, 'scripts', 'v3-pack-npm-candidate.mjs');
 const fixture = path.join(repo, 'v3', 'fixtures', 'codex', 'sessions', '2026', '09', '26',
@@ -136,7 +139,7 @@ test('selected local npm candidate installs and launches Web and native stdio MC
   const nativeStage = path.join(stage, 'native');
   const provenance = JSON.parse(await readFile(path.join(nativeStage, 'provenance.json'), 'utf8'));
   assert.equal(provenance.schemaVersion, 1);
-  assert.equal(provenance.version, '3.0.0');
+  assert.equal(provenance.version, version);
   assert.ok(provenance.platforms[`${process.platform}-${process.arch}`], 'Candidate contains the real host payload');
   for (const platform of Object.keys(provenance.platforms)) {
     assert.match(provenance.platforms[platform].portableManifestSha256, /^[a-f0-9]{64}$/);
@@ -158,11 +161,7 @@ test('selected local npm candidate installs and launches Web and native stdio MC
       run(process.execPath, [pack, '--stage-dir', stage], { cwd: working, env: npmEnv });
     }
   }
-  const tarballs = [
-    'acetamido-agentsession-native-3.0.0.tgz',
-    'acetamido-agentsession-3.0.0.tgz',
-    'acetamido-agentsession-mcp-3.0.0.tgz',
-  ].map(name => path.join(stage, name));
+  const tarballs = Object.values(manifests).map(manifest => path.join(stage, tarballName(manifest)));
   for (const tarball of tarballs) assert.ok(existsSync(tarball), `Missing packed candidate: ${tarball}`);
   run(process.execPath, [npm, 'install', '--offline', '--ignore-scripts', '--no-audit', '--no-fund',
     '--prefix', prefix, ...tarballs], { cwd: working, env: npmEnv });
@@ -203,8 +202,8 @@ test('selected local npm candidate installs and launches Web and native stdio MC
     process.platform === 'win32' ? 'agentsession-mcp.cmd' : 'agentsession-mcp');
   assert.ok(existsSync(viewerShim));
   assert.ok(existsSync(mcpShim));
-  assert.match(run(process.execPath, [viewer, '--version'], { cwd: working }), /agentsession-v3 3\.0\.0/);
-  assert.match(run(process.execPath, [mcp, '--version'], { cwd: working }), /agentsession-v3 3\.0\.0/);
+  assert.equal(run(process.execPath, [viewer, '--version'], { cwd: working }), `agentsession-v3 ${version}`);
+  assert.equal(run(process.execPath, [mcp, '--version'], { cwd: working }), `agentsession-v3 ${version}`);
   const invalid = spawnSync(process.execPath, [viewer, '--unknown-candidate-option'],
     { cwd: working, encoding: 'utf8', timeout: 5_000, windowsHide: true });
   const nativeInvalid = spawnSync(binary, ['serve', '--unknown-candidate-option'],
@@ -213,13 +212,13 @@ test('selected local npm candidate installs and launches Web and native stdio MC
   assert.equal(invalid.status, nativeInvalid.status, 'Viewer command forwards the native exit code');
   if (process.platform === 'win32') {
     const invoke = shim => `& '${shim.replaceAll("'", "''")}' --version`;
-    assert.match(run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', invoke(viewerShim)],
-      { cwd: working }), /agentsession-v3 3\.0\.0/);
-    assert.match(run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', invoke(mcpShim)],
-      { cwd: working }), /agentsession-v3 3\.0\.0/);
+    assert.equal(run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', invoke(viewerShim)],
+      { cwd: working }), `agentsession-v3 ${version}`);
+    assert.equal(run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', invoke(mcpShim)],
+      { cwd: working }), `agentsession-v3 ${version}`);
   } else {
-    assert.match(run(viewerShim, ['--version'], { cwd: working }), /agentsession-v3 3\.0\.0/);
-    assert.match(run(mcpShim, ['--version'], { cwd: working }), /agentsession-v3 3\.0\.0/);
+    assert.equal(run(viewerShim, ['--version'], { cwd: working }), `agentsession-v3 ${version}`);
+    assert.equal(run(mcpShim, ['--version'], { cwd: working }), `agentsession-v3 ${version}`);
   }
 
   const codex = path.join(sources, 'codex');
@@ -293,7 +292,7 @@ test('selected local npm candidate installs and launches Web and native stdio MC
   const mcpPid = transport.pid;
   const serverInfo = client.getServerVersion();
   assert.equal(serverInfo?.name, 'AgentSession-MCP');
-  assert.equal(serverInfo?.version, '3.0.0');
+  assert.equal(serverInfo?.version, version);
   const tools = await client.listTools();
   assert.equal(tools.tools.length, 7);
   assert.ok(tools.tools.some(tool => tool.name === 'session_get_event'));

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { nativeTargets } from '../v3/npm/native/targets.mjs';
 import { assertNativeArtifact } from './v3-native-artifact.mjs';
+import { readPackageManifests, assertPublicPrerelease } from './v3-npm-package-contract.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const templates = path.join(repo, 'v3', 'npm');
@@ -19,12 +20,17 @@ function parseArgs(args) {
   const options = new Map();
   for (let index = 0; index < args.length; index += 2) {
     const key = args[index];
-    const value = args[index + 1];
-    if (!['--output-dir', ...Object.values(bundleOptions), '--source-ledger'].includes(key)
-      || !value || value.startsWith('--') || options.has(key)) {
-      throw new Error('Usage: node scripts/v3-prepare-npm-candidate.mjs --output-dir <new-dir> [--windows-bundle <dir>] [--linux-bundle <dir>] [--linux-arm64-bundle <dir>] [--macos-arm64-bundle <dir>] [--source-ledger <file>]; supply at least one bundle');
+    if (key === '--public' && !options.has(key)) {
+      options.set(key, true);
+      index -= 1;
+      continue;
     }
-    options.set(key, path.resolve(value));
+    const value = args[index + 1];
+    if (!['--output-dir', ...Object.values(bundleOptions), '--source-ledger', '--source-commit'].includes(key)
+      || !value || value.startsWith('--') || options.has(key)) {
+      throw new Error('Usage: node scripts/v3-prepare-npm-candidate.mjs --output-dir <new-dir> [--windows-bundle <dir>] [--linux-bundle <dir>] [--linux-arm64-bundle <dir>] [--macos-arm64-bundle <dir>] [--source-ledger <file>] [--public --source-commit <40hex>]; supply at least one bundle');
+    }
+    options.set(key, key === '--source-commit' ? value : path.resolve(value));
   }
   if (!options.has('--output-dir')) throw new Error('Missing required --output-dir');
   const bundles = Object.fromEntries(Object.entries(bundleOptions)
@@ -34,6 +40,8 @@ function parseArgs(args) {
     output: options.get('--output-dir'),
     bundles,
     ledger: options.get('--source-ledger'),
+    public: options.has('--public'),
+    sourceCommit: options.get('--source-commit'),
   };
 }
 
@@ -43,10 +51,10 @@ async function fileBytes(file) {
   return readFile(file);
 }
 
-async function verifyBundle(root, platform, pin) {
+async function verifyBundle(root, platform, pin, version, sourceCommit) {
   const manifestBytes = await fileBytes(path.join(root, 'manifest.json'));
   const manifest = JSON.parse(manifestBytes);
-  if (manifest.version !== '3.0.0' || manifest.platform !== platform || manifest.executable !== pin.executable
+  if (manifest.version !== version || manifest.platform !== platform || manifest.executable !== pin.executable
     || !Array.isArray(manifest.files)) {
     throw new Error(`${platform} portable manifest has an unexpected identity`);
   }
@@ -83,16 +91,56 @@ async function verifyBundle(root, platform, pin) {
   if (!binaryRow) throw new Error(`${platform} portable manifest does not list its executable`);
   assertNativeArtifact(await fileBytes(path.join(root, pin.executable)), platform);
   const manifestSha256 = sha256(manifestBytes);
+  let releaseSourceSha256;
+  if (sourceCommit) {
+    const sourceBytes = await fileBytes(path.join(root, 'release-source.json'));
+    const source = JSON.parse(sourceBytes);
+    if (source.schemaVersion !== 1 || source.version !== version || source.platform !== platform
+      || source.sourceCommit !== sourceCommit) {
+      throw new Error(`${platform} portable release source differs from the frozen release identity`);
+    }
+    releaseSourceSha256 = sha256(sourceBytes);
+  }
   return { manifestSha256, binarySha256: binaryRow.sha256,
+    ...(releaseSourceSha256 ? { releaseSourceSha256 } : {}),
     binaryPath: path.join(root, pin.executable) };
 }
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
+  const manifests = await readPackageManifests(templates);
+  const version = manifests.native.version;
+  if (options.public && (Object.keys(options.bundles).length !== Object.keys(nativeTargets).length
+    || !/^[a-f0-9]{40}$/.test(options.sourceCommit ?? ''))) {
+    throw new Error('Public prerelease requires all four native targets and a full source commit');
+  }
   const sourceLedgerSha256 = options.ledger ? sha256(await fileBytes(options.ledger)) : undefined;
   const verified = {};
   for (const [platform, bundle] of Object.entries(options.bundles)) {
-    verified[platform] = await verifyBundle(bundle, platform, nativeTargets[platform]);
+    verified[platform] = await verifyBundle(bundle, platform, nativeTargets[platform], version,
+      options.public ? options.sourceCommit : undefined);
+  }
+
+  const provenance = {
+    schemaVersion: 1,
+    version,
+    ...(sourceLedgerSha256 ? { sourceLedgerSha256 } : {}),
+    ...(options.sourceCommit ? { sourceCommit: options.sourceCommit } : {}),
+    note: 'Platform hashes identify the explicitly selected portable bundles; sourceCommit records the release workflow checkout when supplied.',
+    platforms: Object.fromEntries(Object.entries(verified).map(([platform, value]) => [platform, {
+      portableManifestSha256: value.manifestSha256,
+      nativeBinarySha256: value.binarySha256,
+      ...(value.releaseSourceSha256 ? { releaseSourceSha256: value.releaseSourceSha256 } : {}),
+    }])),
+  };
+  if (options.public) {
+    for (const manifest of Object.values(manifests)) {
+      manifest.private = false;
+      manifest.repository = { type: 'git', url: 'git+https://github.com/Guanzhw/AgentSession.git' };
+      manifest.homepage = 'https://github.com/Guanzhw/AgentSession';
+      manifest.publishConfig = { access: 'public', tag: 'next', provenance: true };
+    }
+    assertPublicPrerelease(manifests, provenance);
   }
 
   await mkdir(path.dirname(options.output), { recursive: true });
@@ -110,7 +158,7 @@ async function main() {
       await cp(path.join(templates, name), path.join(stage, name), { recursive: true });
       await copyFile(path.join(repo, 'LICENSE'), path.join(stage, name, 'LICENSE'));
       const manifestPath = path.join(stage, name, 'package.json');
-      const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+      const manifest = manifests[name];
       manifest.os = [...new Set(Object.keys(verified).map(target => target.split('-')[0]))];
       manifest.cpu = [...new Set(Object.keys(verified).map(target => target.split('-')[1]))];
       await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
@@ -121,16 +169,6 @@ async function main() {
       await copyFile(verified[platform].binaryPath, target);
       if (platform !== 'win32-x64') await chmod(target, 0o755);
     }
-    const provenance = {
-      schemaVersion: 1,
-      version: '3.0.0',
-      ...(sourceLedgerSha256 ? { sourceLedgerSha256 } : {}),
-      note: 'Platform hashes identify the explicitly selected portable bundles; they do not assert that the current source tree matches those binaries.',
-      platforms: Object.fromEntries(Object.entries(verified).map(([platform, value]) => [platform, {
-        portableManifestSha256: value.manifestSha256,
-        nativeBinarySha256: value.binarySha256,
-      }])),
-    };
     await writeFile(path.join(stage, 'native', 'provenance.json'), `${JSON.stringify(provenance, null, 2)}\n`);
     await rename(stage, final);
     process.stdout.write(`${final}\n`);

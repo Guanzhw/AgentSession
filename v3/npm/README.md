@@ -1,6 +1,6 @@
-# Local AgentSession 3.0 npm candidate
+# AgentSession 3.0 npm packages
 
-These package templates stage an unpublishable npm install candidate. The
+By default, these private package templates stage a local npm install candidate. The
 Viewer and stdio MCP entrypoints share one native package, which contains the
 explicitly supplied native binaries. The supported target pairs are Windows x64
 (`win32-x64`), Linux x64 (`linux-x64`), Linux arm64 (`linux-arm64`) and macOS arm64
@@ -84,3 +84,44 @@ tarballs exactly without preparing or packing them again.
 Every installed platform requires its real selected payload and a native host
 execution. ARM64/macOS runtime, installation and CI outcomes remain unverified
 until those artifacts and executions exist; no publication is performed here.
+
+## Public prerelease
+
+[The prerelease workflow](../../.github/workflows/v3-prerelease.yml) resolves one
+existing version tag to a commit, validates all four actual native hosts, and
+checks out that same commit throughout the run. It stages all three packages
+for public publication only after every matrix job succeeds. Workflow dispatch
+with `publish: false` performs the complete validation and uploads publication
+assets. A prerelease tag push, or dispatch with `publish: true`, publishes the
+validated artifacts using the existing `NPM_TOKEN` secret and GitHub OIDC
+provenance. Every npm publication explicitly uses `next`; existing `latest`
+values are checked before and after publication.
+
+Public staging uses the current template version, requires a 3.x prerelease,
+all four bundles, and each bundle's `release-source.json` sidecar matching the
+frozen version, platform, and source commit:
+
+```bash
+node scripts/v3-prepare-npm-candidate.mjs --public \
+  --source-commit "$RELEASE_COMMIT" --output-dir tmp/npm-prerelease \
+  --windows-bundle tmp/portable/win32-x64 \
+  --linux-bundle tmp/portable/linux-x64 \
+  --linux-arm64-bundle tmp/portable/linux-arm64 \
+  --macos-arm64-bundle tmp/portable/darwin-arm64
+node scripts/v3-pack-npm-candidate.mjs --stage-dir tmp/npm-prerelease
+```
+
+Only staged public manifests receive `private: false`, repository metadata,
+and `publishConfig` with public access, `next`, and provenance. Wrappers pin the
+exact native prerelease version. The packer validates staged identities,
+dependency pins, native payloads, provenance, and Unix executable archive modes.
+The Ubuntu publication job installs and launches the exact combined tarballs
+offline before publishing native, Viewer, then MCP.
+
+Public portable archives use GNU tar and `gzip -n` with the resolved commit's
+timestamp and normalized archive owners. The GitHub prerelease includes the
+four portable archives, three npm tarballs, aggregate npm provenance, and
+global `SHA256SUMS`; it is explicitly marked prerelease and `latest: false`.
+Publication retries compare existing npm integrity and GitHub asset bytes,
+then continue with missing packages/assets. A different immutable artifact
+fails explicitly. Re-run failed jobs to reuse the validated host inputs.

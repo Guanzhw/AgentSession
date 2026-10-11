@@ -7,13 +7,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { nativeTargets } from '../v3/npm/native/targets.mjs';
 import { assertNativeArtifact } from './v3-native-artifact.mjs';
+import { readPackageManifests, tarballName, assertPublicPrerelease } from './v3-npm-package-contract.mjs';
 
 const names = ['native', 'viewer', 'mcp'];
-const tarballs = [
-  'acetamido-agentsession-native-3.0.0.tgz',
-  'acetamido-agentsession-3.0.0.tgz',
-  'acetamido-agentsession-mcp-3.0.0.tgz',
-];
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 
 function npmCli() {
@@ -61,8 +57,20 @@ async function main() {
   }
   const stage = path.resolve(process.argv[3]);
   const provenance = JSON.parse(await readFile(path.join(stage, 'native', 'provenance.json'), 'utf8'));
+  const manifests = await readPackageManifests(stage);
+  if (provenance.schemaVersion !== 1 || provenance.version !== manifests.native.version) {
+    throw new Error('Prepared package version differs from native provenance');
+  }
+  if (Object.values(manifests).some(manifest => manifest.private !== true)) {
+    assertPublicPrerelease(manifests, provenance);
+  }
+  const tarballs = names.map(name => tarballName(manifests[name]));
   const platforms = Object.keys(provenance.platforms);
   if (!platforms.length) throw new Error('Prepared candidate contains no native target');
+  const payloadTargets = await readdir(path.join(stage, 'native', 'bin'));
+  if (payloadTargets.length !== platforms.length || payloadTargets.some(target => !platforms.includes(target))) {
+    throw new Error('Prepared native payload targets differ from pinned provenance');
+  }
   if (!['linux', 'darwin'].includes(process.platform)
     && !(process.platform === 'win32' && platforms.every(target => target === 'win32-x64'))) {
     throw new Error('Pack candidates containing Unix executables on Linux/WSL ext4 or macOS to preserve executable mode.');
@@ -71,6 +79,10 @@ async function main() {
     const pin = nativeTargets[platform];
     if (!pin) throw new Error(`Unsupported prepared native target: ${platform}`);
     const binary = path.join(stage, 'native', 'bin', platform, pin.executable);
+    const entries = await readdir(path.dirname(binary));
+    if (entries.length !== 1 || entries[0] !== pin.executable) {
+      throw new Error(`Prepared ${platform} payload contains an unpinned file`);
+    }
     const bytes = await readFile(binary);
     assertNativeArtifact(bytes, platform);
     if (hash(bytes) !== provenance.platforms[platform].nativeBinarySha256) {

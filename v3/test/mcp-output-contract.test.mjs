@@ -10,6 +10,7 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
 const repo = fileURLToPath(new URL('../../', import.meta.url));
+const version = JSON.parse(readFileSync(path.join(repo, 'package.json'), 'utf8')).version;
 const binary = process.env.AGENTSESSION_V3_BIN || path.join(repo, 'v3', 'target', 'debug',
   process.platform === 'win32' ? 'agentsession-v3.exe' : 'agentsession-v3');
 const dsh = path.join(repo, 'v3', 'fixtures', 'deepseek-harness');
@@ -42,7 +43,7 @@ for (const era of ['legacy', 'modern']) test(`native MCP tools keep ${era} text 
     await client.connect(new StdioClientTransport({ command: binary, args, cwd: repo, stderr: 'pipe' }));
     t.after(async () => client.close());
     assert.equal(client.getServerVersion()?.name, 'AgentSession-MCP');
-    assert.equal(client.getServerVersion()?.version, '3.0.0');
+    assert.equal(client.getServerVersion()?.version, version);
 
     const calls = [
       ['session_browse', { level: 'providers' }],

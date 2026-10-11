@@ -58,6 +58,34 @@ test('installer rejects a different executable before writing a host config', ()
   assert.equal(existsSync(hostConfig), false);
 });
 
+test('installer accepts the prerelease binary version and refuses malformed version output', () => {
+  const { root, env, serverConfig } = setup();
+  const versions = ['3.0.0', '3.0.0-rc.1', '3.0.0-rc.1+build.7', '3.0.0-rc..1', '3.0.0-', '4.0.0', '3.0.0 extra'];
+  for (const [index, version] of versions.entries()) {
+    const hostConfig = path.join(root, `version-${index}.toml`);
+    // Replace only the executable probe; exercise the real installer/config write boundary.
+    const probe = `import childProcess from 'node:child_process';
+      import { syncBuiltinESMExports } from 'node:module';
+      import { pathToFileURL } from 'node:url';
+      childProcess.spawnSync = () => ({status: 0, stdout: process.env.TEST_VERSION_OUTPUT});
+      syncBuiltinESMExports();
+      process.argv = [process.execPath, ...process.argv.slice(1)];
+      await import(pathToFileURL(process.argv[1]).href);`;
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', probe, installer,
+      '--target', 'codex', '--binary', process.execPath, '--host-config', hostConfig,
+      '--server-config', serverConfig], { encoding: 'utf8', env: { ...env, TEST_VERSION_OUTPUT: `agentsession-v3 ${version}\n` } });
+    if (index < 3) {
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(existsSync(hostConfig), true);
+      assert.match(readFileSync(hostConfig, 'utf8'), /\[mcp_servers\.agentsession-v3\]/);
+    } else {
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /does not report an AgentSession 3.x version/);
+      assert.equal(existsSync(hostConfig), false);
+    }
+  }
+});
+
 test('installer refuses an incomplete explicit server config before writing host settings', () => {
   const { root, serverConfig, install } = setup();
   const hostConfig = path.join(root, 'config.toml');

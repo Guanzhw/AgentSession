@@ -13,6 +13,7 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
 const repo = fileURLToPath(new URL('../../', import.meta.url));
+const version = JSON.parse(await readFile(path.join(repo, 'package.json'), 'utf8')).version;
 const fixture = path.join(repo, 'v3', 'fixtures', 'codex');
 const release = process.env.AGENTSESSION_V3_RELEASE_BIN || path.join(repo, 'v3', 'target', 'release',
   process.platform === 'win32' ? 'agentsession-v3.exe' : 'agentsession-v3');
@@ -307,7 +308,7 @@ test('portable release directory runs from a copied path with spaces using only 
     const manifest = JSON.parse(await readFile(path.join(packageDir, 'manifest.json'), 'utf8'));
     assert.equal(manifest.schemaVersion, 1);
     assert.equal(manifest.product, 'AgentSession');
-    assert.equal(manifest.version, '3.0.0');
+    assert.equal(manifest.version, version);
     assert.equal(manifest.platform, `${process.platform}-${process.arch}`);
     assert.equal(manifest.executable, executableName);
     assert.deepEqual(manifest.fixture, {

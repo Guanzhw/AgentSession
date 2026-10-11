@@ -12,6 +12,19 @@ evidence remain visible throughout the reading and MCP flows.
 [中文](README.md) · [Native CLI, configuration and MCP](v3/README.md) ·
 [Acceptance contract](docs/design/agentsession-v3-acceptance-contract.md)
 
+## 3.0 prerelease
+
+```sh
+npm install -g @acetamido/agentsession@3.0.0-rc.1
+npm install -g @acetamido/agentsession-mcp@3.0.0-rc.1
+agentsession
+```
+
+The prerelease uses npm's `next` channel. [Release and upgrade notes](docs/releases/3.0.0-rc.1.md)
+compare it with public v1.10.1, including the port change, metadata-copy import,
+and MCP/API migration. Four standalone platform bundles are available in the
+[GitHub Release](https://github.com/Guanzhw/AgentSession/releases/tag/v3.0.0-rc.1).
+
 ## Run from source
 
 Development requires Node.js 22.15 or newer and Rust with edition 2024 support.
@@ -41,8 +54,8 @@ npm test
 
 See [the development guide](AGENTS.md) for ownership and validation, and the
 [delivery plan](docs/design/agentsession-v3-delivery-plan.md) for remaining
-source, performance, product, and platform gates. This workspace consolidation
-does not claim a published 3.0 package or complete acceptance. Historical 2.0
+source, performance, product, and platform gates. The prerelease notes identify
+the validated release scope; unresolved acceptance items remain open. Historical 2.0
 evidence and migration decisions retain their original scope; its implementation
 can be recovered from Git history.
 

@@ -14,8 +14,9 @@ Historical Windows/Linux x64 candidate evidence covers actual Web, native MCP,
 desktop Reader and offline npm installation. The local handoff report (`../tmp/v3-delivery/CURRENT-CANDIDATE-20261002.md`, local evidence)
 identifies those exact binaries, fixed 2.0 comparison and measured tradeoffs.
 The [workspace consolidation decision](../.agents/decisions/implemented/2026-10-09-sole-v3-workspace.md)
-records the current default. Remaining acceptance gates stay open; no 3.0
-publication is claimed.
+records the current default. The [3.0.0-rc.1 release notes](../docs/releases/3.0.0-rc.1.md)
+describe the prerelease distribution and upgrade from public v1.10.1.
+Remaining acceptance gates retain their recorded evidence scope.
 
 Library **Manage** selects loaded, readable sessions across the five providers
 by canonical ID. Rows with unavailable history remain visible but cannot enter
@@ -425,7 +426,7 @@ then defaults. Provider-owned source files are opened read-only.
 
 ### Viewer metadata import
 
-To import a **copy** of a 2.0 Viewer metadata SQLite database, run
+To import a **copy** of a legacy Viewer metadata SQLite database, run
 `agentsession-v3 migrate-meta --from <old-meta-copy.db>` with the same source and
 state flags (or `--config`) as the intended 3.0 `serve` process. The command
 prints the selected source scope and creates `meta/scopes/<scope>/meta.db` only
@@ -433,6 +434,9 @@ when that target does not exist. It copies the complete SQLite database,
 including retired-provider rows and the v1 index, without changing the input.
 Existing 3.0 Viewer state is never overwritten. Preserve the input database and
 configuration. The import does not migrate configuration or derived indexes.
+The prerelease validation also imports a real legacy database whose
+`session_meta` schema matches public v1.10.1, with full-table content and schema
+comparisons before and after read-only Web/MCP access and restart.
 The former runtime is recoverable from Git revision
 `50a32e7c5b3fdaa1d335771da80d6c919d4ab536`; its startup and rollback harnesses
 are historical and are not part of this workspace.

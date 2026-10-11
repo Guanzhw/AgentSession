@@ -11,6 +11,18 @@ Provider 数据库与 transcript 保持只读；收藏、标题和回收站状�
 [English](README.en.md) · [原生 CLI、配置与 MCP](v3/README.md) ·
 [验收契约](docs/design/agentsession-v3-acceptance-contract.md)
 
+## 3.0 预发布版
+
+```sh
+npm install -g @acetamido/agentsession@3.0.0-rc.1
+npm install -g @acetamido/agentsession-mcp@3.0.0-rc.1
+agentsession
+```
+
+预发布使用 npm `next` 渠道。[更新与升级说明](docs/releases/3.0.0-rc.1.md)
+以公开版本 v1.10.1 为基准，涵盖默认端口、元数据副本导入和 MCP/API 迁移。
+四平台独立程序见 [GitHub Release](https://github.com/Guanzhw/AgentSession/releases/tag/v3.0.0-rc.1)。
+
 ## 从源码运行
 
 开发需要 Node.js 22.15 或更新版本，以及支持 edition 2024 的 Rust 工具链。
@@ -40,7 +52,7 @@ npm test
 
 [开发指南](AGENTS.md)规定代码归属和验证要求；
 [交付计划](docs/design/agentsession-v3-delivery-plan.md)记录剩余来源、性能、产品和
-平台门槛。本次工作区整合不代表 3.0 已发布或完成全部验收。2.0 的历史证据和迁移
+平台门槛。3.0 预发布的验证范围见更新说明；完整验收仍保留未补证项。2.0 的历史证据和迁移
 决策保留原有范围，其实现可从 Git 历史恢复。
 
 ## 许可证

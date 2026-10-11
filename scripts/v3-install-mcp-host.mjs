@@ -243,7 +243,8 @@ function main() {
   requireRegularFile(options.binary, 'Native AgentSession 3.0 binary');
   const version = spawnSync(options.binary, ['--version'], { encoding: 'utf8', timeout: 5_000,
     windowsHide: true });
-  if (version.error || version.status !== 0 || !/^agentsession-v3 3\.\d+\.\d+\s*$/.test(version.stdout)) {
+  if (version.error || version.status !== 0
+    || !/^agentsession-v3 3\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?\s*$/.test(version.stdout)) {
     throw new Error(`Binary does not report an AgentSession 3.x version: ${options.binary}`);
   }
   let config;
