@@ -14,14 +14,14 @@ Provider 数据库与 transcript 保持只读；收藏、标题和回收站状�
 ## 3.0 预发布版
 
 ```sh
-npm install -g @acetamido/agentsession@3.0.0-rc.2
-npm install -g @acetamido/agentsession-mcp@3.0.0-rc.2
+npm install -g @acetamido/agentsession@3.0.0-rc.3
+npm install -g @acetamido/agentsession-mcp@3.0.0-rc.3
 agentsession
 ```
 
-预发布使用 npm `next` 渠道。[更新与升级说明](docs/releases/3.0.0-rc.2.md)
+预发布使用 npm `next` 渠道。[更新与升级说明](docs/releases/3.0.0-rc.3.md)
 以公开版本 v1.10.1 为基准，涵盖默认端口、元数据副本导入和 MCP/API 迁移。
-四平台独立程序见 [GitHub Release](https://github.com/Guanzhw/AgentSession/releases/tag/v3.0.0-rc.2)。
+四平台独立程序见 [GitHub Release](https://github.com/Guanzhw/AgentSession/releases/tag/v3.0.0-rc.3)。
 
 ## 从源码运行
 

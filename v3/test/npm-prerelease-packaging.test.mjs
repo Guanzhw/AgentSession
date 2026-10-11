@@ -119,7 +119,7 @@ test('private host candidate packs using the actual candidate version and retain
   for (const manifest of Object.values(manifests)) {
     const archive = path.join(stage, tarballName(manifest));
     assert.ok((await readFile(archive)).length > 0);
-    const extracted = spawnSync('tar', ['-xOzf', archive, 'package/package.json'], { encoding: 'utf8', windowsHide: true });
+    const extracted = spawnSync('tar', ['-xOzf', path.basename(archive), 'package/package.json'], { cwd: stage, encoding: 'utf8', windowsHide: true });
     assert.equal(extracted.status, 0, extracted.stderr);
     assert.deepEqual(JSON.parse(extracted.stdout), manifest);
   }

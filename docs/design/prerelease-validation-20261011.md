@@ -2,7 +2,7 @@
 
 This prerelease compares product changes with the last public release,
 [v1.10.1](https://github.com/Guanzhw/AgentSession/releases/tag/v1.10.1).
-Its [release notes](../releases/3.0.0-rc.2.md) describe the upgrade and supported
+Its [release notes](../releases/3.0.0-rc.3.md) describe the upgrade and supported
 scope. Publication uses npm `next` and a GitHub prerelease.
 
 ## Current source and platform evidence
@@ -48,6 +48,25 @@ binary paths to tests expecting native paths; rerunning with `Resolve-Path`
 corrects those assertions. One Windows staging-directory rename returned
 `EPERM`; the unchanged packaging file passes on isolated recheck. The final
 four-host run repeats these package checks before publishing.
+
+RC.2's [tagged run](https://github.com/Guanzhw/AgentSession/actions/runs/38131025041)
+passes the complete Linux x64/arm64 and macOS arm64 jobs. Windows passes the
+temporary-root repair and old-configuration checks but reveals a new test-only
+archive-path error: Git Bash GNU tar interprets an absolute drive-letter archive
+path as a remote host. The archive assertion now uses the exact basename under
+its stage working directory, matching the production packer's existing pattern.
+The parallel main-branch run also records one old-config HTTP timeout; the tagged
+Windows run passes that unchanged check. Neither run publishes public packages.
+RC.3 retains both failed candidate tags and repeats the complete release gates.
+The exact tarball assertion passes with Windows native tar and Git GNU tar;
+the complete packaging file passes all five checks on WSL/Linux. Its local
+release build/review pass, and 24 targeted old-config, MCP, installer and package
+checks pass with one Linux-only archive check skipped on Windows. The binary
+reports `3.0.0-rc.3`, SHA-256
+`1456b6619c5f19f557dababde7d393de69a3cd8cb8ef8e7a8486ea4ff06b698b`.
+Rust runtime and Svelte source files are unchanged across the candidate repairs;
+earlier real-data/browser evidence retains that source scope. Publication still
+requires the exact RC.3 tag's four-host build and installed-package checks.
 
 ## Windows real-data release check
 
