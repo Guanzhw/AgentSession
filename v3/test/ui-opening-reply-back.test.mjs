@@ -152,7 +152,7 @@ const runtimeEvent = {
   readerEvent: firstItems[10].event,
 };
 
-async function startHarness(t, holdDiscovery = false, rejectReaderOnce = false, targetAware = false, holdTocHydration = false) {
+async function startHarness(t, holdDiscovery = false, rejectReaderOnce = false, targetAware = false, holdTocHydration = false, libraryGates = false) {
   const requireFromUi = createRequire(path.join(uiDir, 'package.json'));
   const { build } = requireFromUi('vite');
   const buildDir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-opening-back-'));
@@ -170,6 +170,9 @@ async function startHarness(t, holdDiscovery = false, rejectReaderOnce = false, 
   let bootstrapWhileDiscoveryPending = false;
   let releaseDiscovery;
   let discoveryTimer;
+  const familyRequests = [];
+  const discoveryReleases = [];
+  const familyReleases = [];
   const server = createHttpServer((request, response) => {
     const url = new URL(request.url || '/', `http://${request.headers.host || '127.0.0.1'}`);
     const json = (body, status = 200) => {
@@ -179,6 +182,12 @@ async function startHarness(t, holdDiscovery = false, rejectReaderOnce = false, 
 
     if (url.pathname === '/api/providers') {
       discoveryRequests++;
+      if (libraryGates) {
+        discoveryReleases.push((status = 200) => json(status === 200
+          ? [{ id: provider, available: true }]
+          : { error: { code: 'discovery_unavailable', message: 'Controlled discovery failure.' } }, status));
+        return;
+      }
       if (rejectReaderOnce && discoveryRequests > 1) {
         json({ error: { code: 'discovery_unavailable', message: 'Provider discovery is temporarily unavailable.' } }, 503);
         return;
@@ -195,6 +204,16 @@ async function startHarness(t, holdDiscovery = false, rejectReaderOnce = false, 
       } else {
         json([{ id: provider, available: true }]);
       }
+      return;
+    }
+    if (url.pathname === '/api/v3/library/sessions' && libraryGates) {
+      familyRequests.push(Object.fromEntries(url.searchParams));
+      familyReleases.push((status = 200, page) => json(status === 200 ? page ?? {
+        families: [{ session: bootstrap.session, matched: true, matchingCount: 1,
+          childCount: 0, totalChildCount: 0, familyRootId: sessionId,
+          familyUpdated: bootstrap.session.updatedAt, parentBoundary: null }],
+        total: 1, matchingSessions: 1, sourceDiagnostics: [], nextCursor: null,
+      } : { error: { code: 'source_error', message: 'Controlled family failure.' } }, status));
       return;
     }
     if (url.pathname === `/api/v3/reader/${provider}/${sessionId}/bootstrap`) {
@@ -317,6 +336,9 @@ async function startHarness(t, holdDiscovery = false, rejectReaderOnce = false, 
     get targetedBootstrapRequests() { return targetedBootstrapRequests; },
     navigationRequests,
     tocRequests,
+    familyRequests,
+    discoveryReleases,
+    familyReleases,
     releaseTocHydration: () => releaseTocHydration(),
   };
 }
@@ -359,6 +381,95 @@ async function waitForBrowser(command, predicate, description) {
   }
   throw new Error(`Timed out waiting for ${description}. Last browser result: ${last}`);
 }
+
+async function waitForGate(predicate, description) {
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await sleep(25);
+  }
+  assert.fail(`Timed out waiting for ${description}`);
+}
+
+test('Library prefetch overlaps discovery while publication, failures and route ownership stay ordered',
+  { skip: skipReason || false, timeout: 90_000 }, async t => {
+    const harness = await startHarness(t, false, false, false, false, true);
+    const command = await startBrowser(t, `${harness.origin}/sessions`);
+    await waitForGate(() => harness.discoveryReleases.length === 1, 'controlled discovery request');
+    await waitForGate(() => harness.familyRequests.length === 1, 'family request before discovery completes');
+    assert.deepEqual(harness.familyRequests[0], { limit: '40', sort: 'updated-desc' });
+    harness.familyReleases.shift()();
+    await waitForBrowser(command, `document.querySelector('.loading-state')`, 'loading until discovery completes');
+    assert.equal(await command('eval', `document.querySelector('.session-row') === null && !history.state?.agentSessionLibrary`), 'true');
+    harness.discoveryReleases.shift()(503);
+    await waitForBrowser(command, `document.querySelector('.error-state')?.textContent.includes('Controlled discovery failure.')`, 'discovery error');
+    assert.equal(await command('eval', `!history.state?.agentSessionLibrary`), 'true');
+
+    await command('click', '.error-state button');
+    await waitForGate(() => harness.familyRequests.length === 2 && harness.discoveryReleases.length === 1, 'retry requests');
+    harness.familyReleases.shift()(500);
+    harness.discoveryReleases.shift()();
+    await waitForBrowser(command, `document.querySelector('.search-error')?.textContent.includes('Controlled family failure.')`, 'Library-owned family error');
+    assert.equal(await command('eval', `!document.querySelector('.error-state') && !document.querySelector('.session-row')`), 'true');
+
+    await command('click', '.family-more');
+    await waitForGate(() => harness.familyRequests.length === 3, 'family retry');
+    harness.familyReleases.shift()();
+    await waitForBrowser(command, `document.querySelectorAll('.session-row').length === 1`, 'single published family');
+    assert.equal(harness.discoveryRequests, 2, 'successful discovery is reused on family retry');
+    assert.equal(harness.familyRequests.length, 3, 'each opening consumes its initial family response once');
+
+    await command('eval', `history.replaceState({ ...history.state,
+      agentSessionLibrary: { ...history.state.agentSessionLibrary, familyCount: 80 } }, '', '/sessions'); location.reload()`);
+    await waitForGate(() => harness.familyRequests.length === 4 && harness.discoveryReleases.length === 1, 'restored opening prefetch');
+    const restoredPage = (start, nextCursor) => ({
+      families: Array.from({ length: 40 }, (_, index) => ({
+        session: { ...bootstrap.session, session: { provider, sessionId: `restored-${start + index}` } },
+        matched: true, matchingCount: 1, childCount: 0, totalChildCount: 0,
+        familyRootId: `restored-${start + index}`, familyUpdated: bootstrap.session.updatedAt, parentBoundary: null,
+      })), total: 80, matchingSessions: 80, sourceDiagnostics: [], nextCursor,
+    });
+    harness.familyReleases.shift()(200, restoredPage(0, 'restored-page-40'));
+    assert.equal(await command('eval', `document.querySelector('.session-row') === null`), 'true');
+    harness.discoveryReleases.shift()();
+    await waitForGate(() => harness.familyRequests.length === 5, 'restored cursor page');
+    assert.deepEqual(harness.familyRequests[4], { limit: '40', cursor: 'restored-page-40', sort: 'updated-desc' });
+    assert.equal(await command('eval', `document.querySelector('.session-row') === null && history.state.agentSessionLibrary.familyCount === 80`), 'true',
+      'history restoration retains its requested count and publishes after all restored pages');
+    harness.familyReleases.shift()(200, restoredPage(40, null));
+    await waitForBrowser(command, `document.querySelectorAll('.session-row').length === 80`, 'all restored canonical rows');
+    const restoredIds = JSON.parse(await command('eval', `[...document.querySelectorAll('.session-row')].map(row => row.getAttribute('href'))`));
+    assert.deepEqual(restoredIds, Array.from({ length: 80 }, (_, index) => `/${provider}/session/restored-${index}`));
+
+    await command('eval', `history.replaceState(null, '', '/sessions'); location.reload()`);
+    await waitForGate(() => harness.familyRequests.length === 6 && harness.discoveryReleases.length === 1, 'fresh gated opening');
+    await command('eval', `window.libraryUnhandledRejections = []; addEventListener('unhandledrejection', event => window.libraryUnhandledRejections.push(String(event.reason)))`);
+    await command('eval', `history.pushState(null, '', '/${provider}/session/${sessionId}'); dispatchEvent(new PopStateEvent('popstate'))`);
+    await waitForGate(() => harness.discoveryReleases.length === 2, 'Reader discovery request');
+    harness.familyReleases.shift()(500);
+    harness.discoveryReleases.shift()();
+    harness.discoveryReleases.shift()();
+    await waitForBrowser(command, `document.querySelector('.transcript')?.textContent.includes(${JSON.stringify(replyText)})`, 'Reader after stale Library response');
+    assert.equal(await command('eval', `location.pathname === '/${provider}/session/${sessionId}' && !history.state?.agentSessionLibrary`), 'true',
+      'stale prefetch does not publish Library history on the Reader route');
+    assert.deepEqual(JSON.parse(await command('eval', `window.libraryUnhandledRejections`)), [],
+      'an abandoned failed prefetch remains handled without affecting the Reader');
+
+    await command('eval', `history.replaceState(null, '', '/sessions'); location.reload()`);
+    await waitForGate(() => harness.familyRequests.length === 7 && harness.discoveryReleases.length === 1, 'Library refresh waiting for its prefetch');
+    harness.discoveryReleases.shift()();
+    await waitForBrowser(command, `performance.getEntriesByType('resource').some(entry => entry.name.endsWith('/api/providers'))`, 'completed provider discovery before route change');
+    await command('eval', `new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+    assert.equal(await command('eval', `Boolean(document.querySelector('.loading-state'))`), 'true',
+      'Library remains loading while refreshFamilies awaits its prefetched page after discovery');
+    await command('eval', `history.pushState(null, '', '/${provider}/session/${sessionId}'); dispatchEvent(new PopStateEvent('popstate'))`);
+    await waitForBrowser(command, `document.querySelector('.transcript')?.textContent.includes(${JSON.stringify(replyText)})`, 'Reader before abandoned successful family response');
+    harness.familyReleases.shift()();
+    await waitForBrowser(command, `performance.getEntriesByType('resource').some(entry => entry.name.includes('/api/v3/library/sessions'))`, 'abandoned family response completion');
+    await command('eval', `new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+    assert.equal(await command('eval', `location.pathname === '/${provider}/session/${sessionId}' && !history.state?.agentSessionLibrary`), 'true',
+      'a refresh awaiting its prefetched page loses publication ownership when the route changes');
+  });
 
 test('OpenCode opening reply remains readable after Runtime source navigation and Back',
   { skip: skipReason || false, timeout: 90_000 }, async t => {

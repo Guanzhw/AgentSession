@@ -17,6 +17,7 @@
     type SettingsSnapshot,
     type ReaderBootstrap,
     type LibraryNode,
+    type LibraryFamilyPage,
     type SessionRef,
     type SourceDiagnostic,
     type SearchProviderDiagnostic,
@@ -364,8 +365,10 @@
     return { provider: providerFilter, message };
   }
 
-  async function refreshFamilies(preservePages = true): Promise<void> {
+  async function refreshFamilies(preservePages = true,
+    initialPage?: Promise<PromiseSettledResult<LibraryFamilyPage>>): Promise<void> {
     const request = ++familyRequest;
+    const routeRequest = generation;
     const search = titleQuery.trim();
     const loadedCount = preservePages ? Math.max(40, families.length, restoredFamilyCount) : 40;
     const filters = currentLibraryFilters();
@@ -377,8 +380,13 @@
       let next: LibraryNode[] = [];
       let page;
       do {
-        page = await getLibraryFamilies(search, cursor ?? undefined, filters);
-        if (request !== familyRequest) return;
+        if (initialPage) {
+          const result = await initialPage;
+          initialPage = undefined;
+          if (result.status === 'rejected') throw result.reason;
+          page = result.value;
+        } else page = await getLibraryFamilies(search, cursor ?? undefined, filters);
+        if (request !== familyRequest || routeRequest !== generation) return;
         next = [...next, ...page.families];
         cursor = page.nextCursor;
       } while (cursor && next.length < loadedCount);
@@ -401,9 +409,9 @@
       }
       saveLibraryHistory();
     } catch (cause) {
-      if (request === familyRequest) {
+      if (request === familyRequest && routeRequest === generation) {
         const diagnostic = await selectedSourceDiagnostic(cause);
-        if (request !== familyRequest) return;
+        if (request !== familyRequest || routeRequest !== generation) return;
         if (diagnostic) {
           clearFamilyRows();
           sourceErrors = [diagnostic];
@@ -416,8 +424,10 @@
     } finally {
       if (request === familyRequest) {
         familyLoading = false;
-        void restoreLibraryScrollWhenReady();
-        void restoreLibraryFocusWhenReady();
+        if (routeRequest === generation) {
+          void restoreLibraryScrollWhenReady();
+          void restoreLibraryFocusWhenReady();
+        }
       }
     }
   }
@@ -631,6 +641,14 @@
     reader = null;
     settings = null;
     try {
+      const parallelLibrary = next.kind === 'library' && !providersReady &&
+        (!familyLoaded || familyDirty || familyFilterSignature !== currentFamilyFilterSignature());
+      // Publish and report this prefetched page through refreshFamilies after discovery.
+      const initialFamilyPage = parallelLibrary
+        ? getLibraryFamilies(titleQuery.trim(), undefined, currentLibraryFilters()).then(
+          value => ({ status: 'fulfilled', value } as const),
+          reason => ({ status: 'rejected', reason } as const),
+        ) : undefined;
       const [, nextReader] = await Promise.all([
         providersReady ? providers : getProviders().then(nextProviders => {
           providers = nextProviders;
@@ -650,7 +668,9 @@
       } else if (next.kind === 'reader') {
         reader = nextReader;
       } else {
-        if (!familyLoaded || familyDirty || familyFilterSignature !== currentFamilyFilterSignature()) await refreshFamilies();
+        if (!familyLoaded || familyDirty || familyFilterSignature !== currentFamilyFilterSignature()) {
+          await refreshFamilies(true, initialFamilyPage);
+        }
         if (request !== generation) return;
         if (restoreSubmittedContentSearch && !searchStarted && libraryView === 'sessions'
           && libraryMode === 'content' && searchSubmittedQuery) {
