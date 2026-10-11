@@ -105,6 +105,8 @@ const chinese = {
   'Opening your sessions…': '正在打开会话…', 'The page could not load': '页面无法加载',
   'Check the local service': '请检查本地服务', 'Try again': '重试',
   'Recorded history unavailable': '历史记录不可用',
+  'Session not found': '未找到会话',
+  'This session is not in the current sources. Return to your sessions to open an available history.': '当前来源中没有此会话。请返回会话列表，打开可用的历史记录。',
   'The local records for this session could not be read. You can return to your sessions or try again.': '无法读取此会话的本地记录。你可以返回会话列表，或重试。',
   'Technical details': '技术详情',
   'Session Reader': '会话阅读器', 'Token statistics': 'Token 统计', 'Session library': '会话库',
@@ -313,6 +315,7 @@ const chinese = {
   'events loaded': '个事件已加载', 'Go to session end': '跳到会话末尾',
   'Open tasks and collaboration': '打开任务与协作',
   'Tasks & collaboration': '任务与协作', 'Recorded collaboration': '已记录的协作',
+  'No recorded tasks or agent messages.': '没有已记录的任务或助手消息。',
   'Work and handoffs': '工作与交接', 'tasks': '个任务',
   'Close tasks and collaboration': '关闭任务与协作',
   'Source session': '来源会话',
@@ -389,8 +392,14 @@ const chinese = {
   'Recorded event': '已记录事件', 'work entries on this page': '个工作条目在此页',
   'entries scanned': '个条目已扫描',
   'The recorded source changed. Refresh this session before searching again.': '已记录来源发生变化。请刷新会话后重新搜索。',
+  'The recorded source changed. Refresh this session and search again.': '已记录来源发生变化。请刷新会话后重新搜索。',
+  'The recorded source changed. Refresh this session before opening this event.': '已记录来源发生变化。请刷新会话后再打开此事件。',
+  'The recorded source changed. Refresh this session.': '已记录来源发生变化。请刷新此会话。',
+  'The source location could not be opened.': '无法打开此来源位置。',
   'This session could not be searched.': '无法搜索此会话。',
   'The matching source could not be opened.': '无法打开匹配的来源内容。',
+  'The search destination is invalid. Return to Library and search again.': '搜索目标无效。请返回会话库重新搜索。',
+  'The matching content changed. Refresh this session and search again.': '匹配内容已更改。请刷新此会话并重新搜索。',
   'Tool input': '工具输入', 'Tool output': '工具输出', 'Message': '消息',
   'Search this child history': '搜索此子会话历史', 'Search this session': '搜索此会话',
   'Find in child': '在子会话中查找', 'Find in session': '在会话中查找',
@@ -422,6 +431,18 @@ const chinese = {
   'The local service could not load this page.': '本地服务无法加载此页面。',
   'The search could not finish.': '搜索未能完成。',
   'Trash could not be loaded.': '无法加载回收站。',
+  'Only starred': '仅显示加星会话', 'Starred': '已加星', 'Not starred': '未加星',
+  'readable sessions': '个可读取会话', 'Retry Trash': '重试读取回收站',
+  'Trash could not be read. Its contents and count are unknown.': '无法读取回收站，内容和数量未知。',
+  'Trash is incomplete. Showing readable sessions; other records may be unavailable.': '回收站列表不完整。当前显示可读取的会话，其他记录可能不可用。',
+  'Configure source': '配置来源', 'Current source path': '当前来源路径',
+  'Configuration field': '配置字段', 'CLI option': '命令行选项', 'Environment variable': '环境变量',
+  'Source paths are selected at startup. CLI options take precedence over environment variables, then configuration fields, then provider defaults.': '来源路径在启动时确定。优先级依次为：命令行选项、环境变量、配置字段、提供方默认值。',
+  'The configuration file is selected by --config, then AGENTSESSION_CONFIG, then the platform default.': '配置文件的选择优先级依次为：--config、AGENTSESSION_CONFIG、当前平台的默认位置。',
+  'Check that the current path exists and this Viewer process can read it.': '确认当前路径存在，且此 Viewer 进程能够读取它。',
+  'To change the path, update the startup CLI option or environment variable, or set this field in the configuration file:': '要修改路径，请更新启动命令行选项或环境变量，或在此配置文件中设置对应字段：',
+  'Remove or update higher-priority overrides so the intended value can apply.': '移除或更新优先级更高的覆盖值，使目标值能够生效。',
+  'Restart the Viewer with the updated startup settings. Return here to confirm the current path, then open Sessions and select this provider to recheck its source.': '使用更新后的启动设置重启 Viewer。返回此处确认当前路径，再打开会话库并选择此提供方，重新检查来源。',
   'The Viewer change could not be saved.': '无法保存浏览器更改。',
   'provider metadata source could not be read.': '个提供方元数据来源无法读取。',
   'provider metadata sources could not be read.': '个提供方元数据来源无法读取。',
@@ -490,12 +511,18 @@ const protocolChinese: Record<string, string> = {
   usage: '用量', ownership: '归属', branches: '分支',
   session: '会话', branch: '分支', task: '任务', run: '运行', artifact: '产物',
   active: '活跃', abandoned: '已放弃',
+  running: '进行中', completed: '已完成', failed: '失败', cancelled: '已取消',
   'contains-branch': '包含分支', 'executed-by': '由其执行',
   parent: '父会话', child: '子会话',
 };
 
 export function t(language: Language, message: Message): string {
   return language === 'zh' ? chinese[message] : message;
+}
+
+export function errorText(language: Language, message: string): string {
+  return language === 'zh' && Object.hasOwn(chinese, message)
+    ? chinese[message as Message] : message;
 }
 
 export function protocolLabel(value: string, selectedLanguage: Language): string {

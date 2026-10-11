@@ -387,6 +387,8 @@ fn supported_event(kind: &str) -> bool {
             | "team/message/delivered"
             | "tool-workflow/agent-start"
             | "tool-workflow/agent-end"
+            | "tool-workflow/run-start"
+            | "tool-workflow/run-end"
             | "permission/preset"
             | "sandbox/mode"
             | "approval/policy"
@@ -445,8 +447,6 @@ fn historical_event(kind: &str, generation: u8) -> bool {
                 | "schedule/change"
                 | "session-log-deepseek/delivery-accepted"
                 | "subagent/model-selection-policy"
-                | "tool-workflow/run-start"
-                | "tool-workflow/run-end"
                 | "tool/code-dispatch"
                 | "tool/code-dispatch-start"
         )
@@ -962,10 +962,10 @@ fn read_dsh_rows(path: &Path, bytes: &[u8]) -> Result<Vec<Value>> {
 
 fn versioned_revision(path: &Path, scope: &str, generation: u8, bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(if generation == 3 {
-        b"dsh-v3-s2-2\0".as_slice()
-    } else {
-        b"dsh-v1-v2-3\0".as_slice()
+    hasher.update(match generation {
+        4 => b"dsh-v4-2\0".as_slice(),
+        3 => b"dsh-v3-s2-2\0".as_slice(),
+        _ => b"dsh-v1-v2-3\0".as_slice(),
     });
     hasher.update(scope.as_bytes());
     hasher.update(path.to_string_lossy().as_bytes());
@@ -978,6 +978,7 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
         Some("session.v1.jsonl" | "session.v1.jsonl.zstd") => 1,
         Some("session.v2.jsonl" | "session.v2.jsonl.zstd") => 2,
         Some("session.v3.jsonl" | "session.v3.jsonl.zstd") => 3,
+        Some("session.v4.jsonl" | "session.v4.jsonl.zstd") => 4,
         _ => return Err(parse_error(path, "unsupported DSH source generation")),
     };
     let bytes = fs::read(path).map_err(|source| CoreError::Io {
@@ -1127,8 +1128,16 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
                 format!("missing {kind}.data at seq {seq}"),
             ));
         }
-        if !(if generation == 3 {
+        if !(if generation >= 3 {
             supported_event(kind)
+                || (generation == 4
+                    && matches!(
+                        kind,
+                        "developer/message"
+                            | "compaction/prune"
+                            | "llm/retry"
+                            | "workspace/changes"
+                    ))
                 || matches!(
                     kind,
                     "agent-preset/selected"
@@ -1141,7 +1150,7 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
         } else {
             historical_event(kind, generation)
         }) {
-            if generation > 0 && generation < 3 && row["ignorable"] == true {
+            if matches!(generation, 1 | 2 | 4) && row["ignorable"] == true {
                 continue;
             }
             return Err(parse_error(
@@ -1153,6 +1162,29 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
             .get("data")
             .filter(|value| value.is_object())
             .ok_or_else(|| parse_error(path, format!("missing {kind}.data at seq {seq}")))?;
+        if generation == 4
+            && matches!(
+                kind,
+                "user/message"
+                    | "system/message"
+                    | "assistant/message"
+                    | "tool/result"
+                    | "developer/message"
+            )
+        {
+            let message = if kind == "user/message" {
+                data
+            } else {
+                &data["message"]
+            };
+            let source_kind = required(&message["source"], "kind", path)?;
+            if source_kind == "plugin" {
+                return Err(parse_error(
+                    path,
+                    "v4 message requires a producer-owned source kind",
+                ));
+            }
+        }
         if kind == "session/end-seed"
             && data
                 .get("inherited")
@@ -1167,7 +1199,8 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
             return Err(parse_error(path, "session/end-seed precedes seedLength"));
         }
         let surface_eligible = matches!(kind, "user/message" | "assistant/message" | "tool/result")
-            || (generation == 3 && kind == "system/message");
+            || (generation >= 3 && kind == "system/message")
+            || (generation == 4 && kind == "developer/message");
         let historical_sources = if generation < 3 {
             historical_source_seqs(row, seq, path)?
         } else {
@@ -1215,8 +1248,8 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
                     }
                     continue;
                 }
-                let start_field = if generation == 3 { "startSeq" } else { "start" };
-                let end_field = if generation == 3 { "endSeq" } else { "end" };
+                let start_field = if generation >= 3 { "startSeq" } else { "start" };
+                let end_field = if generation >= 3 { "endSeq" } else { "end" };
                 let start = op
                     .get(start_field)
                     .and_then(Value::as_u64)
@@ -1231,7 +1264,7 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
                         format!("invalid {kind} surface operation range at seq {seq}"),
                     ));
                 };
-                let sources = if generation == 3 {
+                let sources = if generation >= 3 {
                     let entries = row
                         .get("sourceEventSeqs")
                         .and_then(Value::as_array)
@@ -1281,7 +1314,7 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
                         system_head = Some(seq);
                     }
                 }
-                if generation == 3 && kind == "assistant/message" {
+                if generation >= 3 && kind == "assistant/message" {
                     return Err(parse_error(
                         path,
                         "assistant replacement cannot carry sourceEventSeqs",
@@ -1295,12 +1328,15 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
                     let mut original_data = original["data"].clone();
                     let mut replacement_data = data.clone();
                     for value in [&mut original_data, &mut replacement_data] {
-                        let content =
-                            value
-                                .pointer_mut("/message/content/0/content")
-                                .ok_or_else(|| {
-                                    parse_error(path, "invalid tool result replacement content")
-                                })?;
+                        let content = value
+                            .pointer_mut(if generation == 4 {
+                                "/message/content"
+                            } else {
+                                "/message/content/0/content"
+                            })
+                            .ok_or_else(|| {
+                                parse_error(path, "invalid tool result replacement content")
+                            })?;
                         *content = Value::Null;
                     }
                     if original_data != replacement_data {
@@ -1317,12 +1353,12 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
             }
         }
         match kind {
-            "agent-preset/selected" if generation == 3 => {
+            "agent-preset/selected" if generation >= 3 => {
                 data.get("agentPreset")
                     .and_then(Value::as_str)
                     .ok_or_else(|| parse_error(path, "missing or invalid agentPreset"))?;
             }
-            "approval/asked" if generation == 3 => {
+            "approval/asked" if generation >= 3 => {
                 for field in ["id", "toolName"] {
                     if !data.get(field).is_some_and(Value::is_string) {
                         return Err(parse_error(
@@ -1337,7 +1373,7 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
                     }
                 }
             }
-            "approval/decided" if generation == 3 => {
+            "approval/decided" if generation >= 3 => {
                 if !data.get("id").is_some_and(Value::is_string)
                     || !matches!(
                         data.get("outcome").and_then(Value::as_str),
@@ -1347,7 +1383,7 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
                     return Err(parse_error(path, "invalid approval/decided payload"));
                 }
             }
-            "deliverables/presented" if generation == 3 => {
+            "deliverables/presented" if generation >= 3 => {
                 if !data.get("turn").is_some_and(Value::is_number)
                     || !data.get("callId").is_some_and(Value::is_string)
                 {
@@ -1367,7 +1403,7 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
                     }
                 }
             }
-            "tool/ptc-dispatch-start" | "tool/ptc-dispatch" if generation == 3 => {
+            "tool/ptc-dispatch-start" | "tool/ptc-dispatch" if generation >= 3 => {
                 for field in ["rootCallId", "parentCallId", "subCallId", "name"] {
                     if !data.get(field).is_some_and(Value::is_string) {
                         return Err(parse_error(
@@ -1408,7 +1444,7 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
                     }
                 }
             }
-            "session-log-deepseek/delivery-accepted" if generation == 3 => {
+            "session-log-deepseek/delivery-accepted" if generation >= 3 => {
                 let accepted_session = required(data, "sessionId", path)?;
                 let accepted_format = data
                     .get("sessionFormatVersion")
@@ -1438,8 +1474,10 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
                     })
                     .transpose()?;
                 let fields = if label.is_some() { 5 } else { 4 };
-                if integer(data, "version", path)? != 0
-                    || !matches!(mode, "one-shot" | "continuable")
+                let catalog_version = integer(data, "version", path)?;
+                if !(catalog_version == 0 || (generation == 4 && catalog_version == 1))
+                    || !(matches!(mode, "one-shot" | "continuable")
+                        || (catalog_version == 1 && mode == "unknown"))
                     || (mode == "continuable" && label.is_none_or(str::is_empty))
                     || catalog_fields.len() != fields
                     || catalog_fields.keys().any(|key| {
@@ -1456,8 +1494,20 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
                 }
                 let child = required(data, "childId", path)?;
                 integer(data, "childCreatedAt", path)?;
-                let mut catalog =
-                    observation("spawn", "started", child, kind, seq, expected_id, child);
+                let (catalog_kind, catalog_state) = if generation == 4 && catalog_version == 1 {
+                    ("catalog", "recorded")
+                } else {
+                    ("spawn", "started")
+                };
+                let mut catalog = observation(
+                    catalog_kind,
+                    catalog_state,
+                    child,
+                    kind,
+                    seq,
+                    expected_id,
+                    child,
+                );
                 catalog.to_participant = team_members.get(child).cloned().or_else(|| {
                     label.map(|name| RelationParticipant {
                         id: child.into(),
@@ -1492,6 +1542,9 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
                             "agent-instructions" | "plugin" | "skill-catalog" | "subagent-report"
                             | "goal" | "subagent-settled",
                         ) => continue,
+                        Some(kind) if generation == 4 && kind != "plugin" && !kind.is_empty() => {
+                            continue;
+                        }
                         _ => {
                             return Err(parse_error(
                                 path,
@@ -1505,7 +1558,7 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
                     expected_id,
                     time,
                     "user",
-                    if generation == 3 {
+                    if generation >= 3 {
                         required(data, "id", path)?.to_owned()
                     } else {
                         data["id"]
@@ -1529,7 +1582,7 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
                         format!("invalid assistant role at seq {seq}"),
                     ));
                 }
-                let id = if generation == 3 {
+                let id = if generation >= 3 {
                     required(message, "id", path)?.to_owned()
                 } else {
                     message["id"]
@@ -1623,16 +1676,33 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
                     parse_error(path, format!("invalid tool result content at seq {seq}"))
                 })?;
                 let mut output = String::new();
-                for block in blocks {
-                    if block.get("type").and_then(Value::as_str) != Some("tool-result")
-                        || block.get("toolCallId").and_then(Value::as_str) != Some(call_id)
+                if generation == 4 {
+                    if message["role"] != "tool"
+                        || message["toolCallId"] != call_id
+                        || message["source"]["kind"] != "tool"
+                        || message
+                            .get("isError")
+                            .is_some_and(|value| !value.is_boolean())
                     {
                         return Err(parse_error(
                             path,
-                            format!("unsupported tool result block at seq {seq}"),
+                            format!("invalid native tool result message at seq {seq}"),
                         ));
                     }
-                    output.push_str(&text_blocks(&block["content"], path)?);
+                    required(message, "id", path)?;
+                    output = text_blocks(&message["content"], path)?;
+                } else {
+                    for block in blocks {
+                        if block.get("type").and_then(Value::as_str) != Some("tool-result")
+                            || block.get("toolCallId").and_then(Value::as_str) != Some(call_id)
+                        {
+                            return Err(parse_error(
+                                path,
+                                format!("unsupported tool result block at seq {seq}"),
+                            ));
+                        }
+                        output.push_str(&text_blocks(&block["content"], path)?);
+                    }
                 }
                 let index = if let Some(index) = tool_calls.get(call_id).copied() {
                     index
@@ -1665,9 +1735,10 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
                     tool_calls.insert(call_id.into(), index);
                     index
                 };
-                let failed = blocks
-                    .iter()
-                    .any(|block| block.get("isError") == Some(&Value::Bool(true)))
+                let failed = (generation == 4 && message["isError"] == true)
+                    || blocks
+                        .iter()
+                        .any(|block| block.get("isError") == Some(&Value::Bool(true)))
                     || data.get("error").is_some_and(js_truthy);
                 events[index].tool_status = Some(if failed { "error" } else { "completed" }.into());
                 events[index].tool_output = output.clone();
@@ -1809,6 +1880,22 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
                     member_or_sender(&team_members, from, sender_name.as_deref(), *queued_seq);
                 row.to_participant = team_members.get(to).cloned();
                 relation_rows.push((seq, RelationEntry::Coordination { observation: row }));
+            }
+            "tool-workflow/run-start" if generation >= 3 => {
+                required(data, "runId", path)?;
+                required(data, "name", path)?;
+                // Run records are log-only producer observations. They carry no
+                // child assignment or AgentRun identity to project into Reader.
+            }
+            "tool-workflow/run-end" if generation >= 3 => {
+                required(data, "runId", path)?;
+                let stop_reason = required(data, "stopReason", path)?;
+                if !matches!(stop_reason, "completed" | "cancelled" | "error") {
+                    return Err(parse_error(
+                        path,
+                        format!("unsupported workflow stopReason {stop_reason} at seq {seq}"),
+                    ));
+                }
             }
             "tool-workflow/agent-start" => {
                 let run_id = required(data, "runId", path)?;
@@ -1985,6 +2072,194 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
 #[cfg(test)]
 fn load_v3(path: &Path, scope: &str, expected_id: &str) -> Result<SessionSnapshot> {
     load_versioned_with_protocol(path, scope, expected_id).map(|(snapshot, _, _, _, _, _)| snapshot)
+}
+
+#[cfg(test)]
+mod v4_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn source() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../fixtures/deepseek-harness-v4/sessions/public/dsh-v4-parent/session.v4.jsonl",
+        )
+    }
+
+    #[test]
+    fn native_v4_keeps_required_workflow_run_records_without_inferred_execution() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../fixtures/deepseek-harness-v4-workflow/sessions/public/dsh-v4-workflow/session.v4.jsonl",
+        );
+        let (snapshot, candidates, _, _, _, _) =
+            load_dsh_with_protocol(&path, "v4-workflow-test", "dsh-v4-workflow").unwrap();
+        assert_eq!(snapshot.summary.message_count, 2);
+        assert_eq!(candidates.len(), 5);
+        assert!(snapshot.relations.is_empty());
+        for (index, kind) in [(2, "tool-workflow/run-start"), (3, "tool-workflow/run-end")] {
+            assert_eq!(
+                candidates[index].provenance.source_type,
+                format!("dsh.session-event:{kind}")
+            );
+            assert!(candidates[index].reader_event.is_none());
+            assert!(candidates[index].execution.is_none());
+        }
+        let bundle = dsh_protocol_bundle(&path, "v4-workflow-test", "dsh-v4-workflow").unwrap();
+        let document = serde_json::to_value(bundle.document(3).unwrap()).unwrap();
+        assert!(document["agentRuns"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn native_v4_preserves_unknown_ignorable_records_and_rejects_required_records() {
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("session.v4.jsonl");
+        let header = serde_json::json!({
+            "type": "session", "version": 4, "id": "opaque-v4", "createdAt": 100,
+            "isSeeded": false, "delegationDepth": 0
+        });
+        let mut event = serde_json::json!({
+            "type": "future/opaque", "seq": 0, "time": 101,
+            "ignorable": true, "data": {"future": "public"}
+        });
+        fs::write(&path, format!("{header}\n{event}\n")).unwrap();
+        let (snapshot, candidates, _, _, _, _) =
+            load_dsh_with_protocol(&path, "v4-test", "opaque-v4").unwrap();
+        assert!(snapshot.events.is_empty());
+        assert_eq!(candidates.len(), 2);
+        let opaque = &candidates[1];
+        assert_eq!(opaque.id, "event:dsh:0");
+        assert_eq!(opaque.source_order.record, 1);
+        assert_eq!(
+            opaque.provenance.source_type,
+            "dsh.session-event:future/opaque"
+        );
+        assert!(opaque.reader_event.is_none());
+
+        event.as_object_mut().unwrap().remove("ignorable");
+        fs::write(&path, format!("{header}\n{event}\n")).unwrap();
+        assert!(
+            matches!(load_v3(&path, "v4-test", "opaque-v4"), Err(CoreError::Parse { reason, .. })
+                if reason.contains("unsupported required DSH v4 event future/opaque at seq 0"))
+        );
+    }
+
+    #[test]
+    fn native_v4_keeps_tool_body_source_records_and_catalog_discovery() {
+        let path = source();
+        let (snapshot, candidates, _, _, _, _) =
+            load_dsh_with_protocol(&path, "v4-test", "dsh-v4-parent").unwrap();
+        assert_eq!(snapshot.summary.message_count, 3);
+        let tool = snapshot
+            .events
+            .iter()
+            .find(|event| event.item.event.message_id == "v4-call")
+            .unwrap();
+        assert_eq!(tool.tool_output, "Original tool body 🚀 end.");
+        assert_eq!(tool.tool_status.as_deref(), Some("completed"));
+        assert_eq!(tool.item.owner.as_ref().unwrap().message_id, "v4-reply");
+        assert_eq!(candidates.len(), 14);
+        for seq in [2, 3, 7, 12] {
+            assert!(
+                candidates
+                    .iter()
+                    .find(|event| event.id == format!("event:dsh:{seq}"))
+                    .unwrap()
+                    .reader_event
+                    .is_none()
+            );
+        }
+        let catalog = snapshot
+            .relations
+            .iter()
+            .find_map(|row| match row {
+                RelationEntry::Coordination { observation }
+                    if observation.provenance.source_id == "8" =>
+                {
+                    Some(observation)
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            catalog.to_session_ref.as_ref().unwrap().session_id,
+            "v4-unavailable-child"
+        );
+        assert_eq!(catalog.kind, "catalog");
+        assert_eq!(catalog.state, "recorded");
+        let before = fs::read(&path).unwrap();
+        let bundle = dsh_protocol_bundle(&path, "v4-test", "dsh-v4-parent").unwrap();
+        let document = serde_json::to_value(bundle.document(3).unwrap()).unwrap();
+        assert_eq!(document["agentRuns"], serde_json::json!([]));
+        let fact = document["coordination"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|fact| fact["evidence"]["provenance"]["sourceId"] == "8")
+            .unwrap();
+        assert_eq!(fact["kind"], "catalog");
+        assert_eq!(fact["state"], "recorded");
+        assert_eq!(fs::read(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn generation_four_takes_precedence_and_invalid_tool_identity_fails() {
+        let temp = tempdir().unwrap();
+        let directory = temp.path().join("sessions/public/dsh-v4-parent");
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("session.v4.jsonl");
+        fs::copy(source(), &path).unwrap();
+        fs::write(
+            directory.join("session.v3.jsonl"),
+            "invalid older generation",
+        )
+        .unwrap();
+        let adapter = DshAdapter {
+            root: temp.path(),
+            scope: "v4-test",
+        };
+        assert_eq!(adapter.source_path("dsh-v4-parent").unwrap(), path);
+        assert_eq!(
+            adapter.load("dsh-v4-parent").unwrap().summary.message_count,
+            3
+        );
+        let text = fs::read_to_string(&path).unwrap();
+        fs::write(
+            &path,
+            text.replace(
+                "\"toolCallId\":\"v4-call\"",
+                "\"toolCallId\":\"wrong-call\"",
+            ),
+        )
+        .unwrap();
+        assert!(
+            matches!(adapter.load("dsh-v4-parent"), Err(CoreError::Parse { reason, .. }) if reason.contains("invalid native tool result"))
+        );
+    }
+
+    #[test]
+    fn native_v4_retains_existing_version_zero_catalog_semantics() {
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("session.v4.jsonl");
+        let text = fs::read_to_string(source())
+            .unwrap()
+            .replace("\"version\":1,\"childId\"", "\"version\":0,\"childId\"")
+            .replace("\"mode\":\"unknown\"", "\"mode\":\"one-shot\"");
+        fs::write(&path, text).unwrap();
+        let snapshot = load_v3(&path, "v4-test", "dsh-v4-parent").unwrap();
+        let catalog = snapshot
+            .relations
+            .iter()
+            .find_map(|entry| match entry {
+                RelationEntry::Coordination { observation }
+                    if observation.provenance.source_id == "8" =>
+                {
+                    Some(observation)
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(catalog.kind, "spawn");
+        assert_eq!(catalog.state, "started");
+    }
 }
 
 fn expand_v0_packed_row(row: Value, path: &Path) -> Result<Vec<Value>> {
@@ -2402,7 +2677,9 @@ fn load_dsh_with_protocol(path: &Path, scope: &str, expected_id: &str) -> Result
             | "session.v2.jsonl"
             | "session.v2.jsonl.zstd"
             | "session.v3.jsonl"
-            | "session.v3.jsonl.zstd",
+            | "session.v3.jsonl.zstd"
+            | "session.v4.jsonl"
+            | "session.v4.jsonl.zstd",
         ) => load_versioned_with_protocol(path, scope, expected_id),
         _ => Err(parse_error(path, "unsupported DSH source generation")),
     }
@@ -2439,7 +2716,13 @@ fn dsh_event_candidates(
             let raw_type = row["type"].as_str().expect("validated DSH source type");
             let seq =
                 (index > 0).then(|| row["seq"].as_u64().expect("validated DSH source sequence"));
-            let (category, kind) = dsh_event_vocabulary(raw_type);
+            let (category, kind) = if rows[0]["version"] == 4
+                && matches!(raw_type, "compaction/prune" | "developer/message")
+            {
+                ("context", raw_type.replace('/', "."))
+            } else {
+                dsh_event_vocabulary(raw_type)
+            };
             let message_id = if row["surfaceOp"].is_object() {
                 None
             } else {
@@ -2803,6 +3086,7 @@ impl DshAdapter<'_> {
                 "session.v1.jsonl" | "session.v1.jsonl.zstd" => 1,
                 "session.v2.jsonl" | "session.v2.jsonl.zstd" => 2,
                 "session.v3.jsonl" | "session.v3.jsonl.zstd" => 3,
+                "session.v4.jsonl" | "session.v4.jsonl.zstd" => 4,
                 _ => continue,
             };
             let path = entry.path().to_path_buf();
@@ -2942,6 +3226,7 @@ impl ProviderAdapter for DshAdapter<'_> {
             Some("session.v1.jsonl" | "session.v1.jsonl.zstd") => 1,
             Some("session.v2.jsonl" | "session.v2.jsonl.zstd") => 2,
             Some("session.v3.jsonl" | "session.v3.jsonl.zstd") => 3,
+            Some("session.v4.jsonl" | "session.v4.jsonl.zstd") => 4,
             _ => return Err(CoreError::EventNotFound(message_id.into())),
         };
         let bytes = fs::read(&path).map_err(|source| CoreError::Io {
@@ -3087,19 +3372,30 @@ impl ProviderAdapter for DshAdapter<'_> {
             if path
                 .file_name()
                 .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with("session.v3"))
+                .is_some_and(|name| {
+                    name.starts_with("session.v3") || name.starts_with("session.v4")
+                })
             {
                 rows.push(row);
             } else {
                 rows.extend(expand_v0_packed_row(row, &path)?);
             }
         }
-        if rows.first().is_some_and(|header| header["version"] == 3) {
+        if rows
+            .first()
+            .is_some_and(|header| matches!(header["version"].as_u64(), Some(3 | 4)))
+        {
             let mut surface = Vec::<&Value>::new();
             for row in rows.iter().skip(1) {
                 if !matches!(
                     row["type"].as_str(),
-                    Some("system/message" | "user/message" | "assistant/message" | "tool/result")
+                    Some(
+                        "system/message"
+                            | "user/message"
+                            | "assistant/message"
+                            | "tool/result"
+                            | "developer/message"
+                    )
                 ) {
                     continue;
                 }

@@ -640,6 +640,7 @@ test('deep child URL restores late root and nested spawn anchors after refresh a
       'the selected grandchild match in its source pane');
     assert.match(JSON.parse(await command('eval', 'location.hash')), /offset=\d+.*matchLength=\d+/,
       'The child location records the selected content span');
+    const selectedNestedHash = JSON.parse(await command('eval', 'location.hash'));
     await command('eval', 'window.location.reload()');
     await waitForBrowser(command, `document.querySelector('${nestedPane} .search-reveal mark')?.textContent === '${marker}'`,
       'the selected late child hit after refresh');
@@ -675,4 +676,26 @@ test('deep child URL restores late root and nested spawn anchors after refresh a
       'Concurrent nested-anchor and ancestor-search restoration mounts each event once');
     const browserErrors = (await command('errors')).trim();
     assert.equal(browserErrors, '', `Browser errors after deep child restoration: ${browserErrors}\n${browserErrors ? await command('errors', '--json') : ''}`);
+    await command('close');
+    const fresh = await startBrowser(harness, `${harness.origin}${rootHref}${selectedNestedHash}`);
+    await waitForBrowser(fresh, `document.querySelector('${nestedPane} .search-reveal mark')?.textContent === '${marker}'`,
+      'the selected nested match from a clean browser entry');
+    await waitForBrowser(fresh, `document.activeElement === document.querySelector('${nestedPane} .search-reveal')`,
+      'the nested match after its automatic body load settles');
+    assert.equal(await fresh('eval', 'Boolean(history.state?.agentSessionReaderSearch)'), 'false',
+      'The direct nested URL has no saved pane-search state');
+    const selected = JSON.parse(await fresh('eval', `(() => {
+      const mark = document.querySelector('${nestedPane} .search-reveal mark');
+      const rect = mark.getBoundingClientRect();
+      const owner = mark.closest('article');
+      return { messageId: owner.dataset.messageId, segment: owner.dataset.segment,
+        focused: document.activeElement === mark.closest('.search-reveal'),
+        top: rect.top, bottom: rect.bottom, height: innerHeight };
+    })()`));
+    t.diagnostic('Fresh nested-search destination: ' + JSON.stringify(selected));
+    assert.equal(selected.messageId, 'grandchild-long');
+    assert.equal(selected.segment, 'message');
+    assert.equal(selected.focused, true, 'The direct nested URL focuses the selected content');
+    assert.ok(selected.top >= 0 && selected.bottom <= selected.height,
+      'The selected nested text is visible on direct entry');
   });

@@ -28,6 +28,7 @@
   let bootstrap: ReaderBootstrap | null = null;
   let segments: ReaderSegment[] = [];
   let content: Record<string, ContentProgress> = {};
+  const contentLoads = new Map<string, Promise<void>>();
   let searchReveals: Record<string, SearchReveal> = {};
   let searchSelectionGeneration = 0;
   let error = '';
@@ -226,7 +227,10 @@
   }
 
   async function openSearchMatch(match: ReaderSearchTarget, updateHistory = true, restorePane = false): Promise<void> {
-    if (!bootstrap) return;
+    // A fresh hash target starts while its PaneSearch is mounting. Let that
+    // pane's initial reset finish before assigning this selection's generation.
+    if (!updateHistory && !restorePane) await tick();
+    if (!bootstrap || !active) return;
     const request = ++searchSelectionGeneration;
     const location = await getReaderLocation(child.provider, child.sessionId, bootstrap.revision, match.event);
     if (!active || request !== searchSelectionGeneration) return;
@@ -255,6 +259,12 @@
       totalChars: page.totalChars } };
     if (updateHistory) onSearchSelection(match);
     await tick();
+    // EventCard starts automatic body reads on mount. A fresh URL must wait for
+    // those existing reads before positioning the selected content below them.
+    if (!updateHistory && !restorePane) {
+      await Promise.all(contentLoads.values());
+      await tick();
+    }
     if (!active || request !== searchSelectionGeneration) return;
     const target = document.getElementById(anchor(match.event));
     for (let ancestor = target?.parentElement; ancestor; ancestor = ancestor.parentElement) {
@@ -313,9 +323,10 @@
     const id = shown.key + ':' + field;
     const current = content[id] ?? { text: '', hasLoaded: false, totalChars: shown.item.totalChars,
       nextOffset: 0, done: false, loading: false, error: '' };
-    if (current.loading || current.done || current.nextOffset === null) return;
+    if (current.loading) return contentLoads.get(id);
+    if (current.done || current.nextOffset === null) return;
     content = { ...content, [id]: { ...current, loading: true, error: '' } };
-    try {
+    const load = (async () => { try {
       const page = await getContentPage(child.provider, child.sessionId, shown.item.event,
         bootstrap.revision, current.hasLoaded ? current.nextOffset : 0, field, 1400,
         shown.item.contentRevisions[field]);
@@ -327,7 +338,9 @@
     } catch (cause) {
       if (active) content = { ...content, [id]: { ...(content[id] ?? current), loading: false,
         error: cause instanceof Error ? cause.message : 'Child content could not be loaded.' } };
-    }
+    } })();
+    contentLoads.set(id, load);
+    try { await load; } finally { contentLoads.delete(id); }
   }
 </script>
 

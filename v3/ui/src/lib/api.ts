@@ -191,6 +191,7 @@ export interface SessionSummary {
 
 export interface LibraryNode {
   session: SessionSummary;
+  starred: boolean;
   matched: boolean;
   matchingCount: number;
   childCount: number;
@@ -211,6 +212,7 @@ export interface LibraryFamilyPage {
 export interface LibraryFilters {
   provider?: string;
   project?: string;
+  starredOnly?: boolean;
   range?: 'today' | 'week' | 'month';
   sort?: 'updated-desc' | 'updated-asc' | 'title-asc' | 'title-desc';
 }
@@ -225,6 +227,7 @@ export interface LibraryChildrenPage {
 export interface SearchMatch {
   session: SessionRef;
   event: ReaderEventRef | null;
+  target: GlobalSearchTarget | null;
   matchField: string;
   matchRole: string | null;
   snippet: string;
@@ -674,6 +677,11 @@ export interface ReaderSearchMatch {
 
 export type ReaderSearchTarget = Pick<ReaderSearchMatch, 'event' | 'field' | 'offset' | 'matchLength'>;
 
+/** Positions are original normalized content UTF-16 units, as in Reader search. */
+export interface GlobalSearchTarget extends ReaderSearchTarget {
+  contentRevision: string;
+}
+
 export interface ReaderSearchPage {
   session: SessionRef;
   revision: string;
@@ -790,6 +798,7 @@ export function getLibraryFamilies(search: string, cursor?: string, filters: Lib
   if (cursor) params.set('cursor', cursor);
   if (filters.provider) params.set('provider', filters.provider);
   if (filters.project) params.set('project', filters.project);
+  if (filters.starredOnly) params.set('starredOnly', 'true');
   if (filters.range) params.set('range', filters.range);
   if (filters.sort) params.set('sort', filters.sort);
   return getJson<LibraryFamilyPage>('/api/v3/library/sessions?' + params);
@@ -802,6 +811,7 @@ export function getLibraryChildren(parent: SessionRef, search: string, cursor?: 
   if (search) params.set('search', search);
   if (cursor) params.set('cursor', cursor);
   if (filters.project) params.set('project', filters.project);
+  if (filters.starredOnly) params.set('starredOnly', 'true');
   if (filters.range) params.set('range', filters.range);
   if (filters.sort) params.set('sort', filters.sort);
   return getJson<LibraryChildrenPage>('/api/v3/library/children?' + params);
@@ -837,12 +847,12 @@ export function batchViewer(action: BatchAction, items: SessionRef[]): Promise<B
 }
 
 export function getReaderBootstrap(provider: string, sessionId: string, target?: URLSearchParams): Promise<ReaderBootstrap> {
-  if (target) {
-    if (!target.has('messageId')) target.set('messageId', '');
-    if (!target.has('segment')) target.set('segment', '');
-  }
+  const query = target ? new URLSearchParams({
+    messageId: target.get('messageId') ?? '', segment: target.get('segment') ?? '',
+  }) : null;
+  if (query && target?.has('revision')) query.set('revision', target.get('revision')!);
   return getJson<ReaderBootstrap>('/api/v3/reader/' + encodeURIComponent(provider) + '/' + encodeURIComponent(sessionId)
-    + '/bootstrap' + (target ? '?' + target : ''));
+    + '/bootstrap' + (query ? '?' + query : ''));
 }
 
 export function getSystemPromptEvidence(provider: string, sessionId: string): Promise<SystemPromptEvidence> {

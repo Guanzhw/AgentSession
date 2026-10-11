@@ -42,6 +42,7 @@ pub struct LibraryChildrenQuery {
 #[serde(rename_all = "camelCase")]
 pub struct LibraryNode {
     pub session: SessionSummary,
+    pub starred: bool,
     pub matched: bool,
     pub matching_count: usize,
     pub child_count: usize,
@@ -89,6 +90,7 @@ struct LibraryCursor {
 
 struct Record {
     session: SessionSummary,
+    starred: bool,
     parent: Option<usize>,
     children: Vec<usize>,
     boundary: Option<&'static str>,
@@ -198,6 +200,7 @@ impl Prepared {
         let record = &self.records[index];
         LibraryNode {
             session: record.session.clone(),
+            starred: record.starred,
             matched: record.matched,
             matching_count: record.matching,
             child_count: record
@@ -292,17 +295,6 @@ impl Core {
         let mut starred = HashSet::new();
         let statuses = self.providers();
         for id in selected {
-            if starred_only {
-                starred.extend(
-                    self.viewer_meta_list(id)?
-                        .into_iter()
-                        .filter(|meta| meta.starred)
-                        .map(|meta| SessionRef {
-                            provider: meta.provider,
-                            session_id: meta.session_id,
-                        }),
-                );
-            }
             let status = statuses
                 .iter()
                 .find(|status| status.id == id)
@@ -357,15 +349,29 @@ impl Core {
                 }
             };
             source_revisions.push((id, source_revision));
+            starred.extend(
+                self.viewer_meta_list(id)?
+                    .into_iter()
+                    .filter(|meta| meta.starred)
+                    .map(|meta| SessionRef {
+                        provider: meta.provider,
+                        session_id: meta.session_id,
+                    }),
+            );
             let all_ids: HashSet<_> = all.iter().map(|row| row.session.clone()).collect();
             let visible = self.visible_sessions(id, all)?;
             let visible_ids: HashSet<_> = visible.iter().map(|row| row.session.clone()).collect();
             hidden.extend(all_ids.difference(&visible_ids).cloned());
             rows.extend(visible);
         }
+        let row_stars: Vec<_> = rows
+            .iter()
+            .map(|row| starred.contains(&row.session))
+            .collect();
         let revision = browse_revision(&(
             &source_revisions,
             &rows,
+            &row_stars,
             &source_diagnostics,
             self.library_collation.identity(),
         ));
@@ -379,6 +385,7 @@ impl Core {
             .enumerate()
             .map(|(index, session)| Record {
                 updated: session.updated_at,
+                starred: starred.contains(&session.session),
                 session,
                 parent: None,
                 children: Vec::new(),
@@ -477,7 +484,7 @@ impl Core {
                     .contains(&term));
             record.matched &= cutoff
                 .is_none_or(|cutoff| record.session.updated_at.is_some_and(|time| time >= cutoff))
-                && (!starred_only || starred.contains(&record.session.session))
+                && (!starred_only || record.starred)
                 && (!has_subagent || !record.children.is_empty());
             record.matching = usize::from(record.matched);
         }

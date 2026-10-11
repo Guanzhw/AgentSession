@@ -1,6 +1,6 @@
 # AgentSession 3.0：可执行重建计划
 
-更新：2026-10-11；当前工作区已按用户要求整合为**唯一 Rust/Svelte 3.0 实现与默认启动入口**。此次整合不改变 S3/S4/S5 和逐项验收中仍开放的结果。本文件是3.0阶段与下一步的唯一进度入口。
+更新：2026-10-12；当前工作区已按用户要求整合为**唯一 Rust/Svelte 3.0 实现与默认启动入口**。历史 S3/S4/S5 结果保留原有日期、产物和范围，当前稳定版进度见下方入口。本文件是3.0阶段与下一步的唯一进度入口。
 进度、退出门槛与下一动作入口；架构选择见
 [Rust-first 架构方案](agentsession-rust-first-architecture.md)，不在这里复制其设计。
 
@@ -21,13 +21,28 @@ MCP 与安装产物均通过；相同语义和负载的性能结果可复核；�
 
 ## 当前工作区与下一动作
 
-当前预发布候选为 `3.0.0-rc.4`。`d5653ac` 的 Quality 和四平台原生 CI 全部通过；
-RC.1 的 Windows 真实元数据副本导入、Web/MCP 读取与重启检查通过，其公开发布
-被测试临时目录别名断言阻止；RC.2 的三个非 Windows 平台通过，Windows 的
-归档测试暴露 GNU tar 盘符路径问题。RC.3 在发布前取消；RC.4 修正首次
-next-only 包的 npm 校验查询方式。修正后发布流水线
-在确切 tag 上重新验证版本、四平台产物及组合 npm 安装，成功后进入 `next` 和
-GitHub prerelease；稳定版仍需补齐既有来源、产品与资源门槛。
+已发布 `v3.0.0-rc.4`，确切提交为 `d74d5088388118d8df7dd622a7ef17f4be0c73ed`。
+2026-10-11 通过只读 `gh run view` 重新核对：
+[发布 38132614812](https://github.com/Guanzhw/AgentSession/actions/runs/38132614812)、
+[Quality 38132610988](https://github.com/Guanzhw/AgentSession/actions/runs/38132610988)和
+[native 38132610982](https://github.com/Guanzhw/AgentSession/actions/runs/38132610982)
+均为 completed/success，head SHA 一致。发布矩阵在 Windows x64、Linux x64/arm64、
+macOS arm64 四个实际宿主完成构建、便携装包、Web/MCP、安装器和 npm 检查；
+组合 tarball 离线安装及启动通过，npm `next` 与 GitHub prerelease 发布成功。
+平台 CI 子结果已取得，稳定版的来源、完整桌面产品与资源门槛仍按下表补证。
+
+当前[follow-through spec](../specs/prerelease-followthrough-2026-10/requirements.md)
+中的 npm 命令路由、升级指导及私有来源测试报告修复属于 **Unreleased**；
+rc.4 的既有行为、产物和 tag 保持其已发布身份。RC.1/2 失败及 RC.3 取消记录保留于
+[预发布验证记录](prerelease-validation-20261011.md)，不由新成功结果改写。
+
+当前本地 Reader journey 修复同属 **Unreleased**，范围见
+[新规格](../specs/reader-journey-repair-2026-10/requirements.md)，实际实施、验证与剩余工作见
+[任务账本](../specs/reader-journey-repair-2026-10/tasks.md)。本轮修复不关闭下表的稳定版门槛
+或已有平台、来源与性能验收项。
+本地截图复核与新增浏览器自动化已补齐：33 个浏览器用例和 2 个辅助检查通过，
+截图及独立审查发现的来源标题遮挡、回收站摘要语言滞留、中文 Reader 错误消失已修复并复验；
+最后独立复审无剩余可操作问题，确切命令、修复前失败和证据复用范围见同一任务账本。
 
 2026-10-09 的[工作区整合决策](../../.agents/decisions/implemented/2026-10-09-sole-v3-workspace.md)
 取代当前工作区的双版本启动要求。2.0 源码、编译物、专用测试与并排／回退入口已移除；
@@ -36,10 +51,44 @@ GitHub prerelease；稳定版仍需补齐既有来源、产品与资源门槛。
 默认地址为 `http://127.0.0.1:3457`。用户来源与既有元数据保持，详细命令见
 [开发指南](../../AGENTS.md)和[原生运行说明](../../v3/README.md)。
 
-下一动作：验证整合后主工作区的根命令、任务自有实例、Web／原生 MCP 和最终 diff，
-按具体失败或未满足的契约继续补证。以下 S0–S5 比较阶段、Oct1/Oct2 的“当前”产物、
+Unreleased follow-through 已完成 Windows x64 本地验收与独立 review：Rust 242 通过、
+18 显式忽略，元数据／安装相关 11 项通过；缺私有 manifest 的显式 opt-in 按预期失败。
+具体命令、复用的原生程序身份及边界见[执行账本](../specs/prerelease-followthrough-2026-10/tasks.md)。
+下一动作：后续候选发布前在确切版本上验证本次修复的四平台安装行为，并按下表推进
+仍缺的真实来源、阅读体验与资源证据。
+以下 S0–S5 比较阶段、Oct1/Oct2 的“当前”产物、
 端口、测试结果和下一动作属于各自日期的历史记录，不代表重新执行或要求日常维护 2.0。
-ARM64/macOS、外部 CI、来源、人类可用性与未闭合的性能／状态门槛保留原状态。
+历史 ARM64/macOS／外部 CI 的环境缺口保留原执行范围；当前四宿主 CI 子结果见
+PLATFORM-01-CI。真实来源、人类可用性与未闭合的性能／状态门槛仍开放。
+
+### 稳定版剩余门槛
+
+2026-10-12 当前稳定版工作由 [stable readiness 规格](../specs/stable-readiness-2026-10/requirements.md)
+和[执行账本](../specs/stable-readiness-2026-10/tasks.md)跟踪。五个当前 producer 均已实际安装并取得
+隔离真实记录，补齐 Claude sidechain/通知/compact、Pi compact/branch/fork、Codex 官方压缩输出及
+DSH 当前成功 workflow、六成员团队和完整 queue。真实记录发现的 DSH v4/workflow 与 Claude Agent
+解析缺口已经修复；最新桌面检查仍在收尾。用户已明确确认实际完成呈现的阅读和返回任务，
+该范围的人类反馈通过。当前 Windows/Linux x64 本地产物已完成离线安装与 Web/MCP 检查，
+最新四宿主 CI、冻结资源完整重复和历史 STATE-01 的验收裁决仍开放。下表给出关闭规则，
+逐项新证据和历史失败的边界以执行账本为准。
+
+| 门槛 | 下一份所需证据 | 关闭条件 |
+| --- | --- | --- |
+| SRC-01/02：最新及稀有来源 | 固定五个 producer 的版本与采集时间，取得只读真实样本：Claude sidechain/task notification/compact；Pi branch_summary/compact/parentSession；Codex 新压缩记录；DSH 大型 team、长 queue/workflow及当前 producer 配对。 | 独立来源金标、完整读取/分页和 owning provider 回归一致，前后来源哈希相同；缺失样本继续 B。 |
+| DEL-01/03 与完整 Reader 用户流 | 同一冻结输入和确切产物，完成 Library→Reader→搜索后段→子历史→Runtime→返回；配对记录完整返回/首段呈现，再采样共享 Web＋多个 MCP 的 RSS、CPU、I/O、索引容量和刷新/重启/恢复。 | 先证明完整内容与 canonical 引用一致，再按冻结阈值评判；记录锁/构建成本、失败和资源分布。单来源 catalog 加速及包装 CI 不关闭整项。 |
+| UX-01：人类可用性 | 在指定桌面尺寸的双语明暗主题与键盘流程上取得用户反馈，记录任务完成、阅读理解与视觉偏好。 | 用户反馈实际返回并裁决发现的问题；自动化与代理截图不代替人类认可。 |
+| STATE-01：历史默认状态失败 | 使用保留的前后哈希、逻辑表比较与进程证据追踪历史 writer；未来保全检查同时记录隔离状态和用户状态端点。 | 只有可归因证据才关闭历史失败；新副本导入成功不追溯归因。历史 writer 仍 unknown，STATE-01 保持 F。 |
+
+### 本机历史证据恢复路径
+
+10 月 11 日清理保留的历史本机证据位于
+`D:/CodexArtifacts/OpenSession/20261011-cleanup/historical-tmp/`；下文历史
+`tmp/<relative>` 引用可按同一相对路径查找已归档的材料。例如已核对的
+`tmp/v3-delivery/provider-freshness-20261001/REPORT.md` 对应归档中的
+`historical-tmp/v3-delivery/provider-freshness-20261001/REPORT.md`。当天性能与增量报告分别在
+`D:/CodexArtifacts/OpenSession/20261011-performance`、`D:/CodexArtifacts/OpenSession/20261011-incremental`，
+真实发布前验证在 `D:/CodexArtifacts/OpenSession/20261011-release-validation`。
+这些是本机私有证据恢复入口，历史命令、哈希、失败和产物身份保持原记录。
 
 2026-10-02当前正常双x64候选为Windows `caffb72b`／Linux `d22c4989`，绑定相同70生产输入及三UI资产；当前报告 (`../../tmp/v3-delivery/CURRENT-CANDIDATE-20261002.md`, local evidence)给出精确包、运行入口和未解决差异。Windows完整Node430/462 pass、0 fail、32 skip，另同PE alternate-selector Library单例1/1；Linux404/456 pass、0 fail、52 skip，实际来源聚焦11/11；Rust192 core＋5 app pass、14 ignore。相同三个npm tarball两宿主离线安装P。当前完整C在原10秒门槛下append/rewrite/delete全部P，三完整transition为4.712/4.566/4.340s。五组当前A/B十臂完整gold通过：357有序根/六facet、507 tool events、10,577单位正文；重复browse更快，首次browse/timeline/body更慢，完整session_get五对均不等价且速度比较不合格。当前一次Web＋2MCP的initial/warm/force/post/restart完整gold P，但wrapper因default meta.db字节/mtime变化exit1、writer unknown；STATE-01保持F。固定2.0／caff在38994／25066实际并排，五源API、Library→Reader→Runtime→native来源引用和Stop/Status/Start P，856来源bytes保全；当前截图失败。DEL-01/03整项U、SRC/平台B、人类偏好U；旧30d2/20db/83/70及ENOSPC失败保留各自身份。 本地候选已交付供直接比较；完整发布验收按契约保持未关闭。后续工作由具体失败、消费者或实际样本驱动，当前没有新的生产修复证据。
 

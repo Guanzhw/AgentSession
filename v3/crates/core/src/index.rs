@@ -29,6 +29,69 @@ pub struct ReindexResult {
 
 const STORED_SUMMARY_SCHEMA_VERSION: u8 = 14;
 
+/// Opt-in, source-free diagnostics for the auxiliary resource build. Entry and
+/// exit share a process-local invocation number, including unsuccessful exits.
+#[cfg(feature = "search-phase-probe")]
+pub(crate) struct ResourceProbe<'a> {
+    started: Option<std::time::Instant>,
+    invocation: u64,
+    kind: &'static str,
+    provider: &'a str,
+    pub(crate) counts: BTreeMap<&'static str, usize>,
+    pub(crate) lock_wait_ms: Option<f64>,
+    pub(crate) completed: bool,
+}
+
+#[cfg(feature = "search-phase-probe")]
+impl<'a> ResourceProbe<'a> {
+    pub(crate) fn new(kind: &'static str, provider: &'a str) -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        let started = (std::env::var_os("AGENTSESSION_V3_SEARCH_PHASE_PROBE").as_deref()
+            == Some(std::ffi::OsStr::new("1")))
+        .then(std::time::Instant::now);
+        let probe = Self {
+            started,
+            invocation: NEXT.fetch_add(1, Ordering::Relaxed),
+            kind,
+            provider,
+            counts: BTreeMap::new(),
+            lock_wait_ms: None,
+            completed: false,
+        };
+        if started.is_some() {
+            probe.emit("entry");
+        }
+        probe
+    }
+
+    pub(crate) fn begin(&self) -> Option<std::time::Instant> {
+        self.started.map(|_| std::time::Instant::now())
+    }
+
+    fn emit(&self, stage: &str) {
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "kind": self.kind, "stage": stage, "pid": std::process::id(),
+                "invocation": self.invocation, "provider": self.provider,
+                "counts": self.counts, "lock_wait_ms": self.lock_wait_ms,
+                "completed": self.completed,
+                "elapsed_ms": self.started.map(|start| start.elapsed().as_secs_f64() * 1000.0),
+            })
+        );
+    }
+}
+
+#[cfg(feature = "search-phase-probe")]
+impl Drop for ResourceProbe<'_> {
+    fn drop(&mut self) {
+        if self.started.is_some() {
+            self.emit("exit");
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize)]
 struct StoredSummary {
     #[serde(rename = "_schemaVersion", default)]
@@ -87,7 +150,17 @@ fn publish(
     force: bool,
     #[cfg(feature = "search-phase-probe")] mut probe: Option<&mut crate::search::SearchPhaseProbe>,
 ) -> Result<Option<PublishedCatalog>> {
+    #[cfg(feature = "search-phase-probe")]
+    let mut resource_probe = ResourceProbe::new("index_publication_probe", provider);
+    #[cfg(feature = "search-phase-probe")]
+    {
+        resource_probe.counts.insert("force", usize::from(force));
+    }
     if !adapter.supports_index() {
+        #[cfg(feature = "search-phase-probe")]
+        {
+            resource_probe.completed = true;
+        }
         return Ok(None);
     }
     fs::create_dir_all(index_dir).map_err(|source| CoreError::Io {
@@ -105,7 +178,14 @@ fn publish(
         })?;
     #[cfg(feature = "search-phase-probe")]
     let phase_started = probe.as_ref().and_then(|probe| probe.begin());
+    #[cfg(feature = "search-phase-probe")]
+    let lock_started = resource_probe.begin();
     lock.lock().map_err(storage)?;
+    #[cfg(feature = "search-phase-probe")]
+    {
+        resource_probe.lock_wait_ms =
+            lock_started.map(|start| start.elapsed().as_secs_f64() * 1000.0);
+    }
     #[cfg(feature = "search-phase-probe")]
     if let Some(probe) = probe.as_mut() {
         probe.add("index_publish_lock", phase_started);
@@ -214,7 +294,18 @@ fn publish(
                     continue;
                 }
             }
+            #[cfg(feature = "search-phase-probe")]
+            {
+                *resource_probe.counts.entry("capture_attempts").or_default() += 1;
+            }
             let snapshot = adapter.capture_for_index(entry)?;
+            #[cfg(feature = "search-phase-probe")]
+            {
+                *resource_probe
+                    .counts
+                    .entry("capture_successes")
+                    .or_default() += 1;
+            }
             if snapshot.summary.session.session_id != *id
                 || snapshot.summary.session.provider != provider
             {
@@ -230,6 +321,15 @@ fn publish(
             .filter(|id| !incoming.contains_key(*id))
             .cloned()
             .collect();
+        #[cfg(feature = "search-phase-probe")]
+        {
+            resource_probe
+                .counts
+                .insert("changed_sessions", captured.len());
+            resource_probe
+                .counts
+                .insert("deleted_sessions", deleted.len());
+        }
         let tx = db.transaction().map_err(storage)?;
         for id in &deleted {
             tx.execute(
@@ -273,6 +373,10 @@ fn publish(
             }
         }
         tx.commit().map_err(storage)?;
+        #[cfg(feature = "search-phase-probe")]
+        {
+            resource_probe.counts.insert("commits", 1);
+        }
         for (id, snapshot) in captured {
             let signature = incoming[&id].signature.clone();
             existing.insert(
@@ -299,6 +403,10 @@ fn publish(
         return Err(CoreError::Storage(format!(
             "{provider} catalog entries have no published revision"
         )));
+    }
+    #[cfg(feature = "search-phase-probe")]
+    {
+        resource_probe.completed = true;
     }
     Ok(Some(PublishedCatalog {
         rows: existing

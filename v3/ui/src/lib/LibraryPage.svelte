@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { BatchAction, BatchResult, LibraryFilters, LibraryNode, ProviderSummary, SearchMatch, SearchProviderDiagnostic, SessionRef, SessionSummary, SourceDiagnostic, ViewerMeta } from './api';
   import { language, t, type Language } from './i18n';
+  import { sourceSettingsHref } from './source-guidance';
+  import { searchMatchHref } from './search-navigation';
 
   export let providers: ProviderSummary[] = [];
   export let families: LibraryNode[] = [];
@@ -19,6 +21,9 @@
   export let projectFilter = '';
   export let rangeFilter: '' | NonNullable<LibraryFilters['range']> = '';
   export let sortFilter: NonNullable<LibraryFilters['sort']> = 'updated-desc';
+  export let starredOnly = false;
+  export let onStarredOnlyChange: (value: boolean) => void;
+  export let onOpenSettings: (provider: string) => void;
   export let onQueryChange: (value: string) => void;
   export let onProviderFilterChange: (value: string) => void;
   export let onProjectFilterChange: (value: string) => void;
@@ -34,6 +39,8 @@
   export let trashRows: ViewerMeta[] = [];
   export let trashLoading = false;
   export let trashError = '';
+  export let trashReadState: 'unread' | 'complete' | 'partial' | 'failed' = 'unread';
+  export let onRetryTrash: () => void;
   export let trashActionBusy = false;
   export let onViewChange: (view: 'sessions' | 'trash') => void;
   export let onTrashAction: (row: ViewerMeta, action: 'restore' | 'permanent-delete') => void;
@@ -60,6 +67,8 @@
   $: rootFamilies = families.filter(family => !family.parentBoundary);
   $: unlinkedFamilies = families.filter(family => Boolean(family.parentBoundary));
   $: searchActive = Boolean(query.trim()) && mode === 'sessions';
+  $: trashCount = trashLoading || trashReadState === 'unread' || trashReadState === 'failed'
+    ? '—' : String(trashRows.length) + (trashReadState === 'partial' ? '+' : '');
 
   let batchMode = false;
   let batchBusy = false;
@@ -96,7 +105,7 @@
     item.id === summary.session.provider && item.available && item.manageable)).map(summary => summary.session);
   $: selectedItems = manageableRows.filter(ref => selectedKeys.includes(key(ref)));
   $: selectionScope = JSON.stringify([libraryView, mode, query, providerFilter, projectFilter,
-    rangeFilter, sortFilter, visibleRows.map(summary => key(summary.session)), manageableRows.map(key)]);
+    rangeFilter, sortFilter, starredOnly, visibleRows.map(summary => key(summary.session)), manageableRows.map(key)]);
   $: if (selectionScope !== lastSelectionScope) {
     selectedKeys = [];
     batchConfirmDelete = false;
@@ -194,13 +203,22 @@
     onOpenSearchMatch(match);
   }
 
+  function openSourceSettings(event: MouseEvent, provider: string): void {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    onOpenSettings(provider);
+  }
+
   function matchHref(match: SearchMatch): string {
-    const path = '/' + encodeURIComponent(match.session.provider) + '/session/' + encodeURIComponent(match.session.sessionId);
-    return match.event ? path + '#event?' + new URLSearchParams({
-      messageId: match.event.messageId, segment: match.event.segment,
-    }) : path;
+    return searchMatchHref(match);
   }
 </script>
+
+{#snippet starState(node: LibraryNode)}
+  {@const label = t($language, node.starred ? 'Starred' : 'Not starred')}
+  <span class="library-row-star" class:starred={node.starred} role="img" aria-label={label} title={label}
+    data-library-star={key(node.session.session)} data-starred={String(node.starred)}>{node.starred ? '★' : '☆'}</span>
+{/snippet}
 
 {#snippet usage(summary: SessionSummary)}
   <span class="session-usage">
@@ -227,7 +245,7 @@
         checked={selectedKeys.includes(childKey)} disabled={!canManage(child.session) || batchBusy}
         onchange={(event) => toggleSelected(child.session.session, event.currentTarget.checked)} />{/if}
       <a class="family-child-row" href={'/' + encodeURIComponent(child.session.session.provider) + '/session/' + encodeURIComponent(child.session.session.sessionId)} onclick={(event) => open(event, child.session.session)}>
-        <span class="family-child-title"><strong title={child.session.title}>{displayTitle(child.session)}</strong>
+        <span class="family-child-title"><span class="library-row-title">{@render starState(child)}<strong title={child.session.title}>{displayTitle(child.session)}</strong></span>
           <small>{providerLabel(child.session.session.provider)} · {child.session.directory || child.session.session.sessionId}</small>
           {@render usage(child.session)}
           {#if child.session.diagnostic === 'codex_multiple_source_files_unmerged'}<small class="source-diagnostic">{t($language, 'History unavailable: multiple Codex source files')}</small>{/if}
@@ -268,7 +286,7 @@
       onclick={() => onViewChange('trash')}>
       <span class="rail-icon trash-icon" aria-hidden="true"></span>
       {t($language, 'Trash')}
-      <span class="rail-count">{trashRows.length}</span>
+      <span class="rail-count" data-trash-count>{trashCount}</span>
     </button>
     {#each providers as provider (provider.id)}
       <div class="rail-note provider-note">
@@ -287,7 +305,9 @@
       <details class="library-source-note">
         <summary>{t($language, 'Some histories are unavailable')} <span>{t($language, 'Source issues')}</span></summary>
         {#each sourceErrors as problem}
-          <p>{providerLabel(problem.provider)}: {t($language, problem.message)}</p>
+          <p>{providerLabel(problem.provider)}: {t($language, problem.message)}
+            <a class="source-settings-link" href={sourceSettingsHref(problem.provider)} data-source-settings={problem.provider}
+              onclick={(event) => openSourceSettings(event, problem.provider)}>{t($language, 'Configure source')} · {providerLabel(problem.provider)}</a></p>
         {/each}
       </details>
     {/if}
@@ -302,16 +322,22 @@
           <button type="button" class="library-manage-button" data-library-manage aria-pressed={batchMode}
             disabled={batchBusy} onclick={toggleBatchMode}>{t($language, batchMode ? 'Cancel manage' : 'Manage')}</button>
         {/if}
-        <div class="archive-count"><strong>{libraryView === 'trash' ? trashRows.length : matchingSessions}</strong><span>{t($language, 'sessions')}</span></div>
+        <div class="archive-count"><strong>{libraryView === 'trash' ? trashCount : matchingSessions}</strong><span>{t($language, libraryView === 'trash' && trashReadState === 'partial' ? 'readable sessions' : 'sessions')}</span></div>
       </div>
     </div>
 
     {#if libraryView === 'trash'}
       {#if trashError}<p class="search-error" role="alert">{trashError}</p>{/if}
       {#if trashLoading}<p class="list-footnote">{t($language, 'Loading Viewer trash…')}</p>{/if}
-      {#if !trashLoading && trashRows.length === 0}
+      {#if !trashLoading && (trashReadState === 'failed' || trashReadState === 'partial')}
+        <p class="list-footnote" data-trash-read-status role="status">{t($language, trashReadState === 'failed'
+          ? 'Trash could not be read. Its contents and count are unknown.'
+          : 'Trash is incomplete. Showing readable sessions; other records may be unavailable.')}</p>
+        <button type="button" class="family-more" data-trash-retry disabled={trashActionBusy} onclick={onRetryTrash}>{t($language, 'Retry Trash')}</button>
+      {/if}
+      {#if !trashLoading && trashReadState === 'complete' && trashRows.length === 0}
         <div class="empty-state compact-empty"><h2>{t($language, 'Trash is empty')}</h2><p>{t($language, 'Moved sessions appear here until restored or permanently hidden.')}</p></div>
-      {:else}
+      {:else if trashRows.length > 0}
         <section class="trash-list" aria-label={t($language, 'Viewer trash')}>
           {#each trashRows as row (row.provider + '/' + row.sessionId)}
             <article class="trash-row">
@@ -381,6 +407,8 @@
             <option value="title-desc">{t($language, 'Title Z-A')}</option>
           </select>
         </label>
+        <label class="library-starred-filter"><input type="checkbox" data-library-starred checked={starredOnly}
+          onchange={(event) => onStarredOnlyChange(event.currentTarget.checked)} />{t($language, 'Only starred')}</label>
       </div>
       {#if batchMode}
         <div class="library-batch-bar" role="group" aria-label={t($language, 'Manage sessions')}>
@@ -502,7 +530,7 @@
                   onchange={(event) => toggleSelected(root.session, event.currentTarget.checked)} />{/if}
                 <a class="session-row" href={'/' + encodeURIComponent(root.session.provider) + '/session/' + encodeURIComponent(root.session.sessionId)} onclick={(event) => open(event, root.session)}>
                   <span class="session-title-cell"><span class="session-glyph" aria-hidden="true"><span></span><span></span></span>
-                    <span class="session-copy"><strong title={root.title}>{displayTitle(root)}</strong>
+                    <span class="session-copy"><span class="library-row-title">{@render starState(family)}<strong title={root.title}>{displayTitle(root)}</strong></span>
                       <span>{providerLabel(root.session.provider)} · {root.directory || root.session.sessionId}</span>
                       {@render usage(root)}
                       {#if root.diagnostic === 'codex_multiple_source_files_unmerged'}<span class="source-diagnostic">{t($language, 'History unavailable: multiple Codex source files')}</span>{/if}
@@ -536,7 +564,7 @@
                   checked={selectedKeys.includes(familyKey)} disabled={!canManage(root) || batchBusy}
                   onchange={(event) => toggleSelected(root.session, event.currentTarget.checked)} />{/if}
                 <a class="unlinked-child-row" href={'/' + encodeURIComponent(root.session.provider) + '/session/' + encodeURIComponent(root.session.sessionId)} onclick={(event) => open(event, root.session)}>
-                  <span class="family-child-title"><strong title={root.title}>{displayTitle(root)}</strong>
+                  <span class="family-child-title"><span class="library-row-title">{@render starState(family)}<strong title={root.title}>{displayTitle(root)}</strong></span>
                     <small>{providerLabel(root.session.provider)} · {family.parentBoundary === 'cyclic-parent'
                       ? t($language, 'Cyclic parent reference') : family.parentBoundary === 'hidden-parent'
                         ? t($language, 'Parent session hidden') : t($language, 'Parent session unavailable')}: {root.parent?.sessionId}</small>
@@ -565,3 +593,11 @@
     {/if}
   </section>
 </main>
+
+<style>
+  .library-row-title { display: flex; align-items: center; min-width: 0; }
+  .library-row-star { display: inline-block; flex-shrink: 0; margin-right: 6px; color: var(--muted); }
+  .library-row-star.starred { color: var(--forest-soft); }
+  .library-starred-filter { display: flex; align-items: center; gap: 6px; align-self: end; padding-bottom: 8px; white-space: nowrap; }
+  .source-settings-link { display: inline-block; margin-left: 8px; color: var(--forest-soft); }
+</style>

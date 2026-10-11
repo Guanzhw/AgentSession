@@ -98,7 +98,7 @@ async function harness(t) {
   let delayedToc = null;
   t.after(async () => {
     releaseToc?.();
-    if (server) await new Promise(resolve => server.close(resolve));
+    if (server) await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
     if (child.exitCode === null) { child.kill(); await new Promise(resolve => child.once('exit', resolve)); }
     await writeFile(path.join(scratch, `native-${process.pid}.log`), logs);
     assert.equal(createHash('sha256').update(await readFile(sourceFile)).digest('hex'), expectedDigest,

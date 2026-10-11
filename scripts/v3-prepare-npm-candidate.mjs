@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { nativeTargets } from '../v3/npm/native/targets.mjs';
 import { assertNativeArtifact } from './v3-native-artifact.mjs';
-import { readPackageManifests, assertPublicPrerelease } from './v3-npm-package-contract.mjs';
+import { readPackageManifests, assertPublicRelease, releaseIdentity } from './v3-npm-package-contract.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const templates = path.join(repo, 'v3', 'npm');
@@ -112,7 +112,7 @@ async function main() {
   const version = manifests.native.version;
   if (options.public && (Object.keys(options.bundles).length !== Object.keys(nativeTargets).length
     || !/^[a-f0-9]{40}$/.test(options.sourceCommit ?? ''))) {
-    throw new Error('Public prerelease requires all four native targets and a full source commit');
+    throw new Error('Public release requires all four native targets and a full source commit');
   }
   const sourceLedgerSha256 = options.ledger ? sha256(await fileBytes(options.ledger)) : undefined;
   const verified = {};
@@ -134,13 +134,14 @@ async function main() {
     }])),
   };
   if (options.public) {
+    const identity = releaseIdentity(version);
     for (const manifest of Object.values(manifests)) {
       manifest.private = false;
       manifest.repository = { type: 'git', url: 'git+https://github.com/Guanzhw/AgentSession.git' };
       manifest.homepage = 'https://github.com/Guanzhw/AgentSession';
-      manifest.publishConfig = { access: 'public', tag: 'next', provenance: true };
+      manifest.publishConfig = { access: 'public', tag: identity.npmTag, provenance: true };
     }
-    assertPublicPrerelease(manifests, provenance);
+    assertPublicRelease(manifests, provenance);
   }
 
   await mkdir(path.dirname(options.output), { recursive: true });

@@ -105,7 +105,7 @@ function fixture(withChild = false) {
   };
 }
 
-async function startHarness(t, withChild = false, withoutCollaboration = false) {
+async function startHarness(t, withChild = false, withoutCollaboration = false, taskOnly = false, emptyChild = false) {
   const requireFromUi = createRequire(path.join(uiDir, 'package.json'));
   const { build } = requireFromUi('vite');
   const buildDir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-codex-collab-'));
@@ -116,6 +116,16 @@ async function startHarness(t, withChild = false, withoutCollaboration = false) 
   if (withoutCollaboration) {
     data.bootstrap.relations = { taskCount: 0, observationCount: 0, firstCursor: null };
     data.relations = [];
+  }
+  if (taskOnly) {
+    data.bootstrap.relations = { taskCount: 1, observationCount: 0, firstCursor: 'codex-relations-0' };
+    data.relations = [{ type: 'task', task: {
+      id: 'recorded-task', kind: 'task_notification', status: 'completed',
+      owner: 'spawn:delegate:1', ownerParticipant: null, subject: null,
+      description: 'The recorded source inspection completed.',
+      readerEvent: { provider, sessionId, messageId: 'spawn:delegate:1', segment: 'tool' },
+      provenance: { fidelity: 'recorded', sourceType: 'task-notification', sourceId: 'notification-1' },
+    } }];
   }
   const contentRequests = [];
   const server = createHttpServer((request, response) => {
@@ -152,12 +162,12 @@ async function startHarness(t, withChild = false, withoutCollaboration = false) 
           preview: 'The child checked the source.', totalChars: 29, toolName: null, replyMetadata: null, contentRevisions: {} }],
         ownerContext: null, previousCursor: null, nextCursor: null }],
       toc: { entries: [], previousCursor: null, nextCursor: null },
-      relations: { taskCount: 0, observationCount: 1, firstCursor: 'child-relations-0' } });
+      relations: { taskCount: 0, observationCount: emptyChild ? 0 : 1, firstCursor: emptyChild ? null : 'child-relations-0' } });
       return;
     }
     if (withChild && url.pathname === `/api/v3/reader/${provider}/${childSessionId}/relations`) {
       json({ session: { provider, sessionId: childSessionId }, revision: 'child-collaboration-revision',
-        entries: [{ type: 'coordination', observation: { kind: 'result', state: 'completed',
+        entries: emptyChild ? [] : [{ type: 'coordination', observation: { kind: 'result', state: 'completed',
           correlationId: 'child-source-result', eventId: 'child-result',
           fromSessionRef: { provider, sessionId: childSessionId }, toSessionRef: { provider, sessionId },
           fromActorPath: '/root/inspector', toActorPath: '/root', readerEvent: null,
@@ -229,7 +239,7 @@ async function startHarness(t, withChild = false, withoutCollaboration = false) 
     server.listen(port, '127.0.0.1', resolve);
   });
   t.after(async () => {
-    await new Promise(resolve => server.close(() => resolve()));
+    await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
     await rm(buildDir, { recursive: true, force: true });
   });
   return { origin: `http://127.0.0.1:${port}`, contentRequests };
@@ -276,6 +286,28 @@ async function waitForBrowser(command, predicate, description) {
 // Fixed dock/overlay geometry was retired by the inline collaboration Reader.
 // Canonical navigation remains covered here and in ui-collaboration-navigation.test.mjs.
 
+test('a recorded task without a participant remains readable and links to its source event',
+  { skip: skipReason, timeout: 45_000 }, async t => {
+    const app = await startHarness(t, false, false, true);
+    const { command } = await startBrowser(t, `${app.origin}/codex/session/${sessionId}`);
+    await waitForBrowser(command, `document.querySelector('.collaboration-launcher')`, 'task-only entry');
+    await command('focus', '.collaboration-launcher');
+    await command('press', 'Enter');
+    await waitForBrowser(command,
+      `document.querySelector('.collaboration-unassigned-tasks')?.textContent.includes('The recorded source inspection completed.')`,
+      'recorded task summary without a participant');
+    assert.match(await command('get', 'text', '.collaboration-unassigned-tasks'), /Latest recorded task state: completed/);
+    assert.equal(Number(await command('get', 'count', '.collaboration-child-node')), 0,
+      'A task notification alone does not invent a child handoff');
+    assert.equal(await command('eval', `document.querySelector('.collaboration-unassigned-tasks details').open`), 'false');
+    await command('select', '.language-select', 'zh');
+    assert.match(await command('get', 'text', '.collaboration-unassigned-tasks'), /最近记录的任务状态.*已完成/s);
+    await command('focus', '.collaboration-unassigned-tasks button');
+    await command('press', 'Enter');
+    await waitForBrowser(command, `location.hash === '#event?messageId=spawn%3Adelegate%3A1&segment=tool'`,
+      'the canonical recorded task source');
+  });
+
 test('a session without collaboration keeps the full three-column Reader on wide desktop',
   { skip: skipReason, timeout: 45_000 }, async t => {
     const app = await startHarness(t, false, true);
@@ -287,6 +319,27 @@ test('a session without collaboration keeps the full three-column Reader on wide
       'false', 'A missing collaboration panel must not reserve a dock column');
     assert.equal(await command('eval', `Boolean(document.querySelector('.collaboration-summary, .collaboration-launcher'))`),
       'false');
+  });
+
+test('an inline child with no recorded collaboration has an explicit localized empty state',
+  { skip: skipReason, timeout: 45_000 }, async t => {
+    const app = await startHarness(t, true, false, false, true);
+    const { command } = await startBrowser(t, `${app.origin}/codex/session/${sessionId}`);
+    await waitForBrowser(command, `document.querySelector('.collaboration-launcher')`, 'parent collaboration entry');
+    await command('click', '.collaboration-launcher');
+    await waitForBrowser(command, `document.querySelector('.inline-child-toggle')`, 'recorded child insertion');
+    await command('eval', `document.querySelector('.inline-child-toggle').click()`);
+    await waitForBrowser(command, `document.querySelector('.inline-child-reader') &&
+      document.querySelector('.collaboration-empty')?.textContent === 'No recorded tasks or agent messages.'`,
+      'an explicit empty child panel');
+    assert.equal(Number(await command('get', 'count', '.collaboration-handoff')), 0,
+      'The empty child panel does not retain parent handoffs');
+    await command('select', '.language-select', 'zh');
+    assert.equal(await command('get', 'text', '.collaboration-empty'), '没有已记录的任务或助手消息。');
+    await command('eval', `document.querySelector('.inline-child-collapse').click()`);
+    await waitForBrowser(command, `!document.querySelector('.collaboration-empty') &&
+      document.querySelector('.collaboration-handoff[data-collaboration-handoff="spawn:delegate:1"]')`,
+      'the restored parent facts');
   });
 
 test('the collaboration panel follows the deepest open child and its recorded facts',

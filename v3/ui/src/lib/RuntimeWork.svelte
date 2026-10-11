@@ -3,34 +3,40 @@
   import type { ReaderEventRef, RuntimeEventDetail, RuntimeWorkPage } from './api';
   import { getRuntimeEventDetail, getRuntimeWork, runtimeEventDetailUrl, RuntimeApiError } from './api';
   import { language, protocolLabel, t } from './i18n';
+  import { runtimeSourceHash, type RuntimeWorkState } from './runtime-history';
 
   export let provider: string;
   export let sessionId: string;
   export let onOpenReader: (event: ReaderEventRef, sourceRevision: string) => void;
+  export let initialState: RuntimeWorkState | undefined;
+  export let onStateChange: (state: RuntimeWorkState) => void;
+  export let onReady: () => Promise<void>;
 
   type WorkDomainCoverage = RuntimeWorkPage['domainCoverage'];
 
   type State = 'loading' | 'ready' | 'empty' | 'invalid' | 'unavailable' | 'request' | 'cursor' | 'stale';
   let state: State = 'loading';
   let message = '';
-  let sourceRevision: string | null = null;
+  let sourceRevision: string | null = initialState?.revision ?? null;
   let page: RuntimeWorkPage | null = null;
   let workCoverage: WorkDomainCoverage | null = null;
-  let kindDraft = '';
-  let statusDraft = '';
-  let kind = '';
-  let status = '';
+  let kindDraft = initialState?.kind ?? '';
+  let statusDraft = initialState?.status ?? '';
+  let kind = kindDraft;
+  let status = statusDraft;
+  let currentCursor = initialState?.cursor ?? null;
   let generation = 0;
   let active = true;
   let evidence: Record<string, { loading: boolean; error: string; detail: RuntimeEventDetail | null }> = {};
 
   onMount(() => {
-    void load(null);
+    void load(currentCursor);
     return () => { active = false; generation++; };
   });
 
   async function load(cursor: string | null): Promise<void> {
     const request = ++generation;
+    currentCursor = cursor;
     state = 'loading';
     message = '';
     evidence = {};
@@ -54,6 +60,8 @@
       workCoverage = result.domainCoverage;
       page = result;
       state = result.entries.length ? 'ready' : 'empty';
+      onStateChange({ kind, status, cursor: currentCursor, revision: sourceRevision });
+      await onReady();
     } catch (cause) {
       if (!active || request !== generation) return;
       page = null;
@@ -175,7 +183,7 @@
                     <strong>{evidence[source.eventId].detail!.event.kind}</strong>
                     <span>{t($language, 'Recorded event')} {source.eventId} · {timeLabel(evidence[source.eventId].detail!.event.timestamp)}</span>
                     {#if evidence[source.eventId].detail!.event.readerEvent}
-                      <a href={'#event?' + new URLSearchParams({ messageId: evidence[source.eventId].detail!.event.readerEvent!.messageId, segment: evidence[source.eventId].detail!.event.readerEvent!.segment })}
+                      <a href={runtimeSourceHash(evidence[source.eventId].detail!.event.readerEvent!, page.revision)}
                         onclick={(click) => openReader(click, evidence[source.eventId].detail!.event.readerEvent!)}>{t($language, 'Open in conversation')}</a>
                     {/if}
                   </div>
@@ -183,7 +191,7 @@
               {/each}
             </div>
             {#if entry.readerEvent}
-              <a href={'#event?' + new URLSearchParams({ messageId: entry.readerEvent.messageId, segment: entry.readerEvent.segment })}
+              <a href={runtimeSourceHash(entry.readerEvent, page.revision)}
                 onclick={(click) => openReader(click, entry.readerEvent!)}>{t($language, 'Open in conversation')}</a>
             {/if}
           </li>

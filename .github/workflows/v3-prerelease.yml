@@ -1,17 +1,17 @@
-name: AgentSession 3 prerelease
+name: AgentSession 3 release
 
 on:
   push:
     tags:
-      - "v3.*-*"
+      - "v3.*"
   workflow_dispatch:
     inputs:
       ref:
-        description: "Existing exact prerelease tag to validate (for example, v3.0.0-rc.4)"
+        description: "Existing exact release tag to validate (for example, v3.0.0 or v3.0.0-rc.4)"
         required: true
         type: string
       publish:
-        description: "Publish validated npm next packages and GitHub prerelease"
+        description: "Publish validated packages and GitHub release to the version-derived channel"
         default: false
         type: boolean
 
@@ -32,7 +32,7 @@ jobs:
     env:
       RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref_name }}
     steps:
-      - name: Resolve exact prerelease identity once
+      - name: Resolve exact release identity once
         uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_REF }}
@@ -80,7 +80,7 @@ jobs:
             package-lock.json
             v3/ui/package-lock.json
 
-      - name: Verify prerelease tag and source versions
+      - name: Verify release tag and source versions
         id: release
         run: node scripts/v3-verify-prerelease.mjs "$RELEASE_REF" >> "$GITHUB_OUTPUT"
 
@@ -172,7 +172,7 @@ jobs:
           path: tmp/release-assets
           merge-multiple: true
 
-      - name: Combine verified native payloads and pack public prerelease
+      - name: Combine verified native payloads and pack public release
         env:
           VERSION: ${{ steps.release.outputs.version }}
           RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
@@ -206,7 +206,7 @@ jobs:
           path: tmp/release-assets/
           if-no-files-found: error
 
-      - name: Publish verified npm packages with next and provenance
+      - name: Publish verified npm packages with the version-derived channel and provenance
         if: github.event_name == 'push' || inputs.publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -215,7 +215,7 @@ jobs:
           node scripts/v3-verify-prerelease.mjs "$RELEASE_REF" --remote
           node scripts/v3-publish-prerelease.mjs --stage-dir tmp/npm-prerelease
 
-      - name: Publish GitHub prerelease with immutable assets
+      - name: Publish GitHub release with immutable assets
         if: github.event_name == 'push' || inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}

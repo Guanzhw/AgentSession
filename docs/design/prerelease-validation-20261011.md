@@ -7,6 +7,29 @@ scope. Publication uses npm `next` and a GitHub prerelease.
 
 ## Current source and platform evidence
 
+Published `v3.0.0-rc.4` resolves to commit
+`d74d5088388118d8df7dd622a7ef17f4be0c73ed`. Read-only GitHub CLI checks on
+2026-10-11 confirm `completed` / `success` for the exact-commit
+[publication run 38132614812](https://github.com/Guanzhw/AgentSession/actions/runs/38132614812),
+[Quality 38132610988](https://github.com/Guanzhw/AgentSession/actions/runs/38132610988)
+and [native validation 38132610982](https://github.com/Guanzhw/AgentSession/actions/runs/38132610982).
+Every response reports that complete source SHA.
+
+The tagged publication matrix actually builds and packs on Windows x64, Linux
+x64, Linux arm64 and macOS arm64. All four jobs pass packaged HTTP, stdio MCP,
+installer and npm checks. The release job passes combined-tarball offline
+installation and launch, npm publication with `next` and provenance, and GitHub
+prerelease publication. These close the rc.4 CI packaging/installation subresult;
+private source shapes, full desktop user flows, preferences and shared-process
+resource acceptance retain the [remaining gates](agentsession-v3-delivery-plan.md#稳定版剩余门槛).
+
+The [follow-through work](../specs/prerelease-followthrough-2026-10/requirements.md)
+is **Unreleased**. Its npm routing, upgrade guidance and private-source test
+reporting changes do not alter rc.4's published artifacts or historical results.
+The commands used to refresh the baseline are `gh run view 38132614812`,
+`gh run view 38132610988` and `gh run view 38132610982`, with JSON status,
+conclusion and head SHA; both matrix runs also include job outcomes.
+
 Before the release-version changes, source commit
 `d5653accf34b25160d0a14cc002e04f9fdff20e2` passes
 [Quality](https://github.com/Guanzhw/AgentSession/actions/runs/38128436257) and
@@ -86,8 +109,9 @@ Both protocol eras initialize the exact candidate and read all seven tools.
 The new next-only publication regression records a failure before the fix and
 passes afterward; a disposable loopback registry independently reproduces the
 bare versus exact-version lookup with the actual npm CLI. Independent review
-finds no issue in the final publisher/version delta. Exact-tag four-host and
-published-artifact verification remain publication gates.
+finds no issue in the final publisher/version delta. The subsequent exact-tag
+four-host and publication execution succeeded in run 38132614812, as recorded
+above; this local pre-publication artifact retains its own hash and scope.
 
 ## Windows real-data release check
 

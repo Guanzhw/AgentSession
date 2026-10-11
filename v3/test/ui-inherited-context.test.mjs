@@ -89,7 +89,7 @@ function inheritedItems(start, end) {
   });
 }
 
-async function startHarness(t, { changedNextRevision = false, changedContentRevision = false, wrongSource = false } = {}) {
+async function startHarness(t, { changedNextRevision = false, changedContentRevision = false, wrongSource = false, noInheritedContext = false } = {}) {
   const requireFromUi = createRequire(path.join(uiDir, 'package.json'));
   const { build } = requireFromUi('vite');
   const buildDir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-inherited-context-'));
@@ -135,7 +135,8 @@ async function startHarness(t, { changedNextRevision = false, changedContentRevi
       const sessionId = decodeURIComponent(listMatch[2]);
       const cursor = url.searchParams.get('cursor');
       listRequests.push({ provider, sessionId, limit: url.searchParams.get('limit'), cursor });
-      if (provider === 'deepseek-harness' && sessionId === dshUnseededId) {
+      if ((provider === 'deepseek-harness' && sessionId === dshUnseededId)
+        || (provider === 'codex' && sessionId === childId && noInheritedContext)) {
         response.writeHead(204).end();
         return;
       }
@@ -214,7 +215,10 @@ async function startHarness(t, { changedNextRevision = false, changedContentRevi
     server.listen(port, '127.0.0.1', resolve);
   });
   t.after(async () => {
-    await new Promise(resolve => server.close(() => resolve()));
+    await new Promise(resolve => {
+      server.close(resolve);
+      server.closeAllConnections();
+    });
     await rm(buildDir, { recursive: true, force: true });
   });
   return { origin: 'http://127.0.0.1:' + port, listRequests, contentRequests };
@@ -257,6 +261,26 @@ async function waitForBrowser(command, predicate, description) {
   }
   throw new Error('Timed out waiting for ' + description + '. Last browser result: ' + last);
 }
+
+test('opening a child with no inherited context keeps the empty explanation and keyboard focus',
+  { skip: skipReason || false, timeout: 45_000 }, async t => {
+    const harness = await startHarness(t, { noInheritedContext: true });
+    const { command } = await startBrowser(t, harness.origin + '/codex/session/' + childId);
+    await waitForBrowser(command, "document.querySelector('.inherited-context-details > summary')", 'child context disclosure');
+    await command('focus', '.inherited-context-details > summary');
+    await command('press', 'Enter');
+    await waitForBrowser(command,
+      "document.querySelector('.inherited-context-state')?.textContent === 'No inherited context was recorded for this child.'",
+      'explicit empty inherited context');
+    assert.equal(await command('eval', "document.activeElement === document.querySelector('.inherited-context-details > summary')"), 'true');
+    assert.equal(Number(await command('get', 'count', '.inherited-context-source')), 0,
+      'No copied-prefix provenance is claimed when there is no recorded inherited context');
+    await command('select', '.language-select', 'zh');
+    assert.equal(await command('get', 'text', '.inherited-context-state'), '此子会话没有已记录的继承上下文。');
+    await command('click', '.inherited-context-details > summary');
+    await command('click', '.inherited-context-details > summary');
+    assert.equal(harness.listRequests.length, 1, 'reopening retains the resolved empty state');
+  });
 
 test('Codex child Reader keeps inherited context separate, bounded, continuable, and explicit about source errors',
   { skip: skipReason || false, timeout: 90_000 }, async t => {

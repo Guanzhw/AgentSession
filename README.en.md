@@ -14,6 +14,10 @@ evidence remain visible throughout the reading and MCP flows.
 
 ## 3.0 prerelease
 
+The source version is **3.0.0, a local stable-release candidate**, not yet
+published. The [stable-readiness ledger](docs/specs/stable-readiness-2026-10/tasks.md)
+tracks the remaining gates. The installation commands below select published rc.4.
+
 ```sh
 npm install -g @acetamido/agentsession@3.0.0-rc.4
 npm install -g @acetamido/agentsession-mcp@3.0.0-rc.4
@@ -24,6 +28,21 @@ The prerelease uses npm's `next` channel. [Release and upgrade notes](docs/relea
 compare it with public v1.10.1, including the port change, metadata-copy import,
 and MCP/API migration. Four standalone platform bundles are available in the
 [GitHub Release](https://github.com/Guanzhw/AgentSession/releases/tag/v3.0.0-rc.4).
+
+When upgrading, follow the [metadata migration guide](v3/README.md#viewer-metadata-import)
+before editing stars, titles or Trash in the new Viewer. It distinguishes the
+published rc.4 standalone command from the workspace's unreleased npm routing
+fix and explains how to preserve both states if 3.0 metadata already exists.
+
+If a third-party npm mirror returns `404` for a newly published tarball, select
+the official registry for that installation:
+
+```sh
+npm install -g @acetamido/agentsession@3.0.0-rc.4 @acetamido/agentsession-mcp@3.0.0-rc.4 --registry https://registry.npmjs.org
+```
+
+This leaves the global npm registry configuration unchanged. If the official
+registry also fails, retain its specific error for diagnosis.
 
 ## Run from source
 
@@ -44,6 +63,28 @@ with `npm start -- --port 3458 --disable-terminal-launch`.
 For the already-built binary, run `v3/target/release/agentsession-v3 serve`
 (`.exe` on Windows), or use its `mcp` subcommand for native stdio MCP.
 Standalone binaries need neither Node nor Cargo at runtime.
+
+## Local workspace changes (Unreleased)
+
+Content-search links reveal and highlight matches beyond the initial Reader
+window using UTF-16 positions and `contentRevision`, with bounded body retrieval.
+Browser Back restores the query, results and selected position. Library rows show
+their own star state; **Only starred** combines with provider, project, time and
+sort filters while retaining the core's parent/child family semantics.
+
+After a **Technical details** source link opens the conversation, Back restores
+the Runtime view, applied filters, current page and scroll position. Related
+session graph selection also survives history navigation. Trash distinguishes
+complete, partial and failed reads: partial results keep readable rows and mark
+the count incomplete; failed reads report an unknown count. Both offer retry.
+Source issues link to the matching Settings anchor with the current startup
+path, configuration field, CLI option and restart/recheck instructions. Path
+precedence is CLI, environment, configuration file, then provider defaults.
+
+See the [repair specification](docs/specs/reader-journey-repair-2026-10/requirements.md)
+and [execution record](docs/specs/reader-journey-repair-2026-10/tasks.md) for scope
+and actual validation. These workspace changes are unreleased; published rc.4
+retains its recorded behavior.
 
 ## Development and status
 

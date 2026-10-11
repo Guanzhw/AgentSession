@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, utimes, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, cp, mkdir, mkdtemp, readFile, realpath, rm, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { readPackageManifests, tarballName } from '../../scripts/v3-npm-package-contract.mjs';
@@ -55,7 +55,7 @@ async function fixtureBundle(root, target, selectedVersion = version, bytes = he
   return source;
 }
 
-test('public prerelease stages all four verified payloads with exact version, dependency, and source pins', async t => {
+test('public release stages all four verified payloads with exact version, dependency, and source pins', async t => {
   const root = await fixtureRoot(t);
   const bundles = [];
   for (const target of Object.keys(nativeTargets)) bundles.push(flags[target], await fixtureBundle(root, target));
@@ -76,7 +76,7 @@ test('public prerelease stages all four verified payloads with exact version, de
     const manifest = JSON.parse(await readFile(path.join(stage, name, 'package.json')));
     assert.equal(manifest.private, false); assert.equal(manifest.version, version);
     assert.equal(manifest.repository.url, 'git+https://github.com/Guanzhw/AgentSession.git');
-    assert.deepEqual(manifest.publishConfig, { access: 'public', tag: 'next', provenance: true });
+    assert.deepEqual(manifest.publishConfig, { access: 'public', tag: version.includes('-') ? 'next' : 'latest', provenance: true });
     assert.equal(manifest.license, 'MIT');
     if (name !== 'native') assert.equal(manifest.dependencies['@acetamido/agentsession-native'], version);
     assert.ok((await readFile(path.join(stage, name, 'LICENSE'))).length > 0);
@@ -86,6 +86,43 @@ test('public prerelease stages all four verified payloads with exact version, de
   const mixedSource = invoke('v3-prepare-npm-candidate.mjs', ['--output-dir', path.join(root, 'mixed-source'),
     '--public', '--source-commit', sourceCommit, ...bundles]);
   assert.notEqual(mixedSource.status, 0); assert.match(mixedSource.stderr, /release source differs/);
+});
+
+test('stable public staging derives latest from isolated templates without publishing', async t => {
+  const root = await fixtureRoot(t);
+  const isolated = path.join(root, 'source');
+  await mkdir(path.join(isolated, 'scripts'), { recursive: true });
+  await cp(path.join(repo, 'v3/npm'), path.join(isolated, 'v3/npm'), { recursive: true });
+  await copyFile(path.join(repo, 'LICENSE'), path.join(isolated, 'LICENSE'));
+  for (const script of ['v3-prepare-npm-candidate.mjs', 'v3-native-artifact.mjs', 'v3-npm-package-contract.mjs']) {
+    await copyFile(path.join(repo, 'scripts', script), path.join(isolated, 'scripts', script));
+  }
+  for (const [name, template] of Object.entries(templates)) {
+    await writeFile(path.join(isolated, 'v3/npm', name, 'package.json'), JSON.stringify({ ...template,
+      version: '3.0.0', ...(name !== 'native' ? { dependencies: { '@acetamido/agentsession-native': '3.0.0' } } : {}),
+    }));
+  }
+  const bundles = [];
+  for (const target of Object.keys(nativeTargets)) {
+    bundles.push(flags[target], await fixtureBundle(root, target, '3.0.0'));
+  }
+  const env = { ...process.env };
+  for (const key of ['GH_TOKEN', 'GITHUB_TOKEN', 'NPM_TOKEN', 'NODE_AUTH_TOKEN']) delete env[key];
+  const stage = path.join(root, 'stable');
+  const result = spawnSync(process.execPath, [path.join(isolated, 'scripts/v3-prepare-npm-candidate.mjs'),
+    '--output-dir', stage, '--public', '--source-commit', 'a'.repeat(40), ...bundles], {
+    encoding: 'utf8', windowsHide: true, timeout: 60_000, env,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const manifests = await readPackageManifests(stage);
+  for (const manifest of Object.values(manifests)) {
+    assert.equal(manifest.version, '3.0.0');
+    assert.deepEqual(manifest.publishConfig, { access: 'public', tag: 'latest', provenance: true });
+  }
+  const provenance = JSON.parse(await readFile(path.join(stage, 'native/provenance.json')));
+  assert.equal(provenance.version, '3.0.0');
+  assert.equal(provenance.sourceCommit, 'a'.repeat(40));
+  assert.deepEqual(Object.keys(provenance.platforms), Object.keys(nativeTargets));
 });
 
 test('public boundary refuses incomplete platforms and stale-version or wrong-architecture bundles', async t => {

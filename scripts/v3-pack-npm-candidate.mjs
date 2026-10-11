@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { nativeTargets } from '../v3/npm/native/targets.mjs';
 import { assertNativeArtifact } from './v3-native-artifact.mjs';
-import { readPackageManifests, tarballName, assertPublicPrerelease } from './v3-npm-package-contract.mjs';
+import { readPackageManifests, tarballName, assertPublicRelease } from './v3-npm-package-contract.mjs';
 
 const names = ['native', 'viewer', 'mcp'];
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -62,7 +62,7 @@ async function main() {
     throw new Error('Prepared package version differs from native provenance');
   }
   if (Object.values(manifests).some(manifest => manifest.private !== true)) {
-    assertPublicPrerelease(manifests, provenance);
+    assertPublicRelease(manifests, provenance);
   }
   const tarballs = names.map(name => tarballName(manifests[name]));
   const platforms = Object.keys(provenance.platforms);

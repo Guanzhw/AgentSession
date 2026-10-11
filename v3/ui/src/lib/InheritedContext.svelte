@@ -89,7 +89,8 @@
       const page = await getInheritedContextPage(child);
       if (!active || request !== requestGeneration) return;
       if (!page) {
-        available = false;
+        available = !discover;
+        loaded = true;
         return;
       }
       assertPageScope(page);
@@ -244,6 +245,7 @@
       <span>{loaded ? `${totalItems} ${t($language, 'records')}` : t($language, 'Recorded context before this child’s own messages.')}</span>
     </summary>
     <div class="inherited-context-content">
+      {#if inheritedPage}
       <p class="inherited-context-source">
         {#if inheritedPage?.sourceSession}
           {t($language, 'Inherited from')} {providerLabel(inheritedPage.sourceSession.provider)} {t($language, 'session')} <code>{inheritedPage.sourceSession.sessionId}</code>.
@@ -252,6 +254,7 @@
         {/if}
         {t($language, 'These records are shown separately from the child’s conversation and outline.')}
       </p>
+      {/if}
 
       {#if loading && !loaded}<p class="inherited-context-state" role="status">{t($language, 'Loading inherited context…')}</p>{/if}
       {#if apiError}

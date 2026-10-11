@@ -63,6 +63,9 @@ pub(crate) fn publish_docs(
     changed: &BTreeMap<String, SessionSnapshot>,
     deleted: &[String],
 ) -> Result<()> {
+    #[cfg(feature = "search-phase-probe")]
+    let mut resource_probe =
+        crate::index::ResourceProbe::new("search_document_build_probe", provider);
     tx.execute_batch(
         "CREATE TABLE IF NOT EXISTS search_doc_state (
         provider TEXT PRIMARY KEY, version INTEGER NOT NULL
@@ -99,6 +102,10 @@ pub(crate) fn publish_docs(
         )
         .map_err(storage)?;
     for (id, snapshot) in changed {
+        #[cfg(feature = "search-phase-probe")]
+        {
+            *resource_probe.counts.entry("build_attempts").or_default() += 1;
+        }
         if snapshot.summary.session.provider != provider
             || snapshot.summary.session.session_id != *id
         {
@@ -196,6 +203,10 @@ pub(crate) fn publish_docs(
                 _ => {}
             }
         }
+        #[cfg(feature = "search-phase-probe")]
+        {
+            *resource_probe.counts.entry("build_successes").or_default() += 1;
+        }
     }
     tx.execute(
         "INSERT INTO search_doc_state(provider,version) VALUES (?1,?2)
@@ -203,6 +214,10 @@ pub(crate) fn publish_docs(
         params![provider, DOCUMENT_VERSION],
     )
     .map_err(storage)?;
+    #[cfg(feature = "search-phase-probe")]
+    {
+        resource_probe.completed = true;
+    }
     Ok(())
 }
 

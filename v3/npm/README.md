@@ -65,8 +65,13 @@ Run `agentsession --config <isolated-config.json> --port <port>` for Web and
 `agentsession-mcp --config <isolated-config.json>` for stdio MCP. The config must
 name all five provider source paths and three 3.0 derived-state paths. The
 installed commands need Node and the packaged binary; they do not invoke npm,
-Cargo, or the network at runtime. Both entrypoints pass their remaining
-arguments to the native executable and retain its stdio and exit status.
+Cargo, or the network at runtime. The Viewer defaults to `serve` and forwards
+explicit `serve`, `mcp`, `migrate-meta` and `help` commands. Global `--config`
+works before or after an explicit command. The separate MCP entrypoint selects
+`mcp`. Both retain native stdio and exit status. This workspace's explicit
+Viewer command routing is an unreleased follow-through fix; see the
+[migration guide](../README.md#viewer-metadata-import) for the published rc.4
+standalone migration route and preserving already-created Viewer metadata.
 
 Run the opt-in isolated pack/install/Web/MCP test with
 `AGENTSESSION_V3_NPM_CANDIDATE=1 node --test v3/test/npm-candidate-install.test.mjs`
@@ -85,19 +90,20 @@ Every installed platform requires its real selected payload and a native host
 execution. ARM64/macOS runtime, installation and CI outcomes remain unverified
 until those artifacts and executions exist; no publication is performed here.
 
-## Public prerelease
+## Public release
 
-[The prerelease workflow](../../.github/workflows/v3-prerelease.yml) resolves one
+[The release workflow](../../.github/workflows/v3-prerelease.yml) resolves one
 existing version tag to a commit, validates all four actual native hosts, and
 checks out that same commit throughout the run. It stages all three packages
 for public publication only after every matrix job succeeds. Workflow dispatch
 with `publish: false` performs the complete validation and uploads publication
-assets. A prerelease tag push, or dispatch with `publish: true`, publishes the
+assets. A version tag push, or dispatch with `publish: true`, publishes the
 validated artifacts using the existing `NPM_TOKEN` secret and GitHub OIDC
-provenance. Every npm publication explicitly uses `next`; existing `latest`
-values are checked before and after publication.
+provenance. A stable `3.x.y` version publishes to npm `latest`; a version with a
+prerelease suffix publishes to `next`. The other channel is checked before and
+after publication and keeps its existing value.
 
-Public staging uses the current template version, requires a 3.x prerelease,
+Public staging uses the current template version, requires a concrete 3.x release,
 all four bundles, and each bundle's `release-source.json` sidecar matching the
 frozen version, platform, and source commit:
 
@@ -112,16 +118,17 @@ node scripts/v3-pack-npm-candidate.mjs --stage-dir tmp/npm-prerelease
 ```
 
 Only staged public manifests receive `private: false`, repository metadata,
-and `publishConfig` with public access, `next`, and provenance. Wrappers pin the
-exact native prerelease version. The packer validates staged identities,
+and `publishConfig` with public access, the version-derived channel, and provenance.
+Wrappers pin the exact native version. The packer validates staged identities,
 dependency pins, native payloads, provenance, and Unix executable archive modes.
 The Ubuntu publication job installs and launches the exact combined tarballs
 offline before publishing native, Viewer, then MCP.
 
 Public portable archives use GNU tar and `gzip -n` with the resolved commit's
-timestamp and normalized archive owners. The GitHub prerelease includes the
+timestamp and normalized archive owners. The GitHub release includes the
 four portable archives, three npm tarballs, aggregate npm provenance, and
-global `SHA256SUMS`; it is explicitly marked prerelease and `latest: false`.
+global `SHA256SUMS`. Stable versions create a normal latest release; prerelease
+versions are explicitly marked prerelease and `latest: false`.
 Publication retries compare existing npm integrity and GitHub asset bytes,
 then continue with missing packages/assets. A different immutable artifact
 fails explicitly. Re-run failed jobs to reuse the validated host inputs.

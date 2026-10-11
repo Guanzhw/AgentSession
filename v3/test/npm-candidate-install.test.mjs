@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
+import { DatabaseSync } from 'node:sqlite';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
@@ -204,6 +205,28 @@ test('selected local npm candidate installs and launches Web and native stdio MC
   assert.ok(existsSync(mcpShim));
   assert.equal(run(process.execPath, [viewer, '--version'], { cwd: working }), `agentsession-v3 ${version}`);
   assert.equal(run(process.execPath, [mcp, '--version'], { cwd: working }), `agentsession-v3 ${version}`);
+  for (const args of [
+    ['--help'], ['serve', '--help'], ['mcp', '--help'], ['migrate-meta', '--help'], ['help', 'migrate-meta'],
+    ['--config', 'mcp', 'migrate-meta', '--help'],
+    ['--config=mcp', 'migrate-meta', '--help'],
+    ['migrate-meta', '--config', 'mcp', '--help'],
+  ]) {
+    assert.equal(run(process.execPath, [viewer, ...args], { cwd: working }),
+      run(binary, args, { cwd: working }), `Installed routing: ${args.join(' ')}`);
+  }
+  for (const args of [['--codex-dir', 'mcp', '--help'], ['--config', 'mcp', '--help'],
+    ['--config=mcp', '--help']]) {
+    assert.equal(run(process.execPath, [viewer, ...args], { cwd: working }),
+      run(binary, ['serve', ...args], { cwd: working }), `Option value remains a value: ${args.join(' ')}`);
+  }
+  const invalidPortArgs = ['--port', 'serve', '--help'];
+  const invalidPort = spawnSync(process.execPath, [viewer, ...invalidPortArgs],
+    { cwd: working, encoding: 'utf8', timeout: 5_000, windowsHide: true });
+  const nativeInvalidPort = spawnSync(binary, ['serve', ...invalidPortArgs],
+    { cwd: working, encoding: 'utf8', timeout: 5_000, windowsHide: true });
+  assert.notEqual(nativeInvalidPort.status, 0);
+  assert.equal(invalidPort.status, nativeInvalidPort.status);
+  assert.equal(invalidPort.stderr, nativeInvalidPort.stderr, 'A command-shaped port value remains a native invalid value');
   const invalid = spawnSync(process.execPath, [viewer, '--unknown-candidate-option'],
     { cwd: working, encoding: 'utf8', timeout: 5_000, windowsHide: true });
   const nativeInvalid = spawnSync(binary, ['serve', '--unknown-candidate-option'],
@@ -251,6 +274,31 @@ test('selected local npm candidate installs and launches Web and native stdio MC
   for (const directory of [env.HOME, env.CODEX_HOME, env.XDG_CONFIG_HOME]) {
     await mkdir(directory);
   }
+  const legacy = path.join(state, 'legacy-copy.db');
+  const legacyDb = new DatabaseSync(legacy);
+  legacyDb.exec(`CREATE TABLE session_meta (provider TEXT NOT NULL DEFAULT 'opencode',
+    session_id TEXT NOT NULL, custom_title TEXT, starred INTEGER DEFAULT 0,
+    deleted INTEGER DEFAULT 0, permanent INTEGER DEFAULT 0, time_starred INTEGER,
+    time_deleted INTEGER, time_renamed INTEGER, PRIMARY KEY(provider,session_id));`);
+  legacyDb.prepare('INSERT INTO session_meta(provider,session_id,custom_title,starred) VALUES (?,?,?,?)')
+    .run('codex', sessionId, 'Installed migration title', 1);
+  legacyDb.close();
+  const legacyHash = digest(await readFile(legacy));
+  const scope = run(process.execPath, [viewer, 'migrate-meta', '--from', legacy, '--config', config],
+    { cwd: working, env });
+  assert.match(scope, /^[a-f0-9]{64}$/);
+  assert.equal(digest(await readFile(legacy)), legacyHash);
+  const target = path.join(state, 'meta', 'scopes', scope, 'meta.db');
+  const targetHash = digest(await readFile(target));
+  for (const globalConfig of [['--config', config], [`--config=${config}`]]) {
+    const repeated = spawnSync(process.execPath,
+      [viewer, ...globalConfig, 'migrate-meta', '--from', legacy],
+      { cwd: working, env, encoding: 'utf8', timeout: 5_000, windowsHide: true });
+    assert.notEqual(repeated.status, 0);
+    assert.match(repeated.stderr, /already exists/);
+    assert.equal(digest(await readFile(target)), targetHash);
+    assert.equal(digest(await readFile(legacy)), legacyHash);
+  }
   const port = await freeFetchSafePort();
   web = spawn(process.execPath, [viewer, '--config', config, '--port', String(port)],
     { cwd: working, env, stdio: 'ignore', windowsHide: true });
@@ -259,6 +307,10 @@ test('selected local npm candidate installs and launches Web and native stdio MC
   const settings = await (await fetch(`${origin}/api/settings`)).json();
   assert.equal(settings.startup.sources.codexDir, codex);
   assert.equal(settings.startup.state.metaDir, path.join(state, 'meta'));
+  const importedMeta = await (await fetch(`${origin}/api/v3/meta?provider=codex`)).json();
+  const importedRow = importedMeta.find(row => row.sessionId === sessionId);
+  assert.equal(importedRow.customTitle, 'Installed migration title');
+  assert.equal(importedRow.starred, true);
   const pageResponse = await fetch(`${origin}/sessions`);
   assert.equal(pageResponse.status, 200);
   const page = await pageResponse.text();
@@ -284,6 +336,21 @@ test('selected local npm candidate installs and launches Web and native stdio MC
     'Installed Viewer port must close after its command exits');
   web = undefined;
 
+  for (const args of [[], ['--config', config, 'serve'], [`--config=${config}`, 'serve']]) {
+    const selectedPort = await freeFetchSafePort();
+    const savedConfig = JSON.parse(await readFile(config, 'utf8'));
+    await writeFile(config, `${JSON.stringify({ ...savedConfig, port: selectedPort })}\n`);
+    web = spawn(process.execPath, [viewer, ...args],
+      { cwd: working, env, stdio: 'ignore', windowsHide: true });
+    const selectedOrigin = `http://127.0.0.1:${selectedPort}`;
+    await ready(selectedOrigin, web);
+    const rows = await (await fetch(`${selectedOrigin}/api/v3/meta?provider=codex`)).json();
+    assert.equal(rows.find(row => row.sessionId === sessionId)?.customTitle, 'Installed migration title');
+    await stop(web);
+    await waitForExit(web.pid);
+    web = undefined;
+  }
+
   client = new Client({ name: 'agentsession-v3-npm-install-check', version: '1.0.0' });
   const transport = new StdioClientTransport({ command: process.execPath,
     args: [mcp, '--config', config], cwd: working, env, stderr: 'pipe' });
@@ -306,6 +373,16 @@ test('selected local npm candidate installs and launches Web and native stdio MC
   await client.close();
   await waitForExit(mcpPid);
   client = undefined;
+  client = new Client({ name: 'agentsession-v3-viewer-mcp-check', version: '1.0.0' });
+  const explicitTransport = new StdioClientTransport({ command: process.execPath,
+    args: [viewer, '--config', config, 'mcp'], cwd: working, env, stderr: 'pipe' });
+  await client.connect(explicitTransport);
+  assert.equal((await client.listTools()).tools.length, 7);
+  const explicitPid = explicitTransport.pid;
+  await client.close();
+  await waitForExit(explicitPid);
+  client = undefined;
+  assert.equal(digest(await readFile(legacy)), legacyHash);
   assert.equal(digest(await readFile(copiedFixture)), fixtureHash);
   assert.equal(digest(await readFile(fixture)), fixtureHash);
 });

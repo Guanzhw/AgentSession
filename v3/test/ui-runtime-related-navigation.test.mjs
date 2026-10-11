@@ -137,6 +137,11 @@ test('related Runtime session opens canonical Reader and Back restores Sessions 
       document.querySelector('.runtime-lens-sessions[aria-current="page"]') &&
       document.activeElement?.closest('.runtime-graph-node')?.getAttribute('data-session-id') === '${ids.root}'`,
       'originating Runtime Sessions lens and related link focus');
+    if (process.env.AGENTSESSION_V3_JOURNEY_SCREENSHOT_DIR) {
+      await mkdir(process.env.AGENTSESSION_V3_JOURNEY_SCREENSHOT_DIR, { recursive: true });
+      await command(name, 'screenshot', path.join(process.env.AGENTSESSION_V3_JOURNEY_SCREENSHOT_DIR,
+        'runtime-sessions-related-back.png'));
+    }
     await command(name, 'click', '.runtime-lenses button:first-child');
     await waitFor(name, `document.querySelector('.runtime-events a[href^="#event?"]')`,
       'source event link');
@@ -145,8 +150,9 @@ test('related Runtime session opens canonical Reader and Back restores Sessions 
       document.querySelector('.conversation-tab[aria-current="page"]')`, 'source conversation');
     await command(name, 'back');
     await waitFor(name, `location.pathname === '/codex/session/${ids.child}' &&
-      document.querySelector('.runtime-lens-sessions[aria-current="page"]')`,
-      'Runtime Sessions after event Back');
+      document.querySelector('.runtime-lenses button:first-child[aria-current="page"]') &&
+      document.querySelector('.runtime-events a[href^="#event?"]')`,
+      'the Events lens that opened the source after event Back');
     await command(name, 'forward');
     await waitFor(name, `location.hash.startsWith('#event?') &&
       document.querySelector('.conversation-tab[aria-current="page"]') &&
@@ -169,10 +175,27 @@ test('unverified missing related session stays navigable and Reader reports the 
     await command(name, 'click', `${selector} a`);
     await waitFor(name, `location.pathname === '/codex/session/${ids.root}' && document.querySelector('.error-state[role="alert"]')`,
       'missing Reader diagnostic');
-    assert.match(await command(name, 'get', 'text', '.error-state'), /could not load|not found|missing/i);
+    assert.equal(await command(name, 'get', 'text', '.error-state h1'), 'Session not found');
+    assert.equal(await command(name, 'eval', `document.querySelector('.error-state details').open`), 'false');
+    assert.doesNotMatch(await command(name, 'get', 'text', '.error-state'), /Check the local service/);
+    assert.equal(await command(name, 'eval', `document.querySelector('.error-state a').getAttribute('href')`), '"/sessions"');
+    await command(name, 'select', '.language-select', 'zh');
+    await waitFor(name, `document.querySelector('.error-state h1')?.textContent === '未找到会话'`, 'Chinese missing-session guidance');
+    assert.match(await command(name, 'get', 'text', '.error-state'), /当前来源中没有此会话/);
+    assert.doesNotMatch(await command(name, 'get', 'text', '.error-state'), /请检查本地服务/);
+    if (process.env.AGENTSESSION_V3_JOURNEY_SCREENSHOT_DIR) {
+      await mkdir(process.env.AGENTSESSION_V3_JOURNEY_SCREENSHOT_DIR, { recursive: true });
+      await command(name, 'screenshot', path.join(process.env.AGENTSESSION_V3_JOURNEY_SCREENSHOT_DIR,
+        'runtime-missing-parent-zh.png'));
+    }
     await command(name, 'back');
     await waitFor(name, `location.pathname === '/codex/session/${ids.child}' &&
       document.querySelector('.runtime-lens-sessions[aria-current="page"]')`, 'originating Sessions lens');
+    await command(name, 'forward');
+    await waitFor(name, `document.querySelector('.error-state h1')?.textContent === '未找到会话'`, 'missing-session Forward');
+    await command(name, 'click', '.error-state a[href="/sessions"]');
+    await waitFor(name, `location.pathname === '/sessions' &&
+      document.querySelector('.unlinked-child-row[href="/codex/session/${ids.child}"]')`, 'return to the available child session');
   });
 
 test('Pi header parent link opens the parent Reader and Back restores Sessions focus',

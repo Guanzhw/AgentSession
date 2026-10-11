@@ -2412,6 +2412,9 @@ fn load_codex_reader_positioned(
     decoded: Option<&[u8]>,
     positions: Option<&[source_set::Position]>,
 ) -> Result<LoadedSession> {
+    #[cfg(feature = "search-phase-probe")]
+    let mut resource_probe =
+        crate::index::ResourceProbe::new("codex_positioned_reader_probe", "codex");
     #[cfg(test)]
     CODEX_NORMALIZATION_COUNT.with(|count| count.set(count.get() + 1));
     let mut id = None;
@@ -3377,6 +3380,10 @@ fn load_codex_reader_positioned(
     let token_count = (parent_id.is_none() || owned_boundary_line.is_some())
         .then(|| codex_selected_token_count(&observations.usage, owned_boundary_line))
         .flatten();
+    #[cfg(feature = "search-phase-probe")]
+    {
+        resource_probe.completed = true;
+    }
     Ok(LoadedSession {
         id: expected_id.into(),
         cwd,

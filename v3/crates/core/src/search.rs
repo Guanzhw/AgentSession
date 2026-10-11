@@ -482,6 +482,13 @@ fn candidate(
     } else {
         snippet_with_utf16(text, query, utf16)
     };
+    let target = if field == "message" {
+        event
+            .as_ref()
+            .and_then(|event| content_target(event, text, query, utf16))
+    } else {
+        None
+    };
     Candidate {
         position: Position {
             rank,
@@ -493,8 +500,46 @@ fn candidate(
             "matchField": field, "matchRole": role, "snippet": excerpt,
             "title": summary.title, "directory": summary.directory,
             "updatedAt": summary.updated_at.unwrap_or(0), "untrustedContent": true,
+            "target": target,
         }),
     }
+}
+
+/// Reader positions use original UTF-16 units, including case-fold expansions.
+/// Bind the target to the normalized body hash used by Reader content retrieval.
+fn content_target(
+    event: &EventRef,
+    text: &str,
+    query: &str,
+    utf16: Option<&Utf16Query>,
+) -> Option<Value> {
+    let lower: Vec<u16> = text.to_lowercase().encode_utf16().collect();
+    let (_, starts, ends) = folded_units(text);
+    let needle = utf16.map_or_else(
+        || query.to_lowercase().encode_utf16().collect(),
+        |query| lower_utf16(&query.query),
+    );
+    let first_term = utf16.map_or_else(
+        || {
+            query
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .to_lowercase()
+                .encode_utf16()
+                .collect()
+        },
+        |query| query.terms.first().cloned().unwrap_or_default(),
+    );
+    let (at, length) = find_units(&lower, &needle, 0)
+        .map(|at| (at, needle.len()))
+        .or_else(|| find_units(&lower, &first_term, 0).map(|at| (at, first_term.len())))?;
+    let offset = starts[at];
+    Some(json!({
+        "event": event, "field": "body", "offset": offset,
+        "matchLength": ends[at + length - 1] - offset,
+        "contentRevision": format!("{:x}", Sha256::digest(text.as_bytes())),
+    }))
 }
 
 fn best_match(
@@ -1060,8 +1105,12 @@ impl Core {
 
 #[cfg(test)]
 mod tests {
+    use super::{SearchQuery, content_target};
     use super::{Utf16Query, best_match, bounded, matches, snippet, snippet_with_utf16};
     use crate::{Core, SessionRef, SessionSummary, SourceConfig, providers};
+    use crate::{CoreError, EventRef};
+    use serde_json::json;
+    use sha2::{Digest, Sha256};
     use std::fs;
     use std::path::Path;
 
@@ -1242,6 +1291,105 @@ mod tests {
             "the excerpt must retain a hit after lowercase expansion"
         );
         assert!(excerpt.encode_utf16().count() <= 160);
+    }
+
+    #[test]
+    fn content_target_uses_original_utf16_spans_and_reader_body_hash() {
+        let event = EventRef {
+            provider: "codex".into(),
+            session_id: "long".into(),
+            message_id: "late".into(),
+            segment: "message".into(),
+        };
+        for (prefix, matched, query) in [
+            ("x".repeat(6500), "late marker", "late marker"),
+            ("🙂İ汉".repeat(1600), "ALPHA🙂", "alpha🙂"),
+            ("🙂".repeat(3250), "İ", "i\u{307}"),
+            ("🙂".repeat(3250), "ΟΣ", "ος"),
+        ] {
+            let body = format!("{prefix}{matched} trailing content");
+            let target = content_target(&event, &body, query, None).unwrap();
+            assert_eq!(target["offset"], prefix.encode_utf16().count());
+            assert_eq!(target["matchLength"], matched.encode_utf16().count());
+            assert_eq!(
+                target["contentRevision"],
+                format!("{:x}", Sha256::digest(body.as_bytes()))
+            );
+            let page =
+                crate::page_text(&body, target["offset"].as_u64().unwrap() as usize, 1400).unwrap();
+            assert!(page.text.starts_with(matched));
+            assert!(page.text.encode_utf16().count() <= 1400);
+        }
+        let distant = content_target(
+            &event,
+            "first term is distant from second",
+            "first second",
+            None,
+        )
+        .unwrap();
+        assert_eq!(distant["offset"], 0);
+        assert_eq!(distant["matchLength"], 5);
+    }
+
+    #[test]
+    fn indexed_content_target_opens_bounded_reader_content_and_rejects_changed_body() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("codex/sessions/long.jsonl");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        let body = format!("{}LATE🙂MARKER trailing", "🙂İ汉".repeat(1600));
+        let write_source =
+            |text: &str| {
+                fs::write(&source, format!("{}\n{}\n",
+                json!({"type":"session_meta","payload":{"id":"long"}}),
+                json!({"type":"response_item","payload":{"type":"message","role":"assistant",
+                    "content":[{"type":"output_text","text":text}]}}))).unwrap();
+            };
+        write_source(&body);
+        let core = Core::new(SourceConfig {
+            codex_dir: root.path().join("codex"),
+            opencode_db: root.path().join("opencode.db"),
+            claude_dir: root.path().join("claude"),
+            pi_dir: root.path().join("pi"),
+            dsh_dir: root.path().join("dsh"),
+            meta_dir: root.path().join("meta"),
+            index_dir: root.path().join("index"),
+            cache_dir: root.path().join("cache"),
+        })
+        .unwrap();
+        let result = core
+            .viewer_search(SearchQuery {
+                query: "late🙂marker".into(),
+                providers: Some(vec!["codex".into()]),
+                fields: Some(vec!["assistant".into()]),
+                lineage: None,
+                updated_after: None,
+                updated_before: None,
+                directory: None,
+                cursor: None,
+                limit: Some(20),
+            })
+            .unwrap();
+        let target = &result["matches"][0]["target"];
+        assert_eq!(target["offset"], 6400);
+        let bootstrap = core.reader_bootstrap("codex", "long").unwrap();
+        let query = || crate::ContentQuery {
+            message_id: target["event"]["messageId"].as_str().unwrap().into(),
+            segment: "message".into(),
+            field: "body".into(),
+            offset: 6400,
+            max_chars: 1400,
+            revision: bootstrap.revision.clone(),
+            content_revision: Some(target["contentRevision"].as_str().unwrap().into()),
+        };
+        let page = core.reader_content("codex", "long", query()).unwrap();
+        assert!(page.text.starts_with("LATE🙂MARKER"));
+        assert!(page.text.encode_utf16().count() <= 1400);
+        write_source(&format!("{body} changed"));
+        core.reader_bootstrap("codex", "long").unwrap();
+        assert!(matches!(
+            core.reader_content("codex", "long", query()),
+            Err(CoreError::SourceChanged)
+        ));
     }
 
     #[test]

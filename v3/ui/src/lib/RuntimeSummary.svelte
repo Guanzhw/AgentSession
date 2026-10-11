@@ -6,8 +6,11 @@
 
   export let provider: string;
   export let sessionId: string;
+  export let initialRevision: string | null;
+  export let onRevision: (revision: string) => void;
+  export let onReady: () => Promise<void>;
 
-  let sourceRevision: string | null = null;
+  let sourceRevision: string | null = initialRevision;
   let summary: Summary | null = null;
   let state: 'loading' | 'ready' | 'invalid' | 'unavailable' | 'stale' | 'request' = 'loading';
   let message = '';
@@ -34,6 +37,8 @@
       sourceRevision = result.revision;
       summary = result;
       state = 'ready';
+      onRevision(sourceRevision);
+      await onReady();
     } catch (cause) {
       if (!active || generation !== request) return;
       const code = cause instanceof RuntimeApiError ? cause.code : 'request_failed';

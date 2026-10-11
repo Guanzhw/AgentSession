@@ -18,12 +18,53 @@ records the current default. The [3.0.0-rc.4 release notes](../docs/releases/3.0
 describe the prerelease distribution and upgrade from public v1.10.1.
 Remaining acceptance gates retain their recorded evidence scope.
 
+The current source version is **3.0.0, an unpublished local stable candidate**.
+The [stable-readiness ledger](../docs/specs/stable-readiness-2026-10/tasks.md)
+owns its current validation and release decision. Stable publication uses npm
+`latest` and a normal GitHub release; prerelease versions continue to use `next`.
+
 Library **Manage** selects loaded, readable sessions across the five providers
 by canonical ID. Rows with unavailable history remain visible but cannot enter
 a batch. Manage can star, unstar, or move selected sessions to Viewer Trash;
 delete asks for confirmation. `POST /api/sessions/batch` accepts
 `{action,items:[{provider,id}]}` for these Viewer-only changes and reports
 `{ok,affected,skipped}`. Provider transcripts are never changed.
+
+## Local Reader journey changes (Unreleased)
+
+Library rows expose each node's own `starred` state. **Only starred** sends
+`starredOnly=true` to both `/api/v3/library/sessions` and
+`/api/v3/library/children`, combining with the existing provider, project, time
+and sort filters. Matching children retain their contextual parents, whose
+displayed star state remains their own. Stars are Viewer metadata.
+
+Global message-content search adds a `target` containing the event, `field`,
+`offset`, `matchLength` and `contentRevision`; title/directory hits retain ordinary
+session navigation. Positions use original normalized UTF-16 units, including
+Unicode case-fold expansions. The result link encodes the target in `#event?`,
+so ordinary clicks and new-tab links open the same bounded Reader body window
+and highlight the match. `contentRevision` binds the target to its normalized
+field snapshot; replacing that field rejects its old fingerprint. Back restores
+the submitted Library query, loaded results and selected result context.
+
+The Reader's **Technical details** tab preserves its Runtime lens, applied Events
+filters, current page and scroll position when following source links. Browser
+Back restores the investigation; Forward returns to the source event. The
+Sessions graph retains its selected related node across related-session
+navigation. Restored pages keep the existing source-revision and cursor checks.
+
+Trash reports complete, partial and failed metadata reads separately. Partial
+reads preserve readable rows and show a lower-bound count (`N+`); failed or
+unread listings show an unknown count (`—`). Only a complete successful read of
+zero rows displays **Trash is empty**. Partial and failed reads offer **Retry
+Trash**. Source issues link to the provider's focused Settings source section,
+with the startup path and restart guidance described below.
+
+These changes are local and unreleased. The
+[repair specification](../docs/specs/reader-journey-repair-2026-10/requirements.md)
+defines scope; the [execution record](../docs/specs/reader-journey-repair-2026-10/tasks.md)
+owns actual validation. Published rc.4 and existing acceptance gates retain
+their recorded scope.
 
 ## HTTP contract migration
 
@@ -173,7 +214,7 @@ late messages, reasoning, and tool input/output. Each inline child has its own
 case-insensitive occurrence and open the exact event and content offset;
 Library and MCP search retain their separate multi-term semantics.
 
-The Reader's **Runtime** tab loads Summary, Events, Work, Sessions graph,
+The Reader's **Technical details** tab loads Runtime Summary, Events, Work, Sessions graph,
 Execution, Coordination, and Context on demand. The HTTP API exposes validated
 summary, bounded graph, and paged execution, coordination, and context projections at
 `/api/v3/runtime/{provider}/{session_id}/{summary,graph,execution,coordination,context}`.
@@ -224,6 +265,27 @@ checks and terminal launches use the update immediately; reopening a Reader
 refreshes its preview. `resumeShell: null` uses the default shell, and an empty
 `resumeCommands` object restores provider defaults. Invalid updates and failed
 saves leave the running configuration unchanged.
+
+In the unreleased workspace, source diagnostics open
+`/settings#source-{provider}` and focus the matching source section. Each section
+shows the effective startup path, its public
+configuration field, CLI option and environment variable:
+
+| Provider anchor | JSON field | CLI option | Environment variable |
+| --- | --- | --- | --- |
+| `source-codex` | `codexDir` | `--codex-dir` | `AGENTSESSION_CODEX_DIR` |
+| `source-opencode` | `dbPath` | `--opencode-db` | `AGENTSESSION_DB_PATH` |
+| `source-claude-code` | `claudeDir` | `--claude-dir` | `AGENTSESSION_CLAUDE_DIR` |
+| `source-pi` | `piDir` | `--pi-dir` | `AGENTSESSION_PI_DIR` |
+| `source-deepseek-harness` | `dshDir` | `--dsh-dir` | `AGENTSESSION_DSH_DIR` |
+
+Source paths use CLI values first, then environment variables, JSON fields and
+provider defaults. The configuration file itself is selected by global
+`--config`, then `AGENTSESSION_CONFIG`, then the platform default. To repair a
+source, check that the displayed path exists and is readable, update the
+applicable startup option or selected config field, and remove or update any
+higher-priority override. Restart the Viewer, confirm the effective path in
+Settings, then reopen Sessions with that provider selected to recheck it.
 
 `serve --open` or `"open": true` opens the Viewer in the system's default
 browser after the loopback listener is ready. Browser-launch failures are
@@ -426,14 +488,66 @@ then defaults. Provider-owned source files are opened read-only.
 
 ### Viewer metadata import
 
-To import a **copy** of a legacy Viewer metadata SQLite database, run
-`agentsession-v3 migrate-meta --from <old-meta-copy.db>` with the same source and
-state flags (or `--config`) as the intended 3.0 `serve` process. The command
-prints the selected source scope and creates `meta/scopes/<scope>/meta.db` only
-when that target does not exist. It copies the complete SQLite database,
-including retired-provider rows and the v1 index, without changing the input.
-Existing 3.0 Viewer state is never overwritten. Preserve the input database and
-configuration. The import does not migrate configuration or derived indexes.
+Import the old Viewer metadata **before the first star, title or Trash edit** in
+the selected 3.0 source scope. Opening and reading the Viewer alone does not
+create its metadata database; an edit does. An existing target is refused even
+when it contains only one new edit.
+
+1. Preserve the old configuration and a consistent SQLite **backup copy** of
+   the old Viewer database. Stop its writers before making a filesystem copy;
+   when a live database has committed WAL rows, use a SQLite backup that includes
+   them rather than copying only the main `.db` file.
+2. Prepare the intended 3.0 JSON configuration with absolute source paths and
+   separate `metaDir`, `indexDir` and `cacheDir` paths. Use the same effective
+   source paths for import, Viewer and MCP. CLI values override environment
+   values, which override the file; source identity determines the metadata
+   scope. Check any existing overrides before importing.
+3. Run the migration command, then start the Viewer with that configuration.
+   Verify the effective paths in Settings and an expected old title or star
+   before making new edits. Point MCP at the same selected configuration.
+
+For **published `3.0.0-rc.4`**, download and extract the matching standalone
+bundle from the [release](https://github.com/Guanzhw/AgentSession/releases/tag/v3.0.0-rc.4).
+Its native command provides migration; the rc.4 npm Viewer wrapper cannot route
+`migrate-meta`. For example, from the extracted Windows bundle:
+
+```powershell
+.\agentsession-v3.exe migrate-meta --from C:\backups\old-meta-copy.db --config C:\AgentSession\config.json
+.\agentsession-v3.exe serve --config C:\AgentSession\config.json
+```
+
+Linux/macOS use `./agentsession-v3` instead. The npm Viewer may also be used after
+that import: `agentsession --config <the-same-config.json>`.
+
+The **unreleased npm routing fix in this workspace** supports the same migration
+through the installed Viewer entrypoint:
+
+```sh
+agentsession migrate-meta --from /absolute/old-meta-copy.db --config /absolute/config.json
+agentsession --config /absolute/config.json
+```
+
+Explicit `serve`, `mcp`, `migrate-meta` and `help` commands are forwarded to the
+native CLI; invocations without a command default to `serve`. Global `--config` may also precede
+the command. The separate `agentsession-mcp --config <file>` entrypoint retains
+its stdio behavior. These corrected wrapper commands require a package built
+from the follow-through changes; installing the already-published rc.4 does not
+include them.
+
+The import prints the selected source scope and creates
+`<metaDir>/scopes/<scope>/meta.db` only when that target does not exist. It copies
+the complete SQLite database, including retired-provider rows and the v1 index,
+without changing the input. Configuration and derived indexes require separate
+3.0 setup.
+
+If import reports **`target ... already exists`**, preserve the current 3.0
+metadata root and configuration. Create another configuration with the same
+source paths and a new `metaDir`, such as `C:/AgentSession/imported-legacy-meta`,
+then import and inspect that copy. Both databases remain available under their
+respective configurations. Import does not merge old and new edits; keep both
+until you have selected which state to continue using. Removing the existing
+target to force an import would discard its newer Viewer edits.
+
 The prerelease validation also imports a real legacy database whose
 `session_meta` schema matches public v1.10.1, with full-table content and schema
 comparisons before and after read-only Web/MCP access and restart.
@@ -553,3 +667,25 @@ timeouts under load.
 The standalone release test also requires the release binary. Browser tests
 use agent-browser supplied by the test environment. The frozen real-source
 corpus is private and ignored by Git; public tests do not depend on it.
+
+## Private-source validation
+
+The frozen Pi and Claude Code source checks are ignored in normal test runs.
+To run them, select the corresponding private manifest explicitly. The manifest
+and its referenced source files must be available as read-only frozen copies;
+the checks verify the recorded snapshot hash, full event traversal and unchanged
+source bytes. They report test outcomes without printing private transcript text.
+
+From the repository root in PowerShell:
+
+```powershell
+$env:AGENTSESSION_V3_PI_PRIVATE_MANIFEST = 'D:\path\to\manifest.private.json'
+cargo test --workspace --manifest-path v3/Cargo.toml --locked frozen_private_pi_events_cover_all_rows_without_source_mutation -- --ignored
+
+$env:AGENTSESSION_V3_CLAUDE_PRIVATE_MANIFEST = 'D:\path\to\manifest.private.json'
+cargo test --workspace --manifest-path v3/Cargo.toml --locked frozen_private_claude_native_stream_full_pagination -- --ignored
+```
+
+Each explicit run fails with a prerequisite message if its manifest variable is
+missing. A successful public-fixture suite does not validate these private
+sources.

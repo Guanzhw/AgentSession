@@ -142,7 +142,7 @@ async function harness(t) {
   const port = await freePort();
   await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
   t.after(async () => {
-    await new Promise(resolve => server.close(resolve));
+    await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
     await rm(buildDir, { recursive: true, force: true });
   });
   return { origin: `http://127.0.0.1:${port}`, get promptRequests() { return promptRequests; } };

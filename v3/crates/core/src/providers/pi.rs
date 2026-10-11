@@ -1589,12 +1589,14 @@ mod protocol_tests {
     }
 
     #[test]
+    #[ignore = "requires an explicitly selected private Pi source manifest"]
     fn frozen_private_pi_events_cover_all_rows_without_source_mutation() {
-        let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../tmp/v3-corpus/manifest.private.json");
-        if !manifest_path.exists() {
-            return;
-        }
+        let manifest_path = std::env::var_os("AGENTSESSION_V3_PI_PRIVATE_MANIFEST")
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                panic!("set AGENTSESSION_V3_PI_PRIVATE_MANIFEST to the frozen private Pi manifest before explicitly running this ignored test")
+            });
         let manifest: Value = serde_json::from_slice(&fs::read(manifest_path).unwrap()).unwrap();
         let source = manifest["files"]
             .as_array()

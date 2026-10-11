@@ -58,6 +58,15 @@ async function freePort() {
 }
 
 async function harness(t, options = {}) {
+  const fixtureRef = (id, name) => ({ ...ref(id, name),
+    segment: options.childToolInput && id === childId && name === 'tail' ? 'tool' : 'message' });
+  const fixtureSegment = (id, tail) => {
+    const page = segment(id, tail);
+    if (options.childToolInput && id === childId && tail) {
+      page.items[0] = { ...page.items[0], event: fixtureRef(id, 'tail'), role: 'tool', toolName: 'shell' };
+    }
+    return page;
+  };
   const { build } = createRequire(path.join(uiDir, 'package.json'))('vite');
   const buildDir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-pane-ui-'));
   await build({ root: uiDir, configFile: path.join(uiDir, 'vite.config.ts'),
@@ -148,14 +157,15 @@ async function harness(t, options = {}) {
         const hit = q.toLocaleLowerCase() === marker[id].toLocaleLowerCase();
         return json({ session: session(id), revision: revision(id),
           scope: 'owned', coverage: 'complete-owned-content', matches: hit ? [{
-            event: ref(id, 'tail'), owner: null, ordinal: 1, field: 'body', offset: 1700,
+            event: fixtureRef(id, 'tail'), owner: null, ordinal: 1,
+            field: options.childToolInput && id === childId ? 'toolInput' : 'body', offset: 1700,
             matchLength: marker[id].length, excerpt: marker[id], excerptStart: 1700,
             totalChars: body[id].length,
           }] : [], nextCursor: options.continuation && hit ? 'more' : null });
       }
       if (kind === 'locate') {
         const send = () => json({ session: session(id), revision: revision(id),
-          event: ref(id, url.searchParams.get('messageId')), ordinal: 1, owner: null,
+          event: fixtureRef(id, url.searchParams.get('messageId')), ordinal: 1, owner: null,
           pageCursor: 'tail', tocCursor: 'tail' });
         if (delayLocate) {
           delayLocate = false;
@@ -165,7 +175,7 @@ async function harness(t, options = {}) {
         return send();
       }
       if (kind === 'segments') return json({ session: session(id), revision: revision(id),
-        page: segment(id, url.searchParams.get('cursor') === 'tail') });
+        page: fixtureSegment(id, url.searchParams.get('cursor') === 'tail') });
       if (kind === 'toc') return json({ session: session(id), revision: revision(id),
         toc: toc(id, url.searchParams.get('cursor') === 'tail') });
       if (kind === 'content') {
@@ -207,7 +217,7 @@ async function harness(t, options = {}) {
   t.after(async () => {
     releaseDelayedSearch?.();
     releaseDelayedLocate?.();
-    await new Promise(resolve => server.close(resolve));
+    await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
     await rm(buildDir, { recursive: true, force: true });
   });
   return { origin: `http://127.0.0.1:${port}`, searches, contents, bootstraps,
@@ -221,7 +231,7 @@ async function harness(t, options = {}) {
     get delayedSearchDelivered() { return delayedSearchDelivered; } };
 }
 
-async function browser(t, url, launchArgs = []) {
+async function browser(t, url, launchArgs = [], openSessionSearch = true) {
   const name = `agentsession-v3-pane-${process.pid}-${Date.now()}`;
   const command = (...args) => new Promise((resolve, reject) => {
     const child = spawn(browserExe, ['--session', name, ...args],
@@ -241,8 +251,10 @@ async function browser(t, url, launchArgs = []) {
   t.after(async () => { try { await command('close'); } catch { /* Already closed. */ } });
   await command('open', url, ...launchArgs);
   await waitFor(command, `document.querySelector('.reader-find-toggle')`);
-  await command('click', '.reader-find-toggle');
-  await waitFor(command, `!document.querySelector('#reader-search').hidden`);
+  if (openSessionSearch) {
+    await command('click', '.reader-find-toggle');
+    await waitFor(command, `!document.querySelector('#reader-search').hidden`);
+  }
   return command;
 }
 
@@ -472,7 +484,7 @@ test('root and child pane search reveal complete unloaded content in their own h
 
 test('child source Back and Forward preserve each pane search after a fresh Reader mount',
   { skip, timeout: 90_000 }, async t => {
-    const app = await harness(t, { childOnTail: true });
+    const app = await harness(t, { childOnTail: true, childToolInput: true });
     const command = await browser(t, `${app.origin}/codex/session/${rootId}`);
     const rootInput = '.pane-search[data-scope="session"] input';
     const childInput = '.pane-search[data-scope="child"] input';
@@ -487,14 +499,21 @@ test('child source Back and Forward preserve each pane search after a fresh Read
     await command('fill', childInput, marker[childId]);
     await command('eval', `document.querySelector('.pane-search[data-scope="child"] button[type="submit"]').click()`);
     await waitFor(command, `document.querySelector('.pane-search[data-scope="child"] .pane-search-result')`);
-    await command('eval', `document.querySelector('.pane-search[data-scope="child"] .pane-search-result').click()`);
+    await command('focus', '.pane-search[data-scope="child"] .pane-search-result');
+    await command('press', 'Enter');
     await waitFor(command, `document.querySelector('.inline-child-reader .search-reveal mark')?.textContent === '${marker[childId]}'`);
     const parentHash = await command('eval', 'location.hash');
-    await command('eval', `document.querySelector('.inline-child-heading-actions a').click()`);
+    await command('eval', `window.addEventListener('pageshow', event => {
+      window.__paneHistoryPersisted = event.persisted;
+    })`);
+    await command('focus', '.inline-child-heading-actions a');
+    await command('press', 'Enter');
     await waitFor(command, `location.pathname.endsWith('/${childId}') && document.querySelector('${rootInput}')`);
     assert.equal(await command('get', 'value', rootInput), '', 'Canonical child source has its own root search scope');
     await command('back');
     await waitFor(command, `location.pathname.endsWith('/${rootId}') && document.querySelector('${childInput}')`);
+    t.diagnostic('Initial child-source Back BFCache: ' + await command('eval', 'window.__paneHistoryPersisted'));
+    await assertInsertionFocus();
     // Reload proves recovery from history state without a live Reader or BFCache.
     const beforeReload = app.bootstraps.filter(id => id === rootId).length;
     await command('reload');
@@ -508,6 +527,23 @@ test('child source Back and Forward preserve each pane search after a fresh Read
       await waitFor(command, `document.querySelector('.pane-search[data-scope="child"] .pane-search-result')?.textContent.includes('${marker[childId]}')`);
       await waitFor(command, `document.querySelector('.inline-child-reader .search-reveal mark')?.textContent === '${marker[childId]}'`);
       await waitFor(command, `document.querySelector('.reader-main > .transcript .search-reveal mark')?.textContent === '${marker[rootId]}'`);
+      await assertInsertionFocus();
+    }
+    async function assertInsertionFocus() {
+      try { await waitFor(command, `document.activeElement?.classList.contains('inline-child-toggle')`); }
+      catch (cause) {
+        t.diagnostic(await command('eval', `({ activeTag: document.activeElement?.tagName,
+          activeClass: document.activeElement?.className, hash: location.hash })`));
+        throw cause;
+      }
+      const focus = JSON.parse(await command('eval', `(() => {
+        const rect = document.activeElement.getBoundingClientRect();
+        return { top: rect.top, bottom: rect.bottom, height: innerHeight,
+          outline: getComputedStyle(document.activeElement).outlineStyle };
+      })()`));
+      assert.ok(focus.top >= -1 && focus.bottom <= focus.height + 1,
+        'Keyboard return restores the visible child insertion control: ' + JSON.stringify(focus));
+      assert.notEqual(focus.outline, 'none', 'Returned keyboard focus has a visible outline');
     }
     await assertRestored();
     await command('forward');
@@ -522,6 +558,35 @@ test('child source Back and Forward preserve each pane search after a fresh Read
     assert.equal(await command('get', 'value', childInput), marker[childId]);
     assert.deepEqual(app.searches, [{ id: rootId, q: marker[rootId] }, { id: childId, q: marker[childId] }],
       'Restoration retains results without reissuing searches');
+    const fresh = await browser(t, `${app.origin}/codex/session/${rootId}${JSON.parse(parentHash)}`, [], false);
+    await waitFor(fresh, `document.querySelector('.inline-child-reader .search-reveal mark')?.textContent === '${marker[childId]}'`);
+    assert.equal(await fresh('eval', `Boolean(history.state?.agentSessionReaderSearch)`), 'false',
+      'The new browser entry has no saved pane-search history');
+    assert.equal(await fresh('eval', `document.querySelector('.inline-child-reader .search-reveal').closest('article').dataset.messageId`),
+      '"tail"', 'A canonical child-search URL restores its exact owner without saved history state');
+    const destination = JSON.parse(await fresh('eval', `(() => {
+      const mark = document.querySelector('.inline-child-reader .search-reveal mark');
+      const rect = mark.getBoundingClientRect();
+      return { focused: document.activeElement === mark.closest('.search-reveal'),
+        top: rect.top, bottom: rect.bottom, height: innerHeight,
+        activeTag: document.activeElement?.tagName, activeClass: document.activeElement?.className };
+    })()`));
+    t.diagnostic('Fresh child-search destination: ' + JSON.stringify(destination));
+    assert.equal(destination.focused, true, 'The fresh entry focuses its selected content');
+    assert.ok(destination.top >= 0 && destination.bottom <= destination.height,
+      'The selected child-search text is visible on fresh entry');
+    const bodyApp = await harness(t, { childOnTail: true });
+    const bodyHash = JSON.parse(parentHash).replace('segment=tool', 'segment=message').replace('field=toolInput', 'field=body');
+    const freshBody = await browser(t, `${bodyApp.origin}/codex/session/${rootId}${bodyHash}`, [], false);
+    await waitFor(freshBody, `document.activeElement === document.querySelector('.inline-child-reader .search-reveal')`);
+    const bodyPosition = JSON.parse(await freshBody('eval', `(() => {
+      const mark = document.querySelector('.inline-child-reader .search-reveal mark');
+      const rect = mark.getBoundingClientRect();
+      return { text: mark.textContent, top: rect.top, bottom: rect.bottom, height: innerHeight };
+    })()`));
+    assert.equal(bodyPosition.text, marker[childId]);
+    assert.ok(bodyPosition.top >= 0 && bodyPosition.bottom <= bodyPosition.height,
+      'Fresh body search waits for automatic content reads before positioning: ' + JSON.stringify(bodyPosition));
   });
 
 for (const movedAway of [false, true]) {

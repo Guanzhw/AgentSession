@@ -166,7 +166,7 @@ export async function readerMetadataHarness(t, mode = 'replies', options = {}) {
   });
   const serverRef = await new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server.address())));
   t.after(async () => {
-    await new Promise(resolve => server.close(resolve));
+    await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
     await rm(buildDir, { recursive: true, force: true });
   });
   return { origin: `http://127.0.0.1:${serverRef.port}`, buildDir, requests };

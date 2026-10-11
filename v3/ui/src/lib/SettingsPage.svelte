@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { onMount, tick } from 'svelte';
   import type { SettingsSnapshot, RuntimeSettings } from './api';
   import { saveSettings } from './api';
   import { language, t } from './i18n';
+  import { sourceGuidance } from './source-guidance';
 
   export let settings: SettingsSnapshot;
   let commands = JSON.stringify(settings.runtime.resumeCommands, null, 2);
@@ -15,6 +17,21 @@
   let error = '';
   let projectMessage = '';
   let projectError = '';
+
+  async function focusSource(): Promise<void> {
+    await tick();
+    const source = sourceGuidance.find(item => window.location.hash === '#source-' + item.provider);
+    if (!source) return;
+    const target = document.getElementById('source-' + source.provider);
+    target?.scrollIntoView({ block: 'start' });
+    target?.focus({ preventScroll: true });
+  }
+
+  onMount(() => {
+    void focusSource();
+    window.addEventListener('hashchange', focusSource);
+    return () => window.removeEventListener('hashchange', focusSource);
+  });
 
   async function save(event: SubmitEvent): Promise<void> {
     event.preventDefault();
@@ -140,11 +157,25 @@
 
   <section class="settings-panel" aria-labelledby="settings-sources-heading">
     <h2 id="settings-sources-heading">{t($language, 'Provider sources')}</h2>
-    <dl>
-      {#each Object.entries(settings.startup.sources) as [key, value] (key)}
-        <div><dt>{settingLabel(key)}</dt><dd><code>{value}</code></dd></div>
-      {/each}
-    </dl>
+    <p>{t($language, 'Source paths are selected at startup. CLI options take precedence over environment variables, then configuration fields, then provider defaults.')}</p>
+    <p>{t($language, 'The configuration file is selected by --config, then AGENTSESSION_CONFIG, then the platform default.')}</p>
+    {#each sourceGuidance as source (source.provider)}
+      <article class="source-guidance" id={'source-' + source.provider} tabindex="-1" aria-labelledby={'source-heading-' + source.provider}>
+        <h3 id={'source-heading-' + source.provider}>{source.label}</h3>
+        <dl>
+          <div><dt>{t($language, 'Current source path')}</dt><dd><code data-source-path={source.provider}>{settings.startup.sources[source.key]}</code></dd></div>
+          <div><dt>{t($language, 'Configuration field')}</dt><dd><code>{source.key}</code></dd></div>
+          <div><dt>{t($language, 'CLI option')}</dt><dd><code>{source.flag}</code></dd></div>
+          <div><dt>{t($language, 'Environment variable')}</dt><dd><code>{source.environment}</code></dd></div>
+        </dl>
+        <ol>
+          <li>{t($language, 'Check that the current path exists and this Viewer process can read it.')}</li>
+          <li>{t($language, 'To change the path, update the startup CLI option or environment variable, or set this field in the configuration file:')} <code>{settings.configFile.path}</code>.
+            {t($language, 'Remove or update higher-priority overrides so the intended value can apply.')}</li>
+          <li>{t($language, 'Restart the Viewer with the updated startup settings. Return here to confirm the current path, then open Sessions and select this provider to recheck its source.')}</li>
+        </ol>
+      </article>
+    {/each}
   </section>
 
   <section class="settings-panel" aria-labelledby="settings-process-heading">
@@ -166,4 +197,10 @@
   textarea:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
   form p { margin: 0; }
   form button { justify-self: start; }
+  .source-guidance { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); scroll-margin-top: 92px; }
+  .source-guidance h3 { margin: 0 0 12px; }
+  .source-guidance:focus { outline: 2px solid var(--focus-ring); outline-offset: 5px; }
+  .source-guidance ol { padding-left: 20px; font-size: 12px; line-height: 1.65; }
+  .source-guidance li + li { margin-top: 7px; }
+  .source-guidance code { overflow-wrap: anywhere; }
 </style>

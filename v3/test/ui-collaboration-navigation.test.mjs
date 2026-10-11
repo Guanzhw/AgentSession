@@ -104,7 +104,7 @@ async function harness(t) {
   });
   const port = await freeFetchSafePort();
   await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
-  t.after(async () => { await new Promise(resolve => server.close(resolve)); await rm(outDir, { recursive: true, force: true }); });
+  t.after(async () => { await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }); await rm(outDir, { recursive: true, force: true }); });
   return { origin: `http://127.0.0.1:${server.address().port}`, requests };
 }
 async function browser(t, url) {

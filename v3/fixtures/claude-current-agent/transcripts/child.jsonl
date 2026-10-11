@@ -1,0 +1,2 @@
+{"type":"user","uuid":"child-request","timestamp":"2026-10-11T12:00:02Z","sessionId":"parent","agentId":"child","isSidechain":true,"message":{"content":"Reply with CHILD_OK."}}
+{"type":"assistant","uuid":"child-reply","timestamp":"2026-10-11T12:00:03Z","sessionId":"parent","agentId":"child","isSidechain":true,"message":{"content":[{"type":"text","text":"CHILD_OK"}]}}

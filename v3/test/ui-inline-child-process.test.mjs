@@ -333,7 +333,7 @@ test('retained empty assistant, owned reasoning and tool stay inside the inline 
     const command = (...args) => browserCommand(browserBinary(), browserSession, ...args);
     t.after(async () => {
       try { await command('close'); } catch { /* Browser may already be closed. */ }
-      await new Promise(resolve => server.close(resolve));
+      await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
       await rm(buildDir, { recursive: true, force: true });
     });
     const origin = `http://127.0.0.1:${port}`;

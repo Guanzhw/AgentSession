@@ -10,6 +10,14 @@ export const packageNames = {
 
 export const tarballName = manifest => `${manifest.name.replace(/^@/, '').replace('/', '-')}-${manifest.version}.tgz`;
 
+export function releaseIdentity(version) {
+  if (!/^3\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/.test(version)) {
+    throw new Error('Expected a concrete AgentSession 3 release version');
+  }
+  const prerelease = version.includes('-');
+  return { version, tag: `v${version}`, npmTag: prerelease ? 'next' : 'latest', prerelease };
+}
+
 export async function readPackageManifests(root) {
   const manifests = Object.fromEntries(await Promise.all(Object.keys(packageNames).map(async name =>
     [name, JSON.parse(await readFile(path.join(root, name, 'package.json'), 'utf8'))])));
@@ -26,26 +34,25 @@ export async function readPackageManifests(root) {
   return manifests;
 }
 
-export function assertPublicPrerelease(manifests, provenance) {
-  if (!manifests.native.version.startsWith('3.') || !manifests.native.version.includes('-')) {
-    throw new Error('Public staging requires an AgentSession 3 prerelease version');
-  }
+export function assertPublicRelease(manifests, provenance) {
+  const identity = releaseIdentity(manifests.native.version);
   if (provenance.version !== manifests.native.version || !/^[a-f0-9]{40}$/.test(provenance.sourceCommit ?? '')
     || Object.keys(nativeTargets).some(target => !provenance.platforms[target])
     || Object.keys(provenance.platforms).length !== Object.keys(nativeTargets).length) {
-    throw new Error('Public prerelease requires all four native targets and a full source commit');
+    throw new Error('Public release requires all four native targets and a full source commit');
   }
   for (const [name, manifest] of Object.entries(manifests)) {
     if (manifest.private !== false || manifest.license !== 'MIT'
       || manifest.repository?.url !== 'git+https://github.com/Guanzhw/AgentSession.git'
-      || manifest.publishConfig?.access !== 'public' || manifest.publishConfig?.tag !== 'next'
+      || manifest.publishConfig?.access !== 'public' || manifest.publishConfig?.tag !== identity.npmTag
       || manifest.publishConfig?.provenance !== true) {
-      throw new Error(`${name} public prerelease metadata is incomplete`);
+      throw new Error(`${name} public release metadata is incomplete`);
     }
   }
   for (const [target, pin] of Object.entries(provenance.platforms)) {
     if (!/^[a-f0-9]{64}$/.test(pin.releaseSourceSha256 ?? '')) {
-      throw new Error(`${target} public prerelease must pin its release source sidecar`);
+      throw new Error(`${target} public release must pin its release source sidecar`);
     }
   }
+  return identity;
 }

@@ -138,8 +138,14 @@ test('Runtime lenses render bounded summary, graph and domain facts with coverag
               query.get('messageId') === ${JSON.stringify(sourceEvent.messageId)} && query.get('segment') === ${JSON.stringify(sourceEvent.segment)};
           })`),
         'true', 'Execution source navigation passes its own strict revision despite the Reader prefix hash');
-        await command(name, 'click', 'button.runtime-tab');
-        await waitFor(name, `document.querySelector('.runtime-lenses')`);
+        await command(name, 'back');
+        await waitFor(name, `document.querySelector('.runtime-lens-execution[aria-current="page"]') &&
+          document.querySelector('.runtime-domain-execution .runtime-domain-entry')`);
+        await command(name, 'forward');
+        await waitFor(name, `document.querySelector('.transcript') && location.hash.includes(${JSON.stringify(sourceEvent.messageId)})`);
+        await command(name, 'back');
+        await waitFor(name, `document.querySelector('.runtime-lens-execution[aria-current="page"]') &&
+          document.querySelector('.runtime-domain-execution .runtime-domain-entry')`);
       }
     }
     const coordinationPage = {
@@ -191,12 +197,20 @@ test('Runtime lenses render bounded summary, graph and domain facts with coverag
     await command(name, 'eval', `window.fetch=(input,init)=>String(input).endsWith('/summary') ?
       new Response(${JSON.stringify(JSON.stringify({ ...summary, revision: 'changed' }))},
         {status:200,headers:{'content-type':'application/json'}}) : window.__runtimeOriginalFetch(input,init)`);
-    // Reopening a lens establishes a new independent view of the current strict source.
+    // Returning to a lens retains its established strict revision.
     await command(name, 'click', '.runtime-lens-sessions');
     await waitFor(name, `document.querySelector('.runtime-graph-node')`);
     await command(name, 'click', '.runtime-lens-summary');
-    await waitFor(name, `document.querySelector('.runtime-summary-counts')`);
+    await waitFor(name, `document.querySelector('.runtime-summary [role="alert"]')?.textContent.includes('Source revision changed')`);
+    assert.equal(Number(await command(name, 'get', 'count', '.runtime-summary-counts')), 0,
+      'a changed revision cannot publish counts into the saved overview');
+    // A fresh navigation establishes its own snapshot against the real native source.
+    await command(name, 'open', `${base}/codex/session/${sessionId}#runtime?lens=summary`);
+    await command(name, 'eval', `window.__beforeFreshOverviewReload=true;
+      history.replaceState(null,'',location.href); location.reload()`);
+    await waitFor(name, `!window.__beforeFreshOverviewReload && document.querySelector('.runtime-summary-counts')`);
     assert.equal(Number(await command(name, 'get', 'count', '.runtime-summary [role="alert"]')), 0);
+    await command(name, 'eval', 'window.__runtimeOriginalFetch=window.fetch.bind(window)');
     await command(name, 'eval', `window.fetch=(input,init)=>String(input).endsWith('/summary') ?
       new Response(JSON.stringify({error:{code:'source_changed',message:'The strict source changed.'}}),
         {status:409,headers:{'content-type':'application/json'}}) : window.__runtimeOriginalFetch(input,init)`);

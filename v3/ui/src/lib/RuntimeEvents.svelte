@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import type { ReaderEventRef, RuntimeEvent, RuntimeEventPage, SessionRef } from './api';
   import { getRuntimeEvents, RuntimeApiError } from './api';
   import RuntimeWork from './RuntimeWork.svelte';
@@ -7,36 +7,82 @@
   import RuntimeSessions from './RuntimeSessions.svelte';
   import RuntimeDomain from './RuntimeDomain.svelte';
   import { language, protocolLabel, t } from './i18n';
+  import { readRuntimeHistory, runtimeLensFromHash, runtimeSourceHash, saveRuntimeHistory,
+    type RuntimeLens, type RuntimeNavigationSnapshot } from './runtime-history';
 
   export let provider: string;
   export let sessionId: string;
   export let onOpenReader: (event: ReaderEventRef, sourceRevision: string) => void;
   export let onOpenSession: (session: SessionRef, nodeId: string) => void;
 
+  const saved = readRuntimeHistory(provider, sessionId);
+  let navigation: RuntimeNavigationSnapshot = saved ?? {
+    provider, sessionId, lens: 'events', scrollY: 0, domains: {}, focusNodeId: null,
+  };
+
   type State = 'loading' | 'ready' | 'empty' | 'invalid' | 'unavailable' | 'request' | 'cursor' | 'stale';
   let state: State = 'loading';
   let message = '';
-  let sourceRevision: string | null = null;
+  let sourceRevision: string | null = navigation.events?.revision ?? null;
   let page: RuntimeEventPage | null = null;
-  let categoryDraft = '';
-  let kindDraft = '';
-  let category = '';
-  let kind = '';
+  let categoryDraft = navigation.events?.category ?? '';
+  let kindDraft = navigation.events?.kind ?? '';
+  let category = categoryDraft;
+  let kind = kindDraft;
+  let currentCursor = navigation.events?.cursor ?? null;
   let generation = 0;
   let active = true;
   const initialRuntime = window.location.hash.startsWith('#runtime?')
     ? new URLSearchParams(window.location.hash.slice(9)) : null;
-  let lens: 'events' | 'work' | 'summary' | 'sessions' | 'execution' | 'coordination' | 'context' =
-    initialRuntime?.get('lens') === 'sessions' ? 'sessions' : 'events';
-  let focusNodeId = initialRuntime?.get('node') ?? null;
+  let lens: RuntimeLens = runtimeLensFromHash() ?? navigation.lens;
+  let focusNodeId = initialRuntime?.get('node') ?? navigation.focusNodeId;
+  let restoreScroll = saved !== null && initialRuntime !== null;
+
+  export function saveNavigation(): void {
+    navigation = { ...navigation, lens, focusNodeId, scrollY: window.scrollY,
+      events: { category, kind, cursor: currentCursor, revision: sourceRevision } };
+    saveRuntimeHistory(navigation);
+  }
+
+  async function restorePosition(): Promise<void> {
+    if (!restoreScroll) return;
+    restoreScroll = false;
+    const currentLens = lens;
+    await tick();
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    if (!active || lens !== currentLens) return;
+    window.scrollTo({ top: saved!.scrollY, behavior: 'instant' });
+    saveNavigation();
+  }
+
+  function selectLens(next: RuntimeLens): void {
+    lens = next;
+    focusNodeId = next === 'sessions' ? null : focusNodeId;
+    generation++;
+    restoreScroll = false;
+    saveNavigation();
+    if (next === 'events') void load(currentCursor);
+  }
+
+  function openReader(event: ReaderEventRef, revision: string): void {
+    saveNavigation();
+    onOpenReader(event, revision);
+  }
+
+  function openSession(session: SessionRef, nodeId: string): void {
+    focusNodeId = nodeId;
+    saveNavigation();
+    onOpenSession(session, nodeId);
+  }
 
   onMount(() => {
-    void load(null);
+    if (lens === 'events') void load(currentCursor);
     return () => { active = false; generation++; };
   });
 
   async function load(cursor: string | null): Promise<void> {
     const request = ++generation;
+    currentCursor = cursor;
     state = 'loading';
     message = '';
     try {
@@ -55,6 +101,8 @@
       sourceRevision = result.revision;
       page = result;
       state = result.events.length ? 'ready' : 'empty';
+      saveNavigation();
+      await restorePosition();
     } catch (cause) {
       if (!active || request !== generation) return;
       page = null;
@@ -85,26 +133,26 @@
   function openSource(click: MouseEvent, event: RuntimeEvent): void {
     if (!event.readerEvent || click.metaKey || click.ctrlKey || click.shiftKey || click.altKey) return;
     click.preventDefault();
-    onOpenReader(event.readerEvent, page!.revision);
+    openReader(event.readerEvent, page!.revision);
   }
 </script>
 
 <section class="runtime-panel" aria-label={t($language, 'Runtime')}>
   <nav class="runtime-lenses" aria-label={t($language, 'Runtime views')}>
     <button type="button" class:active={lens === 'events'} aria-current={lens === 'events' ? 'page' : undefined}
-      onclick={() => { lens = 'events'; void load(null); }}>{t($language, 'Events')}</button>
+      onclick={() => selectLens('events')}>{t($language, 'Events')}</button>
     <button type="button" class:active={lens === 'work'} aria-current={lens === 'work' ? 'page' : undefined}
-      onclick={() => { lens = 'work'; generation++; }}>{t($language, 'Work')}</button>
+      onclick={() => selectLens('work')}>{t($language, 'Work')}</button>
     <button type="button" class="runtime-lens-summary" class:active={lens === 'summary'} aria-current={lens === 'summary' ? 'page' : undefined}
-      onclick={() => { lens = 'summary'; generation++; }}>{t($language, 'Summary')}</button>
+      onclick={() => selectLens('summary')}>{t($language, 'Summary')}</button>
     <button type="button" class="runtime-lens-sessions" class:active={lens === 'sessions'} aria-current={lens === 'sessions' ? 'page' : undefined}
-      onclick={() => { lens = 'sessions'; focusNodeId = null; generation++; }}>{t($language, 'Sessions')}</button>
+      onclick={() => selectLens('sessions')}>{t($language, 'Sessions')}</button>
     <button type="button" class="runtime-lens-execution" class:active={lens === 'execution'} aria-current={lens === 'execution' ? 'page' : undefined}
-      onclick={() => { lens = 'execution'; generation++; }}>{t($language, 'Execution')}</button>
+      onclick={() => selectLens('execution')}>{t($language, 'Execution')}</button>
     <button type="button" class="runtime-lens-coordination" class:active={lens === 'coordination'} aria-current={lens === 'coordination' ? 'page' : undefined}
-      onclick={() => { lens = 'coordination'; generation++; }}>{t($language, 'Coordination')}</button>
+      onclick={() => selectLens('coordination')}>{t($language, 'Coordination')}</button>
     <button type="button" class="runtime-lens-context" class:active={lens === 'context'} aria-current={lens === 'context' ? 'page' : undefined}
-      onclick={() => { lens = 'context'; generation++; }}>{t($language, 'Context')}</button>
+      onclick={() => selectLens('context')}>{t($language, 'Context')}</button>
   </nav>
   {#if lens === 'events'}
   <div class="runtime-intro">
@@ -145,8 +193,8 @@
             <p>{t($language, 'Source order')} {event.sourceOrder.record}:{event.sourceOrder.ordinal} · {t($language, 'Event')} {event.sequence}</p>
             <p>{t($language, 'Provenance:')} {protocolLabel(event.provenance.fidelity, $language)} · {event.provenance.sourceType}{event.provenance.sourceId ? ` #${event.provenance.sourceId}` : ''}</p>
             {#if event.readerEvent}
-              <a href={'#event?' + new URLSearchParams({ messageId: event.readerEvent.messageId, segment: event.readerEvent.segment })}
-                onclick={(click) => openSource(click, event)}>Open in conversation</a>
+              <a href={runtimeSourceHash(event.readerEvent, page.revision)}
+                onclick={(click) => openSource(click, event)}>{t($language, 'Open in conversation')}</a>
             {/if}
           </li>
         {/each}
@@ -158,14 +206,22 @@
     </div>
   {/if}
   {:else if lens === 'work'}
-    <RuntimeWork {provider} {sessionId} {onOpenReader} />
+    <RuntimeWork {provider} {sessionId} initialState={navigation.work}
+      onStateChange={(state) => { navigation = { ...navigation, work: state }; saveNavigation(); }}
+      onReady={restorePosition} onOpenReader={openReader} />
   {:else if lens === 'summary'}
-    <RuntimeSummary {provider} {sessionId} />
+    <RuntimeSummary {provider} {sessionId} initialRevision={navigation.summaryRevision ?? null}
+      onRevision={(revision) => { navigation = { ...navigation, summaryRevision: revision }; saveNavigation(); }}
+      onReady={restorePosition} />
   {:else if lens === 'sessions'}
-    <RuntimeSessions {provider} {sessionId} {focusNodeId} {onOpenSession} />
+    <RuntimeSessions {provider} {sessionId} {focusNodeId} initialRevision={navigation.sessionsRevision ?? null}
+      onRevision={(revision) => { navigation = { ...navigation, sessionsRevision: revision }; saveNavigation(); }}
+      onReady={restorePosition} onOpenSession={openSession} />
   {:else}
     {#key lens}
-      <RuntimeDomain {provider} {sessionId} domain={lens} {onOpenReader} />
+      <RuntimeDomain {provider} {sessionId} domain={lens} initialState={navigation.domains[lens]}
+        onStateChange={(domain, state) => { navigation = { ...navigation, domains: { ...navigation.domains, [domain]: state } }; saveNavigation(); }}
+        onReady={restorePosition} onOpenReader={openReader} />
     {/key}
   {/if}
 </section>

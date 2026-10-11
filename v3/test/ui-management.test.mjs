@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createServer as createHttpServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,7 +45,7 @@ async function freePort() {
   return freeFetchSafePort();
 }
 
-async function harness(t) {
+async function harness(t, { trashScenario = false, trashRace = false } = {}) {
   const { build } = createRequire(path.join(uiDir, 'package.json'))('vite');
   const buildDir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-ui-manage-'));
   await build({ root: uiDir, configFile: path.join(uiDir, 'vite.config.ts'),
@@ -54,6 +54,12 @@ async function harness(t) {
     deleted: false, permanent: false, timeStarred: null, timeDeleted: null,
     timeRenamed: null };
   const writes = [];
+  const libraryRequests = [];
+  const trashState = { mode: 'failed', holdPi: false };
+  let notifyHeldTrash;
+  let releaseHeldTrash;
+  const heldTrashRead = new Promise(resolve => { notifyHeldTrash = resolve; });
+  const heldTrashResponse = new Promise(resolve => { releaseHeldTrash = resolve; });
   let bootstrapRequests = 0;
   const server = createHttpServer(async (request, response) => {
     const url = new URL(request.url || '/', `http://${request.headers.host || '127.0.0.1'}`);
@@ -62,17 +68,35 @@ async function harness(t) {
         'cache-control': 'no-store' });
       response.end(JSON.stringify(body));
     };
-    if (url.pathname === '/api/providers') return json([{ id: 'codex', available: true, manageable: true }]);
+    if (url.pathname === '/api/providers') return json([{ id: 'codex', available: true, manageable: true },
+      ...(trashScenario || trashRace ? [{ id: 'pi', available: true, manageable: true }] : [])]);
     if (url.pathname === '/api/v3/sessions') return json(meta.deleted || meta.permanent ? [] : [summary(meta.customTitle || undefined)]);
     if (url.pathname === '/api/v3/library/sessions') {
-      const rows = meta.deleted || meta.permanent ? [] : [summary(meta.customTitle || undefined)];
-      return json({ families: rows.map(session => ({ session, matched: true, matchingCount: 1,
+      libraryRequests.push(Object.fromEntries(url.searchParams));
+      const rows = meta.deleted || meta.permanent || (url.searchParams.get('starredOnly') === 'true' && !meta.starred)
+        ? [] : [summary(meta.customTitle || undefined)];
+      return json({ families: rows.map(session => ({ session, starred: meta.starred, matched: true, matchingCount: 1,
         childCount: 0, totalChildCount: 0, familyRootId: session.session.sessionId,
         familyUpdated: session.updatedAt, parentBoundary: null })), total: rows.length,
         matchingSessions: rows.length, sourceDiagnostics: [], nextCursor: null });
     }
     if (url.pathname === '/api/v3/meta') return json([meta]);
-    if (url.pathname === '/api/v3/trash') return json(meta.deleted && !meta.permanent ? [meta] : []);
+    if (url.pathname === '/api/v3/trash') {
+      if (trashScenario) {
+        if (trashState.mode === 'failed' || (trashState.mode === 'partial' && url.searchParams.get('provider') === 'pi')) {
+          return json({ error: { code: 'meta_unavailable', message: 'Fixture metadata source is unreadable.' } }, 503);
+        }
+        return json(trashState.mode === 'partial' ? [{ ...meta, deleted: true }] : []);
+      }
+      const rows = url.searchParams.get('provider') === 'pi' ? []
+        : meta.deleted && !meta.permanent ? [{ ...meta }] : [];
+      if (trashRace && trashState.holdPi && url.searchParams.get('provider') === 'pi') {
+        trashState.holdPi = false;
+        notifyHeldTrash();
+        await heldTrashResponse;
+      }
+      return json(rows);
+    }
     if (url.pathname === `/api/v3/meta/codex/${sessionId}`) return json(meta);
     if (url.pathname === `/api/v3/reader/codex/${sessionId}/bootstrap`) {
       bootstrapRequests++;
@@ -107,10 +131,11 @@ async function harness(t) {
   const port = await freePort();
   await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
   t.after(async () => {
-    await new Promise(resolve => server.close(resolve));
+    releaseHeldTrash();
+    await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
     await rm(buildDir, { recursive: true, force: true });
   });
-  return { origin: `http://127.0.0.1:${port}`, writes,
+  return { origin: `http://127.0.0.1:${port}`, writes, libraryRequests, trashState, heldTrashRead, releaseHeldTrash,
     get bootstrapRequests() { return bootstrapRequests; } };
 }
 
@@ -130,9 +155,18 @@ async function browser(t, url) {
       code === 0 ? resolve(stdout.trim()) : reject(new Error(stderr || stdout));
     });
   });
+
   t.after(async () => { try { await command('close'); } catch { /* Browser already closed. */ } });
   await command('open', url);
+  await command('set', 'viewport', '1440', '1000');
   return command;
+}
+
+async function screenshot(command, name) {
+  const dir = process.env.AGENTSESSION_V3_JOURNEY_SCREENSHOT_DIR;
+  if (!dir) return;
+  await mkdir(dir, { recursive: true });
+  await command('screenshot', path.join(dir, name));
 }
 
 async function waitFor(command, expression) {
@@ -144,9 +178,9 @@ async function waitFor(command, expression) {
   throw new Error(`Timed out waiting for ${expression}`);
 }
 
-test('Reader manages a Viewer star, custom title, and reversible exclusion',
+test('Reader manages Viewer metadata and cancels an older empty Trash read after deletion',
   { skip, timeout: 60_000 }, async t => {
-    const app = await harness(t);
+    const app = await harness(t, { trashRace: true });
     const command = await browser(t, `${app.origin}/sessions`);
     await waitFor(command, `document.querySelector('.session-row')`);
     await command('click', '.session-row');
@@ -167,10 +201,44 @@ test('Reader manages a Viewer star, custom title, and reversible exclusion',
     await waitFor(command, `document.querySelector('#reader-title')?.textContent === 'The saved title'`);
     await command('reload');
     await waitFor(command, `document.querySelector('#reader-title')?.textContent === 'The saved title'`);
+    await command('click', '.reader-back-link');
+    await waitFor(command, `document.querySelector('.session-row strong')?.textContent === 'The saved title'`);
+    await command('click', '[data-library-view="trash"]');
+    await waitFor(command, `document.querySelector('.empty-state h2')?.textContent === 'Trash is empty'`);
+    await command('click', '[data-library-view="sessions"]');
+    await command('eval', `(() => {
+      const originalFetch = window.fetch;
+      window.__raceTrashBodiesRead = 0;
+      window.fetch = async (...args) => {
+        const response = await originalFetch(...args);
+        if (new URL(args[0], location.href).pathname === '/api/v3/trash') {
+          const originalJson = response.json.bind(response);
+          response.json = async () => {
+            const body = await originalJson();
+            window.__raceTrashBodiesRead++;
+            return body;
+          };
+        }
+        return response;
+      };
+    })()`);
+    app.trashState.holdPi = true;
+    await command('click', '[data-library-view="trash"]');
+    await app.heldTrashRead;
+    await waitFor(command, `window.__raceTrashBodiesRead === 1`);
+    await command('click', '[data-library-view="sessions"]');
+    await command('click', '.session-row');
+    await waitFor(command, `document.querySelector('.reader-delete:not([disabled])')`);
     await command('click', '.reader-delete');
     await waitFor(command, `location.pathname === '/sessions' && document.querySelector('.empty-state')`);
+    app.releaseHeldTrash();
+    await waitFor(command, `window.__raceTrashBodiesRead === 2`);
+    assert.match(await command('get', 'text', '[data-library-view="trash"]'), /—/,
+      'the older empty response cannot overwrite unread state after a new exclusion');
     await command('click', '[data-library-view="trash"]');
     await waitFor(command, `document.querySelector('.trash-row')`);
+    assert.equal(await command('get', 'text', '[data-trash-count]'), '1',
+      'a fresh read confirms the newly deleted session after the cancelled read');
     await command('click', '.trash-restore');
     await waitFor(command, `!document.querySelector('.trash-row')`);
     await command('click', '[data-library-view="sessions"]');
@@ -190,4 +258,81 @@ test('Reader manages a Viewer star, custom title, and reversible exclusion',
       ['star', 'rename', 'delete', 'restore', 'delete', 'permanent-delete']);
     assert.equal(app.writes[1].body.title, 'The saved title');
     assert.ok(app.writes.every(write => write.contentType?.startsWith('application/json')));
+  });
+
+test('Library shows saved stars and keeps the core starred filter across Reader and Back',
+  { skip, timeout: 60_000 }, async t => {
+    const app = await harness(t);
+    const command = await browser(t, `${app.origin}/sessions`);
+    await waitFor(command, `document.querySelector('[data-library-star="codex/${sessionId}"][data-starred="false"]')`);
+    await command('click', '.session-row');
+    await waitFor(command, `document.querySelector('.reader-star:not([disabled])')`);
+    await command('click', '.reader-star');
+    await waitFor(command, `document.querySelector('.reader-star')?.textContent.includes('Starred')`);
+    await command('click', '.reader-back-link');
+    await waitFor(command, `document.querySelector('[data-library-star="codex/${sessionId}"][data-starred="true"]')`);
+    await command('click', '[data-library-starred]');
+    await waitFor(command, `document.querySelector('[data-library-starred]')?.checked && document.querySelector('.session-row')`);
+    assert.equal(app.libraryRequests.at(-1).starredOnly, 'true');
+    await screenshot(command, 'library-only-starred-en.png');
+    await command('click', '.session-row');
+    await waitFor(command, `document.querySelector('.reader-layout')`);
+    await command('eval', 'history.back()');
+    await waitFor(command, `document.querySelector('[data-library-starred]')?.checked && document.querySelector('.session-row')`);
+    await command('reload');
+    await waitFor(command, `document.querySelector('[data-library-starred]')?.checked && document.querySelector('[data-starred="true"]')`);
+    await command('click', '.session-row');
+    await waitFor(command, `document.querySelector('.reader-star:not([disabled])')`);
+    await command('click', '.reader-star');
+    await waitFor(command, `document.querySelector('.reader-star')?.textContent.includes('☆ Star')`);
+    await command('eval', 'history.back()');
+    await waitFor(command, `document.querySelector('[data-library-starred]')?.checked && !document.querySelector('.session-row')`);
+    assert.equal(await command('get', 'text', '.archive-count strong'), '0');
+    await command('click', '[data-library-starred]');
+    await waitFor(command, `document.querySelector('[data-library-star="codex/${sessionId}"][data-starred="false"]')`);
+    assert.deepEqual(app.writes.map(write => write.action), ['star', 'star']);
+  });
+
+test('Trash failures, partial rows and confirmed empty reads have distinct counts and retry',
+  { skip, timeout: 60_000 }, async t => {
+    const app = await harness(t, { trashScenario: true });
+    const command = await browser(t, `${app.origin}/sessions`);
+    await waitFor(command, `document.querySelector('.session-row')`);
+    await command('click', '[data-library-view="trash"]');
+    await waitFor(command, `document.querySelector('[data-trash-read-status]')?.textContent.includes('unknown')`);
+    assert.equal(await command('get', 'text', '[data-trash-count]'), '—');
+    assert.equal(await command('get', 'text', '.archive-count strong'), '—');
+    assert.equal(await command('eval', `document.body.textContent.includes('Trash is empty')`), 'false');
+    await command('press', 'Tab');
+    await command('eval', `document.querySelector('[data-trash-retry]').focus()`);
+    assert.equal(await command('eval', `document.activeElement.matches('[data-trash-retry]') && getComputedStyle(document.activeElement).outlineStyle !== 'none'`), 'true');
+    await screenshot(command, 'trash-all-failed-en.png');
+
+    app.trashState.mode = 'partial';
+    await command('click', '[data-trash-retry]');
+    await waitFor(command, `document.querySelector('.trash-row') && document.querySelector('[data-trash-read-status]')?.textContent.includes('incomplete')`);
+    assert.equal(await command('get', 'text', '[data-trash-count]'), '1+');
+    assert.equal(await command('get', 'text', '.archive-count strong'), '1+');
+    assert.equal(await command('eval', `document.body.textContent.includes('Trash is empty')`), 'false');
+    await screenshot(command, 'trash-partial-en.png');
+    await command('eval', `(() => { const select = document.querySelector('.language-select'); select.value = 'zh'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await waitFor(command, `document.querySelector('[data-trash-read-status]')?.textContent.includes('列表不完整')`);
+    assert.equal(await command('get', 'text', '[data-trash-retry]'), '重试读取回收站');
+    assert.equal(await command('get', 'text', '.search-error'), '1 个提供方元数据来源无法读取。',
+      'changing language also translates the existing metadata read summary without retrying');
+    await screenshot(command, 'trash-partial-zh.png');
+    await command('eval', `(() => { const select = document.querySelector('.language-select'); select.value = 'en'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await waitFor(command, `document.querySelector('[data-trash-read-status]')?.textContent.includes('incomplete')`);
+    assert.equal(await command('get', 'text', '.search-error'), '1 provider metadata source could not be read.',
+      'the same existing failure summary also follows a switch back to English');
+    await command('eval', `(() => { const select = document.querySelector('.language-select'); select.value = 'zh'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await waitFor(command, `document.querySelector('[data-trash-read-status]')?.textContent.includes('列表不完整')`);
+
+    app.trashState.mode = 'complete';
+    await command('click', '[data-trash-retry]');
+    await waitFor(command, `document.querySelector('.empty-state h2')?.textContent === '回收站为空'`);
+    assert.equal(await command('get', 'text', '[data-trash-count]'), '0');
+    assert.equal(await command('get', 'count', '.trash-row'), '0');
+    assert.equal(await command('get', 'count', '[data-trash-retry]'), '0');
+    await screenshot(command, 'trash-complete-empty-zh.png');
   });

@@ -1,6 +1,70 @@
 # Changelog
 
-## 2.0.0 - Unreleased
+## Unreleased
+
+- DeepSeek Harness generation-four sources are discovered and read by the
+  owning adapter, including first-class tool results and complete mailbox
+  bodies. Version-one catalog records retain child discovery without claiming
+  a recorded launch or agent run.
+- Reader restores saved pane searches after initial layout and returns keyboard
+  focus to the child insertion after source navigation, including browser cache
+  restoration. Missing canonical sessions show bilingual missing-session
+  guidance and a return-to-Library action.
+- Stable `3.x.y` publication selects npm `latest` and a normal GitHub release;
+  prerelease versions retain `next`. Both channels keep the same exact
+  tag/commit, four-platform, immutable artifact and provenance checks. Manual
+  validation prepares artifacts without publishing. The current `3.0.0`
+  workspace version is an unpublished local candidate.
+
+- Global content-search links carry normalized UTF-16 match positions and a
+  Reader `contentRevision`, revealing and highlighting a bounded body window.
+  Normal and modified-click links preserve the destination; Back restores the
+  Library query, results and selected result context.
+  Reader source-location errors remain visible in Chinese, with translations
+  for known errors and preserved text for other source diagnostics.
+- Library rows display their own star state. **Only starred** uses core filtering
+  alongside provider, project, time, sort and family navigation.
+- Runtime source jumps preserve the Technical details view, applied filters,
+  current page and scroll context in browser history. Related-session graph
+  selection is restored; source revision and cursor failures stay explicit.
+- Trash separates complete, partial and failed reads. Partial rows remain
+  readable with an incomplete count; failed reads show an unknown count. Only a
+  complete zero-row read claims empty Trash, and failures offer explicit retry.
+  Existing metadata-read summaries update immediately when language changes.
+- Source diagnostics link to provider-specific Settings anchors showing the
+  current path, public config key, CLI option, environment variable, precedence
+  and restart/recheck steps, with anchor headings visible below the sticky bar.
+  Changed controls and status text support English
+  and Chinese. Scope and actual validation are tracked in the
+  [Reader journey execution record](docs/specs/reader-journey-repair-2026-10/tasks.md).
+- The npm Viewer accepts explicit native commands, including `migrate-meta`,
+  with global `--config` before or after the command. Default Viewer invocation
+  and the separate MCP entrypoint keep their existing behavior.
+- The upgrade guide explains import-before-edit, preserving already-created
+  Viewer state, the standalone migration route for published rc.4, and an
+  official-registry override for a missing mirrored tarball.
+- Private Pi and Claude Code source tests are explicitly ignored by default;
+  an opt-in run requires its selected manifest instead of silently passing.
+- Current release records identify successful rc.4 four-host CI separately
+  from open source, user experience and resource gates. Follow-through checks
+  are tracked in the [execution ledger](docs/specs/prerelease-followthrough-2026-10/tasks.md).
+  These changes are subsequent to the immutable rc.4 release.
+
+## 3.0.0-rc.4 - 2026-10-11
+
+- Published the Rust/Axum Viewer, Svelte Reader and independent native stdio MCP
+  with seven read-only tools for OpenCode, Claude Code, Codex CLI, Pi and DeepSeek
+  Harness. HTTP clients migrate to `/api/v3`; Viewer metadata is imported from
+  an explicit database copy into the selected source scope.
+- Exact commit `d74d5088388118d8df7dd622a7ef17f4be0c73ed` passed four-host native
+  build, portable package, HTTP/MCP and installation checks, followed by combined
+  npm tarball installation and publication to `next` and a GitHub prerelease.
+  Latest/rare source, complete product and resource gates remain open.
+- See the [release notes](docs/releases/3.0.0-rc.4.md) and
+  [validation record](docs/design/prerelease-validation-20261011.md) for upgrade
+  behavior, bounded performance evidence and remaining acceptance scope.
+
+## 2.0.0 - Unreleased (historical)
 
 ### Breaking
 

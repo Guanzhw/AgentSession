@@ -4,28 +4,34 @@
   import { RuntimeApiError, runtimeEventDetailUrl } from './api';
   import { getRuntimeDomain, type DomainFact, type DomainPage, type RuntimeDomain } from './runtime-projections';
   import { language, protocolLabel, t } from './i18n';
+  import { runtimeSourceHash, type RuntimePageState } from './runtime-history';
 
   export let provider: string;
   export let sessionId: string;
   export let domain: RuntimeDomain;
   export let onOpenReader: (event: ReaderEventRef, sourceRevision: string) => void;
+  export let initialState: RuntimePageState | undefined;
+  export let onStateChange: (domain: RuntimeDomain, state: RuntimePageState) => void;
+  export let onReady: () => Promise<void>;
 
-  let sourceRevision: string | null = null;
+  let sourceRevision: string | null = initialState?.revision ?? null;
   let page: DomainPage | null = null;
   let state: 'loading' | 'ready' | 'empty' | 'invalid' | 'unavailable' | 'stale' | 'cursor' | 'request' = 'loading';
   let message = '';
-  let kindDraft = '';
-  let kind = '';
+  let kindDraft = initialState?.kind ?? '';
+  let kind = kindDraft;
+  let currentCursor = initialState?.cursor ?? null;
   let generation = 0;
   let active = true;
 
   onMount(() => {
-    void load(null);
+    void load(currentCursor);
     return () => { active = false; generation++; };
   });
 
   async function load(cursor: string | null): Promise<void> {
     const request = ++generation;
+    currentCursor = cursor;
     state = 'loading';
     page = null;
     message = '';
@@ -40,6 +46,8 @@
       sourceRevision = result.revision;
       page = result;
       state = result.entries.length ? 'ready' : 'empty';
+      onStateChange(domain, { kind, cursor: currentCursor, revision: sourceRevision });
+      await onReady();
     } catch (cause) {
       if (!active || request !== generation) return;
       const code = cause instanceof RuntimeApiError ? cause.code : 'request_failed';
@@ -148,7 +156,7 @@
             <p>{t($language, 'Provenance:')} {provenance(entry.fact)}</p>
             {#if entry.fact.version?.readerEvent ?? entry.fact.readerEvent}
               {@const readerEvent = (entry.fact.version?.readerEvent ?? entry.fact.readerEvent)!}
-              <a href={'#event?' + new URLSearchParams({ messageId: readerEvent.messageId, segment: readerEvent.segment })}
+              <a href={runtimeSourceHash(readerEvent, page.revision)}
                 onclick={(click) => openReader(click, readerEvent)}>{t($language, 'Open in conversation')}</a>
             {/if}
             {#if entry.fact.transformation?.eventId ?? entry.fact.evidence?.eventId}

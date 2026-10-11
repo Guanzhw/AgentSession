@@ -117,7 +117,7 @@ test('Axum exposes one Codex compaction checkpoint with bounded recorded content
     assert.equal(sha(fixture), before);
   });
 
-test('browser Runtime opens compact checkpoint and Back restores its exact Reader anchor',
+test('browser Runtime compact source returns through its filtered Events view and Reader anchor',
   { skip: !browser ? 'agent-browser executable unavailable' : false, timeout: 90_000 }, async t => {
     const base = await serve(t);
     const session = `v3-codex-compact-${process.pid}-${Date.now()}`;
@@ -134,9 +134,18 @@ test('browser Runtime opens compact checkpoint and Back restores its exact Reade
     await command(session, 'fill', '.runtime-category', 'context');
     await command(session, 'click', '.runtime-filters button');
     await until(session, `document.querySelector('.runtime-event strong')?.textContent === 'context.compaction'`);
+    const runtimeHash = new URL(await command(session, 'get', 'url')).hash;
+    assert.match(runtimeHash, /^#runtime\?/);
     await command(session, 'click', '.runtime-event a');
     await until(session, `document.querySelector('.transcript') && location.hash.includes('compaction-3')`);
     assert.match(await command(session, 'get', 'text', '.event-card[id*="636f6d70616374696f6e2d33"]'), /Recorded compaction summary/);
     await command(session, 'eval', 'history.back()');
+    await until(session, `location.hash === ${JSON.stringify(runtimeHash)} &&
+      document.querySelector('.runtime-category')?.value === 'context' &&
+      document.querySelector('.runtime-event strong')?.textContent === 'context.compaction'`);
+    await command(session, 'eval', 'history.back()');
     await until(session, `location.hash === ${JSON.stringify(priorHash)} && document.querySelector('.transcript')`);
+    await command(session, 'eval', 'history.forward()');
+    await until(session, `location.hash === ${JSON.stringify(runtimeHash)} &&
+      document.querySelector('.runtime-category')?.value === 'context'`);
   });

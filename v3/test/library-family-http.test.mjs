@@ -102,4 +102,30 @@ test('library families preserve canonical boundaries, project aliases, and compl
   assert.equal(orphan.body.families[0].session.parent.sessionId, 'missing');
   const bad = await get('/api/v3/library/children?provider=opencode&parentId=other&cursor=' + encodeURIComponent(first.body.nextCursor));
   assert.equal(bad.status, 400);
+
+  // Stars describe each row, while a matching descendant retains its parent context.
+  assert.equal(first.body.families[0].starred, false);
+  const toggleStar = async sessionId => {
+    const response = await fetch(`${base}/api/opencode/session/${sessionId}/star`, {
+      method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: '{}',
+    });
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  assert.equal((await toggleStar('child-42')).starred, true);
+  const starred = await get('/api/v3/library/sessions?provider=opencode&starredOnly=true&project=d%3A%2Fproject');
+  assert.equal(starred.status, 200);
+  assert.equal(starred.body.matchingSessions, 1);
+  assert.equal(starred.body.families[0].session.session.sessionId, 'root');
+  assert.equal(starred.body.families[0].starred, false);
+  assert.equal(starred.body.families[0].matched, false);
+  const starredChildren = await get('/api/v3/library/children?provider=opencode&parentId=root&starredOnly=true');
+  assert.deepEqual(starredChildren.body.children.map(row => [row.session.session.sessionId, row.starred]),
+    [['child-42', true]]);
+  assert.equal((await get('/api/v3/library/sessions?provider=opencode&project=d%3A%2Fproject&limit=1&cursor='
+    + encodeURIComponent(first.body.nextCursor))).status, 409, 'star changes invalidate Library continuation');
+  assert.equal((await toggleStar('child-42')).starred, false);
+  const cleared = await get('/api/v3/library/sessions?provider=opencode&starredOnly=true');
+  assert.equal(cleared.body.matchingSessions, 0);
+  assert.deepEqual(cleared.body.families, []);
 });

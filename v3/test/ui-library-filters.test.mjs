@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createServer as createHttpServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,8 +39,8 @@ function summary(provider, sessionId, directory, parent = null) {
     createdAt: 1, updatedAt: 1, messageCount: 1, tokenCount: null, parent };
 }
 
-function node(session, { childCount = 0, boundary = null } = {}) {
-  return { session, matched: true, matchingCount: 1, childCount,
+function node(session, { childCount = 0, boundary = null, starred = false } = {}) {
+  return { session, starred, matched: true, matchingCount: 1, childCount,
     totalChildCount: childCount, familyRootId: session.session.sessionId,
     familyUpdated: session.updatedAt, parentBoundary: boundary };
 }
@@ -48,11 +48,11 @@ function node(session, { childCount = 0, boundary = null } = {}) {
 const roots = [
   node(summary('codex', 'codex-alpha-root', projects[0]), { childCount: 2 }),
   node(summary('claude-code', 'claude-alpha-root', projects[0])),
-  node(summary('codex', 'codex-beta-root', projects[1])),
+  node(summary('codex', 'codex-beta-root', projects[1]), { starred: true }),
   node(summary('claude-code', 'claude-beta-root', projects[1])),
 ];
 const alphaChildren = [1, 2].map(index => node(summary('codex', `codex-alpha-child-${index}`, projects[0],
-  { provider: 'codex', sessionId: 'codex-alpha-root' })));
+  { provider: 'codex', sessionId: 'codex-alpha-root' }), { starred: index === 2 }));
 
 async function freePort() {
   return freeFetchSafePort();
@@ -120,9 +120,11 @@ async function harness(t, { opencodeInitiallyAvailable = false, collisionRow = f
         const session = row.session;
         return (!filters.provider || session.session.provider === filters.provider)
           && (!filters.project || normalizedProject(session.directory) === normalizedProject(filters.project))
+          && (filters.starredOnly !== 'true' || row.starred || session.session.sessionId === 'codex-alpha-root')
           && (!search || [session.title, session.directory, session.session.sessionId]
             .some(value => value.toLowerCase().includes(search)));
-      });
+      }).map(row => filters.starredOnly === 'true' && row.session.session.sessionId === 'codex-alpha-root'
+        ? { ...row, childCount: 1, matched: false } : row);
       return json({ families, total: families.length, matchingSessions: families.length,
         sourceDiagnostics: [], nextCursor: null });
     }
@@ -132,6 +134,7 @@ async function harness(t, { opencodeInitiallyAvailable = false, collisionRow = f
       const rows = filters.parentId === 'codex-alpha-root' ? alphaChildren : [];
       const normalizedProject = value => value.toLowerCase().replaceAll('\\', '/').replace(/\/$/, '');
       const filtered = rows.filter(row => row.session.session.provider === filters.provider
+        && (filters.starredOnly !== 'true' || row.starred)
         && (!filters.project || normalizedProject(row.session.directory) === normalizedProject(filters.project))
         && (!(filters.search || '') || row.session.title.toLowerCase().includes(filters.search.toLowerCase())));
       const page = filters.cursor ? filtered.slice(1) : filtered.slice(0, 1);
@@ -140,6 +143,13 @@ async function harness(t, { opencodeInitiallyAvailable = false, collisionRow = f
     }
     if (url.pathname === '/api/v3/search') return json({ matches: [], diagnostics: [], nextCursor: null,
       truncated: false });
+    if (url.pathname === '/api/settings') return json({
+      configFile: { path: '/fixture/config.json', loaded: true },
+      startup: { port: 3457, sources: { codexDir: '/fixture/codex', dbPath: '/synthetic/opencode.db',
+        claudeDir: '/fixture/claude', piDir: '/fixture/pi', dshDir: '/fixture/dsh' }, state: {} },
+      runtimeEditable: ['resumeCommands', 'resumeShell', 'projectPaths', 'tokenPricing'],
+      runtime: { resumeCommands: {}, resumeShell: null, projectPaths: {}, tokenPricing: {} },
+    });
     const reader = url.pathname.match(/^\/api\/v3\/reader\/codex\/codex-alpha-root\/bootstrap$/);
     if (reader) return json({ session: roots[0].session, revision: 'public-filter-reader', totalItems: 0,
       segments: [], toc: { entries: [], previousCursor: null, nextCursor: null }, relations: null });
@@ -174,7 +184,7 @@ async function harness(t, { opencodeInitiallyAvailable = false, collisionRow = f
   const port = await freePort();
   await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
   t.after(async () => {
-    await new Promise(resolve => server.close(resolve));
+    await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
     await rm(buildDir, { recursive: true, force: true });
   });
   return { origin: `http://127.0.0.1:${port}`, libraryRequests, childRequests,
@@ -210,6 +220,13 @@ async function waitFor(command, expression) {
     await new Promise(resolve => setTimeout(resolve, 75));
   }
   throw new Error(`Timed out waiting for ${expression}`);
+}
+
+async function screenshot(command, name) {
+  const dir = process.env.AGENTSESSION_V3_JOURNEY_SCREENSHOT_DIR;
+  if (!dir) return;
+  await mkdir(dir, { recursive: true });
+  await command('screenshot', path.join(dir, name));
 }
 
 test('Library visibly marks a Codex source collision without showing a zero message count',
@@ -449,4 +466,83 @@ test('Library refreshes provider diagnostics when a source becomes unavailable',
     assert.equal(await command('get', 'value', 'input[type="search"]'), 'beta');
     assert.deepEqual((( { provider, search }) => ({ provider, search }))(app.libraryRequests.at(-1)),
       { provider: 'opencode', search: 'beta' });
+  });
+
+test('Starred filtering preserves core family context and combines with Library filters',
+  { skip, timeout: 60_000 }, async t => {
+    const app = await harness(t);
+    const command = await browser(t, `${app.origin}/sessions`);
+    await waitFor(command, `document.querySelector('[data-library-star="codex/codex-beta-root"][data-starred="true"]')`);
+    await command('eval', `(() => {
+      for (const [selector, value] of [['[data-library-provider]', 'codex'], ['[data-library-range]', 'month'], ['[data-library-sort]', 'title-desc']]) {
+        const field = document.querySelector(selector); field.value = value; field.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      const project = document.querySelector('[data-library-project]'); project.value = '${projects[0]}'; project.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await waitFor(command, `document.querySelectorAll('.session-row').length === 1`);
+    await command('click', '[data-library-starred]');
+    await waitFor(command, `document.querySelector('[data-library-starred]')?.checked && document.querySelector('[data-family-toggle]')?.textContent.includes('1 children')`);
+    assert.deepEqual((( { provider, project, range, sort, starredOnly }) => ({ provider, project, range, sort, starredOnly }))(app.libraryRequests.at(-1)),
+      { provider: 'codex', project: projects[0], range: 'month', sort: 'title-desc', starredOnly: 'true' });
+    assert.equal(await command('get', 'attr', '[data-library-star="codex/codex-alpha-root"]', 'data-starred'), 'false',
+      'a contextual parent keeps its own actual unstarred state');
+    await command('click', '[data-family-toggle="codex/codex-alpha-root"]');
+    await waitFor(command, `document.querySelector('[data-library-star="codex/codex-alpha-child-2"][data-starred="true"]')`);
+    assert.equal(await command('get', 'count', '.family-child-row'), '1');
+    assert.deepEqual((( { provider, project, range, sort, starredOnly }) => ({ provider, project, range, sort, starredOnly }))(app.childRequests.at(-1)),
+      { provider: 'codex', project: projects[0], range: 'month', sort: 'title-desc', starredOnly: 'true' });
+    await screenshot(command, 'library-starred-family-en.png');
+    await command('click', '.session-row');
+    await waitFor(command, `document.querySelector('.reader-layout')`);
+    await command('eval', 'history.back()');
+    await waitFor(command, `document.querySelector('[data-library-starred]')?.checked && document.querySelector('.family-child-row')`);
+    assert.equal(await command('get', 'value', '[data-library-sort]'), 'title-desc');
+    await command('eval', `(() => { const select = document.querySelector('.language-select'); select.value = 'zh'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await waitFor(command, `document.querySelector('.library-starred-filter')?.textContent.includes('仅显示加星会话')`);
+    assert.equal(await command('get', 'attr', '[data-library-star="codex/codex-alpha-child-2"]', 'aria-label'), '已加星');
+    await screenshot(command, 'library-starred-family-zh.png');
+  });
+
+test('Source issues open the exact Settings source and retain documented startup guidance',
+  { skip, timeout: 60_000 }, async t => {
+    const app = await harness(t);
+    const command = await browser(t, `${app.origin}/sessions`);
+    await waitFor(command, `document.querySelector('[data-library-provider]')`);
+    await command('eval', `(() => { const select = document.querySelector('[data-library-provider]'); select.value = 'opencode'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await waitFor(command, `document.querySelector('[data-source-settings="opencode"]')`);
+    await command('click', '.library-source-note > summary');
+    assert.equal(await command('get', 'attr', '[data-source-settings="opencode"]', 'href'), '/settings#source-opencode');
+    await command('click', '[data-source-settings="opencode"]');
+    await waitFor(command, `location.hash === '#source-opencode' && document.activeElement.id === 'source-opencode'`);
+    const guidance = await command('get', 'text', '#source-opencode');
+    assert.match(guidance, /\/synthetic\/opencode\.db/);
+    assert.match(guidance, /dbPath/);
+    assert.match(guidance, /--opencode-db/);
+    assert.match(guidance, /AGENTSESSION_DB_PATH/);
+    assert.match(guidance, /\/fixture\/config\.json/);
+    assert.match(guidance, /higher-priority overrides/);
+    assert.match(guidance, /Restart the Viewer/);
+    assert.match(await command('get', 'text', '[aria-labelledby="settings-sources-heading"]'), /CLI options take precedence over environment variables, then configuration fields/);
+    assert.equal(await command('eval', `getComputedStyle(document.activeElement).outlineStyle !== 'none'`), 'true');
+    assert.equal(await command('eval', `document.querySelector('#source-heading-opencode').getBoundingClientRect().top >= document.querySelector('.topbar').getBoundingClientRect().bottom`), 'true',
+      'the focused source heading remains visible below the fixed app header');
+    assert.equal(await command('eval', `document.querySelector('#source-opencode').getBoundingClientRect().top - 5 >= document.querySelector('.topbar').getBoundingClientRect().bottom`), 'true',
+      'the source focus outline is fully visible below the fixed app header');
+    await screenshot(command, 'source-settings-focus-en.png');
+    await command('reload');
+    await waitFor(command, `document.activeElement.id === 'source-opencode'`);
+    assert.equal(await command('eval', `document.querySelector('#source-heading-opencode').getBoundingClientRect().top >= document.querySelector('.topbar').getBoundingClientRect().bottom`), 'true',
+      'reloading a source deep link keeps its heading visible');
+    await command('eval', `(() => { const select = document.querySelector('.language-select'); select.value = 'zh'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await waitFor(command, `document.querySelector('#source-opencode')?.textContent.includes('重启 Viewer')`);
+    await screenshot(command, 'source-settings-focus-zh.png');
+    t.diagnostic(`Chinese language switch geometry: ${await command('eval', `({ articleTop: document.querySelector('#source-opencode').getBoundingClientRect().top, headingTop: document.querySelector('#source-heading-opencode').getBoundingClientRect().top, headerBottom: document.querySelector('.topbar').getBoundingClientRect().bottom, focus: document.activeElement.id })`)}`);
+    await command('reload');
+    await waitFor(command, `document.activeElement.id === 'source-opencode' && document.querySelector('#source-opencode')?.textContent.includes('重启 Viewer')`);
+    assert.equal(await command('eval', `document.querySelector('#source-opencode').getBoundingClientRect().top - 5 >= document.querySelector('.topbar').getBoundingClientRect().bottom`), 'true',
+      'a Chinese source deep link also reveals its complete focus outline');
+    await screenshot(command, 'source-settings-focus-zh-reload.png');
+    t.diagnostic(`Chinese deep-link reload geometry: ${await command('eval', `({ articleTop: document.querySelector('#source-opencode').getBoundingClientRect().top, headingTop: document.querySelector('#source-heading-opencode').getBoundingClientRect().top, headerBottom: document.querySelector('.topbar').getBoundingClientRect().bottom, focus: document.activeElement.id })`)}`);
+    await command('eval', 'history.back()');
+    await waitFor(command, `document.querySelector('[data-library-provider]')?.value === 'opencode'`);
   });

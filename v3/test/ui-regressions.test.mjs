@@ -589,7 +589,7 @@ async function startHarness(t, { dshListError = false, extraRows = 0,
       heldStatsDayResponse.writeHead(503);
       heldStatsDayResponse.end();
     }
-    if (server.listening) await new Promise(resolve => server.close(() => resolve()));
+    if (server.listening) await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
     await rm(buildDir, { recursive: true, force: true });
   });
 
@@ -615,7 +615,7 @@ async function startHarness(t, { dshListError = false, extraRows = 0,
       break;
     } catch (error) {
       if (error?.cause?.message !== 'bad port' || attempt === 4) throw error;
-      await new Promise(resolve => server.close(() => resolve()));
+      await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
     }
   }
   assert.equal(pageResponse.status, 200, 'The local server must serve the built Reader app');

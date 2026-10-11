@@ -325,7 +325,7 @@ async function startHarness(t, holdDiscovery = false, rejectReaderOnce = false, 
   t.after(async () => {
     clearTimeout(discoveryTimer);
     server.closeAllConnections();
-    await new Promise(resolve => server.close(resolve));
+    await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
     await rm(buildDir, { recursive: true, force: true });
   });
   return {
@@ -491,9 +491,14 @@ test('OpenCode opening reply remains readable after Runtime source navigation an
       'the Runtime event opened in Conversation');
     await command('back');
     await waitForBrowser(command,
+      `location.hash.startsWith('#runtime?') && document.querySelector('.runtime-tab[aria-current="page"]') &&
+        document.querySelector('.runtime-events a[href^="#event?"]')`,
+      'the Runtime Events view that opened the source');
+    await command('back');
+    await waitForBrowser(command,
       `location.hash === '' && document.querySelector('.conversation-tab[aria-current="page"]') &&
         !document.querySelector('.runtime-events')`,
-      'the base Conversation view after browser Back');
+      'the base Conversation view after returning through Runtime');
     await waitForBrowser(command,
       `document.querySelector('.transcript')?.textContent.includes(${JSON.stringify(replyText)}) &&
         document.querySelector('.transcript [data-message-id="later-item-63"]')`,

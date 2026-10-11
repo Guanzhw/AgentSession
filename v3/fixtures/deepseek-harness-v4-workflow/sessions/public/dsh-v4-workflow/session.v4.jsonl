@@ -1,0 +1,5 @@
+{"type":"session","version":4,"id":"dsh-v4-workflow","createdAt":1791732819292,"isSeeded":false,"delegationDepth":0}
+{"type":"user/message","seq":0,"time":1791732819293,"surfaceOp":"append","data":{"id":"workflow-request","role":"user","source":{"kind":"user"},"content":[{"type":"text","text":"Run the tiny capture-check workflow."}]}}
+{"type":"tool-workflow/run-start","seq":1,"time":1791732822918,"data":{"runId":"75af93e8-325b-4485-93fc-b23845eb6494","name":"capture-check"}}
+{"type":"tool-workflow/run-end","seq":2,"time":1791732822958,"data":{"runId":"75af93e8-325b-4485-93fc-b23845eb6494","stopReason":"error"}}
+{"type":"assistant/message","seq":3,"time":1791732840000,"surfaceOp":"append","data":{"turn":1,"step":1,"message":{"id":"workflow-response","role":"assistant","source":{"kind":"model","provider":"public","model":"synthetic"},"content":[{"type":"text","text":"The recorded workflow ended with an error."}]}}}

@@ -29,6 +29,8 @@
   import ReaderPage from './lib/ReaderPage.svelte';
   import SettingsPage from './lib/SettingsPage.svelte';
   import StatsPage from './lib/StatsPage.svelte';
+  import { sourceSettingsHref } from './lib/source-guidance';
+  import { searchMatchHref } from './lib/search-navigation';
   import { readThemePreference, saveThemePreference, type ThemePreference } from './lib/theme';
   import { language, setLanguage, syncDocumentLanguage, t, type Language } from './lib/i18n';
 
@@ -50,6 +52,7 @@
     project: string;
     range?: '' | NonNullable<LibraryFilters['range']>;
     sort?: NonNullable<LibraryFilters['sort']>;
+    starredOnly?: boolean;
     expandedFamilies: string[];
     scroll: number;
     familyCount: number;
@@ -102,6 +105,7 @@
   let projectFilter = '';
   let rangeFilter: '' | NonNullable<LibraryFilters['range']> = '';
   let sortFilter: NonNullable<LibraryFilters['sort']> = 'updated-desc';
+  let starredOnly = false;
   let childPageTargets: Record<string, number> = {};
   let libraryQuery = '';
   let libraryMode: 'sessions' | 'content' = 'sessions';
@@ -113,6 +117,11 @@
   let trashRows: ViewerMeta[] = [];
   let trashLoading = false;
   let trashError = '';
+  let trashFailedSources = 0;
+  $: trashStatusError = trashError || (trashFailedSources
+    ? `${trashFailedSources} ${t($language, trashFailedSources === 1 ? 'provider metadata source could not be read.' : 'provider metadata sources could not be read.')}` : '');
+  let trashReadState: 'unread' | 'complete' | 'partial' | 'failed' = 'unread';
+  let trashReadGeneration = 0;
   let trashActionBusy = false;
   let searchMatches: SearchMatch[] = [];
   let searchCursor: string | null = null;
@@ -210,19 +219,20 @@
     if (providerFilter) filters.provider = providerFilter;
     if (projectFilter.trim()) filters.project = projectFilter.trim();
     if (rangeFilter) filters.range = rangeFilter;
+    if (starredOnly) filters.starredOnly = true;
     filters.sort = sortFilter;
     return filters;
   }
 
   function currentFamilyFilterSignature(): string {
-    return JSON.stringify([titleQuery.trim(), providerFilter, projectFilter.trim(), rangeFilter, sortFilter]);
+    return JSON.stringify([titleQuery.trim(), providerFilter, projectFilter.trim(), rangeFilter, sortFilter, starredOnly]);
   }
 
   function libraryHistorySnapshot(scroll = window.scrollY): LibraryHistorySnapshot {
     return {
       libraryQuery, titleQuery, contentQuery, searchSubmittedQuery, mode: libraryMode, view: libraryView,
       provider: providerFilter, contentProviders, legacySearchOffset,
-      project: projectFilter, range: rangeFilter, sort: sortFilter,
+      project: projectFilter, range: rangeFilter, sort: sortFilter, starredOnly,
       expandedFamilies: [...expandedFamilies],
       scroll, familyCount: Math.max(restoredFamilyCount, families.length),
       childCounts: { ...childPageTargets }, focusTarget: libraryFocusTarget,
@@ -266,6 +276,7 @@
     projectFilter = snapshot.project;
     rangeFilter = snapshot.range ?? '';
     sortFilter = snapshot.sort ?? 'updated-desc';
+    starredOnly = snapshot.starredOnly ?? false;
     expandedFamilies = [...snapshot.expandedFamilies];
     libraryScroll = snapshot.scroll;
     hasLibraryPosition = true;
@@ -618,6 +629,25 @@
     void refreshFamilies(false);
   }
 
+  function changeStarredOnly(value: boolean): void {
+    if (starredOnly === value) return;
+    clearLibraryFocusTarget();
+    starredOnly = value;
+    restoredFamilyCount = 40;
+    childPageTargets = {};
+    clearFamilyResultsForFilterChange();
+    saveLibraryHistory();
+    if (familySearchTimer) clearTimeout(familySearchTimer);
+    void refreshFamilies(false);
+  }
+
+  function openSourceSettings(provider: string): void {
+    if (route.kind === 'library') saveLibraryHistory();
+    window.history.pushState({ agentSessionLibrary: libraryHistorySnapshot() }, '', sourceSettingsHref(provider));
+    route = { kind: 'settings' };
+    void loadRoute(route);
+  }
+
   function navigate(event: MouseEvent, path: string): void {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
@@ -720,23 +750,16 @@
   }
 
   function openSearchMatch(match: SearchMatch): void {
+    const href = searchMatchHref(match);
     if (route.kind === 'library') {
       libraryScroll = window.scrollY;
       hasLibraryPosition = true;
-      const path = '/' + encodeURIComponent(match.session.provider) + '/session/' + encodeURIComponent(match.session.sessionId);
-      const hash = match.event ? '#event?' + new URLSearchParams({
-        messageId: match.event.messageId, segment: match.event.segment,
-      }) : '';
-      libraryFocusTarget = { provider: match.session.provider, sessionId: match.session.sessionId, href: path + hash };
+      libraryFocusTarget = { provider: match.session.provider, sessionId: match.session.sessionId, href };
       pendingLibraryFocus = null;
       restoredSearchMatchCount = searchMatches.length;
       saveLibraryHistory(libraryScroll);
     }
-    const path = '/' + encodeURIComponent(match.session.provider) + '/session/' + encodeURIComponent(match.session.sessionId);
-    const hash = match.event ? '#event?' + new URLSearchParams({
-      messageId: match.event.messageId, segment: match.event.segment,
-    }) : '';
-    window.history.pushState({ agentSessionLibrary: libraryHistorySnapshot() }, '', path + hash);
+    window.history.pushState({ agentSessionLibrary: libraryHistorySnapshot() }, '', href);
     route = { kind: 'reader', provider: match.session.provider, sessionId: match.session.sessionId };
     void loadRoute(route);
   }
@@ -798,19 +821,33 @@
   }
 
   async function refreshTrash(): Promise<void> {
+    const request = ++trashReadGeneration;
     trashLoading = true;
     trashError = '';
+    trashFailedSources = 0;
+    trashReadState = 'unread';
     try {
       const pages = await Promise.allSettled(providers.map(provider => getViewerTrash(provider.id)));
+      if (request !== trashReadGeneration) return;
       trashRows = pages.flatMap(page => page.status === 'fulfilled' ? page.value : [])
         .sort((left, right) => (right.timeDeleted ?? 0) - (left.timeDeleted ?? 0));
       const failed = pages.filter(page => page.status === 'rejected');
-      if (failed.length) trashError = `${failed.length} ${t($language, failed.length === 1 ? 'provider metadata source could not be read.' : 'provider metadata sources could not be read.')}`;
+      trashReadState = failed.length === 0 ? 'complete'
+        : failed.length === pages.length ? 'failed' : 'partial';
+      trashFailedSources = failed.length;
     } catch (cause) {
+      if (request !== trashReadGeneration) return;
+      trashReadState = 'failed';
       trashError = cause instanceof Error ? cause.message : t($language, 'Trash could not be loaded.');
     } finally {
-      trashLoading = false;
+      if (request === trashReadGeneration) trashLoading = false;
     }
+  }
+
+  function invalidateTrashRead(): void {
+    trashReadGeneration++;
+    trashReadState = 'unread';
+    trashLoading = false;
   }
 
   function changeLibraryView(next: 'sessions' | 'trash'): void {
@@ -850,6 +887,7 @@
   async function manageLibraryBatch(action: BatchAction, items: SessionRef[]): Promise<BatchResult> {
     const result = await batchViewer(action, items);
     if (!result.ok) throw new Error(t($language, 'The Viewer change could not be saved.'));
+    if (action === 'delete') invalidateTrashRead();
     await refreshFamilies();
     void refreshSubmittedContentSearch();
     return result;
@@ -865,6 +903,7 @@
   }
 
   function afterReaderDelete(): void {
+    invalidateTrashRead();
     window.history.pushState({ agentSessionLibrary: libraryHistorySnapshot() }, '', '/sessions');
     route = { kind: 'library' };
     libraryScroll = 0;
@@ -931,7 +970,16 @@
     </main>
   {:else if error}
     <main class="error-state" role="alert">
-      {#if route.kind === 'reader' && pageErrorCode === 'protocol_unavailable'}
+      {#if route.kind === 'reader' && pageErrorCode === 'session_not_found'}
+        <p class="state-kicker">{t($language, 'Session Reader')}</p>
+        <h1>{t($language, 'Session not found')}</h1>
+        <p>{t($language, 'This session is not in the current sources. Return to your sessions to open an available history.')}</p>
+        <details>
+          <summary>{t($language, 'Technical details')}</summary>
+          <p>{error}</p>
+        </details>
+        <a class="quiet-button" href="/sessions" onclick={goToLibrary}>{t($language, 'All sessions')}</a>
+      {:else if route.kind === 'reader' && pageErrorCode === 'protocol_unavailable'}
         <p class="state-kicker">{t($language, 'Session Reader')}</p>
         <h1>{t($language, 'Recorded history unavailable')}</h1>
         <p>{t($language, 'The local records for this session could not be read. You can return to your sessions or try again.')}</p>
@@ -954,17 +1002,19 @@
       onSelectProvider={selectStatsProvider} onOpen={openSession} />
   {:else if route.kind === 'reader' && reader}
     <ReaderPage provider={route.provider} sessionId={route.sessionId} bootstrap={reader}
-      onBack={goToLibrary} onOpen={openSession} onDeleted={afterReaderDelete} onRenamed={afterReaderRename} />
+      onBack={goToLibrary} onOpen={openSession} onDeleted={afterReaderDelete} onRenamed={afterReaderRename}
+      onStarred={() => { familyDirty = true; }} />
   {:else}
     <LibraryPage {providers} {families} {familyTotal} {matchingSessions} {familyCursor} {familyLoading} {familyError}
       {childrenByParent} {childCursors} {childLoading} {childErrors} {sourceErrors} query={libraryQuery}
-      {providerFilter} {projectFilter} {rangeFilter} {sortFilter} onProviderFilterChange={changeProviderFilter}
+      {providerFilter} {projectFilter} {rangeFilter} {sortFilter} {starredOnly} onProviderFilterChange={changeProviderFilter}
       onProjectFilterChange={changeProjectFilter} onRangeFilterChange={changeRangeFilter}
-      onSortFilterChange={changeSortFilter}
+      onSortFilterChange={changeSortFilter} onStarredOnlyChange={changeStarredOnly}
       {expandedFamilies} onQueryChange={changeLibraryQuery} onToggleFamily={toggleFamily}
       onLoadMoreFamilies={loadMoreFamilies} onRefreshFamilies={() => void refreshFamilies(false)}
       onLoadChildren={loadChildren} onRetryChildren={retryChildren}
-      mode={libraryMode} onModeChange={changeLibraryMode} {libraryView} {trashRows} {trashLoading} {trashError} {trashActionBusy}
+      mode={libraryMode} onModeChange={changeLibraryMode} {libraryView} {trashRows} {trashLoading} trashError={trashStatusError} {trashActionBusy}
+      {trashReadState} onRetryTrash={() => void refreshTrash()} onOpenSettings={openSourceSettings}
       onViewChange={changeLibraryView} onTrashAction={manageTrash}
       onBatchAction={manageLibraryBatch}
       {searchMatches} {searchCursor} {searchSubmittedQuery}

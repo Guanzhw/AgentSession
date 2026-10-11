@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import type { ContentField, ContentProgress, ReaderBootstrap, ReaderChildPlacement, ReaderCollaborationSnapshot, ReaderEventRef, ReaderItem, ReaderSearchMatch, ReaderSearchTarget, ReaderSegment, ReaderTocEntry, ReaderTocPage, RelationEntry, RelationParticipant, RuntimeExecutionEvent, SessionRef, ViewerMeta } from './api';
+  import type { ContentField, ContentProgress, ReaderBootstrap, ReaderChildPlacement, ReaderCollaborationSnapshot, ReaderEventRef, ReaderItem, ReaderSearchTarget, ReaderSegment, ReaderTocEntry, ReaderTocPage, RelationEntry, RelationParticipant, RuntimeExecutionEvent, SessionRef, ViewerMeta } from './api';
   import { getContentPage, getReaderChildLocation, getReaderLocation, getReaderRelations, getReaderSegment, getReaderToc, getReaderExecutionEvents, getTeamMessageContentPage, getViewerMeta, mutateViewer } from './api';
   import EventCard, { type DisplayItem, type ExecutionLandmark, type SearchReveal } from './EventCard.svelte';
   import InheritedContext from './InheritedContext.svelte';
@@ -8,13 +8,15 @@
   import PaneSearch, { type PaneSearchState } from './PaneSearch.svelte';
   import RecordedMemory from './RecordedMemory.svelte';
   import RuntimeEvents from './RuntimeEvents.svelte';
+  import { readRuntimeHistory, runtimeHash, runtimeSourceHash } from './runtime-history';
+  import { searchTargetFromHash } from './search-navigation';
   import SystemPromptEvidence from './SystemPromptEvidence.svelte';
   import CollaborationTimeline from './CollaborationTimeline.svelte';
   import TranscriptCollaboration from './TranscriptCollaboration.svelte';
   import ReaderContinuation from './ReaderContinuation.svelte';
   import { readerCollaborationIdentity, transcriptHandoffs } from './transcript-collaboration';
   import { groupReaderItems, groupReaderProcesses, type ProcessUnit, type ReaderBlock } from './reader-presentation';
-  import { language, t, type Language } from './i18n';
+  import { errorText, language, protocolLabel, t, type Language } from './i18n';
 
   export let provider: string;
   export let sessionId: string;
@@ -23,6 +25,9 @@
   export let onOpen: (session: SessionRef) => void;
   export let onDeleted: () => void;
   export let onRenamed: (title: string) => void;
+  export let onStarred: () => void = () => {};
+  let runtimePanel: RuntimeEvents | null = null;
+  let conversationHash = window.location.hash.startsWith('#runtime?') ? '' : window.location.hash;
 
   type OutlineNode = { key: string; entry: ReaderTocEntry };
   interface OutlineTurn { key: string; request: ReaderTocEntry | null; children: OutlineNode[] }
@@ -101,7 +106,8 @@
   }
   let relationCursor = bootstrap.relations?.firstCursor ?? null;
   let relationLoading = false;
-  let initialLayoutReady: Promise<void[]> = Promise.resolve([]);
+  let resolveInitialLayout!: () => void;
+  const initialLayoutReady = new Promise<void>(resolve => { resolveInitialLayout = resolve; });
   let relationError = '';
   let teamMessagePages: Record<string, { text: string; nextOffset: number | null; loading: boolean; error: string }> = {};
   let selectedParticipantId = '';
@@ -184,6 +190,8 @@
   $: panelError = activeChildPath.length > 0 ? childPanel?.error ?? '' : relationError;
   $: panelRevision = activeChildPath.length > 0 ? childPanel?.revision ?? '' : bootstrap.revision;
   $: panelParticipants = recordedParticipants(panelEntries);
+  $: panelUnassignedTasks = panelEntries.flatMap(entry =>
+    entry.type === 'task' && !entry.task.ownerParticipant ? [entry.task] : []);
   $: selectedParticipant = panelParticipants.find(participant => participant.id === selectedParticipantId) ?? panelParticipants[0];
   $: participantEntries = selectedParticipant ? panelEntries.filter(entry =>
     entry.type === 'task' ? entry.task.ownerParticipant?.id === selectedParticipant.id :
@@ -539,19 +547,25 @@
         window.location.hash === lastHandledHash) return;
       paneSearchStates = readPaneSearchHistory();
       const previousHash = lastHandledHash;
+      if (previousHash !== null) searchSelectionGeneration++;
       lastHandledHash = window.location.hash;
       if (window.location.hash.startsWith('#runtime?')) {
+        locationGeneration++;
+        pageGeneration++;
+        locationLoading = false;
+        pageLoading = false;
         view = 'runtime';
         return;
       }
       view = 'conversation';
+      conversationHash = window.location.hash;
       childRestoreGeneration++;
       const previous = activeChildPath;
       if (previousHash !== null) selectionHistoryVersion++;
       const next = childPathFromHash();
-      focusRestoredRoot = next.length === 1 && previous.length <= next.length;
       activeChildPath = next;
       selectedChildSearch = childSearchFromHash();
+      focusRestoredRoot = next.length === 1 && previous.length <= next.length;
       if (next.length > 0) {
         void restoreRootChildAnchor();
         if (previous.length > next.length && next.every((step, index) =>
@@ -567,13 +581,27 @@
       }
       const target = targetFromHash();
       if (target) {
-        if (previousHash === null && bootstrap.targetLocation?.event.messageId === target.messageId &&
+        try {
+          const searchTarget = searchTargetFromHash(window.location.hash, { provider, sessionId });
+          if (searchTarget) {
+            const searchHash = window.location.hash;
+            void openSearchMatch(searchTarget, false, true).catch(cause => {
+              if (active && window.location.hash === searchHash) locationError = cause instanceof Error ? cause.message : 'The matching source could not be opened.';
+            });
+            return;
+          }
+        } catch (cause) {
+          locationError = cause instanceof Error ? cause.message : 'The search destination is invalid. Return to Library and search again.';
+          return;
+        }
+        const sourceRevision = new URLSearchParams(window.location.hash.slice(7)).get('sourceRevision') ?? undefined;
+        if (!sourceRevision && previousHash === null && bootstrap.targetLocation?.event.messageId === target.messageId &&
           bootstrap.targetLocation.event.segment === target.segment) {
           const request = ++locationGeneration;
           void tick().then(() => {
             if (active && request === locationGeneration) scrollToEvent(target);
           });
-        } else void revealTarget(target, false);
+        } else void revealTarget(target, false, undefined, false, sourceRevision);
       }
       else {
         const returnFocus = previousHash?.startsWith('#event?') ? taskReturnFocus : null;
@@ -584,10 +612,19 @@
         });
       }
     };
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted || view !== 'conversation' || activeChildPath.length === 0) return;
+      // BFCache resumes this Reader without mount or a changed hash. Restore the
+      // insertion control after the browser has resumed the returning document.
+      childRestoreGeneration++;
+      focusRestoredRoot = activeChildPath.length === 1;
+      void restoreRootChildAnchor();
+    };
     window.addEventListener('popstate', onLocationChange);
     window.addEventListener('hashchange', onLocationChange);
+    window.addEventListener('pageshow', onPageShow);
     const initialRelationsReady = relationCursor ? loadRelations() : Promise.resolve();
-    initialLayoutReady = Promise.all([initialExecutionReady, initialResumeReady, initialRelationsReady]);
+    void Promise.all([initialExecutionReady, initialResumeReady, initialRelationsReady]).then(resolveInitialLayout);
     onLocationChange();
     return () => {
       active = false;
@@ -603,6 +640,7 @@
       searchSelectionGeneration++;
       childRestoreGeneration++;
       window.removeEventListener('popstate', onLocationChange);
+      window.removeEventListener('pageshow', onPageShow);
       window.removeEventListener('hashchange', onLocationChange);
       document.removeEventListener('keydown', onPanelKeydown);
     };
@@ -616,6 +654,7 @@
       const updated = await mutateViewer(provider, sessionId, action, title);
       if (!active) return;
       viewerMeta = updated;
+      if (action === 'star') onStarred();
       if (action === 'rename') {
         effectiveTitle = updated.customTitle || bootstrap.session.title;
         renaming = false;
@@ -842,9 +881,10 @@
         toc = { ...toc, entries: mergeOutlineEntries(response.toc.entries) };
       }
       if (updateHistory) {
-        const hash = hashFor(location.event);
+        const hash = sourceRevision ? runtimeSourceHash(location.event, sourceRevision) : hashFor(location.event);
         if (window.location.hash !== hash) window.history.pushState(window.history.state, '', hash);
         lastHandledHash = window.location.hash;
+        conversationHash = window.location.hash;
       }
       await tick();
       if (!active || request !== locationGeneration || !stillCurrent()) return false;
@@ -937,15 +977,16 @@
     searchReveals = {};
   }
 
-  async function openSearchMatch(match: ReaderSearchMatch, restoring = false): Promise<void> {
+  async function openSearchMatch(match: ReaderSearchTarget & { contentRevision?: string }, restoring = false,
+    fromLocation = false): Promise<void> {
     const request = ++searchSelectionGeneration;
-    if (restoring) { await tick(); await initialLayoutReady; await tick(); }
+    if (restoring || fromLocation) { await tick(); await initialLayoutReady; await tick(); }
     if (!active || request !== searchSelectionGeneration) return;
-    const opened = await revealTarget(match.event, !restoring,
-      () => request === searchSelectionGeneration, restoring);
+    const opened = await revealTarget(match.event, !restoring && !fromLocation,
+      () => request === searchSelectionGeneration, restoring || fromLocation);
     if (!opened || !active || request !== searchSelectionGeneration) return;
     const page = await getContentPage(provider, sessionId, match.event, bootstrap.revision,
-      match.offset, match.field, Math.max(1400, match.matchLength));
+      match.offset, match.field, Math.max(1400, match.matchLength), match.contentRevision);
     if (!active || request !== searchSelectionGeneration) return;
     if (page.offset !== match.offset || page.text.length < match.matchLength) {
       throw new Error('The matching content changed. Refresh this session and search again.');
@@ -977,14 +1018,43 @@
   }
 
   async function openRuntimeSource(target: ReaderEventRef, sourceRevision: string): Promise<void> {
+    const runtimeHash = window.location.hash;
     view = 'conversation';
     await tick();
-    if (active) await revealTarget(target, true, undefined, false, sourceRevision);
+    if (!active || view !== 'conversation') return;
+    const request = locationGeneration + 1;
+    const opened = await revealTarget(target, true, undefined, false, sourceRevision);
+    if (!opened && active && request === locationGeneration && view === 'conversation' &&
+      window.location.hash === runtimeHash) {
+      window.history.pushState(window.history.state, '', window.location.pathname + window.location.search + conversationHash);
+      lastHandledHash = window.location.hash;
+    }
   }
 
-  function openRuntimeSession(session: SessionRef, nodeId: string): void {
-    const query = new URLSearchParams({ lens: 'sessions', node: nodeId });
-    window.history.replaceState(window.history.state, '', window.location.pathname + '#runtime?' + query);
+  function enterRuntime(): void {
+    if (view === 'runtime') return;
+    if (!window.location.hash.startsWith('#runtime?')) conversationHash = window.location.hash;
+    const saved = readRuntimeHistory(provider, sessionId);
+    const hash = runtimeHash(saved?.lens ?? 'events', saved?.focusNodeId ?? null);
+    if (window.location.hash !== hash) window.history.pushState(window.history.state, '', hash);
+    lastHandledHash = window.location.hash;
+    searchSelectionGeneration++;
+    locationGeneration++;
+    pageGeneration++;
+    locationLoading = false;
+    pageLoading = false;
+    view = 'runtime';
+  }
+
+  function enterConversation(): void {
+    if (view === 'conversation') return;
+    runtimePanel?.saveNavigation();
+    window.history.pushState(window.history.state, '', window.location.pathname + window.location.search + conversationHash);
+    lastHandledHash = window.location.hash;
+    view = 'conversation';
+  }
+
+  function openRuntimeSession(session: SessionRef): void {
     onOpen(session);
   }
 
@@ -1081,8 +1151,8 @@
       <a class="reader-back-link" href="/sessions" onclick={onBack}><span aria-hidden="true">←</span> {t($language, 'All sessions')}</a>
       <div class="reader-heading-top">
         <nav class="reader-view-tabs" aria-label={t($language, 'Session view')}>
-          <button type="button" class="conversation-tab" aria-current={view === 'conversation' ? 'page' : undefined} onclick={() => view = 'conversation'}>{t($language, 'Conversation')}</button>
-          <button type="button" class="runtime-tab" aria-current={view === 'runtime' ? 'page' : undefined} onclick={() => view = 'runtime'}>{t($language, 'Technical details')}</button>
+          <button type="button" class="conversation-tab" aria-current={view === 'conversation' ? 'page' : undefined} onclick={enterConversation}>{t($language, 'Conversation')}</button>
+          <button type="button" class="runtime-tab" aria-current={view === 'runtime' ? 'page' : undefined} onclick={enterRuntime}>{t($language, 'Technical details')}</button>
         </nav>
         <div class="reader-management" role="group" aria-label={t($language, 'Viewer metadata actions')}>
           <button type="button" class="reader-star" disabled={!metaReady || managementBusy}
@@ -1150,7 +1220,7 @@
           <button class="read-more" disabled={locationLoading} onclick={() => void revealTarget('end', true)}>{t($language, 'Go to session end')}</button>
         </div>
       </div>
-      {#if locationError}<p class="content-error" role="status">{locationError}</p>{/if}
+      {#if locationError}<p class="content-error" role="status">{errorText($language, locationError)}</p>{/if}
       {#if locationError.includes('Refresh this session')}<button class="read-more" onclick={() => window.location.reload()}>{t($language, 'Refresh session')}</button>{/if}
       <div id="reader-search" class="reader-search-disclosure" hidden={!searchOpen}>
         <div class="reader-search-heading"><p>{t($language, 'Search the full conversation, including collapsed and unloaded messages.')}</p>
@@ -1172,7 +1242,7 @@
     {/if}
 
     {#if view === 'runtime'}
-      <RuntimeEvents {provider} {sessionId} onOpenReader={openRuntimeSource}
+      <RuntimeEvents bind:this={runtimePanel} {provider} {sessionId} onOpenReader={openRuntimeSource}
         onOpenSession={openRuntimeSession} />
     {:else}
     {#if hasCollaboration}
@@ -1190,8 +1260,31 @@
             onclick={() => setCollaborationOpen(false)}>×</button>
         </div>
         {#if activeChildPath.length > 0 && !childPanel}<p role="status">{t($language, 'Opening child collaboration…')}</p>{/if}
+        {#if panelEntries.length === 0 && !panelLoading && !panelError && (activeChildPath.length === 0 || childPanel)}
+          <p class="collaboration-empty" role="status">{t($language, 'No recorded tasks or agent messages.')}</p>
+        {/if}
         <CollaborationTimeline entries={panelEntries} session={panelSource} items={activeChildPath.length > 0 ? [] : items} complete={!panelCursor && !panelLoading}
           onOpenChild={openCollaborationChild} onNavigate={openCollaborationEvent} />
+        {#if panelUnassignedTasks.length > 0}
+          <ol class="collaboration-thread collaboration-unassigned-tasks">
+            {#each panelUnassignedTasks as task (task.provenance.sourceId + ':' + task.id)}
+              <li class="collaboration-assignment" data-source-seq={task.provenance.sourceId}>
+                <strong>{t($language, 'Latest recorded task state')}: {protocolLabel(task.status, $language)}</strong>
+                {#if task.subject}<p>{task.subject}</p>{/if}
+                {#if task.description}<p>{task.description}</p>{/if}
+                {#if task.readerEvent}
+                  <button type="button" onclick={() => openCollaborationEvent(task.readerEvent!)}>{t($language, 'Open Reader event')}</button>
+                {:else}
+                  <span class="relation-unavailable-history">{t($language, 'This recorded team event has no conversation-message link.')}</span>
+                {/if}
+                <details class="collaboration-source-details">
+                  <summary>{t($language, 'Technical details')}</summary>
+                  <p>{task.id} · {task.provenance.sourceType} #{task.provenance.sourceId}</p>
+                </details>
+              </li>
+            {/each}
+          </ol>
+        {/if}
         {#if panelParticipants.length > 0}
           <section class="collaboration-participants" aria-label={t($language, 'Recorded participants')}>
             <div class="collaboration-participant-choices">

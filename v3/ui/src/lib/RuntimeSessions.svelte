@@ -9,8 +9,11 @@
   export let sessionId: string;
   export let focusNodeId: string | null = null;
   export let onOpenSession: (session: SessionRef, nodeId: string) => void;
+  export let initialRevision: string | null;
+  export let onRevision: (revision: string) => void;
+  export let onReady: () => Promise<void>;
 
-  let sourceRevision: string | null = null;
+  let sourceRevision: string | null = initialRevision;
   let graph: RuntimeGraph | null = null;
   let state: 'loading' | 'ready' | 'invalid' | 'unavailable' | 'stale' | 'request' = 'loading';
   let message = '';
@@ -37,14 +40,16 @@
       sourceRevision = result.revision;
       graph = result;
       state = 'ready';
+      onRevision(sourceRevision);
       if (focusNodeId) {
         await tick();
         if (active && generation === request) {
           [...document.querySelectorAll<HTMLAnchorElement>('.runtime-graph-node[data-node-id] a')]
             .find(link => link.closest('.runtime-graph-node')?.getAttribute('data-node-id') === focusNodeId)
-            ?.focus();
+            ?.focus({ preventScroll: true });
         }
       }
+      await onReady();
     } catch (cause) {
       if (!active || generation !== request) return;
       const code = cause instanceof RuntimeApiError ? cause.code : 'request_failed';

@@ -3,9 +3,12 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { releaseIdentity } from './v3-npm-package-contract.mjs';
 
 if (process.argv.length !== 5) throw new Error('Usage: node scripts/v3-github-prerelease.mjs <tag> <assets-dir> <notes-file>');
 const [tag, assetsArg, notes] = process.argv.slice(2);
+const identity = releaseIdentity(tag.slice(1));
+if (tag !== identity.tag) throw new Error('Release ref must be the exact version tag');
 const assets = path.resolve(assetsArg);
 const gh = args => {
   const result = spawnSync('gh', args, { encoding: 'utf8', timeout: 120_000, maxBuffer: 2_000_000 });
@@ -15,9 +18,12 @@ const gh = args => {
 const repo = process.env.GITHUB_REPOSITORY;
 const releases = JSON.parse(gh(['api', `repos/${repo}/releases`, '--paginate', '--slurp'])).flat();
 let release = releases.find(value => value.tag_name === tag);
-if (release && !release.prerelease) throw new Error(`Existing ${tag} release is not a prerelease`);
+if (release && release.prerelease !== identity.prerelease) {
+  throw new Error(`Existing ${tag} release channel differs from its version`);
+}
 if (!release) {
-  gh(['release', 'create', tag, '--repo', repo, '--verify-tag', '--draft', '--prerelease', '--latest=false',
+  gh(['release', 'create', tag, '--repo', repo, '--verify-tag', '--draft',
+    ...(identity.prerelease ? ['--prerelease', '--latest=false'] : ['--latest']),
     '--title', `AgentSession ${tag.slice(1)}`, '--notes-file', notes]);
   release = JSON.parse(gh(['api', `repos/${repo}/releases/tags/${tag}`]));
 }
@@ -37,7 +43,8 @@ try {
       gh(['release', 'upload', tag, file, '--repo', repo]);
     }
   }
-  if (release.draft) gh(['release', 'edit', tag, '--repo', repo, '--draft=false', '--prerelease', '--latest=false']);
+  if (release.draft) gh(['release', 'edit', tag, '--repo', repo, '--draft=false',
+    ...(identity.prerelease ? ['--prerelease', '--latest=false'] : ['--prerelease=false', '--latest'])]);
 } finally {
   const physical = await realpath(scratch);
   if (path.dirname(physical) !== await realpath(os.tmpdir())) throw new Error('Unexpected release verification temp path');

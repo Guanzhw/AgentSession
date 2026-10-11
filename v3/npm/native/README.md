@@ -11,4 +11,4 @@ additional download. `provenance.json` pins each native payload to its selected
 portable bundle and records the publication source commit.
 
 See [AgentSession](https://github.com/Guanzhw/AgentSession) for configuration,
-provider support, and prerelease acceptance status.
+provider support, and current release acceptance status.

@@ -13,6 +13,10 @@ Provider 数据库与 transcript 保持只读；收藏、标题和回收站状�
 
 ## 3.0 预发布版
 
+当前源码版本为 **3.0.0 本地稳定版候选**，尚未发布；
+[稳定版验收账本](docs/specs/stable-readiness-2026-10/tasks.md)记录剩余门槛。
+以下安装命令仍指向已发布的 rc.4。
+
 ```sh
 npm install -g @acetamido/agentsession@3.0.0-rc.4
 npm install -g @acetamido/agentsession-mcp@3.0.0-rc.4
@@ -22,6 +26,18 @@ agentsession
 预发布使用 npm `next` 渠道。[更新与升级说明](docs/releases/3.0.0-rc.4.md)
 以公开版本 v1.10.1 为基准，涵盖默认端口、元数据副本导入和 MCP/API 迁移。
 四平台独立程序见 [GitHub Release](https://github.com/Guanzhw/AgentSession/releases/tag/v3.0.0-rc.4)。
+
+从旧版升级时，请先按[元数据迁移指南](v3/README.md#viewer-metadata-import)
+导入旧收藏、标题和回收站状态，再进行新版元数据编辑。指南区分已发布 rc.4 的
+独立程序入口与工作区尚未发布的 npm 命令修复，并说明已有新版状态时如何保留两份数据。
+
+如果第三方 npm 镜像对新版本的 tarball 返回 `404`，可仅对本次安装指定官方源：
+
+```sh
+npm install -g @acetamido/agentsession@3.0.0-rc.4 @acetamido/agentsession-mcp@3.0.0-rc.4 --registry https://registry.npmjs.org
+```
+
+这不会修改全局 npm registry 配置；官方源也报错时，应保留具体错误继续排查。
 
 ## 从源码运行
 
@@ -42,6 +58,23 @@ UI 依赖需明确安装。`npm run build` 构建 UI 和锁定依赖的 Rust rel
 已构建的原生程序可用 `v3/target/release/agentsession-v3 serve` 直接启动
 （Windows 文件名带 `.exe`），用 `mcp` 子命令启动原生 stdio MCP。
 独立程序运行时无需 Node 或 Cargo。
+
+## 工作区本地修复（Unreleased）
+
+正文搜索结果可直接显示并高亮初始窗口之外的匹配内容，使用与 Reader 一致的
+UTF-16 位置和 `contentRevision`，按有界正文窗口读取；浏览器 Back 恢复查询、
+结果和所选位置。会话库各行显示自身加星状态，**仅显示加星会话**可与提供方、
+项目、时间和排序筛选组合，保留 core 的父子家族语义。
+
+**技术详情**跳转到来源正文后，Back 恢复 Runtime 视图、已应用筛选、当前页和
+滚动位置；相关会话图选择也随历史保留。回收站区分完整、部分和失败读取，部分
+结果保留可读行并标记数量不完整，失败时数量未知，两者均可重试。来源诊断链接到
+对应的 Settings 锚点，显示当前启动路径、配置字段、命令行选项及重启复查步骤；
+路径优先级为 CLI、环境变量、配置文件、提供方默认值。
+
+范围见[修复规格](docs/specs/reader-journey-repair-2026-10/requirements.md)，
+实际验证见[执行记录](docs/specs/reader-journey-repair-2026-10/tasks.md)。
+这些工作区改动尚未发布，已发布 rc.4 保留原有行为。
 
 ## 开发与状态
 

@@ -12,14 +12,14 @@ pub(super) fn default_data_path(home: &std::path::Path) -> std::path::PathBuf {
 
 use super::{NormalizedEvent, ProviderAdapter, SessionSnapshot, SourceEntry};
 use crate::protocol::{
-    ContextObservation, Diagnostic, DomainCoverage, EventCandidate, EventStream, Evidence,
-    Fidelity, ObservationCandidates, ObservationSnapshot, ObservationState, ProtocolBundle,
-    ProtocolError, Provenance, RelationshipObservation, SourceOrder, UsageRecord,
+    ContextObservation, CoordinationFact, Diagnostic, DomainCoverage, EventCandidate, EventStream,
+    Evidence, Fidelity, ObservationCandidates, ObservationSnapshot, ObservationState,
+    ProtocolBundle, ProtocolError, Provenance, RelationshipObservation, SourceOrder, UsageRecord,
     UsageTokenComponents, finalize_events, finalize_protocol_bundle,
 };
 use crate::{
-    CoreError, EventRef, ReaderItem, RelationEntry, RelationProvenance, RelationTask, Result,
-    SessionRef, SessionSummary, bounded_preview,
+    CoordinationObservation, CoreError, EventRef, ReaderItem, RelationEntry, RelationProvenance,
+    RelationTask, Result, SessionRef, SessionSummary, bounded_preview,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -205,6 +205,7 @@ impl ProviderAdapter for ClaudeAdapter<'_> {
             ..ObservationCandidates::default()
         };
         let mut sidechain_seen = false;
+        let mut agent_calls = HashSet::new();
         for (line_index, line) in bytes.split(|byte| *byte == b'\n').enumerate() {
             if line.iter().all(u8::is_ascii_whitespace) {
                 continue;
@@ -214,6 +215,53 @@ impl ProviderAdapter for ClaudeAdapter<'_> {
                     path: path.clone(),
                     reason: format!("line {}: {error}", line_index + 1),
                 })?;
+            for mut observation in
+                claude_agent_handoffs(&record, line_index, session_id, &mut agent_calls)
+            {
+                let event = stream
+                    .event_detail(&observation.event_id)
+                    .expect("Agent source record is in the same finalized stream")
+                    .event;
+                if observation.reader_event != event.reader_event {
+                    observation.reader_event = None;
+                }
+                let evidence = Evidence {
+                    event_id: observation.event_id.clone(),
+                    provenance: Provenance {
+                        fidelity: Fidelity::Recorded,
+                        source_type: observation.provenance.source_type.clone(),
+                        source_id: Some(observation.provenance.source_id.clone()),
+                    },
+                };
+                if let Some(child) = &observation.to_session_ref {
+                    observations.relationships.push(RelationshipObservation {
+                        id: format!("relationship:claude:child:{}", observation.correlation_id),
+                        kind: "child".into(),
+                        from: observation
+                            .from_session_ref
+                            .clone()
+                            .expect("Agent spawn has a source session"),
+                        to: child.clone(),
+                        correlation_id: Some(observation.correlation_id.clone()),
+                        evidence: evidence.clone(),
+                    });
+                }
+                observations.coordination.push(CoordinationFact {
+                    id: format!(
+                        "coordination:claude:{}:{}",
+                        observation.correlation_id, observation.state
+                    ),
+                    kind: observation.kind,
+                    state: observation.state,
+                    correlation_id: observation.correlation_id,
+                    from_session_ref: observation.from_session_ref,
+                    to_session_ref: observation.to_session_ref,
+                    from_actor_path: None,
+                    to_actor_path: None,
+                    reader_event: observation.reader_event,
+                    evidence,
+                });
+            }
             if record["type"] == "system" && record["subtype"] == "compact_boundary" {
                 let event_id = format!("event:claude:{line_index}");
                 let event = stream
@@ -278,7 +326,7 @@ impl ProviderAdapter for ClaudeAdapter<'_> {
         for (domain, details) in [
             (
                 "relationships",
-                "A sidechain record with a canonical parent session ID identifies a recorded parent link; target availability is unverified. Opaque or missing lineage remains unknown.",
+                "Sidechain parent IDs and structured asynchronous Agent results identify recorded session links; target availability is unverified. Opaque or missing lineage remains unknown.",
             ),
             (
                 "tasks",
@@ -300,7 +348,7 @@ impl ProviderAdapter for ClaudeAdapter<'_> {
             ),
             (
                 "coordination",
-                "Actor and coordination projection is unported.",
+                "Recorded Agent requests and matching structured asynchronous launch results identify dispatch and child IDs. Completion, actor paths and other coordination remain unported.",
             ),
             (
                 "usage",
@@ -314,6 +362,8 @@ impl ProviderAdapter for ClaudeAdapter<'_> {
                     state: if domain == "context" && !observations.context_observations.is_empty() {
                         ObservationState::Observed
                     } else if domain == "relationships" && !observations.relationships.is_empty() {
+                        ObservationState::Observed
+                    } else if domain == "coordination" && !observations.coordination.is_empty() {
                         ObservationState::Observed
                     } else if domain == "usage" {
                         if usage_observed {
@@ -361,7 +411,7 @@ fn source_has_header(path: &Path) -> bool {
 
 fn source_revision(path: &Path, scope: &str, bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"claude-jsonl-v3-slice-3\0");
+    hasher.update(b"claude-jsonl-v3-slice-4\0");
     hasher.update(scope.as_bytes());
     hasher.update(path.to_string_lossy().as_bytes());
     hasher.update(bytes);
@@ -444,7 +494,18 @@ fn load_bytes(
     let mut generated = 0usize;
 
     let mut reply_owners = HashMap::new();
+    let mut agent_calls = HashSet::new();
     for (record_index, record) in records.iter().enumerate() {
+        relations.extend(
+            claude_agent_handoffs(
+                record,
+                line_numbers[record_index],
+                expected_id,
+                &mut agent_calls,
+            )
+            .into_iter()
+            .map(|observation| RelationEntry::Coordination { observation }),
+        );
         let reply_start = events.len();
         let kind = record["type"].as_str().unwrap_or("");
         let timestamp = timestamp_ms(&record["timestamp"]);
@@ -523,7 +584,7 @@ fn load_bytes(
                             status: relation_status.into(),
                             owner: notification.tool_use_id,
                             subject: None,
-                            description: None,
+                            description: notification.summary,
                             owner_participant: None,
                             reader_event: Some(event_ref(expected_id, &uuid, "tool")),
                             provenance: RelationProvenance {
@@ -1440,6 +1501,96 @@ fn title(records: &[Value], id: &str, is_sidechain: bool) -> String {
         .unwrap_or_else(|| "Claude Code session".into())
 }
 
+fn claude_agent_handoffs(
+    record: &Value,
+    line_index: usize,
+    session_id: &str,
+    agent_calls: &mut HashSet<String>,
+) -> Vec<CoordinationObservation> {
+    let Some(source_id) = record["uuid"].as_str().filter(|id| !id.is_empty()) else {
+        return Vec::new();
+    };
+    let Some(blocks) = record["message"]["content"].as_array() else {
+        return Vec::new();
+    };
+    let mut handoffs = Vec::new();
+    for block in blocks {
+        let (call_id, state, target, prompt, source_type, reader_id) = if record["type"]
+            == "assistant"
+            && block["type"] == "tool_use"
+            && block["name"] == "Agent"
+        {
+            let Some(call_id) = block["id"].as_str().filter(|id| !id.is_empty()) else {
+                continue;
+            };
+            agent_calls.insert(call_id.into());
+            (
+                call_id,
+                "requested",
+                None,
+                block["input"]["prompt"].as_str(),
+                "claude.assistant:tool_use:Agent",
+                call_id.to_owned(),
+            )
+        } else if record["type"] == "user" && block["type"] == "tool_result" {
+            let result = &record["toolUseResult"];
+            let Some(call_id) = block["tool_use_id"]
+                .as_str()
+                .filter(|id| agent_calls.contains(*id))
+            else {
+                continue;
+            };
+            if result["isAsync"] != true || result["status"] != "async_launched" {
+                continue;
+            }
+            let Some(agent_id) = result["agentId"]
+                .as_str()
+                .filter(|id| !id.trim().is_empty() && *id != session_id)
+            else {
+                continue;
+            };
+            (
+                call_id,
+                "started",
+                Some(SessionRef {
+                    provider: PROVIDER.into(),
+                    session_id: agent_id.into(),
+                }),
+                result["prompt"].as_str(),
+                "claude.user:toolUseResult:Agent",
+                format!("tool-result:{call_id}"),
+            )
+        } else {
+            continue;
+        };
+        handoffs.push(CoordinationObservation {
+            kind: "spawn".into(),
+            state: state.into(),
+            correlation_id: call_id.into(),
+            event_id: format!("event:claude:{line_index}"),
+            from_session_ref: Some(SessionRef {
+                provider: PROVIDER.into(),
+                session_id: session_id.into(),
+            }),
+            to_session_ref: target,
+            from_participant: None,
+            to_participant: None,
+            message_excerpt: prompt.map(|text| bounded_preview(text, PREVIEW_CHARS)),
+            message_excerpt_truncated: prompt.map(|text| text.chars().count() > PREVIEW_CHARS),
+            launch_request: None,
+            from_actor_path: None,
+            to_actor_path: None,
+            reader_event: Some(event_ref(session_id, &reader_id, "tool")),
+            provenance: RelationProvenance {
+                fidelity: "recorded".into(),
+                source_type: source_type.into(),
+                source_id: source_id.into(),
+            },
+        });
+    }
+    handoffs
+}
+
 struct Notification {
     id: String,
     tool_use_id: Option<String>,
@@ -1530,6 +1681,87 @@ mod tests {
     use crate::protocol::EventQuery;
 
     #[test]
+    fn current_structured_agent_launch_records_child_dispatch_without_a_run() {
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/claude-current-agent");
+        let adapter = ClaudeAdapter {
+            root: &root,
+            scope: "fixture",
+        };
+        let snapshot = adapter.load("parent").unwrap();
+        let handoffs: Vec<_> = snapshot
+            .relations
+            .iter()
+            .filter_map(|entry| match entry {
+                RelationEntry::Coordination { observation } => Some(observation),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(handoffs.len(), 2);
+        assert_eq!(handoffs[0].state, "requested");
+        assert_eq!(handoffs[0].to_session_ref, None);
+        assert_eq!(handoffs[1].state, "started");
+        assert_eq!(
+            handoffs[1].to_session_ref.as_ref().unwrap().session_id,
+            "child"
+        );
+        assert_eq!(handoffs[1].event_id, "event:claude:2");
+        assert_eq!(
+            handoffs[1].reader_event,
+            Some(event_ref("parent", "tool-result:agent-call", "tool"))
+        );
+        let RelationEntry::Task { task } = &snapshot.relations[2] else {
+            panic!("recorded notification");
+        };
+        assert_eq!(
+            task.description.as_deref(),
+            Some("Agent \"Run child marker check\" finished")
+        );
+        let bundle = adapter.protocol_bundle("parent").unwrap();
+        let document = serde_json::to_value(bundle.document(3).unwrap()).unwrap();
+        assert_eq!(document["coordination"].as_array().unwrap().len(), 2);
+        assert_eq!(document["agentRuns"], serde_json::json!([]));
+        assert_eq!(document["relationships"][0]["kind"], "child");
+        assert_eq!(
+            adapter
+                .load("child")
+                .unwrap()
+                .summary
+                .parent
+                .unwrap()
+                .session_id,
+            "parent"
+        );
+    }
+
+    #[test]
+    fn agent_launch_keeps_missing_identity_or_unknown_status_unresolved() {
+        let rows: Vec<Value> =
+            include_str!("../../../../fixtures/claude-current-agent/transcripts/parent.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        for (field, value) in [
+            ("status", serde_json::json!("unknown")),
+            ("agentId", Value::Null),
+        ] {
+            let mut calls = HashSet::new();
+            assert_eq!(
+                claude_agent_handoffs(&rows[1], 1, "parent", &mut calls)[0].state,
+                "requested"
+            );
+            let mut result = rows[2].clone();
+            result["toolUseResult"][field] = value;
+            assert!(claude_agent_handoffs(&result, 2, "parent", &mut calls).is_empty());
+        }
+        let mut unrelated = rows[1].clone();
+        unrelated["message"]["content"][0]["name"] = serde_json::json!("Read");
+        let mut calls = HashSet::new();
+        assert!(claude_agent_handoffs(&unrelated, 1, "parent", &mut calls).is_empty());
+        assert!(claude_agent_handoffs(&rows[2], 2, "parent", &mut calls).is_empty());
+    }
+
+    #[test]
     fn task_notification_without_recorded_status_stays_unknown() {
         let dir = tempfile::tempdir().unwrap();
         let transcripts = dir.path().join("transcripts");
@@ -1548,6 +1780,7 @@ mod tests {
             panic!("expected a recorded task notification");
         };
         assert_eq!(task.status, "unknown");
+        assert_eq!(task.description.as_deref(), Some("Waiting for an update"));
         assert_eq!(task.provenance.source_id, "notification-1");
         assert_eq!(
             task.reader_event,
@@ -1681,11 +1914,14 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires an explicitly selected private Claude Code source manifest"]
     fn frozen_private_claude_native_stream_full_pagination() {
-        let Ok(manifest_path) = std::env::var("AGENTSESSION_V3_CLAUDE_PRIVATE_MANIFEST") else {
-            eprintln!("private Claude corpus unavailable; skipping source verification");
-            return;
-        };
+        let manifest_path = std::env::var_os("AGENTSESSION_V3_CLAUDE_PRIVATE_MANIFEST")
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                panic!("set AGENTSESSION_V3_CLAUDE_PRIVATE_MANIFEST to the frozen private Claude Code manifest before explicitly running this ignored test")
+            });
         let manifest: Value = serde_json::from_slice(&fs::read(manifest_path).unwrap()).unwrap();
         let source = manifest["files"]
             .as_array()

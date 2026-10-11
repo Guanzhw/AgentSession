@@ -1,6 +1,7 @@
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { createServer as createHttpServer } from 'node:http';
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
@@ -13,6 +14,9 @@ import test from 'node:test';
 const repo = fileURLToPath(new URL('../../', import.meta.url));
 const uiDir = path.join(repo, 'v3', 'ui');
 const ids = ['search-one', 'search-two'];
+const lateBody = '🙂İ汉'.repeat(1625) + 'recorded term🙂 trailing content';
+const lateBodyRevision = createHash('sha256').update(lateBody).digest('hex');
+const lateBodyOffset = '🙂İ汉'.repeat(1625).length;
 const browserName = process.platform === 'win32'
   ? 'agent-browser-win32-x64.exe' : `agent-browser-${process.platform}-${process.arch}`;
 const browserExe = process.env.AGENTSESSION_V3_AGENT_BROWSER_BIN ||
@@ -50,18 +54,56 @@ async function freePort() {
   return freeFetchSafePort();
 }
 
+test('search destination URLs round-trip normalized targets and preserve ordinary destinations', async t => {
+  const { createServer } = createRequire(path.join(uiDir, 'package.json'))('vite');
+  const server = await createServer({ root: uiDir, server: { middlewareMode: true, hmr: false, ws: false }, appType: 'custom', logLevel: 'error' });
+  t.after(() => server.close());
+  const { searchMatchHref, searchTargetFromHash } = await server.ssrLoadModule('/src/lib/search-navigation.ts');
+  const session = { provider: 'codex', sessionId: 'session 中文 ?#' };
+  const event = { ...session, messageId: 'message ?#&🙂', segment: 'message' };
+  const target = { event, field: 'body', offset: 6500, matchLength: 13, contentRevision: lateBodyRevision };
+  const href = searchMatchHref({ session, event, target });
+  const url = new URL(href, 'http://127.0.0.1');
+  assert.equal(decodeURIComponent(url.pathname.split('/').at(-1)), session.sessionId);
+  assert.deepEqual(searchTargetFromHash(url.hash, session), target);
+  assert.equal(searchMatchHref({ session, event: null, target: null }), href.split('#')[0]);
+  const ordinary = searchMatchHref({ session, event, target: null });
+  assert.equal(searchTargetFromHash(new URL(ordinary, url).hash, session), null);
+  const { getReaderBootstrap } = await server.ssrLoadModule('/src/lib/api.ts');
+  const originalFetch = globalThis.fetch;
+  let bootstrapUrl;
+  globalThis.fetch = async input => {
+    bootstrapUrl = input;
+    return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    await getReaderBootstrap(session.provider, session.sessionId, new URLSearchParams(url.hash.slice(7)));
+    const params = new URL(bootstrapUrl, url).searchParams;
+    assert.deepEqual([...params.keys()], ['messageId', 'segment'],
+      'content-target fields belong to Reader reveal, not the bootstrap request contract');
+    assert.equal(params.get('messageId'), event.messageId);
+  } finally { globalThis.fetch = originalFetch; }
+  for (const [key, value] of [['offset', '-1'], ['offset', '1.5'], ['matchLength', '0'],
+    ['matchLength', '1000000'], ['field', 'toolOutput'], ['contentRevision', 'invalid']]) {
+    const query = new URLSearchParams(url.hash.slice(7));
+    query.set(key, value);
+    assert.throws(() => searchTargetFromHash('#event?' + query, session), /search destination is invalid/);
+  }
+});
+
 async function harness(t, multipleProviders = false) {
   const { build } = createRequire(path.join(uiDir, 'package.json'))('vite');
   const buildDir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-ui-search-'));
   await build({ root: uiDir, configFile: path.join(uiDir, 'vite.config.ts'),
     build: { outDir: buildDir, emptyOutDir: true }, logLevel: 'error' });
   const searches = [];
+  const contentRequests = [];
   const fixtureIds = multipleProviders ? ['search-one', 'pi-one', 'claude-one', 'search-two'] : ids;
   const providerFor = sessionId => sessionId === 'pi-one' ? 'pi'
     : sessionId === 'claude-one' ? 'claude-code' : 'codex';
   const state = { deleted: new Set(), permanent: new Set(), titles: new Map(), searchRevision: 0,
     delayCursorSearches: false, delayNextFreshSearch: false, completedSearches: 0,
-    failNextSearch: false,
+    failNextSearch: false, longBody: false, changedBody: false, contentFailureMessage: null,
     partialSearchCoverage: false, partialFamilyCoverage: false, familySourceDiagnostics: null };
   let nextSearchHold = null;
   const pendingSearchHolds = new Set();
@@ -151,6 +193,10 @@ async function harness(t, multipleProviders = false) {
         return [{ session: { provider: providerFor(sessionId), sessionId },
           event: { ...reference(sessionId), provider: providerFor(sessionId) },
           matchField: titleMatch ? 'title' : 'message', matchRole: titleMatch ? null : 'assistant',
+          target: state.longBody && !titleMatch ? {
+            event: { ...reference(sessionId), provider: providerFor(sessionId) }, field: 'body',
+            offset: lateBodyOffset, matchLength: 'recorded term'.length, contentRevision: lateBodyRevision,
+          } : null,
           snippet: titleMatch ? title : snippet, title, directory: '/fixture', updatedAt: 1,
           untrustedContent: true }];
       });
@@ -182,11 +228,25 @@ async function harness(t, multipleProviders = false) {
       state.searchRevision++;
       return json(currentMeta(mutation[1]));
     }
-    const reader = url.pathname.match(/^\/api\/v3\/reader\/codex\/(search-one|search-two)\/(bootstrap|locate|toc)$/);
+    const reader = url.pathname.match(/^\/api\/v3\/reader\/codex\/(search-one|search-two)\/(bootstrap|locate|toc|content)$/);
     if (reader) {
       const [, sessionId, kind] = reader;
       const data = bootstrap(sessionId);
+      if (state.longBody) {
+        data.segments[0].items[0].totalChars = lateBody.length;
+        data.segments[0].items[0].contentRevisions = { body: lateBodyRevision };
+      }
       data.session.title = currentTitle(sessionId);
+      if (kind === 'content') {
+        contentRequests.push(Object.fromEntries(url.searchParams));
+        if (state.changedBody) return json({ error: { code: 'source_changed',
+          message: state.contentFailureMessage ?? 'The recorded source changed. Refresh this session and search again.' } }, 409);
+        assert.equal(url.searchParams.get('contentRevision'), lateBodyRevision);
+        const offset = Number(url.searchParams.get('offset'));
+        const maxChars = Number(url.searchParams.get('maxChars'));
+        const text = lateBody.slice(offset, offset + maxChars);
+        return json({ text, offset, totalChars: lateBody.length, nextOffset: null, truncated: false });
+      }
       if (kind === 'bootstrap') return json(data);
       if (kind === 'toc') return json({ session: data.session.session,
         revision: data.revision, toc: data.toc });
@@ -211,10 +271,13 @@ async function harness(t, multipleProviders = false) {
   await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
   t.after(async () => {
     for (const hold of pendingSearchHolds) hold.release();
-    await new Promise(resolve => server.close(resolve));
+    await new Promise(resolve => {
+      server.close(resolve);
+      server.closeAllConnections();
+    });
     await rm(buildDir, { recursive: true, force: true });
   });
-  return { origin: `http://127.0.0.1:${port}`, searches, state, holdNextSearch };
+  return { origin: `http://127.0.0.1:${port}`, searches, contentRequests, state, holdNextSearch };
 }
 
 async function browser(t, url) {
@@ -463,6 +526,56 @@ test('a content-search scope change rejects an older continuation response',
     assert.equal(app.searches.at(-1).cursor, undefined);
     assert.equal(await command('eval', `document.querySelectorAll('.search-result').length`), '1');
     assert.match(await command('get', 'text', '.search-result'), /pi-one/);
+  });
+
+test('late global content hits reveal a bounded Unicode target and retain Back and direct-link context',
+  { skip, timeout: 60_000 }, async t => {
+    const app = await harness(t);
+    app.state.longBody = true;
+    const command = await browser(t, `${app.origin}/sessions/search?q=recorded+term&provider=codex`);
+    await waitFor(command, `document.querySelector('.search-result a')`);
+    await command('click', '.search-more');
+    await waitFor(command, `document.querySelectorAll('.search-result').length === 2`);
+    const href = await command('eval', `document.querySelector('.search-result:nth-child(2) a').getAttribute('href')`);
+    assert.match(href, /offset=6500/);
+    assert.match(href, /matchLength=13/);
+    assert.match(href, new RegExp(`contentRevision=${lateBodyRevision}`));
+    await command('click', '.search-result:nth-child(2) a');
+    await waitFor(command, `document.querySelector('.search-reveal mark')?.textContent === 'recorded term'`);
+    assert.equal(await command('eval', `(() => { const rect = document.querySelector('.search-reveal mark').getBoundingClientRect(); return rect.top >= 0 && rect.bottom <= innerHeight; })()`), 'true');
+    assert.equal(app.contentRequests.at(-1).offset, '6500');
+    assert.equal(app.contentRequests.at(-1).maxChars, '1400');
+    assert.equal(app.contentRequests.at(-1).contentRevision, lateBodyRevision);
+    assert.equal(await command('eval', `document.querySelector('.search-reveal .event-body').textContent.length < 1401`), 'true');
+    if (process.env.AGENTSESSION_V3_JOURNEY_SCREENSHOT_DIR) {
+      await command('screenshot', path.join(process.env.AGENTSESSION_V3_JOURNEY_SCREENSHOT_DIR, 'search-late-reveal.png'));
+    }
+    await command('back');
+    await waitFor(command, `document.querySelectorAll('.search-result').length === 2`);
+    assert.equal(await command('get', 'value', 'input[type="search"]'), 'recorded term');
+    assert.equal(await command('eval', `document.activeElement === document.querySelector('.search-result:nth-child(2) a')`), 'true');
+    // A browser-owned destination (new-tab/modified click) carries the same target.
+    const directHref = await command('eval', `document.querySelector('.search-result:nth-child(2) a').href`);
+    await command('open', JSON.parse(directHref));
+    await waitFor(command, `document.querySelector('.search-reveal mark')?.textContent === 'recorded term'`);
+    app.state.changedBody = true;
+    await command('reload');
+    await waitFor(command, `document.querySelector('.reader-actions + .content-error')?.textContent.includes('recorded source changed')`);
+    if (process.env.AGENTSESSION_V3_JOURNEY_SCREENSHOT_DIR) {
+      await command('screenshot', path.join(process.env.AGENTSESSION_V3_JOURNEY_SCREENSHOT_DIR, 'search-stale-source.png'));
+    }
+    assert.equal(await command('eval', `Boolean(document.querySelector('.search-reveal mark'))`), 'false');
+    await command('select', '.language-select', 'zh');
+    await waitFor(command, `document.querySelector('.reader-actions + .content-error')?.textContent === '已记录来源发生变化。请刷新会话后重新搜索。'`);
+    if (process.env.AGENTSESSION_V3_JOURNEY_SCREENSHOT_DIR) {
+      await command('screenshot', path.join(process.env.AGENTSESSION_V3_JOURNEY_SCREENSHOT_DIR, 'search-stale-source-zh.png'));
+    }
+    app.state.contentFailureMessage = 'Unable to read recorded source: diagnostic-42';
+    await command('reload');
+    await waitFor(command, `document.documentElement.lang === 'zh-CN' && document.querySelector('.reader-actions + .content-error')?.textContent === 'Unable to read recorded source: diagnostic-42'`);
+    if (process.env.AGENTSESSION_V3_JOURNEY_SCREENSHOT_DIR) {
+      await command('screenshot', path.join(process.env.AGENTSESSION_V3_JOURNEY_SCREENSHOT_DIR, 'search-raw-error-zh.png'));
+    }
   });
 
 test('Library searches recorded content, pages hits, and opens an exact Reader event',

@@ -5,10 +5,19 @@
 证据，源码链接固定到原 Git 修订；现有验收状态不因移除旧 runtime 自动改变。
 原生 Protocol 2/3 和 provider 自有格式版本继续属于 3.0 的已记录事实契约。
 
-2026-10-11 的[预发布验证](prerelease-validation-20261011.md)增加当前四平台
-CI 和 `3.0.0-rc.1` 的 Windows 真实元数据副本／Web／MCP 证据。它们各有
-来源与产物范围；以下历史未归因失败及未覆盖来源形状保留原结论。
-MCP 初始化报告当前工作区声明的包版本（此候选为 `3.0.0-rc.4`）；表内
+2026-10-11 已发布 `v3.0.0-rc.4`，确切提交 `d74d5088388118d8df7dd622a7ef17f4be0c73ed`。
+[预发布验证](prerelease-validation-20261011.md)记录重新读取的发布 run 38132614812、
+Quality 38132610988 和 native 38132610982；三者 completed/success 且 head SHA 一致。
+四个实际宿主已完成构建、装包、Web/MCP 与安装检查，当前子结果见 PLATFORM-01-CI；
+RC.1 的 Windows 真实元数据副本／Web／MCP 证据仍按自身产物归属。
+剩余来源、完整桌面产品、资源、人类反馈和历史 STATE-01 门槛见
+[当前 gate 表](agentsession-v3-delivery-plan.md#稳定版剩余门槛)。新增 follow-through 修复为
+**Unreleased**，不改变 rc.4 已发布行为或下文历史失败。
+本地 Reader journey 修复范围见[新规格](../specs/reader-journey-repair-2026-10/requirements.md)，
+实施与验证结果见[任务账本](../specs/reader-journey-repair-2026-10/tasks.md)；本轮不改变
+已有逐项验收、平台或稳定发布 gate。
+历史本机 `tmp/` 证据的归档映射见[恢复入口](agentsession-v3-delivery-plan.md#本机历史证据恢复路径)。
+MCP 初始化报告工作区声明的包版本（已发布基线为 `3.0.0-rc.4`）；表内
 `3.0.0` 保留历史候选的身份，不固定后续发行版本号。
 
 2026-10-10 HTTP-04 的内容续读增加[字段快照契约](../../.agents/decisions/implemented/2026-10-10-reader-content-snapshots.md)：
@@ -16,7 +25,8 @@ MCP 初始化报告当前工作区声明的包版本（此候选为 `3.0.0-rc.4`
 Input/Output 失效。缓存中的匹配字段可独立于当前来源状态读取，新发布替换字段后
 拒绝旧指纹。未提供字段指纹的请求，以及段落、搜索和 MCP，保留原来源修订检查。
 
-状态：候选验收中；各行 P/U/F/B 记录整项结论与剩余证据。更新：2026-10-02。
+状态：rc.4 已预发布，稳定版验收未完成；各行 P/U/F/B 记录各自产物范围的整项结论。
+当前发布及平台子结果更新：2026-10-11；以下 Oct1/Oct2 结果保留历史范围。
 
 2026-10-02当前正常双x64候选为Windows `caffb72b`／Linux `d22c4989`，绑定相同70生产输入及三UI资产；当前报告 (`../../tmp/v3-delivery/CURRENT-CANDIDATE-20261002.md`, local evidence)给出精确包、运行入口和未解决差异。Windows完整Node430/462 pass、0 fail、32 skip，另同PE alternate-selector Library单例1/1；Linux404/456 pass、0 fail、52 skip，实际来源聚焦11/11；Rust192 core＋5 app pass、14 ignore。相同三个npm tarball两宿主离线安装P。当前完整C在原10秒门槛下append/rewrite/delete全部P，三完整transition为4.712/4.566/4.340s。五组当前A/B十臂完整gold通过：357有序根/六facet、507 tool events、10,577单位正文；重复browse更快，首次browse/timeline/body更慢，完整session_get五对均不等价且速度比较不合格。当前一次Web＋2MCP的initial/warm/force/post/restart完整gold P，但wrapper因default meta.db字节/mtime变化exit1、writer unknown；STATE-01保持F。固定2.0／caff在38994／25066实际并排，五源API、Library→Reader→Runtime→native来源引用和Stop/Status/Start P，856来源bytes保全；当前截图失败。DEL-01/03整项U、SRC/平台B、人类偏好U；旧30d2/20db/83/70及ENOSPC失败保留各自身份。
 
@@ -129,6 +139,10 @@ Web 验收须在真实桌面浏览器中检查中英文、明暗主题、键盘�
 
 ## 性能、分发与迁移对比
 
+DEL-04 下文保留 Oct1 产物的整行 B。当前 rc.4 的四宿主构建/装包/Web/MCP/安装
+子结果已通过 PLATFORM-01-CI；这不关闭 DEL-01/03、SRC-01/02 或 UX-01，
+也不把历史缺环境、失败及旧产物重新标为当前执行。
+
 先通过功能正确性及完整结果／引用等价门槛，再比较性能。已优化的 2.0 基线与 3.0 候选须使用同一冻结五-provider 语料、筛选条件和查询集，派生状态分别隔离但条件等价。保留全部尝试、错误和重试，交替运行顺序。[同语义性能协议](agentsession-v3-performance-protocol.md)已在 3.0 测量前固定重复查询 p95 小于 1 秒、无变化 fresh-process 可回答时间小于 2 秒的目标。[3.0 release 五轮绝对阈值测量](agentsession-v3-delivery-plan.md#进度决策与恢复记录)当前 Windows exe `4313bfe5dd56be7e356b9bba2362caa0ad3dceee8a1f5ff8b348a7e9ed214420` 在 816 文件共同语义子语料的五轮交替测量中满足这两项；完整 840 文件与新增 Agent 回复仍未证明跨版本等价或普遍加速，也未关闭 DEL-01 的其余负载。未实际控制文件系统缓存时，不称为“冷盘”。
 
 | ID | 依据／旧观察 | 3.0 目标 | 验证方法 | 待核实 | 状态 |
@@ -167,7 +181,8 @@ DEL-06 的历史包补充：f2a3feb5 fresh-state 并排复现 (`../../tmp/v3-del
 | SRC-01 | 最新上游producer与真实只读格式配对 | 官方registry快照及本机census (`../../tmp/v3-delivery/provider-freshness-20261001/REPORT.md`, local evidence)逐个记录版本／时间。最新五producer未都有现行配对样本；五GitHub HEAD请求失败保留原错误。版本号不证明兼容，也不把历史alpha.2称为当前rc2。 | B |
 | SRC-02 | 罕见原生形状 | 当前Claude11文件132records无sidechain/task notification/compact，Pi1文件5records无branch_summary/compact/parentSession，选定Codex无真实新压缩样本；原生DSH team仅两成员/短queue、无workflow。既有controlled分支／容量／格式回归通过，原生样本缺口保持具体B，不制造新源数据。 | B |
 | UX-01 | 用户对重设计的视觉偏好 | 最终真实双语明暗展开与本代理截图检查已完成；WEB-10原axe incomplete已逐目标实际裁决。用户视觉偏好尚未返回，不作为已取得的认可。 | U |
-| PLATFORM-01 | Linux arm64／macOS arm64与实际平台CI | 本地Windows/Linux x64安装已验；四平台workflow仅本地静态检查，未推送或执行，缺实际ARM/macOS环境。已询问交付偏好；无及时回复时按推荐先交付双x64候选，保留原四平台未完成状态。 | B |
+| PLATFORM-01 | 历史 Oct1/Oct2 Linux arm64／macOS arm64与实际平台CI | 当时本地Windows/Linux x64安装已验；四平台workflow仅本地静态检查，未推送或执行，缺实际ARM/macOS环境。原环境B保持该日期范围；当前rc.4执行另记PLATFORM-01-CI，不把包装CI扩展为真实来源、完整桌面产品或资源验收。 | B |
+| PLATFORM-01-CI | rc.4 四宿主构建、装包、Web/MCP与安装子结果 | 确切d74d508的[发布run38132614812](https://github.com/Guanzhw/AgentSession/actions/runs/38132614812)及[native38132610982](https://github.com/Guanzhw/AgentSession/actions/runs/38132610982)均success：Windows x64、Linux x64/arm64、macOS arm64实际宿主各自构建、portable包、HTTP/MCP、安装器与npm检查；组合tarball在Linux离线安装/启动通过并已发布。三run的head SHA及逐job结果经只读gh重新核对，详见[预发布验证](prerelease-validation-20261011.md)。SRC-01/02、DEL-01/03、UX-01与STATE-01继续各自开放。 | P |
 | STATE-01 | 默认Viewer元数据库字节保全 | 最终性能保全时间线 (`../../tmp/v3-performance/final-native-83edfddc-20261001/default-metadata-timeline.public.json`, local evidence)记录FDE→076（14:48）→B323（15:20）三次观测；writer未知、诊断区间缺完整即时前后hash，不能称default state未变或归因于产品／外部写入。Oct2 matched／shared再次观测default DB字节变化且writer未知。只读副本逻辑比较 (`../../tmp/v3-delivery/state01-20261002/logical-comparison-post-shared.public.json`, local evidence)的最新endpoint与Sept30备份同schema，session_meta／config／三个token表／index_catalog_revision相同，只有session_index变化；该endpoint不能证明未保存的中间byte版本逻辑内容或连续无写入。冻结provider文件、exact候选、70生产输入和五组并排状态已保全；此默认DB异常与隔离副本迁移P分别记录。 当前caff A/B四保护端点全部P；随后单次共享观察仍见default meta.db bytes/mtime变化，wrapper exit1，只有此文件的保护比较F，writer unknown。旧pairs/default listener/source/artifacts分别P，不能归因writer或用先前P抹掉新F。见当前共享独立审计 (`../../tmp/v3-delivery/current-caff-shared-one-review-20261002/POST-REPORT.md`, local evidence)。 | F |
 
 

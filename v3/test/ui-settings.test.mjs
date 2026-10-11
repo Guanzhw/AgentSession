@@ -57,7 +57,7 @@ test('real Settings saves resume overrides and Reader reflects the saved capabil
   ].map(JSON.stringify).join('\n') + '\n';
   await writeFile(source, body);
   const config = path.join(dir, 'config.json');
-  await writeFile(config, JSON.stringify({ resumeCommands: { pi: false } }));
+  await writeFile(config, JSON.stringify({ resumeCommands: { pi: false }, dbPath: path.join(dir, 'configured-opencode.db') }));
   const port = await freeFetchSafePort();
   const base = `http://127.0.0.1:${port}`;
   child = spawn(binary, ['serve', '--port', String(port), '--config', config,
@@ -71,8 +71,35 @@ test('real Settings saves resume overrides and Reader reflects the saved capabil
     if (i === 99) throw new Error('Web server unavailable');
     await new Promise(resolve => setTimeout(resolve, 100));
   }
-  await command(session, 'open', base + '/settings');
+  await command(session, 'open', base + '/settings#source-opencode');
+  await command(session, 'set', 'viewport', '1440', '1000');
   await command(session, 'snapshot', '-i');
+  await waitForText(session, 'Current source path');
+  assert.equal(JSON.parse(await command(session, 'eval', `document.activeElement.id`)), 'source-opencode',
+    'the native Settings deep link focuses its specific source after async loading');
+  assert.equal(await command(session, 'eval', `document.querySelector('#source-heading-opencode').getBoundingClientRect().top >= document.querySelector('.topbar').getBoundingClientRect().bottom`), 'true',
+    'the native source destination heading remains visible below the fixed app header');
+  assert.equal(await command(session, 'eval', `document.querySelector('#source-opencode').getBoundingClientRect().top - 5 >= document.querySelector('.topbar').getBoundingClientRect().bottom`), 'true',
+    'the native source destination reveals its complete focus outline');
+  assert.equal(await command(session, 'get', 'text', '[data-source-path="opencode"]'), path.join(dir, 'opencode.db'),
+    'source guidance shows the effective startup CLI path rather than the lower-priority config value');
+  const sourceGuidance = await command(session, 'get', 'text', '#source-opencode');
+  assert.match(sourceGuidance, /dbPath/);
+  assert.match(sourceGuidance, /--opencode-db/);
+  assert.match(sourceGuidance, /AGENTSESSION_DB_PATH/);
+  assert.match(sourceGuidance, /Restart the Viewer/);
+  assert.equal(await command(session, 'get', 'text', '[data-source-path="pi"]'), path.join(dir, 'pi'));
+  const journeyScreenshots = process.env.AGENTSESSION_V3_JOURNEY_SCREENSHOT_DIR;
+  if (journeyScreenshots) {
+    await mkdir(journeyScreenshots, { recursive: true });
+    await command(session, 'screenshot', path.join(journeyScreenshots, 'native-source-settings-focus-en.png'));
+    await command(session, 'eval', `(() => { const select = document.querySelector('.language-select'); select.value = 'zh'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await waitForText(session, '重启 Viewer');
+    await command(session, 'eval', `document.querySelector('#source-opencode').focus()`);
+    await command(session, 'screenshot', path.join(journeyScreenshots, 'native-source-settings-focus-zh.png'));
+    await command(session, 'eval', `(() => { const select = document.querySelector('.language-select'); select.value = 'en'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await waitForText(session, 'Restart the Viewer');
+  }
   const controls = await command(session, 'eval', "Boolean(document.querySelector('#resume-commands'))");
   assert.ok(controls.includes('true'), 'Settings must expose the resume command editor');
   await command(secondSession, 'open', base + '/settings');
