@@ -505,3 +505,12 @@ publication contract. The delta since `11ec33d` is documentation only; prior
 production, installed-package and real-surface evidence is reused within its
 unchanged source scope. The tag's own release workflow will bind rebuilt public
 payloads to the final documentation commit.
+
+Documentation commit `f554564e973e045774ad9b0a59b7bbd2539801a6` was pushed to
+main. Its [Quality run](https://github.com/Guanzhw/AgentSession/actions/runs/38197248158)
+passes on Node 22.15 and 26.5; its [native run](https://github.com/Guanzhw/AgentSession/actions/runs/38197248161)
+passes on all four actual hosts. A subsequent release-page rendering check
+shows GitHub leaves relative Markdown links unchanged, so the release note's
+three documentation links are pinned to the `v3.0.0` source tag before tagging.
+This final link/evidence delta changes no application, build or test inputs;
+the publication workflow still validates the exact final tag commit.
