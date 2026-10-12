@@ -519,8 +519,7 @@ Its native command provides migration; the rc.4 npm Viewer wrapper cannot route
 Linux/macOS use `./agentsession-v3` instead. The npm Viewer may also be used after
 that import: `agentsession --config <the-same-config.json>`.
 
-The **unreleased npm routing fix in this workspace** supports the same migration
-through the installed Viewer entrypoint:
+**Starting with 3.0.0**, the npm Viewer entrypoint supports the same migration:
 
 ```sh
 agentsession migrate-meta --from /absolute/old-meta-copy.db --config /absolute/config.json
@@ -530,9 +529,8 @@ agentsession --config /absolute/config.json
 Explicit `serve`, `mcp`, `migrate-meta` and `help` commands are forwarded to the
 native CLI; invocations without a command default to `serve`. Global `--config` may also precede
 the command. The separate `agentsession-mcp --config <file>` entrypoint retains
-its stdio behavior. These corrected wrapper commands require a package built
-from the follow-through changes; installing the already-published rc.4 does not
-include them.
+its stdio behavior. These corrected wrapper commands require 3.0.0 or newer;
+rc.4 retains its original wrapper behavior.
 
 The import prints the selected source scope and creates
 `<metaDir>/scopes/<scope>/meta.db` only when that target does not exist. It copies

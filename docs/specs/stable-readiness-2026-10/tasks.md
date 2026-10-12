@@ -5,12 +5,12 @@ Updated: 2026-10-12. Goal: **3.0 stable**. See
 
 | Work package | Owner | State |
 | --- | --- | --- |
-| Freeze stable rubric and candidate scope | Orchestrator | Active; user selected stable |
-| SRC-01/02 real-source evidence | Source workers | All five current producers and required rare shapes captured; current DSH Linux workflow/team succeeds and complete native oracle passes; latest Claude dispatch repair awaits final5 integrated verification |
+| Freeze stable rubric and candidate scope | Orchestrator | Frozen; user selected stable and later authorized immediate publication with the remaining evidence limits recorded |
+| SRC-01/02 real-source evidence | Source workers | All five current producers and required rare shapes captured; final5 authentic Claude/DSH desktop and native source oracles pass |
 | Historical STATE-01 attribution | State worker | Historical F remains unattributed; same legacy index-write mechanism reproduced on isolated copies |
-| Stable packaging/publication path | Release worker | Implemented; final5 Windows/WSL offline npm installation and Web/MCP launch pass; four-target current CI remains open |
+| Stable packaging/publication path | Release worker | Implemented; final5 Windows/WSL offline npm installation and Web/MCP launch pass; same-commit four-target CI passes |
 | Optimized candidate and complete regression gate | Orchestrator | Final5 built; 251 Rust passes, 18 explicit ignores and review pass; full Node historical run ended with one repaired harness failure and scoped reruns pass |
-| Complete desktop/resource validation | Desktop/resource workers | Final5 authentic Claude/DSH desktop delta passes; representative journeys and ten latest-source routes covered; five normal plus one auxiliary resource repetition pending quiet launch |
+| Complete desktop/resource validation | Desktop/resource workers | Final5 authentic desktop delta passes; current resource/search attempts fail the live legacy state guard; remaining measurements stay open under the user's direct-publication decision |
 | Human UX feedback | User + orchestrator | Passed for the presented desktop tasks; user explicitly confirmed actual task completion and acceptable reading/return behavior |
 | Final independent review and release judgment | Independent reviewer + orchestrator | Broad and final-delta reviews completed; DSH and test-harness findings repaired and independently verified; final evidence judgment pending |
 
@@ -269,7 +269,7 @@ Evidence is under `tmp/stable-readiness-20261011/final-candidate-5/`.
 - The final empty-child collaboration regression and all five mock-backed
   collaboration browser checks pass after a preserved failing baseline.
   Authentic final5 desktop integration passes as detailed below; formal
-  resource repetitions and current four-host CI remain pending.
+  resource repetitions remain pending; current four-host CI passes below.
 
 Final5 authentic desktop QA confirms the recorded Claude dispatch/summary,
 canonical child expansion, bilingual empty-child state and Back/Forward return.
@@ -296,5 +296,212 @@ reports no remaining actionable implementation finding.
 The user authorized committing and pushing the reviewed changes to the isolated
 `codex/stable-readiness-20261012` validation branch and running four-platform
 native CI. This authorization excludes changing `main`, creating release tags,
-or publishing npm/GitHub releases. Resource verification continues locally;
-the exact remote commit/run and outcome will be recorded after execution.
+or publishing npm/GitHub releases. Commit
+`11ec33d57762b96c752473a5b4a8a69e961d7742` was pushed to that branch;
+`main` remains at `d74d508`. The [four-platform native run](https://github.com/Guanzhw/AgentSession/actions/runs/38155304737)
+completed successfully on that exact commit. Each actual host passed 251 Rust
+tests with 18 explicit ignores. Packaged native integration counts were
+347 pass / 188 skip on Windows x64, 339 / 196 on each Linux architecture,
+and 338 / 197 on macOS ARM64, with zero failures. Browser/private-source/host
+skips retain their stated scope; local authentic-source and desktop evidence
+supplies the separately recorded checks. All four unpublished portable/npm
+validation artifacts were produced; no release was published.
+
+On October 12 the user additionally instructed: publish after completing the
+work. Stable publication is now authorized after the remaining acceptance and
+final review succeed. The earlier validation-only authorization above retains
+its historical scope; no release has yet been created.
+
+Read-only publication preparation confirms source versions already agree on
+`3.0.0`, while its remote tag and all three npm package versions are still
+absent. The release workflow publishes a pushed `v3.*` tag after validation;
+stable versions select npm `latest` and a normal GitHub release. Its required
+[3.0.0 release note](../../releases/3.0.0.md) is now prepared and independently
+reviewed without actionable findings. Final released-version wording in the
+note and READMEs is aligned in the pre-tag delta. The exact publication and
+post-install verification sequence is retained in
+`tmp/stable-readiness-20261011/release-after-acceptance/HANDOFF.md`.
+
+## Current resource and matched-workload qualification
+
+The first final5 formal resource attempt stopped in repetition one. Its three
+services returned all 813 search rows with complete raw-call evidence. The
+810 fixed-cutoff rows retain their previous order, count and fields, but each
+now includes a source-navigation `target` absent from the old gold. The old
+full-object hash mismatch remains a failed attempt; all target fields require
+independent raw-source validation before a revised oracle is sealed. Later
+normal repetitions and the auxiliary run were not started.
+
+The same window changed the protected live legacy `agentsession/meta.db`
+bytes/mtime. Provider-source and owned-copy guards pass, and all three task
+services exit. There is no per-write PID trace, so the writer remains unknown;
+the current failure is retained separately from historical STATE-01 and the
+passing controlled metadata-copy import.
+
+Independent review confirms that shared-resource repetitions alone cannot
+close DEL-01. Remaining current evidence includes nine-query five-pair search
+and source-verified restart measurements, metadata/long-content paired reads,
+source-change repetitions and full-session semantic adjudication. The original
+one-second repeat-search and two-second restart thresholds remain unchanged.
+Preparation and raw-source oracles are task-owned ignored evidence; no timing
+comparison becomes eligible by discarding new fields or unresolved differences.
+
+The [current semantic adjudication](../../design/agentsession-v3-current-semantic-adjudication.md)
+now resolves the search targets and all 118 complete-session differences against
+independent raw sources. A separately sealed second resource attempt completes
+initial, warm, post-refresh and restart phases: each verifies 813 search rows,
+357 roots, 507 tool references and the entire 10,577-unit body. Its first
+repetition succeeds, but the overall run exits 1 because protected legacy
+metadata changes; repetitions two through five and the auxiliary run remain
+unstarted. These outcomes do not close the five-repetition resource gate.
+
+The second attempt's observer retained five stable SQLite snapshots. Their
+schema and all table contents remain equal except `session_index.last_indexed`:
+three bursts update 25, 16 and 17 rows, without adding or removing rows. Every
+snapshot passes `quick_check`. A later read-only Windows Restart Manager query
+finds ten legacy MCP Node holders and no native candidate holder. This narrows
+the current change to legacy index timestamps; the post-run holder list does
+not establish which process performed an earlier write. The strict failure
+and unknown writer remain recorded. The hash-bound native source has no
+`last_indexed` updater and the measured processes receive explicit isolated
+state paths; installed legacy 1.10.1 source writes that column during startup
+index refresh. This identifies a matching mechanism without attributing an
+individual observed write. The retained audit verifies all 987 raw calls and
+four phases while preserving the failed execution status. All six task-owned
+services exit. Detailed evidence is in
+`tmp/stable-readiness-20261011/state-audit/observed-final5-002/REPORT.md`.
+
+A later diagnostic observes six newly launched installed legacy MCP processes
+with increasing read I/O, all descending from the Codex app-server, alongside
+further legacy index writes. Another newly created process has zero observed
+I/O delta; the six active processes are not an exhaustive launch count.
+Eight stable SQLite copies change only `session_index.last_indexed`; schema,
+row count and all user metadata/token tables remain equal during that observer.
+The ten previously known MCP holders remain idle by independent native and WMI
+I/O counters. Exact-file writer attribution remains unavailable. This narrows
+the recurring interference to a host-launch/index-refresh mechanism without
+retroactively identifying the historical writer. The observer stops early on
+a sharing violation in its own log; its actual four-minute-twenty-second scope,
+failed WMI subscription and all raw evidence remain explicit in
+`state-audit/transient-observation-004-analysis/REPORT.md`.
+
+Copy preparation for the remaining matched workloads is complete: ten isolated
+source-change copies and ten read-only plans, fixed2 runtime fingerprint,
+independent complete search targets and source-adjudicated full-session output
+are sealed. Preparation itself launches no product. Its separately observed
+legacy-state drift remains failed; only source/copy/controller readiness is
+qualified. Timed-stage before/after preservation checks stay strict. The search
+attempt and its failed preservation check are recorded below; paired reads and
+source-change measurements have not started. The paired Reader controller is
+also statically ready; current Linux I/O/count instrumentation passes in the
+separate diagnostic below. The user authorized temporary legacy MCP isolation
+on October 12. Only the manual `mcp_servers.agentsession` entry was disabled;
+the plugin entry and unrelated configuration remain unchanged. Runtime
+activation is still required, as the search attempt demonstrates.
+
+Independent static review finds no actionable issue in the matched or Reader
+controllers and semantic claims. It verifies the actual seal, twelve relevant
+small pins, alternating plans, all 118 full-output differences and Reader
+reference hashes. Bulk guards and actual measurements remain execution checks;
+the review does not convert preparation or historical results into current
+performance evidence.
+
+The current-source crash check uses a separate debug `crash-test-hook` build
+(`f7373d4b…`) from all 82 production inputs bound to final5. A controlled
+precommit termination preserves the old complete catalog/search/FTS revision;
+recovery advances revision 1 to 2, agrees across Web and two MCP processes,
+rejects stale cursors and survives restart. Four SQLite integrity checks pass,
+19 raw call records settle, all shadow defaults and frozen inputs stay equal,
+and all five owned process IDs are confirmed absent afterward. The first
+observer attempt failed because Node 22.15 lacks FTS5; its six-call failure
+record remains. The unchanged controller passes with the verified FTS5-enabled
+Node 26.5.1 observer. This is bound debug-hook evidence, not a claim of forcibly
+terminating the ordinary optimized final5 executable. Detailed evidence is in
+`tmp/stable-readiness-20261011/crash-final5/`.
+
+Read-only analysis of the retained resource calls attributes 138–152 seconds
+per browse/search phase to four `/api/sessions` compatibility-statistics pages.
+That endpoint builds source-backed Protocol statistics for each returned row;
+the current Library uses `/api/v3/library/sessions?limit=40` and indexed family
+summaries. The retained compatibility timings therefore do not establish
+Library latency or a fixed2 regression. HTTP-01 retains these statistics but
+has no numeric latency threshold. The frozen workload and separate one-second
+search/two-second restart thresholds remain unchanged. Detailed call, source
+and logical-I/O evidence is in
+`remaining-performance-review/web-browse-latency/REPORT.md`.
+
+The current final5 Linux Reader diagnostic now passes over the same 15 frozen
+source files (36,116,973 bytes). Actual GDB entries show one capture,
+normalization and publication on the cold bootstrap and zero on the six
+subsequent unchanged bootstrap/Content requests. The opening, target and final
+complete bodies match source gold; final ordinal is 1,497 of 1,498. Fixed2
+precise coverage records 15 startup parses and one capture/render per detail.
+Strace records 401,408 native startup provider-read bytes, 24,310,353 on the
+cold bootstrap and 7,562,779 for each subsequent request in this original
+revision-checking sequence. Those are logical syscall bytes, not physical
+disk traffic or a browser-paint result. Source/runtime/tool/controller and
+copied-membership guards pass; Linux default state is unchanged and all owned
+processes exit. Two earlier controller failures (wrong cohort-size constant
+and misclassified owned runtime log) remain preserved with their narrow fixes.
+The successful run is independently identified in
+`del02-final5-linux/RESULT.md`; Windows browser and resource gates remain open.
+
+The October 12 search attempt completes five alternating fixed2/current pairs
+over all nine frozen queries. All ten arms pass their complete source-backed
+targets; the raw-call audit verifies 1,570 records with no unsettled call.
+Current repeat-search p95 values are 87.15–135.04 ms, and unchanged-restart to
+first correct answer p95 is 118.95 ms, below the frozen 1,000/2,000 ms thresholds.
+Fresh index construction to first correct answer p95 is 11,393.30 ms and remains
+a separate descriptive measure. Complete cross-version output is unequal, so
+full-output speedup comparison remains ineligible.
+
+The overall search attempt nevertheless exits 1: its protected-state guard
+finds the user's legacy `meta.db` changed. Frozen sources, runtime artifacts
+and the candidate remain unchanged. Forty seconds of quiet observation before
+the run and `codex mcp get agentsession --json` reporting `enabled: false` did
+not establish durable runtime isolation. Two exact manual `npx -y
+@acetamido/agentsession-mcp@latest` process chains were created by the existing
+Codex app-server after the setting changed; both accumulated substantial read
+and write I/O. The installed plugin uses a different pinned launch command.
+This establishes that the live app continued launching the disabled manual
+entry, without attributing an individual database write to a PID. The failed
+attempt and its measurements remain in `matched-final5/search-result.private.json`,
+with the original preservation packet and raw journals.
+
+Local installed protocol and official app-server documentation identify
+`config/mcpServer/reload`, which refreshes loaded threads without a single-server
+filter. No supported connection to the already-running Desktop stdio server was
+established, and no refresh was dispatched. The next action is a user-performed
+Codex restart, followed by runtime activation and quiet-state checks before
+resuming the prepared measurements. The manual entry stays temporarily disabled
+for that restart and must be restored afterward using the exact-section restore
+script, preserving unrelated edits. Remaining paired reads, source changes,
+Windows Reader and full resource repetitions stay open; this failed attempt
+does not close DEL-01 or historical STATE-01.
+
+## Direct stable publication disposition
+
+The user subsequently stated that restarting was not possible and explicitly
+instructed immediate publication. The [release decision](../../../.agents/decisions/implemented/2026-10-12-user-authorized-stable-publication.md)
+therefore replaces waiting for that restart and the remaining host-dependent
+measurements. This is an authorized release exception, not an acceptance pass.
+The current source and desktop checks, human feedback, installed-artifact checks
+and four-host CI retain their passing scope. Remaining paired reads, source
+changes, Windows Reader measurements, full shared-resource repetitions and
+historical STATE-01 attribution retain their incomplete or failed statuses.
+
+The manual MCP configuration was restored by exact-section replacement. Its
+complete config SHA-256 returned to the original value, and CLI inspection
+reports the manual entry enabled; plugin and unrelated settings are unchanged.
+No further blocked measurements are running. The ordinary release pipeline and
+post-publication package/asset checks remain required; publication outcome will
+be recorded after those operations complete.
+
+Final release preparation passes `npm run pre-push` (governance, Rust formatting
+and compilation) and the serial root Node 22.15 test suite: 244 tests, 241 pass,
+zero failures and three explicit skips. Fresh independent review finds no
+actionable issue in the final release note, disposition, migration commands or
+publication contract. The delta since `11ec33d` is documentation only; prior
+production, installed-package and real-surface evidence is reused within its
+unchanged source scope. The tag's own release workflow will bind rebuilt public
+payloads to the final documentation commit.

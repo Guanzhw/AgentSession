@@ -26,7 +26,16 @@ Input/Output 失效。缓存中的匹配字段可独立于当前来源状态读�
 拒绝旧指纹。未提供字段指纹的请求，以及段落、搜索和 MCP，保留原来源修订检查。
 
 状态：rc.4 已预发布，稳定版验收未完成；各行 P/U/F/B 记录各自产物范围的整项结论。
-当前发布及平台子结果更新：2026-10-11；以下 Oct1/Oct2 结果保留历史范围。
+当前发布基线仍为 rc.4。2026-10-12 的未发布 final5 候选和精确验证提交
+`11ec33d57762b96c752473a5b4a8a69e961d7742` 已通过最新五来源/稀有形状读取、
+真实桌面增量检查、用户指定阅读任务反馈及四宿主 native CI；证据范围见
+[稳定版执行账本](../specs/stable-readiness-2026-10/tasks.md)。当前完整会话差异已由
+[独立来源裁决](agentsession-v3-current-semantic-adjudication.md)解释，整输出速度比较仍不合格。
+当前五对九查询内容与绝对耗时目标通过，但整轮因默认旧索引变化而失败；手动旧 MCP
+临时停用后未在现有 Codex 进程生效，配置现已恢复。用户明确要求直接发布稳定版，
+按[发布裁决](../../.agents/decisions/implemented/2026-10-12-user-authorized-stable-publication.md)
+执行；其余配对性能、资源重复与状态保全验收继续开放。以下 Oct1/Oct2 各行状态
+保留历史产物范围，发布授权不改变其通过、失败或缺失证据。
 
 2026-10-02当前正常双x64候选为Windows `caffb72b`／Linux `d22c4989`，绑定相同70生产输入及三UI资产；当前报告 (`../../tmp/v3-delivery/CURRENT-CANDIDATE-20261002.md`, local evidence)给出精确包、运行入口和未解决差异。Windows完整Node430/462 pass、0 fail、32 skip，另同PE alternate-selector Library单例1/1；Linux404/456 pass、0 fail、52 skip，实际来源聚焦11/11；Rust192 core＋5 app pass、14 ignore。相同三个npm tarball两宿主离线安装P。当前完整C在原10秒门槛下append/rewrite/delete全部P，三完整transition为4.712/4.566/4.340s。五组当前A/B十臂完整gold通过：357有序根/六facet、507 tool events、10,577单位正文；重复browse更快，首次browse/timeline/body更慢，完整session_get五对均不等价且速度比较不合格。当前一次Web＋2MCP的initial/warm/force/post/restart完整gold P，但wrapper因default meta.db字节/mtime变化exit1、writer unknown；STATE-01保持F。固定2.0／caff在38994／25066实际并排，五源API、Library→Reader→Runtime→native来源引用和Stop/Status/Start P，856来源bytes保全；当前截图失败。DEL-01/03整项U、SRC/平台B、人类偏好U；旧30d2/20db/83/70及ENOSPC失败保留各自身份。
 

@@ -8,8 +8,12 @@ plan remain the owners of product behavior and release gates.
 
 Produce an evidence-backed stable-release decision for the complete local
 candidate. Repair observed blockers, validate affected real surfaces, and obtain
-independent review. Preparing a candidate is authorized; remote publication is
-a separate final action after the candidate is concrete and reviewable.
+independent review. On 2026-10-12 the user first authorized publication after
+completion, then explicitly instructed immediate publication because restarting
+Codex was not possible. The [release disposition](../../../.agents/decisions/implemented/2026-10-12-user-authorized-stable-publication.md)
+authorizes publishing the reviewed candidate with the remaining acceptance
+limits documented. The measured statuses below retain their actual evidence;
+publication does not convert an incomplete or failed check into a pass.
 
 ## Acceptance
 

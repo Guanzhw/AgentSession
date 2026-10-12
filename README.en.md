@@ -12,33 +12,34 @@ evidence remain visible throughout the reading and MCP flows.
 [中文](README.md) · [Native CLI, configuration and MCP](v3/README.md) ·
 [Acceptance contract](docs/design/agentsession-v3-acceptance-contract.md)
 
-## 3.0 prerelease
+## 3.0 stable release
 
-The source version is **3.0.0, a local stable-release candidate**, not yet
-published. The [stable-readiness ledger](docs/specs/stable-readiness-2026-10/tasks.md)
-tracks the remaining gates. The installation commands below select published rc.4.
+**3.0.0** uses npm's `latest` stable channel. The
+[release notes](docs/releases/3.0.0.md) describe features, migration and actual
+validation scope. Complete performance/resource acceptance and historical state
+attribution retain open items in the [ledger](docs/specs/stable-readiness-2026-10/tasks.md).
 
 ```sh
-npm install -g @acetamido/agentsession@3.0.0-rc.4
-npm install -g @acetamido/agentsession-mcp@3.0.0-rc.4
+npm install -g @acetamido/agentsession@3.0.0
+npm install -g @acetamido/agentsession-mcp@3.0.0
 agentsession
 ```
 
-The prerelease uses npm's `next` channel. [Release and upgrade notes](docs/releases/3.0.0-rc.4.md)
+Prereleases retain npm's `next` channel. [Release and upgrade notes](docs/releases/3.0.0.md)
 compare it with public v1.10.1, including the port change, metadata-copy import,
 and MCP/API migration. Four standalone platform bundles are available in the
-[GitHub Release](https://github.com/Guanzhw/AgentSession/releases/tag/v3.0.0-rc.4).
+[GitHub Release](https://github.com/Guanzhw/AgentSession/releases/tag/v3.0.0).
 
 When upgrading, follow the [metadata migration guide](v3/README.md#viewer-metadata-import)
-before editing stars, titles or Trash in the new Viewer. It distinguishes the
-published rc.4 standalone command from the workspace's unreleased npm routing
-fix and explains how to preserve both states if 3.0 metadata already exists.
+before editing stars, titles or Trash in the new Viewer. The 3.0.0 npm entrypoint
+supports `migrate-meta`; the guide also retains the rc.4 standalone path and
+explains how to preserve both states if 3.0 metadata already exists.
 
 If a third-party npm mirror returns `404` for a newly published tarball, select
 the official registry for that installation:
 
 ```sh
-npm install -g @acetamido/agentsession@3.0.0-rc.4 @acetamido/agentsession-mcp@3.0.0-rc.4 --registry https://registry.npmjs.org
+npm install -g @acetamido/agentsession@3.0.0 @acetamido/agentsession-mcp@3.0.0 --registry https://registry.npmjs.org
 ```
 
 This leaves the global npm registry configuration unchanged. If the official
@@ -64,7 +65,7 @@ For the already-built binary, run `v3/target/release/agentsession-v3 serve`
 (`.exe` on Windows), or use its `mcp` subcommand for native stdio MCP.
 Standalone binaries need neither Node nor Cargo at runtime.
 
-## Local workspace changes (Unreleased)
+## 3.0.0 reading and navigation fixes
 
 Content-search links reveal and highlight matches beyond the initial Reader
 window using UTF-16 positions and `contentRevision`, with bounded body retrieval.
@@ -83,7 +84,7 @@ precedence is CLI, environment, configuration file, then provider defaults.
 
 See the [repair specification](docs/specs/reader-journey-repair-2026-10/requirements.md)
 and [execution record](docs/specs/reader-journey-repair-2026-10/tasks.md) for scope
-and actual validation. These workspace changes are unreleased; published rc.4
+and actual validation. These changes are included in 3.0.0; historical rc.4
 retains its recorded behavior.
 
 ## Development and status
@@ -95,8 +96,8 @@ npm test
 
 See [the development guide](AGENTS.md) for ownership and validation, and the
 [delivery plan](docs/design/agentsession-v3-delivery-plan.md) for remaining
-source, performance, product, and platform gates. The prerelease notes identify
-the validated release scope; unresolved acceptance items remain open. Historical 2.0
+source, performance, product, and platform gates. The 3.0.0 notes identify the
+validation scope and release disposition; unresolved acceptance items remain open. Historical 2.0
 evidence and migration decisions retain their original scope; its implementation
 can be recovered from Git history.
 
