@@ -1130,13 +1130,11 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
         }
         if !(if generation >= 3 {
             supported_event(kind)
+                || (generation >= 3 && matches!(kind, "llm/retry"))
                 || (generation == 4
                     && matches!(
                         kind,
-                        "developer/message"
-                            | "compaction/prune"
-                            | "llm/retry"
-                            | "workspace/changes"
+                        "developer/message" | "compaction/prune" | "workspace/changes"
                     ))
                 || matches!(
                     kind,
@@ -1150,7 +1148,10 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
         } else {
             historical_event(kind, generation)
         }) {
-            if matches!(generation, 1 | 2 | 4) && row["ignorable"] == true {
+            // An ignorable record is explicitly marked optional by the
+            // producer. Unknown kinds with that flag stay loadable for every
+            // generation instead of failing the whole session source.
+            if row["ignorable"] == true {
                 continue;
             }
             return Err(parse_error(

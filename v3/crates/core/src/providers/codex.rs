@@ -47,6 +47,7 @@ const PREVIEW_CHARS: usize = 240;
 const CODEX_REVISION_NAMESPACE: &[u8] = b"codex-jsonl-v3-s2-6\0";
 const MULTIPLE_SOURCE_DIAGNOSTIC: &str = "codex_multiple_source_files_unmerged";
 const UNRESOLVED_SOURCE_DIAGNOSTIC: &str = "codex_source_inventory_incomplete";
+const CHILD_OWNERSHIP_BOUNDARY_DIAGNOSTIC: &str = "codex_child_ownership_boundary_unavailable";
 const INHERITED_PARSER_VERSION: &str = "codex-inherited-v1";
 const INHERITED_CACHE_LIMIT: usize = 4;
 const INHERITED_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
@@ -1378,7 +1379,23 @@ impl ProviderAdapter for CodexAdapter<'_> {
             }
             return self.capture_selected_entry(entry, &sources, None);
         }
-        let mut snapshot = codex_snapshot(&entry.path, self.scope, &entry.session_id)?;
+        let mut snapshot = match codex_snapshot(&entry.path, self.scope, &entry.session_id) {
+            Ok(snapshot) => snapshot,
+            Err(CoreError::Protocol(ProtocolError::Unavailable { diagnostic }))
+                if diagnostic.starts_with("child_ownership_boundary_unavailable:") =>
+            {
+                // A copied-parent child without a recorded NEW_TASK boundary
+                // stays visible in the catalog with its diagnostic instead of
+                // failing the whole provider publication.
+                return Ok(unavailable_snapshot(
+                    &entry.session_id,
+                    &entry.signature,
+                    CHILD_OWNERSHIP_BOUNDARY_DIAGNOSTIC,
+                    &[],
+                ));
+            }
+            Err(error) => return Err(error),
+        };
         CodexNativeTitles::read(self.root).apply(&mut snapshot.summary);
         Ok(snapshot)
     }
@@ -8594,12 +8611,16 @@ mod tests {
             .unwrap();
         assert_eq!(search["matches"].as_array().unwrap().len(), 0);
         assert_eq!(search["diagnostics"][0]["provider"], "codex");
-        assert_eq!(search["diagnostics"][0]["status"], "error");
-        assert!(
-            search["diagnostics"][0]["message"]
-                .as_str()
-                .unwrap()
-                .contains("child_ownership_boundary_unavailable")
+        // The boundary-unavailable child stays a catalog row with a session
+        // diagnostic instead of failing the whole provider's search.
+        assert_eq!(search["diagnostics"][0]["status"], "partial");
+        assert_eq!(
+            search["diagnostics"][0]["sourceDiagnostics"][0]["code"],
+            CHILD_OWNERSHIP_BOUNDARY_DIAGNOSTIC
+        );
+        assert_eq!(
+            search["diagnostics"][0]["sourceDiagnostics"][0]["affectedSessions"],
+            1
         );
     }
 
