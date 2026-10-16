@@ -10,6 +10,8 @@ pub(super) fn default_data_path(home: &std::path::Path) -> std::path::PathBuf {
     )
 }
 
+#[path = "codex_index.rs"]
+mod catalog;
 #[path = "codex_rollout_authority.rs"]
 mod rollout_authority;
 #[path = "codex_source_set.rs"]
@@ -293,25 +295,33 @@ impl CodexAdapter<'_> {
     }
 
     fn codex_inventory_observation(&self) -> Result<super::InventoryObservation> {
-        let mut selected = Vec::new();
         let native_titles = CodexNativeTitles::read(self.root);
         let scan = self.source_entries()?;
+        self.codex_inventory_observation_from_scan(&scan, &native_titles)
+    }
+
+    fn codex_inventory_observation_from_scan(
+        &self,
+        scan: &CodexSourceScan,
+        native_titles: &CodexNativeTitles,
+    ) -> Result<super::InventoryObservation> {
+        let mut selected = Vec::new();
         let unresolved_count = scan.unresolved.len();
         let unresolved = if scan.unresolved.is_empty() {
             None
         } else {
             Some(Self::unresolved_signature(&scan.unresolved)?)
         };
-        for (id, entries) in scan.grouped {
+        for (id, entries) in &scan.grouped {
             let mut entry = entries.last().expect("grouped source entry").clone();
             if entries.len() > 1 {
-                entry.signature = match self.resolve_multiple_sources(&id, &entries)? {
+                entry.signature = match self.resolve_multiple_sources(id, entries)? {
                     CodexSourceSelection::Pair(pair) => pair.revision(self.scope)?,
                     CodexSourceSelection::Recorded(recorded) => {
                         entry.path = recorded.path.clone();
-                        self.recorded_signature(&recorded, &entries)?
+                        self.recorded_signature(&recorded, entries)?
                     }
-                    CodexSourceSelection::Collision => Self::collision_signature(&entries)?,
+                    CodexSourceSelection::Collision => Self::collision_signature(entries)?,
                 };
             }
             if let Some(unresolved) = &unresolved {
@@ -320,7 +330,7 @@ impl CodexAdapter<'_> {
             if !entry.signature.starts_with("unresolved:")
                 && !entry.signature.starts_with("collision:")
             {
-                entry.signature = native_titles.signature(&id, &entry.signature);
+                entry.signature = native_titles.signature(id, &entry.signature);
             }
             selected.push(entry);
         }
@@ -1348,6 +1358,12 @@ impl ProviderAdapter for CodexAdapter<'_> {
     fn inventory_observation(&self, _rebuild: bool) -> Result<super::InventoryObservation> {
         self.codex_inventory_observation()
     }
+    fn index_capture_batch(
+        &self,
+        _rebuild: bool,
+    ) -> Result<Option<super::IndexObservationBatch<'_>>> {
+        catalog::observe(self).map(Some)
+    }
     fn capture(&self, entry: &SourceEntry) -> Result<SessionSnapshot> {
         if entry.signature.starts_with("unresolved:") {
             return Ok(unavailable_snapshot(
@@ -2244,11 +2260,16 @@ fn load_codex(path: &Path, scope: &str, expected_id: &str) -> Result<LoadedSessi
 /// Capture complete JSONL records present at the opening boundary. The caller
 /// verifies this exact prefix after collecting dependent facts.
 fn open_codex_complete_prefix(path: &Path) -> Result<(fs::File, u64)> {
+    let (file, end, _) = open_codex_prefix_observation(path)?;
+    Ok((file, end))
+}
+
+fn open_codex_prefix_observation(path: &Path) -> Result<(fs::File, u64, fs::Metadata)> {
     let mut file = fs::File::open(path).map_err(|source| codex_line_error(path, source))?;
-    let mut end = file
+    let metadata = file
         .metadata()
-        .map_err(|source| codex_line_error(path, source))?
-        .len();
+        .map_err(|source| codex_line_error(path, source))?;
+    let mut end = metadata.len();
     let opening_length = end;
     let mut buffer = [0u8; 64 * 1024];
     while end > 0 {
@@ -2278,7 +2299,7 @@ fn open_codex_complete_prefix(path: &Path) -> Result<(fs::File, u64)> {
     }
     file.seek(SeekFrom::Start(0))
         .map_err(|source| codex_line_error(path, source))?;
-    Ok((file, end))
+    Ok((file, end, metadata))
 }
 
 fn load_codex_reader_prefix(
@@ -2287,6 +2308,16 @@ fn load_codex_reader_prefix(
     expected_id: &str,
 ) -> Result<(LoadedSession, u64)> {
     let (file, end) = open_codex_complete_prefix(path)?;
+    load_codex_fixed_prefix(path, scope, expected_id, file, end).map(|loaded| (loaded, end))
+}
+
+fn load_codex_fixed_prefix(
+    path: &Path,
+    scope: &str,
+    expected_id: &str,
+    file: fs::File,
+    end: u64,
+) -> Result<LoadedSession> {
     let mut hasher = codex_revision_hasher(path, scope);
     let hashing = HashingReader {
         inner: file.take(end),
@@ -2298,10 +2329,12 @@ fn load_codex_reader_prefix(
     let mut loaded = load_codex_reader(path, expected_id, String::new(), &mut reader, None)?;
     drop(reader);
     loaded.revision = format!("{:x}", hasher.finalize());
-    Ok((loaded, end))
+    Ok(loaded)
 }
 
 fn codex_prefix_revision(path: &Path, scope: &str, length: u64) -> Result<String> {
+    #[cfg(test)]
+    CODEX_REVISION_FILE_READS.with(|count| count.set(count.get() + 1));
     let file = fs::File::open(path).map_err(|source| codex_line_error(path, source))?;
     let mut reader = file.take(length);
     let mut hasher = codex_revision_hasher(path, scope);
@@ -2495,7 +2528,7 @@ fn load_codex_reader_positioned(
         }
         let record: Value = match serde_json::from_slice(&line) {
             Ok(record) => record,
-            Err(error) if !terminated => {
+            Err(error) if !terminated && error.is_eof() => {
                 // An actively appended transcript may end in a partial line.
                 let _ = error;
                 observations.facts.diagnostics.push(Diagnostic {

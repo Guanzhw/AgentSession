@@ -184,20 +184,30 @@ fn attach_source_diagnostics(mut response: Value, diagnostics: Vec<Value>) -> Va
     response
 }
 
+fn stats_diagnostic(error: CoreError) -> Value {
+    let retryable = matches!(error, CoreError::SourceChanged);
+    let error = ApiError::from(error);
+    json!({"code": error.code, "message": error.message, "retryable": retryable})
+}
+
 fn base_stats(core: &Core, session: &SessionSummary) -> Value {
     let duration = session
         .created_at
         .zip(session.updated_at)
         .filter(|(start, end)| *start > 0 && *end >= *start)
         .map(|(start, end)| end - start);
+    // Availability describes the protocol projection; summary facts retain their source.
     let mut stats = json!({"provider": session.session.provider, "sessionId": session.session.session_id,
         "messageCount": session.conversation_message_count.unwrap_or(session.message_count), "tokenCount": session.token_count,
         "durationMs": duration, "durationSource": duration.map(|_| "raw"),
+        "availability": "unavailable", "diagnostic": null,
         "protocol": false, "compactions": null, "lastCompactionAt": null,
         "taskCount": null, "agentRunCount": null, "subagentRunCount": null,
         "backgroundRunCount": null, "activeStatuses": null, "contextArtifactCount": null,
         "memoryCount": null});
-    if session.diagnostic.is_some() {
+    if let Some(diagnostic) = &session.diagnostic {
+        stats["diagnostic"] =
+            json!({"code": diagnostic, "message": diagnostic, "retryable": false});
         stats["messageCount"] = Value::Null;
         stats["tokenCount"] = Value::Null;
         stats["durationMs"] = Value::Null;
@@ -207,6 +217,7 @@ fn base_stats(core: &Core, session: &SessionSummary) -> Value {
     }
     match core.protocol_list_stats(&session.session.provider, &session.session.session_id) {
         Ok(protocol) => {
+            stats["availability"] = json!("available");
             stats["protocol"] = json!(true);
             stats["compactions"] = json!(protocol.compactions);
             stats["lastCompactionAt"] = json!(protocol.last_compaction_at);
@@ -222,10 +233,13 @@ fn base_stats(core: &Core, session: &SessionSummary) -> Value {
                 stats["durationSource"] = json!("protocol");
             }
         }
-        Err(error) => eprintln!(
-            "legacy list stats: protocol unavailable for {}/{}: {error}",
-            session.session.provider, session.session.session_id
-        ),
+        Err(error) => {
+            eprintln!(
+                "legacy list stats: protocol unavailable for {}/{}: {error}",
+                session.session.provider, session.session.session_id
+            );
+            stats["diagnostic"] = stats_diagnostic(error);
+        }
     }
     stats
 }
@@ -762,4 +776,28 @@ pub(super) async fn children(
         "nextOffset": page.next_cursor.map(|_| offset + shown)}),
         diagnostics,
     )))
+}
+
+#[cfg(test)]
+mod stats_diagnostic_tests {
+    use super::*;
+
+    #[test]
+    fn source_change_is_retryable_and_retains_the_http_error_contract() {
+        let diagnostic = stats_diagnostic(CoreError::SourceChanged);
+        assert_eq!(diagnostic["code"], "source_changed");
+        assert_eq!(diagnostic["retryable"], true);
+        assert_eq!(diagnostic["message"], CoreError::SourceChanged.to_string());
+    }
+
+    #[test]
+    fn source_failure_keeps_its_actual_code_and_message() {
+        let diagnostic = stats_diagnostic(CoreError::Storage("fixture SQL failure".into()));
+        assert_eq!(diagnostic["code"], "storage_error");
+        assert_eq!(diagnostic["retryable"], false);
+        assert_eq!(
+            diagnostic["message"],
+            "derived catalog storage: fixture SQL failure"
+        );
+    }
 }
