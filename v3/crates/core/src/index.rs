@@ -27,7 +27,7 @@ pub struct ReindexResult {
     pub diagnostic: Option<String>,
 }
 
-const STORED_SUMMARY_SCHEMA_VERSION: u8 = 14;
+const STORED_SUMMARY_SCHEMA_VERSION: u8 = 15;
 
 /// Opt-in, source-free diagnostics for the auxiliary resource build. Entry and
 /// exit share a process-local invocation number, including unsuccessful exits.
@@ -192,7 +192,10 @@ fn publish(
     }
     #[cfg(feature = "search-phase-probe")]
     let phase_started = probe.as_ref().and_then(|probe| probe.begin());
-    let observation = adapter.inventory_observation(force)?;
+    let (observation, mut capture_batch) = match adapter.index_capture_batch(force)? {
+        Some(batch) => (batch.inventory, Some(batch.capture)),
+        None => (adapter.inventory_observation(force)?, None),
+    };
     let inventory = observation.entries.ok_or_else(|| {
         CoreError::Storage(format!(
             "{provider} declared indexed capture without inventory"
@@ -280,25 +283,36 @@ fn publish(
                 && signature == &entry.signature
                 && *version == STORED_SUMMARY_SCHEMA_VERSION
             {
-                if !force {
-                    continue;
-                }
-                if let Some(revision) = revision
-                    && adapter.index_capture_revision(entry)?.as_ref() == Some(revision)
-                {
-                    // The exact probe is the byte-verification point, just as
-                    // capture's final exact hash is. Preserve its stat check too.
-                    if adapter.source_signature(entry)? != entry.signature {
-                        return Err(CoreError::SourceChanged);
+                if let Some(batch) = capture_batch.as_mut() {
+                    if let Some(revision) = revision
+                        && batch.reuse(entry, revision, force)?
+                    {
+                        continue;
                     }
-                    continue;
+                } else {
+                    if !force {
+                        continue;
+                    }
+                    if let Some(revision) = revision
+                        && adapter.index_capture_revision(entry)?.as_ref() == Some(revision)
+                    {
+                        // The exact probe is the byte-verification point, just as
+                        // capture's final exact hash is. Preserve its stat check too.
+                        if adapter.source_signature(entry)? != entry.signature {
+                            return Err(CoreError::SourceChanged);
+                        }
+                        continue;
+                    }
                 }
             }
             #[cfg(feature = "search-phase-probe")]
             {
                 *resource_probe.counts.entry("capture_attempts").or_default() += 1;
             }
-            let snapshot = adapter.capture_for_index(entry)?;
+            let snapshot = match capture_batch.as_mut() {
+                Some(batch) => batch.capture(entry)?,
+                None => adapter.capture_for_index(entry)?,
+            };
             #[cfg(feature = "search-phase-probe")]
             {
                 *resource_probe
@@ -315,7 +329,10 @@ fn publish(
             }
             captured.insert(id.clone(), snapshot);
         }
-        adapter.validate_inventory(&incoming)?;
+        match capture_batch.as_ref() {
+            Some(batch) => batch.validate()?,
+            None => adapter.validate_inventory(&incoming)?,
+        }
         let deleted: Vec<_> = existing
             .keys()
             .filter(|id| !incoming.contains_key(*id))
