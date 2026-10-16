@@ -1,9 +1,9 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createServer as createHttpServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -91,7 +91,7 @@ export function readerMetadataBootstrap(mode = 'replies', forChild = false) {
 // Exported so the root agent can extract and serve this fixture without running this test/browser harness.
 export async function readerMetadataHarness(t, mode = 'replies', options = {}) {
   const { build } = createRequire(path.join(uiDir, 'package.json'))('vite');
-  const buildDir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-reader-metadata-'));
+  const buildDir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-reader-metadata-'));
   await build({ root: uiDir, configFile: path.join(uiDir, 'vite.config.ts'),
     build: { outDir: buildDir, emptyOutDir: true }, logLevel: 'error' });
   const requests = [];
@@ -164,11 +164,11 @@ export async function readerMetadataHarness(t, mode = 'replies', options = {}) {
         : asset.endsWith('.css') ? 'text/css; charset=utf-8' : 'application/octet-stream' });
     response.end(readFileSync(asset));
   });
-  const serverRef = await new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server.address())));
-  t.after(async () => {
+  onCleanup(t, async () => {
     await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
-    await rm(buildDir, { recursive: true, force: true });
   });
+  const serverRef = await new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server.address())));
+
   return { origin: `http://127.0.0.1:${serverRef.port}`, buildDir, requests };
 }
 
@@ -188,7 +188,7 @@ async function browser(t, url, launchArgs = []) {
       code === 0 ? resolve(stdout.trim()) : reject(new Error(stderr || stdout));
     });
   });
-  t.after(async () => { try { await command('close'); } catch { /* Browser already closed. */ } });
+  onCleanup(t, async () => { try { await command('close'); } catch { /* Browser already closed. */ } });
   await command('open', url, ...launchArgs);
   await command('set', 'viewport', '1440', '900');
   return command;

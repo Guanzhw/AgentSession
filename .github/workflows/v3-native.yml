@@ -88,7 +88,7 @@ jobs:
           node --input-type=module -e 'import path from "node:path"; import {appendFileSync} from "node:fs"; const exe=process.platform==="win32"?"agentsession-v3.exe":"agentsession-v3"; const bundle=path.resolve(`tmp/v3-ci-${process.platform}-${process.arch}`); const binary=path.join(bundle,exe); appendFileSync(process.env.GITHUB_ENV, `AGENTSESSION_V3_BIN=${binary}\nAGENTSESSION_V3_BINARY=${binary}\nAGENTSESSION_V3_RELEASE_BIN=${binary}\nAGENTSESSION_CONFIG=${path.resolve("tmp/v3-ci-config.json")}\nAGENTSESSION_V3_NPM_HOST_BUNDLE=${bundle}\nAGENTSESSION_V3_NPM_CANDIDATE=1\n`);'
 
       - name: Validate packaged HTTP, MCP, and standalone behavior
-        run: node --test --test-concurrency=1 v3/test/*.test.mjs
+        run: node --test --test-concurrency=1 test/fixture-cleanup.test.mjs v3/test/*.test.mjs
 
       - name: Pack host npm candidate
         run: |

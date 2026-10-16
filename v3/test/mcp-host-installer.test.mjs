@@ -1,6 +1,7 @@
+import { onCleanup, temporaryDirectorySync } from '../../test/helpers/fixture-cleanup.mjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -11,8 +12,8 @@ const repo = path.resolve(import.meta.dirname, '../..');
 const installer = path.join(repo, 'scripts/v3-install-mcp-host.mjs');
 const binary = process.env.AGENTSESSION_V3_BIN || path.join(repo, 'v3/target/debug', process.platform === 'win32' ? 'agentsession-v3.exe' : 'agentsession-v3');
 
-function setup() {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'agentsession-v3-host-'));
+function setup(t) {
+  const root = temporaryDirectorySync(t, path.join(os.tmpdir(), 'agentsession-v3-host-'));
   const home = path.join(root, 'home');
   const codexHome = path.join(root, 'codex');
   const xdg = path.join(root, 'xdg');
@@ -37,8 +38,8 @@ function setup() {
   return { root, home, codexHome, xdg, env, serverConfig, serverConfigText, install };
 }
 
-test('installer requires an explicit binary and host config path', () => {
-  const { root, env, serverConfigText } = setup();
+test('installer requires an explicit binary and host config path', t => {
+  const { root, env, serverConfigText } = setup(t);
   const result = spawnSync(process.execPath, [installer, '--target', 'codex'],
     { encoding: 'utf8', env });
   assert.notEqual(result.status, 0);
@@ -46,8 +47,8 @@ test('installer requires an explicit binary and host config path', () => {
   assert.equal(readFileSync(path.join(root, 'server.json'), 'utf8'), serverConfigText);
 });
 
-test('installer rejects a different executable before writing a host config', () => {
-  const { root, env, serverConfigText } = setup();
+test('installer rejects a different executable before writing a host config', t => {
+  const { root, env, serverConfigText } = setup(t);
   const hostConfig = path.join(root, 'config.toml');
   const result = spawnSync(process.execPath,
     [installer, '--target', 'codex', '--binary', process.execPath, '--host-config', hostConfig],
@@ -58,8 +59,8 @@ test('installer rejects a different executable before writing a host config', ()
   assert.equal(existsSync(hostConfig), false);
 });
 
-test('installer accepts the prerelease binary version and refuses malformed version output', () => {
-  const { root, env, serverConfig } = setup();
+test('installer accepts the prerelease binary version and refuses malformed version output', t => {
+  const { root, env, serverConfig } = setup(t);
   const versions = ['3.0.0', '3.0.0-rc.1', '3.0.0-rc.1+build.7', '3.0.0-rc..1', '3.0.0-', '4.0.0', '3.0.0 extra'];
   for (const [index, version] of versions.entries()) {
     const hostConfig = path.join(root, `version-${index}.toml`);
@@ -86,8 +87,8 @@ test('installer accepts the prerelease binary version and refuses malformed vers
   }
 });
 
-test('installer refuses an incomplete explicit server config before writing host settings', () => {
-  const { root, serverConfig, install } = setup();
+test('installer refuses an incomplete explicit server config before writing host settings', t => {
+  const { root, serverConfig, install } = setup(t);
   const hostConfig = path.join(root, 'config.toml');
   for (const content of ['{}\n', JSON.stringify({ codexDir: 'relative-path' }) + '\n']) {
     writeFileSync(serverConfig, content);
@@ -100,8 +101,8 @@ test('installer refuses an incomplete explicit server config before writing host
   }
 });
 
-test('installer preserves unrelated Codex, Claude and OpenCode entries and is idempotent', () => {
-  const { root, install, serverConfig } = setup();
+test('installer preserves unrelated Codex, Claude and OpenCode entries and is idempotent', t => {
+  const { root, install, serverConfig } = setup(t);
   const codex = path.join(root, 'config.toml');
   const claude = path.join(root, '.claude.json');
   const opencode = path.join(root, 'opencode.json');
@@ -110,7 +111,6 @@ test('installer preserves unrelated Codex, Claude and OpenCode entries and is id
   writeFileSync(opencode, JSON.stringify({ theme: 'dark', mcp: {
     other: { type: 'local', command: ['other'] },
   } }));
-
   for (const [target, config] of [['codex', codex], ['claude-code', claude], ['opencode', opencode]]) {
     const first = install(target, config);
     assert.equal(first.status, 0, first.stderr);
@@ -151,8 +151,8 @@ test('installer preserves unrelated Codex, Claude and OpenCode entries and is id
   }
 });
 
-test('installer refuses conflicting entries and invalid JSON without replacement', () => {
-  const { root, install } = setup();
+test('installer refuses conflicting entries and invalid JSON without replacement', t => {
+  const { root, install } = setup(t);
   const config = path.join(root, '.claude.json');
   const original = '{"mcpServers":{"agentsession-v3":{"command":"custom"}},"theme":"dark"}\n';
   writeFileSync(config, original);
@@ -170,8 +170,8 @@ test('installer refuses conflicting entries and invalid JSON without replacement
   assert.equal(readFileSync(config, 'utf8'), '{bad json');
 });
 
-test('OpenCode replacement uses top-level MCP entries and preserves unrelated servers', () => {
-  const { root, install } = setup();
+test('OpenCode replacement uses top-level MCP entries and preserves unrelated servers', t => {
+  const { root, install } = setup(t);
   const config = path.join(root, 'opencode.json');
   const original = JSON.stringify({ theme: 'dark', mcp: {
     'agentsession-v3': { type: 'local', command: ['old-binary'], enabled: true },
@@ -197,8 +197,8 @@ test('OpenCode replacement uses top-level MCP entries and preserves unrelated se
   assert.match(idempotent.stdout, /already installed/);
 });
 
-test('OpenCode preserves a valid server whose name is servers', () => {
-  const { root, install } = setup();
+test('OpenCode preserves a valid server whose name is servers', t => {
+  const { root, install } = setup(t);
   const config = path.join(root, 'opencode.json');
   const namedServer = { type: 'local', command: ['other'] };
   writeFileSync(config, JSON.stringify({ mcp: { servers: namedServer } }) + '\n');
@@ -210,8 +210,8 @@ test('OpenCode preserves a valid server whose name is servers', () => {
   assert.equal(parsed.mcp['agentsession-v3'].type, 'local');
 });
 
-test('OpenCode refuses the previous nested servers layout for manual migration', () => {
-  const { root, install } = setup();
+test('OpenCode refuses the previous nested servers layout for manual migration', t => {
+  const { root, install } = setup(t);
   const config = path.join(root, 'opencode.json');
   const original = JSON.stringify({ mcp: { servers: {
     'agentsession-v3': { type: 'local', command: ['old-binary'] },
@@ -226,8 +226,8 @@ test('OpenCode refuses the previous nested servers layout for manual migration',
   }
 });
 
-test('Codex replacement preserves adjacent nested tables', () => {
-  const { root, install } = setup();
+test('Codex replacement preserves adjacent nested tables', t => {
+  const { root, install } = setup(t);
   const config = path.join(root, 'config.toml');
   const original = '[mcp_servers.agentsession-v3] # custom\ncommand = "custom"\n'
     + '[mcp_servers.agentsession-v3.env]\nKEEP = "old"\n'
@@ -243,8 +243,8 @@ test('Codex replacement preserves adjacent nested tables', () => {
   assert.match(current, /\[mcp_servers\.other\]\ncommand = "other"/);
 });
 
-test('Codex ignores a registration-shaped header inside a multiline string when replacing', () => {
-  const { root, install } = setup();
+test('Codex ignores a registration-shaped header inside a multiline string when replacing', t => {
+  const { root, install } = setup(t);
   const config = path.join(root, 'config.toml');
   const note = '[notice]\ntext = """\n[mcp_servers.agentsession-v3] # example text\n'
     + 'command = "keep exactly"\n"""\n';
@@ -257,8 +257,8 @@ test('Codex ignores a registration-shaped header inside a multiline string when 
   assert.match(current.slice(note.length), /^\n\[mcp_servers\.agentsession-v3\]\ncommand = /);
 });
 
-test('Codex recognizes a quoted table name as an existing registration', () => {
-  const { root, install } = setup();
+test('Codex recognizes a quoted table name as an existing registration', t => {
+  const { root, install } = setup(t);
   const config = path.join(root, 'config.toml');
   const original = '[mcp_servers."agentsession-v3"]\ncommand = "custom"\n'
     + '[mcp_servers.other]\ncommand = "other"\n';
@@ -269,8 +269,8 @@ test('Codex recognizes a quoted table name as an existing registration', () => {
   assert.equal([...readFileSync(config, 'utf8').matchAll(/\[mcp_servers\.agentsession-v3\]/g)].length, 1);
 });
 
-test('Codex refuses alternate inline and dotted registrations without changing the TOML', () => {
-  const { root, install } = setup();
+test('Codex refuses alternate inline and dotted registrations without changing the TOML', t => {
+  const { root, install } = setup(t);
   const config = path.join(root, 'config.toml');
   const originals = [
     '[mcp_servers]\nagentsession-v3 = { command = "custom", args = ["mcp"] }\n',
@@ -289,7 +289,7 @@ test('Codex refuses alternate inline and dotted registrations without changing t
 });
 
 test('installed Codex reads the isolated registration and its stdio command serves the public fixture', async (t) => {
-  const { root, codexHome, env, serverConfig, install } = setup();
+  const { root, codexHome, env, serverConfig, install } = setup(t);
   const codexProbe = spawnSync(process.platform === 'win32' ? 'codex.exe' : 'codex',
     ['--version'], { encoding: 'utf8', timeout: 5_000, env });
   if (codexProbe.error?.code === 'ENOENT') return t.skip('Codex CLI is not installed');
@@ -321,7 +321,7 @@ test('installed Codex reads the isolated registration and its stdio command serv
   const client = new Client({ name: 'agentsession-v3-installed-host-test', version: '1.0.0' });
   const transport = new StdioClientTransport({ command: registration.transport.command,
     args: registration.transport.args, env, cwd: root, stderr: 'pipe' });
-  t.after(async () => client.close());
+  onCleanup(t, async () => client.close());
   await client.connect(transport);
   const event = await client.callTool({ name: 'session_get_event', arguments: {
     event: { provider: 'codex', sessionId: '44444444-4444-4444-8444-444444444444',

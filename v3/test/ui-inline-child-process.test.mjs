@@ -1,3 +1,4 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -5,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { appendFile, cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { appendFile, cp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { createServer as createHttpServer } from 'node:http';
 import os from 'node:os';
@@ -92,7 +93,7 @@ test('inline child Reader groups normalized process work like its direct Reader'
       .map(name => path.join(fixture, '2026', '09', '27', name));
     const hashes = originals.map(sha256);
     await mkdir(path.join(repo, 'tmp'), { recursive: true });
-    const scratch = await mkdtemp(path.join(repo, 'tmp', 'v3-inline-child-process-'));
+    const scratch = await temporaryDirectory(t, path.join(repo, 'tmp', 'v3-inline-child-process-'));
     const codex = path.join(scratch, 'codex');
     await cp(fixture, path.join(codex, 'sessions'), { recursive: true });
     const copiedChild = path.join(codex, 'sessions', '2026', '09', '27', childFile);
@@ -120,23 +121,26 @@ test('inline child Reader groups normalized process work like its direct Reader'
     let copiedHash = sha256(copiedChild);
     const dirs = ['claude', 'pi', 'dsh', 'meta', 'index', 'cache'];
     await Promise.all(dirs.map(name => mkdir(path.join(scratch, name))));
+    onCleanup(t, () => {
+      assert.deepEqual(originals.map(sha256), hashes);
+      assert.equal(sha256(copiedChild), copiedHash);
+    });
     const port = await freePort();
     const server = spawn(binary, ['serve', '--port', String(port), '--codex-dir', codex,
       '--opencode-db', path.join(scratch, 'absent.db'), '--claude-dir', path.join(scratch, 'claude'),
       '--pi-dir', path.join(scratch, 'pi'), '--dsh-dir', path.join(scratch, 'dsh'),
       '--meta-dir', path.join(scratch, 'meta'), '--index-dir', path.join(scratch, 'index'),
       '--cache-dir', path.join(scratch, 'cache')], { cwd: repo, windowsHide: true, stdio: 'ignore' });
+    onCleanup(t, async () => {
+      if (server.exitCode === null && server.signalCode === null) {
+        const closed = once(server, 'close');
+        server.kill();
+        await closed;
+      }
+    });
     const session = `v3-inline-process-${process.pid}-${Date.now()}`;
     const command = (...args) => browserCommand(browserBinary(), session, ...args);
-    t.after(async () => {
-      try { await command('close'); } catch { /* Browser may already be closed. */ }
-      if (server.exitCode === null) { const closed = once(server, 'close'); server.kill(); await Promise.race([closed, pause(3000)]); }
-      assert.deepEqual(originals.map(sha256), hashes);
-      assert.equal(sha256(copiedChild), copiedHash);
-      const resolved = await realpath(scratch);
-      assert.equal(path.dirname(resolved), await realpath(path.join(repo, 'tmp')));
-      await rm(resolved, { recursive: true, force: true });
-    });
+    onCleanup(t, () => command('close'));
     const origin = `http://127.0.0.1:${port}`;
     let ready = false;
     for (let attempt = 0; attempt < 100; attempt++) {
@@ -228,7 +232,7 @@ test('inline child Reader groups normalized process work like its direct Reader'
 test('retained empty assistant, owned reasoning and tool stay inside the inline child process',
   { timeout: 60_000, skip: !existsSync(path.join(uiDir, 'node_modules', 'vite')) || !browserBinary() }, async t => {
     const { build } = createRequire(path.join(uiDir, 'package.json'))('vite');
-    const buildDir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-inline-process-'));
+    const buildDir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-inline-process-'));
     await build({ root: uiDir, configFile: path.join(uiDir, 'vite.config.ts'),
       build: { outDir: buildDir, emptyOutDir: true }, logLevel: 'error' });
     const parentId = 'inline-process-parent';
@@ -327,15 +331,14 @@ test('retained empty assistant, owned reasoning and tool stay inside the inline 
         : asset.endsWith('.js') ? 'text/javascript' : asset.endsWith('.css') ? 'text/css' : 'application/octet-stream' });
       response.end(readFileSync(asset));
     });
+    onCleanup(t, async () => {
+      await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
+    });
     const port = await freePort();
     await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
     const browserSession = `v3-inline-empty-${process.pid}-${Date.now()}`;
     const command = (...args) => browserCommand(browserBinary(), browserSession, ...args);
-    t.after(async () => {
-      try { await command('close'); } catch { /* Browser may already be closed. */ }
-      await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
-      await rm(buildDir, { recursive: true, force: true });
-    });
+    onCleanup(t, () => command('close'));
     const origin = `http://127.0.0.1:${port}`;
     await command('open', `${origin}/codex/session/${childId}`);
     await waitFor(command, `Boolean(document.querySelector('.transcript details.reader-process'))`, 'direct empty process');

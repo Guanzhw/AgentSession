@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { deriveOpenCodeToolMatches } from '../scripts/v3-tool-name-opencode-oracle.mjs';
+import { temporaryDirectory } from './helpers/fixture-cleanup.mjs';
 
-test('OpenCode tool oracle reads owned v2 source rows, first hit and canonical part ID', async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'tool-oracle-'));
+test('OpenCode tool oracle reads owned v2 source rows, first hit and canonical part ID', async t => {
+  const dir = await temporaryDirectory(t, path.join(os.tmpdir(), 'tool-oracle-'));
   const file = path.join(dir, 'source.db');
   const db = new DatabaseSync(file);
   try {
@@ -25,12 +25,10 @@ test('OpenCode tool oracle reads owned v2 source rows, first hit and canonical p
     message.run('archive', 'archived', 'assistant', 1, parts([{ type: 'tool', name: 'read' }]));
     message.run('future-hit', 'future', 'assistant', 1, parts([{ type: 'tool', name: 'read' }]));
   } finally { db.close(); }
-  try {
-    assert.deepEqual(deriveOpenCodeToolMatches(file, 'read', 100), [{
-      session: { provider: 'opencode', sessionId: 'owned' },
-      event: { provider: 'opencode', sessionId: 'owned', messageId: 'first:content:1', segment: 'tool' },
-      matchField: 'toolName', matchRole: 'tool', snippet: 'Read_File', title: 'Original title',
-      directory: '/project', updatedAt: 90, untrustedContent: true
-    }]);
-  } finally { await rm(dir, { recursive: true }); }
+  assert.deepEqual(deriveOpenCodeToolMatches(file, 'read', 100), [{
+    session: { provider: 'opencode', sessionId: 'owned' },
+    event: { provider: 'opencode', sessionId: 'owned', messageId: 'first:content:1', segment: 'tool' },
+    matchField: 'toolName', matchRole: 'tool', snippet: 'Read_File', title: 'Original title',
+    directory: '/project', updatedAt: 90, untrustedContent: true
+  }]);
 });

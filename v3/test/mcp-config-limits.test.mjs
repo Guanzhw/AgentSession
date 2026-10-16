@@ -1,8 +1,9 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -21,14 +22,10 @@ const session = { provider: 'deepseek-harness', sessionId: ids[0] };
 const event = { ...session, messageId: 'root-continues', segment: 'message' };
 
 async function setup(t) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-mcp-config-'));
-  t.after(async () => {
-    try {
-      assert.deepEqual(sources.map(file => createHash('sha256').update(readFileSync(file)).digest('hex')),
-        sourceHashes, 'provider source bytes remain unchanged');
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+  const dir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-mcp-config-'));
+  onCleanup(t, async () => {
+    assert.deepEqual(sources.map(file => createHash('sha256').update(readFileSync(file)).digest('hex')),
+      sourceHashes, 'provider source bytes remain unchanged');
   });
   for (const name of ['codex', 'claude', 'pi', 'meta', 'index', 'cache']) {
     await mkdir(path.join(dir, name));
@@ -46,9 +43,9 @@ async function setup(t) {
 async function connect(t, config, era) {
   const client = new Client({ name: 'agentsession-v3-mcp-config-test', version: '1.0.0' },
     era === 'modern' ? { versionNegotiation: { mode: { pin: '2026-07-28' } } } : undefined);
+  onCleanup(t, () => client.close());
   await client.connect(new StdioClientTransport({ command: binary,
     args: ['mcp', '--config', config], cwd: repo, stderr: 'pipe' }));
-  t.after(async () => client.close());
   return client;
 }
 

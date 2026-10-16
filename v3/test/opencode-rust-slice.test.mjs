@@ -1,10 +1,11 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { copyFileSync, readFileSync, statSync, truncateSync, utimesSync } from 'node:fs';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,53 +20,55 @@ const binary = process.env.AGENTSESSION_V3_BIN || path.join(repo, 'v3', 'target'
 const hash = file => createHash('sha256').update(readFileSync(file)).digest('hex');
 
 async function fixture(t, schema) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-opencode-'));
-  t.after(async () => { await rm(dir, { recursive: true, force: true }); });
+  const dir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-opencode-'));
   for (const name of ['codex', 'claude', 'pi', 'dsh', 'meta', 'index', 'cache']) {
     await mkdir(path.join(dir, name));
   }
   const file = path.join(dir, 'opencode.db');
   const db = new DatabaseSync(file);
-  if (schema === 'v2') {
-    db.exec(`CREATE TABLE session_v2 (
-      id TEXT PRIMARY KEY, parent_id TEXT, fork_session_id TEXT, fork_boundary TEXT,
-      title TEXT, slug TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER,
-      time_archived INTEGER, tokens_input INTEGER, tokens_output INTEGER,
-      tokens_reasoning INTEGER, tokens_cache_read INTEGER, tokens_cache_write INTEGER
-    ); CREATE TABLE session_message (
-      id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER,
-      time_created INTEGER, time_updated INTEGER, data TEXT
-    ); CREATE TABLE session_pending (id TEXT, session_id TEXT, data TEXT);
-    INSERT INTO session_v2 VALUES
-      ('root',NULL,NULL,NULL,'Root','root','/synthetic',1,5,NULL,10,5,2,3,1),
-      ('child','root',NULL,NULL,'Child','child','/synthetic',2,5,NULL,0,0,0,0,0),
-      ('fork',NULL,'root','{}','Fork','fork','/synthetic',3,5,NULL,0,0,0,0,0),
-      ('archived',NULL,NULL,NULL,'Archived','archived','/synthetic',4,5,5,0,0,0,0,0);
-    INSERT INTO session_pending VALUES ('pending','root','{"text":"NOT_ADMITTED"}');`);
-    const add = db.prepare('INSERT INTO session_message VALUES (?,?,?,?,?,?,?)');
-    add.run('user', 'root', 'user', 1, 100, 100, JSON.stringify({ text: 'First user' }));
-    const assistant = { tokens: { input: 10, output: 5, reasoning: 2, cache: { read: 3, write: 1 } },
-      content: [{ type: 'reasoning', text: 'Inspect first' }, { type: 'text', text: 'Answer body' },
-        { type: 'tool', id: 'call', name: 'read', state: { status: 'completed',
-          input: { file: 'a' }, content: [{ type: 'text', text: 'result '.repeat(80) }] } }] };
-    add.run('assistant', 'root', 'assistant', 2, 1, 1, JSON.stringify(assistant));
-    add.run('compact', 'root', 'compaction', 3, 2, 2,
-      JSON.stringify({ status: 'completed', summary: 'Saved summary' }));
-    add.run('msg_forkevent_2', 'fork', 'assistant', 2, 1, 1, JSON.stringify(assistant));
-    add.run('fork-own', 'fork', 'user', 6, 6, 6, JSON.stringify({ text: 'Fork owned' }));
-  } else if (schema === 'v1') {
-    db.exec(`CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT, title TEXT,
-      directory TEXT, time_created INTEGER, time_updated INTEGER, time_archived INTEGER);
-      CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT, time_created INTEGER);
-      CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, data TEXT,
-        time_created INTEGER);
-      INSERT INTO session VALUES ('legacy',NULL,'Legacy','/synthetic',1,2,NULL);
-      INSERT INTO message VALUES ('legacy-user','legacy','{"role":"user","time":{"created":1}}',1);
-      INSERT INTO part VALUES ('legacy-part','legacy-user','legacy','{"type":"text","text":"Legacy body"}',1);`);
-  } else {
-    db.exec('CREATE TABLE session_v2 (id TEXT PRIMARY KEY)');
+  try {
+    if (schema === 'v2') {
+      db.exec(`CREATE TABLE session_v2 (
+        id TEXT PRIMARY KEY, parent_id TEXT, fork_session_id TEXT, fork_boundary TEXT,
+        title TEXT, slug TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER,
+        time_archived INTEGER, tokens_input INTEGER, tokens_output INTEGER,
+        tokens_reasoning INTEGER, tokens_cache_read INTEGER, tokens_cache_write INTEGER
+      ); CREATE TABLE session_message (
+        id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER,
+        time_created INTEGER, time_updated INTEGER, data TEXT
+      ); CREATE TABLE session_pending (id TEXT, session_id TEXT, data TEXT);
+      INSERT INTO session_v2 VALUES
+        ('root',NULL,NULL,NULL,'Root','root','/synthetic',1,5,NULL,10,5,2,3,1),
+        ('child','root',NULL,NULL,'Child','child','/synthetic',2,5,NULL,0,0,0,0,0),
+        ('fork',NULL,'root','{}','Fork','fork','/synthetic',3,5,NULL,0,0,0,0,0),
+        ('archived',NULL,NULL,NULL,'Archived','archived','/synthetic',4,5,5,0,0,0,0,0);
+      INSERT INTO session_pending VALUES ('pending','root','{"text":"NOT_ADMITTED"}');`);
+      const add = db.prepare('INSERT INTO session_message VALUES (?,?,?,?,?,?,?)');
+      add.run('user', 'root', 'user', 1, 100, 100, JSON.stringify({ text: 'First user' }));
+      const assistant = { tokens: { input: 10, output: 5, reasoning: 2, cache: { read: 3, write: 1 } },
+        content: [{ type: 'reasoning', text: 'Inspect first' }, { type: 'text', text: 'Answer body' },
+          { type: 'tool', id: 'call', name: 'read', state: { status: 'completed',
+            input: { file: 'a' }, content: [{ type: 'text', text: 'result '.repeat(80) }] } }] };
+      add.run('assistant', 'root', 'assistant', 2, 1, 1, JSON.stringify(assistant));
+      add.run('compact', 'root', 'compaction', 3, 2, 2,
+        JSON.stringify({ status: 'completed', summary: 'Saved summary' }));
+      add.run('msg_forkevent_2', 'fork', 'assistant', 2, 1, 1, JSON.stringify(assistant));
+      add.run('fork-own', 'fork', 'user', 6, 6, 6, JSON.stringify({ text: 'Fork owned' }));
+    } else if (schema === 'v1') {
+      db.exec(`CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT, title TEXT,
+        directory TEXT, time_created INTEGER, time_updated INTEGER, time_archived INTEGER);
+        CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT, time_created INTEGER);
+        CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, data TEXT,
+          time_created INTEGER);
+        INSERT INTO session VALUES ('legacy',NULL,'Legacy','/synthetic',1,2,NULL);
+        INSERT INTO message VALUES ('legacy-user','legacy','{"role":"user","time":{"created":1}}',1);
+        INSERT INTO part VALUES ('legacy-part','legacy-user','legacy','{"type":"text","text":"Legacy body"}',1);`);
+    } else {
+      db.exec('CREATE TABLE session_v2 (id TEXT PRIMARY KEY)');
+    }
+  } finally {
+    db.close();
   }
-  db.close();
   const args = ['--opencode-db', file, '--codex-dir', path.join(dir, 'codex'),
     '--claude-dir', path.join(dir, 'claude'), '--pi-dir', path.join(dir, 'pi'),
     '--dsh-dir', path.join(dir, 'dsh'), '--meta-dir', path.join(dir, 'meta'),
@@ -77,9 +80,12 @@ async function serve(t, args) {
   const port = await freeFetchSafePort();
   const child = spawn(binary, ['serve', '--port', String(port), ...args],
     { cwd: repo, windowsHide: true, stdio: 'ignore' });
-  t.after(async () => {
-    child.kill();
-    if (child.exitCode === null) await once(child, 'close');
+  onCleanup(t, async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      const closed = once(child, 'close');
+      child.kill();
+      await closed;
+    }
   });
   const base = `http://127.0.0.1:${port}`;
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -140,9 +146,9 @@ test('OpenCode v2 full tool and reasoning content requires explicit MCP opt-in',
     const f = await fixture(t, 'v2');
     const before = hash(f.file);
     const client = new Client({ name: 'opencode-slice', version: '1.0.0' });
+    onCleanup(t, () => client.close());
     await client.connect(new StdioClientTransport({ command: binary,
       args: ['mcp', ...f.args], cwd: repo, stderr: 'pipe' }));
-    t.after(async () => { await client.close(); });
     const get = await client.callTool({ name: 'session_get', arguments: {
       session: { provider: 'opencode', sessionId: 'root' },
     } });
@@ -179,6 +185,7 @@ test('OpenCode v2 WAL updates become visible and invalidate an older Reader revi
   { timeout: 30_000 }, async t => {
     const f = await fixture(t, 'v2');
     const db = new DatabaseSync(f.file);
+    onCleanup(t, () => db.close());
     db.exec('PRAGMA journal_mode=WAL');
     const base = await serve(t, f.args);
     const old = await (await fetch(base + '/api/v3/reader/opencode/root/bootstrap')).json();
@@ -192,7 +199,6 @@ test('OpenCode v2 WAL updates become visible and invalidate an older Reader revi
       offset: '0', maxChars: '80', revision: old.revision });
     const stale = await fetch(`${base}/api/v3/reader/opencode/root/content?${query}`);
     assert.equal(stale.status, 409);
-    db.close();
   });
 
 test('OpenCode Reader revision detects a same-metadata rollback-journal commit',
@@ -203,9 +209,12 @@ test('OpenCode Reader revision detects a same-metadata rollback-journal commit',
     const before = statSync(f.file, { bigint: true });
     const old = await (await fetch(base + '/api/v3/reader/opencode/root/bootstrap')).json();
     const db = new DatabaseSync(f.file);
-    db.prepare('UPDATE session_message SET data=? WHERE id=?')
-      .run(JSON.stringify({ text: 'Other user' }), 'user');
-    db.close();
+    try {
+      db.prepare('UPDATE session_message SET data=? WHERE id=?')
+        .run(JSON.stringify({ text: 'Other user' }), 'user');
+    } finally {
+      db.close();
+    }
     utimesSync(f.file, 1700000000, 1700000000);
     const after = statSync(f.file, { bigint: true });
     assert.equal(after.size, before.size);
@@ -221,6 +230,7 @@ test('OpenCode Reader revision detects a same-metadata WAL commit',
   { timeout: 30_000 }, async t => {
     const f = await fixture(t, 'v2');
     const db = new DatabaseSync(f.file);
+    onCleanup(t, () => db.close());
     db.exec('PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0');
     db.prepare('UPDATE session_message SET data=? WHERE id=?')
       .run(JSON.stringify({ text: 'First pass' }), 'user');
@@ -244,7 +254,6 @@ test('OpenCode Reader revision detects a same-metadata WAL commit',
     const afterDbHash = hash(f.file);
     const afterShmHeader = readFileSync(shm).subarray(0, 96);
     const fresh = await (await fetch(base + '/api/v3/reader/opencode/root/bootstrap')).json();
-    db.close();
     assert.equal(afterDbHash, beforeDbHash, 'WAL commit leaves the main database untouched');
     assert.equal(afterDb.size, beforeDb.size);
     assert.equal(afterDb.mtimeNs, beforeDb.mtimeNs);
@@ -261,14 +270,17 @@ test('OpenCode Reader revision detects a same-metadata WAL commit',
 test('OpenCode Reader opens a copied WAL database before a WAL-index sidecar exists',
   { timeout: 30_000 }, async t => {
     const f = await fixture(t, 'v2');
-    const db = new DatabaseSync(f.file);
-    db.exec('PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0');
-    db.prepare('UPDATE session_message SET data=? WHERE id=?')
-      .run(JSON.stringify({ text: 'WAL copy' }), 'user');
     const copy = `${f.file}.copy`;
-    copyFileSync(f.file, copy);
-    copyFileSync(`${f.file}-wal`, `${copy}-wal`);
-    db.close();
+    const db = new DatabaseSync(f.file);
+    try {
+      db.exec('PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0');
+      db.prepare('UPDATE session_message SET data=? WHERE id=?')
+        .run(JSON.stringify({ text: 'WAL copy' }), 'user');
+      copyFileSync(f.file, copy);
+      copyFileSync(`${f.file}-wal`, `${copy}-wal`);
+    } finally {
+      db.close();
+    }
     const args = [...f.args];
     args[args.indexOf('--opencode-db') + 1] = copy;
     const base = await serve(t, args);
@@ -295,9 +307,9 @@ test('frozen private OpenCode v2 copy remains byte-identical across Web and MCP 
     assert.equal(reader.status, 200);
     assert.ok((await reader.json()).totalItems > 0);
     const client = new Client({ name: 'opencode-private-slice', version: '1.0.0' });
+    onCleanup(t, () => client.close());
     await client.connect(new StdioClientTransport({ command: binary,
       args: ['mcp', ...args], cwd: repo, stderr: 'pipe' }));
-    t.after(async () => { await client.close(); });
     const get = await client.callTool({ name: 'session_get', arguments: {
       session: { provider: 'opencode', sessionId: target.sessionId },
     } });

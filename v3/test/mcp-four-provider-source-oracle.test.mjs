@@ -1,7 +1,8 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -87,28 +88,19 @@ test('4c2b0f20 portable stdio MCP complete default timelines agree with four raw
       beforeHashes.set(providers[index], actual);
     }
     const facts = inventory(manifest);
-    const scratch = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-four-oracle-'));
+    const scratch = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-four-oracle-'));
     const realScratch = await realpath(scratch);
     const realTemp = await realpath(os.tmpdir());
     assert.equal(path.dirname(realScratch).toLowerCase(), realTemp.toLowerCase());
     const state = Object.fromEntries(['meta', 'index', 'cache', 'empty-dsh'].map(name =>
       [name, path.join(realScratch, name)]));
     for (const directory of Object.values(state)) await mkdir(directory);
-    let client, transport, childPid;
-    t.after(async () => {
-      try {
-        if (client) await client.close();
-        if (childPid) await waitForExit(childPid);
-        for (const [index, source] of files.entries()) {
-          const after = sha256(source.snapshotPath);
-          assert.equal(after, source.snapshotSha256, 'frozen source hash after MCP process exit');
-          t.diagnostic(JSON.stringify({ provider: providers[index],
-            sourceSha256Before: beforeHashes.get(providers[index]), sourceSha256After: after }));
-        }
-      } finally {
-        const cleanup = await realpath(realScratch);
-        assert.equal(path.dirname(cleanup).toLowerCase(), realTemp.toLowerCase());
-        await rm(cleanup, { recursive: true, force: true });
+    onCleanup(t, () => {
+      for (const [index, source] of files.entries()) {
+        const after = sha256(source.snapshotPath);
+        assert.equal(after, source.snapshotSha256, 'frozen source hash after MCP process exit');
+        t.diagnostic(JSON.stringify({ provider: providers[index],
+          sourceSha256Before: beforeHashes.get(providers[index]), sourceSha256After: after }));
       }
     });
     const args = ['mcp'];
@@ -118,10 +110,15 @@ test('4c2b0f20 portable stdio MCP complete default timelines agree with four raw
     }
     args.push('--dsh-dir', state['empty-dsh'], '--meta-dir', state.meta,
       '--index-dir', state.index, '--cache-dir', state.cache);
-    client = new Client({ name: 'agentsession-v3-four-source-oracle', version: '1.0.0' });
-    transport = new StdioClientTransport({ command: packageExecutable, args, cwd: repo, stderr: 'pipe' });
+    const client = new Client({ name: 'agentsession-v3-four-source-oracle', version: '1.0.0' });
+    const transport = new StdioClientTransport({ command: packageExecutable, args, cwd: repo, stderr: 'pipe' });
+    onCleanup(t, async () => {
+      const pid = transport.pid;
+      try { await client.close(); }
+      finally { if (pid) await waitForExit(pid); }
+    });
     await client.connect(transport);
-    childPid = transport.pid;
+    const childPid = transport.pid;
     assert.ok(childPid, 'native MCP child PID is available for exit verification');
 
     for (const provider of providers) {

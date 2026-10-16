@@ -1,10 +1,11 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { existsSync, readFileSync } from 'node:fs';
-import { copyFile, mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { copyFile, mkdir, readdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,41 +19,38 @@ const binary = process.env.AGENTSESSION_V3_BIN || path.join(repo, 'v3', 'target'
 const sha = file => createHash('sha256').update(readFileSync(file)).digest('hex');
 
 async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'as-v3-stats-'));
-  const children = [];
-  t.after(async () => {
-    for (const child of children) child.kill();
-    await Promise.all(children.map(child => child.exitCode === null ? once(child, 'close') : null));
-    await rm(root, { recursive: true, force: true });
-  });
+  const root = await temporaryDirectory(t, path.join(os.tmpdir(), 'as-v3-stats-'));
   const dirs = Object.fromEntries(['codex', 'claude', 'pi', 'dsh', 'meta', 'index', 'cache']
     .map(name => [name, path.join(root, name)]));
   await Promise.all(Object.values(dirs).map(dir => mkdir(dir)));
   await mkdir(path.join(dirs.codex, 'sessions'));
   const file = path.join(root, 'opencode.db');
   const db = new DatabaseSync(file);
-  db.exec(`CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT, fork_session_id TEXT,
-    fork_boundary TEXT, title TEXT, slug TEXT, directory TEXT, time_created INTEGER,
-    time_updated INTEGER, time_archived INTEGER, tokens_input INTEGER, tokens_output INTEGER,
-    tokens_reasoning INTEGER, tokens_cache_read INTEGER, tokens_cache_write INTEGER);
-    CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER,
-    time_created INTEGER, time_updated INTEGER, data TEXT);
-    INSERT INTO session_v2 VALUES
-      ('root',NULL,NULL,NULL,'Root','root','/synthetic',1,3,NULL,5000,7000,0,0,0),
-      ('child','root',NULL,NULL,'Child','child','/synthetic',2,3,NULL,9000,2000,0,0,0),
-      ('archived',NULL,NULL,NULL,'Archived','archived','/synthetic',1,3,3,100,100,0,0,0);
-    INSERT INTO session_message VALUES
-      ('u','root','user',1,1789776000000,1789776000000,'{"text":"SECRET_PROMPT"}'),
-      ('a','root','assistant',2,1789776001000,1789776001000,'{"content":[{"type":"text","text":"SECRET_ANSWER"}],"tokens":{"input":12,"output":4,"reasoning":3,"cache":{"read":5,"write":2},"total":26}}'),
-      ('b','root','assistant',3,1789862401000,1789862401000,'{"content":[],"tokens":{"input":5,"output":1,"reasoning":1,"cache":{"read":2,"write":1},"total":50}}'),
-      ('c','child','user',1,1789862400000,1789862400000,'{"text":"SECRET_CHILD"}'),
-      ('d','child','assistant',2,1789862402000,1789862402000,'{"content":[],"tokens":{"input":3,"output":2,"reasoning":0,"cache":{"read":1,"write":0},"total":6}}'),
-      ('x','archived','assistant',1,1789862403000,1789862403000,'{"text":"SECRET_ARCHIVED","tokens":{"input":100,"output":100,"reasoning":0,"cache":{"read":0,"write":0},"total":200}}');`);
-  db.close();
+  try {
+    db.exec(`CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT, fork_session_id TEXT,
+      fork_boundary TEXT, title TEXT, slug TEXT, directory TEXT, time_created INTEGER,
+      time_updated INTEGER, time_archived INTEGER, tokens_input INTEGER, tokens_output INTEGER,
+      tokens_reasoning INTEGER, tokens_cache_read INTEGER, tokens_cache_write INTEGER);
+      CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER,
+      time_created INTEGER, time_updated INTEGER, data TEXT);
+      INSERT INTO session_v2 VALUES
+        ('root',NULL,NULL,NULL,'Root','root','/synthetic',1,3,NULL,5000,7000,0,0,0),
+        ('child','root',NULL,NULL,'Child','child','/synthetic',2,3,NULL,9000,2000,0,0,0),
+        ('archived',NULL,NULL,NULL,'Archived','archived','/synthetic',1,3,3,100,100,0,0,0);
+      INSERT INTO session_message VALUES
+        ('u','root','user',1,1789776000000,1789776000000,'{"text":"SECRET_PROMPT"}'),
+        ('a','root','assistant',2,1789776001000,1789776001000,'{"content":[{"type":"text","text":"SECRET_ANSWER"}],"tokens":{"input":12,"output":4,"reasoning":3,"cache":{"read":5,"write":2},"total":26}}'),
+        ('b','root','assistant',3,1789862401000,1789862401000,'{"content":[],"tokens":{"input":5,"output":1,"reasoning":1,"cache":{"read":2,"write":1},"total":50}}'),
+        ('c','child','user',1,1789862400000,1789862400000,'{"text":"SECRET_CHILD"}'),
+        ('d','child','assistant',2,1789862402000,1789862402000,'{"content":[],"tokens":{"input":3,"output":2,"reasoning":0,"cache":{"read":1,"write":0},"total":6}}'),
+        ('x','archived','assistant',1,1789862403000,1789862403000,'{"text":"SECRET_ARCHIVED","tokens":{"input":100,"output":100,"reasoning":0,"cache":{"read":0,"write":0},"total":200}}');`);
+  } finally {
+    db.close();
+  }
   const args = ['--opencode-db', file, '--codex-dir', dirs.codex,
     '--claude-dir', dirs.claude, '--pi-dir', dirs.pi, '--dsh-dir', dirs.dsh,
     '--meta-dir', dirs.meta, '--index-dir', dirs.index, '--cache-dir', dirs.cache];
-  return { root, file, args, children };
+  return { root, file, args, t };
 }
 
 function agentBrowserBinary() {
@@ -83,7 +81,11 @@ async function serve(f, options = {}) {
   const child = spawn(binary, ['serve', '--port', String(port), ...f.args],
     { cwd: repo, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, ...options.env } });
-  f.children.push(child);
+  onCleanup(f.t, async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      const closed = once(child, 'close'); child.kill(); await closed;
+    }
+  });
   let stderr = '';
   child.stderr.on('data', data => { stderr += data.toString(); });
   f.stderr = () => stderr;
@@ -184,11 +186,14 @@ test('stats rank recorded request models and drill into day-owned session totals
   { timeout: 30_000 }, async t => {
     const f = await fixture(t);
     const db = new DatabaseSync(f.file);
-    db.exec(`ALTER TABLE session_v2 ADD COLUMN project_id TEXT;
-      UPDATE session_v2 SET directory='/project/a', project_id='project-a' WHERE id='root';
-      UPDATE session_v2 SET directory='/project/b', project_id='project-b' WHERE id='child';
-      UPDATE session_message SET data=json_set(data, '$.modelID', 'model-a') WHERE id IN ('a','b');`);
-    db.close();
+    try {
+      db.exec(`ALTER TABLE session_v2 ADD COLUMN project_id TEXT;
+        UPDATE session_v2 SET directory='/project/a', project_id='project-a' WHERE id='root';
+        UPDATE session_v2 SET directory='/project/b', project_id='project-b' WHERE id='child';
+        UPDATE session_message SET data=json_set(data, '$.modelID', 'model-a') WHERE id IN ('a','b');`);
+    } finally {
+      db.close();
+    }
     const before = sha(f.file);
     const base = await serve(f);
     const query = new URLSearchParams({ days: 'custom', from: '2026-09-19', to: '2026-09-20' });
@@ -277,11 +282,14 @@ test('OpenCode missing model provider filter is distinct from legacy wildcard an
   { timeout: 30_000 }, async t => {
     const f = await fixture(t);
     const db = new DatabaseSync(f.file);
-    db.exec(`UPDATE session_message SET data=json_set(data, '$.modelID', 'shared-model')
-      WHERE id IN ('a','b');
-      UPDATE session_message SET data=json_set(data, '$.providerID', 'provider-b') WHERE id='b';
-      UPDATE session_message SET data=json_set(data, '$.providerID', 'provider-only') WHERE id='d';`);
-    db.close();
+    try {
+      db.exec(`UPDATE session_message SET data=json_set(data, '$.modelID', 'shared-model')
+        WHERE id IN ('a','b');
+        UPDATE session_message SET data=json_set(data, '$.providerID', 'provider-b') WHERE id='b';
+        UPDATE session_message SET data=json_set(data, '$.providerID', 'provider-only') WHERE id='d';`);
+    } finally {
+      db.close();
+    }
     const before = sha(f.file);
     const base = await serve(f);
     const query = new URLSearchParams({ days: 'custom', from: '2026-09-19',
@@ -328,9 +336,12 @@ test('OpenCode empty recorded model and provider IDs normalize to missing usage 
   { timeout: 30_000 }, async t => {
     const f = await fixture(t);
     const db = new DatabaseSync(f.file);
-    db.exec(`UPDATE session_message SET data=json_set(data, '$.modelID', '', '$.providerID', '')
-      WHERE id='a';`);
-    db.close();
+    try {
+      db.exec(`UPDATE session_message SET data=json_set(data, '$.modelID', '', '$.providerID', '')
+        WHERE id='a';`);
+    } finally {
+      db.close();
+    }
     const before = sha(f.file);
     const base = await serve(f);
     const response = await fetch(`${base}/api/v3/protocol/opencode/root`);
@@ -374,17 +385,20 @@ test('working directory and model select the same owned requests across JSON, CS
   { timeout: 30_000 }, async t => {
     const f = await fixture(t);
     const db = new DatabaseSync(f.file);
-    db.exec(`UPDATE session_v2 SET directory='/project/a' WHERE id='root';
-      UPDATE session_v2 SET directory='/project/b' WHERE id='child';
-      UPDATE session_message SET data=json_set(data, '$.modelID', 'model-one') WHERE id='a';
-      UPDATE session_message SET data=json_set(data, '$.modelID', 'model-two') WHERE id='b';
-      UPDATE session_message SET data=json_set(data, '$.modelID', 'model-one') WHERE id='d';
-      INSERT INTO session_v2 VALUES
-        ('other',NULL,NULL,NULL,'Other','other','/project/a',1,3,NULL,0,0,0,0,0);
-      INSERT INTO session_message VALUES
-        ('other-a','other','assistant',1,1789862404000,1789862404000,
-          '{"content":[],"modelID":"model-two","tokens":{"input":2,"output":1,"total":3}}');`);
-    db.close();
+    try {
+      db.exec(`UPDATE session_v2 SET directory='/project/a' WHERE id='root';
+        UPDATE session_v2 SET directory='/project/b' WHERE id='child';
+        UPDATE session_message SET data=json_set(data, '$.modelID', 'model-one') WHERE id='a';
+        UPDATE session_message SET data=json_set(data, '$.modelID', 'model-two') WHERE id='b';
+        UPDATE session_message SET data=json_set(data, '$.modelID', 'model-one') WHERE id='d';
+        INSERT INTO session_v2 VALUES
+          ('other',NULL,NULL,NULL,'Other','other','/project/a',1,3,NULL,0,0,0,0,0);
+        INSERT INTO session_message VALUES
+          ('other-a','other','assistant',1,1789862404000,1789862404000,
+            '{"content":[],"modelID":"model-two","tokens":{"input":2,"output":1,"total":3}}');`);
+    } finally {
+      db.close();
+    }
     const before = sha(f.file);
     const base = await serve(f);
     const query = new URLSearchParams({ days: 'custom', from: '2026-09-19',
@@ -428,20 +442,23 @@ test('OpenCode project ID is distinct from working directory and composes with m
   { timeout: 30_000 }, async t => {
     const f = await fixture(t);
     const db = new DatabaseSync(f.file);
-    db.exec(`ALTER TABLE session_v2 ADD COLUMN project_id TEXT;
-      UPDATE session_v2 SET project_id='project-a', directory='/shared' WHERE id='root';
-      UPDATE session_v2 SET project_id='project-b', directory='/shared' WHERE id='child';
-      UPDATE session_message SET data=json_set(data, '$.modelID', 'model-one') WHERE id IN ('a','d');
-      UPDATE session_message SET data=json_set(data, '$.modelID', 'model-two') WHERE id='b';
-      INSERT INTO session_v2 (id,parent_id,title,slug,directory,time_created,time_updated,
-        project_id) VALUES ('other',NULL,'Other','other','/shared',1,3,'project-b'),
-          ('unassigned',NULL,'Unassigned','unassigned','/shared',1,3,NULL);
-      INSERT INTO session_message VALUES
-        ('other-a','other','assistant',1,1789862404000,1789862404000,
-          '{"content":[],"modelID":"model-two","tokens":{"input":2,"output":1,"total":3}}'),
-        ('unassigned-a','unassigned','assistant',1,1789862405000,1789862405000,
-          '{"content":[],"modelID":"model-two","tokens":{"input":1,"output":1,"total":2}}');`);
-    db.close();
+    try {
+      db.exec(`ALTER TABLE session_v2 ADD COLUMN project_id TEXT;
+        UPDATE session_v2 SET project_id='project-a', directory='/shared' WHERE id='root';
+        UPDATE session_v2 SET project_id='project-b', directory='/shared' WHERE id='child';
+        UPDATE session_message SET data=json_set(data, '$.modelID', 'model-one') WHERE id IN ('a','d');
+        UPDATE session_message SET data=json_set(data, '$.modelID', 'model-two') WHERE id='b';
+        INSERT INTO session_v2 (id,parent_id,title,slug,directory,time_created,time_updated,
+          project_id) VALUES ('other',NULL,'Other','other','/shared',1,3,'project-b'),
+            ('unassigned',NULL,'Unassigned','unassigned','/shared',1,3,NULL);
+        INSERT INTO session_message VALUES
+          ('other-a','other','assistant',1,1789862404000,1789862404000,
+            '{"content":[],"modelID":"model-two","tokens":{"input":2,"output":1,"total":3}}'),
+          ('unassigned-a','unassigned','assistant',1,1789862405000,1789862405000,
+            '{"content":[],"modelID":"model-two","tokens":{"input":1,"output":1,"total":2}}');`);
+    } finally {
+      db.close();
+    }
     const base = await serve(f);
     const query = new URLSearchParams({ days: 'custom', from: '2026-09-19', to: '2026-09-20',
       scope: 'root', directory: '/shared', model: 'model-two', project: 'project-a' });
@@ -561,7 +578,7 @@ test('statistics browser downloads the displayed CSV and JSON reports',
     const session = `as-v3-stats-${process.pid}-${Date.now()}`;
     const downloads = path.join(f.root, 'downloads');
     await mkdir(downloads);
-    t.after(async () => { try { await browserCommand(browser, session, downloads, 'close'); } catch { /* cleanup */ } });
+    onCleanup(t, async () => { try { await browserCommand(browser, session, downloads, 'close'); } catch { /* cleanup */ } });
     await browserCommand(browser, session, downloads, 'open', `${base}/opencode/stats`);
     await browserCommand(browser, session, downloads, 'wait', '--text', 'Download CSV');
     const snapshot = await browserCommand(browser, session, downloads, 'snapshot', '-i');
@@ -602,8 +619,11 @@ test('active sessions with no owned usage report not-observed coverage and unkno
   { timeout: 30_000 }, async t => {
     const f = await fixture(t);
     const db = new DatabaseSync(f.file);
-    db.exec(`UPDATE session_message SET data='{"content":[]}' WHERE type='assistant'`);
-    db.close();
+    try {
+      db.exec(`UPDATE session_message SET data='{"content":[]}' WHERE type='assistant'`);
+    } finally {
+      db.close();
+    }
     const base = await serve(f);
     const response = await fetch(`${base}/api/v3/stats/opencode`);
     const report = await response.json();
@@ -624,14 +644,18 @@ test('frozen OpenCode statistics export all active sessions and preserve DB/WAL 
     const before = sourceFiles.map(hashOrNull);
     assert.equal(before[0], manifest.database.snapshotSha256);
     const db = new DatabaseSync(database, { readOnly: true });
-    const expectedSessions = db.prepare(
-      'SELECT COUNT(*) AS n FROM session_v2 WHERE time_archived IS NULL').get().n;
-    const expectedMessages = db.prepare(`SELECT COUNT(*) AS n FROM session_message m
-      JOIN session_v2 s ON s.id=m.session_id WHERE s.time_archived IS NULL
-      AND m.type IN ('user','assistant')
-      AND (s.fork_session_id IS NULL OR
-        substr(m.id,-length(CAST(m.seq AS TEXT))-1) != '_' || m.seq)`).get().n;
-    db.close();
+    let expectedSessions, expectedMessages;
+    try {
+      expectedSessions = db.prepare(
+        'SELECT COUNT(*) AS n FROM session_v2 WHERE time_archived IS NULL').get().n;
+      expectedMessages = db.prepare(`SELECT COUNT(*) AS n FROM session_message m
+        JOIN session_v2 s ON s.id=m.session_id WHERE s.time_archived IS NULL
+        AND m.type IN ('user','assistant')
+        AND (s.fork_session_id IS NULL OR
+          substr(m.id,-length(CAST(m.seq AS TEXT))-1) != '_' || m.seq)`).get().n;
+    } finally {
+      db.close();
+    }
     const f = await fixture(t);
     f.args[f.args.indexOf('--opencode-db') + 1] = database;
     const base = await serve(f);
@@ -658,14 +682,18 @@ test('frozen OpenCode root scope matches source parent ownership',
     const before = sourceFiles.map(hashOrNull);
     assert.equal(before[0], manifest.database.snapshotSha256);
     const db = new DatabaseSync(database, { readOnly: true });
-    const expected = db.prepare(`SELECT id FROM session_v2
-      WHERE time_archived IS NULL AND parent_id IS NULL ORDER BY id`).all().map(row => row.id);
-    const expectedMessages = db.prepare(`SELECT COUNT(*) AS n FROM session_message m
-      JOIN session_v2 s ON s.id=m.session_id WHERE s.time_archived IS NULL
-      AND s.parent_id IS NULL AND m.type IN ('user','assistant')
-      AND (s.fork_session_id IS NULL OR
-        substr(m.id,-length(CAST(m.seq AS TEXT))-1) != '_' || m.seq)`).get().n;
-    db.close();
+    let expected, expectedMessages;
+    try {
+      expected = db.prepare(`SELECT id FROM session_v2
+        WHERE time_archived IS NULL AND parent_id IS NULL ORDER BY id`).all().map(row => row.id);
+      expectedMessages = db.prepare(`SELECT COUNT(*) AS n FROM session_message m
+        JOIN session_v2 s ON s.id=m.session_id WHERE s.time_archived IS NULL
+        AND s.parent_id IS NULL AND m.type IN ('user','assistant')
+        AND (s.fork_session_id IS NULL OR
+          substr(m.id,-length(CAST(m.seq AS TEXT))-1) != '_' || m.seq)`).get().n;
+    } finally {
+      db.close();
+    }
     const f = await fixture(t);
     f.args[f.args.indexOf('--opencode-db') + 1] = database;
     const base = await serve(f);
@@ -693,15 +721,19 @@ test('frozen OpenCode directory and model selection agrees with independent SQLi
     const hashOrNull = file => existsSync(file) ? sha(file) : null;
     const before = sourceFiles.map(hashOrNull);
     const db = new DatabaseSync(database, { readOnly: true });
-    const raw = db.prepare(`SELECT s.id AS session_id, s.directory, s.project_id,
-        m.time_created AS timestamp, m.data
-      FROM session_message m JOIN session_v2 s ON s.id=m.session_id
-      WHERE s.time_archived IS NULL AND s.parent_id IS NULL AND m.type='assistant'
-        AND m.time_created >= ? AND m.time_created < ?
-        AND (s.fork_session_id IS NULL OR
-          substr(m.id,-length(CAST(m.seq AS TEXT))-1) != '_' || m.seq)`)
-      .all(Date.parse('2026-07-01T00:00:00Z'), Date.parse('2026-09-28T00:00:00Z'));
-    db.close();
+    let raw;
+    try {
+      raw = db.prepare(`SELECT s.id AS session_id, s.directory, s.project_id,
+          m.time_created AS timestamp, m.data
+        FROM session_message m JOIN session_v2 s ON s.id=m.session_id
+        WHERE s.time_archived IS NULL AND s.parent_id IS NULL AND m.type='assistant'
+          AND m.time_created >= ? AND m.time_created < ?
+          AND (s.fork_session_id IS NULL OR
+            substr(m.id,-length(CAST(m.seq AS TEXT))-1) != '_' || m.seq)`)
+        .all(Date.parse('2026-07-01T00:00:00Z'), Date.parse('2026-09-28T00:00:00Z'));
+    } finally {
+      db.close();
+    }
     const owned = raw.flatMap(row => {
       const message = JSON.parse(row.data);
       if (!message.tokens || typeof message.tokens !== 'object') return [];
@@ -811,22 +843,26 @@ test('frozen OpenCode statistics keep source provider and model identities separ
     if (existsSync(`${source}-wal`)) await copyFile(`${source}-wal`, `${f.file}-wal`);
     const copyHashes = [f.file, `${f.file}-wal`].map(hashOrNull);
     const db = new DatabaseSync(f.file, { readOnly: true });
-    const pairs = db.prepare(`SELECT
-        COALESCE(json_extract(m.data, '$.providerID'), json_extract(m.data, '$.model.providerID')) AS model_provider,
-        COALESCE(json_extract(m.data, '$.modelID'), json_extract(m.data, '$.model.id')) AS model,
-        count(*) AS requests
-      FROM session_message m JOIN session_v2 s ON s.id=m.session_id
-      WHERE s.time_archived IS NULL AND m.type='assistant'
-        AND m.time_created >= ? AND m.time_created < ?
-        AND COALESCE(json_extract(m.data, '$.modelID'), json_extract(m.data, '$.model.id'))='deepseek-v4-flash'
-        AND (COALESCE(json_extract(m.data, '$.tokens.input'),0)
-          + COALESCE(json_extract(m.data, '$.tokens.output'),0)
-          + COALESCE(json_extract(m.data, '$.tokens.reasoning'),0)
-          + COALESCE(json_extract(m.data, '$.tokens.cache.read'),0)
-          + COALESCE(json_extract(m.data, '$.tokens.cache.write'),0))>0
-      GROUP BY 1,2 ORDER BY 1`)
-      .all(Date.parse('2026-05-01T00:00:00Z'), Date.parse('2026-08-01T00:00:00Z'));
-    db.close();
+    let pairs;
+    try {
+      pairs = db.prepare(`SELECT
+          COALESCE(json_extract(m.data, '$.providerID'), json_extract(m.data, '$.model.providerID')) AS model_provider,
+          COALESCE(json_extract(m.data, '$.modelID'), json_extract(m.data, '$.model.id')) AS model,
+          count(*) AS requests
+        FROM session_message m JOIN session_v2 s ON s.id=m.session_id
+        WHERE s.time_archived IS NULL AND m.type='assistant'
+          AND m.time_created >= ? AND m.time_created < ?
+          AND COALESCE(json_extract(m.data, '$.modelID'), json_extract(m.data, '$.model.id'))='deepseek-v4-flash'
+          AND (COALESCE(json_extract(m.data, '$.tokens.input'),0)
+            + COALESCE(json_extract(m.data, '$.tokens.output'),0)
+            + COALESCE(json_extract(m.data, '$.tokens.reasoning'),0)
+            + COALESCE(json_extract(m.data, '$.tokens.cache.read'),0)
+            + COALESCE(json_extract(m.data, '$.tokens.cache.write'),0))>0
+        GROUP BY 1,2 ORDER BY 1`)
+        .all(Date.parse('2026-05-01T00:00:00Z'), Date.parse('2026-08-01T00:00:00Z'));
+    } finally {
+      db.close();
+    }
     assert.deepEqual(pairs.map(row => row.model_provider), ['deepseek', 'opencode-go']);
     const base = await serve(f);
     const query = new URLSearchParams({ days: 'custom', from: '2026-05-01', to: '2026-07-31' });
@@ -955,7 +991,7 @@ test('frozen Claude and Pi statistics exports preserve raw known and missing req
       }
       return { provider, file, request };
     });
-    t.after(() => {
+    onCleanup(t, () => {
       for (const { provider, file } of sources) {
         assert.equal(sha(file.snapshotPath), file.snapshotSha256,
           `${provider} frozen source bytes remain unchanged`);
@@ -1036,7 +1072,7 @@ test('frozen Codex, OpenCode and DSH statistics match raw request ownership and 
     assert.equal(sha(codexFile.snapshotPath), codexFile.snapshotSha256);
     assert.equal(sha(dshFile.snapshotPath), dshFile.snapshotSha256);
     assert.equal(sha(manifest.database.snapshotPath), manifest.database.snapshotSha256);
-    t.after(() => assert.deepEqual(sourceFiles.map(hashOrNull), before,
+    onCleanup(t, () => assert.deepEqual(sourceFiles.map(hashOrNull), before,
       'frozen provider source and OpenCode DB/WAL bytes remain unchanged'));
 
     const day = '2026-09-25';
@@ -1081,14 +1117,18 @@ test('frozen Codex, OpenCode and DSH statistics match raw request ownership and 
     };
 
     const db = new DatabaseSync(manifest.database.snapshotPath, { readOnly: true });
-    const openRows = db.prepare(`SELECT s.id AS session_id, m.data FROM session_message m
-      JOIN session_v2 s ON s.id=m.session_id
-      WHERE s.time_archived IS NULL AND m.type='assistant'
-        AND m.time_created >= ? AND m.time_created < ?
-        AND (s.fork_session_id IS NULL OR
-          substr(m.id,-length(CAST(m.seq AS TEXT))-1) != '_' || m.seq)`)
-      .all(Date.parse(`${day}T00:00:00Z`), Date.parse('2026-09-26T00:00:00Z'));
-    db.close();
+    let openRows;
+    try {
+      openRows = db.prepare(`SELECT s.id AS session_id, m.data FROM session_message m
+        JOIN session_v2 s ON s.id=m.session_id
+        WHERE s.time_archived IS NULL AND m.type='assistant'
+          AND m.time_created >= ? AND m.time_created < ?
+          AND (s.fork_session_id IS NULL OR
+            substr(m.id,-length(CAST(m.seq AS TEXT))-1) != '_' || m.seq)`)
+        .all(Date.parse(`${day}T00:00:00Z`), Date.parse('2026-09-26T00:00:00Z'));
+    } finally {
+      db.close();
+    }
     const openRequests = openRows.flatMap(row => {
       const raw = JSON.parse(row.data).tokens;
       if (!raw) return [];

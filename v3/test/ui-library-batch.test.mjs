@@ -1,10 +1,10 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,7 +31,7 @@ function node(provider, id, parent = null, childCount = 0, boundary = null) {
 
 async function harness(t, { paged = false, diagnostics = false } = {}) {
   const { build } = createRequire(path.join(uiDir, 'package.json'))('vite');
-  const buildDir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-ui-batch-'));
+  const buildDir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-ui-batch-'));
   await build({ root: uiDir, configFile: path.join(uiDir, 'vite.config.ts'),
     build: { outDir: buildDir, emptyOutDir: true }, logLevel: 'error' });
   const writes = [];
@@ -104,15 +104,14 @@ async function harness(t, { paged = false, diagnostics = false } = {}) {
     response.end(readFileSync(asset));
   });
 
-  const port = await freeFetchSafePort();
-  await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
-  t.after(async () => {
+  onCleanup(t, async () => {
     await new Promise(resolve => {
       server.close(resolve);
       server.closeAllConnections();
     });
-    await rm(buildDir, { recursive: true, force: true });
   });
+  const port = await freeFetchSafePort();
+  await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
   return { origin: `http://127.0.0.1:${port}`, writes, listRequests,
     rejectOnce() { rejectNext = true; } };
 }
@@ -133,7 +132,7 @@ async function browser(t, url) {
       code === 0 ? resolve(stdout.trim()) : reject(new Error(stderr || stdout));
     });
   });
-  t.after(async () => { try { await command('close'); } catch { /* Already closed. */ } });
+  onCleanup(t, () => command('close'));
   await command('open', url);
   await command('set', 'viewport', '1280', '900');
   return command;

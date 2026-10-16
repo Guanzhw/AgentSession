@@ -1,5 +1,6 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import assert from 'node:assert/strict';
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,14 +16,13 @@ const filename = 'rollout-2026-09-26T00-00-00-44444444-4444-4444-8444-4444444444
 
 async function start(t, args) {
   const client = new Client({ name: 'index-publication-test', version: '1.0.0' });
+  onCleanup(t, () => client.close());
   await client.connect(new StdioClientTransport({ command: binary, args, cwd: repo, stderr: 'pipe' }));
-  t.after(() => client.close());
   return client;
 }
 
 test('durable catalog invalidates body-only rewrite across MCP processes', { timeout: 30_000 }, async t => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-index-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  const root = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-index-'));
   for (const name of ['codex', 'claude', 'pi', 'dsh', 'meta', 'index', 'cache'])
     await mkdir(path.join(root, name));
   await cp(fixture, path.join(root, 'codex'), { recursive: true });
@@ -58,13 +58,10 @@ test('durable catalog invalidates body-only rewrite across MCP processes', { tim
 });
 
 test('valid JSONL shortening withdraws search text and invalidates cursors across restart', { timeout: 30_000 }, async t => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-shortening-'));
-  const clients = [];
+  const root = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-shortening-'));
   const original = await readFile(path.join(fixture, 'sessions', '2026', '09', '26', filename), 'utf8');
-  t.after(async () => {
-    await Promise.all(clients.map(client => client.close()));
+  onCleanup(t, async () => {
     assert.equal(await readFile(path.join(fixture, 'sessions', '2026', '09', '26', filename), 'utf8'), original);
-    await rm(root, { recursive: true, force: true });
   });
   for (const name of ['codex', 'claude', 'pi', 'dsh', 'meta', 'index', 'cache'])
     await mkdir(path.join(root, name));
@@ -85,8 +82,8 @@ test('valid JSONL shortening withdraws search text and invalidates cursors acros
     '--index-dir', path.join(root, 'index'), '--cache-dir', path.join(root, 'cache')];
   const connect = async () => {
     const client = new Client({ name: 'index-shortening-test', version: '1.0.0' });
+    onCleanup(t, () => client.close());
     await client.connect(new StdioClientTransport({ command: binary, args, cwd: repo, stderr: 'pipe' }));
-    clients.push(client);
     return client;
   };
   const call = async (client, name, input) => {

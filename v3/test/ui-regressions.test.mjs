@@ -1,10 +1,10 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createServer as createHttpServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -286,7 +286,7 @@ async function startHarness(t, { dshListError = false, extraRows = 0,
   staleChildCursorOnce = false } = {}) {
   const requireFromUi = createRequire(path.join(uiDir, 'package.json'));
   const { build } = requireFromUi('vite');
-  const buildDir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-ui-build-'));
+  const buildDir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-ui-build-'));
   await build({
     root: uiDir,
     configFile: path.join(uiDir, 'vite.config.ts'),
@@ -576,7 +576,7 @@ async function startHarness(t, { dshListError = false, extraRows = 0,
     response.end(readFileSync(asset));
   });
 
-  t.after(async () => {
+  onCleanup(t, async () => {
     if (heldAResponse && !heldAResponse.writableEnded && !heldAResponse.destroyed) {
       heldAResponse.writeHead(503);
       heldAResponse.end();
@@ -590,7 +590,6 @@ async function startHarness(t, { dshListError = false, extraRows = 0,
       heldStatsDayResponse.end();
     }
     if (server.listening) await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
-    await rm(buildDir, { recursive: true, force: true });
   });
 
   let port;
@@ -673,7 +672,7 @@ async function startBrowser(t, url) {
       finish(undefined, stdout.trim());
     });
   });
-  t.after(async () => {
+  onCleanup(t, async () => {
     try { await command('close'); } catch { /* The session may already have closed after a browser error. */ }
   });
 

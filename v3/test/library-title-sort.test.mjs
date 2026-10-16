@@ -1,9 +1,10 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,17 +16,10 @@ const binary = process.env.AGENTSESSION_V3_BIN || path.join(repo, 'v3/target/deb
 const digest = async file => createHash('sha256').update(await readFile(file)).digest('hex');
 
 test('family title sort matches server Intl base collation, subtree recency, visible renames, and child pages', { timeout: 30000 }, async t => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'as-title-sort-'));
+  const root = await temporaryDirectory(t, path.join(os.tmpdir(), 'as-title-sort-'));
   const dirs = Object.fromEntries(['codex', 'claude', 'pi', 'dsh', 'meta', 'index', 'cache'].map(name => [name, path.join(root, name)]));
   await Promise.all(Object.values(dirs).map(dir => mkdir(dir)));
   const file = path.join(root, 'opencode.db');
-  const db = new DatabaseSync(file);
-  db.exec(`CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT, fork_session_id TEXT,
-    fork_boundary TEXT, title TEXT, slug TEXT, directory TEXT, time_created INTEGER,
-    time_updated INTEGER, time_archived INTEGER, tokens_input INTEGER, tokens_output INTEGER,
-    tokens_reasoning INTEGER, tokens_cache_read INTEGER, tokens_cache_write INTEGER);
-    CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER,
-    time_created INTEGER, time_updated INTEGER, data TEXT);`);
   const samples = [['latin', 'Alpha', 10], ['chinese-b', '北京', 10], ['chinese-z', '中山', 10],
     ['accent-old', 'éclair', 10], ['accent-new', 'ECLAIR', 20], ['accent-family', 'e\u0301clair', 1],
     ['case-a', 'Same', 30], ['case-A', 'same', 30], ['punct', 'A-b', 10],
@@ -33,9 +27,19 @@ test('family title sort matches server Intl base collation, subtree recency, vis
   const rows = samples.map(([id, title, updated]) => ({ id, title, updated, parent: null }));
   rows.push(...samples.map(([id, title, updated]) => ({ id: `child-${id}`, title, updated, parent: 'latin' })));
   rows.push({ id: 'fresh-descendant', title: 'Fresh', updated: 100, parent: 'accent-family' });
-  const insert = db.prepare('INSERT INTO session_v2 VALUES (?,?,NULL,NULL,?,?,?,1,?,NULL,NULL,NULL,NULL,NULL,NULL)');
-  for (const row of rows) insert.run(row.id, row.parent, row.title, row.id, '/public/sort', row.updated);
-  db.close();
+  const db = new DatabaseSync(file);
+  try {
+    db.exec(`CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT, fork_session_id TEXT,
+      fork_boundary TEXT, title TEXT, slug TEXT, directory TEXT, time_created INTEGER,
+      time_updated INTEGER, time_archived INTEGER, tokens_input INTEGER, tokens_output INTEGER,
+      tokens_reasoning INTEGER, tokens_cache_read INTEGER, tokens_cache_write INTEGER);
+      CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER,
+      time_created INTEGER, time_updated INTEGER, data TEXT);`);
+    const insert = db.prepare('INSERT INTO session_v2 VALUES (?,?,NULL,NULL,?,?,?,1,?,NULL,NULL,NULL,NULL,NULL,NULL)');
+    for (const row of rows) insert.run(row.id, row.parent, row.title, row.id, '/public/sort', row.updated);
+  } finally {
+    db.close();
+  }
   const before = await digest(file);
   const port = await freeFetchSafePort();
   const child = spawn(binary, ['serve', '--port', String(port), '--opencode-db', file,
@@ -44,10 +48,9 @@ test('family title sort matches server Intl base collation, subtree recency, vis
   { cwd: repo, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
   let stderr = '';
   child.stderr.on('data', data => { stderr += data; });
-  t.after(async () => {
-    if (child.exitCode === null) { const closed = once(child, 'close'); child.kill(); await closed; }
+  onCleanup(t, async () => {
+    if (child.exitCode === null && child.signalCode === null) { const closed = once(child, 'close'); child.kill(); await closed; }
     assert.equal(await digest(file), before, 'provider source remains unchanged');
-    await rm(root, { recursive: true, force: true });
   });
   const base = `http://127.0.0.1:${port}`;
   for (let i = 0; i < 100; i++) {

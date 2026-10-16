@@ -1,10 +1,11 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,7 +35,7 @@ async function fetchJson(url) {
 test('frozen DSH v0 reaches Web Reader and stdio MCP search without source writes',
   { timeout: 30_000, skip: !existsSync(source) || !existsSync(binary) }, async t => {
     const sourceHash = hash();
-    const state = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-dsh-v0-'));
+    const state = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-dsh-v0-'));
     for (const name of ['codex', 'claude', 'pi', 'meta', 'index', 'cache']) {
       await mkdir(path.join(state, name));
     }
@@ -51,17 +52,13 @@ test('frozen DSH v0 reaches Web Reader and stdio MCP search without source write
     const port = await freePort();
     const child = spawn(binary, ['serve', '--port', String(port), ...args],
       { cwd: repo, windowsHide: true, stdio: 'ignore' });
-    let client;
-    t.after(async () => {
-      try {
-        await client?.close();
-        child.kill();
-        if (child.exitCode === null) await once(child, 'close');
-        assert.equal(hash(), sourceHash, 'Frozen DSH source bytes remain unchanged');
-      } finally {
-        await rm(state, { recursive: true, force: true });
+    onCleanup(t, () => assert.equal(hash(), sourceHash, 'Frozen DSH source bytes remain unchanged'));
+    onCleanup(t, async () => {
+      if (child.exitCode === null && child.signalCode === null) {
+        const closed = once(child, 'close'); child.kill(); await closed;
       }
     });
+    let client;
     const origin = `http://127.0.0.1:${port}`;
     let ready = false;
     for (let attempt = 0; attempt < 100; attempt++) {
@@ -117,8 +114,11 @@ test('frozen DSH v0 reaches Web Reader and stdio MCP search without source write
     assert.ok(!tools.matches.some(row => row.session?.sessionId === id));
 
     client = new Client({ name: 'agentsession-v3-frozen-dsh-v0', version: '1.0.0' });
-    await client.connect(new StdioClientTransport({ command: binary,
-      args: ['mcp', ...args], cwd: repo, stderr: 'pipe' }));
+    const transport = new StdioClientTransport({ command: binary,
+      args: ['mcp', ...args], cwd: repo, stderr: 'pipe' });
+    onCleanup(t, () => transport.close());
+    onCleanup(t, () => client.close());
+    await client.connect(transport);
     const result = await client.callTool({ name: 'session_search', arguments: {
       query: 'read', providers: ['deepseek-harness'], fields: ['toolName'],
     } });
