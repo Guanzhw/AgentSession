@@ -1,9 +1,10 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -28,7 +29,7 @@ async function freePort() {
 }
 
 test('OpenCode V2 prompt evidence separates recorded system rows from current AGENTS and selected agent sources', { timeout: 30000 }, async t => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'as-v3-opencode-prompt-'));
+  const root = await temporaryDirectory(t, path.join(os.tmpdir(), 'as-v3-opencode-prompt-'));
   const home = path.join(root, 'home');
   const project = path.join(home, 'project');
   const workspace = path.join(project, 'pkg');
@@ -61,26 +62,29 @@ test('OpenCode V2 prompt evidence separates recorded system rows from current AG
   await Promise.all(files.map(([file, content]) => writeFile(file, content)));
   const dbPath = path.join(root, 'opencode.db');
   const db = new DatabaseSync(dbPath);
-  db.exec(`CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT, fork_session_id TEXT,
-    fork_boundary TEXT, title TEXT, slug TEXT, directory TEXT, time_created INTEGER,
-    time_updated INTEGER, time_archived INTEGER, tokens_input INTEGER, tokens_output INTEGER,
-    tokens_reasoning INTEGER, tokens_cache_read INTEGER, tokens_cache_write INTEGER, agent TEXT);
-    CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER,
-    time_created INTEGER, time_updated INTEGER, data TEXT);`);
-  const insert = db.prepare('INSERT INTO session_v2 VALUES (?,NULL,NULL,NULL,?,?,?,1,2,NULL,NULL,NULL,NULL,NULL,NULL,?)');
-  insert.run('review-session', 'Review', 'review', workspace, 'reviewer');
-  insert.run('scribe-session', 'Scribe', 'scribe', workspace, 'scribe');
-  insert.run('unknown-session', 'Unknown', 'unknown', workspace, null);
-  insert.run('large-session', 'Large', 'large', workspace, 'reviewer');
-  insert.run('cleared-session', 'Cleared', 'cleared', workspace, 'cleared');
-  insert.run('outside-session', 'Outside', 'outside', outsideWorkspace, 'outsider');
-  db.prepare('INSERT INTO session_message VALUES (?,?,?,?,?,?,?)').run('recorded-system', 'review-session', 'system', 1, 1234, 1234,
-    JSON.stringify({ text: 'RECORDED_SYSTEM_FROM_SESSION' }));
-  db.prepare('INSERT INTO session_message VALUES (?,?,?,?,?,?,?)').run('unrelated-malformed', 'review-session', 'assistant', 2, 1235, 1235,
-    '{not-json');
-  db.prepare('INSERT INTO session_message VALUES (?,?,?,?,?,?,?)').run('large-system', 'large-session', 'system', 1, 1234, 1234,
-    JSON.stringify({ text: 'X'.repeat(1_048_577) }));
-  db.close();
+  try {
+    db.exec(`CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT, fork_session_id TEXT,
+      fork_boundary TEXT, title TEXT, slug TEXT, directory TEXT, time_created INTEGER,
+      time_updated INTEGER, time_archived INTEGER, tokens_input INTEGER, tokens_output INTEGER,
+      tokens_reasoning INTEGER, tokens_cache_read INTEGER, tokens_cache_write INTEGER, agent TEXT);
+      CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER,
+      time_created INTEGER, time_updated INTEGER, data TEXT);`);
+    const insert = db.prepare('INSERT INTO session_v2 VALUES (?,NULL,NULL,NULL,?,?,?,1,2,NULL,NULL,NULL,NULL,NULL,NULL,?)');
+    insert.run('review-session', 'Review', 'review', workspace, 'reviewer');
+    insert.run('scribe-session', 'Scribe', 'scribe', workspace, 'scribe');
+    insert.run('unknown-session', 'Unknown', 'unknown', workspace, null);
+    insert.run('large-session', 'Large', 'large', workspace, 'reviewer');
+    insert.run('cleared-session', 'Cleared', 'cleared', workspace, 'cleared');
+    insert.run('outside-session', 'Outside', 'outside', outsideWorkspace, 'outsider');
+    db.prepare('INSERT INTO session_message VALUES (?,?,?,?,?,?,?)').run('recorded-system', 'review-session', 'system', 1, 1234, 1234,
+      JSON.stringify({ text: 'RECORDED_SYSTEM_FROM_SESSION' }));
+    db.prepare('INSERT INTO session_message VALUES (?,?,?,?,?,?,?)').run('unrelated-malformed', 'review-session', 'assistant', 2, 1235, 1235,
+      '{not-json');
+    db.prepare('INSERT INTO session_message VALUES (?,?,?,?,?,?,?)').run('large-system', 'large-session', 'system', 1, 1234, 1234,
+      JSON.stringify({ text: 'X'.repeat(1_048_577) }));
+  } finally {
+    db.close();
+  }
   const before = new Map([dbPath, ...files.map(([file]) => file)].map(file => [file, sha(file)]));
   const state = Object.fromEntries(['codex', 'claude', 'pi', 'dsh', 'meta', 'index', 'cache'].map(name => [name, path.join(root, name)]));
   await Promise.all(Object.values(state).map(dir => mkdir(dir)));
@@ -91,11 +95,11 @@ test('OpenCode V2 prompt evidence separates recorded system rows from current AG
   { cwd: repo, windowsHide: true, env: { ...process.env, HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: path.join(root, 'xdg') }, stdio: ['ignore', 'ignore', 'pipe'] });
   let stderr = '';
   child.stderr.on('data', chunk => { stderr += chunk.toString(); });
-  t.after(async () => {
-    child.kill();
-    if (child.exitCode === null) await once(child, 'close');
+  onCleanup(t, async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      const closed = once(child, 'close'); child.kill(); await closed;
+    }
     for (const [file, digest] of before) assert.equal(sha(file), digest, `${file} changed`);
-    await rm(root, { recursive: true, force: true });
   });
   const base = `http://127.0.0.1:${port}`;
   for (let i = 0; i < 100; i++) {
@@ -153,17 +157,20 @@ test('OpenCode V2 prompt evidence separates recorded system rows from current AG
 });
 
 test('OpenCode V2 schema without optional session agent column remains explicit', { timeout: 30000 }, async t => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'as-v3-opencode-prompt-old-schema-'));
+  const root = await temporaryDirectory(t, path.join(os.tmpdir(), 'as-v3-opencode-prompt-old-schema-'));
   const dbPath = path.join(root, 'opencode.db');
   const db = new DatabaseSync(dbPath);
-  db.exec(`CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT, fork_session_id TEXT,
-    fork_boundary TEXT, title TEXT, slug TEXT, directory TEXT, time_created INTEGER,
-    time_updated INTEGER, time_archived INTEGER, tokens_input INTEGER, tokens_output INTEGER,
-    tokens_reasoning INTEGER, tokens_cache_read INTEGER, tokens_cache_write INTEGER);
-    CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER,
-    time_created INTEGER, time_updated INTEGER, data TEXT);
-    INSERT INTO session_v2 VALUES ('old',NULL,NULL,NULL,'Old','old',NULL,1,2,NULL,NULL,NULL,NULL,NULL,NULL);`);
-  db.close();
+  try {
+    db.exec(`CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT, fork_session_id TEXT,
+      fork_boundary TEXT, title TEXT, slug TEXT, directory TEXT, time_created INTEGER,
+      time_updated INTEGER, time_archived INTEGER, tokens_input INTEGER, tokens_output INTEGER,
+      tokens_reasoning INTEGER, tokens_cache_read INTEGER, tokens_cache_write INTEGER);
+      CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER,
+      time_created INTEGER, time_updated INTEGER, data TEXT);
+      INSERT INTO session_v2 VALUES ('old',NULL,NULL,NULL,'Old','old',NULL,1,2,NULL,NULL,NULL,NULL,NULL,NULL);`);
+  } finally {
+    db.close();
+  }
   const digest = sha(dbPath);
   const dirs = Object.fromEntries(['codex', 'claude', 'pi', 'dsh', 'meta', 'index', 'cache', 'xdg']
     .map(name => [name, path.join(root, name)]));
@@ -173,11 +180,11 @@ test('OpenCode V2 schema without optional session agent column remains explicit'
     '--codex-dir', dirs.codex, '--claude-dir', dirs.claude, '--pi-dir', dirs.pi,
     '--dsh-dir', dirs.dsh, '--meta-dir', dirs.meta, '--index-dir', dirs.index, '--cache-dir', dirs.cache],
   { cwd: repo, windowsHide: true, env: { ...process.env, XDG_CONFIG_HOME: dirs.xdg }, stdio: 'ignore' });
-  t.after(async () => {
-    child.kill();
-    if (child.exitCode === null) await once(child, 'close');
+  onCleanup(t, async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      const closed = once(child, 'close'); child.kill(); await closed;
+    }
     assert.equal(sha(dbPath), digest);
-    await rm(root, { recursive: true, force: true });
   });
   let response;
   for (let i = 0; i < 100; i++) {

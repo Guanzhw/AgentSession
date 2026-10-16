@@ -1,9 +1,10 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdtemp, mkdir, readFile, rm, stat, unlink, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, unlink, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -32,7 +33,7 @@ async function hash(file) {
 
 test('same-ID Codex sources stay browsable but cannot publish fragment history or usage',
   { timeout: 30_000 }, async t => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'v3-codex-collision-'));
+    const dir = await temporaryDirectory(t, path.join(os.tmpdir(), 'v3-codex-collision-'));
     const codex = path.join(dir, 'codex');
     const sessions = path.join(codex, 'sessions', '2026', '09', '27');
     await mkdir(sessions, { recursive: true });
@@ -54,12 +55,11 @@ test('same-ID Codex sources stay browsable but cannot publish fragment history o
     { cwd: repo, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
     child.stderr.on('data', chunk => { stderr = (stderr + chunk.toString()).slice(-5000); });
-    t.after(async () => {
+    onCleanup(t, async () => {
       if (child.exitCode === null && child.signalCode === null) {
         const closed = once(child, 'close'); child.kill();
         await Promise.race([closed, new Promise(resolve => setTimeout(resolve, 3000))]);
       }
-      await rm(dir, { recursive: true, force: true });
     });
     const base = `http://127.0.0.1:${port}`;
     let ready = false;

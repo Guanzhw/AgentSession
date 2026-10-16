@@ -1,7 +1,8 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,14 +22,10 @@ const session = { provider: 'deepseek-harness', sessionId: 'dsh-v3-s2-root' };
 
 for (const era of ['legacy', 'modern']) test(`native MCP tools keep ${era} text summaries bounded`,
   { timeout: 30_000 }, async t => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-mcp-output-'));
-    t.after(async () => {
-      try {
-        assert.deepEqual(sources.map(file => createHash('sha256').update(readFileSync(file)).digest('hex')),
-          sourceHashes, 'provider source files remain read-only');
-      } finally {
-        await rm(dir, { recursive: true, force: true });
-      }
+    const dir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-mcp-output-'));
+    onCleanup(t, async () => {
+      assert.deepEqual(sources.map(file => createHash('sha256').update(readFileSync(file)).digest('hex')),
+        sourceHashes, 'provider source files remain read-only');
     });
     for (const name of ['codex', 'claude', 'pi', 'meta', 'index', 'cache']) {
       await mkdir(path.join(dir, name));
@@ -40,8 +37,8 @@ for (const era of ['legacy', 'modern']) test(`native MCP tools keep ${era} text 
       '--cache-dir', path.join(dir, 'cache')];
     const client = new Client({ name: 'agentsession-v3-output-contract', version: '1.0.0' },
       era === 'modern' ? { versionNegotiation: { mode: { pin: '2026-07-28' } } } : undefined);
+    onCleanup(t, () => client.close());
     await client.connect(new StdioClientTransport({ command: binary, args, cwd: repo, stderr: 'pipe' }));
-    t.after(async () => client.close());
     assert.equal(client.getServerVersion()?.name, 'AgentSession-MCP');
     assert.equal(client.getServerVersion()?.version, version);
 

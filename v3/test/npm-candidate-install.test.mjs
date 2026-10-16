@@ -1,9 +1,10 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -93,7 +94,7 @@ test('selected local npm candidate installs and launches Web and native stdio MC
   skip: process.env.AGENTSESSION_V3_NPM_CANDIDATE !== '1'
     ? 'Set AGENTSESSION_V3_NPM_CANDIDATE=1 for the selected local artifact test' : false,
 }, async t => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-npm-'));
+  const root = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-npm-'));
   const physicalRoot = await realpath(root);
   const physicalTemp = await realpath(os.tmpdir());
   assert.equal(path.dirname(physicalRoot).toLowerCase(), physicalTemp.toLowerCase());
@@ -111,13 +112,7 @@ test('selected local npm candidate installs and launches Web and native stdio MC
   const state = path.join(root, 'state');
   let web;
   let client;
-  t.after(async () => {
-    if (client) await client.close();
-    if (web) await stop(web);
-    const physical = await realpath(root);
-    assert.equal(path.dirname(physical).toLowerCase(), physicalTemp.toLowerCase());
-    await rm(physical, { recursive: true, force: true });
-  });
+  onCleanup(t, () => web && stop(web));
 
   const fixtureHash = digest(await readFile(fixture));
   assert.equal(fixtureHash, '17e3638a76197a60969f83849707bda886377c6d69cd8f5a78a6620f44f7dc12');
@@ -276,13 +271,16 @@ test('selected local npm candidate installs and launches Web and native stdio MC
   }
   const legacy = path.join(state, 'legacy-copy.db');
   const legacyDb = new DatabaseSync(legacy);
-  legacyDb.exec(`CREATE TABLE session_meta (provider TEXT NOT NULL DEFAULT 'opencode',
-    session_id TEXT NOT NULL, custom_title TEXT, starred INTEGER DEFAULT 0,
-    deleted INTEGER DEFAULT 0, permanent INTEGER DEFAULT 0, time_starred INTEGER,
-    time_deleted INTEGER, time_renamed INTEGER, PRIMARY KEY(provider,session_id));`);
-  legacyDb.prepare('INSERT INTO session_meta(provider,session_id,custom_title,starred) VALUES (?,?,?,?)')
-    .run('codex', sessionId, 'Installed migration title', 1);
-  legacyDb.close();
+  try {
+    legacyDb.exec(`CREATE TABLE session_meta (provider TEXT NOT NULL DEFAULT 'opencode',
+      session_id TEXT NOT NULL, custom_title TEXT, starred INTEGER DEFAULT 0,
+      deleted INTEGER DEFAULT 0, permanent INTEGER DEFAULT 0, time_starred INTEGER,
+      time_deleted INTEGER, time_renamed INTEGER, PRIMARY KEY(provider,session_id));`);
+    legacyDb.prepare('INSERT INTO session_meta(provider,session_id,custom_title,starred) VALUES (?,?,?,?)')
+      .run('codex', sessionId, 'Installed migration title', 1);
+  } finally {
+    legacyDb.close();
+  }
   const legacyHash = digest(await readFile(legacy));
   const scope = run(process.execPath, [viewer, 'migrate-meta', '--from', legacy, '--config', config],
     { cwd: working, env });
@@ -354,6 +352,8 @@ test('selected local npm candidate installs and launches Web and native stdio MC
   client = new Client({ name: 'agentsession-v3-npm-install-check', version: '1.0.0' });
   const transport = new StdioClientTransport({ command: process.execPath,
     args: [mcp, '--config', config], cwd: working, env, stderr: 'pipe' });
+  onCleanup(t, () => transport.close());
+  { const ownedClient = client; onCleanup(t, () => ownedClient.close()); }
   await client.connect(transport);
   assert.ok(transport.pid);
   const mcpPid = transport.pid;
@@ -376,6 +376,8 @@ test('selected local npm candidate installs and launches Web and native stdio MC
   client = new Client({ name: 'agentsession-v3-viewer-mcp-check', version: '1.0.0' });
   const explicitTransport = new StdioClientTransport({ command: process.execPath,
     args: [viewer, '--config', config, 'mcp'], cwd: working, env, stderr: 'pipe' });
+  onCleanup(t, () => explicitTransport.close());
+  { const ownedClient = client; onCleanup(t, () => ownedClient.close()); }
   await client.connect(explicitTransport);
   assert.equal((await client.listTools()).tools.length, 7);
   const explicitPid = explicitTransport.pid;

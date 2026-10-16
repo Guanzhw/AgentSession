@@ -1,10 +1,10 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createServer as createHttpServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -92,7 +92,7 @@ function inheritedItems(start, end) {
 async function startHarness(t, { changedNextRevision = false, changedContentRevision = false, wrongSource = false, noInheritedContext = false } = {}) {
   const requireFromUi = createRequire(path.join(uiDir, 'package.json'));
   const { build } = requireFromUi('vite');
-  const buildDir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-inherited-context-'));
+  const buildDir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-inherited-context-'));
   await build({ root: uiDir, configFile: path.join(uiDir, 'vite.config.ts'),
     build: { outDir: buildDir, emptyOutDir: true }, logLevel: 'error' });
 
@@ -209,17 +209,16 @@ async function startHarness(t, { changedNextRevision = false, changedContentRevi
     response.end(readFileSync(asset));
   });
 
-  const port = await freePort();
-  await new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(port, '127.0.0.1', resolve);
-  });
-  t.after(async () => {
+  onCleanup(t, async () => {
     await new Promise(resolve => {
       server.close(resolve);
       server.closeAllConnections();
     });
-    await rm(buildDir, { recursive: true, force: true });
+  });
+  const port = await freePort();
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', resolve);
   });
   return { origin: 'http://127.0.0.1:' + port, listRequests, contentRequests };
 }
@@ -245,7 +244,7 @@ async function startBrowser(t, url) {
       else resolve(stdout.trim());
     });
   });
-  t.after(async () => { try { await command('close'); } catch { /* Browser may already be closed. */ } });
+  onCleanup(t, () => command('close'));
   await command('open');
   await command('eval', 'window.location.href = ' + JSON.stringify(url));
   return { command };

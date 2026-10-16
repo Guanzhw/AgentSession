@@ -1,10 +1,11 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdir, readFile, readdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -38,11 +39,18 @@ async function serve(t, args) {
   const port = await freePort();
   const child = spawn(binary, ['serve', '--port', String(port), ...args],
     { cwd: repo, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
-  t.after(async () => {
-    if (child.exitCode === null) {
+  onCleanup(t, async () => {
+    if (child.exitCode === null && child.signalCode === null) {
       const closed = once(child, 'close');
       child.kill();
-      await Promise.race([closed, new Promise(resolve => setTimeout(resolve, 3000))]);
+      let timer;
+      try {
+        await Promise.race([closed, new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('metadata test server failed to stop')), 3000);
+        })]);
+      } finally {
+        clearTimeout(timer);
+      }
     }
   });
   const base = `http://127.0.0.1:${port}`;
@@ -58,22 +66,24 @@ async function serve(t, args) {
 test('explicit metadata import preserves the 2.0 database and isolates 3.0 scopes',
   { timeout: 45_000 }, async t => {
     assert.ok(existsSync(binary), `Build ${binary} first`);
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'v3-meta-migration-'));
-    t.after(() => rm(dir, { recursive: true, force: true }));
+    const dir = await temporaryDirectory(t, path.join(os.tmpdir(), 'v3-meta-migration-'));
     await mkdir(path.join(dir, 'meta'), { recursive: true });
     const old = path.join(dir, 'meta', 'meta.db');
     const db = new DatabaseSync(old);
-    db.exec(`CREATE TABLE session_meta (provider TEXT NOT NULL DEFAULT 'opencode',
-      session_id TEXT NOT NULL, custom_title TEXT, starred INTEGER DEFAULT 0,
-      deleted INTEGER DEFAULT 0, permanent INTEGER DEFAULT 0, time_starred INTEGER,
-      time_deleted INTEGER, time_renamed INTEGER, PRIMARY KEY(provider,session_id));
-      CREATE TABLE session_index (provider TEXT NOT NULL, id TEXT NOT NULL, title TEXT);`);
-    db.prepare('INSERT INTO session_meta(provider,session_id,custom_title,starred,deleted,time_deleted) VALUES (?,?,?,?,?,?)')
-      .run('codex', id, 'Migrated title', 1, 1, 123456789);
-    db.prepare('INSERT INTO session_meta(provider,session_id,custom_title) VALUES (?,?,?)')
-      .run('hermes', id, 'Retired row');
-    db.prepare('INSERT INTO session_index VALUES (?,?,?)').run('hermes', id, 'Retired index');
-    db.close();
+    try {
+      db.exec(`CREATE TABLE session_meta (provider TEXT NOT NULL DEFAULT 'opencode',
+        session_id TEXT NOT NULL, custom_title TEXT, starred INTEGER DEFAULT 0,
+        deleted INTEGER DEFAULT 0, permanent INTEGER DEFAULT 0, time_starred INTEGER,
+        time_deleted INTEGER, time_renamed INTEGER, PRIMARY KEY(provider,session_id));
+        CREATE TABLE session_index (provider TEXT NOT NULL, id TEXT NOT NULL, title TEXT);`);
+      db.prepare('INSERT INTO session_meta(provider,session_id,custom_title,starred,deleted,time_deleted) VALUES (?,?,?,?,?,?)')
+        .run('codex', id, 'Migrated title', 1, 1, 123456789);
+      db.prepare('INSERT INTO session_meta(provider,session_id,custom_title) VALUES (?,?,?)')
+        .run('hermes', id, 'Retired row');
+      db.prepare('INSERT INTO session_index VALUES (?,?,?)').run('hermes', id, 'Retired index');
+    } finally {
+      db.close();
+    }
     const before = await sha(old);
     const left = paths(dir, 'left');
     const right = paths(dir, 'right');
@@ -94,15 +104,18 @@ test('explicit metadata import preserves the 2.0 database and isolates 3.0 scope
       meta.find(row => row.sessionId === id)?.starred,
       meta.find(row => row.sessionId === id)?.deleted], ['Migrated title', true, true]);
     const copied = new DatabaseSync(target, { readOnly: true });
-    assert.equal(copied.prepare("SELECT custom_title FROM session_meta WHERE provider='hermes'").get().custom_title,
-      'Retired row');
-    assert.equal(copied.prepare("SELECT title FROM session_index WHERE provider='hermes'").get().title,
-      'Retired index');
-    copied.close();
+    try {
+      assert.equal(copied.prepare("SELECT custom_title FROM session_meta WHERE provider='hermes'").get().custom_title,
+        'Retired row');
+      assert.equal(copied.prepare("SELECT title FROM session_index WHERE provider='hermes'").get().title,
+        'Retired index');
+    } finally {
+      copied.close();
+    }
     const client = new Client({ name: 'migration-test', version: '1' });
+    onCleanup(t, () => client.close());
     await client.connect(new StdioClientTransport({ command: binary,
       args: ['mcp', ...left], cwd: repo, stderr: 'pipe' }));
-    t.after(() => client.close());
     const result = await client.callTool({ name: 'session_get', arguments: {
       session: { provider: 'codex', sessionId: id },
     } });
@@ -132,12 +145,14 @@ test('explicit metadata import preserves the 2.0 database and isolates 3.0 scope
   });
 
 test('metadata import rejects an incompatible source without publishing a target', async t => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'v3-meta-invalid-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  const dir = await temporaryDirectory(t, path.join(os.tmpdir(), 'v3-meta-invalid-'));
   const old = path.join(dir, 'old.db');
   const db = new DatabaseSync(old);
-  db.exec('CREATE TABLE session_meta (session_id TEXT PRIMARY KEY, starred INTEGER)');
-  db.close();
+  try {
+    db.exec('CREATE TABLE session_meta (session_id TEXT PRIMARY KEY, starred INTEGER)');
+  } finally {
+    db.close();
+  }
   const before = await sha(old);
   const result = cli(['migrate-meta', '--from', old, ...paths(dir, 'left')]);
   assert.notEqual(result.status, 0);
@@ -147,10 +162,10 @@ test('metadata import rejects an incompatible source without publishing a target
 });
 
 test('metadata import includes committed WAL rows while leaving the live source bytes intact', async t => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'v3-meta-wal-'));
+  const dir = await temporaryDirectory(t, path.join(os.tmpdir(), 'v3-meta-wal-'));
   const old = path.join(dir, 'old.db');
   const source = new DatabaseSync(old);
-  t.after(async () => { source.close(); await rm(dir, { recursive: true, force: true }); });
+  onCleanup(t, () => source.close());
   source.exec(`PRAGMA journal_mode=WAL;
     CREATE TABLE session_meta (provider TEXT NOT NULL, session_id TEXT NOT NULL,
       custom_title TEXT, starred INTEGER DEFAULT 0, deleted INTEGER DEFAULT 0,
@@ -164,9 +179,12 @@ test('metadata import includes committed WAL rows while leaving the live source 
   assert.equal(result.status, 0, result.stderr);
   const target = path.join(dir, 'meta', 'scopes', result.stdout.trim(), 'meta.db');
   const imported = new DatabaseSync(target, { readOnly: true });
-  assert.equal(imported.prepare('SELECT custom_title FROM session_meta WHERE provider=? AND session_id=?')
-    .get('codex', id).custom_title, 'WAL title');
-  imported.close();
+  try {
+    assert.equal(imported.prepare('SELECT custom_title FROM session_meta WHERE provider=? AND session_id=?')
+      .get('codex', id).custom_title, 'WAL title');
+  } finally {
+    imported.close();
+  }
   assert.equal(await sha(old), mainHash);
   assert.equal(await sha(`${old}-wal`), walHash);
   assert.deepEqual(await readdir(path.dirname(target)), ['meta.db']);

@@ -1,7 +1,8 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,9 +21,8 @@ const binary = process.env.AGENTSESSION_V3_BIN || path.join(repo, 'v3', 'target'
 const session = { provider: 'deepseek-harness', sessionId: 'dsh-v3-s2-root' };
 
 async function start(t, dshRoot = fixture, era = 'legacy') {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-team-mcp-'));
-  t.after(async () => {
-    await rm(dir, { recursive: true, force: true });
+  const dir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-team-mcp-'));
+  onCleanup(t, async () => {
     assert.equal(createHash('sha256').update(readFileSync(source)).digest('hex'), sourceHash);
   });
   for (const name of ['codex', 'claude', 'pi', 'meta', 'index', 'cache']) {
@@ -34,8 +34,8 @@ async function start(t, dshRoot = fixture, era = 'legacy') {
     '--claude-dir', path.join(dir, 'claude'), '--pi-dir', path.join(dir, 'pi'), '--dsh-dir', dshRoot,
     '--meta-dir', path.join(dir, 'meta'), '--index-dir', path.join(dir, 'index'),
     '--cache-dir', path.join(dir, 'cache')];
+  onCleanup(t, () => client.close());
   await client.connect(new StdioClientTransport({ command: binary, args, cwd: repo, stderr: 'pipe' }));
-  t.after(async () => client.close());
   return { client, dir };
 }
 
@@ -122,8 +122,7 @@ for (const era of ['legacy', 'modern']) test(`native MCP lists owned queued mess
 test('native queued-message cursors reject changed scope and source', { timeout: 30_000 }, async t => {
   const { client } = await start(t);
   const first = result(await call(client, { action: 'list', session, limit: 1 }));
-  const local = await mkdtemp(path.join(os.tmpdir(), 'agentsession-team-source-'));
-  t.after(async () => rm(local, { recursive: true, force: true }));
+  const local = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-team-source-'));
   await cp(fixture, local, { recursive: true });
   const { client: other } = await start(t, local);
   error(await call(other, { action: 'list', session, cursor: first.nextCursor }), 'invalid_cursor');

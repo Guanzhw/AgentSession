@@ -1,10 +1,11 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,25 +17,28 @@ const binary = process.env.AGENTSESSION_V3_BIN || path.join(repo, 'v3/target/deb
 const hash = file => createHash('sha256').update(readFileSync(file)).digest('hex');
 
 test('library families preserve canonical boundaries, project aliases, and complete child cursor traversal', { timeout: 30000 }, async t => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'as-v3-library-'));
+  const root = await temporaryDirectory(t, path.join(os.tmpdir(), 'as-v3-library-'));
   const dirs = Object.fromEntries(['codex', 'claude', 'pi', 'dsh', 'meta', 'index', 'cache'].map(name => [name, path.join(root, name)]));
   await Promise.all(Object.values(dirs).map(dir => mkdir(dir)));
   const dbPath = path.join(root, 'opencode.db');
   const db = new DatabaseSync(dbPath);
-  db.exec(`CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT, fork_session_id TEXT,
-    fork_boundary TEXT, title TEXT, slug TEXT, directory TEXT, time_created INTEGER,
-    time_updated INTEGER, time_archived INTEGER, tokens_input INTEGER, tokens_output INTEGER,
-    tokens_reasoning INTEGER, tokens_cache_read INTEGER, tokens_cache_write INTEGER);
-    CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER,
-    time_created INTEGER, time_updated INTEGER, data TEXT);`);
-  const insert = db.prepare('INSERT INTO session_v2 VALUES (?,?,NULL,NULL,?,?,?, ?,?,NULL,NULL,NULL,NULL,NULL,NULL)');
-  const add = (id, parent, directory, time) => insert.run(id, parent,
-    id === 'root' ? 'An unrelated title' : id, id, directory, time, time);
-  add('root', null, 'D:\\Project', 1);
-  add('other', null, 'D:\\Project', 2);
-  add('orphan', 'missing', 'D:\\Project', 3);
-  for (let i = 0; i < 43; i++) add(`child-${String(i).padStart(2, '0')}`, 'root', '/mnt/d/Project', 10 + i);
-  db.close();
+  try {
+    db.exec(`CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT, fork_session_id TEXT,
+      fork_boundary TEXT, title TEXT, slug TEXT, directory TEXT, time_created INTEGER,
+      time_updated INTEGER, time_archived INTEGER, tokens_input INTEGER, tokens_output INTEGER,
+      tokens_reasoning INTEGER, tokens_cache_read INTEGER, tokens_cache_write INTEGER);
+      CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER,
+      time_created INTEGER, time_updated INTEGER, data TEXT);`);
+    const insert = db.prepare('INSERT INTO session_v2 VALUES (?,?,NULL,NULL,?,?,?, ?,?,NULL,NULL,NULL,NULL,NULL,NULL)');
+    const add = (id, parent, directory, time) => insert.run(id, parent,
+      id === 'root' ? 'An unrelated title' : id, id, directory, time, time);
+    add('root', null, 'D:\\Project', 1);
+    add('other', null, 'D:\\Project', 2);
+    add('orphan', 'missing', 'D:\\Project', 3);
+    for (let i = 0; i < 43; i++) add(`child-${String(i).padStart(2, '0')}`, 'root', '/mnt/d/Project', 10 + i);
+  } finally {
+    db.close();
+  }
   const before = hash(dbPath);
   const port = await freeFetchSafePort();
   const args = ['serve', '--port', String(port), '--opencode-db', dbPath,
@@ -43,11 +47,11 @@ test('library families preserve canonical boundaries, project aliases, and compl
   const child = spawn(binary, args, { cwd: repo, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
   let stderr = '';
   child.stderr.on('data', data => { stderr += data.toString(); });
-  t.after(async () => {
-    child.kill();
-    if (child.exitCode === null) await once(child, 'close');
+  onCleanup(t, async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      const closed = once(child, 'close'); child.kill(); await closed;
+    }
     assert.equal(hash(dbPath), before);
-    await rm(root, { recursive: true, force: true });
   });
   const base = `http://127.0.0.1:${port}`;
   for (let i = 0; i < 100; i++) {

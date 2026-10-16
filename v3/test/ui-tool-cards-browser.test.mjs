@@ -1,8 +1,8 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -65,8 +65,7 @@ test('compact tool disclosure uses keyboard, loads exact fields on demand and ke
   { skip, timeout: 60_000 }, async t => {
     const { createServer } = createRequire(path.join(ui, 'package.json'))('vite');
     const port = await freeFetchSafePort();
-    const cacheDir = await mkdtemp(path.join(tmpdir(), 'agentsession-v3-tool-card-cache-'));
-    t.after(() => rm(cacheDir, { recursive: true, force: true }));
+    const cacheDir = await temporaryDirectory(t, path.join(tmpdir(), 'agentsession-v3-tool-card-cache-'));
     const fixtureId = path.join(ui, 'tool-card-browser-fixture.svelte').replaceAll('\\', '/');
     const server = await createServer({ root: ui, cacheDir, logLevel: 'error', server: { host: '127.0.0.1', port, strictPort: true },
       plugins: [{ name: 'controlled-tool-cards',
@@ -85,8 +84,8 @@ test('compact tool disclosure uses keyboard, loads exact fields on demand and ke
           });
         },
       }] });
+    onCleanup(t, () => server.close());
     await server.listen();
-    t.after(() => server.close());
     const session = `agentsession-v3-tool-cards-${process.pid}-${Date.now()}`;
     const command = (...args) => new Promise((resolve, reject) => {
       const child = spawn(browserBinary, ['--session', session, ...args],
@@ -98,7 +97,7 @@ test('compact tool disclosure uses keyboard, loads exact fields on demand and ke
       child.once('error', error => { clearTimeout(timeout); reject(error); });
       child.once('exit', code => { clearTimeout(timeout); code === 0 ? resolve(stdout.trim()) : reject(new Error(stderr || stdout)); });
     });
-    t.after(async () => { try { await command('close'); } catch { /* Browser already closed. */ } });
+    onCleanup(t, async () => { try { await command('close'); } catch { /* Browser already closed. */ } });
     const evaluate = async expression => JSON.parse(await command('eval', expression));
     const waitFor = async expression => {
       const deadline = Date.now() + 8_000;

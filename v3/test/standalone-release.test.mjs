@@ -1,10 +1,11 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { existsSync } from 'node:fs';
-import { appendFile, copyFile, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { appendFile, copyFile, cp, mkdir, readFile, readdir, realpath, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -102,21 +103,10 @@ async function freePort() {
 }
 
 async function setup(t) {
-  const dir = await mkdtemp(path.join(tmpdir(), 'agentsession-v3-artifact-'));
+  const dir = await temporaryDirectory(t, path.join(tmpdir(), 'agentsession-v3-artifact-'));
   const physical = await realpath(dir);
   const physicalTemp = await realpath(tmpdir());
   assert.equal(path.dirname(physical).toLowerCase(), physicalTemp.toLowerCase());
-  const children = [];
-  const clients = [];
-  t.after(async () => {
-    for (const client of clients) await client.close();
-    for (const child of children) child.kill();
-    await Promise.all(children.filter(child => child.exitCode === null).map(child => once(child, 'close')));
-    const cleanupTarget = await realpath(dir);
-    assert.equal(path.dirname(cleanupTarget).toLowerCase(), physicalTemp.toLowerCase(),
-      'Cleanup target must remain a direct child of the system temp directory');
-    await rm(cleanupTarget, { recursive: true, force: true });
-  });
   const binary = path.join(dir, path.basename(release));
   await copyFile(release, binary);
   for (const name of ['meta', 'index', 'cache', 'claude', 'pi', 'dsh', 'opencode']) {
@@ -132,16 +122,16 @@ async function setup(t) {
     '--index-dir', path.join(dir, 'index'),
     '--cache-dir', path.join(dir, 'cache'),
   ];
-  return { binary, dir, args, children, clients };
+  return { binary, dir, args };
 }
 
 test('copied release binary serves embedded Reader assets and native MCP without a checkout cwd',
   { timeout: 40_000 }, async t => {
-    const { binary, dir, args, children, clients } = await setup(t);
+    const { binary, dir, args } = await setup(t);
     const port = await freePort();
     const server = spawn(binary, ['serve', '--port', String(port), ...args],
       { cwd: dir, windowsHide: true, stdio: 'ignore' });
-    children.push(server);
+    onCleanup(t, () => stopChild(server));
     const origin = `http://127.0.0.1:${port}`;
     const deadline = Date.now() + 15_000;
     let ready = false;
@@ -173,24 +163,21 @@ test('copied release binary serves embedded Reader assets and native MCP without
 
     const client = new Client({ name: 'agentsession-v3-standalone-check', version: '1.0.0' },
       { versionNegotiation: { mode: { pin: '2026-07-28' } } });
-    clients.push(client);
-    await client.connect(new StdioClientTransport({ command: binary, args: ['mcp', ...args],
-      cwd: dir, stderr: 'pipe' }));
+    const transport = new StdioClientTransport({ command: binary, args: ['mcp', ...args],
+      cwd: dir, stderr: 'pipe' });
+    onCleanup(t, () => transport.close());
+    onCleanup(t, () => client.close());
+    await client.connect(transport);
     const tools = await client.listTools();
     assert.equal(tools.tools.length, 7);
 });
 
 test('portable packager rejects an executable that reports a different version',
   { timeout: 15_000 }, async t => {
-    const scratch = await mkdtemp(path.join(tmpdir(), 'agentsession-v3-wrong-version-'));
+    const scratch = await temporaryDirectory(t, path.join(tmpdir(), 'agentsession-v3-wrong-version-'));
     const physical = await realpath(scratch);
     const physicalTemp = await realpath(tmpdir());
     assert.equal(path.dirname(physical).toLowerCase(), physicalTemp.toLowerCase());
-    t.after(async () => {
-      const cleanup = await realpath(scratch);
-      assert.equal(path.dirname(cleanup).toLowerCase(), physicalTemp.toLowerCase());
-      await rm(cleanup, { recursive: true, force: true });
-    });
     const fakeRelease = path.join(scratch, process.platform === 'win32'
       ? 'agentsession-v3.exe' : 'agentsession-v3');
     await copyFile(process.execPath, fakeRelease);
@@ -198,6 +185,7 @@ test('portable packager rejects an executable that reports a different version',
     const packager = spawn(process.execPath,
       [portablePackager, '--release-bin', fakeRelease, '--output-dir', outputDir],
       { cwd: repo, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    onCleanup(t, () => stopChild(packager));
     const stderr = [];
     packager.stderr.on('data', chunk => stderr.push(chunk));
     const [exitCode] = await once(packager, 'close');
@@ -208,15 +196,10 @@ test('portable packager rejects an executable that reports a different version',
 
 test('portable packager rejects a version-correct executable with a local build path',
   { timeout: 15_000 }, async t => {
-    const scratch = await mkdtemp(path.join(tmpdir(), 'agentsession-v3-local-path-'));
+    const scratch = await temporaryDirectory(t, path.join(tmpdir(), 'agentsession-v3-local-path-'));
     const physical = await realpath(scratch);
     const physicalTemp = await realpath(tmpdir());
     assert.equal(path.dirname(physical).toLowerCase(), physicalTemp.toLowerCase());
-    t.after(async () => {
-      const cleanup = await realpath(scratch);
-      assert.equal(path.dirname(cleanup).toLowerCase(), physicalTemp.toLowerCase());
-      await rm(cleanup, { recursive: true, force: true });
-    });
     for (const [name, buildHome] of [['current', homedir()], ['unicode', path.join(scratch, '测试')]]) {
       const variant = path.join(scratch, name);
       await mkdir(variant);
@@ -229,6 +212,7 @@ test('portable packager rejects a version-correct executable with a local build 
         [portablePackager, '--release-bin', fakeRelease, '--output-dir', outputDir],
         { cwd: repo, env: { ...process.env, [homeVariable]: buildHome }, windowsHide: true,
           stdio: ['ignore', 'pipe', 'pipe'] });
+      onCleanup(t, () => stopChild(packager));
       const stderr = [];
       packager.stderr.on('data', chunk => stderr.push(chunk));
       const [exitCode] = await once(packager, 'close');
@@ -245,7 +229,7 @@ test('portable release directory runs from a copied path with spaces using only 
     const sourceFixtureHash = sha256(await readFile(fixtureFile));
     const licenseFile = path.join(repo, 'LICENSE');
     const licenseHash = sha256(await readFile(licenseFile));
-    const scratch = await mkdtemp(path.join(tmpdir(), 'agentsession-v3-portable-'));
+    const scratch = await temporaryDirectory(t, path.join(tmpdir(), 'agentsession-v3-portable-'));
     const realScratch = await realpath(scratch);
     const realTemp = await realpath(tmpdir());
     assert.equal(path.dirname(realScratch).toLowerCase(), realTemp.toLowerCase());
@@ -257,35 +241,24 @@ test('portable release directory runs from a copied path with spaces using only 
     const packagedExecutable = path.join(installDir, executableName);
     const packagedFixture = path.join(installDir, 'fixtures', 'codex');
     const configFile = path.join(stateRoot, 'config.json');
-    const children = [];
-    const clients = [];
-    const transports = [];
+        const transports = [];
     const mcpPids = [];
     const expectedState = {
       meta: path.join(stateRoot, 'meta'),
       index: path.join(stateRoot, 'index'),
       cache: path.join(stateRoot, 'cache'),
     };
-    t.after(async () => {
+    onCleanup(t, async () => {
       const childPids = [...new Set([...mcpPids, ...transports.map(transport => transport.pid).filter(Boolean)])];
-      for (const client of clients) await client.close();
-      for (const child of children) {
-        await stopChild(child);
-        assert.ok(child.exitCode !== null || child.signalCode !== null,
-          'Every explicitly spawned portable Web process must exit');
-      }
       for (const pid of childPids) await waitForProcessExit(pid);
       assert.equal(sha256(await readFile(fixtureFile)), sourceFixtureHash,
         'The repository public fixture must remain unchanged');
-      const physicalScratch = await realpath(realScratch);
-      assert.equal(path.dirname(physicalScratch).toLowerCase(), realTemp.toLowerCase(),
-        'Cleanup target must remain the test-owned child of the system temp directory');
-      await rm(physicalScratch, { recursive: true, force: true });
     });
 
     const packager = spawn(process.execPath,
       [portablePackager, '--release-bin', release, '--output-dir', packageDir],
       { cwd: repo, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    onCleanup(t, () => stopChild(packager));
     const packageStdout = [];
     const packageStderr = [];
     packager.stdout.on('data', chunk => packageStdout.push(chunk));
@@ -471,7 +444,7 @@ test('portable release directory runs from a copied path with spaces using only 
     const server = spawn(packagedExecutable,
       ['--config', configFile, 'serve', '--port', String(port), ...sourceArgs],
       { cwd: installDir, env, windowsHide: true, stdio: 'ignore' });
-    children.push(server);
+    onCleanup(t, () => stopChild(server));
     const origin = `http://127.0.0.1:${port}`;
     const deadline = Date.now() + 15_000;
     let ready = false;
@@ -512,8 +485,9 @@ test('portable release directory runs from a copied path with spaces using only 
       { versionNegotiation: { mode: { pin: '2026-07-28' } } });
     const transport = new StdioClientTransport({ command: packagedExecutable,
       args: ['--config', configFile, 'mcp', ...sourceArgs], cwd: installDir, env, stderr: 'pipe' });
-    clients.push(client);
     transports.push(transport);
+    onCleanup(t, () => transport.close());
+    onCleanup(t, () => client.close());
     await client.connect(transport);
     assert.ok(transport.pid, 'MCP runs as a child of the copied executable');
     const mcpPid = transport.pid;
@@ -534,8 +508,9 @@ test('portable release directory runs from a copied path with spaces using only 
     const documentedClient = new Client({ name: 'agentsession-v3-readme-mcp', version: '1.0.0' });
     const documentedTransport = new StdioClientTransport({ command: shell,
       args: shellArgs, cwd: installDir, env, stderr: 'pipe' });
-    clients.push(documentedClient);
     transports.push(documentedTransport);
+    onCleanup(t, () => documentedTransport.close());
+    onCleanup(t, () => documentedClient.close());
     await documentedClient.connect(documentedTransport);
     assert.ok(documentedTransport.pid, 'The standalone README MCP block starts in a fresh shell');
     const documentedPid = documentedTransport.pid;

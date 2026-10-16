@@ -1,8 +1,9 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -17,7 +18,7 @@ async function freePort() {
 
 test('2.0 projectPaths for active providers survive settings saves and restart',
   { timeout: 30_000 }, async t => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-project-paths-'));
+    const dir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-project-paths-'));
     const config = path.join(dir, 'config.json');
     const mapped = path.join(dir, 'mapped-project');
     await mkdir(mapped);
@@ -36,7 +37,7 @@ test('2.0 projectPaths for active providers survive settings saves and restart',
         await closed;
       }
     };
-    t.after(async () => { await stop(); await rm(dir, { recursive: true, force: true }); });
+    onCleanup(t, stop);
     const start = async () => {
       const port = await freePort();
       child = spawn(binary, ['serve', '--config', config, '--port', String(port),
@@ -86,8 +87,8 @@ test('2.0 projectPaths for active providers survive settings saves and restart',
   });
 
 test('invalid projectPaths fail startup with the owning config error', async t => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-project-paths-invalid-'));
-  t.after(async () => { await rm(dir, { recursive: true, force: true }); });
+  const dir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-project-paths-invalid-'));
+
   const config = path.join(dir, 'config.json');
   for (const [projectPaths, diagnostic] of [
     [{ codex: { opaque: 'relative/path' } }, /projectPaths.*absolute path/],

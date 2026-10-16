@@ -1,7 +1,8 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -32,7 +33,7 @@ async function freePort() {
 }
 
 async function settingsServer(t) {
-  const dir = await mkdtemp(path.join(tmpdir(), 'agentsession-v3-settings-boundary-'));
+  const dir = await temporaryDirectory(t, path.join(tmpdir(), 'agentsession-v3-settings-boundary-'));
   const config = path.join(dir, 'config.json');
   await writeFile(config, JSON.stringify({ resumeCommands: { pi: false } }));
   const port = await freePort();
@@ -42,9 +43,8 @@ async function settingsServer(t) {
     '--opencode-db', path.join(dir, 'opencode.db'), '--meta-dir', path.join(dir, 'meta'),
     '--index-dir', path.join(dir, 'index'), '--cache-dir', path.join(dir, 'cache')],
   { cwd: dir, windowsHide: true, stdio: 'ignore' });
-  t.after(async () => {
+  onCleanup(t, async () => {
     if (child.exitCode === null && child.signalCode === null) { const done = once(child, 'close'); child.kill(); await done; }
-    await rm(dir, { recursive: true, force: true });
   });
   const origin = `http://127.0.0.1:${port}`;
   for (let i = 0; i < 100; i++) {
@@ -90,7 +90,7 @@ test('settings save validates the full merged configuration after external edits
 });
 
 test('settings report effective startup selection and reject unsupported live writes', { timeout: 30_000 }, async t => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'agentsession-v3-settings-'));
+  const dir = await temporaryDirectory(t, path.join(tmpdir(), 'agentsession-v3-settings-'));
   const port = await freePort();
   const selected = path.join(dir, 'config.json');
   const fileCodex = path.join(dir, 'file-codex');
@@ -106,11 +106,10 @@ test('settings report effective startup selection and reject unsupported live wr
   let stderr = '';
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', chunk => { stderr += chunk; });
-  t.after(async () => {
+  onCleanup(t, async () => {
     const closed = child.exitCode === null && child.signalCode === null ? once(child, 'close') : Promise.resolve();
     child.kill();
     await closed;
-    await rm(dir, { recursive: true, force: true });
   });
   const origin = `http://127.0.0.1:${port}`;
   let response;
@@ -138,7 +137,7 @@ test('settings report effective startup selection and reject unsupported live wr
 });
 
 test('resume settings save live, preserve startup config, and survive restart', { timeout: 45_000 }, async t => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'agentsession-v3-settings-write-'));
+  const dir = await temporaryDirectory(t, path.join(tmpdir(), 'agentsession-v3-settings-write-'));
   const config = path.join(dir, 'config.json');
   const pi = path.join(dir, 'pi', 'sessions', 'project');
   await mkdir(pi, { recursive: true });
@@ -153,7 +152,7 @@ test('resume settings save live, preserve startup config, and survive restart', 
       const done = once(child, 'close'); child.kill(); await done;
     }
   };
-  t.after(async () => { await stop(); await rm(dir, { recursive: true, force: true }); });
+  onCleanup(t, stop);
   const start = async (disabled = false) => {
     const port = await freePort();
     child = spawn(binary, ['serve', '--config', config, '--port', String(port),

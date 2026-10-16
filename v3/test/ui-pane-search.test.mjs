@@ -1,3 +1,4 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -5,7 +6,7 @@ import { createRequire } from 'node:module';
 import { once } from 'node:events';
 import { createServer as createHttpServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -68,7 +69,7 @@ async function harness(t, options = {}) {
     return page;
   };
   const { build } = createRequire(path.join(uiDir, 'package.json'))('vite');
-  const buildDir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-pane-ui-'));
+  const buildDir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-pane-ui-'));
   await build({ root: uiDir, configFile: path.join(uiDir, 'vite.config.ts'),
     build: { outDir: buildDir, emptyOutDir: true }, logLevel: 'error' });
   const searches = [];
@@ -212,14 +213,14 @@ async function harness(t, options = {}) {
         : asset.endsWith('.css') ? 'text/css; charset=utf-8' : 'application/octet-stream' });
     response.end(readFileSync(asset));
   });
-  const port = await freePort();
-  await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
-  t.after(async () => {
+  onCleanup(t, async () => {
     releaseDelayedSearch?.();
     releaseDelayedLocate?.();
     await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
-    await rm(buildDir, { recursive: true, force: true });
   });
+  const port = await freePort();
+  await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
+
   return { origin: `http://127.0.0.1:${port}`, searches, contents, bootstraps,
     get executionRequests() { return executionRequests; },
     executionUrls,
@@ -248,7 +249,7 @@ async function browser(t, url, launchArgs = [], openSessionSearch = true) {
     });
   });
 
-  t.after(async () => { try { await command('close'); } catch { /* Already closed. */ } });
+  onCleanup(t, async () => { try { await command('close'); } catch { /* Already closed. */ } });
   await command('open', url, ...launchArgs);
   await waitFor(command, `document.querySelector('.reader-find-toggle')`);
   if (openSessionSearch) {
@@ -749,7 +750,7 @@ test('restored pane search preserves its term and diagnoses a changed source rev
 test('real Axum Reader searches and opens a late Codex body from its own source',
   { skip, timeout: 60_000 }, async t => {
     assert.ok(existsSync(binary), `Build the current 3.0 binary at ${binary}`);
-    const scratch = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-pane-real-'));
+    const scratch = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-pane-real-'));
     const source = path.join(scratch, 'codex');
     const sessionDir = path.join(source, 'sessions', '2026', '09', '27');
     await mkdir(sessionDir, { recursive: true });
@@ -773,12 +774,16 @@ test('real Axum Reader searches and opens a late Codex body from its own source'
       '--meta-dir', path.join(scratch, 'meta'), '--index-dir', path.join(scratch, 'index'),
       '--cache-dir', path.join(scratch, 'cache')],
     { cwd: scratch, windowsHide: true, stdio: 'ignore' });
-    t.after(async () => {
-      server.kill();
-      if (server.exitCode === null) await once(server, 'close');
+    onCleanup(t, async () => {
       const physical = await realpath(scratch);
       assert.equal(path.dirname(physical).toLowerCase(), (await realpath(os.tmpdir())).toLowerCase());
-      await rm(physical, { recursive: true, force: true });
+    });
+    onCleanup(t, async () => {
+      if (server.exitCode === null && server.signalCode === null) {
+        const done = once(server, 'close');
+        server.kill();
+        await done;
+      }
     });
     const origin = `http://127.0.0.1:${port}`;
     let ready = false;

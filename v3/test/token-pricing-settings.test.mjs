@@ -1,7 +1,8 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -17,25 +18,28 @@ const pricing = { currency: ' usd ', inputPerMillion: 2, outputPerMillion: 4,
 
 test('tokenPricing survives startup, settings saves and restart; live Stats uses exact vendor/model rates',
   { timeout: 40_000 }, async t => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-token-pricing-'));
+    const dir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-token-pricing-'));
     const config = path.join(dir, 'config.json');
     const dbPath = path.join(dir, 'opencode.db');
     const db = new DatabaseSync(dbPath);
-    db.exec(`CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT, fork_session_id TEXT,
-      fork_boundary TEXT, title TEXT, slug TEXT, directory TEXT, time_created INTEGER,
-      time_updated INTEGER, time_archived INTEGER, tokens_input INTEGER, tokens_output INTEGER,
-      tokens_reasoning INTEGER, tokens_cache_read INTEGER, tokens_cache_write INTEGER);
-      CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER,
-      time_created INTEGER, time_updated INTEGER, data TEXT);
-      INSERT INTO session_v2 VALUES ('root',NULL,NULL,NULL,'Pricing fixture','root','/fixture',1,2,NULL,0,0,0,0,0);`);
-    const add = db.prepare('INSERT INTO session_message VALUES (?,?,?,?,?,?,?)');
-    for (const [id, vendor, model, tokens] of [
-      ['a', 'vendor', 'priced', { input: 1_000_000, output: 500_000, reasoning: 250_000, cache: { read: 100_000, write: 50_000 } }],
-      ['b', 'different-vendor', 'priced', { input: 9_000_000, output: 9_000_000, reasoning: 0, cache: { read: 0, write: 0 } }],
-      ['c', 'vendor', 'missing-cache', { input: 100, output: 20, reasoning: 0 }],
-    ]) add.run(id, 'root', 'assistant', id.charCodeAt(0), 1789776000000, 1789776000000,
-      JSON.stringify({ modelID: model, providerID: vendor, content: [], tokens }));
-    db.close();
+    try {
+      db.exec(`CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT, fork_session_id TEXT,
+        fork_boundary TEXT, title TEXT, slug TEXT, directory TEXT, time_created INTEGER,
+        time_updated INTEGER, time_archived INTEGER, tokens_input INTEGER, tokens_output INTEGER,
+        tokens_reasoning INTEGER, tokens_cache_read INTEGER, tokens_cache_write INTEGER);
+        CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER,
+        time_created INTEGER, time_updated INTEGER, data TEXT);
+        INSERT INTO session_v2 VALUES ('root',NULL,NULL,NULL,'Pricing fixture','root','/fixture',1,2,NULL,0,0,0,0,0);`);
+      const add = db.prepare('INSERT INTO session_message VALUES (?,?,?,?,?,?,?)');
+      for (const [id, vendor, model, tokens] of [
+        ['a', 'vendor', 'priced', { input: 1_000_000, output: 500_000, reasoning: 250_000, cache: { read: 100_000, write: 50_000 } }],
+        ['b', 'different-vendor', 'priced', { input: 9_000_000, output: 9_000_000, reasoning: 0, cache: { read: 0, write: 0 } }],
+        ['c', 'vendor', 'missing-cache', { input: 100, output: 20, reasoning: 0 }],
+      ]) add.run(id, 'root', 'assistant', id.charCodeAt(0), 1789776000000, 1789776000000,
+        JSON.stringify({ modelID: model, providerID: vendor, content: [], tokens }));
+    } finally {
+      db.close();
+    }
     const initial = { tokenPricing: { 'vendor/priced': pricing, 'vendor/missing-cache': pricing },
       projectPaths: { opencode: { opaque: dir } }, resumeCommands: { pi: false },
       mcp: { searchLimit: 17 } };
@@ -46,7 +50,7 @@ test('tokenPricing survives startup, settings saves and restart; live Stats uses
         const closed = once(child, 'close'); child.kill(); await closed;
       }
     };
-    t.after(async () => { await stop(); await rm(dir, { recursive: true, force: true }); });
+    onCleanup(t, stop);
     const start = async () => {
       const port = await freeFetchSafePort();
       child = spawn(binary, ['serve', '--config', config, '--port', String(port),
@@ -128,8 +132,8 @@ test('tokenPricing survives startup, settings saves and restart; live Stats uses
   });
 
 test('invalid tokenPricing startup identifies the owning field and leaves config untouched', async t => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-token-pricing-invalid-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  const dir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-token-pricing-invalid-'));
+
   const config = path.join(dir, 'config.json');
   const body = JSON.stringify({ tokenPricing: { 'vendor/model': { ...pricing, inputPerMillion: null } } });
   await writeFile(config, body);

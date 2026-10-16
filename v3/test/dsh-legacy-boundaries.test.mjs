@@ -1,9 +1,10 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,7 +31,7 @@ async function json(url) {
 
 test('rc.8 Reader/search and healthy inventory survive torn tails and mixed encoding',
   { timeout: 30_000, skip: !existsSync(binary) }, async t => {
-    const state = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-dsh-boundaries-'));
+    const state = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-dsh-boundaries-'));
     const dsh = path.join(state, 'dsh');
     const sessions = path.join(dsh, 'sessions');
     for (const name of ['codex', 'claude', 'pi', 'meta', 'index', 'cache',
@@ -64,16 +65,12 @@ test('rc.8 Reader/search and healthy inventory survive torn tails and mixed enco
     const port = await freePort();
     const child = spawn(binary, ['serve', '--port', String(port), ...args],
       { cwd: repo, windowsHide: true, stdio: 'ignore' });
-    let client;
-    t.after(async () => {
-      try {
-        await client?.close();
-        child.kill();
-        if (child.exitCode === null) await once(child, 'close');
-      } finally {
-        await rm(state, { recursive: true, force: true });
+    onCleanup(t, async () => {
+      if (child.exitCode === null && child.signalCode === null) {
+        const closed = once(child, 'close'); child.kill(); await closed;
       }
     });
+    let client;
     const origin = `http://127.0.0.1:${port}`;
     let ready = false;
     for (let attempt = 0; attempt < 100; attempt++) {
@@ -112,8 +109,11 @@ test('rc.8 Reader/search and healthy inventory survive torn tails and mixed enco
     assert.ok(tornSearch.matches.some(row => row.session?.sessionId === 'torn-v3'));
 
     client = new Client({ name: 'agentsession-v3-dsh-boundary-test', version: '1.0.0' });
-    await client.connect(new StdioClientTransport({ command: binary,
-      args: ['mcp', ...args], cwd: repo, stderr: 'pipe' }));
+    const transport = new StdioClientTransport({ command: binary,
+      args: ['mcp', ...args], cwd: repo, stderr: 'pipe' });
+    onCleanup(t, () => transport.close());
+    onCleanup(t, () => client.close());
+    await client.connect(transport);
     const get = await client.callTool({ name: 'session_get', arguments: {
       session: { provider, sessionId: 'rc8-public' },
     } });

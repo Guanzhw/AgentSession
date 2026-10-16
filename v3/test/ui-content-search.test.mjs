@@ -1,3 +1,4 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -5,7 +6,6 @@ import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { createServer as createHttpServer } from 'node:http';
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -57,7 +57,7 @@ async function freePort() {
 test('search destination URLs round-trip normalized targets and preserve ordinary destinations', async t => {
   const { createServer } = createRequire(path.join(uiDir, 'package.json'))('vite');
   const server = await createServer({ root: uiDir, server: { middlewareMode: true, hmr: false, ws: false }, appType: 'custom', logLevel: 'error' });
-  t.after(() => server.close());
+  onCleanup(t, () => server.close());
   const { searchMatchHref, searchTargetFromHash } = await server.ssrLoadModule('/src/lib/search-navigation.ts');
   const session = { provider: 'codex', sessionId: 'session 中文 ?#' };
   const event = { ...session, messageId: 'message ?#&🙂', segment: 'message' };
@@ -93,7 +93,7 @@ test('search destination URLs round-trip normalized targets and preserve ordinar
 
 async function harness(t, multipleProviders = false) {
   const { build } = createRequire(path.join(uiDir, 'package.json'))('vite');
-  const buildDir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-ui-search-'));
+  const buildDir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-ui-search-'));
   await build({ root: uiDir, configFile: path.join(uiDir, 'vite.config.ts'),
     build: { outDir: buildDir, emptyOutDir: true }, logLevel: 'error' });
   const searches = [];
@@ -267,16 +267,15 @@ async function harness(t, multipleProviders = false) {
         : asset.endsWith('.css') ? 'text/css; charset=utf-8' : 'application/octet-stream' });
     response.end(readFileSync(asset));
   });
-  const port = await freePort();
-  await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
-  t.after(async () => {
+  onCleanup(t, async () => {
     for (const hold of pendingSearchHolds) hold.release();
     await new Promise(resolve => {
       server.close(resolve);
       server.closeAllConnections();
     });
-    await rm(buildDir, { recursive: true, force: true });
   });
+  const port = await freePort();
+  await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
   return { origin: `http://127.0.0.1:${port}`, searches, contentRequests, state, holdNextSearch };
 }
 
@@ -298,7 +297,7 @@ async function browser(t, url) {
       code === 0 ? resolve(stdout.trim()) : reject(new Error(stderr || stdout));
     });
   });
-  t.after(async () => { try { await command('close'); } catch { /* Browser already closed. */ } });
+  onCleanup(t, () => command('close'));
   await command('open', url);
   await command('set', 'viewport', '1440', '900');
   return command;

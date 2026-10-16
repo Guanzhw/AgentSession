@@ -1,10 +1,10 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -95,7 +95,7 @@ async function freePort() {
 
 async function harness(t) {
   const { build } = createRequire(path.join(uiDir, 'package.json'))('vite');
-  const buildDir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-ui-prompts-'));
+  const buildDir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-ui-prompts-'));
   await build({ root: uiDir, configFile: path.join(uiDir, 'vite.config.ts'),
     build: { outDir: buildDir, emptyOutDir: true }, logLevel: 'error' });
   let promptRequests = 0;
@@ -139,12 +139,12 @@ async function harness(t) {
         : asset.endsWith('.css') ? 'text/css; charset=utf-8' : 'application/octet-stream' });
     response.end(readFileSync(asset));
   });
+  onCleanup(t, async () => {
+    await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
+  });
   const port = await freePort();
   await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
-  t.after(async () => {
-    await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
-    await rm(buildDir, { recursive: true, force: true });
-  });
+
   return { origin: `http://127.0.0.1:${port}`, get promptRequests() { return promptRequests; } };
 }
 
@@ -165,7 +165,7 @@ async function openBrowser(t, url) {
       code === 0 ? resolve(stdout.trim()) : reject(new Error(stderr || stdout));
     });
   });
-  t.after(async () => { try { await command('close'); } catch { /* Browser may already be closed. */ } });
+  onCleanup(t, async () => { try { await command('close'); } catch { /* Browser may already be closed. */ } });
   await command('open', url);
   return command;
 }
