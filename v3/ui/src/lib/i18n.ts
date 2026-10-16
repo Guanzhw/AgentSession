@@ -208,6 +208,7 @@ const chinese = {
   'Additional diagnostic codes are omitted.': '其他诊断代码已省略。',
   'History unavailable: multiple Codex source files': '历史记录暂不可用：同一 Codex 会话有多个源文件',
   'History unavailable: Codex source identity is incomplete': '历史记录暂不可用：Codex 源文件身份不完整',
+  'History unavailable: child ownership boundary is missing': '历史不可用：缺少子会话归属边界',
   'No recorded matches in available sources': '可用来源中没有已记录的匹配结果',
   'No recorded sessions in available sources': '可用来源中没有已记录的会话',
   'Some session sources could not be read.': '部分会话来源无法读取。',
