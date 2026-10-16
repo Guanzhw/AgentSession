@@ -1149,8 +1149,9 @@ fn load_versioned_with_protocol(path: &Path, scope: &str, expected_id: &str) -> 
             historical_event(kind, generation)
         }) {
             // An ignorable record is explicitly marked optional by the
-            // producer. Unknown kinds with that flag stay loadable for every
-            // generation instead of failing the whole session source.
+            // producer (only the exact true literal qualifies). Unknown kinds
+            // with that flag stay loadable for every generation instead of
+            // failing the whole session source.
             if row["ignorable"] == true {
                 continue;
             }
@@ -3573,6 +3574,64 @@ mod tests {
         .unwrap();
         assert!(matches!(load_v3(&path, "test", "preset-selection"),
             Err(CoreError::Parse { reason, .. }) if reason.contains("unsupported required DSH v3 event future/required-event at seq 1")));
+    }
+
+    #[test]
+    fn native_v3_keeps_recorded_llm_retry_and_unknown_ignorable_records_loadable() {
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("session.v3.jsonl");
+        let header = serde_json::json!({"type":"session","version":3,"id":"v3-optional","createdAt":1,"isSeeded":false});
+        let retry = serde_json::json!({"type":"llm/retry","seq":0,"time":2,"data":{"turn":1,"step":1,"reason":"rate-limited"}});
+        let ignorable = serde_json::json!({"type":"web/metaso-search-request","seq":1,"time":3,"ignorable":true,"data":{"query":"public"}});
+        let user = serde_json::json!({"type":"user/message","seq":2,"time":4,"surfaceOp":"append","data":{"id":"request","source":{"kind":"user"},"content":[{"type":"text","text":"Read the retried session."}]}});
+        let assistant = serde_json::json!({"type":"assistant/message","seq":3,"time":5,"surfaceOp":"append","data":{"message":{"id":"answer","role":"assistant","content":[{"type":"text","text":"The conversation remains readable."}]}}});
+        let write = |rows: &[Value], path: &Path| {
+            fs::write(
+                path,
+                rows.iter()
+                    .map(Value::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    + "\n",
+            )
+            .unwrap();
+        };
+        write(
+            &[header.clone(), retry, ignorable.clone(), user, assistant],
+            &path,
+        );
+        let snapshot = load_v3(&path, "test", "v3-optional").unwrap();
+        assert_eq!(snapshot.events.len(), 2);
+        assert_eq!(snapshot.events[0].body, "Read the retried session.");
+        let protocol = dsh_protocol_stream(&path, "test", "v3-optional").unwrap();
+        let page = protocol
+            .events(crate::protocol::EventQuery::default())
+            .unwrap();
+        assert_eq!(page.events.len(), 5);
+        assert_eq!(
+            page.events[1].provenance.source_type,
+            "dsh.session-event:llm/retry"
+        );
+        assert_eq!(
+            page.events[2].provenance.source_type,
+            "dsh.session-event:web/metaso-search-request"
+        );
+        assert!(page.events[2].reader_event.is_none());
+
+        let mut required = ignorable;
+        required.as_object_mut().unwrap().remove("ignorable");
+        write(
+            &[
+                header,
+                serde_json::json!({"type":"llm/retry","seq":0,"time":2,"data":{"turn":1,"step":1,"reason":"rate-limited"}}),
+                required,
+                serde_json::json!({"type":"user/message","seq":2,"time":4,"surfaceOp":"append","data":{"id":"request","source":{"kind":"user"},"content":[{"type":"text","text":"Read the retried session."}]}}),
+                serde_json::json!({"type":"assistant/message","seq":3,"time":5,"surfaceOp":"append","data":{"message":{"id":"answer","role":"assistant","content":[{"type":"text","text":"The conversation remains readable."}]}}}),
+            ],
+            &path,
+        );
+        assert!(matches!(load_v3(&path, "test", "v3-optional"),
+            Err(CoreError::Parse { reason, .. }) if reason.contains("unsupported required DSH v3 event web/metaso-search-request at seq 1")));
     }
 
     #[test]
