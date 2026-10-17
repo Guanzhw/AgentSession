@@ -138,13 +138,15 @@
 
   async function select(match: ReaderSearchMatch): Promise<void> {
     const request = generation;
+    selected = match;
+    save();
     try {
       await onSelect(match);
-      if (active && request === generation) { selected = match; save(); }
     }
     catch (cause) {
       if (active && request === generation) {
         error = cause instanceof Error ? cause.message : t($language, 'The matching source could not be opened.');
+        save();
       }
     }
   }

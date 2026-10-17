@@ -263,8 +263,8 @@
     // those existing reads before positioning the selected content below them.
     if (!updateHistory && !restorePane) {
       await Promise.all(contentLoads.values());
-      await tick();
-    }
+    } else await contentLoads.get(eventKey(match.event) + ':body');
+    await tick();
     if (!active || request !== searchSelectionGeneration) return;
     const target = document.getElementById(anchor(match.event));
     for (let ancestor = target?.parentElement; ancestor; ancestor = ancestor.parentElement) {
