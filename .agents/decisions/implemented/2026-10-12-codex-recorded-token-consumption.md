@@ -77,7 +77,7 @@ artifact cases pass against the final remapped release. The successful
 unaffected source/transport checks are reused; the final UI/locale browser
 checks pass 10/10 against the remapped release.
 
-The [read-only real-source oracle](../../../tmp/token-accounting-20261012/report.json)
+The read-only real-source oracle (`tmp/token-accounting-20261012/report.json`)
 (local evidence) compares Library, Stats overview, UTC daily disjoint components,
 recorded model, model filter, all-Harness composition, JSON and CSV at
 4,847,217 tokens. A naive last-usage sum is 4,987,301: two repeated snapshots
