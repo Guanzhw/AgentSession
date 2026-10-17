@@ -1,9 +1,9 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -65,7 +65,7 @@ function bootstrap(id, target) {
 async function harness(t) {
   const require = createRequire(path.join(ui, 'package.json'));
   const { build } = require('vite');
-  const outDir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-timeline-navigation-'));
+  const outDir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-timeline-navigation-'));
   await build({ root: ui, configFile: path.join(ui, 'vite.config.ts'),
     build: { outDir, emptyOutDir: true }, logLevel: 'error' });
   const requests = [];
@@ -102,9 +102,9 @@ async function harness(t) {
     response.writeHead(200, { 'content-type': asset.endsWith('.js') ? 'text/javascript' : asset.endsWith('.css') ? 'text/css' : 'text/html' });
     response.end(readFileSync(asset));
   });
+  onCleanup(t, async () => { await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }); });
   const port = await freeFetchSafePort();
   await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
-  t.after(async () => { await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }); await rm(outDir, { recursive: true, force: true }); });
   return { origin: `http://127.0.0.1:${server.address().port}`, requests };
 }
 async function browser(t, url) {
@@ -117,7 +117,7 @@ async function browser(t, url) {
     process.once('error', error => { clearTimeout(timeout); reject(error); });
     process.once('exit', code => { clearTimeout(timeout); code === 0 ? resolve(stdout.trim()) : reject(new Error(stderr || stdout)); });
   });
-  t.after(async () => { try { await command('close'); } catch {} });
+  onCleanup(t, () => command('close'));
   await command('open', url); await command('set', 'viewport', '1280', '900');
   await wait(command, `document.querySelector('.inline-child-toggle')`, 'root child placement');
   return command;

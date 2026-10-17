@@ -1,10 +1,11 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -111,7 +112,7 @@ test('real Axum Reader preserves Codex source facts and graph dispatch-return na
   { skip: skipReason || false, timeout: 120_000 }, async t => {
     assert.ok(existsSync(binary), `Build the current v3 debug binary at ${binary}`);
     const fixture = await loadPublicFixture();
-    const scratch = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-codex-collab-real-'));
+    const scratch = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-codex-collab-real-'));
     const codexDirectory = path.join(scratch, 'codex');
     const sessionDirectory = path.join(codexDirectory, 'sessions', '2026', '09', '27');
     await mkdir(sessionDirectory, { recursive: true });
@@ -123,6 +124,13 @@ test('real Axum Reader preserves Codex source facts and graph dispatch-return na
     assert.equal(sha256(await readFile(copiedFixture)), fixture.hash,
       'The isolated source copy matches the public fixture SHA');
 
+    onCleanup(t, async () => {
+      assert.equal(sha256(await readFile(fixture.file)), fixture.hash,
+        'The public source fixture remains byte-for-byte unchanged');
+      assert.equal(sha256(await readFile(copiedFixture)), fixture.hash,
+        'The server leaves its isolated source copy unchanged');
+    });
+
     const port = await freePort();
     const server = spawn(binary, ['serve', '--port', String(port), '--codex-dir', codexDirectory,
       '--opencode-db', path.join(scratch, 'opencode.db'), '--claude-dir', path.join(scratch, 'claude'),
@@ -133,23 +141,11 @@ test('real Axum Reader preserves Codex source facts and graph dispatch-return na
       windowsHide: true,
       stdio: 'ignore',
     });
-    let command;
-    t.after(async () => {
-      try { if (command) await command('close'); } catch { /* Browser may already be closed. */ }
-      if (server.exitCode === null) {
+    onCleanup(t, async () => {
+      if (server.exitCode === null && server.signalCode === null) {
         const closed = once(server, 'close');
         server.kill();
         await closed;
-      }
-      try {
-        assert.equal(sha256(await readFile(fixture.file)), fixture.hash,
-          'The public source fixture remains byte-for-byte unchanged');
-        assert.equal(sha256(await readFile(copiedFixture)), fixture.hash,
-          'The server leaves its isolated source copy unchanged');
-      } finally {
-        const physical = await realpath(scratch);
-        assert.equal(path.dirname(physical).toLowerCase(), (await realpath(os.tmpdir())).toLowerCase());
-        await rm(physical, { recursive: true, force: true });
       }
     });
 
@@ -219,7 +215,8 @@ test('real Axum Reader preserves Codex source facts and graph dispatch-return na
 
     const sessionUrl = `/${provider}/session/${encodeURIComponent(fixture.sessionId)}`;
     const sessionBrowser = `agentsession-v3-codex-collab-real-${process.pid}-${Date.now()}`;
-    command = browserCommand(sessionBrowser);
+    const command = browserCommand(sessionBrowser);
+    onCleanup(t, () => command('close'));
     await command('open', `${origin}${sessionUrl}`);
     await waitFor(command, `Boolean(document.querySelector('.agent-card'))`,
       'the real Codex Reader');

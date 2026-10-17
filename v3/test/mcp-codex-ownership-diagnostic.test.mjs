@@ -1,5 +1,6 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -30,15 +31,14 @@ async function configFor(root, source, { duplicate = false } = {}) {
 
 async function connect(t, args) {
   const client = new Client({ name: 'agentsession-v3-codex-ownership-test', version: '1.0.0' });
+  onCleanup(t, () => client.close());
   await client.connect(new StdioClientTransport({ command: binary, args, cwd: repo, stderr: 'pipe' }));
-  t.after(async () => client.close());
   return client;
 }
 
 test('Codex copied-parent boundary failure keeps its protocol diagnostic over native MCP stdio',
   { timeout: 60_000 }, async t => {
-    const work = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-mcp06-ownership-'));
-    t.after(async () => rm(work, { recursive: true, force: true }));
+    const work = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-mcp06-ownership-'));
     const fixtureText = await readFile(fixture, 'utf8');
     const missingBoundary = fixtureText.split(/\r?\n/)
       .filter(line => !line.includes('"agent_message"')).join('\n');

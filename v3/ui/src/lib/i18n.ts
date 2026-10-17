@@ -226,6 +226,7 @@ const chinese = {
   'History unavailable: duplicate DSH source generations': '历史记录暂不可用：DSH 同代来源重复',
   'History unavailable: multiple Codex source files': '历史记录暂不可用：同一 Codex 会话有多个源文件',
   'History unavailable: Codex source identity is incomplete': '历史记录暂不可用：Codex 源文件身份不完整',
+  'History unavailable: child ownership boundary is missing': '历史不可用：缺少子会话归属边界',
   'No recorded matches in available sources': '可用来源中没有已记录的匹配结果',
   'No recorded sessions in available sources': '可用来源中没有已记录的会话',
   'Some session sources could not be read.': '部分会话来源无法读取。',
@@ -558,6 +559,7 @@ const diagnosticMessages: Record<string, Message> = {
   dsh_duplicate_source_generation: 'History unavailable: duplicate DSH source generations',
   codex_multiple_source_files_unmerged: 'History unavailable: multiple Codex source files',
   codex_source_inventory_incomplete: 'History unavailable: Codex source identity is incomplete',
+  codex_child_ownership_boundary_unavailable: 'History unavailable: child ownership boundary is missing',
 };
 
 export function diagnosticText(language: Language, code: string): string {

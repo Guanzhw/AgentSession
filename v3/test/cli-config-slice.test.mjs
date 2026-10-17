@@ -1,9 +1,10 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -15,24 +16,10 @@ const binary = process.env.AGENTSESSION_V3_BIN || path.join(repo, 'v3', 'target'
   process.platform === 'win32' ? 'agentsession-v3.exe' : 'agentsession-v3');
 const fixture = path.join(repo, 'v3', 'fixtures', 'codex');
 const sessionId = '44444444-4444-4444-8444-444444444444';
-const testChildren = new WeakMap();
-const testClients = new WeakMap();
 
 async function setup(t) {
   assert.ok(existsSync(binary), `Build ${binary} first`);
-  const dir = await mkdtemp(path.join(tmpdir(), 'agentsession-v3-cli-'));
-  const children = [];
-  const clients = [];
-  testChildren.set(t, children);
-  testClients.set(t, clients);
-  t.after(async () => {
-    for (const client of clients) await client.close();
-    const closed = children.map(child => child.exitCode === null && child.signalCode === null
-      ? once(child, 'close') : Promise.resolve());
-    for (const child of children) child.kill();
-    await Promise.all(closed);
-    await rm(dir, { recursive: true, force: true });
-  });
+  const dir = await temporaryDirectory(t, path.join(tmpdir(), 'agentsession-v3-cli-'));
   for (const name of ['home', 'roaming', 'config', 'data', 'codex', 'claude', 'pi', 'dsh', 'other']) {
     await mkdir(path.join(dir, name));
   }
@@ -59,7 +46,11 @@ async function serve(t, cwd, env, args = [], options = {}) {
   const portArgs = options.fromConfig ? [] : ['--port', String(port)];
   const child = spawn(binary, ['serve', ...portArgs, ...args],
     { cwd, env, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
-  testChildren.get(t).push(child);
+  onCleanup(t, async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      const closed = once(child, 'close'); child.kill(); await closed;
+    }
+  });
   let stderr = '';
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', chunk => { stderr += chunk; });
@@ -178,8 +169,8 @@ test('stdio MCP starts from non-checkout cwd using discovered paths',
     const client = new Client({ name: 'cli-config-slice', version: '1.0.0' });
     const transport = new StdioClientTransport({ command: binary, args: ['mcp'],
       cwd: dir, env, stderr: 'pipe' });
-    try { await client.connect(transport); }
-    catch (error) { await transport.close(); throw error; }
-    testClients.get(t).push(client);
+    onCleanup(t, () => transport.close());
+    onCleanup(t, () => client.close());
+    await client.connect(transport);
     assert.equal((await client.listTools()).tools.length, 7);
   });

@@ -1,10 +1,11 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createServer as createHttpServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -60,7 +61,7 @@ async function freePort() {
 
 async function harness(t, { opencodeInitiallyAvailable = false, collisionRow = false } = {}) {
   const { build } = createRequire(path.join(uiDir, 'package.json'))('vite');
-  const buildDir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-ui-library-filters-'));
+  const buildDir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-ui-library-filters-'));
   await build({ root: uiDir, configFile: path.join(uiDir, 'vite.config.ts'),
     build: { outDir: buildDir, emptyOutDir: true }, logLevel: 'error' });
   const providerRows = providers.map(row => ({ ...row }));
@@ -181,12 +182,11 @@ async function harness(t, { opencodeInitiallyAvailable = false, collisionRow = f
       ? contents.toString().replace('</head>', '<style>body{min-height:2200px!important}</style></head>')
       : contents);
   });
+  onCleanup(t, async () => {
+    await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
+  });
   const port = await freePort();
   await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
-  t.after(async () => {
-    await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
-    await rm(buildDir, { recursive: true, force: true });
-  });
   return { origin: `http://127.0.0.1:${port}`, libraryRequests, childRequests,
     providerRows, providerRequests, sourceState };
 }
@@ -207,7 +207,7 @@ async function browser(t, url) {
       code === 0 ? resolve(stdout.trim()) : reject(new Error(stderr || stdout));
     });
   });
-  t.after(async () => { try { await command('close'); } catch { /* Browser already closed. */ } });
+  onCleanup(t, () => command('close'));
   await command('open', url);
   await command('set', 'viewport', '1280', '900');
   return command;

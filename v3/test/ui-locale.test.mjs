@@ -1,3 +1,4 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -6,7 +7,7 @@ import { once } from 'node:events';
 import { createRequire } from 'node:module';
 import { createServer as createHttpServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,7 +34,7 @@ async function freePort() {
 
 async function harness(t) {
   const { build } = createRequire(path.join(uiDir, 'package.json'))('vite');
-  const buildDir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-locale-ui-'));
+  const buildDir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-locale-ui-'));
   await build({ root: uiDir, configFile: path.join(uiDir, 'vite.config.ts'),
     build: { outDir: buildDir, emptyOutDir: true }, logLevel: 'error' });
   const server = createHttpServer((request, response) => {
@@ -86,12 +87,11 @@ async function harness(t) {
         : asset.endsWith('.css') ? 'text/css; charset=utf-8' : 'application/octet-stream' });
     response.end(readFileSync(asset));
   });
+  onCleanup(t, async () => {
+    await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
+  });
   const port = await freePort();
   await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
-  t.after(async () => {
-    await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
-    await rm(buildDir, { recursive: true, force: true });
-  });
   return `http://127.0.0.1:${port}`;
 }
 
@@ -110,7 +110,7 @@ async function browser(t, url) {
       code === 0 ? resolve(stdout.trim()) : reject(new Error(stderr || stdout));
     });
   });
-  t.after(async () => { try { await command('close'); } catch { /* Browser already closed. */ } });
+  onCleanup(t, () => command('close'));
   await command('open', url);
   return command;
 }
@@ -175,7 +175,7 @@ test('embedded Axum Web serves the selected language on a real provider page',
     const codexFixture = path.join(repo, 'v3', 'fixtures', 'codex', 'sessions', '2026', '09', '26',
       'rollout-2026-09-26T00-00-00-44444444-4444-4444-8444-444444444444.jsonl');
     const sourceHash = createHash('sha256').update(readFileSync(codexFixture)).digest('hex');
-    const stateDir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-locale-axum-'));
+    const stateDir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-locale-axum-'));
     const piSessionDir = path.join(stateDir, 'pi', 'sessions', 'locale-project');
     await mkdir(piSessionDir, { recursive: true });
     await writeFile(path.join(piSessionDir, 'locale.jsonl'), [
@@ -198,11 +198,10 @@ test('embedded Axum Web serves the selected language on a real provider page',
       '--index-dir', path.join(stateDir, 'index'),
       '--cache-dir', path.join(stateDir, 'cache')],
     { cwd: repo, windowsHide: true, stdio: 'ignore' });
-    t.after(async () => {
+    onCleanup(t, async () => {
       if (child.exitCode === null && child.signalCode === null) {
         const done = once(child, 'close'); child.kill(); await done;
       }
-      await rm(stateDir, { recursive: true, force: true });
     });
     let ready = false;
     for (let attempt = 0; attempt < 100; attempt++) {

@@ -1,7 +1,8 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,16 +25,12 @@ const collaborationSource = path.join(collaborationRoot, 'sessions', '2026', '09
 const collaborationHash = createHash('sha256').update(readFileSync(collaborationSource)).digest('hex');
 
 async function connect(t, era, codexRoot) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-search-'));
-  t.after(async () => {
-    try {
-      assert.deepEqual(sources.map(file => createHash('sha256').update(readFileSync(file)).digest('hex')),
-        hashes, 'provider source bytes remain unchanged');
-      assert.equal(createHash('sha256').update(readFileSync(collaborationSource)).digest('hex'),
-        collaborationHash, 'recorded Codex collaboration bytes remain unchanged');
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+  const dir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-search-'));
+  onCleanup(t, async () => {
+    assert.deepEqual(sources.map(file => createHash('sha256').update(readFileSync(file)).digest('hex')),
+      hashes, 'provider source bytes remain unchanged');
+    assert.equal(createHash('sha256').update(readFileSync(collaborationSource)).digest('hex'),
+      collaborationHash, 'recorded Codex collaboration bytes remain unchanged');
   });
   for (const name of ['codex', 'claude', 'pi', 'meta', 'index', 'cache']) await mkdir(path.join(dir, name));
   const args = ['mcp', '--codex-dir', path.join(dir, 'codex'), '--opencode-db', path.join(dir, 'opencode.db'),
@@ -43,8 +40,8 @@ async function connect(t, era, codexRoot) {
   if (codexRoot) args[args.indexOf('--codex-dir') + 1] = codexRoot;
   const client = new Client({ name: 'agentsession-v3-search-test', version: '1.0.0' },
     era === 'modern' ? { versionNegotiation: { mode: { pin: '2026-07-28' } } } : undefined);
+  onCleanup(t, () => client.close());
   await client.connect(new StdioClientTransport({ command: binary, args, cwd: repo, stderr: 'pipe' }));
-  t.after(async () => client.close());
   return client;
 }
 
@@ -145,36 +142,38 @@ for (const era of ['legacy', 'modern']) {
 
 test('indexed title search stays source-read-only and diagnoses later corrupt transcript',
   { timeout: 30_000 }, async t => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-search-metadata-'));
-    t.after(async () => { await rm(dir, { recursive: true, force: true }); });
+    const dir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-search-metadata-'));
     for (const name of ['codex', 'claude', 'pi', 'dsh', 'meta', 'index', 'cache']) {
       await mkdir(path.join(dir, name));
     }
     const file = path.join(dir, 'opencode.db');
     const db = new DatabaseSync(file);
-    db.exec(`CREATE TABLE session_v2 (
-      id TEXT PRIMARY KEY, parent_id TEXT, fork_session_id TEXT, fork_boundary TEXT,
-      title TEXT, slug TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER,
-      time_archived INTEGER, tokens_input INTEGER, tokens_output INTEGER,
-      tokens_reasoning INTEGER, tokens_cache_read INTEGER, tokens_cache_write INTEGER
-    ); CREATE TABLE session_message (
-      id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER,
-      time_created INTEGER, time_updated INTEGER, data TEXT
-    ); INSERT INTO session_v2 VALUES
-      ('metadata-only',NULL,NULL,NULL,'Metadata marker','slug','/synthetic',1,2,NULL,0,0,0,0,0),
-      ('metadata-sibling',NULL,NULL,NULL,'Marker sibling','slug','/synthetic',1,2,NULL,0,0,0,0,0);
-      INSERT INTO session_message VALUES ('message','metadata-only','assistant',1,1,1,
-        '{"content":[{"type":"text","text":"ordinary body"}]}');`);
-    db.close();
+    try {
+      db.exec(`CREATE TABLE session_v2 (
+        id TEXT PRIMARY KEY, parent_id TEXT, fork_session_id TEXT, fork_boundary TEXT,
+        title TEXT, slug TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER,
+        time_archived INTEGER, tokens_input INTEGER, tokens_output INTEGER,
+        tokens_reasoning INTEGER, tokens_cache_read INTEGER, tokens_cache_write INTEGER
+      ); CREATE TABLE session_message (
+        id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER,
+        time_created INTEGER, time_updated INTEGER, data TEXT
+      ); INSERT INTO session_v2 VALUES
+        ('metadata-only',NULL,NULL,NULL,'Metadata marker','slug','/synthetic',1,2,NULL,0,0,0,0,0),
+        ('metadata-sibling',NULL,NULL,NULL,'Marker sibling','slug','/synthetic',1,2,NULL,0,0,0,0,0);
+        INSERT INTO session_message VALUES ('message','metadata-only','assistant',1,1,1,
+          '{"content":[{"type":"text","text":"ordinary body"}]}');`);
+    } finally {
+      db.close();
+    }
     const before = createHash('sha256').update(readFileSync(file)).digest('hex');
     const client = new Client({ name: 'agentsession-v3-search-metadata', version: '1.0.0' });
+    onCleanup(t, () => client.close());
     await client.connect(new StdioClientTransport({ command: binary, cwd: repo, stderr: 'pipe',
       args: ['mcp', '--opencode-db', file, '--codex-dir', path.join(dir, 'codex'),
         '--claude-dir', path.join(dir, 'claude'), '--pi-dir', path.join(dir, 'pi'),
         '--dsh-dir', path.join(dir, 'dsh'), '--meta-dir', path.join(dir, 'meta'),
         '--index-dir', path.join(dir, 'index'), '--cache-dir', path.join(dir, 'cache')],
     }));
-    t.after(async () => client.close());
     const result = await search(client, { query: 'metadata marker', providers: ['opencode'],
       fields: ['title'] });
     assert.deepEqual(result.matches.map(row => row.session.sessionId), ['metadata-only']);
@@ -188,17 +187,23 @@ test('indexed title search stays source-read-only and diagnoses later corrupt tr
       fields: ['title'], limit: 1 });
     assert.ok(first.nextCursor);
     const changed = new DatabaseSync(file);
-    changed.prepare('UPDATE session_v2 SET title=? WHERE id=?')
-      .run('Unrelated sibling', 'metadata-sibling');
-    changed.close();
+    try {
+      changed.prepare('UPDATE session_v2 SET title=? WHERE id=?')
+        .run('Unrelated sibling', 'metadata-sibling');
+    } finally {
+      changed.close();
+    }
     const stale = await client.callTool({ name: 'session_search', arguments: {
       query: 'marker', providers: ['opencode'], fields: ['title'], limit: 1,
       cursor: first.nextCursor,
     } });
     assert.equal(stale.isError, true, 'cursor must reject a changed source revision');
     const corrupt = new DatabaseSync(file);
-    corrupt.prepare('UPDATE session_message SET data=? WHERE id=?').run('{broken', 'message');
-    corrupt.close();
+    try {
+      corrupt.prepare('UPDATE session_message SET data=? WHERE id=?').run('{broken', 'message');
+    } finally {
+      corrupt.close();
+    }
     const diagnosed = await search(client, { query: 'metadata marker', providers: ['opencode'],
       fields: ['assistant'] });
     assert.equal(diagnosed.diagnostics[0].status, 'error',
@@ -212,10 +217,10 @@ test('frozen OpenCode and Codex content search reuses published documents withou
       .map(row => row.snapshotPath);
     const sourceFiles = [manifest.database.snapshotPath, ...codexFiles];
     const before = sourceFiles.map(file => createHash('sha256').update(readFileSync(file)).digest('hex'));
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-search-private-'));
-    t.after(async () => { await rm(dir, { recursive: true, force: true }); });
+    const dir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-search-private-'));
     for (const name of ['claude', 'pi', 'dsh', 'meta', 'index', 'cache']) await mkdir(path.join(dir, name));
     const client = new Client({ name: 'agentsession-v3-search-private', version: '1.0.0' });
+    onCleanup(t, () => client.close());
     await client.connect(new StdioClientTransport({ command: binary, cwd: repo, stderr: 'pipe',
       args: ['mcp', '--opencode-db', manifest.database.snapshotPath,
         '--codex-dir', manifest.providerRoots.codex.path,
@@ -223,7 +228,6 @@ test('frozen OpenCode and Codex content search reuses published documents withou
         '--dsh-dir', path.join(dir, 'dsh'), '--meta-dir', path.join(dir, 'meta'),
         '--index-dir', path.join(dir, 'index'), '--cache-dir', path.join(dir, 'cache')],
     }));
-    t.after(async () => client.close());
     for (const provider of ['opencode', 'codex']) {
       const request = { query: 'the', providers: [provider], fields: ['user', 'assistant'], limit: 2 };
       const first = await search(client, request);

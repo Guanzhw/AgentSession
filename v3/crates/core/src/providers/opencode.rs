@@ -46,6 +46,12 @@ mod prompt;
 
 const PROVIDER: &str = "opencode";
 
+#[cfg(test)]
+thread_local! {
+    static BEFORE_WAL_HEADER_READ: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        std::cell::RefCell::new(None);
+}
+
 pub(super) struct OpenCodeAdapter<'a> {
     pub path: &'a Path,
     pub scope: &'a str,
@@ -400,6 +406,20 @@ impl OpenCodeAdapter<'_> {
     }
 
     fn revision(&self) -> Result<String> {
+        // SQLite initializes and holds the SHM mapping for this read transaction.
+        // An independent file reader can otherwise observe its normal zero-byte
+        // first-opener state before SQLite extends the mapping again.
+        let (_db, _schema) = self.open()?;
+        for _ in 0..3 {
+            match self.revision_sample() {
+                Err(CoreError::SourceChanged) => {}
+                result => return result,
+            }
+        }
+        Err(CoreError::SourceChanged)
+    }
+
+    fn revision_sample(&self) -> Result<String> {
         let mut digest = Sha256::new();
         digest.update(b"opencode-sqlite-v3-slice-4\0");
         digest.update(self.scope.as_bytes());
@@ -423,17 +443,39 @@ impl OpenCodeAdapter<'_> {
                             digest.update(duration.as_nanos().to_le_bytes());
                         }
                     }
-                    let mut file = File::open(&path).map_err(|source| CoreError::Io {
-                        path: path.clone(),
-                        source,
+                    let mut file = File::open(&path).map_err(|source| {
+                        if path == wal && source.kind() == std::io::ErrorKind::NotFound {
+                            CoreError::SourceChanged
+                        } else {
+                            CoreError::Io {
+                                path: path.clone(),
+                                source,
+                            }
+                        }
                     })?;
                     let prefix_len = if path == self.path { 100 } else { 32 };
                     let mut header = vec![0; metadata.len().min(prefix_len as u64) as usize];
-                    file.read_exact(&mut header)
-                        .map_err(|source| CoreError::Io {
-                            path: path.clone(),
-                            source,
-                        })?;
+                    #[cfg(test)]
+                    if path == wal {
+                        BEFORE_WAL_HEADER_READ.with(|hook| {
+                            if let Some(hook) = hook.borrow_mut().take() {
+                                hook();
+                            }
+                        });
+                    }
+                    file.read_exact(&mut header).map_err(|source| {
+                        // A read transaction using the main database can
+                        // coexist with TRUNCATE of already-checkpointed WAL
+                        // frames. Its earlier metadata is then obsolete.
+                        if path == wal && source.kind() == std::io::ErrorKind::UnexpectedEof {
+                            CoreError::SourceChanged
+                        } else {
+                            CoreError::Io {
+                                path: path.clone(),
+                                source,
+                            }
+                        }
+                    })?;
                     digest.update(&header);
                     if path == self.path && header.len() < 100 {
                         return Err(self.source_error("OpenCode database header is truncated"));
@@ -2042,6 +2084,141 @@ mod empty_wal_revision_tests {
         assert_eq!(catalog.rows.len(), 1);
         assert_eq!(catalog.rows[0].session.session_id, "one");
         assert_eq!(adapter.load("two").unwrap().summary.title, "Second");
+    }
+
+    #[test]
+    fn revision_keeps_shm_alive_when_the_last_writer_closes() {
+        let (_directory, path) = fixture();
+        let writer = Connection::open(&path).unwrap();
+        writer
+            .execute_batch(
+                "PRAGMA wal_autocheckpoint=0; UPDATE session SET title='Committed' WHERE id='one';",
+            )
+            .unwrap();
+        let wal = path.with_file_name("opencode.db-wal");
+        let shm = path.with_file_name("opencode.db-shm");
+        assert!(fs::metadata(&wal).unwrap().len() > 0);
+        BEFORE_WAL_HEADER_READ.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move || {
+                drop(writer);
+                // The adapter's SQLite read transaction owns a live mapping,
+                // so closing the writer cannot release the SHM underneath it.
+                assert!(fs::metadata(&shm).unwrap().len() >= 96);
+                assert!(fs::metadata(&wal).unwrap().len() > 0);
+            }));
+        });
+        let adapter = OpenCodeAdapter {
+            path: &path,
+            scope: "owned-wal-lifecycle",
+        };
+        assert_eq!(adapter.revision().unwrap().len(), 64);
+        let catalog_dir = tempfile::tempdir().unwrap();
+        let catalog =
+            crate::index::refresh(catalog_dir.path(), adapter.scope, PROVIDER, &adapter).unwrap();
+        assert_eq!(
+            catalog
+                .rows
+                .iter()
+                .find(|row| row.session.session_id == "one")
+                .unwrap()
+                .title,
+            "Committed"
+        );
+    }
+
+    #[test]
+    fn same_metadata_wal_commit_still_invalidates_revision() {
+        let (_directory, path) = fixture();
+        let writer = Connection::open(&path).unwrap();
+        writer
+            .execute_batch(
+                "PRAGMA wal_autocheckpoint=0; UPDATE session SET title='Before' WHERE id='one';",
+            )
+            .unwrap();
+        let wal = path.with_file_name("opencode.db-wal");
+        let file = fs::OpenOptions::new().write(true).open(&wal).unwrap();
+        let page_size: u64 = writer
+            .query_row("PRAGMA page_size", [], |row| row.get(0))
+            .unwrap();
+        // Preallocate one frame so the next ordinary commit does not grow WAL.
+        let size = file.metadata().unwrap().len() + page_size + 24;
+        file.set_len(size).unwrap();
+        let modified = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        file.set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        let main = fs::read(&path).unwrap();
+        let adapter = OpenCodeAdapter {
+            path: &path,
+            scope: "owned-wal-lifecycle",
+        };
+        let before = adapter.revision().unwrap();
+        writer
+            .execute_batch("UPDATE session SET title='After!' WHERE id='one';")
+            .unwrap();
+        file.set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        assert_eq!(file.metadata().unwrap().len(), size);
+        assert_eq!(file.metadata().unwrap().modified().unwrap(), modified);
+        assert_eq!(fs::read(&path).unwrap(), main);
+        assert_ne!(adapter.revision().unwrap(), before);
+        let catalog_dir = tempfile::tempdir().unwrap();
+        let catalog =
+            crate::index::refresh(catalog_dir.path(), adapter.scope, PROVIDER, &adapter).unwrap();
+        assert_eq!(
+            catalog
+                .rows
+                .iter()
+                .find(|row| row.session.session_id == "one")
+                .unwrap()
+                .title,
+            "After!"
+        );
+    }
+
+    #[test]
+    fn checkpoint_between_wal_metadata_and_header_is_resampled() {
+        let (_directory, path) = fixture();
+        let writer = Connection::open(&path).unwrap();
+        writer
+            .execute_batch("PRAGMA wal_autocheckpoint=0; UPDATE session SET title='Checkpointed' WHERE id='one'; PRAGMA wal_checkpoint(PASSIVE);")
+            .unwrap();
+        let wal = path.with_file_name("opencode.db-wal");
+        assert!(fs::metadata(&wal).unwrap().len() >= 32);
+        let checkpointed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let observed = checkpointed.clone();
+        BEFORE_WAL_HEADER_READ.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move || {
+                // This is a legal SQLite checkpoint, not a sidecar mutation.
+                // The read snapshot uses the already-checkpointed main DB and
+                // therefore permits WAL truncation after its metadata sample.
+                let result: (i64, i64, i64) = writer
+                    .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+                        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                    })
+                    .unwrap();
+                assert_eq!(result, (0, 0, 0));
+                assert_eq!(fs::metadata(&wal).unwrap().len(), 0);
+                observed.store(true, std::sync::atomic::Ordering::Relaxed);
+            }));
+        });
+        let adapter = OpenCodeAdapter {
+            path: &path,
+            scope: "owned-wal-lifecycle",
+        };
+        assert_eq!(adapter.revision().unwrap().len(), 64);
+        assert!(checkpointed.load(std::sync::atomic::Ordering::Relaxed));
+        let catalog_dir = tempfile::tempdir().unwrap();
+        let catalog =
+            crate::index::refresh(catalog_dir.path(), adapter.scope, PROVIDER, &adapter).unwrap();
+        assert_eq!(
+            catalog
+                .rows
+                .iter()
+                .find(|row| row.session.session_id == "one")
+                .unwrap()
+                .title,
+            "Checkpointed"
+        );
     }
 
     #[test]

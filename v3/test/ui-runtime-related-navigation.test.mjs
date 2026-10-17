@@ -1,10 +1,11 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -40,7 +41,7 @@ async function freePort() {
 async function startApp(t, sessionIds, includePiFamily = false) {
   const originalHashes = fixtureFiles.map(hash);
   const originalPiHash = hash(piFixture);
-  const work = await mkdtemp(path.join(os.tmpdir(), 'v3-runtime-navigation-'));
+  const work = await temporaryDirectory(t, path.join(os.tmpdir(), 'v3-runtime-navigation-'));
   const codex = path.join(work, 'codex');
   const destination = path.join(codex, 'sessions', '2026', '09', '27');
   await mkdir(destination, { recursive: true });
@@ -67,12 +68,16 @@ async function startApp(t, sessionIds, includePiFamily = false) {
     '--pi-dir', path.join(work, 'pi'), '--dsh-dir', path.join(work, 'missing-dsh'),
     '--meta-dir', path.join(work, 'meta'), '--index-dir', path.join(work, 'index'),
     '--cache-dir', path.join(work, 'cache')], { cwd: repo, windowsHide: true, stdio: 'ignore' });
-  t.after(async () => {
-    app.kill();
-    if (app.exitCode === null) await once(app, 'close');
+  onCleanup(t, () => {
     assert.deepEqual(fixtureFiles.map(hash), originalHashes, 'Public provider sources remain unchanged');
     assert.equal(hash(piFixture), originalPiHash, 'Public Pi source remains unchanged');
-    await rm(work, { recursive: true, force: true });
+  });
+  onCleanup(t, async () => {
+    if (app.exitCode === null && app.signalCode === null) {
+      const done = once(app, 'close');
+      app.kill();
+      await done;
+    }
   });
   for (let attempt = 0; attempt < 100; attempt++) {
     try { if ((await fetch(`${origin}/api/providers`, { signal: AbortSignal.timeout(500) })).ok) return origin; }
@@ -109,7 +114,7 @@ async function waitFor(name, expression, description) {
 
 async function openBrowser(t, origin, provider, sessionId) {
   const name = `v3-related-${process.pid}-${Date.now()}`;
-  t.after(async () => { try { await command(name, 'close'); } catch { /* Already closed. */ } });
+  onCleanup(t, async () => { try { await command(name, 'close'); } catch { /* Already closed. */ } });
   await command(name, 'open', `${origin}/${provider}/session/${sessionId}`);
   await waitFor(name, `document.querySelector('#reader-title')`, 'Reader');
   await command(name, 'click', '.runtime-tab');

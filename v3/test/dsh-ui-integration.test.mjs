@@ -1,11 +1,12 @@
 import { browserPrerequisites } from './browser-prerequisites.mjs';
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, writeFile } from 'node:fs/promises';
 import { zstdCompressSync } from 'node:zlib';
 import os from 'node:os';
 import path from 'node:path';
@@ -45,18 +46,13 @@ async function stopServer(child) {
 async function startServer(t, dshSource = dshDir) {
   assert.ok(existsSync(binary), `Build the S2 Rust binary at ${binary}`);
   const sourceHashes = sourceFiles.map(sha256);
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-dsh-ui-'));
+  const tempDir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-dsh-ui-'));
   let child;
   let browserCleanup;
-  t.after(async () => {
-    try {
-      try { await browserCleanup?.(); } finally { await stopServer(child); }
-      assert.deepEqual(sourceFiles.map(sha256), sourceHashes,
-        'The real Web process must leave public Codex and DSH source files unchanged');
-    } finally {
-      await rm(tempDir, { recursive: true, force: true });
-    }
-  });
+  onCleanup(t, () => assert.deepEqual(sourceFiles.map(sha256), sourceHashes,
+    'The real Web process must leave public Codex and DSH source files unchanged'));
+  onCleanup(t, () => stopServer(child));
+  onCleanup(t, () => browserCleanup?.());
 
   const stateDirs = ['meta', 'index', 'cache', 'claude', 'pi'];
   await Promise.all(stateDirs.map(name => mkdir(path.join(tempDir, name), { recursive: true })));
@@ -106,8 +102,8 @@ async function startServer(t, dshSource = dshDir) {
 async function longAlphaCorpus(t, teamMessageText = null) {
   const fixtureRoot = path.join(repo, 'tmp');
   await mkdir(fixtureRoot, { recursive: true });
-  const source = await mkdtemp(path.join(fixtureRoot, 'v3-inline-child-'));
-  t.after(() => rm(source, { recursive: true, force: true }));
+  const source = await temporaryDirectory(t, path.join(fixtureRoot, 'v3-inline-child-'));
+
   for (const id of [ids.root, ids.beta]) {
     const relative = path.join('sessions', 's2-synthetic', id, 'session.v3.jsonl.zstd');
     await mkdir(path.dirname(path.join(source, relative)), { recursive: true });

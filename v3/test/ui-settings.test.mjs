@@ -1,9 +1,10 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -39,16 +40,9 @@ async function waitForText(session, text) {
 test('real Settings saves resume overrides and Reader reflects the saved capability', {
   skip: !browser ? 'agent-browser is required' : false, timeout: 90_000,
 }, async t => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'v3-ui-settings-'));
+  const dir = await temporaryDirectory(t, path.join(os.tmpdir(), 'v3-ui-settings-'));
   const session = `v3-settings-${process.pid}`;
   const secondSession = `${session}-second`;
-  let child;
-  t.after(async () => {
-    await command(session, 'close').catch(() => {});
-    await command(secondSession, 'close').catch(() => {});
-    if (child?.exitCode === null && child.signalCode === null) { const done = once(child, 'close'); child.kill(); await done; }
-    await rm(dir, { recursive: true, force: true });
-  });
   await mkdir(path.join(dir, 'pi/sessions/project'), { recursive: true });
   const source = path.join(dir, 'pi/sessions/project/session.jsonl');
   const body = [
@@ -60,17 +54,26 @@ test('real Settings saves resume overrides and Reader reflects the saved capabil
   await writeFile(config, JSON.stringify({ resumeCommands: { pi: false }, dbPath: path.join(dir, 'configured-opencode.db') }));
   const port = await freeFetchSafePort();
   const base = `http://127.0.0.1:${port}`;
-  child = spawn(binary, ['serve', '--port', String(port), '--config', config,
+  const child = spawn(binary, ['serve', '--port', String(port), '--config', config,
     '--pi-dir', path.join(dir, 'pi'), '--codex-dir', path.join(dir, 'codex'),
     '--claude-dir', path.join(dir, 'claude'), '--dsh-dir', path.join(dir, 'dsh'),
     '--opencode-db', path.join(dir, 'opencode.db'), '--meta-dir', path.join(dir, 'meta'),
     '--index-dir', path.join(dir, 'index'), '--cache-dir', path.join(dir, 'cache')],
   { windowsHide: true, stdio: 'ignore' });
+  onCleanup(t, async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      const done = once(child, 'close');
+      child.kill();
+      await done;
+    }
+  });
   for (let i = 0; i < 100; i++) {
     try { if ((await fetch(base + '/api/settings')).ok) break; } catch {}
     if (i === 99) throw new Error('Web server unavailable');
     await new Promise(resolve => setTimeout(resolve, 100));
   }
+  onCleanup(t, () => command(session, 'close').catch(() => {}));
+  onCleanup(t, () => command(secondSession, 'close').catch(() => {}));
   await command(session, 'open', base + '/settings#source-opencode');
   await command(session, 'set', 'viewport', '1440', '1000');
   await command(session, 'snapshot', '-i');

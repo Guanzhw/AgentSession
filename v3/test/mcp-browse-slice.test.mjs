@@ -1,7 +1,8 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,10 +32,9 @@ const hashes = sources.map(file => createHash('sha256').update(readFileSync(file
 const hash = file => createHash('sha256').update(readFileSync(file)).digest('hex');
 
 async function setup(t) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'agentsession-v3-browse-'));
-  t.after(async () => {
-    try { assert.deepEqual(sources.map(hash), hashes, 'provider source files must remain unchanged'); }
-    finally { await rm(dir, { recursive: true, force: true }); }
+  const dir = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-v3-browse-'));
+  onCleanup(t, async () => {
+    assert.deepEqual(sources.map(hash), hashes, 'provider source files must remain unchanged');
   });
   for (const name of ['codex', 'claude', 'pi', 'meta', 'index', 'cache']) await mkdir(path.join(dir, name));
   await cp(path.join(repo, 'v3', 'fixtures', 'codex'), path.join(dir, 'codex'), { recursive: true });
@@ -57,8 +57,8 @@ async function setupCodexParentConsensus(t) {
 async function connect(t, args, modern) {
   const client = new Client({ name: 'agentsession-v3-browse-test', version: '1.0.0' },
     modern ? { versionNegotiation: { mode: { pin: '2026-07-28' } } } : undefined);
+  onCleanup(t, () => client.close());
   await client.connect(new StdioClientTransport({ command: binary, args, cwd: repo, stderr: 'pipe' }));
-  t.after(async () => client.close());
   return client;
 }
 
@@ -367,7 +367,7 @@ test('session_browse traverses frozen real Codex and DSH sources when selected',
     const frozenSources = manifest.files.filter(row => ['codex', 'deepseek-harness'].includes(row.provider));
     const before = frozenSources.map(row => hash(row.snapshotPath));
     assert.deepEqual(before, frozenSources.map(row => row.snapshotSha256), 'frozen source hashes match manifest');
-    t.after(() => assert.deepEqual(frozenSources.map(row => hash(row.snapshotPath)), before,
+    onCleanup(t, () => assert.deepEqual(frozenSources.map(row => hash(row.snapshotPath)), before,
       'MCP must leave frozen provider source bytes unchanged'));
     const { args } = await setup(t);
     args[args.indexOf('--codex-dir') + 1] = manifest.providerRoots.codex.path;

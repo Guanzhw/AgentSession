@@ -105,6 +105,13 @@ impl SourceEntry {
             path: path.clone(),
             source,
         })?;
+        Self::from_metadata(session_id, path, &metadata)
+    }
+    pub fn from_metadata(
+        session_id: String,
+        path: PathBuf,
+        metadata: &fs::Metadata,
+    ) -> Result<Self> {
         let modified = metadata.modified().map_err(|source| CoreError::Io {
             path: path.clone(),
             source,
@@ -191,6 +198,19 @@ pub(crate) trait StatsObservationBatch {
 pub(crate) struct InventoryObservation {
     pub entries: Vec<SourceEntry>,
     pub source_uncertainty: Option<(&'static str, usize)>,
+}
+/// One provider-owned catalog observation and its publication receipts.
+pub(crate) struct IndexObservationBatch<'a> {
+    pub inventory: InventoryObservation,
+    pub capture: Box<dyn IndexCaptureBatch + 'a>,
+}
+pub(crate) trait IndexCaptureBatch {
+    /// Register an unchanged row against this request's opening observation.
+    /// `force` requires an exact content probe before reusing normalization.
+    fn reuse(&mut self, entry: &SourceEntry, revision: &str, force: bool) -> Result<bool>;
+    fn capture(&mut self, entry: &SourceEntry) -> Result<SessionSnapshot>;
+    /// Verify this batch's captured and reused rows before atomic publication.
+    fn validate(&self) -> Result<()>;
 }
 pub(crate) trait ProviderAdapter {
     fn team_messages(&self, _session_id: &str) -> Result<crate::TeamMessageInventory> {
@@ -347,6 +367,9 @@ pub(crate) trait ProviderAdapter {
             },
             source_uncertainty: self.source_uncertainty()?,
         })
+    }
+    fn index_capture_batch(&self, _rebuild: bool) -> Result<Option<IndexObservationBatch<'_>>> {
+        Ok(None)
     }
     fn capture(&self, entry: &SourceEntry) -> Result<SessionSnapshot> {
         self.load(&entry.session_id)

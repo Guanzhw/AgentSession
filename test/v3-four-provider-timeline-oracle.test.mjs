@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import os from 'node:os';
@@ -8,6 +8,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { frozenFourProviderTimelineFacts, jsonlTimelineFacts, openCodeV2TimelineFacts,
   verifyFourProviderTimeline } from '../scripts/v3-four-provider-timeline-oracle.mjs';
+import { temporaryDirectorySync } from './helpers/fixture-cleanup.mjs';
 
 const repo = fileURLToPath(new URL('../', import.meta.url));
 const manifestPath = path.join(repo, 'tmp', 'v3-corpus', 'manifest.private.json');
@@ -15,19 +16,21 @@ const jsonl = rows => Buffer.from(rows.map(JSON.stringify).join('\n'));
 const asTimeline = facts => facts.required.map(({ event, role }) => ({ event, role }));
 
 function openCodeFixture(t) {
-  const directory = mkdtempSync(path.join(os.tmpdir(), 'agentsession-source-oracle-'));
+  const directory = temporaryDirectorySync(t, path.join(os.tmpdir(), 'agentsession-source-oracle-'));
   const file = path.join(directory, 'source.db');
   const db = new DatabaseSync(file);
-  db.exec(`CREATE TABLE session_v2 (id TEXT PRIMARY KEY);
+  try {
+    db.exec(`CREATE TABLE session_v2 (id TEXT PRIMARY KEY);
     CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER, data TEXT);
     INSERT INTO session_v2 VALUES ('s');`);
-  const insert = db.prepare('INSERT INTO session_message VALUES (?, ?, ?, ?, ?)');
-  insert.run('u', 's', 'user', 1, JSON.stringify({ text: 'prompt' }));
-  insert.run('a', 's', 'assistant', 2, JSON.stringify({ content: [
-    { type: 'text', text: 'reply' }, { type: 'tool', name: 'read', state: { status: 'completed' } },
-  ] }));
-  db.close();
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+    const insert = db.prepare('INSERT INTO session_message VALUES (?, ?, ?, ?, ?)');
+    insert.run('u', 's', 'user', 1, JSON.stringify({ text: 'prompt' }));
+    insert.run('a', 's', 'assistant', 2, JSON.stringify({ content: [
+      { type: 'text', text: 'reply' }, { type: 'tool', name: 'read', state: { status: 'completed' } },
+    ] }));
+  } finally {
+    db.close();
+  }
   return openCodeV2TimelineFacts(file, 's');
 }
 

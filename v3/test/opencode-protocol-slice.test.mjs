@@ -1,10 +1,11 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,54 +18,51 @@ const binary = process.env.AGENTSESSION_V3_BIN || path.join(repo, 'v3', 'target'
 const sha = file => createHash('sha256').update(readFileSync(file)).digest('hex');
 
 async function setup(t, version) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'as-opencode-events-'));
-  const children = [];
-  t.after(async () => {
-    for (const child of children) child.kill();
-    await Promise.all(children.map(child => child.exitCode === null ? once(child, 'close') : null));
-    await rm(root, { recursive: true, force: true });
-  });
+  const root = await temporaryDirectory(t, path.join(os.tmpdir(), 'as-opencode-events-'));
   const dirs = Object.fromEntries(['codex', 'claude', 'pi', 'dsh', 'meta', 'index', 'cache']
     .map(name => [name, path.join(root, name)]));
   await Promise.all(Object.values(dirs).map(dir => mkdir(dir)));
   const file = path.join(root, 'opencode.db');
   const db = new DatabaseSync(file);
-  if (version === 'v2') {
-    db.exec(`CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT, fork_session_id TEXT,
-      fork_boundary TEXT, title TEXT, slug TEXT, directory TEXT, time_created INTEGER,
-      time_updated INTEGER, time_archived INTEGER, tokens_input INTEGER, tokens_output INTEGER,
-      tokens_reasoning INTEGER, tokens_cache_read INTEGER, tokens_cache_write INTEGER);
-      CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER,
-      time_created INTEGER, time_updated INTEGER, data TEXT);
-      INSERT INTO session_v2 VALUES ('root',NULL,NULL,NULL,'Root','root','/synthetic',1,1,NULL,0,0,0,0,0),
-        ('fork',NULL,'root','{}','Fork','fork','/synthetic',1,1,NULL,0,0,0,0,0);`);
-    const add = db.prepare('INSERT INTO session_message VALUES (?,?,?,?,?,?,?)');
-    add.run('u', 'root', 'user', 1, 1, 1, JSON.stringify({ text: 'SECRET_USER' }));
-    add.run('a', 'root', 'assistant', 2, 2, 2, JSON.stringify({ content: [
-      { type: 'reasoning', text: 'SECRET_REASONING' },
-      { type: 'text', text: 'SECRET_ANSWER' },
-      { type: 'tool', name: 'read', state: { status: 'completed', input: {}, content: [] } },
-    ] }));
-    add.run('c', 'root', 'compaction', 3, 3, 3, JSON.stringify({ summary: 'SECRET_SUMMARY' }));
-    add.run('msg_parent_4', 'fork', 'assistant', 4, 4, 4, JSON.stringify({ content: [
-      { type: 'text', text: 'SECRET_INHERITED' }] }));
-    add.run('f', 'fork', 'user', 5, 5, 5, JSON.stringify({ text: 'SECRET_FORK' }));
-  } else {
-    db.exec(`CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT, title TEXT,
-      directory TEXT, time_created INTEGER, time_updated INTEGER, time_archived INTEGER);
-      CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT, time_created INTEGER);
-      CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, data TEXT,
-        time_created INTEGER);
-      INSERT INTO session VALUES ('legacy',NULL,'Legacy','/synthetic',1,1,NULL);
-      INSERT INTO message VALUES ('m','legacy','{"role":"user","time":{"created":1}}',1);
-      INSERT INTO part VALUES ('p','m','legacy','{"type":"text","text":"SECRET_LEGACY"}',1),
-        ('tool','m','legacy','{"type":"tool","tool":"read","state":{"status":"error","error":"SECRET_ERROR"}}',2);`);
+  try {
+    if (version === 'v2') {
+      db.exec(`CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT, fork_session_id TEXT,
+        fork_boundary TEXT, title TEXT, slug TEXT, directory TEXT, time_created INTEGER,
+        time_updated INTEGER, time_archived INTEGER, tokens_input INTEGER, tokens_output INTEGER,
+        tokens_reasoning INTEGER, tokens_cache_read INTEGER, tokens_cache_write INTEGER);
+        CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER,
+        time_created INTEGER, time_updated INTEGER, data TEXT);
+        INSERT INTO session_v2 VALUES ('root',NULL,NULL,NULL,'Root','root','/synthetic',1,1,NULL,0,0,0,0,0),
+          ('fork',NULL,'root','{}','Fork','fork','/synthetic',1,1,NULL,0,0,0,0,0);`);
+      const add = db.prepare('INSERT INTO session_message VALUES (?,?,?,?,?,?,?)');
+      add.run('u', 'root', 'user', 1, 1, 1, JSON.stringify({ text: 'SECRET_USER' }));
+      add.run('a', 'root', 'assistant', 2, 2, 2, JSON.stringify({ content: [
+        { type: 'reasoning', text: 'SECRET_REASONING' },
+        { type: 'text', text: 'SECRET_ANSWER' },
+        { type: 'tool', name: 'read', state: { status: 'completed', input: {}, content: [] } },
+      ] }));
+      add.run('c', 'root', 'compaction', 3, 3, 3, JSON.stringify({ summary: 'SECRET_SUMMARY' }));
+      add.run('msg_parent_4', 'fork', 'assistant', 4, 4, 4, JSON.stringify({ content: [
+        { type: 'text', text: 'SECRET_INHERITED' }] }));
+      add.run('f', 'fork', 'user', 5, 5, 5, JSON.stringify({ text: 'SECRET_FORK' }));
+    } else {
+      db.exec(`CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT, title TEXT,
+        directory TEXT, time_created INTEGER, time_updated INTEGER, time_archived INTEGER);
+        CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT, time_created INTEGER);
+        CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, data TEXT,
+          time_created INTEGER);
+        INSERT INTO session VALUES ('legacy',NULL,'Legacy','/synthetic',1,1,NULL);
+        INSERT INTO message VALUES ('m','legacy','{"role":"user","time":{"created":1}}',1);
+        INSERT INTO part VALUES ('p','m','legacy','{"type":"text","text":"SECRET_LEGACY"}',1),
+          ('tool','m','legacy','{"type":"tool","tool":"read","state":{"status":"error","error":"SECRET_ERROR"}}',2);`);
+    }
+  } finally {
+    db.close();
   }
-  db.close();
   const args = ['--opencode-db', file, '--codex-dir', dirs.codex, '--claude-dir', dirs.claude,
     '--pi-dir', dirs.pi, '--dsh-dir', dirs.dsh, '--meta-dir', dirs.meta,
     '--index-dir', dirs.index, '--cache-dir', dirs.cache];
-  return { file, args, children };
+  return { file, args, t };
 }
 
 async function serve(f) {
@@ -73,7 +71,11 @@ async function serve(f) {
     { cwd: repo, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let stderr = '';
   child.stderr.on('data', data => { stderr += data.toString(); });
-  f.children.push(child);
+  onCleanup(f.t, async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      const closed = once(child, 'close'); child.kill(); await closed;
+    }
+  });
   const base = `http://127.0.0.1:${port}`;
   for (let i = 0; i < 100; i++) {
     try { if ((await fetch(base + '/api/providers')).ok) return base; } catch { /* startup */ }
@@ -155,8 +157,11 @@ test('OpenCode invalid source record reports a diagnostic without its payload',
   { timeout: 30_000 }, async t => {
     const f = await setup(t, 'v2');
     const db = new DatabaseSync(f.file);
-    db.prepare('UPDATE session_message SET data=? WHERE id=?').run('SECRET_BAD_JSON', 'a');
-    db.close();
+    try {
+      db.prepare('UPDATE session_message SET data=? WHERE id=?').run('SECRET_BAD_JSON', 'a');
+    } finally {
+      db.close();
+    }
     const base = await serve(f);
     const response = await fetch(new URL('/api/v3/runtime/opencode/root/events', base));
     assert.equal(response.status, 500);
@@ -180,18 +185,22 @@ test('frozen OpenCode v2 source streams all native rows without changing DB or W
     const base = await serve(f);
     const { events, revision } = await allEvents(base, target.sessionId, 100);
     const sourceDb = new DatabaseSync(database, { readOnly: true });
-    const expectedTools = sourceDb.prepare(`SELECT m.id, m.seq, m.data FROM session_message m
-      JOIN session_v2 s ON s.id=m.session_id WHERE m.session_id=? AND
-      (s.fork_session_id IS NULL OR substr(m.id,-length(CAST(m.seq AS TEXT))-1) != '_' || m.seq)
-      ORDER BY m.seq, m.id`).all(target.sessionId).flatMap(row => {
-        const content = JSON.parse(row.data).content;
-        return Array.isArray(content) ? content.flatMap((part, index) => part.type === 'tool' ? [{
-          id: `event:opencode:v2:${row.id}:content:${index}`,
-          kind: ['pending', 'running', 'completed', 'error'].includes(part.state?.status)
-            ? `tool.${part.state.status}` : 'tool',
-        }] : []) : [];
-      });
-    sourceDb.close();
+    let expectedTools;
+    try {
+      expectedTools = sourceDb.prepare(`SELECT m.id, m.seq, m.data FROM session_message m
+        JOIN session_v2 s ON s.id=m.session_id WHERE m.session_id=? AND
+        (s.fork_session_id IS NULL OR substr(m.id,-length(CAST(m.seq AS TEXT))-1) != '_' || m.seq)
+        ORDER BY m.seq, m.id`).all(target.sessionId).flatMap(row => {
+          const content = JSON.parse(row.data).content;
+          return Array.isArray(content) ? content.flatMap((part, index) => part.type === 'tool' ? [{
+            id: `event:opencode:v2:${row.id}:content:${index}`,
+            kind: ['pending', 'running', 'completed', 'error'].includes(part.state?.status)
+              ? `tool.${part.state.status}` : 'tool',
+          }] : []) : [];
+        });
+    } finally {
+      sourceDb.close();
+    }
     assert.ok(expectedTools.length > 0);
     assert.deepEqual(events.filter(event => event.category === 'tool').map(event =>
       ({ id: event.id, kind: event.kind })), expectedTools);
@@ -213,18 +222,25 @@ test('frozen OpenCode v2 source streams all native rows without changing DB or W
   { timeout: 30_000 }, async t => {
     const f = await setup(t, 'v2');
     const db = new DatabaseSync(f.file);
-    const states = [{ status: 'pending' }, { status: 'running' }, { status: 'error' }, {}, { status: 'future' }];
-    db.prepare('UPDATE session_message SET data=? WHERE id=?').run(JSON.stringify({
-      content: states.map(state => ({ type: 'tool', name: 'read', state })) }), 'a');
-    db.close();
+    let states;
+    try {
+      states = [{ status: 'pending' }, { status: 'running' }, { status: 'error' }, {}, { status: 'future' }];
+      db.prepare('UPDATE session_message SET data=? WHERE id=?').run(JSON.stringify({
+        content: states.map(state => ({ type: 'tool', name: 'read', state })) }), 'a');
+    } finally {
+      db.close();
+    }
     const base = await serve(f);
     const { events } = await allEvents(base, 'root');
     assert.deepEqual(events.filter(event => event.category === 'tool').map(event => event.kind),
       ['tool.pending', 'tool.running', 'tool.error', 'tool', 'tool']);
     const corrupt = new DatabaseSync(f.file);
-    corrupt.prepare('UPDATE session_message SET data=? WHERE id=?').run(JSON.stringify({
-      content: [{ type: 'tool', name: 'read', state: { status: { secret: 'SECRET_BAD' } } }] }), 'a');
-    corrupt.close();
+    try {
+      corrupt.prepare('UPDATE session_message SET data=? WHERE id=?').run(JSON.stringify({
+        content: [{ type: 'tool', name: 'read', state: { status: { secret: 'SECRET_BAD' } } }] }), 'a');
+    } finally {
+      corrupt.close();
+    }
     const response = await fetch(`${base}/api/v3/runtime/opencode/root/events`);
     assert.equal(response.status, 500);
     const body = await response.text();

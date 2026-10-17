@@ -1,7 +1,8 @@
+import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { cp, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,13 +19,7 @@ const sum = (rows, name) => rows.reduce((total, row) => total + (row.counts[name
 
 test('resource probe observes cold, warm, Web force, failure and disabled paths with pure MCP stdout',
   { timeout: 60_000, skip: !binary && 'requires separately built search-phase-probe binary' }, async t => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'agentsession-resource-probe-'));
-    const children = [];
-    t.after(async () => {
-      for (const process of children) if (process.exitCode === null && process.signalCode === null) process.kill();
-      await Promise.all(children.map(process => process.exitCode === null && process.signalCode === null ? once(process, 'close') : null));
-      await rm(root, { recursive: true, force: true });
-    });
+    const root = await temporaryDirectory(t, path.join(os.tmpdir(), 'agentsession-resource-probe-'));
     for (const name of ['codex', 'claude', 'pi', 'dsh', 'meta', 'index', 'cache'])
       await mkdir(path.join(root, name));
     await cp(path.join(repo, 'v3/fixtures/codex'), path.join(root, 'codex'), { recursive: true });
@@ -35,7 +30,11 @@ test('resource probe observes cold, warm, Web force, failure and disabled paths 
       const process = spawn(binary, [mode, ...extra, ...args], { cwd: repo, windowsHide: true,
         env: { ...globalThis.process.env, AGENTSESSION_V3_SEARCH_PHASE_PROBE: enabled ? '1' : '0' },
         stdio: ['pipe', 'pipe', 'pipe'] });
-      children.push(process);
+      onCleanup(t, async () => {
+        if (process.exitCode === null && process.signalCode === null) {
+          const closed = once(process, 'close'); process.kill(); await closed;
+        }
+      });
       let stderr = '', stdout = '', buffer = '', next = 1;
       const pending = new Map();
       process.on('close', code => {
@@ -61,7 +60,7 @@ test('resource probe observes cold, warm, Web force, failure and disabled paths 
           process.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
           const result = await reply; await sleep(30); return result;
         },
-        close: async () => { if (process.exitCode === null && process.signalCode === null) { process.kill(); await once(process, 'close'); } },
+        close: async () => { if (process.exitCode === null && process.signalCode === null) { const closed = once(process, 'close'); process.kill(); await closed; } },
       };
     }
     async function connect(enabled) {

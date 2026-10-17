@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { BatchAction, BatchResult, LibraryFilters, LibraryNode, ProviderSummary, SearchMatch, SearchProviderDiagnostic, SessionRef, SessionSummary, SourceDiagnostic, ViewerMeta } from './api';
-  import { diagnosticText, language, t, type Language } from './i18n';
+  import { diagnosticText, errorText, language, t, type Language } from './i18n';
   import { sourceSettingsHref } from './source-guidance';
   import { searchMatchHref } from './search-navigation';
 
@@ -300,7 +300,7 @@
       <details class="library-source-note">
         <summary>{t($language, 'Some histories are unavailable')} <span>{t($language, 'Source issues')}</span></summary>
         {#each sourceErrors as problem}
-          <p>{providerLabel(problem.provider)}: {t($language, problem.message)}
+          <p>{providerLabel(problem.provider)}: {errorText($language, problem.message)}
             <a class="source-settings-link" href={sourceSettingsHref(problem.provider)} data-source-settings={problem.provider}
               onclick={(event) => openSourceSettings(event, problem.provider)}>{t($language, 'Configure source')} · {providerLabel(problem.provider)}</a></p>
         {/each}
