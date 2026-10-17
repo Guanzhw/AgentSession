@@ -82,7 +82,11 @@ pub enum CoreError {
         source: std::io::Error,
     },
     #[error("invalid provider source at {path}: {reason}")]
-    Parse { path: PathBuf, reason: String },
+    Parse {
+        path: PathBuf,
+        reason: String,
+        diagnostic: ParseDiagnostic,
+    },
     #[error("derived catalog storage: {0}")]
     Storage(String),
     #[error(transparent)]
@@ -90,6 +94,40 @@ pub enum CoreError {
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;
+
+/// Source-boundary diagnostics safe to write to a local log. The display reason
+/// remains separate because it can contain values from provider records.
+#[derive(Debug)]
+pub struct ParseDiagnostic {
+    pub cause: &'static str,
+    pub line: Option<usize>,
+    pub column: Option<usize>,
+}
+
+impl ParseDiagnostic {
+    pub fn new(cause: &'static str) -> Self {
+        Self {
+            cause,
+            line: None,
+            column: None,
+        }
+    }
+
+    /// `line_offset` is the number of source lines preceding the parsed JSON.
+    pub fn json(error: &serde_json::Error, line_offset: usize) -> Self {
+        let cause = match error.classify() {
+            serde_json::error::Category::Io => "JSON input I/O failure",
+            serde_json::error::Category::Syntax => "invalid JSON syntax",
+            serde_json::error::Category::Data => "invalid JSON data",
+            serde_json::error::Category::Eof => "incomplete JSON input",
+        };
+        Self {
+            cause,
+            line: Some(line_offset + error.line()),
+            column: Some(error.column()),
+        }
+    }
+}
 
 #[rustfmt::skip]
 fn provider_icon(id: &str) -> &'static str {
@@ -1214,14 +1252,9 @@ impl Core {
             provider,
             adapter.as_ref(),
         )?;
-        let (mut rows, revision, uncertainty) = match published {
-            Some(catalog) => (catalog.rows, catalog.revision, catalog.source_uncertainty),
-            None => {
-                let rows = adapter.list()?;
-                let revision = browse_revision(&rows);
-                (rows, revision, adapter.source_uncertainty()?)
-            }
-        };
+        let mut rows = published.rows;
+        let revision = published.revision;
+        let uncertainty = published.source_uncertainty;
         rows.sort_by(|a, b| {
             b.created_at
                 .cmp(&a.created_at)

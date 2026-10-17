@@ -303,6 +303,97 @@ test('Claude request usage deduplicates responses, keeps token components, and o
     assert.equal(v3.coverage.usage.state, 'observed');
   });
 
+for (const includeRecordedUsage of [false, true]) {
+  test(`Claude completely missing usage ${includeRecordedUsage ? 'does not hide mixed recorded usage' : 'stays unknown without fabricated requests'}`,
+    { timeout: 60_000 }, async t => {
+      const f = await setup(t, fixture('claude-current-v259-synthetic.jsonl'), () => {
+        const assistant = (uuid, responseId) => ({ type: 'assistant', uuid,
+          message: { id: responseId, content: [{ type: 'text', text: uuid }] } });
+        const records = [assistant('usage-absent-before', 'shared-response')];
+        if (includeRecordedUsage) {
+          const recorded = assistant('usage-recorded', 'shared-response');
+          recorded.message.usage = { input_tokens: 10, output_tokens: 4 };
+          records.push(recorded);
+        }
+        records.push(assistant('usage-absent-after', 'unrecorded-response'));
+        return records.map(record => JSON.stringify(record)).join('\n') + '\n';
+      });
+      const summaries = await json(`${f.base}/api/v3/sessions?provider=claude-code`);
+      const summary = summaries.find(item => item.session.sessionId === f.id);
+      assert.ok(summary, 'Missing usage must not hide the conversation');
+      assert.equal(summary.tokenCount, includeRecordedUsage ? 14 : null);
+      const v3 = await json(`${f.base}/api/v3/protocol/claude-code/${f.id}?version=3`);
+      assert.equal(v3.validation.ok, true);
+      assert.equal(v3.coverage.usage.state, includeRecordedUsage ? 'observed' : 'not-observed');
+      assert.deepEqual(v3.usageRecords.map(record => record.provenance.sourceId),
+        includeRecordedUsage ? ['usage-recorded'] : [],
+        'Absent usage contributes no request and cannot claim a later recorded response');
+      if (includeRecordedUsage) {
+        assert.deepEqual(v3.usageRecords[0].tokens, {
+          // Inclusive output has no recorded reasoning breakdown in this source.
+          input: 10, cacheRead: null, cacheWrite: null, output: null, reasoning: null, total: null,
+        });
+      }
+      const reader = await json(`${f.base}/api/v3/reader/claude-code/${f.id}/bootstrap`);
+      const readableIds = reader.segments.flatMap(page => page.items.map(item => item.event.messageId));
+      for (const id of ['usage-absent-before', 'usage-absent-after']) assert.ok(readableIds.includes(id),
+        `The reply without usage remains readable: ${id}`);
+    });
+}
+
+test('Claude summary and Protocol select final responses and distinct legacy components',
+  { timeout: 60_000 }, async t => {
+    const f = await setup(t, fixture('claude-current-v259-synthetic.jsonl'), () => {
+      const assistant = (uuid, responseId, input, output, content = []) => ({
+        type: 'assistant', uuid, message: { ...(responseId ? { id: responseId } : {}),
+          content, usage: { input_tokens: input, output_tokens: output } },
+      });
+      return [
+        assistant('pending', 'final-response', 0, 0),
+        assistant('final', 'final-response', 10, 4),
+        assistant('final-fragment', 'final-response', 10, 4),
+        assistant('legacy-first', null, 8, 2),
+        assistant('legacy-fragment', null, 8, 2),
+        assistant('legacy-distinct', null, 7, 3),
+        { type: 'user', uuid: 'reset', message: { content: 'Next request' } },
+        assistant('legacy-after-user', null, 7, 3),
+        assistant('pending-only', 'pending-response', 0, 0),
+      ].map(record => JSON.stringify(record)).join('\n') + '\n';
+    });
+    const summaries = await json(`${f.base}/api/v3/sessions?provider=claude-code`);
+    assert.equal(summaries.find(item => item.session.sessionId === f.id)?.tokenCount, 44);
+    const v3 = await json(`${f.base}/api/v3/protocol/claude-code/${f.id}?version=3`);
+    assert.equal(v3.validation.ok, true);
+    assert.deepEqual(v3.usageRecords.map(record => record.id), [
+      'usage:source-session:response:final-response',
+      'usage:source-session:response:legacy-first',
+      'usage:source-session:response:legacy-distinct',
+      'usage:source-session:response:legacy-after-user',
+    ]);
+    assert.ok(v3.usageRecords.every(record => record.tokens.total === null),
+      'Summary sums recorded components while Protocol retains an unrecorded total as unknown');
+    assert.equal(v3.usageRecords[0].provenance.sourceId, 'final');
+  });
+
+test('Claude duplicate usage keeps the first owned anchor and upgrades an unowned fragment',
+  { timeout: 60_000 }, async t => {
+    const f = await setup(t, fixture('claude-current-v259-synthetic.jsonl'), () => {
+      const assistant = uuid => ({ type: 'assistant', ...(uuid ? { uuid } : {}),
+        message: { id: 'anchored-response', content: [],
+          usage: { input_tokens: 10, output_tokens: 4 } } });
+      return [assistant(null), assistant('owned-fragment'), assistant('later-fragment')]
+        .map(record => JSON.stringify(record)).join('\n') + '\n';
+    });
+    const summaries = await json(`${f.base}/api/v3/sessions?provider=claude-code`);
+    assert.equal(summaries.find(item => item.session.sessionId === f.id)?.tokenCount, 14);
+    const v3 = await json(`${f.base}/api/v3/protocol/claude-code/${f.id}?version=3`);
+    assert.equal(v3.validation.ok, true);
+    assert.equal(v3.usageRecords.length, 1);
+    assert.equal(v3.usageRecords[0].provenance.sourceId, 'owned-fragment');
+    assert.equal(v3.usageRecords[0].eventId,
+      v3.events.find(event => event.provenance.sourceId === 'owned-fragment').id);
+  });
+
 test('Claude sidechain and task-like records remain events without invented AgentRuns', { timeout: 60_000 }, async t => {
   const f = await setup(t, fixture('claude-current.jsonl'), text => {
     const records = rowsOf(text).map(row => row.record);

@@ -89,6 +89,19 @@ retains its recorded behavior.
 
 ## Development and status
 
+Local unreleased repairs default Statistics trends, Harness comparisons and
+model shares to tokens. Codex ordinary `token_count` records contribute verified
+cumulative increments to known usage; repeated snapshots add nothing. Request
+counts still require request identity. Legacy `session_id` headers are also
+discoverable. See the [statistics decision](.agents/decisions/implemented/2026-10-12-codex-recorded-token-consumption.md).
+
+Local architecture repairs also correct Claude pending-usage deduplication,
+retain ambiguous DSH sessions as diagnostic rows, and preserve captured
+Protocol errors in the Reader. Older derived indexes and Reader caches are
+recaptured automatically; provider records and Viewer metadata are preserved.
+Public browser regressions are required in Linux x64 CI. Browser tools have
+their own installation, retaining the project's Node.js 22.15 development floor.
+
 ```bash
 npm run review
 npm test

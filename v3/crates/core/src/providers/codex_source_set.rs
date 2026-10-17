@@ -81,8 +81,8 @@ impl DirectPair {
             let b = &b["payload"];
             // This slice owns direct, root-session continuation only. An inherited
             // base requires ancestry and child-ownership semantics of its own.
-            if a["id"] != id
-                || b["id"] != id
+            if session_meta_id(a) != Some(id)
+                || session_meta_id(b) != Some(id)
                 || !a["history_base"].is_null()
                 || [a, b].iter().any(|p| {
                     !p["parent_thread_id"].is_null()
@@ -145,7 +145,8 @@ impl DirectPair {
                     return Ok(false);
                 };
                 let p = &record["payload"];
-                if line == 0 && (record["type"] != "session_meta" || p["id"] != id) {
+                if line == 0 && (record["type"] != "session_meta" || session_meta_id(p) != Some(id))
+                {
                     return Ok(false);
                 }
                 if line == 0
@@ -204,7 +205,7 @@ impl DirectPair {
 
     pub fn revision(&self, scope: &str) -> Result<String> {
         let mut hash = Sha256::new();
-        hash.update(b"codex-direct-source-set-v5\0");
+        hash.update(b"codex-direct-source-set-v6\0");
         hash.update(scope.as_bytes());
         hash.update((self.cutoff as u64).to_le_bytes());
         hash.update((self.prefix_records as u64).to_le_bytes());
@@ -302,7 +303,7 @@ impl DirectPair {
             let event_id = format!("event:codex:{first_key}:{line}");
             start = end;
             loaded.observations.facts.diagnostics.push(Diagnostic {
-                code: "codex_history_base_excluded_record",
+                code: "codex_history_base_excluded_record".into(),
                 event_id: Some(event_id.clone()),
             });
             loaded.protocol_candidates.push(EventCandidate {
@@ -357,7 +358,7 @@ pub(super) fn load_selected(
 
 pub(super) fn mark_recorded_rollout(loaded: &mut LoadedSession) {
     loaded.observations.facts.diagnostics.push(Diagnostic {
-        code: "codex_recorded_rollout_selected",
+        code: "codex_recorded_rollout_selected".into(),
         event_id: None,
     });
     loaded.observations.facts.coverage.insert("sourceHistory".into(), DomainCoverage {
@@ -413,6 +414,62 @@ mod tests {
         );
         fs::write(&later, source).unwrap();
         (first, later, id.into())
+    }
+
+    #[test]
+    fn direct_source_set_accepts_canonical_legacy_headers() {
+        let tmp = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../tmp");
+        fs::create_dir_all(&tmp).unwrap();
+        for aliases in [(true, false), (false, true), (true, true)] {
+            let directory = tempfile::tempdir_in(&tmp).unwrap();
+            let (first, later, id) = fixture(directory.path());
+            let mut sources: Vec<Vec<Value>> = [&first, &later]
+                .into_iter()
+                .map(|path| {
+                    fs::read_to_string(path)
+                        .unwrap()
+                        .lines()
+                        .map(|line| serde_json::from_str(line).unwrap())
+                        .collect()
+                })
+                .collect();
+            for (records, legacy) in sources.iter_mut().zip([aliases.0, aliases.1]) {
+                if legacy {
+                    let payload = records[0]["payload"].as_object_mut().unwrap();
+                    let canonical_id = payload.remove("id").unwrap();
+                    payload.insert("session_id".into(), canonical_id);
+                }
+            }
+            sources[1][0]["payload"]["history_base"]["end_byte_offset"] = sources[0][..3]
+                .iter()
+                .cloned()
+                .map(row)
+                .collect::<String>()
+                .len()
+                .into();
+            for (path, records) in [&first, &later].into_iter().zip(sources) {
+                fs::write(path, records.into_iter().map(row).collect::<String>()).unwrap();
+            }
+            let adapter = CodexAdapter {
+                root: directory.path(),
+                scope: "canonical-source-set",
+            };
+            let snapshot = adapter.load(&id).expect("canonical source pair must load");
+            assert!(adapter.storage_diagnostic().is_none());
+            assert_eq!(snapshot.summary.session.session_id, id);
+            let content = format!("{snapshot:?}");
+            assert!(content.contains("First selected question"));
+            assert!(content.contains("Later selected question"));
+            assert!(!content.contains("Excluded aborted question"));
+            assert_eq!(
+                adapter
+                    .native_protocol_snapshot(&id)
+                    .unwrap()
+                    .usage_records()
+                    .len(),
+                2
+            );
+        }
     }
 
     #[test]
@@ -486,7 +543,7 @@ mod tests {
             .unwrap();
         assert_eq!(batch.observations(&id).unwrap().usage_records().len(), 2);
         batch.validate_source_revision().unwrap();
-        let inventory = adapter.inventory().unwrap().unwrap();
+        let inventory = adapter.inventory().unwrap();
         assert_eq!(inventory.len(), 1);
         assert!(
             adapter
@@ -584,7 +641,14 @@ mod tests {
                 "{mutation}"
             );
             assert_eq!(
-                adapter.list().unwrap()[0].diagnostic.as_deref(),
+                {
+                    let catalog_dir = tempfile::tempdir().unwrap();
+                    crate::index::refresh(catalog_dir.path(), adapter.scope, "codex", &adapter)
+                        .unwrap()
+                        .rows
+                }[0]
+                .diagnostic
+                .as_deref(),
                 Some(MULTIPLE_SOURCE_DIAGNOSTIC),
                 "{mutation}"
             );
@@ -608,7 +672,14 @@ mod tests {
             matches!(adapter.load(&id), Err(CoreError::Protocol(ProtocolError::Unavailable { diagnostic })) if diagnostic == UNRESOLVED_SOURCE_DIAGNOSTIC)
         );
         assert_eq!(
-            adapter.list().unwrap()[0].diagnostic.as_deref(),
+            {
+                let catalog_dir = tempfile::tempdir().unwrap();
+                crate::index::refresh(catalog_dir.path(), adapter.scope, "codex", &adapter)
+                    .unwrap()
+                    .rows
+            }[0]
+            .diagnostic
+            .as_deref(),
             Some(UNRESOLVED_SOURCE_DIAGNOSTIC)
         );
     }

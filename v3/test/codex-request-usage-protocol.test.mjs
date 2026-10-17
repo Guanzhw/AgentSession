@@ -136,8 +136,8 @@ test('Codex current v153 public source publishes its one recorded request',
     assert.deepEqual(document.usageRecords.map(record => record.id), [`usage:${id}:response-1`]);
     assert.deepEqual(document.usageRecords[0].tokens,
       { input: 75, cacheRead: 20, cacheWrite: 5, output: 20, reasoning: 10, total: 130 });
-    assert.equal(document.usageRecords[0].provenance.fidelity, 'recorded');
-    assert.equal(document.usageRecords[0].provenance.sourceType, 'codex.token_usage_record');
+    assert.equal(document.usageRecords[0].provenance.fidelity, 'derived');
+    assert.equal(document.usageRecords[0].provenance.sourceType, 'codex.token_usage_record+turn_context');
     assert.equal(document.usageRecords[0].turnId, 'turn-1');
   });
 

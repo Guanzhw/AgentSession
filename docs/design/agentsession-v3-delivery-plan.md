@@ -1,5 +1,62 @@
 # AgentSession 3.0：可执行重建计划
 
+2026-10-17 七项最终验收收尾：Claude 完全缺失 `usage` 的两项公开 HTTP 验收已补齐，
+确认全缺失时摘要保持未知、Protocol 不伪造请求，混合正常记录时保留已知合计，
+且缺失记录不抢占同一 response ID；原消息保持可读。最终工作树的完整 `npm test`
+与 `npm run review` 使用任务隔离状态执行；实际命令、结果、输入哈希及剩余边界见
+本地 `tmp/final-seven-acceptance-20261017-142420/RESULTS.md`。
+
+2026-10-17 DSH 鼠标点击补验：在原 metadata／继承上下文错误布局中，浏览器实际
+viewport 高度为 577px，协作入口中心 y=595.08，命中查询为空；原生点击落到 HTML，
+没有触发滚动或打开面板。显式滚动后，同一入口收到 `isTrusted=true` 的鼠标事件，
+协作面板正常打开。该证据确认测试工具没有自动滚入视口，未显示页面遮罩。
+关系图路由用例已改为真实点击根会话、协作入口、子节点和子历史链接，先验证中心
+可命中；固定 1280×577 和 1280×900 两种 viewport，等待原有错误布局呈现后操作。
+Windows x64 与 Ubuntu WSL2 x64 的相关六组浏览器回归各 43 项通过、0 失败、0 跳过；
+双宿主另各完成两种窗口的可信鼠标事件与截图采样。`npm run review` 通过。
+本轮修改仅涉及该浏览器测试与验收说明，截图、事件及执行结果保留在本地
+`tmp/dsh-pointer-20261017-141140/`。
+
+2026-10-17 后续补齐：Linux x64 两条既有工作流已显式选择、检查并启动安装后的
+Chrome；定向重新挂载场景保持会话启动参数一致，普通会话缓存行为保留。
+MCP 解析诊断从 provider 边界保留安全类别与 JSON 行列，原始记录值不进入日志；
+见[安全诊断决策](../../.agents/decisions/implemented/2026-10-17-safe-mcp-parse-diagnostics.md)。
+最终 Windows `npm test`：Rust 276 通过、18 忽略；Node 775 通过、50 条件跳过、
+0 失败。review、全部 feature 编译及最终治理／diff 检查通过。
+Ubuntu 24.04.4 WSL2 x64 使用 Node 26.5.0、Rust 1.95.0、agent-browser 0.39.1，
+全新安装 Chrome 155.0.8059.84；Rust 276 通过、18 忽略，公开浏览器 42 项和
+导航 6 项全部通过。实际 Linux portable release 通过校验和检查，以及 DSH Web
+7 项、MCP 6 项验收。Node 22.15 的 UI 构建与最终 Windows 产物检索补测通过。
+五 provider 真实冻结副本的 Web 列表计数及四源 MCP 独立时间线对照通过，原件与
+副本哈希保持；不将正常历史来源扩展为所有新格式或异常来源的证明。
+原始失败与最终结果保留于本地 `tmp/architecture-followup-20261017/RESULTS.md`。
+首轮一次 DSH 删除超时未复现，已补操作就绪等待；其确切原因仍未确认。
+本轮未安装系统组件，未运行远程 GitHub job、完整 Linux `npm test` 或 macOS；
+这些结果不关闭既有稳定发布门槛。没有提交、推送或发布。
+
+2026-10-17 本地架构修复覆盖 Claude 用量选择、DSH 集合诊断、Reader 错误持久化、
+MCP 本地诊断、Linux x64 浏览器必跑、唯一索引列表契约及批量元数据预检合并。
+来源和状态边界见 [Reader 决策](../../.agents/decisions/implemented/2026-10-17-reader-protocol-failure-persistence.md)
+与 [索引决策](../../.agents/decisions/implemented/2026-10-17-indexed-provider-diagnostics.md)。
+本轮仅使用公开夹具与任务自有来源、状态和端口。`npm run review` 通过；完整
+`npm test` 的 Rust core 266 项、app 10 项通过，18 项来源探针明确忽略；Node
+771 项通过、49 项条件跳过、0 失败。浏览器必跑模式实际执行，缺工具、缺 UI
+依赖及不存在 Chromium 的负例均失败。原始全量日志保留于本地
+`tmp/architecture-repair-20261017-014744/npm-test-final.log`。既有真实来源、资源和
+其他宿主门槛保留原状态；Linux CI 安装链尚未远程执行。没有提交、推送或发布。
+随后重建 UI／原生 release，7 项 Reader HTTP／UI 定向复验和 workspace
+`--all-features` 编译通过；任务独占端口的桌面检查确认正文、解析原因、诊断码、
+来源事件 ID 及 DSH 禁止管理边界，验收进程已关闭。
+
+2026-10-12 本地未发布统计修复：普通 Codex 累计增量进入已知 Token 小计，请求数
+保持身份要求；默认图表、Harness 与模型份额使用 Token。旧 `session_id` 会话头及
+direct history-base 身份校验恢复一致。最终 Rust 263 项通过、18 明确忽略；Node
+全量 750 通过、48 条件跳过，唯一隔离产物路径映射失败已修正并通过四项打包补测；
+最终 UI/locale 10 项通过，真实源/API/CSV/JSON/native MCP 均核对到 4,847,217。
+范围和原始证据见[决策记录](../../.agents/decisions/implemented/2026-10-12-codex-recorded-token-consumption.md)。
+CORE-14 的新增累计消耗范围保持 U，既有 canonical 金标保留历史范围。下一步按
+实际新机器配置复核，并为混合历史及重置段补充来源金标；本轮不扩大完整覆盖声明。
+
 更新：2026-10-12；当前工作区已按用户要求整合为**唯一 Rust/Svelte 3.0 实现与默认启动入口**。历史 S3/S4/S5 结果保留原有日期、产物和范围，当前稳定版进度见下方入口。本文件是3.0阶段与下一步的唯一进度入口。
 进度、退出门槛与下一动作入口；架构选择见
 [Rust-first 架构方案](agentsession-rust-first-architecture.md)，不在这里复制其设计。

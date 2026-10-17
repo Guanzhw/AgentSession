@@ -1,3 +1,4 @@
+import { browserPrerequisites } from './browser-prerequisites.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -22,27 +23,7 @@ const toolOutput = `{"result":"${'o'.repeat(1460)}","tail":"output-end"}`;
 
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
-function agentBrowserBinary() {
-  const override = process.env.AGENTSESSION_V3_AGENT_BROWSER_BIN;
-  if (override && existsSync(override)) return override;
-  const binaryName = process.platform === 'win32'
-    ? 'agent-browser-win32-x64.exe'
-    : `agent-browser-${process.platform}-${process.arch}`;
-  for (const entry of (process.env.PATH || '').split(path.delimiter)) {
-    const candidate = path.join(entry, 'node_modules', 'agent-browser', 'bin', binaryName);
-    if (existsSync(candidate)) return candidate;
-  }
-  return undefined;
-}
-
-const agentBrowserExe = agentBrowserBinary();
-const uiDependenciesPresent = existsSync(path.join(uiDir, 'node_modules', 'vite'))
-  && existsSync(path.join(uiDir, 'node_modules', 'svelte'));
-const skipReason = !uiDependenciesPresent
-  ? 'Install the locked v3/ui dependencies before running the UI browser regressions.'
-  : !agentBrowserExe
-    ? 'The agent-browser CLI is required; the test does not install it or download a browser.'
-    : false;
+const { browserBinary: agentBrowserExe, skip: skipReason } = browserPrerequisites({ ui: uiDir });
 
 async function freePort() {
   return freeFetchSafePort();
@@ -931,7 +912,8 @@ test('Library preserves an expanded DSH family and child query across Reader Bac
     assert.equal(await command('errors'), '');
   });
 
-test('Library routes DSH roots and opens child sessions from the relationship graph', { skip: skipReason || false, timeout: 60_000 }, async t => {
+for (const viewportHeight of [577, 900]) {
+test(`Library routes DSH roots and opens child sessions from the relationship graph at 1280x${viewportHeight}`, { skip: skipReason || false, timeout: 60_000 }, async t => {
   const harness = await startHarness(t);
   const rootHref = `/${dshProvider}/session/${dshIds.root}`;
   const alphaHref = `/${dshProvider}/session/${dshIds.alpha}`;
@@ -940,12 +922,27 @@ test('Library routes DSH roots and opens child sessions from the relationship gr
   try { browser = await startBrowser(t, `${harness.origin}/sessions`); }
   catch (cause) { throw new Error(`${cause.message}; requests=${JSON.stringify(harness.requests)}`); }
   const { command } = browser;
+  await command('set', 'viewport', '1280', String(viewportHeight));
+
+  const clickInView = async selector => {
+    // The native CLI can dispatch an offscreen center without scrolling first.
+    await command('scrollintoview', selector);
+    const hit = JSON.parse(await command('eval', `(() => {
+      const element = document.querySelector(${JSON.stringify(selector)});
+      const rect = element.getBoundingClientRect();
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+      const target = document.elementFromPoint(x, y);
+      return { x, y, viewportHeight: innerHeight, tag: target?.tagName,
+        className: target?.className, inside: element.contains(target) };
+    })()`));
+    assert.equal(hit.inside, true,
+      `The target is pointer-accessible after scrolling: ${selector}: ${JSON.stringify(hit)}`);
+    await command('click', selector);
+  };
 
   await command('wait', `a[href="${rootHref}"]`);
-  await command('eval', `document.querySelector('a[href="${rootHref}"]').scrollIntoView({ block: 'center', behavior: 'instant' })`);
-  const rootHit = JSON.parse(await command('eval', `(() => { const row = document.querySelector('a[href="${rootHref}"]'); const rect = row.getBoundingClientRect(); const target = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2); return { tag: target?.tagName, className: target?.className, insideRow: row.contains(target) }; })()`));
-  assert.equal(rootHit.insideRow, true, `The root link is pointer-accessible at its center: ${JSON.stringify(rootHit)}`);
-  await command('eval', `document.querySelector('a[href="${rootHref}"]').click()`);
+  await clickInView(`a[href="${rootHref}"]`);
   assert.equal(await command('get', 'url'), `${harness.origin}${rootHref}`,
     'The root row opens its canonical Reader URL');
   await waitForBrowser(command,
@@ -956,18 +953,23 @@ test('Library routes DSH roots and opens child sessions from the relationship gr
     `document.querySelector('.reader-byline')?.textContent ?? ''`);
   assert.match(providerLabel, /DeepSeek Harness|\bDSH\b/i, 'The Reader identifies the DSH provider');
 
+  await waitForBrowser(command,
+    `document.querySelector('.reader-heading > .content-error') && document.querySelector('.inherited-context-error')`,
+    'the original metadata and inherited-context error layout');
+  await waitForBrowser(command,
+    `document.querySelector('.collaboration-launcher:not([hidden])') || document.querySelector('#collaboration-panel')`,
+    'the collaboration launcher or open panel');
   if (await command('eval', `Boolean(document.querySelector('.collaboration-launcher:not([hidden])'))`) === 'true') {
-    await command('click', '.collaboration-launcher');
+    await clickInView('.collaboration-launcher');
   }
-  assert.doesNotMatch(await command('get', 'text', '#collaboration-panel'),
-    /Collaboration sources|Inspect recorded tasks and handoffs|Load more recorded work/,
-    'The Reader retains the collaboration graph without its removed source sections');
-
   await waitForBrowser(command,
     `document.querySelector('[data-collaboration-handoff="parallel-inspection:1"] .collaboration-child-node') && document.querySelector('[data-collaboration-handoff="parallel-inspection:2"] .collaboration-child-node')`,
     'both child nodes in the DSH relationship graph');
+  assert.doesNotMatch(await command('get', 'text', '#collaboration-panel'),
+    /Collaboration sources|Inspect recorded tasks and handoffs|Load more recorded work/,
+    'The Reader retains the collaboration graph without its removed source sections');
   for (const [correlationId, href] of [['parallel-inspection:1', alphaHref], ['parallel-inspection:2', betaHref]]) {
-    await command('eval', `document.querySelector('[data-collaboration-handoff="${correlationId}"] .collaboration-child-node').click()`);
+    await clickInView(`[data-collaboration-handoff="${correlationId}"] .collaboration-child-node`);
     await waitForBrowser(command, `Boolean(document.querySelector('.collaboration-timeline a[href="${href}"]'))`,
       `selected handoff ${correlationId} child action`);
     assert.equal(Number(await command('get', 'count', `.collaboration-timeline a[href="${href}"]`)), 1,
@@ -976,16 +978,17 @@ test('Library routes DSH roots and opens child sessions from the relationship gr
       'Recorded handoff details belong to the selected child');
   }
 
-  await command('eval', `document.querySelector('[data-collaboration-handoff="parallel-inspection:1"] .collaboration-child-node').click()`);
+  await clickInView('[data-collaboration-handoff="parallel-inspection:1"] .collaboration-child-node');
   await waitForBrowser(command, `Boolean(document.querySelector('.collaboration-timeline a[href="${alphaHref}"]'))`,
     'the selected graph node’s canonical child link');
-  await command('click', `.collaboration-timeline a[href="${alphaHref}"]`);
+  await clickInView(`.collaboration-timeline a[href="${alphaHref}"]`);
   await waitForBrowser(command,
     `(() => { const query = new URLSearchParams(location.hash.slice(7)); const path = JSON.parse(query.get('path') ?? '[]'); return location.hash.startsWith('#child?') && query.get('provider') === '${dshProvider}' && query.get('sessionId') === '${dshIds.alpha}' && path.length === 1 && path[0].provider === '${dshProvider}' && path[0].sessionId === '${dshIds.alpha}'; })()`,
     'the graph link records the canonical DSH alpha child path');
   assert.equal(new URL(await command('get', 'url')).pathname, rootHref,
     'Opening the child from the graph keeps the root Reader route active');
 });
+}
 
 test('Library retains readable providers and reports a DSH source failure', { skip: skipReason || false, timeout: 60_000 }, async t => {
   const harness = await startHarness(t, { dshListError: true });
@@ -1107,6 +1110,16 @@ test('Stats page exposes source-backed request usage, date range and exports',
     assert.equal(Number(await command('get', 'count', '.model-distribution-row')), 2);
     assert.match(await command('get', 'text', '.model-distribution'), /Model not recorded/);
     assert.match(await command('get', 'text', '.model-distribution'), /known tokens/i);
+    assert.equal(await command('get', 'attr', '.chart-metrics button:last-child', 'aria-pressed'), 'true',
+      'Token statistics defaults to tokens');
+    assert.match(await command('get', 'text', '.stats-kpis article:first-child'), /Known token subtotal/);
+    assert.equal(JSON.parse(await command('eval', `document.querySelector('.model-distribution-row strong').textContent.trim()`)), '100.0%',
+      'Model shares use known tokens by default, excluding unknown totals');
+    assert.match(await command('get', 'text', '.harness-comparison-title'), /47 known tokens/);
+    await command('select', 'select[aria-label="Language"]', 'zh');
+    await waitForBrowser(command, `document.querySelector('.chart-day')?.getAttribute('aria-label').includes('个已知 Token')`,
+      'chart tooltips update when the statistics language changes');
+    await command('select', 'select[aria-label="语言"]', 'en');
     await waitForBrowser(command, `(() => { const r=document.querySelector('.chart-metrics button:last-child').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })()`,
       'the entire chart metric control inside the viewport');
     await command('click', '.chart-metrics button:last-child');
@@ -1120,6 +1133,9 @@ test('Stats page exposes source-backed request usage, date range and exports',
       'the recorded-request chart metric');
     assert.ok(Number(await command('get', 'attr', '.chart-day[data-day="2026-09-20"] .chart-bar', 'height')) > 0,
       'the recorded unknown-total request remains in the request chart');
+    assert.equal(JSON.parse(await command('eval', `document.querySelector('.model-distribution-row strong').textContent.trim()`)), '50.0%',
+      'Model shares switch to requests with the daily chart');
+    assert.match(await command('get', 'text', '.harness-comparison-title'), /2 requests/);
     await command('click', '.stats-day-toggle[data-day="2026-09-20"]');
     await waitForBrowser(command,
       `performance.getEntriesByType('resource').some(entry => entry.name.includes('/api/v3/stats/all?days=30&day=2026-09-20'))`,

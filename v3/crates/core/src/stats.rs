@@ -65,7 +65,7 @@ thread_local! {
 }
 
 // Request attribution and recorded dimension presence changes recapture cached rows.
-const STATS_PROJECTION_VERSION: i64 = 8;
+const STATS_PROJECTION_VERSION: i64 = 9;
 
 #[path = "stats_overview.rs"]
 mod overview;
@@ -80,6 +80,7 @@ fn stats_protocol_loads() -> usize {
 /// observation snapshot remains the owner of the full protocol record.
 #[derive(Clone, Deserialize, Serialize)]
 struct StatsUsage {
+    recorded_request: bool,
     session_ref: SessionRef,
     timestamp: Option<i64>,
     model: Option<String>,
@@ -101,6 +102,7 @@ struct StatsUsageTokens {
 impl From<&UsageRecord> for StatsUsage {
     fn from(record: &UsageRecord) -> Self {
         Self {
+            recorded_request: true,
             session_ref: record.session_ref.clone(),
             timestamp: record.timestamp,
             model: record.model.clone(),
@@ -115,6 +117,28 @@ impl From<&UsageRecord> for StatsUsage {
                 total: record.tokens.total,
             },
         }
+    }
+}
+
+impl StatsUsage {
+    fn from_consumption(observation: &UsageObservation) -> Option<Self> {
+        let tokens = observation.consumption_tokens.as_ref()?;
+        Some(Self {
+            recorded_request: false,
+            session_ref: observation.session_ref.clone(),
+            timestamp: observation.timestamp,
+            model: observation.model.clone(),
+            model_provider: observation.model_provider.clone(),
+            event_id: Some(observation.event_id.clone()),
+            tokens: StatsUsageTokens {
+                input: tokens.input,
+                cache_read: tokens.cache_read,
+                cache_write: tokens.cache_write,
+                output: tokens.output,
+                reasoning: tokens.reasoning,
+                total: tokens.total,
+            },
+        })
     }
 }
 
@@ -363,6 +387,8 @@ pub struct StatsDay {
     pub cache_write_tokens: Option<u64>,
     pub total_tokens: Option<u64>,
     pub sessions: Vec<StatsDaySession>,
+    #[serde(skip)]
+    usage_amount_count: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -420,6 +446,8 @@ pub struct StatsReport {
     pub cost_estimate: Option<crate::CostEstimate>,
     #[serde(skip)]
     pricing_tokens: crate::stats_cost::CostTokenTotals,
+    #[serde(skip)]
+    usage_amount_count: usize,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -674,6 +702,7 @@ impl Core {
         };
         let mut days = BTreeMap::<String, StatsDay>::new();
         let mut pricing_tokens = crate::stats_cost::CostTokenTotals::default();
+        let mut usage_amount_count = 0;
         let mut day_sessions = BTreeMap::<String, BTreeMap<String, StatsDaySession>>::new();
         let mut models = BTreeMap::<(Option<String>, Option<String>), StatsModelRank>::new();
         let mut sessions = Vec::with_capacity(rows.len());
@@ -773,6 +802,12 @@ impl Core {
                         .usage_records()
                         .iter()
                         .map(StatsUsage::from)
+                        .chain(
+                            observations
+                                .usage_observations()
+                                .iter()
+                                .filter_map(StatsUsage::from_consumption),
+                        )
                         .collect(),
                     observations: observations
                         .usage_observations()
@@ -807,7 +842,8 @@ impl Core {
                 .collect();
             let selected_observations: Vec<_> = usage_observations
                 .iter()
-                // Observations have no proved model attribution; preserve them under model filters.
+                // Occurrence coverage stays visible under model filters; attributed
+                // consumption amounts above follow their recorded model independently.
                 .filter(|observation| query.contains(observation.timestamp))
                 .collect();
             let precounted_untimed_requests = query.model.is_some()
@@ -817,7 +853,7 @@ impl Core {
             if precounted_untimed_requests {
                 overview.untimed_request_count += selected_usage
                     .iter()
-                    .filter(|request| request.timestamp.is_none())
+                    .filter(|request| request.recorded_request && request.timestamp.is_none())
                     .count();
                 if selected_observations.is_empty() {
                     continue;
@@ -864,7 +900,10 @@ impl Core {
             }
             for request in selected_usage {
                 if !query.contains(request.timestamp) {
-                    if request.timestamp.is_none() && !precounted_untimed_requests {
+                    if request.recorded_request
+                        && request.timestamp.is_none()
+                        && !precounted_untimed_requests
+                    {
                         overview.untimed_request_count += 1;
                     }
                     continue;
@@ -878,15 +917,16 @@ impl Core {
                         known_token_count: 0,
                         unknown_token_request_count: 0,
                     });
-                model.recorded_request_count += 1;
+                model.recorded_request_count += usize::from(request.recorded_request);
                 if let Some(total) = request.tokens.total {
                     model.known_token_count =
                         checked_total(model.known_token_count, total, request)?;
                 } else {
                     model.unknown_token_request_count += 1;
                 }
-                session.recorded_request_count += 1;
-                overview.recorded_request_count += 1;
+                session.recorded_request_count += usize::from(request.recorded_request);
+                overview.recorded_request_count += usize::from(request.recorded_request);
+                usage_amount_count += 1;
                 for (sum, value) in [
                     (&mut pricing_tokens.input, request.tokens.input),
                     (&mut pricing_tokens.output, request.tokens.output),
@@ -894,7 +934,7 @@ impl Core {
                     (&mut pricing_tokens.cache_read, request.tokens.cache_read),
                     (&mut pricing_tokens.cache_write, request.tokens.cache_write),
                 ] {
-                    add_component(sum, value, overview.recorded_request_count, request)?;
+                    add_component(sum, value, usage_amount_count, request)?;
                 }
                 if let Some(total) = request.tokens.total {
                     session.known_token_count =
@@ -925,7 +965,7 @@ impl Core {
                             });
                         day_session.add(request)?;
                     }
-                } else {
+                } else if request.recorded_request {
                     overview.untimed_request_count += 1;
                 }
             }
@@ -1074,6 +1114,7 @@ impl Core {
             available_projects: available_projects.into_iter().collect(),
             cost_estimate: None,
             pricing_tokens,
+            usage_amount_count,
         };
         #[cfg(feature = "stats-phase-probe")]
         {
@@ -1086,7 +1127,8 @@ impl Core {
 
 impl StatsDay {
     fn add(&mut self, request: &StatsUsage) -> Result<()> {
-        self.recorded_request_count += 1;
+        self.recorded_request_count += usize::from(request.recorded_request);
+        self.usage_amount_count += 1;
         if let Some(total) = request.tokens.total {
             self.known_token_count = checked_total(self.known_token_count, total, request)?;
         } else {
@@ -1096,37 +1138,37 @@ impl StatsDay {
         add_component(
             &mut self.input_tokens,
             tokens.input,
-            self.recorded_request_count,
+            self.usage_amount_count,
             request,
         )?;
         add_component(
             &mut self.output_tokens,
             tokens.output,
-            self.recorded_request_count,
+            self.usage_amount_count,
             request,
         )?;
         add_component(
             &mut self.reasoning_tokens,
             tokens.reasoning,
-            self.recorded_request_count,
+            self.usage_amount_count,
             request,
         )?;
         add_component(
             &mut self.cache_read_tokens,
             tokens.cache_read,
-            self.recorded_request_count,
+            self.usage_amount_count,
             request,
         )?;
         add_component(
             &mut self.cache_write_tokens,
             tokens.cache_write,
-            self.recorded_request_count,
+            self.usage_amount_count,
             request,
         )?;
         add_component(
             &mut self.total_tokens,
             tokens.total,
-            self.recorded_request_count,
+            self.usage_amount_count,
             request,
         )?;
         Ok(())
@@ -1135,7 +1177,7 @@ impl StatsDay {
 
 impl StatsDaySession {
     fn add(&mut self, request: &StatsUsage) -> Result<()> {
-        self.recorded_request_count += 1;
+        self.recorded_request_count += usize::from(request.recorded_request);
         if let Some(total) = request.tokens.total {
             self.known_token_count = checked_total(self.known_token_count, total, request)?;
         } else {
@@ -1166,7 +1208,7 @@ fn checked_total(sum: u64, value: u64, request: &StatsUsage) -> Result<u64> {
     sum.checked_add(value).ok_or_else(|| {
         CoreError::Protocol(ProtocolError::Invalid {
             diagnostics: vec![Diagnostic {
-                code: "usage_aggregate_overflow",
+                code: "usage_aggregate_overflow".into(),
                 event_id: request.event_id.clone(),
             }],
         })
@@ -1446,6 +1488,66 @@ mod tests {
         let mut content = fs::read_to_string(original).unwrap();
         content.push('\n');
         fs::write(second, content).unwrap();
+    }
+
+    #[test]
+    fn legacy_consumption_reaches_totals_models_days_and_cache_without_request_count() {
+        let root = tempdir().unwrap();
+        let config = source_config(root.path());
+        let id = "11111111-1111-4111-8111-111111111111";
+        let dir = config.codex_dir.join("sessions");
+        fs::create_dir_all(&dir).unwrap();
+        let vector = |input, output| {
+            serde_json::json!({"input_tokens":input,
+            "cached_input_tokens":0,"cache_write_input_tokens":0,
+            "output_tokens":output,"reasoning_output_tokens":0,"total_tokens":input+output})
+        };
+        let records = [
+            serde_json::json!({"type":"session_meta","payload":{"id":id}}),
+            serde_json::json!({"type":"turn_context","payload":{"model":"legacy-model"}}),
+            serde_json::json!({"timestamp":"2026-09-02T00:00:00Z","type":"event_msg",
+                "payload":{"type":"token_count","info":{
+                    "last_token_usage":vector(10,2),"total_token_usage":vector(10,2)}}}),
+            serde_json::json!({"timestamp":"2026-09-02T00:00:01Z","type":"event_msg",
+                "payload":{"type":"token_count","info":{
+                    "last_token_usage":vector(9,4),"total_token_usage":vector(19,6)}}}),
+            serde_json::json!({"timestamp":"2026-09-02T00:00:02Z","type":"event_msg",
+                "payload":{"type":"token_count","info":{
+                    "last_token_usage":vector(9,4),"total_token_usage":vector(19,6)}}}),
+        ];
+        fs::write(
+            dir.join(format!("rollout-{id}.jsonl")),
+            records
+                .iter()
+                .map(serde_json::Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n",
+        )
+        .unwrap();
+        let core = Core::new(config.clone()).unwrap();
+        let report = core.stats("codex").unwrap();
+        assert_eq!(report.overview.recorded_request_count, 0);
+        assert_eq!(report.overview.known_token_count, 25);
+        assert_eq!(report.overview.unresolved_usage_observation_count, 3);
+        assert_eq!(report.daily_usage[0].total_tokens, Some(25));
+        assert_eq!(report.daily_usage[0].input_tokens, Some(19));
+        assert_eq!(report.daily_usage[0].output_tokens, Some(6));
+        assert_eq!(
+            report.model_ranking[0].model.as_deref(),
+            Some("legacy-model")
+        );
+        assert_eq!(report.model_ranking[0].known_token_count, 25);
+        assert_eq!(report.pricing_tokens.input, Some(19));
+        let restarted = Core::new(config).unwrap();
+        assert_eq!(
+            restarted.stats("codex").unwrap().overview.known_token_count,
+            25
+        );
+        let all = core.stats("all").unwrap();
+        assert_eq!(all.overview.known_token_count, 25);
+        assert_eq!(all.daily_usage[0].total_tokens, Some(25));
+        assert_eq!(all.pricing_tokens.input, Some(19));
     }
 
     #[test]

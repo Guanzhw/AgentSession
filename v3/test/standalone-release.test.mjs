@@ -495,7 +495,7 @@ test('portable release directory runs from a copied path with spaces using only 
     assert.equal(settings.startup.state.cacheDir, expectedState.cache);
 
     const bootstrapResponse = await fetch(`${origin}/api/v3/reader/codex/${sessionId}/bootstrap`);
-    assert.equal(bootstrapResponse.status, 200);
+    assert.equal(bootstrapResponse.status, 200, await bootstrapResponse.clone().text());
     const bootstrap = await bootstrapResponse.json();
     const query = new URLSearchParams({ messageId: 'assistant-1', segment: 'message', field: 'body',
       offset: '0', maxChars: '256', revision: bootstrap.revision });

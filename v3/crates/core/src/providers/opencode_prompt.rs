@@ -18,7 +18,7 @@ pub(super) fn build(
     let revision = adapter.revision()?;
     let (db, schema) = adapter.open()?;
     let summary = adapter
-        .rows(&db, schema, Some(session_id))?
+        .rows(&db, schema, session_id)?
         .into_iter()
         .next()
         .ok_or_else(|| crate::CoreError::NotFound {

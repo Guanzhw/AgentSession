@@ -374,6 +374,7 @@ impl OpenCodeAdapter<'_> {
 
     fn source_error(&self, reason: impl ToString) -> CoreError {
         CoreError::Parse {
+            diagnostic: crate::ParseDiagnostic::new("invalid OpenCode source"),
             path: self.path.into(),
             reason: reason.to_string(),
         }
@@ -555,12 +556,7 @@ impl OpenCodeAdapter<'_> {
         Ok(usage_records)
     }
 
-    fn rows(
-        &self,
-        db: &Connection,
-        schema: Schema,
-        id: Option<&str>,
-    ) -> Result<Vec<SessionSummary>> {
+    fn rows(&self, db: &Connection, schema: Schema, id: &str) -> Result<Vec<SessionSummary>> {
         let table = match schema {
             Schema::V1 => "session",
             Schema::V2 => "session_v2",
@@ -595,14 +591,14 @@ impl OpenCodeAdapter<'_> {
                  AND m.type IN ('user','assistant')), \
                 COALESCE(s.tokens_input,0)+COALESCE(s.tokens_output,0)+COALESCE(s.tokens_reasoning,0)+COALESCE(s.tokens_cache_read,0)+COALESCE(s.tokens_cache_write,0), \
                 COALESCE(NULLIF(s.title,''), NULLIF(s.slug,'')), {counts} \
-                FROM session_v2 s WHERE (?1 IS NOT NULL AND s.id=?1) OR (?1 IS NULL AND s.time_archived IS NULL) ORDER BY s.time_updated DESC, s.id"
+                FROM session_v2 s WHERE s.id=?1"
                 )
             }
             Schema::V1 => {
                 format!(
                     "SELECT s.id, s.parent_id, COALESCE(NULLIF(s.title,''), s.id), s.directory, s.time_created, s.time_updated, \
                 (SELECT COUNT(DISTINCT m.id) FROM message m WHERE m.session_id=s.id), NULL, NULLIF(s.title,''), {counts} \
-                FROM session s WHERE (?1 IS NOT NULL AND s.id=?1) OR (?1 IS NULL AND s.time_archived IS NULL) ORDER BY s.time_updated DESC, s.id"
+                FROM session s WHERE s.id=?1"
                 )
             }
         };
@@ -1028,16 +1024,11 @@ impl ProviderAdapter for OpenCodeAdapter<'_> {
         "OpenCode database is missing, unreadable, or has unsupported schema"
     }
 
-    fn list(&self) -> Result<Vec<SessionSummary>> {
-        let (db, schema) = self.open()?;
-        self.rows(&db, schema, None)
-    }
-
     fn load(&self, session_id: &str) -> Result<SessionSnapshot> {
         let revision = self.revision()?;
         let (db, schema) = self.open()?;
         let summary = self
-            .rows(&db, schema, Some(session_id))?
+            .rows(&db, schema, session_id)?
             .into_iter()
             .next()
             .ok_or_else(|| CoreError::NotFound {
@@ -1692,11 +1683,7 @@ impl ProviderAdapter for OpenCodeAdapter<'_> {
             .map_err(CoreError::Protocol)
     }
 
-    fn supports_index(&self) -> bool {
-        true
-    }
-
-    fn inventory(&self) -> Result<Option<Vec<SourceEntry>>> {
+    fn inventory(&self) -> Result<Vec<SourceEntry>> {
         let signature = self.revision()?;
         let (db, schema) = self.open()?;
         let query = match schema {
@@ -1716,15 +1703,14 @@ impl ProviderAdapter for OpenCodeAdapter<'_> {
         if self.revision()? != signature {
             return Err(CoreError::SourceChanged);
         }
-        Ok(Some(
-            ids.into_iter()
-                .map(|session_id| SourceEntry {
-                    session_id,
-                    path: self.path.to_path_buf(),
-                    signature: signature.clone(),
-                })
-                .collect(),
-        ))
+        Ok(ids
+            .into_iter()
+            .map(|session_id| SourceEntry {
+                session_id,
+                path: self.path.to_path_buf(),
+                signature: signature.clone(),
+            })
+            .collect())
     }
 
     fn capture(&self, entry: &SourceEntry) -> Result<SessionSnapshot> {
@@ -1950,8 +1936,7 @@ mod empty_wal_revision_tests {
         };
         let entries = adapter
             .inventory()
-            .expect("An empty WAL must not require a 96-byte SHM header")
-            .unwrap();
+            .expect("An empty WAL must not require a 96-byte SHM header");
         assert_eq!(
             entries
                 .iter()
@@ -1959,7 +1944,16 @@ mod empty_wal_revision_tests {
                 .collect::<Vec<_>>(),
             ["one", "two"]
         );
-        assert_eq!(adapter.list().unwrap().len(), 2);
+        assert_eq!(
+            {
+                let catalog_dir = tempfile::tempdir().unwrap();
+                crate::index::refresh(catalog_dir.path(), adapter.scope, "opencode", &adapter)
+                    .unwrap()
+                    .rows
+            }
+            .len(),
+            2
+        );
         assert_eq!(fs::read(&path).unwrap(), before);
         assert!(
             fs::read(path.with_file_name("opencode.db-wal"))
@@ -2013,15 +2007,41 @@ mod empty_wal_revision_tests {
         );
         assert_ne!(adapter.revision().unwrap(), before);
         assert_eq!(
-            adapter
-                .list()
-                .unwrap()
-                .iter()
-                .find(|row| row.session.session_id == "one")
-                .unwrap()
-                .title,
+            {
+                let catalog_dir = tempfile::tempdir().unwrap();
+                crate::index::refresh(catalog_dir.path(), adapter.scope, "opencode", &adapter)
+                    .unwrap()
+                    .rows
+            }
+            .iter()
+            .find(|row| row.session.session_id == "one")
+            .unwrap()
+            .title,
             "After commit"
         );
+    }
+
+    #[test]
+    fn catalog_excludes_archived_sessions_and_keeps_explicit_load() {
+        let (directory, path) = fixture();
+        let writer = Connection::open(&path).unwrap();
+        writer
+            .execute("UPDATE session SET time_archived=5 WHERE id='two'", [])
+            .unwrap();
+        let adapter = OpenCodeAdapter {
+            path: &path,
+            scope: "owned-archive",
+        };
+        let catalog = crate::index::refresh(
+            &directory.path().join("index"),
+            adapter.scope,
+            PROVIDER,
+            &adapter,
+        )
+        .unwrap();
+        assert_eq!(catalog.rows.len(), 1);
+        assert_eq!(catalog.rows[0].session.session_id, "one");
+        assert_eq!(adapter.load("two").unwrap().summary.title, "Second");
     }
 
     #[test]

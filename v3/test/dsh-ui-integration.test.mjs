@@ -1,3 +1,4 @@
+import { browserPrerequisites } from './browser-prerequisites.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -26,23 +27,7 @@ const sourceFiles = [
 ];
 const sha256 = file => createHash('sha256').update(readFileSync(file)).digest('hex');
 
-function agentBrowserBinary() {
-  const override = process.env.AGENTSESSION_V3_AGENT_BROWSER_BIN;
-  if (override && existsSync(override)) return override;
-  const binaryName = process.platform === 'win32'
-    ? 'agent-browser-win32-x64.exe'
-    : `agent-browser-${process.platform}-${process.arch}`;
-  for (const entry of (process.env.PATH || '').split(path.delimiter)) {
-    const candidate = path.join(entry, 'node_modules', 'agent-browser', 'bin', binaryName);
-    if (existsSync(candidate)) return candidate;
-  }
-  return undefined;
-}
-
-const agentBrowserExe = agentBrowserBinary();
-const skipReason = !agentBrowserExe
-  ? 'The agent-browser CLI is required; the test does not install it or download a browser.'
-  : false;
+const { browserBinary: agentBrowserExe, skip: skipReason } = browserPrerequisites();
 
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
@@ -592,6 +577,8 @@ test('real Axum search locates a DSH event and Viewer deletion updates the resul
     assert.equal(Number(await command('get', 'count', '.reader-action-links a[download]')), 0,
       'The Reader has no session download action at the final event');
 
+    await waitForBrowser(command, `Boolean(document.querySelector('.reader-delete:not(:disabled)'))`,
+      'the Reader metadata controls to become ready');
     await command('click', '.reader-delete');
     await waitForBrowser(command,
       `window.location.pathname === '/sessions' && document.querySelector('[data-search-mode="content"]')?.getAttribute('aria-pressed') === 'true' && document.querySelector('input[type="search"]')?.value === 'END-OF-SYNTHETIC-DSH-ROOT' && document.querySelector('.search-results') === null && Boolean(document.querySelector('.empty-state h2'))`,

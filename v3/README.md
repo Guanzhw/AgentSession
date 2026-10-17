@@ -68,6 +68,40 @@ their recorded scope.
 
 ## HTTP contract migration
 
+Local unreleased architecture repairs preserve invalid Reader execution
+evidence as HTTP 422 `protocol_invalid`. Its error object additionally includes
+`diagnostics` (existing `code` / `event_id` shape, at most 20 entries) and
+`diagnosticsTruncated`. Readable conversation content remains available. Reader
+schema 1/2 caches upgrade to schema 3 and recapture the old projection on the
+next bootstrap; provider records and Viewer metadata are not migrated. See the
+[Reader decision](../.agents/decisions/implemented/2026-10-17-reader-protocol-failure-persistence.md).
+
+Known ambiguous DSH sessions now appear as diagnostic rows with unknown
+counts, search partial coverage and excluded-source statistics. Direct reads
+still reject ambiguous generations. All five adapters use the same indexed
+publication path; see the [inventory decision](../.agents/decisions/implemented/2026-10-17-indexed-provider-diagnostics.md).
+
+Native MCP keeps its existing error responses and writes tool, stage and safe
+failure details to stderr. I/O and storage errors retain their local causes.
+Parse diagnostics carry a static cause chosen at the source boundary; JSON
+errors also retain parser-supplied line and column, with JSONL file offsets.
+Provider structural errors use safe adapter categories when a precise position
+is unavailable. Original provider error text can embed raw record fields and
+is not logged. Blocking failures distinguish panic from cancellation without
+logging their payload. Batch Viewer actions preflight
+each source once and retain their existing transaction and partial-commit rules.
+
+The Linux x64 native/release jobs require public browser regressions. Optional
+local browser tooling has its own Node 24+ manifest and lockfile under
+`v3/test/browser-tools`; root development still supports Node 22.15. Set
+`AGENTSESSION_V3_AGENT_BROWSER_BIN` to the native browser executable and
+`AGENTSESSION_V3_REQUIRE_BROWSER=1` to require browser prerequisites locally.
+Linux x64 CI explicitly selects the installed Chrome executable, checks its
+version and runs `v3/test/browser-smoke.mjs` before the suites. The smoke verifies
+navigation and actual launch arguments. Fresh-mount navigation tests keep the
+same launch arguments for every command in their session; ordinary sessions
+retain the browser's default cache behavior.
+
 AgentSession 3.0 publishes native Reader, pane-search, Protocol and Runtime JSON
 under `/api/v3`. Recognized published 2.0 session endpoints return HTTP 410 with
 `error.code: "http_contract_migrated"`, the canonical `session`, and
@@ -554,17 +588,19 @@ The former runtime is recoverable from Git revision
 are historical and are not part of this workspace.
 
 The Statistics page is available at `/stats` or `/{provider}/stats` for each
-of the five active providers. It displays recorded request counts, known token
-subtotals, unknown request totals, UTC daily rows, and JSON/CSV downloads.
+of the five active providers. It defaults daily trends, Harness comparisons and
+model shares to known token subtotals; the metric control switches all three to
+requests. It also displays recorded request counts, unknown request totals,
+UTC daily rows, and JSON/CSV downloads.
 It also ranks recorded request model IDs by known token subtotal, with request
 and unknown-total counts. Opening a UTC day lists sessions with matching
-recorded requests under the current filters, with per-session counts and known
+request, consumption or observation evidence under the current filters, with per-session counts and known
 token subtotals. The daily drill keeps the report range and filters; JSON and
 CSV downloads reflect the selected report filters.
 The partial statistics endpoints are `/api/v3/stats/{provider}` and
 `/api/v3/stats/{provider}/export.json` or `.csv`. JSON exports every active
 source session, its message count, and a UTC daily series of validated
-request-owned usage. CSV exports the daily series, with one row per day in the
+request usage and verified consumption. CSV exports the daily series, with one row per day in the
 selected range and a `Requests` column. It also repeats the selected usage
 scope and report/usage coverage on each row, with daily known-token subtotals
 and unknown-request counts so blank totals remain interpretable. The default
@@ -573,8 +609,10 @@ range is the last 30 UTC days; `days=7`, `days=90`, and
 message counts describe the full active source inventory; request counts and
 daily rows describe the selected usage range.
 Missing request totals or token components remain `null` in JSON and blank
-in CSV. `knownTokenCount` is the sum of request totals that were actually
-recorded and does not claim full coverage. Requests without a usable timestamp
+in CSV. `knownTokenCount` includes recorded request totals and separately
+verified Codex cumulative consumption increments, and does not claim full
+coverage. Consumption observations do not increase request counts.
+Requests without a usable timestamp
 are counted separately as `untimedRequestCount`; a dated export cannot
 assign them to a day or include them in its recorded request total. Full usage
 coverage is not asserted. OpenCode's root-session (`scope=root`) and recorded
@@ -582,7 +620,8 @@ coverage is not asserted. OpenCode's root-session (`scope=root`) and recorded
 compose across JSON, CSV, and the Statistics page. Project ID is available only
 when the OpenCode source schema records it; working directory is a separate
 cross-provider facet. A model-filtered session row keeps its whole-session
-message count while its request and token counts use only matching requests.
+message count while request and token counts use matching attributed usage.
+Observation counts retain the other selected source and range filters.
 
 Codex Session Protocol v3 separates `usageRecords` from `usageObservations`.
 Only canonical usage with a response ID and explicit thread ownership enters
@@ -594,10 +633,20 @@ boundary excludes earlier child-file rows;
 matching parent usage vectors do not erase later anonymous occurrences. A
 canonical row whose explicit `thread_id` belongs to another session remains
 in raw events and enters neither child usage collection. Stats JSON/CSV reports
-observation counts and marks usage coverage partial; their tokens do not enter request
-totals. The Codex Library/list `tokenCount` likewise sums proved requests and
-is `null` for a legacy-only session. The [decision record](../.agents/decisions/implemented/2026-09-29-v3-codex-unresolved-usage-observations.md)
-documents the source proof and cache versions. Current full-corpus request
+observation counts and marks usage coverage partial. Legacy-only sources now
+expose `consumptionTokens` on observations when a complete cumulative advance
+matches the recorded last-usage vector. Repeated cumulative snapshots add no
+tokens. Verified consumption contributes to known token subtotals, daily/model
+buckets and Library/list `tokenCount`, while request counts stay unchanged.
+Missing, inconsistent, synthetic context-size and ambiguous reset snapshots
+retain unknown consumption. Mixed canonical/legacy sources retain canonical
+request accounting until their mirror relationship can be established.
+An unproved cumulative reset ends the known consumption epoch; later anonymous
+records remain observations. Excluded parent history supplies the last baseline
+without limiting a child's own epoch.
+The [current decision](../.agents/decisions/implemented/2026-10-12-codex-recorded-token-consumption.md)
+extends the [original request-identity decision](../.agents/decisions/implemented/2026-09-29-v3-codex-unresolved-usage-observations.md).
+Current full-corpus request
 verification and provider coverage are tracked separately in the acceptance
 contract.
 The historical Windows `ec320284` package merged requests that share

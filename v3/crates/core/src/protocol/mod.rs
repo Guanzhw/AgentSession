@@ -93,13 +93,13 @@ pub struct ProtocolEvent {
     pub execution: Option<ExecutionObservation>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Diagnostic {
-    pub code: &'static str,
+    pub code: String,
     pub event_id: Option<String>,
 }
 
-#[derive(Debug, Serialize, thiserror::Error)]
+#[derive(Debug, Serialize, Deserialize, thiserror::Error)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ProtocolError {
     #[error("protocol unavailable: {diagnostic}")]
@@ -134,16 +134,16 @@ pub fn finalize_events(
         || revision.is_empty()
     {
         diagnostics.push(Diagnostic {
-            code: "missing_snapshot_identity",
+            code: "missing_snapshot_identity".into(),
             event_id: None,
         });
     }
     let mut ids = HashSet::new();
     let mut positions = HashSet::new();
     for event in &candidates {
-        let mut issue = |code| {
+        let mut issue = |code: &str| {
             diagnostics.push(Diagnostic {
-                code,
+                code: code.into(),
                 event_id: Some(event.id.clone()),
             })
         };

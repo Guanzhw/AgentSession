@@ -44,7 +44,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 use walkdir::WalkDir;
 const PREVIEW_CHARS: usize = 240;
-const CODEX_REVISION_NAMESPACE: &[u8] = b"codex-jsonl-v3-s2-6\0";
+const CODEX_REVISION_NAMESPACE: &[u8] = b"codex-jsonl-v3-s2-7\0";
 const MULTIPLE_SOURCE_DIAGNOSTIC: &str = "codex_multiple_source_files_unmerged";
 const UNRESOLVED_SOURCE_DIAGNOSTIC: &str = "codex_source_inventory_incomplete";
 const INHERITED_PARSER_VERSION: &str = "codex-inherited-v1";
@@ -324,13 +324,13 @@ impl CodexAdapter<'_> {
             selected.push(entry);
         }
         Ok(super::InventoryObservation {
-            entries: Some(selected),
+            entries: selected,
             source_uncertainty: (unresolved_count > 0)
                 .then_some((UNRESOLVED_SOURCE_DIAGNOSTIC, unresolved_count)),
         })
     }
 
-    fn codex_inventory(&self) -> Result<Option<Vec<SourceEntry>>> {
+    fn codex_inventory(&self) -> Result<Vec<SourceEntry>> {
         Ok(self.codex_inventory_observation()?.entries)
     }
     fn capture_selected_entry(
@@ -413,6 +413,9 @@ impl CodexAdapter<'_> {
                 Ok(metadata) if metadata.is_dir() => {}
                 Ok(_) => {
                     return Err(CoreError::Parse {
+                        diagnostic: crate::ParseDiagnostic::new(
+                            "Codex transcript root is not a directory",
+                        ),
                         path: root,
                         reason: "Codex transcript root is not a directory".into(),
                     });
@@ -422,6 +425,7 @@ impl CodexAdapter<'_> {
             }
             for entry in WalkDir::new(&root) {
                 let entry = entry.map_err(|error| CoreError::Parse {
+                    diagnostic: crate::ParseDiagnostic::new("source directory traversal failed"),
                     path: root.clone(),
                     reason: error.to_string(),
                 })?;
@@ -614,7 +618,7 @@ where
     });
     file_digests.sort_by_key(|(index, _)| *index);
     let mut digest = Sha256::new();
-    digest.update(b"codex-stats-usage-source-v10\0");
+    digest.update(b"codex-stats-usage-source-v11\0");
     for ((id, path), (_, file_digest)) in selected.into_iter().zip(file_digests) {
         let path_bytes = path.to_string_lossy();
         digest.update((id.len() as u64).to_le_bytes());
@@ -903,48 +907,6 @@ impl ProviderAdapter for CodexAdapter<'_> {
     fn unavailable_diagnostic(&self) -> &'static str {
         "Codex source directory is unavailable"
     }
-    fn list(&self) -> Result<Vec<SessionSummary>> {
-        let mut rows = Vec::new();
-        let scan = self.source_entries()?;
-        let incomplete = !scan.unresolved.is_empty();
-        for (id, entries) in scan.grouped {
-            if incomplete {
-                rows.push(
-                    unavailable_snapshot(&id, "unindexed", UNRESOLVED_SOURCE_DIAGNOSTIC, &[])
-                        .summary,
-                );
-                continue;
-            }
-            if entries.len() > 1 {
-                match self.resolve_multiple_sources(&id, &entries)? {
-                    CodexSourceSelection::Pair(pair) => {
-                        rows.push(summarize(&pair.load(self.scope, &id)?))
-                    }
-                    CodexSourceSelection::Recorded(_) => {
-                        let sources = self.selected_sources(Some(&id))?;
-                        let path = sources.get(&id).ok_or(CoreError::SourceChanged)?;
-                        let loaded = load_selected(path, self.scope, &id, Some(&sources))?;
-                        self.validate_source_set_membership(&sources, &id)?;
-                        rows.push(summarize(&loaded));
-                    }
-                    CodexSourceSelection::Collision => {
-                        rows.push(collision_snapshot(&id, "unindexed", &entries).summary)
-                    }
-                }
-                continue;
-            }
-            let path = &entries[0].path;
-            // Isolate corrupt individual provider files, preserving existing behavior.
-            if let Ok(session) = load_codex(&path, self.scope, &id) {
-                rows.push(summarize(&session));
-            }
-        }
-        let native_titles = CodexNativeTitles::read(self.root);
-        for row in &mut rows {
-            native_titles.apply(row);
-        }
-        Ok(rows)
-    }
     fn load(&self, session_id: &str) -> Result<SessionSnapshot> {
         let sources = self.selected_sources(Some(session_id))?;
         let path = sources.get(session_id).ok_or_else(|| CoreError::NotFound {
@@ -989,7 +951,7 @@ impl ProviderAdapter for CodexAdapter<'_> {
             );
             if let Ok(row) = serde_json::from_slice::<Value>(&line) {
                 let payload = &row["payload"];
-                if row["type"] == "session_meta" && payload["id"] == session_id {
+                if row["type"] == "session_meta" && session_meta_id(payload) == Some(session_id) {
                     if let Some(content) = payload["base_instructions"]["text"].as_str() {
                         evidence.recorded_with_metadata(
                             "Recorded Codex base instructions",
@@ -1029,7 +991,7 @@ impl ProviderAdapter for CodexAdapter<'_> {
         }
         if is_child && owned_boundary.is_none() {
             evidence.diagnostics.push(crate::system_prompts::PromptDiagnostic {
-                code: "child_prompt_ownership_unavailable",
+                code: "child_prompt_ownership_unavailable".into(),
                 message: "This child source has no owned-message boundary; inherited prompt rows are not attributed to the child.".into(),
                 source: Some(path.to_string_lossy().into_owned()),
             });
@@ -1163,7 +1125,15 @@ impl ProviderAdapter for CodexAdapter<'_> {
         } else {
             codex_apply_child_revision(&mut loaded, &sources);
         }
-        let stream = if !loaded.ownership_unavailable && loaded.protocol_parse_errors.is_empty() {
+        let stream = if loaded.ownership_unavailable {
+            Err(crate::protocol::ProtocolError::Unavailable {
+                diagnostic: "copied parent history has no recorded child task boundary".into(),
+            })
+        } else if !loaded.protocol_parse_errors.is_empty() {
+            Err(crate::protocol::ProtocolError::Invalid {
+                diagnostics: std::mem::take(&mut loaded.protocol_parse_errors),
+            })
+        } else {
             finalize_events(
                 SessionRef {
                     provider: "codex".into(),
@@ -1173,9 +1143,6 @@ impl ProviderAdapter for CodexAdapter<'_> {
                 loaded.revision.clone(),
                 std::mem::take(&mut loaded.protocol_candidates),
             )
-            .ok()
-        } else {
-            None
         };
         let mut capture = super::ReaderCapture {
             stamp: None,
@@ -1335,13 +1302,7 @@ impl ProviderAdapter for CodexAdapter<'_> {
         self.validate_source_set_membership(&sources, session_id)?;
         Ok(bundle)
     }
-    fn supports_index(&self) -> bool {
-        true
-    }
-    fn inventory(&self) -> Result<Option<Vec<SourceEntry>>> {
-        self.codex_inventory()
-    }
-    fn inventory_for_rebuild(&self) -> Result<Option<Vec<SourceEntry>>> {
+    fn inventory(&self) -> Result<Vec<SourceEntry>> {
         self.codex_inventory()
     }
     fn inventory_observation(&self, _rebuild: bool) -> Result<super::InventoryObservation> {
@@ -1465,7 +1426,6 @@ impl ProviderAdapter for CodexAdapter<'_> {
     fn validate_inventory(&self, incoming: &BTreeMap<String, SourceEntry>) -> Result<()> {
         let current = self
             .codex_inventory()?
-            .expect("Codex inventory is always available")
             .into_iter()
             .map(|entry| (entry.session_id, entry.signature))
             .collect::<BTreeMap<_, _>>();
@@ -1493,7 +1453,7 @@ fn collision_parent(entries: &[SourceEntry], session_id: &str) -> Option<Session
     for entry in entries {
         let header = read_primary_meta(&entry.path).ok().flatten()?;
         let payload = &header["payload"];
-        if payload["id"].as_str() != Some(session_id) {
+        if session_meta_id(payload) != Some(session_id) {
             return None;
         }
         let candidates = [
@@ -1698,13 +1658,20 @@ fn header_entry(path: PathBuf) -> Result<Option<SourceEntry>> {
     Ok(Some(entry))
 }
 
+fn session_meta_id(payload: &Value) -> Option<&str> {
+    payload["id"]
+        .as_str()
+        .filter(|id| !id.is_empty())
+        .or_else(|| payload["session_id"].as_str().filter(|id| !id.is_empty()))
+}
+
 fn read_header(path: &Path) -> Result<Option<(String, Option<String>, Option<String>)>> {
     #[cfg(test)]
     HEADER_READS.with(|count| count.set(count.get() + 1));
     let Some(value) = read_primary_meta(path)? else {
         return Ok(None);
     };
-    let Some(id) = value["payload"]["id"].as_str() else {
+    let Some(id) = session_meta_id(&value["payload"]) else {
         return Ok(None);
     };
     Ok(Some((
@@ -1753,7 +1720,7 @@ fn child_identity(path: &Path) -> Result<Option<ChildIdentity>> {
         return Ok(None);
     };
     let payload = &record["payload"];
-    let Some(id) = payload["id"].as_str() else {
+    let Some(id) = session_meta_id(payload) else {
         return Ok(None);
     };
     let declared = payload["source"]["subagent"]["thread_spawn"]["parent_thread_id"].as_str();
@@ -1798,12 +1765,16 @@ fn selected_child_identities(sources: &BTreeMap<String, PathBuf>) -> SelectedChi
 
 fn reader_parent_fact_from_path(path: &Path, session_id: &str) -> Result<Option<SessionRef>> {
     let header = read_primary_meta(path)?.ok_or_else(|| CoreError::Parse {
+        diagnostic: crate::ParseDiagnostic::new("Codex source has no canonical session header"),
         path: path.into(),
         reason: "Codex source has no canonical session header".into(),
     })?;
     let payload = &header["payload"];
-    if payload["id"].as_str() != Some(session_id) {
+    if session_meta_id(payload) != Some(session_id) {
         return Err(CoreError::Parse {
+            diagnostic: crate::ParseDiagnostic::new(
+                "selected child header has another canonical ID",
+            ),
             path: path.into(),
             reason: "selected child header has another canonical ID".into(),
         });
@@ -1862,7 +1833,9 @@ fn copied_child_parent_evidence(path: &Path, session_id: &str) -> Result<(String
         bytes += count as u64;
         digest.update(&line);
         if let Ok(record) = serde_json::from_slice::<Value>(&line) {
-            if record["type"] == "session_meta" && record["payload"]["id"] == session_id {
+            if record["type"] == "session_meta"
+                && session_meta_id(&record["payload"]) == Some(session_id)
+            {
                 primary = true;
             }
             if primary
@@ -1916,8 +1889,7 @@ fn copied_parent_header(path: &Path, parent: &str) -> Result<bool> {
                 .ok()
                 .is_some_and(|record| {
                     record["type"] == "session_meta"
-                        && (record["payload"]["id"].as_str() == Some(parent)
-                            || record["payload"]["session_id"].as_str() == Some(parent))
+                        && session_meta_id(&record["payload"]) == Some(parent)
                 }));
         }
     }
@@ -2181,6 +2153,7 @@ fn open_codex_reader(path: &Path) -> Result<Box<dyn BufRead>> {
 fn codex_line_error(path: &Path, source: std::io::Error) -> CoreError {
     if path.to_string_lossy().ends_with(".zst") {
         CoreError::Parse {
+            diagnostic: crate::ParseDiagnostic::new("Zstandard decoding failed"),
             path: path.into(),
             reason: source.to_string(),
         }
@@ -2367,6 +2340,9 @@ fn codex_prefix(path: &Path, line_count: usize) -> Result<Vec<u8>> {
             .map_err(|source| codex_line_error(path, source))?;
         if count == 0 {
             return Err(CoreError::Parse {
+                diagnostic: crate::ParseDiagnostic::new(
+                    "Codex inherited prefix changed during reading",
+                ),
                 path: path.into(),
                 reason: "Codex inherited prefix changed during reading".into(),
             });
@@ -2384,6 +2360,7 @@ fn load_codex_bytes(
 ) -> Result<LoadedSession> {
     let decoded = if path.to_string_lossy().ends_with(".zst") {
         zstd::stream::decode_all(source_bytes.as_slice()).map_err(|error| CoreError::Parse {
+            diagnostic: crate::ParseDiagnostic::new("Zstandard decoding failed"),
             path: path.into(),
             reason: error.to_string(),
         })?
@@ -2482,14 +2459,14 @@ fn load_codex_reader_positioned(
                 // An actively appended transcript may end in a partial line.
                 let _ = error;
                 observations.facts.diagnostics.push(Diagnostic {
-                    code: "incomplete_trailing_record",
+                    code: "incomplete_trailing_record".into(),
                     event_id: None,
                 });
                 break;
             }
             Err(_) => {
                 protocol_parse_errors.push(Diagnostic {
-                    code: "malformed_source_record",
+                    code: "malformed_source_record".into(),
                     event_id: Some(event_id.clone()),
                 });
                 line_index += 1;
@@ -2503,7 +2480,7 @@ fn load_codex_reader_positioned(
             .flatten();
         let event_timestamp = timestamp.as_deref().and_then(timestamp_ms);
         if created_at.is_none() && record["type"] == "session_meta" {
-            id = record["payload"]["id"].as_str().map(str::to_owned);
+            id = session_meta_id(&record["payload"]).map(str::to_owned);
             cwd = record["payload"]["cwd"].as_str().map(str::to_owned);
             parent_id = record["payload"]["parent_thread_id"]
                 .as_str()
@@ -2530,10 +2507,9 @@ fn load_codex_reader_positioned(
         } else if record["type"] == "session_meta"
             && primary_header_line.is_some_and(|line| line + 1 == line_index)
         {
-            copied_parent_header = parent_id.as_deref().is_some_and(|parent| {
-                record["payload"]["id"].as_str() == Some(parent)
-                    || record["payload"]["session_id"].as_str() == Some(parent)
-            });
+            copied_parent_header = parent_id
+                .as_deref()
+                .is_some_and(|parent| session_meta_id(&record["payload"]) == Some(parent));
         }
         if timestamp.is_some() {
             updated_at = timestamp.clone();
@@ -2586,6 +2562,7 @@ fn load_codex_reader_positioned(
         {
             if parent_id.is_some() && owned_boundary_line.is_none() {
                 owned_boundary_line = Some(line_index);
+                observations.begin_owned_session(expected_id);
                 messages.clear();
                 legacy_user_rows.clear();
                 recorded_user_rows.clear();
@@ -3249,6 +3226,9 @@ fn load_codex_reader_positioned(
     }
     if id.as_deref() != Some(expected_id) {
         return Err(CoreError::Parse {
+            diagnostic: crate::ParseDiagnostic::new(
+                "session_meta canonical ID differs from requested ID",
+            ),
             path: path.into(),
             reason: "session_meta canonical ID differs from requested ID".into(),
         });
@@ -3301,7 +3281,7 @@ fn load_codex_reader_positioned(
         parent_id.is_some() && owned_boundary_line.is_none() && copied_parent_header;
     if parent_id.is_some() && owned_boundary_line.is_none() {
         observations.facts.diagnostics.push(Diagnostic {
-            code: "child_ownership_boundary_unavailable",
+            code: "child_ownership_boundary_unavailable".into(),
             event_id: None,
         });
     }
@@ -3790,9 +3770,11 @@ struct CodexUsageCandidate {
     event_key: String,
     canonical_owner_matches_meta: bool,
     foreign_canonical_owner: bool,
+    inherited_fork_baseline: bool,
     timestamp: Option<i64>,
     model: Option<String>,
     model_provider: Option<String>,
+    model_source: Option<&'static str>,
     response_id: Option<String>,
     turn_id: Option<String>,
     usage: Value,
@@ -3877,13 +3859,103 @@ fn codex_selected_token_count(
     owned_boundary_line: Option<usize>,
 ) -> Option<u64> {
     let selected = codex_proved_usage(usage, owned_boundary_line);
-    (!selected.is_empty())
+    let consumption = codex_legacy_consumption(usage, owned_boundary_line);
+    (!selected.is_empty() || !consumption.is_empty())
         .then(|| {
             selected
                 .iter()
-                .try_fold(0u64, |total, (_, tokens)| total.checked_add(tokens.total?))
+                .map(|(_, tokens)| tokens)
+                .chain(consumption.values())
+                .try_fold(0u64, |total, tokens| total.checked_add(tokens.total?))
         })
         .flatten()
+}
+
+/// Complete cumulative snapshots establish additive consumption even when the
+/// legacy event has no response ID. They do not establish a request identity.
+fn codex_legacy_consumption(
+    usage: &[CodexUsageCandidate],
+    owned_boundary_line: Option<usize>,
+) -> HashMap<usize, UsageTokenComponents> {
+    let owned = || {
+        usage.iter().filter(|candidate| {
+            owned_boundary_line.is_none_or(|boundary| candidate.index >= boundary)
+                && !candidate.foreign_canonical_owner
+        })
+    };
+    // Canonical/legacy mixed streams need a separate proved mirror relation.
+    // Keep their canonical request accounting until that relation is available.
+    if owned().any(|candidate| candidate.source_type == "codex.token_usage_record") {
+        return HashMap::new();
+    }
+    let mut previous: Option<[u64; 6]> = None;
+    let mut initial_zero = true;
+    let mut consumption = HashMap::new();
+    for candidate in usage.iter().filter(|candidate| {
+        !candidate.foreign_canonical_owner && candidate.source_type == "codex.event_msg:token_count"
+    }) {
+        let current = candidate
+            .cumulative_usage
+            .as_ref()
+            .and_then(codex_complete_usage);
+        if owned_boundary_line.is_some_and(|boundary| candidate.index < boundary) {
+            // Excluded parent history supplies only the latest baseline; its
+            // earlier resets do not interrupt the child's accounting epoch.
+            previous = current;
+            initial_zero = false;
+            continue;
+        }
+        let Some(current) = current else {
+            // A reset or missing cumulative snapshot ends the proved accounting
+            // epoch. Later rows can replay an earlier counter and need lineage
+            // evidence before they can extend this known subtotal.
+            if previous.is_some() {
+                break;
+            }
+            initial_zero = false;
+            continue;
+        };
+        if previous.is_some_and(|before| (0..6).any(|index| current[index] < before[index])) {
+            break;
+        }
+        let last = codex_complete_usage(&candidate.usage);
+        let delta = match previous {
+            Some(before) => Some(std::array::from_fn(|index| current[index] - before[index])),
+            // The first complete append starts at zero. A copied or resumed
+            // cumulative prefix cannot satisfy this equality and is not counted.
+            None => last.filter(|last| {
+                initial_zero && !candidate.inherited_fork_baseline && *last == current
+            }),
+        };
+        initial_zero = false;
+        previous = Some(current);
+        if let Some(delta) = delta
+            && Some(delta) == last
+            && delta[5] > 0
+        {
+            consumption.insert(
+                candidate.index,
+                codex_usage_tokens(&candidate.usage, false).expect("complete positive usage"),
+            );
+        }
+    }
+    consumption
+}
+
+fn codex_complete_usage(usage: &Value) -> Option<[u64; 6]> {
+    let input = usage["input_tokens"].as_u64()?;
+    let cached = usage["cached_input_tokens"].as_u64()?;
+    let write = match usage.get("cache_write_input_tokens") {
+        None => 0, // Native TokenUsage serde default.
+        Some(value) => value.as_u64()?,
+    };
+    let output = usage["output_tokens"].as_u64()?;
+    let reasoning = usage["reasoning_output_tokens"].as_u64()?;
+    let total = usage["total_tokens"].as_u64()?;
+    (input.checked_add(output)? == total
+        && cached.checked_add(write)? <= input
+        && reasoning <= output)
+        .then_some([input, cached, write, output, reasoning, total])
 }
 
 fn codex_proved_usage<'a>(
@@ -3945,14 +4017,27 @@ struct CodexObservations {
     lifecycles: Vec<RunObservation>,
     saw_primary_meta: bool,
     copied_parent_prefix_excluded: bool,
+    inherited_fork_baseline: bool,
     execution_observed: bool,
     active_model: Option<String>,
     active_model_provider: Option<String>,
+    active_model_source: Option<&'static str>,
+    own_model_provider: Option<String>,
     usage_owner_id: Option<String>,
     usage: Vec<CodexUsageCandidate>,
 }
 
 impl CodexObservations {
+    fn begin_owned_session(&mut self, session_id: &str) {
+        if self.usage_owner_id.as_deref() == Some(session_id) {
+            return;
+        }
+        self.usage_owner_id = Some(session_id.into());
+        self.active_model = None;
+        self.active_model_source = None;
+        self.active_model_provider = self.own_model_provider.clone();
+    }
+
     #[cfg(test)]
     fn observe(&mut self, record: &Value, index: usize, session_id: &str) {
         self.observe_positioned(
@@ -3982,7 +4067,7 @@ impl CodexObservations {
             && codex_usage_payload(record).is_none()
         {
             self.facts.diagnostics.push(Diagnostic {
-                code: "codex_usage_payload_unavailable",
+                code: "codex_usage_payload_unavailable".into(),
                 event_id: Some(format!("event:codex:{event_key}")),
             });
         }
@@ -3992,9 +4077,13 @@ impl CodexObservations {
             && self.usage_owner_id.as_deref() != Some(&owner_id)
         {
             self.active_model = None;
+            self.active_model_source = None;
             self.active_model_provider = (owner_id == session_id)
                 .then(|| nonempty(&payload["model_provider"]))
                 .flatten();
+            if owner_id == session_id {
+                self.own_model_provider = self.active_model_provider.clone();
+            }
             self.usage_owner_id = Some(owner_id);
         }
         if kind == "event_msg"
@@ -4004,8 +4093,15 @@ impl CodexObservations {
         {
             if let Some(model) = nonempty(&payload["thread_settings"]["model"]) {
                 self.active_model = Some(model);
+                self.active_model_source = Some("thread_settings_applied");
                 self.active_model_provider =
                     nonempty(&payload["thread_settings"]["model_provider_id"]);
+            }
+        }
+        if kind == "turn_context" && self.usage_owner_id.as_deref() == Some(session_id) {
+            if let Some(model) = nonempty(&payload["model"]) {
+                self.active_model = Some(model);
+                self.active_model_source = Some("turn_context");
             }
         }
         if let Some(usage) = codex_usage_payload(record) {
@@ -4022,9 +4118,11 @@ impl CodexObservations {
                 foreign_canonical_owner: canonical_thread_id
                     .as_deref()
                     .is_some_and(|owner| owner != session_id),
+                inherited_fork_baseline: self.inherited_fork_baseline,
                 timestamp,
                 model: self.active_model.clone(),
                 model_provider: self.active_model_provider.clone(),
+                model_source: self.active_model_source,
                 response_id: nonempty(&payload["response_id"])
                     .or_else(|| nonempty(&payload["info"]["response_id"])),
                 turn_id: nonempty(&payload["turn_id"]),
@@ -4061,6 +4159,7 @@ impl CodexObservations {
             self.saw_primary_meta = true;
             let spawn = &payload["source"]["subagent"]["thread_spawn"];
             let fork = nonempty(&payload["forked_from_id"]);
+            self.inherited_fork_baseline = fork.is_some();
             let spawned_parent = nonempty(&spawn["parent_thread_id"]);
             let parent = spawned_parent
                 .clone()
@@ -4247,6 +4346,7 @@ impl CodexObservations {
         }
         self.facts.run_observations = self.lifecycles;
         let selected = codex_proved_usage(&self.usage, owned_boundary_line);
+        let mut consumption = codex_legacy_consumption(&self.usage, owned_boundary_line);
         let mut selected_indices = HashSet::new();
         for (candidate, tokens) in selected {
             selected_indices.insert(candidate.index);
@@ -4285,7 +4385,11 @@ impl CodexObservations {
                         Fidelity::Recorded
                     },
                     source_type: if candidate.model.is_some() {
-                        format!("{}+thread_settings_applied", candidate.source_type)
+                        format!(
+                            "{}+{}",
+                            candidate.source_type,
+                            candidate.model_source.expect("recorded model source")
+                        )
                     } else {
                         candidate.source_type.into()
                     },
@@ -4313,6 +4417,9 @@ impl CodexObservations {
                     .cumulative_usage
                     .as_ref()
                     .map(codex_observation_tokens),
+                consumption_tokens: consumption.remove(&candidate.index),
+                model: candidate.model.clone(),
+                model_provider: candidate.model_provider.clone(),
                 provenance: Provenance {
                     fidelity: Fidelity::Recorded,
                     source_type: candidate.source_type.into(),
@@ -4327,7 +4434,7 @@ impl CodexObservations {
             } else {
                 ObservationState::Observed
             },
-            details: "Source-proved Codex response requests and separately retained unresolved usage occurrences after child ownership; cumulative turn and thread totals are excluded from request statistics.".into(),
+            details: "Source-proved response requests and separately retained usage occurrences after child ownership. Complete legacy-only cumulative advances establish additive token consumption without request identity; repeated, synthetic, partial and mixed-stream snapshots remain unresolved.".into(),
         });
         for (domain, observed, details) in [
             (
@@ -5754,7 +5861,7 @@ mod tests {
             sources.insert(id.to_owned(), path);
         }
         let mut expected = Sha256::new();
-        expected.update(b"codex-stats-usage-source-v10\0");
+        expected.update(b"codex-stats-usage-source-v11\0");
         for (id, path) in &sources {
             let path_bytes = path.to_string_lossy();
             let bytes = fs::read(path).unwrap();
@@ -5939,6 +6046,311 @@ mod tests {
             Some("1")
         );
         assert_eq!(facts.usage_observations[0].cumulative_tokens, None);
+    }
+
+    fn legacy_token_row(last: u64, cumulative: u64) -> Value {
+        let vector = |total| {
+            serde_json::json!({
+                "input_tokens": total, "cached_input_tokens": 0,
+                "cache_write_input_tokens": 0, "output_tokens": 0,
+                "reasoning_output_tokens": 0, "total_tokens": total,
+            })
+        };
+        serde_json::json!({"type":"event_msg","payload":{
+        "type":"token_count","info":{
+            "last_token_usage":vector(last), "total_token_usage":vector(cumulative)
+        }}})
+    }
+
+    #[test]
+    fn legacy_cumulative_advances_establish_consumption_without_request_identity() {
+        let rows = [
+            serde_json::json!({"type":"session_meta","payload":{"id":"root"}}),
+            legacy_token_row(10, 10),
+            legacy_token_row(10, 10),
+            legacy_token_row(7, 17),
+            legacy_token_row(7, 17),
+            legacy_token_row(7, 24),
+        ];
+        let mut observations = CodexObservations::default();
+        for (index, row) in rows.iter().enumerate() {
+            observations.observe(row, index, "root");
+        }
+        assert_eq!(
+            codex_selected_token_count(&observations.usage, None),
+            Some(24)
+        );
+        let facts = observations.finish("root", None);
+        assert!(facts.usage_records.is_empty());
+        assert_eq!(facts.usage_observations.len(), 5);
+        assert_eq!(
+            facts
+                .usage_observations
+                .iter()
+                .filter_map(|row| row.consumption_tokens.as_ref().map(|tokens| tokens.total))
+                .collect::<Vec<_>>(),
+            [Some(10), Some(7), Some(7)]
+        );
+    }
+
+    #[test]
+    fn child_consumption_uses_copied_prefix_only_as_cumulative_baseline() {
+        let rows = [
+            legacy_token_row(100, 100),
+            legacy_token_row(7, 107),
+            legacy_token_row(7, 107),
+        ];
+        let mut observations = CodexObservations::default();
+        for (index, row) in rows.iter().enumerate() {
+            observations.observe(row, index, "child");
+        }
+        assert_eq!(
+            codex_selected_token_count(&observations.usage, Some(1)),
+            Some(7)
+        );
+        let facts = observations.finish("child", Some(1));
+        assert_eq!(facts.usage_observations.len(), 2);
+        assert_eq!(
+            facts.usage_observations[0]
+                .consumption_tokens
+                .as_ref()
+                .unwrap()
+                .total,
+            Some(7)
+        );
+        assert!(facts.usage_observations[1].consumption_tokens.is_none());
+    }
+
+    #[test]
+    fn excluded_parent_rollbacks_do_not_stop_child_consumption() {
+        let mut partial = legacy_token_row(4, 104);
+        partial["payload"]["info"]["total_token_usage"] = serde_json::json!({"total_tokens":104});
+        for prefix in [
+            vec![legacy_token_row(100, 100), legacy_token_row(10, 10)],
+            vec![
+                legacy_token_row(100, 100),
+                partial,
+                legacy_token_row(10, 10),
+            ],
+        ] {
+            let boundary = prefix.len();
+            let rows = prefix
+                .into_iter()
+                .chain([
+                    legacy_token_row(7, 17),
+                    legacy_token_row(1, 1),
+                    legacy_token_row(2, 3),
+                ])
+                .collect::<Vec<_>>();
+            let mut observations = CodexObservations::default();
+            for (index, row) in rows.iter().enumerate() {
+                observations.observe(row, index, "child");
+            }
+            assert_eq!(
+                codex_selected_token_count(&observations.usage, Some(boundary)),
+                Some(7)
+            );
+            let facts = observations.finish("child", Some(boundary));
+            assert_eq!(facts.usage_observations.len(), 3);
+            assert_eq!(
+                facts.usage_observations[0]
+                    .consumption_tokens
+                    .as_ref()
+                    .unwrap()
+                    .total,
+                Some(7)
+            );
+            assert!(
+                facts.usage_observations[1..]
+                    .iter()
+                    .all(|row| row.consumption_tokens.is_none())
+            );
+        }
+    }
+
+    #[test]
+    fn copied_child_consumption_uses_owned_model_after_task_boundary() {
+        let directory = tempfile::tempdir().unwrap();
+        let child = "11111111-1111-4111-8111-111111111111";
+        let parent = "22222222-2222-4222-8222-222222222222";
+        let path = transcript_path(directory.path(), format!("rollout-{child}.jsonl"));
+        let rows = [
+            serde_json::json!({"type":"session_meta","timestamp":"2026-09-02T00:00:00Z","payload":{
+                "id":child,"parent_thread_id":parent,"model_provider":"own-provider"}}),
+            serde_json::json!({"type":"session_meta","timestamp":"2026-09-02T00:00:01Z","payload":{
+                "id":parent,"model_provider":"parent-provider"}}),
+            serde_json::json!({"type":"event_msg","payload":{"type":"thread_settings_applied",
+                "thread_settings":{"model":"parent-model","model_provider_id":"parent-provider"}}}),
+            legacy_token_row(100, 100),
+            serde_json::json!({"type":"response_item","payload":{"type":"agent_message",
+                "content":[{"type":"text","text":"Message Type: NEW_TASK\nTask name: /root/worker\nPayload: do work"}]}}),
+            serde_json::json!({"type":"turn_context","payload":{"model":"child-model"}}),
+            legacy_token_row(7, 107),
+        ];
+        fs::write(
+            &path,
+            rows.iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n",
+        )
+        .unwrap();
+        let loaded = load_codex(&path, "child-consumption", child).unwrap();
+        assert_eq!(loaded.token_count, Some(7));
+        let facts = loaded
+            .observations
+            .finish(child, loaded.owned_boundary_line);
+        assert_eq!(facts.usage_observations.len(), 1);
+        assert_eq!(
+            facts.usage_observations[0].model.as_deref(),
+            Some("child-model")
+        );
+        assert_eq!(
+            facts.usage_observations[0].model_provider.as_deref(),
+            Some("own-provider")
+        );
+    }
+
+    #[test]
+    fn canonical_usage_model_provenance_names_recorded_turn_context() {
+        let mut observations = CodexObservations::default();
+        let rows = [
+            serde_json::json!({"type":"session_meta","payload":{"id":"root"}}),
+            serde_json::json!({"type":"turn_context","payload":{"model":"recorded-model"}}),
+            serde_json::json!({"type":"token_usage_record","payload":{
+                "thread_id":"root","response_id":"response","usage":{"total_tokens":9}}}),
+        ];
+        for (index, row) in rows.iter().enumerate() {
+            observations.observe(row, index, "root");
+        }
+        let facts = observations.finish("root", None);
+        assert_eq!(
+            facts.usage_records[0].model.as_deref(),
+            Some("recorded-model")
+        );
+        assert_eq!(
+            facts.usage_records[0].provenance.source_type,
+            "codex.token_usage_record+turn_context"
+        );
+    }
+
+    #[test]
+    fn own_child_turn_context_before_task_boundary_keeps_model() {
+        let directory = tempfile::tempdir().unwrap();
+        let child = "11111111-1111-4111-8111-111111111111";
+        let path = transcript_path(directory.path(), format!("rollout-{child}.jsonl"));
+        let rows = [
+            serde_json::json!({"type":"session_meta","timestamp":"2026-09-02T00:00:00Z","payload":{
+                "id":child,"parent_thread_id":"22222222-2222-4222-8222-222222222222"}}),
+            serde_json::json!({"type":"turn_context","payload":{"model":"own-model"}}),
+            serde_json::json!({"type":"response_item","payload":{"type":"agent_message",
+                "content":[{"type":"text","text":"Message Type: NEW_TASK\nTask name: /root/worker\nPayload: do work"}]}}),
+            serde_json::json!({"type":"token_usage_record","payload":{
+                "thread_id":child,"response_id":"child-response","usage":{"total_tokens":7}}}),
+        ];
+        fs::write(
+            &path,
+            rows.iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n",
+        )
+        .unwrap();
+        let loaded = load_codex(&path, "child-consumption", child).unwrap();
+        let facts = loaded
+            .observations
+            .finish(child, loaded.owned_boundary_line);
+        assert_eq!(facts.usage_records[0].model.as_deref(), Some("own-model"));
+    }
+
+    #[test]
+    fn direct_legacy_child_first_cumulative_append_counts_own_consumption() {
+        let rows = [
+            serde_json::json!({"type":"session_meta","payload":{"id":"child"}}),
+            legacy_token_row(10, 10),
+            legacy_token_row(7, 17),
+        ];
+        let mut observations = CodexObservations::default();
+        for (index, row) in rows.iter().enumerate() {
+            observations.observe(row, index, "child");
+        }
+        assert_eq!(
+            codex_selected_token_count(&observations.usage, Some(1)),
+            Some(17)
+        );
+    }
+
+    #[test]
+    fn fork_first_cumulative_snapshot_only_establishes_inherited_baseline() {
+        let rows = [
+            serde_json::json!({"type":"session_meta","payload":{"id":"child","forked_from_id":"parent"}}),
+            legacy_token_row(10, 10),
+            legacy_token_row(7, 17),
+        ];
+        let mut observations = CodexObservations::default();
+        for (index, row) in rows.iter().enumerate() {
+            observations.observe(row, index, "child");
+        }
+        assert_eq!(
+            codex_selected_token_count(&observations.usage, Some(1)),
+            Some(7)
+        );
+    }
+
+    #[test]
+    fn cumulative_rollback_does_not_recount_replayed_consumption() {
+        let rows = [
+            legacy_token_row(10, 10),
+            legacy_token_row(7, 17),
+            legacy_token_row(10, 10),
+            legacy_token_row(7, 17),
+        ];
+        let mut observations = CodexObservations::default();
+        for (index, row) in rows.iter().enumerate() {
+            observations.observe(row, index, "root");
+        }
+        assert_eq!(
+            codex_selected_token_count(&observations.usage, None),
+            Some(17)
+        );
+        let facts = observations.finish("root", None);
+        assert_eq!(facts.usage_observations.len(), 4);
+        assert!(
+            facts.usage_observations[2..]
+                .iter()
+                .all(|row| row.consumption_tokens.is_none())
+        );
+    }
+
+    #[test]
+    fn partial_synthetic_reset_and_mixed_usage_do_not_establish_legacy_consumption() {
+        let mut synthetic = legacy_token_row(5, 20);
+        synthetic["payload"]["info"]["last_token_usage"]["input_tokens"] = 0.into();
+        synthetic["payload"]["info"]["total_token_usage"]["input_tokens"] = 0.into();
+        let rows = [
+            legacy_token_row(10, 10),
+            synthetic,
+            legacy_token_row(7, 27),
+            legacy_token_row(3, 3),
+            legacy_token_row(2, 5),
+        ];
+        let mut observations = CodexObservations::default();
+        for (index, row) in rows.iter().enumerate() {
+            observations.observe(row, index, "root");
+        }
+        assert_eq!(
+            codex_selected_token_count(&observations.usage, None),
+            Some(10)
+        );
+        observations.observe(
+            &serde_json::json!({"type":"token_usage_record","payload":{
+            "thread_id":"root","response_id":"canonical","usage":{"total_tokens":9}}}),
+            5,
+            "root",
+        );
+        assert!(codex_legacy_consumption(&observations.usage, None).is_empty());
     }
 
     #[test]
@@ -7975,7 +8387,7 @@ mod tests {
             [archived.clone(), active.clone()]
         );
         assert!(adapter.storage_diagnostic().is_none());
-        assert_eq!(adapter.inventory().unwrap().unwrap().len(), 2);
+        assert_eq!(adapter.inventory().unwrap().len(), 2);
         assert_eq!(
             adapter.load("active").unwrap().summary.session.session_id,
             "active"
@@ -8014,13 +8426,13 @@ mod tests {
             scope: "cache-test",
         };
         let before = HEADER_READS.with(|count| count.get());
-        assert_eq!(adapter.inventory().unwrap().unwrap().len(), 2);
+        assert_eq!(adapter.inventory().unwrap().len(), 2);
         let after_first = HEADER_READS.with(|count| count.get());
         assert_eq!(after_first - before, 2);
-        assert_eq!(adapter.inventory().unwrap().unwrap().len(), 2);
+        assert_eq!(adapter.inventory().unwrap().len(), 2);
         assert_eq!(HEADER_READS.with(|count| count.get()), after_first + 2);
         fs::write(&second, source("third-longer")).unwrap();
-        let inventory = adapter.inventory().unwrap().unwrap();
+        let inventory = adapter.inventory().unwrap();
         assert_eq!(
             inventory
                 .iter()
@@ -8035,13 +8447,12 @@ mod tests {
             .unwrap()
             .write_all(b"{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"appended\"}}\n")
             .unwrap();
-        assert_eq!(adapter.inventory().unwrap().unwrap().len(), 2);
+        assert_eq!(adapter.inventory().unwrap().len(), 2);
         assert_eq!(HEADER_READS.with(|count| count.get()), after_first + 6);
         fs::remove_file(&first).unwrap();
         assert_eq!(
             adapter
                 .inventory()
-                .unwrap()
                 .unwrap()
                 .iter()
                 .map(|entry| entry.session_id.as_str())
@@ -8064,7 +8475,6 @@ mod tests {
         let incoming = adapter
             .inventory()
             .unwrap()
-            .unwrap()
             .into_iter()
             .map(|entry| (entry.session_id.clone(), entry))
             .collect();
@@ -8073,7 +8483,7 @@ mod tests {
             adapter.validate_inventory(&incoming),
             Err(CoreError::SourceChanged)
         ));
-        let collided = adapter.inventory().unwrap().unwrap();
+        let collided = adapter.inventory().unwrap();
         assert_eq!(collided.len(), 1);
         assert!(collided[0].signature.starts_with("collision:"));
     }
@@ -8161,7 +8571,6 @@ mod tests {
         let entry = adapter
             .inventory()
             .unwrap()
-            .unwrap()
             .into_iter()
             .find(|entry| entry.session_id == "neww-id")
             .unwrap();
@@ -8199,12 +8608,9 @@ mod tests {
             root: right.path(),
             scope: "right",
         };
-        let left_entry = left_adapter.inventory().unwrap().unwrap().remove(0);
+        let left_entry = left_adapter.inventory().unwrap().remove(0);
         assert_eq!(left_entry.session_id, "left-id");
-        assert_eq!(
-            right_adapter.inventory().unwrap().unwrap()[0].session_id,
-            "right-id"
-        );
+        assert_eq!(right_adapter.inventory().unwrap()[0].session_id, "right-id");
 
         let modified = fs::metadata(&left_path).unwrap().modified().unwrap();
         fs::write(&left_path, source("neww-id")).unwrap();
@@ -8220,7 +8626,7 @@ mod tests {
                 .signature,
             left_entry.signature
         );
-        let reassigned = left_adapter.inventory().unwrap().unwrap().remove(0);
+        let reassigned = left_adapter.inventory().unwrap().remove(0);
         assert_eq!(reassigned.session_id, "neww-id");
         assert_eq!(
             left_adapter
@@ -8231,10 +8637,7 @@ mod tests {
                 .session_id,
             "neww-id"
         );
-        assert_eq!(
-            right_adapter.inventory().unwrap().unwrap()[0].session_id,
-            "right-id"
-        );
+        assert_eq!(right_adapter.inventory().unwrap()[0].session_id, "right-id");
     }
 
     #[test]
@@ -8262,12 +8665,10 @@ mod tests {
             scope: "same-stat-rebuild",
         };
         let index = directory.path().join("index");
-        let first = crate::index::refresh(&index, adapter.scope, "codex", &adapter)
-            .unwrap()
-            .unwrap();
+        let first = crate::index::refresh(&index, adapter.scope, "codex", &adapter).unwrap();
         assert_eq!(first.rows[0].session.session_id, "old-id");
         let previous = fs::metadata(&path).unwrap().modified().unwrap();
-        let signature = adapter.inventory().unwrap().unwrap()[0].signature.clone();
+        let signature = adapter.inventory().unwrap()[0].signature.clone();
         fs::write(&path, source("new-id")).unwrap();
         fs::OpenOptions::new()
             .write(true)
@@ -8275,19 +8676,13 @@ mod tests {
             .unwrap()
             .set_times(fs::FileTimes::new().set_modified(previous))
             .unwrap();
-        assert_eq!(
-            adapter.inventory().unwrap().unwrap()[0].signature,
-            signature
-        );
+        assert_eq!(adapter.inventory().unwrap()[0].signature, signature);
 
         let rebuilt = crate::index::rebuild(&index, adapter.scope, "codex", &adapter).unwrap();
         assert_eq!(rebuilt.rows.len(), 1);
         assert_eq!(rebuilt.rows[0].session.session_id, "new-id");
         assert_ne!(rebuilt.revision, first.revision);
-        assert_eq!(
-            adapter.inventory().unwrap().unwrap()[0].session_id,
-            "new-id"
-        );
+        assert_eq!(adapter.inventory().unwrap()[0].session_id, "new-id");
         assert!(adapter.load("new-id").is_ok());
         assert!(matches!(
             adapter.load("old-id"),
@@ -8306,7 +8701,7 @@ mod tests {
         assert_eq!(adapter.codex_files().unwrap().len(), 840);
         let started = std::time::Instant::now();
         for _ in 0..35 {
-            assert_eq!(adapter.inventory().unwrap().unwrap().len(), 837);
+            assert_eq!(adapter.inventory().unwrap().len(), 837);
         }
         eprintln!("Codex 35 inventories: {:?}", started.elapsed());
     }
@@ -8695,7 +9090,7 @@ mod tests {
             root: directory.path(),
             scope: "duplicate-codex",
         };
-        let inventory = adapter.inventory().unwrap().unwrap();
+        let inventory = adapter.inventory().unwrap();
         assert_eq!(inventory.len(), 1);
         assert_eq!(inventory[0].path, later);
         assert!(inventory[0].signature.starts_with("collision:"));
@@ -8962,7 +9357,7 @@ mod tests {
             scope: "compressed-codex",
         };
 
-        assert_eq!(adapter.inventory().unwrap().unwrap()[0].path, plain);
+        assert_eq!(adapter.inventory().unwrap()[0].path, plain);
 
         let plain_stream = adapter.protocol_event_stream(id).unwrap();
         let plain_revision = plain_stream
@@ -8981,10 +9376,10 @@ mod tests {
         );
         fs::remove_file(&plain).unwrap();
 
-        assert_eq!(adapter.inventory().unwrap().unwrap()[0].path, compressed);
+        assert_eq!(adapter.inventory().unwrap()[0].path, compressed);
         assert_eq!(
             adapter
-                .index_capture_revision(&adapter.inventory().unwrap().unwrap()[0])
+                .index_capture_revision(&adapter.inventory().unwrap()[0])
                 .unwrap(),
             None
         );
@@ -9451,7 +9846,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(projection, 10);
+        assert_eq!(projection, 11);
         let row: String = db
             .query_row(
                 "SELECT item_json FROM reader_item WHERE provider='codex' AND session_id=?1 AND ordinal=0",

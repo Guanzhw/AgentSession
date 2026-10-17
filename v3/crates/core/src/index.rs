@@ -27,7 +27,7 @@ pub struct ReindexResult {
     pub diagnostic: Option<String>,
 }
 
-const STORED_SUMMARY_SCHEMA_VERSION: u8 = 14;
+const STORED_SUMMARY_SCHEMA_VERSION: u8 = 16;
 
 /// Opt-in, source-free diagnostics for the auxiliary resource build. Entry and
 /// exit share a process-local invocation number, including unsuccessful exits.
@@ -119,7 +119,7 @@ pub(crate) fn refresh(
     scope: &str,
     provider: &str,
     adapter: &dyn ProviderAdapter,
-) -> Result<Option<PublishedCatalog>> {
+) -> Result<PublishedCatalog> {
     publish(
         index_dir,
         scope,
@@ -138,7 +138,7 @@ pub(crate) fn refresh_with_probe(
     provider: &str,
     adapter: &dyn ProviderAdapter,
     probe: &mut crate::search::SearchPhaseProbe,
-) -> Result<Option<PublishedCatalog>> {
+) -> Result<PublishedCatalog> {
     publish(index_dir, scope, provider, adapter, false, Some(probe))
 }
 
@@ -149,19 +149,12 @@ fn publish(
     adapter: &dyn ProviderAdapter,
     force: bool,
     #[cfg(feature = "search-phase-probe")] mut probe: Option<&mut crate::search::SearchPhaseProbe>,
-) -> Result<Option<PublishedCatalog>> {
+) -> Result<PublishedCatalog> {
     #[cfg(feature = "search-phase-probe")]
     let mut resource_probe = ResourceProbe::new("index_publication_probe", provider);
     #[cfg(feature = "search-phase-probe")]
     {
         resource_probe.counts.insert("force", usize::from(force));
-    }
-    if !adapter.supports_index() {
-        #[cfg(feature = "search-phase-probe")]
-        {
-            resource_probe.completed = true;
-        }
-        return Ok(None);
     }
     fs::create_dir_all(index_dir).map_err(|source| CoreError::Io {
         path: index_dir.to_owned(),
@@ -193,11 +186,7 @@ fn publish(
     #[cfg(feature = "search-phase-probe")]
     let phase_started = probe.as_ref().and_then(|probe| probe.begin());
     let observation = adapter.inventory_observation(force)?;
-    let inventory = observation.entries.ok_or_else(|| {
-        CoreError::Storage(format!(
-            "{provider} declared indexed capture without inventory"
-        ))
-    })?;
+    let inventory = observation.entries;
     #[cfg(feature = "search-phase-probe")]
     if let Some(probe) = probe.as_mut() {
         probe.add("inventory", phase_started);
@@ -408,14 +397,14 @@ fn publish(
     {
         resource_probe.completed = true;
     }
-    Ok(Some(PublishedCatalog {
+    Ok(PublishedCatalog {
         rows: existing
             .into_values()
             .map(|(_, summary, _, _)| summary)
             .collect(),
         revision: format!("{provider}:{}", revision.unwrap_or(0)),
         source_uncertainty: observation.source_uncertainty,
-    }))
+    })
 }
 
 pub(crate) fn rebuild(
@@ -432,8 +421,7 @@ pub(crate) fn rebuild(
         true,
         #[cfg(feature = "search-phase-probe")]
         None,
-    )?
-    .ok_or_else(|| CoreError::Storage(format!("{provider} has no durable catalog support")))
+    )
 }
 
 #[cfg(test)]
@@ -472,23 +460,14 @@ mod tests {
         fn unavailable_diagnostic(&self) -> &'static str {
             "unavailable"
         }
-        fn list(&self) -> Result<Vec<SessionSummary>> {
-            unreachable!("indexed fixture only")
-        }
         fn load(&self, _session_id: &str) -> Result<SessionSnapshot> {
             unreachable!("capture must use selected source")
         }
-        fn supports_index(&self) -> bool {
-            true
-        }
-        fn inventory(&self) -> Result<Option<Vec<SourceEntry>>> {
+        fn inventory(&self) -> Result<Vec<SourceEntry>> {
             if !self.path.exists() {
-                return Ok(Some(Vec::new()));
+                return Ok(Vec::new());
             }
-            Ok(Some(vec![SourceEntry::new(
-                "session".into(),
-                self.path.clone(),
-            )?]))
+            Ok(vec![SourceEntry::new("session".into(), self.path.clone())?])
         }
         fn index_capture_revision(&self, entry: &SourceEntry) -> Result<Option<String>> {
             fs::read_to_string(&entry.path)
@@ -506,6 +485,7 @@ mod tests {
             })?;
             if body == "corrupt" {
                 return Err(CoreError::Parse {
+                    diagnostic: crate::ParseDiagnostic::new("invalid provider source"),
                     path: entry.path.clone(),
                     reason: "corrupt fixture".into(),
                 });
@@ -554,7 +534,6 @@ mod tests {
                 captures: captures.clone(),
             },
         )
-        .unwrap()
         .unwrap();
         let db = Connection::open(index.join("scope.sqlite")).unwrap();
         db.execute_batch(
@@ -683,16 +662,10 @@ mod tests {
         fn unavailable_diagnostic(&self) -> &'static str {
             "unavailable"
         }
-        fn list(&self) -> Result<Vec<SessionSummary>> {
-            self.fixture.list()
-        }
         fn load(&self, id: &str) -> Result<SessionSnapshot> {
             self.fixture.load(id)
         }
-        fn supports_index(&self) -> bool {
-            true
-        }
-        fn inventory(&self) -> Result<Option<Vec<SourceEntry>>> {
+        fn inventory(&self) -> Result<Vec<SourceEntry>> {
             self.fixture.inventory()
         }
         fn capture(&self, entry: &SourceEntry) -> Result<SessionSnapshot> {
@@ -801,9 +774,7 @@ mod tests {
             captures: captures.clone(),
         };
         let index = root.path().join("index");
-        let first = refresh(&index, "scope", "codex", &fixture)
-            .unwrap()
-            .unwrap();
+        let first = refresh(&index, "scope", "codex", &fixture).unwrap();
         let forced = rebuild(
             &index,
             "scope",
@@ -829,9 +800,7 @@ mod tests {
             captures: captures.clone(),
         };
         let index = root.path().join("index");
-        let first = refresh(&index, "scope", "codex", &adapter)
-            .unwrap()
-            .unwrap();
+        let first = refresh(&index, "scope", "codex", &adapter).unwrap();
         let db = Connection::open(index.join("scope.sqlite")).unwrap();
         let encoded: String = db
             .query_row(
@@ -850,11 +819,19 @@ mod tests {
         .unwrap();
         drop(db);
 
-        let refreshed = refresh(&index, "scope", "codex", &adapter)
-            .unwrap()
-            .unwrap();
+        let refreshed = refresh(&index, "scope", "codex", &adapter).unwrap();
         assert_ne!(refreshed.revision, first.revision);
         assert_eq!(refreshed.rows[0].token_count, None);
+        assert_eq!(captures.load(Ordering::SeqCst), 2);
+        let db = Connection::open(index.join("scope.sqlite")).unwrap();
+        let stored_version: u8 = db.query_row(
+            "SELECT json_extract(summary_json, '$._schemaVersion') FROM catalog_entry WHERE provider='codex' AND session_id='session'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(stored_version, STORED_SUMMARY_SCHEMA_VERSION);
+        let unchanged = refresh(&index, "scope", "codex", &adapter).unwrap();
+        assert_eq!(unchanged.revision, refreshed.revision);
         assert_eq!(captures.load(Ordering::SeqCst), 2);
     }
 
@@ -869,25 +846,19 @@ mod tests {
             captures: captures.clone(),
         };
         let index = root.path().join("index");
-        let first = refresh(&index, "scope", "codex", &adapter)
-            .unwrap()
-            .unwrap();
+        let first = refresh(&index, "scope", "codex", &adapter).unwrap();
         assert_eq!(first.rows.len(), 1);
         assert_eq!(captures.load(Ordering::SeqCst), 1);
         let restarted = FixtureAdapter {
             path: path.clone(),
             captures: captures.clone(),
         };
-        let unchanged = refresh(&index, "scope", "codex", &restarted)
-            .unwrap()
-            .unwrap();
+        let unchanged = refresh(&index, "scope", "codex", &restarted).unwrap();
         assert_eq!(unchanged.revision, first.revision);
         assert_eq!(captures.load(Ordering::SeqCst), 1);
         assert_eq!("before".len(), "after!".len());
         fs::write(&path, "after!").unwrap();
-        let changed = refresh(&index, "scope", "codex", &adapter)
-            .unwrap()
-            .unwrap();
+        let changed = refresh(&index, "scope", "codex", &adapter).unwrap();
         assert_eq!(changed.rows[0].title, first.rows[0].title);
         assert_ne!(changed.revision, first.revision);
         assert_eq!(captures.load(Ordering::SeqCst), 2);
@@ -910,9 +881,7 @@ mod tests {
         );
         drop(db);
         fs::remove_file(path).unwrap();
-        let deleted = refresh(&index, "scope", "codex", &adapter)
-            .unwrap()
-            .unwrap();
+        let deleted = refresh(&index, "scope", "codex", &adapter).unwrap();
         assert!(deleted.rows.is_empty());
         assert_ne!(deleted.revision, changed.revision);
     }
@@ -928,9 +897,7 @@ mod tests {
             captures: captures.clone(),
         };
         let index = root.path().join("index");
-        let first = refresh(&index, "scope", "codex", &adapter)
-            .unwrap()
-            .unwrap();
+        let first = refresh(&index, "scope", "codex", &adapter).unwrap();
         let db = Connection::open(index.join("scope.sqlite")).unwrap();
         db.execute(
             "UPDATE search_doc_state SET version=2 WHERE provider='codex'",
@@ -940,9 +907,7 @@ mod tests {
         db.execute("UPDATE search_doc SET text='stale' WHERE field='title'", [])
             .unwrap();
         drop(db);
-        let second = refresh(&index, "scope", "codex", &adapter)
-            .unwrap()
-            .unwrap();
+        let second = refresh(&index, "scope", "codex", &adapter).unwrap();
         assert_ne!(second.revision, first.revision);
         assert_eq!(captures.load(Ordering::SeqCst), 2);
         assert_eq!(second.rows[0].search_title.as_deref(), Some("same summary"));
@@ -988,14 +953,10 @@ mod tests {
             cache_dir: root.path().join("cache"),
         };
         let adapter = crate::providers::adapter(&config, "scope", "codex").unwrap();
-        let first = refresh(&config.index_dir, "scope", "codex", adapter.as_ref())
-            .unwrap()
-            .unwrap();
+        let first = refresh(&config.index_dir, "scope", "codex", adapter.as_ref()).unwrap();
         assert_eq!(first.rows.len(), 2);
         fs::write(&first_path, "{invalid header}\n").unwrap();
-        let incomplete = refresh(&config.index_dir, "scope", "codex", adapter.as_ref())
-            .unwrap()
-            .unwrap();
+        let incomplete = refresh(&config.index_dir, "scope", "codex", adapter.as_ref()).unwrap();
         assert_eq!(incomplete.rows.len(), 1);
         assert_eq!(
             incomplete.rows[0].diagnostic.as_deref(),
@@ -1048,21 +1009,13 @@ mod tests {
             path: right.clone(),
             captures: captures.clone(),
         };
-        let left_first = refresh(&index, "left-scope", "codex", &left_adapter)
-            .unwrap()
-            .unwrap();
-        let right_first = refresh(&index, "right-scope", "codex", &right_adapter)
-            .unwrap()
-            .unwrap();
+        let left_first = refresh(&index, "left-scope", "codex", &left_adapter).unwrap();
+        let right_first = refresh(&index, "right-scope", "codex", &right_adapter).unwrap();
         assert_eq!(left_first.rows.len(), 1);
         assert_eq!(right_first.rows.len(), 1);
         fs::remove_file(left).unwrap();
-        let left_deleted = refresh(&index, "left-scope", "codex", &left_adapter)
-            .unwrap()
-            .unwrap();
-        let right_unchanged = refresh(&index, "right-scope", "codex", &right_adapter)
-            .unwrap()
-            .unwrap();
+        let left_deleted = refresh(&index, "left-scope", "codex", &left_adapter).unwrap();
+        let right_unchanged = refresh(&index, "right-scope", "codex", &right_adapter).unwrap();
         assert!(left_deleted.rows.is_empty());
         assert_eq!(right_unchanged.rows.len(), 1);
         assert_eq!(right_unchanged.revision, right_first.revision);
@@ -1085,12 +1038,8 @@ mod tests {
             path: right.clone(),
             captures: captures.clone(),
         };
-        let first = refresh(&index, "left-scope", "codex", &left_adapter)
-            .unwrap()
-            .unwrap();
-        let other = refresh(&index, "right-scope", "codex", &right_adapter)
-            .unwrap()
-            .unwrap();
+        let first = refresh(&index, "left-scope", "codex", &left_adapter).unwrap();
+        let other = refresh(&index, "right-scope", "codex", &right_adapter).unwrap();
         let stat = fs::metadata(&left).unwrap();
         let signature = SourceEntry::new("session".into(), left.clone())
             .unwrap()
@@ -1109,16 +1058,12 @@ mod tests {
             signature,
             "the ordinary stat inventory cannot observe this rewrite"
         );
-        let unchanged = refresh(&index, "left-scope", "codex", &left_adapter)
-            .unwrap()
-            .unwrap();
+        let unchanged = refresh(&index, "left-scope", "codex", &left_adapter).unwrap();
         assert_eq!(unchanged.revision, first.revision);
         let forced = rebuild(&index, "left-scope", "codex", &left_adapter).unwrap();
         assert_ne!(forced.revision, first.revision);
         assert_eq!(captures.load(Ordering::SeqCst), 3);
-        let other_still = refresh(&index, "right-scope", "codex", &right_adapter)
-            .unwrap()
-            .unwrap();
+        let other_still = refresh(&index, "right-scope", "codex", &right_adapter).unwrap();
         assert_eq!(other_still.revision, other.revision);
         fs::write(&left, "corrupt").unwrap();
         assert!(matches!(
@@ -1288,25 +1233,21 @@ mod tests {
         let copied = dir.join("legacy-id.jsonl");
         fs::write(&copied, &original).unwrap();
         let adapter = crate::providers::adapter(&config, "scope", "claude-code").unwrap();
-        let first = refresh(&config.index_dir, "scope", "claude-code", adapter.as_ref())
-            .unwrap()
-            .expect("Claude must publish a durable catalog");
+        let first = refresh(&config.index_dir, "scope", "claude-code", adapter.as_ref()).unwrap();
         assert_eq!(first.rows.len(), 1);
         fs::write(
             &copied,
             original.replace("Legacy response", "Modern response"),
         )
         .unwrap();
-        let rewritten = refresh(&config.index_dir, "scope", "claude-code", adapter.as_ref())
-            .unwrap()
-            .unwrap();
+        let rewritten =
+            refresh(&config.index_dir, "scope", "claude-code", adapter.as_ref()).unwrap();
         assert_eq!(rewritten.rows[0].title, first.rows[0].title);
         assert_ne!(rewritten.revision, first.revision);
         fs::OpenOptions::new().append(true).open(&copied).unwrap()
             .write_all(b"{\"type\":\"user\",\"uuid\":\"later\",\"timestamp\":\"2025-01-01T00:00:02.000Z\",\"message\":{\"content\":\"Later\"}}\n").unwrap();
-        let appended = refresh(&config.index_dir, "scope", "claude-code", adapter.as_ref())
-            .unwrap()
-            .unwrap();
+        let appended =
+            refresh(&config.index_dir, "scope", "claude-code", adapter.as_ref()).unwrap();
         assert_ne!(appended.revision, rewritten.revision);
         assert_eq!(fs::read_to_string(&fixture).unwrap(), original);
     }
@@ -1323,18 +1264,14 @@ mod tests {
         let copied = dir.join("current_019f8a00-0000-7000-8000-000000000001.jsonl");
         fs::write(&copied, &original).unwrap();
         let adapter = crate::providers::adapter(&config, "scope", "pi").unwrap();
-        let first = refresh(&config.index_dir, "scope", "pi", adapter.as_ref())
-            .unwrap()
-            .expect("Pi must publish a durable catalog");
+        let first = refresh(&config.index_dir, "scope", "pi", adapter.as_ref()).unwrap();
         assert_eq!(first.rows.len(), 1);
         fs::write(
             &copied,
             original.replace("Abandoned branch", "Discarded branch"),
         )
         .unwrap();
-        let rewritten = refresh(&config.index_dir, "scope", "pi", adapter.as_ref())
-            .unwrap()
-            .unwrap();
+        let rewritten = refresh(&config.index_dir, "scope", "pi", adapter.as_ref()).unwrap();
         assert_ne!(rewritten.revision, first.revision);
         assert_eq!(fs::read_to_string(&fixture).unwrap(), original);
     }
@@ -1358,9 +1295,7 @@ mod tests {
         let main_before_read = fs::read(&config.opencode_db).unwrap();
         let wal_before_read = fs::read(&wal).unwrap();
         let adapter = crate::providers::adapter(&config, "scope", "opencode").unwrap();
-        let first = refresh(&config.index_dir, "scope", "opencode", adapter.as_ref())
-            .unwrap()
-            .expect("OpenCode must publish a durable catalog");
+        let first = refresh(&config.index_dir, "scope", "opencode", adapter.as_ref()).unwrap();
         assert_eq!(first.rows.len(), 1);
         assert_eq!(fs::read(&config.opencode_db).unwrap(), main_before_read);
         assert_eq!(fs::read(&wal).unwrap(), wal_before_read);
@@ -1376,9 +1311,7 @@ mod tests {
             main_before,
             "WAL update does not require writing the main source database"
         );
-        let changed = refresh(&config.index_dir, "scope", "opencode", adapter.as_ref())
-            .unwrap()
-            .unwrap();
+        let changed = refresh(&config.index_dir, "scope", "opencode", adapter.as_ref()).unwrap();
         assert_eq!(changed.rows[0].title, first.rows[0].title);
         assert_ne!(changed.revision, first.revision);
     }

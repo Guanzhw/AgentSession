@@ -6,25 +6,30 @@
   export let providers: ProviderSummary[];
   export let onDay: (day: string) => void;
   export let selectedDay: string | null = null;
-  let metric: 'requests' | 'tokens' = 'requests';
+  let metric: 'requests' | 'tokens' = 'tokens';
   $: rows = report.dailyUsage;
   $: sources = report.sources ?? [];
   $: maximum = Math.max(1, ...rows.map(row => metric === 'requests' ? row.recordedRequestCount : row.knownTokenCount));
-  $: comparisonMaximum = Math.max(1, ...sources.map(row => row.overview?.recordedRequestCount ?? 0));
+  $: comparisonMaximum = Math.max(1, ...sources.map(row => row.overview ? metricValue(row.overview) : 0));
   $: readable = sources.filter(row => row.status === 'readable').length;
   $: unknownOnly = report.overview.recordedRequestCount > 0 && report.overview.unknownTokenRequestCount === report.overview.recordedRequestCount;
-  $: modelRows = [...report.modelRanking].sort((a, b) => b.recordedRequestCount - a.recordedRequestCount);
+  $: modelRows = [...report.modelRanking].sort((a, b) => metricValue(b) - metricValue(a));
   $: leadingModel = modelRows.find(row => row.model !== null);
-  $: leadingHarness = [...sources].filter(row => row.overview).sort((a, b) => b.overview!.recordedRequestCount - a.overview!.recordedRequestCount)[0];
-  const share = (value: number) => report.overview.recordedRequestCount ? (value / report.overview.recordedRequestCount * 100).toFixed(1) + '%' : '—';
+  $: leadingHarness = [...sources].filter(row => row.overview).sort((a, b) => metricValue(b.overview!) - metricValue(a.overview!))[0];
+  $: metricValue = (row: { recordedRequestCount: number; knownTokenCount: number }): number =>
+    metric === 'tokens' ? row.knownTokenCount : row.recordedRequestCount;
+  $: share = (value: number): string => {
+    const total = metricValue(report.overview);
+    return total ? (value / total * 100).toFixed(1) + '%' : '—';
+  };
   const width = 920;
   const height = 240;
   const baseline = 194;
   $: slot = 848 / Math.max(1, rows.length);
-  const count = (value: number) => new Intl.NumberFormat($language === 'zh' ? 'zh-CN' : 'en', { notation: value >= 100000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(value);
-  function dayLabel(row: StatsReport['dailyUsage'][number]): string {
+  $: count = (value: number) => new Intl.NumberFormat($language === 'zh' ? 'zh-CN' : 'en', { notation: value >= 100000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(value);
+  $: dayLabel = (row: StatsReport['dailyUsage'][number]): string => {
     return `${row.day}: ${count(row.recordedRequestCount)} ${t($language, 'requests')}, ${count(row.knownTokenCount)} ${t($language, 'known tokens')}, ${count(row.unknownTokenRequestCount)} ${t($language, 'unknown')}, ${count(row.unresolvedUsageObservationCount)} ${t($language, 'unresolved observations')}`;
-  }
+  };
   function keyDay(event: KeyboardEvent, day: string): void {
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onDay(day); }
   }
@@ -76,13 +81,13 @@
   </section>
   <section class="usage-comparison" aria-label={t($language, 'Usage by Harness')}>
     <div class="chart-heading"><div><p class="chart-kicker">{t($language, 'Across Harnesses')}</p><h2>{t($language, 'Usage by Harness')}</h2></div></div>
-    <p class="chart-caption">{t($language, 'Recorded requests with known token subtotals and missing totals.')}</p>
+    <p class="chart-caption">{t($language, metric === 'tokens' ? 'Known token subtotals by Harness. Missing totals are excluded.' : 'Recorded requests with known token subtotals and missing totals.')}</p>
     {#each sources as source (source.provider)}
       <div class="harness-comparison-row" data-harness={source.provider}>
-        <div class="harness-comparison-title"><strong>{providers.find(item => item.id === source.provider)?.name || source.provider}</strong><span>{source.overview ? `${count(source.overview.recordedRequestCount)} ${t($language, 'requests')}` : t($language, source.status === 'failed' ? 'Source could not be read' : 'Unavailable')}</span></div>
+        <div class="harness-comparison-title"><strong>{providers.find(item => item.id === source.provider)?.name || source.provider}</strong><span>{source.overview ? `${count(metricValue(source.overview))} ${t($language, metric === 'tokens' ? 'known tokens' : 'requests')}` : t($language, source.status === 'failed' ? 'Source could not be read' : 'Unavailable')}</span></div>
         {#if source.overview}
-          <div class="comparison-track" role="img" aria-label={`${source.provider}: ${count(source.overview.recordedRequestCount)} ${t($language, 'requests')}`}><div class="comparison-fill" style:width={(source.overview.recordedRequestCount / comparisonMaximum * 100) + '%'}></div></div>
-        <p class="comparison-detail">{share(source.overview.recordedRequestCount)} · {count(source.overview.knownTokenCount)} {t($language, 'known tokens')} · {count(source.overview.unknownTokenRequestCount)} {t($language, 'unknown totals')} · {count(source.overview.unresolvedUsageObservationCount)} {t($language, 'unresolved')}</p>
+          <div class="comparison-track" role="img" aria-label={`${source.provider}: ${count(metricValue(source.overview))} ${t($language, metric === 'tokens' ? 'known tokens' : 'requests')}`}><div class="comparison-fill" style:width={(metricValue(source.overview) / comparisonMaximum * 100) + '%'}></div></div>
+        <p class="comparison-detail">{share(metricValue(source.overview))} · {count(source.overview.recordedRequestCount)} {t($language, 'requests')} · {count(source.overview.knownTokenCount)} {t($language, 'known tokens')} · {count(source.overview.unknownTokenRequestCount)} {t($language, 'unknown totals')} · {count(source.overview.unresolvedUsageObservationCount)} {t($language, 'unresolved')}</p>
         {:else}
           <p class="comparison-detail">{t($language, 'Excluded from totals.')}</p>
         {/if}
@@ -94,9 +99,9 @@
 {#if readable > 0 && report.insights}
   <section class="usage-insights" aria-label={t($language, 'Usage insights')}>
     <div class="chart-heading"><div><p class="chart-kicker">{t($language, 'What the records show')}</p><h2>{t($language, 'Usage insights')}</h2></div></div>
-    <p class="chart-caption">{t($language, 'Based on recorded requests in the current selection. Missing source records can change these comparisons.')}</p>
+    <p class="chart-caption">{t($language, 'Model and Harness shares follow the selected metric. Activity comparisons use recorded requests.')}</p>
     <div class="insight-grid">
-      <article><h3>{t($language, 'Recent activity')}</h3>
+      <article><h3>{t($language, 'Recent request activity')}</h3>
         {#if report.insights.recentWeekRequests !== null && report.insights.precedingWeekRequests !== null}
           {@const difference = report.insights.recentWeekRequests - report.insights.precedingWeekRequests}
           <strong>{difference > 0 ? '+' : ''}{count(difference)} {t($language, 'requests')}</strong>
@@ -105,14 +110,14 @@
         {:else}<p>{t($language, 'Select at least 14 complete UTC days to compare recent weeks.')}</p>{/if}
       </article>
       <article><h3>{t($language, 'Most-used recorded model')}</h3>
-        {#if leadingModel && leadingModel.recordedRequestCount > 0}<strong class="model-insight">{leadingModel.modelProvider ? leadingModel.modelProvider + ' · ' : ''}{leadingModel.model}</strong><p>{count(leadingModel.recordedRequestCount)} {t($language, 'requests')} · {share(leadingModel.recordedRequestCount)}</p>{:else}<p>{t($language, 'No model attribution was recorded.')}</p>{/if}
-        <small>{count(report.insights.unattributedModelRequests)} {t($language, 'requests have no recorded model. Shares include these requests.')}</small>
+        {#if leadingModel && metricValue(leadingModel) > 0}<strong class="model-insight">{leadingModel.modelProvider ? leadingModel.modelProvider + ' · ' : ''}{leadingModel.model}</strong><p>{count(metricValue(leadingModel))} {t($language, metric === 'tokens' ? 'known tokens' : 'requests')} · {share(metricValue(leadingModel))}</p>{:else}<p>{t($language, 'No model attribution was recorded.')}</p>{/if}
+        <small>{count(report.insights.unattributedModelRequests)} {t($language, metric === 'tokens' ? 'requests have no recorded model. Token shares include their known totals.' : 'requests have no recorded model. Shares include these requests.')}</small>
       </article>
       <article><h3>{t($language, 'Most-used Harness')}</h3>
-        {#if leadingHarness?.overview && leadingHarness.overview.recordedRequestCount > 0}<strong>{providers.find(row => row.id === leadingHarness.provider)?.name || leadingHarness.provider}</strong><p>{count(leadingHarness.overview.recordedRequestCount)} {t($language, 'requests')} · {share(leadingHarness.overview.recordedRequestCount)}</p>{:else}<p>{t($language, 'No recorded requests')}</p>{/if}
-        <small>{count(report.insights.activeDays)} / {count(report.insights.selectedDays)} {t($language, 'days with recorded activity')}</small>
+        {#if leadingHarness?.overview && metricValue(leadingHarness.overview) > 0}<strong>{providers.find(row => row.id === leadingHarness.provider)?.name || leadingHarness.provider}</strong><p>{count(metricValue(leadingHarness.overview))} {t($language, metric === 'tokens' ? 'known tokens' : 'requests')} · {share(metricValue(leadingHarness.overview))}</p>{:else}<p>{t($language, metric === 'tokens' ? 'No known token totals' : 'No recorded requests')}</p>{/if}
+        <small>{count(report.insights.activeDays)} / {count(report.insights.selectedDays)} {t($language, 'days with recorded requests')}</small>
       </article>
-      <article><h3>{t($language, 'High-activity days')}</h3><strong>{count(report.insights.unusualDays.length)}</strong>
+      <article><h3>{t($language, 'High-request days')}</h3><strong>{count(report.insights.unusualDays.length)}</strong>
         <p>{t($language, 'Above twice the selected-range daily average:')} {(report.insights.averageDailyRequests * 2).toFixed(1)} {t($language, 'requests')}</p>
         <small>{t($language, 'Requires at least 7 days; zero-activity days are included in the average.')}</small>
         <div class="unusual-days">{#each report.insights.unusualDays as day}<button type="button" onclick={() => onDay(day)}>{day} · {count(rows.find(row => row.day === day)?.recordedRequestCount ?? 0)}</button>{/each}</div>
@@ -123,13 +128,13 @@
 
 <section class="model-distribution" aria-label={t($language, 'Recorded model distribution')}>
   <div class="chart-heading"><div><p class="chart-kicker">{t($language, 'Model usage')}</p><h2>{t($language, 'Recorded model distribution')}</h2></div></div>
-  <p class="chart-caption">{t($language, 'Share of recorded requests, including requests with no model attribution.')}</p>
+  <p class="chart-caption">{t($language, metric === 'tokens' ? 'Share of known tokens, including tokens with no model attribution.' : 'Share of recorded requests, including requests with no model attribution.')}</p>
   {#if readable === 0}<p class="unknown-state">{t($language, 'No selected Harness source could be read. Usage totals are unavailable.')}</p>
   {:else if modelRows.length === 0}<p class="comparison-detail">{t($language, 'No request usage was recorded in this range.')}</p>{/if}
   {#each modelRows as row (JSON.stringify([row.modelProvider, row.model]))}
     <div class="model-distribution-row"><span>{row.modelProvider ? row.modelProvider + ' · ' : ''}{row.model ?? t($language, 'Model not recorded')}</span>
-      <div class="comparison-track"><div class="comparison-fill" style:width={share(row.recordedRequestCount) === '—' ? '0%' : share(row.recordedRequestCount)}></div></div>
-      <strong>{share(row.recordedRequestCount)}</strong><small>{count(row.recordedRequestCount)} {t($language, 'requests')} · {count(row.knownTokenCount)} {t($language, 'known tokens')} · {count(row.unknownTokenRequestCount)} {t($language, 'unknown totals')}</small>
+      <div class="comparison-track"><div class="comparison-fill" style:width={share(metricValue(row)) === '—' ? '0%' : share(metricValue(row))}></div></div>
+      <strong>{share(metricValue(row))}</strong><small>{count(row.recordedRequestCount)} {t($language, 'requests')} · {count(row.knownTokenCount)} {t($language, 'known tokens')} · {count(row.unknownTokenRequestCount)} {t($language, 'unknown totals')}</small>
     </div>
   {/each}
 </section>

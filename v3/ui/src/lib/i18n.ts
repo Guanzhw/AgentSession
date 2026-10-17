@@ -22,19 +22,21 @@ const chinese = {
   'Raw input': '原始输入',
   'Statistics details': '统计详情',
   'Usage insights': '用量洞察', 'What the records show': '记录反映的使用情况',
-  'Based on recorded requests in the current selection. Missing source records can change these comparisons.': '基于当前筛选的已记录请求，数据源记录缺失可能影响比较结果。',
-  'Recent activity': '近期活动变化', 'two complete UTC weeks': '两个完整 UTC 周期',
+  'Model and Harness shares follow the selected metric. Activity comparisons use recorded requests.': '模型与 Harness 份额使用所选指标，活动变化按已记录请求比较。',
+  'Recent request activity': '近期请求变化', 'two complete UTC weeks': '两个完整 UTC 周期',
   'compared with': '对比',
   'Select at least 14 complete UTC days to compare recent weeks.': '选择至少 14 个完整 UTC 日期以比较近期活动。',
   'Most-used recorded model': '使用最多的记录模型',
   'No model attribution was recorded.': '未记录模型归属。',
   'requests have no recorded model. Shares include these requests.': '个请求未记录模型，份额计算包含这些请求。',
-  'Most-used Harness': '使用最多的 Harness', 'days with recorded activity': '天有已记录活动',
-  'High-activity days': '高活跃日期',
+  'requests have no recorded model. Token shares include their known totals.': '个请求未记录模型，Token 份额包含其已知用量。',
+  'Most-used Harness': '使用最多的 Harness', 'days with recorded requests': '天有已记录请求',
+  'High-request days': '高请求量日期',
   'Above twice the selected-range daily average:': '超过所选范围日均请求数的两倍：',
   'Requires at least 7 days; zero-activity days are included in the average.': '需要至少 7 天，平均值包含无活动日期。',
   'Recorded model distribution': '记录模型使用分布', 'Model usage': '模型使用情况',
   'Share of recorded requests, including requests with no model attribution.': '按已记录请求计算份额，包含未记录模型归属的请求。',
+  'Share of known tokens, including tokens with no model attribution.': '按已知 Token 计算份额，包含未记录模型归属的 Token。',
   'All Harnesses': '全部 Harness', 'Select Harnesses': '选择 Harness',
   'Select all': '全选', 'Done': '完成',
   'Daily usage trend': '每日使用趋势', 'Over time': '随时间变化', 'Chart metric': '图表指标',
@@ -48,6 +50,8 @@ const chinese = {
   'Choose a day to inspect its sessions below.': '选择日期可在下方查看对应会话。',
   'Usage by Harness': '各 Harness 使用情况', 'Across Harnesses': '按 Harness 对比',
   'Recorded requests with known token subtotals and missing totals.': '对比已记录请求、已知 Token 小计与缺失总量。',
+  'Known token subtotals by Harness. Missing totals are excluded.': '按 Harness 对比已知 Token 小计，缺失总量不计入。',
+  'No known token totals': '没有已知 Token 总量',
   'Source could not be read': '数据源无法读取', 'unknown totals': '未知总量',
   'Excluded from totals.': '未计入汇总。',
   'Child conversations and agent messages': '子会话与 Agent 消息',
@@ -192,9 +196,9 @@ const chinese = {
   'Could not save resume settings.': '无法保存继续会话设置。',
   'Could not save project paths.': '无法保存项目路径。',
   'Token statistics aria': 'Token 统计', 'Recorded usage': '已记录的用量',
-  'Inspect proved request usage and unresolved source observations. Days use UTC.': '查看已证明的请求用量和未解析的来源观察。日期使用 UTC。',
-  'unresolved usage observation(s) remain separate from proved requests and token totals.': '个未解析用量观察与已证明的请求和 Token 总量分开计数。',
-  'The request model filter narrows proved requests only. Unresolved observations remain counted under the selected source, date, directory, project, and session filters because their model is unknown.': '请求模型筛选仅缩小已证明的请求范围。未解析观察仍按所选来源、日期、目录、项目和会话筛选计数，因为其模型未知。',
+  'Inspect recorded token usage and requests. Days use UTC.': '查看已记录的 Token 用量与请求。日期使用 UTC。',
+  'usage observation(s) have no proved request identity. Verified token increments are included in known tokens.': '条用量记录缺少可确认的请求身份；已核验的 Token 增量已计入已知用量。',
+  'The model filter narrows attributed requests and token consumption. Observation counts retain the selected source, date, directory, project, and session filters.': '模型筛选作用于有归属的请求和 Token 用量。观察条数仍按所选来源、日期、目录、项目和会话筛选计数。',
   'Statistics provider': '统计提供方', 'Date range': '日期范围',
   'Last 7 days': '最近 7 天', 'Last 30 days': '最近 30 天',
   'Last 90 days': '最近 90 天', 'Custom UTC range': '自定义 UTC 区间',
@@ -206,6 +210,20 @@ const chinese = {
   'source session(s) excluded from the totals because their history is unavailable. Request and token totals cover readable sessions only. Excluded sessions cannot be assigned to a request model or UTC day.': '个来源会话因历史记录不可用而未计入总量。请求和 Token 总量仅覆盖可读取的会话；无法将被排除的会话归入请求模型或 UTC 日期。',
   'Source diagnostic codes': '来源诊断代码',
   'Additional diagnostic codes are omitted.': '其他诊断代码已省略。',
+  'protocol evidence is invalid': '协议证据无效。',
+  'Recorded execution details could not be loaded.': '无法加载已记录的执行详情。',
+  'A recorded source entry could not be parsed.': '一条已记录的来源条目无法解析。',
+  'Recorded snapshot identity is incomplete.': '已记录的快照身份不完整。',
+  'Recorded event session differs from the snapshot.': '已记录事件的会话与快照不一致。',
+  'Recorded event identity is incomplete.': '已记录的事件身份不完整。',
+  'Recorded event IDs are duplicated.': '已记录的事件 ID 重复。',
+  'Recorded source positions are duplicated.': '已记录的来源位置重复。',
+  'Recorded provenance source is missing.': '缺少已记录的证据来源。',
+  'Reader event session differs from the snapshot.': '阅读事件的会话与快照不一致。',
+  'Reader event identity is incomplete.': '阅读事件的身份不完整。',
+  'Recorded execution evidence is invalid.': '已记录的执行证据无效。',
+  'History unavailable: mixed DSH source encodings': '历史记录暂不可用：DSH 来源编码混用',
+  'History unavailable: duplicate DSH source generations': '历史记录暂不可用：DSH 同代来源重复',
   'History unavailable: multiple Codex source files': '历史记录暂不可用：同一 Codex 会话有多个源文件',
   'History unavailable: Codex source identity is incomplete': '历史记录暂不可用：Codex 源文件身份不完整',
   'No recorded matches in available sources': '可用来源中没有已记录的匹配结果',
@@ -523,6 +541,28 @@ export function t(language: Language, message: Message): string {
 export function errorText(language: Language, message: string): string {
   return language === 'zh' && Object.hasOwn(chinese, message)
     ? chinese[message as Message] : message;
+}
+
+const diagnosticMessages: Record<string, Message> = {
+  malformed_source_record: 'A recorded source entry could not be parsed.',
+  missing_snapshot_identity: 'Recorded snapshot identity is incomplete.',
+  event_session_mismatch: 'Recorded event session differs from the snapshot.',
+  missing_event_identity: 'Recorded event identity is incomplete.',
+  duplicate_event_id: 'Recorded event IDs are duplicated.',
+  duplicate_source_order: 'Recorded source positions are duplicated.',
+  missing_provenance_source: 'Recorded provenance source is missing.',
+  reader_session_mismatch: 'Reader event session differs from the snapshot.',
+  missing_reader_identity: 'Reader event identity is incomplete.',
+  invalid_execution_observation: 'Recorded execution evidence is invalid.',
+  dsh_mixed_source_encodings: 'History unavailable: mixed DSH source encodings',
+  dsh_duplicate_source_generation: 'History unavailable: duplicate DSH source generations',
+  codex_multiple_source_files_unmerged: 'History unavailable: multiple Codex source files',
+  codex_source_inventory_incomplete: 'History unavailable: Codex source identity is incomplete',
+};
+
+export function diagnosticText(language: Language, code: string): string {
+  const message = diagnosticMessages[code];
+  return message ? t(language, message) : code;
 }
 
 export function protocolLabel(value: string, selectedLanguage: Language): string {

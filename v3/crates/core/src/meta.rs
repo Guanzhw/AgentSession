@@ -402,6 +402,18 @@ impl Core {
         {
             self.load_session(provider, session_id)?;
         }
+        self.write_viewer_metadata(provider, session_id, action, normalized_title)
+    }
+
+    // Callers validate keys, actions, titles, and source availability before writing.
+    // Always read mutable Viewer state inside the transaction.
+    fn write_viewer_metadata(
+        &self,
+        provider: &str,
+        session_id: &str,
+        action: &str,
+        normalized_title: Option<&str>,
+    ) -> Result<ViewerMeta> {
         let mut db = open(&self.meta_path(), true)?.expect("create opens metadata database");
         let tx = db.transaction().map_err(storage)?;
         tx.execute(
@@ -509,7 +521,7 @@ impl Core {
             tx.commit().map_err(storage)?;
         } else {
             for id in ids {
-                self.viewer_mutate(provider, id, action, None)?;
+                self.write_viewer_metadata(provider, id, action, None)?;
             }
         }
         Ok(ids.len())
@@ -521,6 +533,41 @@ mod tests {
     use super::*;
     use crate::SourceConfig;
     use std::path::PathBuf;
+
+    #[test]
+    fn preflighted_restore_checks_current_permanent_state_in_the_write_transaction() {
+        let state = tempfile::tempdir().unwrap();
+        let core = Core::new(SourceConfig {
+            codex_dir: state.path().join("missing-codex"),
+            opencode_db: state.path().join("missing-opencode.db"),
+            claude_dir: state.path().join("missing-claude"),
+            pi_dir: state.path().join("missing-pi"),
+            dsh_dir: state.path().join("missing-dsh"),
+            meta_dir: state.path().join("meta"),
+            index_dir: state.path().join("index"),
+            cache_dir: state.path().join("cache"),
+        })
+        .unwrap();
+        let db = open(&core.meta_path(), true).unwrap().unwrap();
+        db.execute(
+            "INSERT INTO session_meta(provider,session_id,deleted) VALUES ('pi','metadata-only',1)",
+            [],
+        )
+        .unwrap();
+        let preflight = core.viewer_meta("pi", "metadata-only").unwrap().unwrap();
+        assert!(preflight.deleted && !preflight.permanent);
+        db.execute(
+            "UPDATE session_meta SET permanent=1 WHERE provider='pi' AND session_id='metadata-only'",
+            [],
+        )
+        .unwrap();
+        let error = core
+            .write_viewer_metadata("pi", "metadata-only", "restore", None)
+            .unwrap_err();
+        assert!(matches!(error, CoreError::InvalidInput(_)));
+        let current = core.viewer_meta("pi", "metadata-only").unwrap().unwrap();
+        assert!(current.deleted && current.permanent);
+    }
 
     #[test]
     fn shared_state_directory_keeps_same_canonical_id_in_separate_source_scopes() {

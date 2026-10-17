@@ -1,7 +1,7 @@
+import { browserPrerequisites } from './browser-prerequisites.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { existsSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,14 +11,12 @@ import { freeFetchSafePort } from './fetch-safe-port.mjs';
 const repo = fileURLToPath(new URL('../../', import.meta.url));
 const ui = path.join(repo, 'v3/ui');
 const require = createRequire(path.join(ui, 'package.json'));
-const { createServer } = require('vite');
-const binaryName = process.platform === 'win32' ? 'agent-browser-win32-x64.exe' : `agent-browser-${process.platform}-${process.arch}`;
-const browser = process.env.AGENTSESSION_V3_AGENT_BROWSER_BIN || (process.env.PATH || '').split(path.delimiter)
-  .map(entry => path.join(entry, 'node_modules/agent-browser/bin', binaryName)).find(existsSync);
+const { browserBinary: browser, skip } = browserPrerequisites({ ui });
 
 test('collaboration overview updates when canonical Reader items arrive after recorded relations', {
-  timeout: 60_000, skip: !browser && 'agent-browser native binary is unavailable',
+  timeout: 60_000, skip,
 }, async t => {
+  const { createServer } = require('vite');
   const event = { provider: 'codex', sessionId: 'canonical-parent', messageId: 'reused-answer', segment: 'message' };
   const rootPreview = 'The canonical parent return identified the missing ownership constraint.';
   const childPreview = 'This is a different child conversation with the same message ID.';

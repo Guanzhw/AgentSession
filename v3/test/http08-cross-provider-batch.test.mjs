@@ -153,6 +153,14 @@ test('HTTP-08 cross-provider batch writes only scoped Viewer metadata', { timeou
   assert.equal((await post({ action: 'star', items }, { 'content-type': 'text/plain' })).status, 415);
   assert.deepEqual(snapshot(metadata), rejectedBefore);
 
+  const laterProviderFailure = await post({ action: 'delete', items: [
+    { provider: 'pi', id: piId }, { provider: 'codex', id: 'missing-source' },
+  ] });
+  assert.equal(laterProviderFailure.status, 404);
+  assert.equal(snapshot(metadata).pi.deleted, 1, 'completed provider groups remain committed');
+  assert.deepEqual(snapshot(metadata).codex, rejectedBefore.codex);
+  assert.equal((await post({ action: 'restore', items: [{ provider: 'pi', id: piId }] })).status, 200);
+
   const repeated = Array.from({ length: 101 }, () => ({ provider: 'pi', id: piId }));
   const repeatedResponse = await post({ action: 'star', items: repeated });
   assert.equal(repeatedResponse.status, 200, 'legacy global batch accepts more than 100 items, including repeated IDs');
@@ -238,5 +246,26 @@ test('HTTP-08 global batch accepts more than 100 distinct source-backed sessions
     assert.deepEqual(await response.json(), { ok: true, affected: 101, skipped: 0 });
     const rows = await (await fetch(`${base}/api/v3/meta?provider=pi`)).json();
     assert.equal(rows.filter(row => ids.includes(row.sessionId) && row.starred).length, 101);
+    assert.deepEqual(await Promise.all(sources.map(fileDigest)), hashes);
+
+    const post = (action, batchIds) => fetch(`${base}/api/sessions/batch`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: base },
+      body: JSON.stringify({ action, items: batchIds.map(id => ({ provider: 'pi', id })) }),
+    });
+    assert.equal((await post('unstar', ids)).status, 200);
+    assert.equal((await post('star', [...ids.slice(0, 100), 'missing-source'])).status, 404);
+    const partial = await (await fetch(`${base}/api/v3/meta?provider=pi`)).json();
+    assert.equal(partial.filter(row => ids.includes(row.sessionId) && row.starred).length, 100,
+      'the completed first chunk remains committed when the second chunk fails preflight');
+    assert.equal(partial.find(row => row.sessionId === ids[100]).starred, false);
+    const retry = await post('star', ids);
+    assert.equal(retry.status, 200);
+    assert.deepEqual(await retry.json(), { ok: true, affected: 101, skipped: 0 });
+    const afterRetry = await (await fetch(`${base}/api/v3/meta?provider=pi`)).json();
+    for (const row of partial.filter(row => row.starred)) {
+      assert.equal(afterRetry.find(item => item.sessionId === row.sessionId).timeStarred, row.timeStarred,
+        'retry preserves timestamps in the previously committed chunk');
+    }
     assert.deepEqual(await Promise.all(sources.map(fileDigest)), hashes);
   });

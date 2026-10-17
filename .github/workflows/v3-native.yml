@@ -53,6 +53,7 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             v3/ui/package-lock.json
+            v3/test/browser-tools/package-lock.json
 
       - name: Set up Rust
         run: |
@@ -63,6 +64,24 @@ jobs:
         run: |
           npm ci --ignore-scripts
           npm --prefix v3/ui ci
+
+      - name: Install required public browser test tools
+        if: matrix.platform == 'linux-x64'
+        run: |
+          npm --prefix v3/test/browser-tools ci --ignore-scripts
+          node v3/test/browser-tools/node_modules/agent-browser/scripts/postinstall.js
+          browser_bin="$(pwd)/v3/test/browser-tools/node_modules/agent-browser/bin/agent-browser-linux-x64"
+          test -x "$browser_bin"
+          "$browser_bin" --version
+          "$browser_bin" install --with-deps
+          chrome_bin="$(find "$HOME/.agent-browser/browsers" -maxdepth 2 -path '*/chrome-*/chrome' -type f | sort -V | tail -n 1)"
+          test -x "$chrome_bin"
+          "$chrome_bin" --version
+          export AGENTSESSION_V3_AGENT_BROWSER_BIN="$browser_bin"
+          export AGENT_BROWSER_EXECUTABLE_PATH="$chrome_bin"
+          export AGENTSESSION_V3_REQUIRE_BROWSER=1
+          node v3/test/browser-smoke.mjs
+          printf 'AGENTSESSION_V3_AGENT_BROWSER_BIN=%s\nAGENT_BROWSER_EXECUTABLE_PATH=%s\nAGENTSESSION_V3_REQUIRE_BROWSER=1\n' "$browser_bin" "$chrome_bin" >> "$GITHUB_ENV"
 
       - name: Build frontend and validate Rust workspace
         run: |

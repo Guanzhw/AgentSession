@@ -284,6 +284,12 @@ pub struct UsageObservation {
     pub event_id: String,
     pub tokens: UsageTokenComponents,
     pub cumulative_tokens: Option<UsageTokenComponents>,
+    /// Provider-proved additive consumption, without claiming request identity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub consumption_tokens: Option<UsageTokenComponents>,
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_provider: Option<String>,
     pub provenance: Provenance,
 }
 
@@ -1495,9 +1501,9 @@ pub fn finalize_observations(
     let mut errors = Vec::new();
     let mut seen = HashSet::new();
     let mut check = |domain: &'static str, id: &str, evidence: &Evidence| {
-        let mut issue = |code| {
+        let mut issue = |code: &str| {
             errors.push(Diagnostic {
-                code,
+                code: code.into(),
                 event_id: Some(evidence.event_id.clone()),
             })
         };
@@ -1548,7 +1554,7 @@ pub fn finalize_observations(
                 .is_none_or(|event| event.reader_event.as_ref() != Some(reference))
             {
                 anchor_errors.push(Diagnostic {
-                    code: "context_reader_anchor_mismatch",
+                    code: "context_reader_anchor_mismatch".into(),
                     event_id: Some(context.evidence.event_id.clone()),
                 });
             }
@@ -1562,7 +1568,7 @@ pub fn finalize_observations(
                 .is_none_or(|event| event.reader_event.as_ref() != Some(reference))
             {
                 anchor_errors.push(Diagnostic {
-                    code: "coordination_reader_anchor_mismatch",
+                    code: "coordination_reader_anchor_mismatch".into(),
                     event_id: Some(coordination.evidence.event_id.clone()),
                 });
             }
@@ -1574,7 +1580,7 @@ pub fn finalize_observations(
     for version in &input.context_versions {
         if version.id.is_empty() || !version_ids.insert(version.id.as_str()) {
             errors.push(Diagnostic {
-                code: "duplicate_or_missing_context_version_id",
+                code: "duplicate_or_missing_context_version_id".into(),
                 event_id: None,
             });
         }
@@ -1598,13 +1604,13 @@ pub fn finalize_observations(
             })
         {
             errors.push(Diagnostic {
-                code: "invalid_context_version_anchor",
+                code: "invalid_context_version_anchor".into(),
                 event_id: anchor.map(|event| event.id.clone()),
             });
         }
         if !version.parent_version_ids.is_empty() || !version.artifact_ids.is_empty() {
             errors.push(Diagnostic {
-                code: "unsupported_context_version_references",
+                code: "unsupported_context_version_references".into(),
                 event_id: anchor.map(|event| event.id.clone()),
             });
         }
@@ -1619,7 +1625,7 @@ pub fn finalize_observations(
     for transformation in &input.context_transformations {
         if transformation.id.is_empty() || !transformation_ids.insert(transformation.id.as_str()) {
             errors.push(Diagnostic {
-                code: "duplicate_or_missing_context_transformation_id",
+                code: "duplicate_or_missing_context_transformation_id".into(),
                 event_id: Some(transformation.event_id.clone()),
             });
         }
@@ -1639,7 +1645,7 @@ pub fn finalize_observations(
                 })
         {
             errors.push(Diagnostic {
-                code: "invalid_context_transformation_anchor",
+                code: "invalid_context_transformation_anchor".into(),
                 event_id: Some(transformation.event_id.clone()),
             });
         }
@@ -1648,7 +1654,7 @@ pub fn finalize_observations(
             .copied();
         if result_version.is_none() {
             errors.push(Diagnostic {
-                code: "unknown_context_result_version",
+                code: "unknown_context_result_version".into(),
                 event_id: Some(transformation.event_id.clone()),
             });
         } else if result_version.is_some_and(|version| {
@@ -1662,7 +1668,7 @@ pub fn finalize_observations(
         }) || !result_ids.insert(transformation.result_version_id.as_str())
         {
             errors.push(Diagnostic {
-                code: "context_result_anchor_mismatch",
+                code: "context_result_anchor_mismatch".into(),
                 event_id: Some(transformation.event_id.clone()),
             });
         }
@@ -1673,7 +1679,7 @@ pub fn finalize_observations(
             || transformation.turn_id.is_some()
         {
             errors.push(Diagnostic {
-                code: "unsupported_context_transformation_references",
+                code: "unsupported_context_transformation_references".into(),
                 event_id: Some(transformation.event_id.clone()),
             });
         }
@@ -1686,7 +1692,7 @@ pub fn finalize_observations(
                 })
             {
                 errors.push(Diagnostic {
-                    code: "invalid_retained_context_anchor",
+                    code: "invalid_retained_context_anchor".into(),
                     event_id: Some(transformation.event_id.clone()),
                 });
             }
@@ -1697,7 +1703,7 @@ pub fn finalize_observations(
             .is_some_and(|range| range.start > range.end)
         {
             errors.push(Diagnostic {
-                code: "invalid_shadowed_context_range",
+                code: "invalid_shadowed_context_range".into(),
                 event_id: Some(transformation.event_id.clone()),
             });
         }
@@ -1710,7 +1716,7 @@ pub fn finalize_observations(
             .and_then(|event_id| events.get(event_id));
         if usage.id.is_empty() || !usage_ids.insert(usage.id.as_str()) {
             errors.push(Diagnostic {
-                code: "duplicate_or_missing_usage_id",
+                code: "duplicate_or_missing_usage_id".into(),
                 event_id: usage.event_id.clone(),
             });
         }
@@ -1724,7 +1730,7 @@ pub fn finalize_observations(
                 .is_none_or(str::is_empty)
         {
             errors.push(Diagnostic {
-                code: "invalid_usage_identity",
+                code: "invalid_usage_identity".into(),
                 event_id: usage.event_id.clone(),
             });
         }
@@ -1732,7 +1738,7 @@ pub fn finalize_observations(
             && linked.is_none_or(|event| event.provenance.source_id != usage.provenance.source_id)
         {
             errors.push(Diagnostic {
-                code: "invalid_usage_event_anchor",
+                code: "invalid_usage_event_anchor".into(),
                 event_id: usage.event_id.clone(),
             });
         }
@@ -1746,7 +1752,7 @@ pub fn finalize_observations(
             || !observation_sources.insert(observation.event_id.as_str())
         {
             errors.push(Diagnostic {
-                code: "duplicate_or_missing_usage_observation_id",
+                code: "duplicate_or_missing_usage_observation_id".into(),
                 event_id: Some(observation.event_id.clone()),
             });
         }
@@ -1762,7 +1768,7 @@ pub fn finalize_observations(
                 .is_none_or(|event| event.provenance.source_id != observation.provenance.source_id)
         {
             errors.push(Diagnostic {
-                code: "invalid_usage_observation_anchor",
+                code: "invalid_usage_observation_anchor".into(),
                 event_id: Some(observation.event_id.clone()),
             });
         }
@@ -1774,7 +1780,7 @@ pub fn finalize_observations(
             .is_some_and(|id| !task_ids.contains(id))
         {
             errors.push(Diagnostic {
-                code: "unknown_run_task",
+                code: "unknown_run_task".into(),
                 event_id: Some(run.evidence.event_id.clone()),
             });
         }
@@ -1784,7 +1790,7 @@ pub fn finalize_observations(
                 || child == &stream.session
         }) {
             errors.push(Diagnostic {
-                code: "invalid_child_run_session",
+                code: "invalid_child_run_session".into(),
                 event_id: Some(run.evidence.event_id.clone()),
             });
         }
@@ -1794,7 +1800,7 @@ pub fn finalize_observations(
             .is_some_and(|(end, start)| end < start)
         {
             errors.push(Diagnostic {
-                code: "run_end_before_start",
+                code: "run_end_before_start".into(),
                 event_id: Some(run.evidence.event_id.clone()),
             });
         }
@@ -1806,7 +1812,7 @@ pub fn finalize_observations(
             .is_some_and(|id| !run_ids.contains(id))
         {
             errors.push(Diagnostic {
-                code: "unknown_observation_run",
+                code: "unknown_observation_run".into(),
                 event_id: Some(observation.evidence.event_id.clone()),
             });
         }
@@ -1819,7 +1825,7 @@ pub fn finalize_observations(
             || (relationship.from != stream.session && relationship.to != stream.session)
         {
             errors.push(Diagnostic {
-                code: "invalid_relationship_identity",
+                code: "invalid_relationship_identity".into(),
                 event_id: Some(relationship.evidence.event_id.clone()),
             });
         }
@@ -1840,7 +1846,7 @@ pub fn finalize_observations(
             })
         {
             errors.push(Diagnostic {
-                code: "invalid_branch_topology_anchor",
+                code: "invalid_branch_topology_anchor".into(),
                 event_id: Some(branch.evidence.event_id.clone()),
             });
         }
@@ -1854,7 +1860,7 @@ pub fn finalize_observations(
             != 1
     {
         errors.push(Diagnostic {
-            code: "invalid_active_branch_count",
+            code: "invalid_active_branch_count".into(),
             event_id: None,
         });
     }
@@ -1865,11 +1871,11 @@ pub fn finalize_observations(
     }
     let mut diagnostics = input.diagnostics;
     diagnostics.push(Diagnostic {
-        code: "session_protocol_v2_partial_foundation",
+        code: "session_protocol_v2_partial_foundation".into(),
         event_id: None,
     });
     diagnostics.push(Diagnostic {
-        code: "session_protocol_v3_partial_foundation",
+        code: "session_protocol_v3_partial_foundation".into(),
         event_id: None,
     });
     Ok(ObservationSnapshot {

@@ -78,6 +78,16 @@ UTF-16 位置和 `contentRevision`，按有界正文窗口读取；浏览器 Bac
 
 ## 开发与状态
 
+本地未发布修复：Token 统计默认按 Token 展示趋势、Harness 与模型份额。
+Codex 普通 `token_count` 记录按可核验的累计增量计入已知用量，重复快照不重复
+计数；请求数仍需要明确的请求身份。旧格式 `session_id` 会话头也可被发现。
+详见[统计修复决策](.agents/decisions/implemented/2026-10-12-codex-recorded-token-consumption.md)。
+
+本地架构修复同时修正 Claude pending 用量去重，保留 DSH 歧义会话诊断，并让
+Reader 续读保留具体 Protocol 错误。旧派生索引和 Reader 缓存会自动重新捕获；
+provider 原始数据与 Viewer 元数据保持原状。浏览器公开回归在 Linux x64 CI 必跑，
+本地浏览器工具独立安装，项目的 Node.js 22.15 开发要求保持。
+
 ```bash
 npm run review
 npm test
