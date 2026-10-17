@@ -145,6 +145,7 @@
     catch (cause) {
       if (active && request === generation) {
         error = cause instanceof Error ? cause.message : t($language, 'The matching source could not be opened.');
+        save();
       }
     }
   }

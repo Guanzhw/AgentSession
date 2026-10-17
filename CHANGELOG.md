@@ -1,6 +1,6 @@
 # Changelog
 
-## 3.0.1 - 2026-10-17
+## 3.0.2 - 2026-10-17
 
 - Restore fresh Codex discovery using canonical session identity, including legacy
   headers. Token statistics count cumulative increments without repeating snapshots;
@@ -19,7 +19,16 @@
 - Retain live Codex catalog consistency, OpenCode WAL handling, fixture cleanup
   and missing-child Reader guidance from the integrated main branch.
 - Exact-tag publication requires four-platform native and combined npm installation
-  checks. See the [release notes](docs/releases/3.0.1.md) for evidence and open gates.
+  checks. Search positioning waits for the target's first body segment to expand,
+  keeping the match visible and keyboard focus in place. See the
+  [release notes](docs/releases/3.0.2.md) for evidence and open gates.
+
+## 3.0.1 - Unreleased
+
+- The immutable `v3.0.1` tag failed its Linux public-browser visibility assertion;
+  the GitHub Release job was skipped and no npm or GitHub release was published.
+  See the [3.0.1 record](docs/releases/3.0.1.md) and the follow-up
+  [3.0.2 notes](docs/releases/3.0.2.md).
 
 ## 3.0.0 - 2026-10-12
 

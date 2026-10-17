@@ -57,6 +57,7 @@
     openingItem.processCount !== null && openingItem.processCount > 1
       ? openingItem : null;
   let content: Record<string, ContentProgress> = {};
+  const contentLoads = new Map<string, Promise<void>>();
   let searchReveals: Record<string, SearchReveal> = {};
   let searchSelectionGeneration = 0;
   let pageLoading = false;
@@ -341,6 +342,7 @@
   }
 
   async function setChildPath(path: SessionRef[], fallbackEvent?: ReaderEventRef, focusChild?: SessionRef): Promise<void> {
+    searchSelectionGeneration++;
     childRestoreGeneration++;
     focusRestoredRoot = path.length === 1 && !focusChild;
     activeChildPath = path;
@@ -384,6 +386,8 @@
         }
       }
       await initialLayoutReady;
+      await tick();
+      await contentLoads.get(eventKey(location.event) + ':body');
       await tick();
       if (active && request === childRestoreGeneration && focusRestoredRoot) focusChildToggle(target);
     } catch (cause) {
@@ -995,9 +999,10 @@
     const opened = await revealTarget(match.event, !restoring && !fromLocation,
       () => request === searchSelectionGeneration, restoring || fromLocation);
     if (!opened || !active || request !== searchSelectionGeneration) return;
+    const navigation = locationGeneration;
     const page = await getContentPage(provider, sessionId, match.event, bootstrap.revision,
       match.offset, match.field, Math.max(1400, match.matchLength), match.contentRevision);
-    if (!active || request !== searchSelectionGeneration) return;
+    if (!active || request !== searchSelectionGeneration || navigation !== locationGeneration) return;
     if (page.offset !== match.offset || page.text.length < match.matchLength) {
       throw new Error('The matching content changed. Refresh this session and search again.');
     }
@@ -1007,24 +1012,35 @@
     const keepReadingFocus = focusRect && focusRect.top >= -1 && focusRect.bottom <= window.innerHeight + 1;
     searchReveals = { [eventKey(match.event)]: { field: match.field, offset: match.offset,
       matchLength: match.matchLength, text: page.text, totalChars: page.totalChars } };
-    await tick();
-    if (active && request === searchSelectionGeneration) {
-      const event = document.getElementById(stableAnchor(match.event));
-      for (let ancestor = event?.parentElement; ancestor; ancestor = ancestor.parentElement) {
-        if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
-      }
-      if (restoring) {
-        if (keepReadingFocus && document.activeElement === readingFocus) {
-          readingFocus?.scrollIntoView({ behavior: 'instant', block: 'nearest' });
+    const positionMatch = async (): Promise<void> => {
+      await tick();
+      // The target card's automatic body read can move the match after it mounts.
+      await contentLoads.get(eventKey(match.event) + ':body');
+      await tick();
+      if (active && request === searchSelectionGeneration && navigation === locationGeneration) {
+        const event = document.getElementById(stableAnchor(match.event));
+        for (let ancestor = event?.parentElement; ancestor; ancestor = ancestor.parentElement) {
+          if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
         }
-        return;
+        if (restoring) {
+          if (keepReadingFocus && document.activeElement === readingFocus) {
+            readingFocus?.scrollIntoView({ behavior: 'instant', block: 'nearest' });
+          }
+          return;
+        }
+        const region = event?.querySelector<HTMLElement>('.search-reveal');
+        region?.focus({ preventScroll: true });
+        const mark = region?.querySelector('mark');
+        if (mark) mark.scrollIntoView({ behavior: 'instant', block: 'center' });
+        else scrollToEvent(match.event);
       }
-      const region = event?.querySelector<HTMLElement>('.search-reveal');
-      region?.focus({ preventScroll: true });
-      const mark = region?.querySelector('mark');
-      if (mark) mark.scrollIntoView({ behavior: 'instant', block: 'center' });
-      else scrollToEvent(match.event);
-    }
+    };
+    if (restoring || fromLocation) await positionMatch();
+    else void positionMatch().catch(cause => {
+      if (active && request === searchSelectionGeneration && navigation === locationGeneration) {
+        locationError = cause instanceof Error ? cause.message : 'The matching source could not be opened.';
+      }
+    });
   }
 
   async function openRuntimeSource(target: ReaderEventRef, sourceRevision: string): Promise<void> {
@@ -1092,10 +1108,11 @@
       text: '', hasLoaded: false, totalChars: display.item.totalChars,
       nextOffset: 0, done: false, loading: false, error: '',
     };
-    if (current.loading || current.done || current.nextOffset === null) return;
+    if (current.loading) return contentLoads.get(key);
+    if (current.done || current.nextOffset === null) return;
     const offset = current.hasLoaded ? current.nextOffset : 0;
     content = { ...content, [key]: { ...current, loading: true, error: '' } };
-    try {
+    const load = (async () => { try {
       const page = await getContentPage(provider, sessionId, display.item.event, bootstrap.revision,
         offset, field, 1400, display.item.contentRevisions[field]);
       if (!active) return;
@@ -1123,7 +1140,9 @@
           error: cause instanceof Error ? cause.message : 'The next part could not be loaded.',
         },
       };
-    }
+    } })();
+    contentLoads.set(key, load);
+    try { await load; } finally { contentLoads.delete(key); }
   }
 
   async function loadRelations(): Promise<void> {

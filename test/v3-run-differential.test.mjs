@@ -3,24 +3,15 @@ import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { freeFetchSafePort } from '../v3/test/fetch-safe-port.mjs';
 
 const repo = fileURLToPath(new URL('../', import.meta.url));
 const tmp = path.join(repo, 'tmp');
 const runner = path.join(repo, 'scripts', 'v3-run-differential.mjs');
 const digest = (value) => createHash('sha256').update(value).digest('hex');
-
-async function freePort() {
-  const listener = createServer();
-  listener.listen(0, '127.0.0.1');
-  await once(listener, 'listening');
-  const port = listener.address().port;
-  await new Promise((resolve) => listener.close(resolve));
-  return port;
-}
 
 async function fixture(t, v3Body = 'SYNTHETIC_SAME', withMcp = false) {
   const dir = await mkdtemp(path.join(tmp, 'v3-run-test-'));
@@ -59,9 +50,9 @@ async function fixture(t, v3Body = 'SYNTHETIC_SAME', withMcp = false) {
     },
     ...(withMcp ? { mcp: { command: process.execPath, args: ['mcp-server.mjs'], cwd: dir, env: sourceStateEnv } } : {}),
   });
-  const v2Port = await freePort();
-  let v3Port = await freePort();
-  while (v3Port === v2Port) v3Port = await freePort();
+  const v2Port = await freeFetchSafePort();
+  let v3Port = await freeFetchSafePort();
+  while (v3Port === v2Port) v3Port = await freeFetchSafePort();
   const config = {
     format: 'agentsession-v3-differential-plan/v1',
     corpus: { root: corpusRoot, manifest, manifestSha256: digest(manifestContent) },

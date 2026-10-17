@@ -258,25 +258,34 @@
       offset: match.offset, matchLength: match.matchLength, text: page.text,
       totalChars: page.totalChars } };
     if (updateHistory) onSearchSelection(match);
-    await tick();
-    // EventCard starts automatic body reads on mount. A fresh URL must wait for
-    // those existing reads before positioning the selected content below them.
-    if (!updateHistory && !restorePane) {
-      await Promise.all(contentLoads.values());
+    const selectedHash = window.location.hash;
+    const positionMatch = async (): Promise<void> => {
       await tick();
-    }
-    if (!active || request !== searchSelectionGeneration) return;
-    const target = document.getElementById(anchor(match.event));
-    for (let ancestor = target?.parentElement; ancestor; ancestor = ancestor.parentElement) {
-      if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
-    }
-    if (!restorePane) {
-      const region = target?.querySelector<HTMLElement>('.search-reveal');
-      region?.focus({ preventScroll: true });
-      const mark = region?.querySelector('mark');
-      if (mark) mark.scrollIntoView({ behavior: 'instant', block: 'center' });
-      else target?.scrollIntoView({ behavior: 'instant', block: 'center' });
-    }
+      // EventCard starts automatic body reads on mount. A fresh URL must wait for
+      // those existing reads before positioning the selected content below them.
+      if (!updateHistory && !restorePane) {
+        await Promise.all(contentLoads.values());
+      } else await contentLoads.get(eventKey(match.event) + ':body');
+      await tick();
+      if (!active || request !== searchSelectionGeneration || window.location.hash !== selectedHash) return;
+      const target = document.getElementById(anchor(match.event));
+      for (let ancestor = target?.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
+      }
+      if (!restorePane) {
+        const region = target?.querySelector<HTMLElement>('.search-reveal');
+        region?.focus({ preventScroll: true });
+        const mark = region?.querySelector('mark');
+        if (mark) mark.scrollIntoView({ behavior: 'instant', block: 'center' });
+        else target?.scrollIntoView({ behavior: 'instant', block: 'center' });
+      }
+    };
+    if (!updateHistory) await positionMatch();
+    else void positionMatch().catch(cause => {
+      if (active && request === searchSelectionGeneration && window.location.hash === selectedHash) {
+        error = cause instanceof Error ? cause.message : 'The selected child content could not be opened.';
+      }
+    });
   }
 
   async function nextPage(): Promise<void> {

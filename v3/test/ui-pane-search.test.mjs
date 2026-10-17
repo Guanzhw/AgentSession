@@ -85,6 +85,7 @@ async function harness(t, options = {}) {
   let delayedSearchDelivered = false;
   let delayLocate = false;
   let releaseDelayedLocate;
+  let releaseDelayedBody;
   let executionRequests = 0;
   let relationRequests = 0;
   const server = createHttpServer(async (request, response) => {
@@ -183,6 +184,11 @@ async function harness(t, options = {}) {
         const offset = Number(url.searchParams.get('offset'));
         const maxChars = Number(url.searchParams.get('maxChars'));
         contents.push({ id, offset, field: url.searchParams.get('field') });
+        if (id === options.delayBodyFor && url.searchParams.get('messageId') === 'tail' && offset === 0) {
+          await new Promise(resolve => { releaseDelayedBody = resolve; });
+          if (options.failBody) return json({ error: { code: 'unavailable',
+            message: 'Target body is temporarily unavailable' } }, 503);
+        }
         if (id === childId) await options.beforeChildContent?.(contents.filter(row => row.id === childId).length);
         if (id === rootId) await options.beforeRootContent?.(contents.filter(row => row.id === rootId && row.offset === 1700).length);
         const sourceText = url.searchParams.get('messageId') === 'start'
@@ -216,6 +222,7 @@ async function harness(t, options = {}) {
   onCleanup(t, async () => {
     releaseDelayedSearch?.();
     releaseDelayedLocate?.();
+    releaseDelayedBody?.();
     await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
   });
   const port = await freePort();
@@ -228,6 +235,8 @@ async function harness(t, options = {}) {
     releaseDelayedSearch: () => releaseDelayedSearch?.(),
     delayNextLocate: () => { delayLocate = true; },
     releaseDelayedLocate: () => { releaseDelayedLocate?.(); releaseDelayedLocate = undefined; },
+    releaseDelayedBody: () => { releaseDelayedBody?.(); releaseDelayedBody = undefined; },
+    get bodyPending() { return Boolean(releaseDelayedBody); },
     get locatePending() { return Boolean(releaseDelayedLocate); },
     get delayedSearchDelivered() { return delayedSearchDelivered; } };
 }
@@ -272,59 +281,208 @@ async function waitFor(command, expression) {
 
 for (const scope of ['session', 'child']) {
   for (const activation of ['keyboard', 'mouse']) {
-    test(`${scope} search ${activation} activation moves focus to the match and Tab continues to the next reading control`,
-      { skip, timeout: 60_000 }, async t => {
-        const app = await harness(t, { tallRoot: true, tallChild: true });
-        const command = await browser(t, `${app.origin}/codex/session/${rootId}`);
-        await command('set', 'viewport', '1280', '900');
-        if (scope === 'child') {
-          await waitFor(command, `document.querySelector('.inline-child-toggle')`);
-          await command('click', '.inline-child-toggle');
-        }
-        const id = scope === 'child' ? childId : rootId;
-        const search = `.pane-search[data-scope="${scope}"]`;
-        await waitFor(command, `document.querySelector('${search} input')`);
-        await command('fill', `${search} input`, marker[id]);
-        await command('click', `${search} button[type="submit"]`);
-        await waitFor(command, `document.querySelector('${search} .pane-search-result')`);
-        if (activation === 'keyboard') {
-          await command('focus', `${search} .pane-search-result`);
-          await command('press', 'Enter');
-        } else await command('click', `${search} .pane-search-result`);
-        const pane = scope === 'child' ? '.inline-child-reader' : '.reader-main';
-        await waitFor(command, `document.querySelector('${pane} .search-reveal mark')?.textContent === '${marker[id]}'`);
-        const focused = JSON.parse(await command('eval', `(() => {
-          const mark = document.querySelector('${pane} .search-reveal mark');
-          const region = mark.closest('.search-reveal');
-          const rect = mark.getBoundingClientRect();
-          return { matchFocused: document.activeElement === region,
-            ownerMessageId: region.closest('article.event-card').dataset.messageId,
-            ownerSegment: region.closest('article.event-card').dataset.segment,
-            top: rect.top, bottom: rect.bottom, height: innerHeight, y: scrollY };
-        })()`));
-        t.diagnostic(`${scope}/${activation}: ${JSON.stringify(focused)}`);
-        assert.equal(focused.matchFocused, true, 'activation focuses the matched reading region');
-        assert.equal(focused.ownerMessageId, 'tail', 'focus belongs to the exact matched message');
-        assert.equal(focused.ownerSegment, 'message', 'focus belongs to the exact matched content segment');
-        assert.ok(focused.top >= 0 && focused.bottom <= focused.height, 'the matched text is visible');
-        const nextControl = scope === 'child'
-          ? '.reader-main > .transcript > .turn-block > article[data-message-id="tail"] .event-footer .read-more'
-          : '.reader-outline .outline-actions button';
-        await waitFor(command, `document.querySelector('${nextControl}') && !document.querySelector('${nextControl}').disabled`);
-        await command('press', 'Tab');
-        await waitFor(command, `(() => { const rect = document.activeElement.getBoundingClientRect();
-          return rect.top >= 0 && rect.bottom <= innerHeight; })()`);
-        const next = JSON.parse(await command('eval', `(() => {
-          const rect = document.activeElement.getBoundingClientRect();
-          return { controlFocused: document.activeElement === document.querySelector('${nextControl}'),
-            controlTag: document.activeElement.tagName, controlClass: document.activeElement.className,
-            top: rect.top, bottom: rect.bottom, height: innerHeight, y: scrollY };
-        })()`));
-        t.diagnostic(`${scope}/${activation} Tab: ${JSON.stringify(next)}`);
-        assert.equal(next.controlFocused, true, 'Tab proceeds to the next reading control after the matched region');
-        assert.ok(next.top >= 0 && next.bottom <= next.height, 'the next keyboard control is visible');
-      });
+    for (const failBody of [false, true]) {
+      test(`${scope} search ${activation} activation moves focus to the match and Tab continues to the next reading control${failBody ? ' after the initial body read fails' : ''}`,
+        { skip, timeout: 60_000 }, async t => {
+          const id = scope === 'child' ? childId : rootId;
+          const app = await harness(t, { tallRoot: true, tallChild: true, delayBodyFor: id, failBody });
+          const command = await browser(t, `${app.origin}/codex/session/${rootId}`);
+          await command('set', 'viewport', '1280', '900');
+          if (scope === 'child') {
+            await waitFor(command, `document.querySelector('.inline-child-toggle')`);
+            await command('click', '.inline-child-toggle');
+          }
+          const search = `.pane-search[data-scope="${scope}"]`;
+          await waitFor(command, `document.querySelector('${search} input')`);
+          await command('fill', `${search} input`, marker[id]);
+          await command('click', `${search} button[type="submit"]`);
+          await waitFor(command, `document.querySelector('${search} .pane-search-result')`);
+          if (activation === 'keyboard') {
+            await command('focus', `${search} .pane-search-result`);
+            await command('press', 'Enter');
+          } else await command('click', `${search} .pane-search-result`);
+          const pane = scope === 'child' ? '.inline-child-reader' : '.reader-main';
+          await waitFor(command, `document.querySelector('${pane} .search-reveal mark')?.textContent === '${marker[id]}'`);
+          assert.equal(app.bodyPending, true, 'The matched card initial body read is still pending');
+          assert.equal(JSON.parse(await command('eval', `history.state.agentSessionReaderSearch.panes[${JSON.stringify('codex\0' + id)}].selected?.event.messageId`)), 'tail',
+            'The selected source target is recorded before waiting for its layout');
+          app.releaseDelayedBody();
+          if (failBody) await waitFor(command, `document.querySelector('${pane} article[data-message-id="tail"] .content-error')?.textContent.includes('Target body is temporarily unavailable')`);
+          else await waitFor(command, `document.querySelector('${pane} article[data-message-id="tail"] .event-body')?.textContent.trim().length === 1400`);
+          await waitFor(command, `document.activeElement === document.querySelector('${pane} .search-reveal')`);
+          assert.equal(app.contents.filter(row => row.id === id && row.offset === 0).length, 1,
+            'Search reuses the matched card initial body read without requesting another page');
+          const focused = JSON.parse(await command('eval', `(() => {
+            const mark = document.querySelector('${pane} .search-reveal mark');
+            const region = mark.closest('.search-reveal');
+            const rect = mark.getBoundingClientRect();
+            return { matchFocused: document.activeElement === region,
+              ownerMessageId: region.closest('article.event-card').dataset.messageId,
+              ownerSegment: region.closest('article.event-card').dataset.segment,
+              top: rect.top, bottom: rect.bottom, height: innerHeight, y: scrollY };
+          })()`));
+          t.diagnostic(`${scope}/${activation}: ${JSON.stringify(focused)}`);
+          assert.equal(focused.matchFocused, true, 'activation focuses the matched reading region');
+          assert.equal(focused.ownerMessageId, 'tail', 'focus belongs to the exact matched message');
+          assert.equal(focused.ownerSegment, 'message', 'focus belongs to the exact matched content segment');
+          assert.ok(focused.top >= 0 && focused.bottom <= focused.height, 'the matched text is visible');
+          const nextControl = scope === 'child'
+            ? '.reader-main > .transcript > .turn-block > article[data-message-id="tail"] .event-footer .read-more'
+            : '.reader-outline .outline-actions button';
+          await waitFor(command, `document.querySelector('${nextControl}') && !document.querySelector('${nextControl}').disabled`);
+          await command('press', 'Tab');
+          let visibilityError;
+          try {
+            // Native focus scrolls by whole pixels; DOM rectangles retain fractional CSS pixels.
+            await waitFor(command, `(() => { const rect = document.activeElement.getBoundingClientRect();
+              return rect.top >= -1 && rect.bottom <= innerHeight + 1; })()`);
+          } catch (cause) { visibilityError = cause; }
+          const next = JSON.parse(await command('eval', `(() => {
+            const rect = document.activeElement.getBoundingClientRect();
+            return { controlFocused: document.activeElement === document.querySelector('${nextControl}'),
+              controlTag: document.activeElement.tagName, controlClass: document.activeElement.className,
+              ownerMessageId: document.activeElement.closest('article.event-card')?.dataset.messageId,
+              ownerPane: document.activeElement.closest('.inline-child-reader')?.getAttribute('aria-label'),
+              top: rect.top, bottom: rect.bottom, height: innerHeight, y: scrollY };
+          })()`));
+          t.diagnostic(`${scope}/${activation} Tab: ${JSON.stringify(next)}`);
+          if (visibilityError) throw visibilityError;
+          assert.equal(next.controlFocused, true, 'Tab proceeds to the next reading control after the matched region');
+          assert.ok(next.top >= -1 && next.bottom <= next.height + 1, 'the next keyboard control is visible');
+        });
+    }
   }
+}
+
+for (const scope of ['session', 'child']) {
+  test(`${scope} search waiting for the matched card body preserves a new query and its focus`,
+    { skip, timeout: 60_000 }, async t => {
+      const id = scope === 'child' ? childId : rootId;
+      const app = await harness(t, { tallRoot: true, tallChild: true, delayBodyFor: id });
+      const command = await browser(t, `${app.origin}/codex/session/${rootId}`);
+      if (scope === 'child') {
+        await waitFor(command, `document.querySelector('.inline-child-toggle')`);
+        await command('click', '.inline-child-toggle');
+      }
+      const search = `.pane-search[data-scope="${scope}"]`;
+      const pane = scope === 'child' ? '.inline-child-reader' : '.reader-main';
+      await waitFor(command, `document.querySelector('${search} input')`);
+      await command('fill', `${search} input`, marker[id]);
+      await command('click', `${search} button[type="submit"]`);
+      await waitFor(command, `document.querySelector('${search} .pane-search-result')`);
+      await command('click', `${search} .pane-search-result`);
+      await waitFor(command, `document.querySelector('${pane} .search-reveal mark')`);
+      assert.equal(app.bodyPending, true, 'The selected result is waiting for its initial body');
+      await command('fill', `${search} input`, 'NEW-QUERY');
+      app.releaseDelayedBody();
+      await waitFor(command, `document.querySelector('${pane} article[data-message-id="tail"] .event-body')?.textContent.trim().length === 1400`);
+      assert.equal(await command('eval', `document.activeElement === document.querySelector('${search} input')`), 'true',
+        'The old selection does not steal focus after the body finishes');
+      assert.equal(JSON.parse(await command('eval', `document.querySelector('${search} input').value`)), 'NEW-QUERY');
+      assert.equal(await command('eval', `Boolean(document.querySelector('${pane} .search-reveal'))`), 'false',
+        'The old selection does not restore its cleared match');
+      assert.equal(app.contents.filter(row => row.id === id && row.offset === 0).length, 1);
+    });
+}
+
+test('session search waiting for the matched card body respects new child navigation',
+  { skip, timeout: 60_000 }, async t => {
+    const app = await harness(t, { tallRoot: true, childOnTail: true, delayBodyFor: rootId });
+    const command = await browser(t, `${app.origin}/codex/session/${rootId}`);
+    const search = '.pane-search[data-scope="session"]';
+    await command('fill', `${search} input`, marker[rootId]);
+    await command('click', `${search} button[type="submit"]`);
+    await waitFor(command, `document.querySelector('${search} .pane-search-result')`);
+    await command('click', `${search} .pane-search-result`);
+    await waitFor(command, `document.querySelector('.reader-main .search-reveal mark')`);
+    assert.equal(app.bodyPending, true);
+    await command('click', '.inline-child-toggle');
+    await waitFor(command, `document.querySelector('.inline-child-reader article') && document.activeElement?.classList.contains('inline-child-toggle')`);
+    app.releaseDelayedBody();
+    await waitFor(command, `document.querySelector('.reader-main > .transcript article[data-message-id="tail"] .event-body')?.textContent.trim().length === 1400`);
+    assert.equal(await command('eval', `document.activeElement?.classList.contains('inline-child-toggle')`), 'true',
+      'The old root search does not take focus back from the chosen child');
+    assert.equal(JSON.parse(await command('eval', `history.state.agentSessionReaderSearch.panes[${JSON.stringify('codex\0' + rootId)}].selected?.event.messageId`)), 'tail',
+      'Child navigation preserves the selected root search');
+  });
+
+test('session search waiting for the matched card body respects a later outline jump',
+  { skip, timeout: 60_000 }, async t => {
+    const app = await harness(t, { tallRoot: true, delayBodyFor: rootId });
+    const command = await browser(t, `${app.origin}/codex/session/${rootId}`);
+    const search = '.pane-search[data-scope="session"]';
+    await command('fill', `${search} input`, marker[rootId]);
+    await command('click', `${search} button[type="submit"]`);
+    await waitFor(command, `document.querySelector('${search} .pane-search-result')`);
+    await command('click', `${search} .pane-search-result`);
+    await waitFor(command, `document.querySelector('.reader-main .search-reveal mark')`);
+    assert.equal(app.bodyPending, true);
+    const outline = '.reader-outline a[href*="messageId=tail"]';
+    await command('click', outline);
+    await waitFor(command, `!document.querySelector('.reader-actions .read-more').disabled`);
+    const readingY = await command('eval', 'scrollY');
+    app.releaseDelayedBody();
+    await waitFor(command, `document.querySelector('.reader-main article[data-message-id="tail"] .event-body')?.textContent.trim().length === 1400`);
+    assert.equal(await command('eval', `document.activeElement === document.querySelector('${outline}')`), 'true',
+      'The old selection does not take focus back from the chosen outline entry');
+    assert.equal(await command('eval', 'scrollY'), readingY,
+      'The old selection does not scroll away from the outline destination');
+  });
+
+test('child insertion restoration waits for its anchor body before focusing',
+  { skip, timeout: 60_000 }, async t => {
+    const app = await harness(t, { childOnTail: true, delayBodyFor: rootId });
+    const command = await browser(t,
+      `${app.origin}/codex/session/${rootId}#child?provider=codex&sessionId=${childId}`, [], false);
+    await command('set', 'viewport', '1280', '577');
+    await waitFor(command, `document.querySelector('.inline-child-reader article') && document.querySelector('.reader-main > .transcript article[data-message-id="tail"]')`);
+    assert.equal(app.bodyPending, true);
+    app.releaseDelayedBody();
+    await waitFor(command, `document.querySelector('.reader-main > .transcript article[data-message-id="tail"] .event-body')?.textContent.trim().length === 1400`);
+    await waitFor(command, `document.activeElement?.classList.contains('inline-child-toggle')`);
+    const position = JSON.parse(await command('eval', `(() => {
+      const rect = document.activeElement.getBoundingClientRect();
+      return { top: rect.top, bottom: rect.bottom, height: innerHeight };
+    })()`));
+    assert.ok(position.top >= 0 && position.bottom <= position.height,
+      'The insertion control remains visible after its anchor body loads: ' + JSON.stringify(position));
+    assert.equal(app.contents.filter(row => row.id === rootId && row.offset === 0).length, 1);
+  });
+
+for (const scope of ['session', 'child']) {
+  test(`${scope} search accepts its selected history entry while preserving the entry before selection`,
+    { skip, timeout: 60_000 }, async t => {
+      const id = scope === 'child' ? childId : rootId;
+      const app = await harness(t, { tallRoot: true, tallChild: true, delayBodyFor: id });
+      const command = await browser(t, `${app.origin}/codex/session/${rootId}`);
+      if (scope === 'child') {
+        await waitFor(command, `document.querySelector('.inline-child-toggle')`);
+        await command('click', '.inline-child-toggle');
+      }
+      const search = `.pane-search[data-scope="${scope}"]`;
+      const pane = scope === 'child' ? '.inline-child-reader' : '.reader-main';
+      await waitFor(command, `document.querySelector('${search} input')`);
+      await command('fill', `${search} input`, marker[id]);
+      await command('click', `${search} button[type="submit"]`);
+      await waitFor(command, `document.querySelector('${search} .pane-search-result')`);
+      const beforeHash = JSON.parse(await command('eval', 'location.hash'));
+      await command('click', `${search} .pane-search-result`);
+      await waitFor(command, `document.querySelector('${pane} .search-reveal mark')`);
+      await waitFor(command, `history.state.agentSessionReaderSearch.panes[${JSON.stringify('codex\0' + id)}].selected?.event.messageId === 'tail'`);
+      assert.equal(app.bodyPending, true, 'The selected entry is saved before body positioning completes');
+      const selectedHash = JSON.parse(await command('eval', 'location.hash'));
+      assert.notEqual(selectedHash, beforeHash);
+      await command('back');
+      await waitFor(command, `location.hash === ${JSON.stringify(beforeHash)} && !document.querySelector('${pane} .search-reveal')`);
+      assert.equal(await command('eval', `Boolean(history.state.agentSessionReaderSearch.panes[${JSON.stringify('codex\0' + id)}]?.selected)`), 'false',
+        'Back restores the entry before selection without a selected search span');
+      await command('forward');
+      await waitFor(command, `location.hash === ${JSON.stringify(selectedHash)} && document.querySelector('${pane} .search-reveal mark')?.textContent === '${marker[id]}'`);
+      assert.equal(app.bodyPending, true);
+      app.releaseDelayedBody();
+      await waitFor(command, `document.querySelector('${pane} article[data-message-id="tail"] .event-body')?.textContent.trim().length === 1400`);
+      assert.equal(app.contents.filter(row => row.id === id && row.offset === 0).length, 1);
+    });
 }
 
 test('Reader keeps unavailable resume diagnostics in Session details without an inactive primary action',
@@ -376,6 +534,8 @@ test('Reader can retry its first execution-facts read after a transient failure'
     await command('click', '.reader-execution-details summary');
     await waitFor(command, `document.querySelector('.reader-execution-details .content-error')`);
     await command('click', '.reader-execution-details button');
+    await waitFor(command, `performance.getEntriesByType('resource').some(entry =>
+      new URL(entry.name).pathname === '/api/v3/reader/codex/pane-root/executions' && entry.responseStatus === 200)`);
     await waitFor(command, `!document.querySelector('.reader-execution-details .content-error')`);
     assert.equal(app.executionRequests, 2);
     assert.deepEqual(app.executionUrls.map(url => [url.pathname, url.searchParams.get('revision'), url.searchParams.get('limit')]), [
