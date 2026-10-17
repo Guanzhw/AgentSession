@@ -11,11 +11,10 @@ Provider 数据库与 transcript 保持只读；收藏、标题和回收站状�
 [English](README.en.md) · [原生 CLI、配置与 MCP](v3/README.md) ·
 [验收契约](docs/design/agentsession-v3-acceptance-contract.md)
 
-## 3.0.1 稳定版发布候选
+## 3.0.1 稳定补丁版
 
-**3.0.1** 已进入稳定版发布流程，目标为 npm `latest` 渠道。
+**3.0.1** 使用 npm `latest` 稳定版渠道。
 [更新说明](docs/releases/3.0.1.md)记录修复、升级步骤和实际验证范围；
-最终合并版本的 CI 与公开发布验证尚待完成。
 完整性能、资源及历史状态归因仍有开放项，见[验收账本](docs/specs/stable-readiness-2026-10/tasks.md)。
 
 ```sh
@@ -26,8 +25,7 @@ agentsession
 
 预发布继续使用 npm `next` 渠道。[更新与升级说明](docs/releases/3.0.0.md)
 以公开版本 v1.10.1 为基准，涵盖默认端口、元数据副本导入和 MCP/API 迁移。
-已发布的 3.0.0 四平台独立程序见 [GitHub Release](https://github.com/Guanzhw/AgentSession/releases/tag/v3.0.0)。
-上方锁定版本命令用于 3.0.1 发布后的安装。
+四平台独立程序见 [GitHub Release](https://github.com/Guanzhw/AgentSession/releases/tag/v3.0.1)。
 
 从旧版升级时，请先按[元数据迁移指南](v3/README.md#viewer-metadata-import)
 导入旧收藏、标题和回收站状态，再进行新版元数据编辑。3.0.0 的 npm 入口支持
@@ -80,7 +78,7 @@ UTF-16 位置和 `contentRevision`，按有界正文窗口读取；浏览器 Bac
 
 ## 开发与状态
 
-3.0.1 发布候选修复：Token 统计默认按 Token 展示趋势、Harness 与模型份额。
+3.0.1 修复：Token 统计默认按 Token 展示趋势、Harness 与模型份额。
 Codex 普通 `token_count` 记录按可核验的累计增量计入已知用量，重复快照不重复
 计数；请求数仍需要明确的请求身份。旧格式 `session_id` 会话头也可被发现。
 详见[统计修复决策](.agents/decisions/implemented/2026-10-12-codex-recorded-token-consumption.md)。

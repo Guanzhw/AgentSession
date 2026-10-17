@@ -1,11 +1,12 @@
 # Changelog
 
-## 3.0.1 - Release candidate
+## 3.0.1 - 2026-10-17
 
 - Restore fresh Codex discovery using canonical session identity, including legacy
   headers. Token statistics count cumulative increments without repeating snapshots;
   recorded request identity remains required for request counts.
-- Deduplicate Claude pending usage by response and retain recorded usage components.
+- Keep Claude pending records from claiming a response ID, deduplicate recorded
+  usage by response and retain recorded usage components.
   Missing usage remains unknown and does not claim a request or displace later usage.
 - Publish ambiguous DSH sessions as diagnostic rows with unknown counts, partial
   search coverage and explicit excluded-source statistics.
@@ -17,10 +18,8 @@
   non-indexed listing path, and share batch metadata preflight/writes.
 - Retain live Codex catalog consistency, OpenCode WAL handling, fixture cleanup
   and missing-child Reader guidance from the integrated main branch.
-- Final integrated CI and publication checks are pending. Earlier scoped Windows
-  validation passed Rust core 266/app 10 with 18 ignored probes, and Node 778
-  with 50 conditional skips; it is not a test of the combined release commit.
-  See the [release notes](docs/releases/3.0.1.md) for evidence and open gates.
+- Exact-tag publication requires four-platform native and combined npm installation
+  checks. See the [release notes](docs/releases/3.0.1.md) for evidence and open gates.
 
 ## 3.0.0 - 2026-10-12
 

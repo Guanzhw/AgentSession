@@ -373,7 +373,7 @@ test('portable release directory runs from a copied path with spaces using only 
         cwd: installDir, encoding: 'utf8', timeout: 5_000, windowsHide: true,
       });
       assert.equal(result.status, 0, `README block cannot run in a fresh shell: ${result.stderr}`);
-      assert.match(result.stdout, /agentsession-v3 3\.0\.0/);
+      assert.equal(result.stdout.trim(), `agentsession-v3 ${version}`);
     }
 
     const demoConfigFile = path.join(installDir, 'state', 'config.json');

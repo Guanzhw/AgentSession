@@ -18,9 +18,10 @@ records the current default. The [3.0.0-rc.4 release notes](../docs/releases/3.0
 describe the prerelease distribution and upgrade from public v1.10.1.
 Remaining acceptance gates retain their recorded evidence scope.
 
-The current source version is **3.0.1, a stable release candidate**.
+The current source version is **3.0.1, a stable patch**.
 The [3.0.1 notes](../docs/releases/3.0.1.md) describe the included repairs and
-evidence boundaries; final integrated CI and public publication checks are pending.
+evidence boundaries. Exact-tag publication requires the four-platform native
+checks and combined npm installation checks to pass.
 The [stable-readiness ledger](../docs/specs/stable-readiness-2026-10/tasks.md)
 owns its current validation and release decision. Stable publication uses npm
 `latest` and a normal GitHub release; prerelease versions continue to use `next`.
@@ -70,7 +71,7 @@ their recorded scope.
 
 ## HTTP contract migration
 
-The 3.0.1 release candidate preserves invalid Reader execution
+The 3.0.1 patch preserves invalid Reader execution
 evidence as HTTP 422 `protocol_invalid`. Its error object additionally includes
 `diagnostics` (existing `code` / `event_id` shape, at most 20 entries) and
 `diagnosticsTruncated`. Readable conversation content remains available. Reader

@@ -1,11 +1,13 @@
 # AgentSession 3.0：可执行重建计划
 
-2026-10-17 当前版本为 **3.0.1 稳定版发布候选**，已获提交和发布授权。
+2026-10-17 当前版本为 **3.0.1 稳定补丁版**，已获提交和发布授权。
 本版整合 Codex 发现与累计 Token、Claude 用量、DSH 歧义诊断、Reader 错误持久化、
 MCP 安全诊断、Linux 浏览器门槛、统一索引列表及元数据批量预检修复，并保留 main
 的实时 Codex catalog、OpenCode WAL、夹具清理及缺失子历史提示。
 [3.0.1 更新说明](../releases/3.0.1.md)是本版安装与证据边界入口。
-最终合并提交的完整 CI、四平台发布流程及公开安装验证尚未执行完成。
+发布由精确 tag 的四平台 native、Web/MCP、便携包和组合 npm 安装检查共同门禁，
+实际结果见 [发布工作流](https://github.com/Guanzhw/AgentSession/actions/workflows/v3-prerelease.yml)。
+整合后的 Windows 原生程序已通过五源 Web 列表与四源 MCP 冻结来源复验，来源哈希保持。
 此前冻结 Windows 完整检查记录为 Rust core 266、app 10 通过，18 忽略；Node
 778 通过、50 条件跳过、0 失败，review 通过；Windows/Linux x64 浏览器各 43 项
 通过。这些记录仅覆盖各自输入与产物，不视为整合后的提交重跑。性能、资源及历史
