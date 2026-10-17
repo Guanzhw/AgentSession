@@ -16,8 +16,8 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::time::Duration;
 
-const PROJECTION: i64 = 10;
-const SCHEMA_VERSION: i64 = 2;
+const PROJECTION: i64 = 11;
+const SCHEMA_VERSION: i64 = 3;
 const CHUNK_UNITS: usize = 4096;
 
 pub(crate) fn project_process_items(
@@ -252,7 +252,9 @@ fn decode<T: DeserializeOwned>(value: String) -> Result<T> {
 fn placement_pages(
     core: &Core,
     snapshot: &SessionSnapshot,
-    captured_stream: Option<&Option<crate::protocol::EventStream>>,
+    captured_stream: Option<
+        &std::result::Result<crate::protocol::EventStream, crate::protocol::ProtocolError>,
+    >,
     captured_parents: Option<&HashMap<SessionRef, Option<Option<SessionRef>>>>,
 ) -> Vec<Vec<ReaderChildPlacement>> {
     let mut pages = Vec::new();
@@ -362,7 +364,7 @@ fn placement_pages(
         None
     };
     let Some(stream) = captured_stream
-        .and_then(Option::as_ref)
+        .and_then(|result| result.as_ref().ok())
         .or(loaded_stream.as_ref())
     else {
         return pages;
@@ -577,6 +579,7 @@ impl ReaderModel {
                 summary_json TEXT NOT NULL, item_count INTEGER NOT NULL,
                 relation_count INTEGER NOT NULL, task_count INTEGER NOT NULL,
                 execution_available INTEGER NOT NULL DEFAULT 0,
+                execution_error_json TEXT,
                 PRIMARY KEY(provider, session_id)
             );
             CREATE TABLE IF NOT EXISTS reader_execution (
@@ -615,6 +618,12 @@ impl ReaderModel {
             .map_err(storage)?;
             if schema_version == 1 {
                 db.execute_batch("ALTER TABLE reader_session ADD COLUMN execution_available INTEGER NOT NULL DEFAULT 0;").map_err(storage)?;
+            }
+            if matches!(schema_version, 1 | 2) {
+                db.execute_batch(
+                    "ALTER TABLE reader_session ADD COLUMN execution_error_json TEXT;",
+                )
+                .map_err(storage)?;
             }
             db.pragma_update(None, "user_version", SCHEMA_VERSION)
                 .map_err(storage)?;
@@ -716,7 +725,7 @@ impl ReaderModel {
                 boundaries.insert(reference.clone());
             }
         }
-        if let Some(Some(stream)) = capture.protocol_stream.as_ref() {
+        if let Some(Ok(stream)) = capture.protocol_stream.as_ref() {
             boundaries.extend(stream.execution_boundary_refs());
         }
         let projected_items = project_process_items(snapshot, &boundaries);
@@ -859,7 +868,7 @@ impl ReaderModel {
                     .map_err(storage)?;
             }
         }
-        if let Some(Some(stream)) = &capture.protocol_stream {
+        if let Some(Ok(stream)) = &capture.protocol_stream {
             let mut insert = tx
                 .prepare("INSERT INTO reader_execution VALUES (?1,?2,?3,?4)")
                 .map_err(storage)?;
@@ -880,7 +889,7 @@ impl ReaderModel {
             .filter(|entry| matches!(entry, RelationEntry::Task { .. }))
             .count();
         tx.execute(
-            "INSERT INTO reader_session VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+            "INSERT INTO reader_session (provider,session_id,projection,revision,dependencies,summary_json,item_count,relation_count,task_count,execution_available,execution_error_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
             params![
                 provider,
                 session_id,
@@ -891,7 +900,8 @@ impl ReaderModel {
                 snapshot.events.len() as i64,
                 snapshot.relations.len() as i64,
                 task_count as i64,
-                matches!(capture.protocol_stream, Some(Some(_)))
+                matches!(capture.protocol_stream, Some(Ok(_))),
+                capture.protocol_stream.as_ref().and_then(|result| result.as_ref().err()).map(encode).transpose()?
             ],
         )
         .map_err(storage)?;
@@ -1001,11 +1011,14 @@ impl ReaderModel {
         if revision != self.revision {
             return Err(CoreError::SourceChanged);
         }
-        let available: bool = self.db.query_row(
-            "SELECT execution_available FROM reader_session WHERE provider=?1 AND session_id=?2",
-            params![self.summary.session.provider, self.summary.session.session_id], |row| row.get(0),
+        let (available, error): (bool, Option<String>) = self.db.query_row(
+            "SELECT execution_available,execution_error_json FROM reader_session WHERE provider=?1 AND session_id=?2",
+            params![self.summary.session.provider, self.summary.session.session_id], |row| Ok((row.get(0)?, row.get(1)?)),
         ).map_err(storage)?;
         if !available {
+            if let Some(error) = error {
+                return Err(CoreError::Protocol(decode(error)?));
+            }
             return Err(CoreError::Unavailable(
                 "recorded Reader execution evidence is unavailable".into(),
             ));
@@ -1570,6 +1583,129 @@ mod tests {
             cache_dir: root.join("cache"),
         })
         .unwrap()
+    }
+
+    #[test]
+    fn reader_execution_failures_keep_protocol_diagnostics_across_reopens() {
+        let temporary = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../tmp");
+        fs::create_dir_all(&temporary).unwrap();
+        for (invalid_record, expected_code) in [
+            (
+                "{\"payload\":{\"type\":\"message\"}}\n",
+                "missing_provenance_source",
+            ),
+            ("{not-json}\n", "malformed_source_record"),
+        ] {
+            let root = tempfile::Builder::new()
+                .prefix("reader-errors-")
+                .tempdir_in(&temporary)
+                .unwrap();
+            let id = "abababab-abab-4bab-8bab-eeeeeeeeeeee";
+            let source_dir = root.path().join("codex/sessions");
+            fs::create_dir_all(&source_dir).unwrap();
+            let path = source_dir.join(format!("rollout-{id}.jsonl"));
+            fs::write(
+                &path,
+                format!("{}{invalid_record}", source(id, "readable conversation")),
+            )
+            .unwrap();
+            let initial = core(root.path());
+            let bootstrap = initial.reader_bootstrap("codex", id).unwrap();
+            assert!(
+                bootstrap.total_items > 0,
+                "invalid protocol must not hide readable text"
+            );
+            for current in [&initial, &core(root.path())] {
+                for _ in 0..2 {
+                    let error = current
+                        .reader_executions("codex", id, &bootstrap.revision, None, 20)
+                        .unwrap_err();
+                    let CoreError::Protocol(crate::protocol::ProtocolError::Invalid {
+                        diagnostics,
+                    }) = error
+                    else {
+                        panic!("expected the recorded Protocol failure, got {error}");
+                    };
+                    assert!(
+                        diagnostics
+                            .iter()
+                            .any(|diagnostic| diagnostic.code == expected_code)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn valid_reader_without_execution_events_returns_an_empty_successful_page() {
+        let temporary = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../tmp");
+        fs::create_dir_all(&temporary).unwrap();
+        let root = tempfile::Builder::new()
+            .prefix("reader-empty-executions-")
+            .tempdir_in(&temporary)
+            .unwrap();
+        let id = "abababab-abab-4bab-8bab-ffffffffffff";
+        let source_dir = root.path().join("codex/sessions");
+        fs::create_dir_all(&source_dir).unwrap();
+        fs::write(
+            source_dir.join(format!("rollout-{id}.jsonl")),
+            source(id, "no tools"),
+        )
+        .unwrap();
+        let core = core(root.path());
+        let bootstrap = core.reader_bootstrap("codex", id).unwrap();
+        let page = core
+            .reader_executions("codex", id, &bootstrap.revision, None, 20)
+            .unwrap();
+        assert!(page.events.is_empty());
+        assert!(page.next_cursor.is_none());
+    }
+
+    #[test]
+    fn legacy_reader_cache_recaptures_execution_failures_without_changing_source() {
+        let temporary = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../tmp");
+        fs::create_dir_all(&temporary).unwrap();
+        for old_schema in [1, 2] {
+            let root = tempfile::Builder::new()
+                .prefix("reader-schema-upgrade-")
+                .tempdir_in(&temporary)
+                .unwrap();
+            let id = "abababab-abab-4bab-8bab-dddddddddddd";
+            let source_dir = root.path().join("codex/sessions");
+            fs::create_dir_all(&source_dir).unwrap();
+            let path = source_dir.join(format!("rollout-{id}.jsonl"));
+            let original = format!("{}{{not-json}}\n", source(id, "preserved source"));
+            fs::write(&path, &original).unwrap();
+            let initial = core(root.path());
+            let first = initial.reader_bootstrap("codex", id).unwrap();
+            let database = initial
+                .config
+                .cache_dir
+                .join(format!("reader-{}.sqlite", initial.source_scope));
+            let db = Connection::open(&database).unwrap();
+            db.execute_batch("ALTER TABLE reader_session DROP COLUMN execution_error_json; UPDATE reader_session SET projection=10,execution_available=0;").unwrap();
+            if old_schema == 1 {
+                db.execute_batch("ALTER TABLE reader_session DROP COLUMN execution_available;")
+                    .unwrap();
+            }
+            db.pragma_update(None, "user_version", old_schema).unwrap();
+            drop(db);
+            let restarted = core(root.path());
+            let refreshed = restarted.reader_bootstrap("codex", id).unwrap();
+            assert_eq!(refreshed.revision, first.revision);
+            assert!(matches!(
+                restarted.reader_executions("codex", id, &refreshed.revision, None, 20),
+                Err(CoreError::Protocol(
+                    crate::protocol::ProtocolError::Invalid { .. }
+                ))
+            ));
+            let db = Connection::open(&database).unwrap();
+            let (version, projection, error): (i64, i64, Option<String>) = db.query_row("SELECT (SELECT user_version FROM pragma_user_version),projection,execution_error_json FROM reader_session", [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?))).unwrap();
+            assert_eq!(version, SCHEMA_VERSION);
+            assert_eq!(projection, PROJECTION);
+            assert!(error.unwrap().contains("malformed_source_record"));
+            assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        }
     }
 
     #[test]

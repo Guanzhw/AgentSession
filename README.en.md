@@ -12,23 +12,23 @@ evidence remain visible throughout the reading and MCP flows.
 [中文](README.md) · [Native CLI, configuration and MCP](v3/README.md) ·
 [Acceptance contract](docs/design/agentsession-v3-acceptance-contract.md)
 
-## 3.0 stable release
+## 3.0.1 stable patch
 
-**3.0.0** uses npm's `latest` stable channel. The
-[release notes](docs/releases/3.0.0.md) describe features, migration and actual
-validation scope. Complete performance/resource acceptance and historical state
-attribution retain open items in the [ledger](docs/specs/stable-readiness-2026-10/tasks.md).
+**3.0.1** uses npm's stable `latest` channel. The
+[release notes](docs/releases/3.0.1.md) describe fixes, migration and actual
+validation scope.
+Complete performance/resource acceptance and historical state attribution retain open items in the [ledger](docs/specs/stable-readiness-2026-10/tasks.md).
 
 ```sh
-npm install -g @acetamido/agentsession@3.0.0
-npm install -g @acetamido/agentsession-mcp@3.0.0
+npm install -g @acetamido/agentsession@3.0.1
+npm install -g @acetamido/agentsession-mcp@3.0.1
 agentsession
 ```
 
 Prereleases retain npm's `next` channel. [Release and upgrade notes](docs/releases/3.0.0.md)
 compare it with public v1.10.1, including the port change, metadata-copy import,
-and MCP/API migration. Four standalone platform bundles are available in the
-[GitHub Release](https://github.com/Guanzhw/AgentSession/releases/tag/v3.0.0).
+and MCP/API migration. Standalone bundles are available in the
+[GitHub Release](https://github.com/Guanzhw/AgentSession/releases/tag/v3.0.1).
 
 When upgrading, follow the [metadata migration guide](v3/README.md#viewer-metadata-import)
 before editing stars, titles or Trash in the new Viewer. The 3.0.0 npm entrypoint
@@ -39,7 +39,7 @@ If a third-party npm mirror returns `404` for a newly published tarball, select
 the official registry for that installation:
 
 ```sh
-npm install -g @acetamido/agentsession@3.0.0 @acetamido/agentsession-mcp@3.0.0 --registry https://registry.npmjs.org
+npm install -g @acetamido/agentsession@3.0.1 @acetamido/agentsession-mcp@3.0.1 --registry https://registry.npmjs.org
 ```
 
 This leaves the global npm registry configuration unchanged. If the official
@@ -89,6 +89,19 @@ retains its recorded behavior.
 
 ## Development and status
 
+The 3.0.1 fixes default Statistics trends, Harness comparisons and
+model shares to tokens. Codex ordinary `token_count` records contribute verified
+cumulative increments to known usage; repeated snapshots add nothing. Request
+counts still require request identity. Legacy `session_id` headers are also
+discoverable. See the [statistics decision](.agents/decisions/implemented/2026-10-12-codex-recorded-token-consumption.md).
+
+The 3.0.1 architecture repairs also correct Claude pending-usage deduplication,
+retain ambiguous DSH sessions as diagnostic rows, and preserve captured
+Protocol errors in the Reader. Older derived indexes and Reader caches are
+recaptured automatically; provider records and Viewer metadata are preserved.
+Public browser regressions are required in Linux x64 CI. Browser tools have
+their own installation, retaining the project's Node.js 22.15 development floor.
+
 ```bash
 npm run review
 npm test
@@ -96,8 +109,8 @@ npm test
 
 See [the development guide](AGENTS.md) for ownership and validation, and the
 [delivery plan](docs/design/agentsession-v3-delivery-plan.md) for remaining
-source, performance, product, and platform gates. The 3.0.0 notes identify the
-validation scope and release disposition; unresolved acceptance items remain open. Historical 2.0
+source, performance, product, and platform gates. The 3.0.1 notes identify the
+validation scope; unresolved acceptance items remain open. Historical 2.0
 evidence and migration decisions retain their original scope; its implementation
 can be recovered from Git history.
 

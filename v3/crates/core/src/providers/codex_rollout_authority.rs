@@ -12,6 +12,7 @@ pub(super) struct RecordedRollout {
 
 fn invalid(path: &Path, reason: impl std::fmt::Display) -> CoreError {
     CoreError::Parse {
+        diagnostic: crate::ParseDiagnostic::new("invalid Codex rollout authority"),
         path: path.into(),
         reason: format!("Codex recorded rollout authority: {reason}"),
     }
@@ -117,7 +118,7 @@ pub(super) fn resolve(
             let header = super::read_primary_meta(&entry.path)?;
             if header
                 .as_ref()
-                .and_then(|header| header["payload"]["id"].as_str())
+                .and_then(|header| super::session_meta_id(&header["payload"]))
                 != Some(id)
             {
                 return Err(CoreError::SourceChanged);
@@ -395,7 +396,6 @@ mod tests {
             let incoming: BTreeMap<_, _> = adapter
                 .inventory()
                 .unwrap()
-                .unwrap()
                 .into_iter()
                 .map(|entry| (entry.session_id.clone(), entry))
                 .collect();
@@ -439,9 +439,7 @@ mod tests {
         let index = root.path().join("index");
         CODEX_USAGE_DIGEST_READS.with(|count| count.set(0));
         CODEX_REVISION_FILE_READS.with(|count| count.set(0));
-        let published = crate::index::refresh(&index, adapter.scope, "codex", &adapter)
-            .unwrap()
-            .unwrap();
+        let published = crate::index::refresh(&index, adapter.scope, "codex", &adapter).unwrap();
         assert_eq!(
             CODEX_USAGE_DIGEST_READS.with(std::cell::Cell::get),
             0,
@@ -454,9 +452,7 @@ mod tests {
         );
         assert_eq!(published.rows[0].message_count, 1);
         CODEX_NORMALIZATION_COUNT.with(|count| count.set(0));
-        let unchanged = crate::index::refresh(&index, adapter.scope, "codex", &adapter)
-            .unwrap()
-            .unwrap();
+        let unchanged = crate::index::refresh(&index, adapter.scope, "codex", &adapter).unwrap();
         assert_eq!(unchanged.revision, published.revision);
         assert_eq!(
             CODEX_NORMALIZATION_COUNT.with(std::cell::Cell::get),
@@ -466,7 +462,6 @@ mod tests {
 
         let incoming: BTreeMap<_, _> = adapter
             .inventory()
-            .unwrap()
             .unwrap()
             .into_iter()
             .map(|entry| (entry.session_id.clone(), entry))
@@ -590,7 +585,7 @@ mod tests {
             scope: "recorded-rollout-inventory",
         };
         let signature = || {
-            let entries = adapter.inventory().unwrap().unwrap();
+            let entries = adapter.inventory().unwrap();
             assert_eq!(entries.len(), 1);
             assert_eq!(entries[0].session_id, id);
             entries[0].signature.clone()

@@ -190,6 +190,7 @@ fn compose(
         available_projects: vec![],
         cost_estimate: None,
         pricing_tokens: crate::stats_cost::CostTokenTotals::default(),
+        usage_amount_count: 0,
     };
     let mut days: BTreeMap<String, StatsDay> = BTreeMap::new();
     let mut models: BTreeMap<(Option<String>, Option<String>), StatsModelRank> = BTreeMap::new();
@@ -200,8 +201,9 @@ fn compose(
     let mut diagnostics = BTreeMap::new();
     for next in reports {
         revisions.push(format!("{}={}", next.provider, next.revision));
-        let prior_requests = report.overview.recorded_request_count;
-        let next_requests = next.overview.recorded_request_count;
+        let prior_requests = report.usage_amount_count;
+        let next_requests = next.usage_amount_count;
+        report.usage_amount_count += next_requests;
         let overview = &mut report.overview;
         overview.total_sessions += next.overview.total_sessions;
         overview.total_messages += next.overview.total_messages;
@@ -252,8 +254,8 @@ fn compose(
                 day: row.day.clone(),
                 ..StatsDay::default()
             });
-            let a = entry.recorded_request_count;
-            let b = row.recorded_request_count;
+            let a = entry.usage_amount_count;
+            let b = row.usage_amount_count;
             for (left, right) in [
                 (&mut entry.total_tokens, row.total_tokens),
                 (&mut entry.input_tokens, row.input_tokens),
@@ -264,7 +266,8 @@ fn compose(
             ] {
                 *left = complete_dimension(*left, right, a, b)?;
             }
-            entry.recorded_request_count += b;
+            entry.recorded_request_count += row.recorded_request_count;
+            entry.usage_amount_count += b;
             entry.known_token_count = sum(entry.known_token_count, row.known_token_count)?;
             entry.unknown_token_request_count += row.unknown_token_request_count;
             entry.unresolved_usage_observation_count += row.unresolved_usage_observation_count;
@@ -344,6 +347,8 @@ mod tests {
             ..StatsDay::default()
         });
         a.overview.recorded_request_count = 2;
+        a.usage_amount_count = 2;
+        a.daily_usage[0].usage_amount_count = 2;
         a.overview.known_token_count = 30;
         a.pricing_tokens.input = Some(20);
         a.daily_usage[0].sessions.push(StatsDaySession {
@@ -366,6 +371,8 @@ mod tests {
             ..StatsDay::default()
         });
         b.overview.recorded_request_count = 1;
+        b.usage_amount_count = 1;
+        b.daily_usage[0].usage_amount_count = 1;
         b.overview.unknown_token_request_count = 1;
         b.overview.unresolved_usage_observation_count = 4;
         b.daily_usage[0].sessions.push(StatsDaySession {

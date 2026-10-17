@@ -1,3 +1,4 @@
+import { browserPrerequisites } from './browser-prerequisites.mjs';
 import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import { freeFetchSafePort } from './fetch-safe-port.mjs';
 import assert from 'node:assert/strict';
@@ -17,25 +18,7 @@ const sessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const childSessionId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const finalAnswer = `The delegated inspection is complete. ${'Recorded agent result. '.repeat(18)}`.trimEnd();
 
-function agentBrowserBinary() {
-  const override = process.env.AGENTSESSION_V3_AGENT_BROWSER_BIN;
-  if (override && existsSync(override)) return override;
-  const binaryName = process.platform === 'win32'
-    ? 'agent-browser-win32-x64.exe'
-    : `agent-browser-${process.platform}-${process.arch}`;
-  for (const entry of (process.env.PATH || '').split(path.delimiter)) {
-    const candidate = path.join(entry, 'node_modules', 'agent-browser', 'bin', binaryName);
-    if (existsSync(candidate)) return candidate;
-  }
-  return undefined;
-}
-
-const agentBrowserExe = agentBrowserBinary();
-const skipReason = !existsSync(path.join(uiDir, 'node_modules', 'vite'))
-  ? 'Install the locked v3/ui dependencies before running the Reader browser test.'
-  : !agentBrowserExe
-    ? 'The agent-browser CLI is required; the test does not install it or download a browser.'
-    : false;
+const { browserBinary: agentBrowserExe, skip: skipReason } = browserPrerequisites({ ui: uiDir });
 
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 

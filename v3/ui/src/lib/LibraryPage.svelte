@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { BatchAction, BatchResult, LibraryFilters, LibraryNode, ProviderSummary, SearchMatch, SearchProviderDiagnostic, SessionRef, SessionSummary, SourceDiagnostic, ViewerMeta } from './api';
-  import { errorText, language, t, type Language } from './i18n';
+  import { diagnosticText, errorText, language, t, type Language } from './i18n';
   import { sourceSettingsHref } from './source-guidance';
   import { searchMatchHref } from './search-navigation';
 
@@ -163,13 +163,7 @@
   function searchDiagnosticMessage(problem: SearchProviderDiagnostic, selectedLanguage: Language): string {
     if (problem.status !== 'partial') return problem.message || t(selectedLanguage, 'The source could not be searched.');
     return (problem.sourceDiagnostics || []).map(item => {
-      const label = item.code === 'codex_multiple_source_files_unmerged'
-        ? t(selectedLanguage, 'History unavailable: multiple Codex source files')
-        : item.code === 'codex_source_inventory_incomplete'
-          ? t(selectedLanguage, 'History unavailable: Codex source identity is incomplete')
-          : item.code === 'codex_child_ownership_boundary_unavailable'
-            ? t(selectedLanguage, 'History unavailable: child ownership boundary is missing')
-            : item.code;
+      const label = diagnosticText(selectedLanguage, item.code);
       const count = item.affectedSessions ?? item.affectedSources;
       return count === undefined ? label : `${label} (${count})`;
     }).join('; ') || t(selectedLanguage, 'Some sources could not be searched');
@@ -250,9 +244,7 @@
         <span class="family-child-title"><span class="library-row-title">{@render starState(child)}<strong title={child.session.title}>{displayTitle(child.session)}</strong></span>
           <small>{providerLabel(child.session.session.provider)} · {child.session.directory || child.session.session.sessionId}</small>
           {@render usage(child.session)}
-          {#if child.session.diagnostic === 'codex_multiple_source_files_unmerged'}<small class="source-diagnostic">{t($language, 'History unavailable: multiple Codex source files')}</small>{/if}
-          {#if child.session.diagnostic === 'codex_source_inventory_incomplete'}<small class="source-diagnostic">{t($language, 'History unavailable: Codex source identity is incomplete')}</small>{/if}
-          {#if child.session.diagnostic === 'codex_child_ownership_boundary_unavailable'}<small class="source-diagnostic">{t($language, 'History unavailable: child ownership boundary is missing')}</small>{/if}</span>
+          {#if child.session.diagnostic}<small class="source-diagnostic">{diagnosticText($language, child.session.diagnostic)}</small>{/if}</span>
         <span class="session-date">{dateLabel(child.session.updatedAt)}</span>
         <span class="message-count">{child.session.diagnostic ? '—' : child.session.messageCount}</span>
         <span class="row-open" aria-hidden="true">↗</span>
@@ -536,9 +528,7 @@
                     <span class="session-copy"><span class="library-row-title">{@render starState(family)}<strong title={root.title}>{displayTitle(root)}</strong></span>
                       <span>{providerLabel(root.session.provider)} · {root.directory || root.session.sessionId}</span>
                       {@render usage(root)}
-                      {#if root.diagnostic === 'codex_multiple_source_files_unmerged'}<span class="source-diagnostic">{t($language, 'History unavailable: multiple Codex source files')}</span>{/if}
-                      {#if root.diagnostic === 'codex_source_inventory_incomplete'}<span class="source-diagnostic">{t($language, 'History unavailable: Codex source identity is incomplete')}</span>{/if}
-                      {#if root.diagnostic === 'codex_child_ownership_boundary_unavailable'}<span class="source-diagnostic">{t($language, 'History unavailable: child ownership boundary is missing')}</span>{/if}</span></span>
+                      {#if root.diagnostic}<span class="source-diagnostic">{diagnosticText($language, root.diagnostic)}</span>{/if}</span></span>
                   <span class="session-date" title={t($language, 'Latest family activity')}>{dateLabel(family.familyUpdated)}</span>
                   <span class="message-count">{root.diagnostic ? '—' : root.messageCount}</span><span class="row-open" aria-hidden="true">{family.childCount ? '' : '↗'}</span>
                 </a>
@@ -572,7 +562,8 @@
                     <small>{providerLabel(root.session.provider)} · {family.parentBoundary === 'cyclic-parent'
                       ? t($language, 'Cyclic parent reference') : family.parentBoundary === 'hidden-parent'
                         ? t($language, 'Parent session hidden') : t($language, 'Parent session unavailable')}: {root.parent?.sessionId}</small>
-                    {@render usage(root)}</span>
+                    {@render usage(root)}
+                    {#if root.diagnostic}<small class="source-diagnostic">{diagnosticText($language, root.diagnostic)}</small>{/if}</span>
                   <span class="session-date" title={t($language, 'Latest family activity')}>{dateLabel(family.familyUpdated)}</span>
                   <span class="message-count">{root.diagnostic ? '—' : root.messageCount}</span><span class="row-open" aria-hidden="true">↗</span>
                 </a>

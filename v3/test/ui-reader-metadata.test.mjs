@@ -174,9 +174,11 @@ export async function readerMetadataHarness(t, mode = 'replies', options = {}) {
 
 async function browser(t, url, launchArgs = []) {
   const browserSession = `agentsession-v3-reader-metadata-${process.pid}-${Date.now()}`;
+  // Keep launch options identical after open so agent-browser reuses this browser.
+  const env = launchArgs.length ? { ...process.env, AGENT_BROWSER_ARGS: launchArgs[1] } : process.env;
   const command = (...args) => new Promise((resolve, reject) => {
     const child = spawn(browserExe, ['--session', browserSession, ...args],
-      { cwd: repo, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      { cwd: repo, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', chunk => { stdout += chunk.toString(); });

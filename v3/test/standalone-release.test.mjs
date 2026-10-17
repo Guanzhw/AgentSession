@@ -373,7 +373,7 @@ test('portable release directory runs from a copied path with spaces using only 
         cwd: installDir, encoding: 'utf8', timeout: 5_000, windowsHide: true,
       });
       assert.equal(result.status, 0, `README block cannot run in a fresh shell: ${result.stderr}`);
-      assert.match(result.stdout, /agentsession-v3 3\.0\.0/);
+      assert.equal(result.stdout.trim(), `agentsession-v3 ${version}`);
     }
 
     const demoConfigFile = path.join(installDir, 'state', 'config.json');
@@ -468,7 +468,7 @@ test('portable release directory runs from a copied path with spaces using only 
     assert.equal(settings.startup.state.cacheDir, expectedState.cache);
 
     const bootstrapResponse = await fetch(`${origin}/api/v3/reader/codex/${sessionId}/bootstrap`);
-    assert.equal(bootstrapResponse.status, 200);
+    assert.equal(bootstrapResponse.status, 200, await bootstrapResponse.clone().text());
     const bootstrap = await bootstrapResponse.json();
     const query = new URLSearchParams({ messageId: 'assistant-1', segment: 'message', field: 'body',
       offset: '0', maxChars: '256', revision: bootstrap.revision });

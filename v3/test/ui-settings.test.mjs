@@ -132,12 +132,27 @@ test('real Settings saves resume overrides and Reader reflects the saved capabil
   await mkdir(screenshots, { recursive: true });
   await command(session, 'set', 'viewport', '1440', '1000');
   await command(session, 'screenshot', path.join(screenshots, 'runtime-settings.png'), '--full');
-  await command(session, 'open', base + '/pi/session/settings-ui');
-  await waitForText(session, 'Resume in terminal');
   const preview = await (await fetch(base + '/api/v3/resume/pi/settings-ui')).json();
   assert.equal(preview.command.executable, process.execPath);
-  const state = await command(session, 'eval', `JSON.stringify({ enabled: [...document.querySelectorAll('button')].find(b => b.textContent.includes('Resume in terminal'))?.disabled === false })`);
-  if (preview.available) assert.ok(state.includes('true'));
+  assert.deepEqual(preview.command.args, ['settings-ui']);
+  assert.equal(preview.command.cwd, dir);
+  assert.equal(preview.allowTerminalLaunch, true);
+  assert.equal(preview.available, process.platform === 'win32');
+  assert.equal(preview.diagnostic, process.platform === 'win32' ? null
+    : 'Terminal launching is currently supported on Windows only');
+  await command(session, 'open', base + '/pi/session/settings-ui');
+  if (preview.available) {
+    await waitForText(session, 'Resume in terminal');
+  } else {
+    await command(session, 'click', '.reader-session-details > summary');
+    await waitForText(session, preview.diagnostic);
+  }
+  const state = JSON.parse(await command(session, 'eval', `(() => {
+    const button = [...document.querySelectorAll('button')].find(b => b.textContent.includes('Resume in terminal'));
+    return { present: Boolean(button), enabled: button?.disabled === false };
+  })()`));
+  assert.deepEqual(state, { present: preview.available, enabled: preview.available },
+    'Reader resume action must reflect the saved command and the host platform capability');
   await command(session, 'open', base + '/settings');
   await command(session, 'snapshot', '-i');
   await command(session, 'fill', '#resume-commands', '{');

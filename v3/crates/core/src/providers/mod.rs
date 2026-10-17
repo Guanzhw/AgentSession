@@ -174,9 +174,9 @@ pub(crate) struct ReaderCapture {
     pub stamp: Option<ReaderStamp>,
     pub parent_facts: Option<std::collections::HashMap<SessionRef, Option<Option<SessionRef>>>>,
     pub snapshot: SessionSnapshot,
-    /// Outer None asks the core for its existing protocol path. Some(None)
-    /// records that the provider attempted capture but has no valid stream.
-    pub protocol_stream: Option<Option<EventStream>>,
+    /// None asks the core for its existing protocol path. A captured error
+    /// keeps its diagnostics alongside the readable conversation.
+    pub protocol_stream: Option<std::result::Result<EventStream, crate::protocol::ProtocolError>>,
 }
 #[derive(Debug)]
 pub(crate) struct InheritedEvent {
@@ -196,7 +196,7 @@ pub(crate) trait StatsObservationBatch {
     fn validate_source_revision(&self) -> Result<()>;
 }
 pub(crate) struct InventoryObservation {
-    pub entries: Option<Vec<SourceEntry>>,
+    pub entries: Vec<SourceEntry>,
     pub source_uncertainty: Option<(&'static str, usize)>,
 }
 /// One provider-owned catalog observation and its publication receipts.
@@ -291,7 +291,6 @@ pub(crate) trait ProviderAdapter {
     }
     fn available(&self) -> bool;
     fn unavailable_diagnostic(&self) -> &'static str;
-    fn list(&self) -> Result<Vec<SessionSummary>>;
     fn load(&self, session_id: &str) -> Result<SessionSnapshot>;
     fn system_prompt_evidence(&self, session_id: &str) -> Result<SystemPromptEvidence> {
         let summary = self.load(session_id)?.summary;
@@ -355,14 +354,8 @@ pub(crate) trait ProviderAdapter {
             diagnostic: "provider has no finalized Session Protocol foundation".into(),
         }))
     }
-    fn supports_index(&self) -> bool {
-        false
-    }
-    /// None means this provider has not implemented durable capture yet.
-    fn inventory(&self) -> Result<Option<Vec<SourceEntry>>> {
-        Ok(None)
-    }
-    fn inventory_for_rebuild(&self) -> Result<Option<Vec<SourceEntry>>> {
+    fn inventory(&self) -> Result<Vec<SourceEntry>>;
+    fn inventory_for_rebuild(&self) -> Result<Vec<SourceEntry>> {
         self.inventory()
     }
     fn inventory_observation(&self, rebuild: bool) -> Result<InventoryObservation> {

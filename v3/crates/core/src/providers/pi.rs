@@ -43,6 +43,7 @@ impl PiAdapter<'_> {
         }
         for entry in WalkDir::new(&sessions).follow_links(false) {
             let entry = entry.map_err(|error| CoreError::Parse {
+                diagnostic: crate::ParseDiagnostic::new("source directory traversal failed"),
                 path: sessions.clone(),
                 reason: error.to_string(),
             })?;
@@ -101,17 +102,6 @@ impl ProviderAdapter for PiAdapter<'_> {
         "Pi sessions are unavailable or unreadable"
     }
 
-    fn list(&self) -> Result<Vec<SessionSummary>> {
-        let mut summaries = Vec::new();
-        for (id, path) in self.sources()? {
-            // A damaged file does not hide independently readable sessions.
-            if let Ok(snapshot) = load(&path, self.scope, &id) {
-                summaries.push(snapshot.summary);
-            }
-        }
-        Ok(summaries)
-    }
-
     fn load(&self, session_id: &str) -> Result<SessionSnapshot> {
         let sources = self.sources()?;
         let path = sources.get(session_id).ok_or_else(|| CoreError::NotFound {
@@ -150,16 +140,15 @@ impl ProviderAdapter for PiAdapter<'_> {
         finalize_protocol_bundle(stream, observations).map_err(CoreError::Protocol)
     }
 
-    fn supports_index(&self) -> bool {
-        true
-    }
-
-    fn inventory(&self) -> Result<Option<Vec<SourceEntry>>> {
+    fn inventory(&self) -> Result<Vec<SourceEntry>> {
         self.sources()?
             .into_iter()
             .map(|(id, path)| {
                 if read_header_id_strict(&path)? != id {
                     return Err(CoreError::Parse {
+                        diagnostic: crate::ParseDiagnostic::new(
+                            "Pi source header differs from selected canonical ID",
+                        ),
                         path,
                         reason: "Pi source header differs from selected canonical ID".into(),
                     });
@@ -167,7 +156,6 @@ impl ProviderAdapter for PiAdapter<'_> {
                 SourceEntry::new(id, path)
             })
             .collect::<Result<Vec<_>>>()
-            .map(Some)
     }
 
     fn capture(&self, entry: &SourceEntry) -> Result<SessionSnapshot> {
@@ -197,26 +185,29 @@ fn read_header_id_strict(path: &Path) -> Result<String> {
     })?;
     let reader = BufReader::new(file);
     let mut first = None;
-    for line in reader.lines() {
+    for (line_index, line) in reader.lines().enumerate() {
         let line = line.map_err(|source| CoreError::Io {
             path: path.into(),
             source,
         })?;
         if !line.trim().is_empty() {
-            first = Some(line);
+            first = Some((line_index, line));
             break;
         }
     }
-    let line = first.ok_or_else(|| CoreError::Parse {
+    let (line_index, line) = first.ok_or_else(|| CoreError::Parse {
+        diagnostic: crate::ParseDiagnostic::new("empty Pi source"),
         path: path.into(),
         reason: "empty Pi source".into(),
     })?;
     let header: Value = serde_json::from_str(&line).map_err(|error| CoreError::Parse {
+        diagnostic: crate::ParseDiagnostic::json(&error, line_index),
         path: path.into(),
         reason: format!("invalid Pi header: {error}"),
     })?;
     if header["type"] != "session" {
         return Err(CoreError::Parse {
+            diagnostic: crate::ParseDiagnostic::new("missing Pi session header"),
             path: path.into(),
             reason: "missing Pi session header".into(),
         });
@@ -225,6 +216,7 @@ fn read_header_id_strict(path: &Path) -> Result<String> {
         .as_str()
         .map(str::to_owned)
         .ok_or_else(|| CoreError::Parse {
+            diagnostic: crate::ParseDiagnostic::new("Pi session header has no canonical ID"),
             path: path.into(),
             reason: "Pi session header has no canonical ID".into(),
         })
@@ -257,6 +249,7 @@ fn load_bytes(
             continue;
         }
         let value = serde_json::from_slice::<Value>(line).map_err(|error| CoreError::Parse {
+            diagnostic: crate::ParseDiagnostic::json(&error, index),
             path: path.into(),
             reason: format!("line {}: {error}", index + 1),
         })?;
@@ -265,12 +258,16 @@ fn load_bytes(
     }
     let Some(header) = records.first().filter(|record| record["type"] == "session") else {
         return Err(CoreError::Parse {
+            diagnostic: crate::ParseDiagnostic::new("missing Pi session header"),
             path: path.into(),
             reason: "missing Pi session header".into(),
         });
     };
     if header["id"].as_str() != Some(expected_id) {
         return Err(CoreError::Parse {
+            diagnostic: crate::ParseDiagnostic::new(
+                "Pi header ID differs from canonical session ID",
+            ),
             path: path.into(),
             reason: "Pi header ID differs from canonical session ID".into(),
         });
@@ -653,6 +650,7 @@ fn pi_protocol_source(
             continue;
         }
         let record: Value = serde_json::from_slice(line).map_err(|error| CoreError::Parse {
+            diagnostic: crate::ParseDiagnostic::json(&error, line_index),
             path: path.into(),
             reason: format!("line {}: {error}", line_index + 1),
         })?;
@@ -662,7 +660,7 @@ fn pi_protocol_source(
             .ok_or_else(|| {
                 CoreError::Protocol(ProtocolError::Invalid {
                     diagnostics: vec![Diagnostic {
-                        code: "invalid_pi_record_type",
+                        code: "invalid_pi_record_type".into(),
                         event_id: Some(format!("event:pi:{line_index}")),
                     }],
                 })
@@ -672,7 +670,7 @@ fn pi_protocol_source(
             if role.is_none() {
                 return Err(CoreError::Protocol(ProtocolError::Invalid {
                     diagnostics: vec![Diagnostic {
-                        code: "invalid_pi_message_role",
+                        code: "invalid_pi_message_role".into(),
                         event_id: Some(format!("event:pi:{line_index}")),
                     }],
                 }));
@@ -732,7 +730,7 @@ fn pi_protocol_source(
             let invalid_block = || {
                 CoreError::Protocol(ProtocolError::Invalid {
                     diagnostics: vec![Diagnostic {
-                        code: "invalid_pi_content_block",
+                        code: "invalid_pi_content_block".into(),
                         event_id: Some(format!("event:pi:{line_index}")),
                     }],
                 })

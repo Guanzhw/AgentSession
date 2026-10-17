@@ -187,7 +187,54 @@ fn tool_success(summary: impl Into<String>, result: impl Serialize) -> CallToolR
     response.into()
 }
 
-fn core_error(error: CoreError) -> CallToolResponse {
+fn core_diagnostic(tool: &str, error: &CoreError) -> Option<Value> {
+    let mut diagnostic = json!({"kind": "mcp_operation_error", "tool": tool});
+    match error {
+        CoreError::Io { path, source } => {
+            diagnostic["stage"] = json!("source_io");
+            diagnostic["path"] = json!(path);
+            diagnostic["cause"] = json!(source.to_string());
+        }
+        CoreError::Parse {
+            path,
+            diagnostic: parse,
+            ..
+        } => {
+            diagnostic["stage"] = json!("source_parse");
+            diagnostic["path"] = json!(path);
+            diagnostic["cause"] = json!(parse.cause);
+            if let Some(line) = parse.line {
+                diagnostic["line"] = json!(line);
+            }
+            if let Some(column) = parse.column {
+                diagnostic["column"] = json!(column);
+            }
+        }
+        CoreError::Storage(cause) => {
+            diagnostic["stage"] = json!("storage");
+            diagnostic["cause"] = json!(cause);
+        }
+        _ => return None,
+    }
+    Some(diagnostic)
+}
+
+fn blocking_diagnostic(tool: &str, error: &tokio::task::JoinError) -> Value {
+    json!({
+        "kind": "mcp_operation_error", "tool": tool, "stage": "spawn_blocking",
+        "cause": if error.is_panic() { "blocking task panicked" } else { "blocking task cancelled" },
+    })
+}
+
+fn blocking_error(tool: &str, error: tokio::task::JoinError) -> CallToolResponse {
+    eprintln!("{}", blocking_diagnostic(tool, &error));
+    tool_error("internal_error", "MCP operation failed.")
+}
+
+fn core_error(tool: &str, error: CoreError) -> CallToolResponse {
+    if let Some(diagnostic) = core_diagnostic(tool, &error) {
+        eprintln!("{diagnostic}");
+    }
     match error {
         CoreError::Unavailable(_) => tool_error("provider_unavailable", "Provider is unavailable."),
         CoreError::NotFound { .. } => tool_error(
@@ -307,8 +354,8 @@ impl ServerHandler for HistoryServer {
                     ),
                     result,
                 )),
-                Ok(Err(error)) => Ok(core_error(error)),
-                Err(_) => Ok(tool_error("internal_error", "MCP operation failed.")),
+                Ok(Err(error)) => Ok(core_error(&request.name, error)),
+                Err(error) => Ok(blocking_error(&request.name, error)),
             };
         }
         if request.name == "session_search" {
@@ -364,8 +411,8 @@ impl ServerHandler for HistoryServer {
                         result,
                     ))
                 }
-                Ok(Err(error)) => Ok(core_error(error)),
-                Err(_) => Ok(tool_error("internal_error", "MCP operation failed.")),
+                Ok(Err(error)) => Ok(core_error(&request.name, error)),
+                Err(error) => Ok(blocking_error(&request.name, error)),
             };
         }
         if request.name == "session_get" {
@@ -402,8 +449,8 @@ impl ServerHandler for HistoryServer {
                     ),
                     result,
                 )),
-                Ok(Err(error)) => Ok(core_error(error)),
-                Err(_) => Ok(tool_error("internal_error", "MCP operation failed.")),
+                Ok(Err(error)) => Ok(core_error(&request.name, error)),
+                Err(error) => Ok(blocking_error(&request.name, error)),
             };
         }
         if request.name == "session_timeline" {
@@ -452,8 +499,8 @@ impl ServerHandler for HistoryServer {
                     format!("Loaded {} session event summary(s).", result.events.len()),
                     result,
                 )),
-                Ok(Err(error)) => Ok(core_error(error)),
-                Err(_) => Ok(tool_error("internal_error", "MCP operation failed.")),
+                Ok(Err(error)) => Ok(core_error(&request.name, error)),
+                Err(error) => Ok(blocking_error(&request.name, error)),
             };
         }
         if request.name == "session_get_context" {
@@ -499,8 +546,8 @@ impl ServerHandler for HistoryServer {
                     ),
                     result,
                 )),
-                Ok(Err(error)) => Ok(core_error(error)),
-                Err(_) => Ok(tool_error("internal_error", "MCP operation failed.")),
+                Ok(Err(error)) => Ok(core_error(&request.name, error)),
+                Err(error) => Ok(blocking_error(&request.name, error)),
             };
         }
         if request.name == "session_team_messages" {
@@ -557,8 +604,8 @@ impl ServerHandler for HistoryServer {
                             "Native team messages are unavailable for this provider.",
                         ))
                     }
-                    Ok(Err(error)) => Ok(core_error(error)),
-                    Err(_) => Ok(tool_error("internal_error", "MCP operation failed.")),
+                    Ok(Err(error)) => Ok(core_error(&request.name, error)),
+                    Err(error) => Ok(blocking_error(&request.name, error)),
                 };
             }
             if args.action == "read" {
@@ -620,8 +667,8 @@ impl ServerHandler for HistoryServer {
                             "Native team messages are unavailable for this provider.",
                         ))
                     }
-                    Ok(Err(error)) => Ok(core_error(error)),
-                    Err(_) => Ok(tool_error("internal_error", "MCP operation failed.")),
+                    Ok(Err(error)) => Ok(core_error(&request.name, error)),
+                    Err(error) => Ok(blocking_error(&request.name, error)),
                 };
             }
             return Ok(tool_error("invalid_input", "action must be list or read."));
@@ -681,8 +728,8 @@ impl ServerHandler for HistoryServer {
         .await
         {
             Ok(Ok(result)) => result,
-            Ok(Err(error)) => return Ok(core_error(error)),
-            Err(_) => return Ok(tool_error("internal_error", "MCP operation failed.")),
+            Ok(Err(error)) => return Ok(core_error(&request.name, error)),
+            Err(error) => return Ok(blocking_error(&request.name, error)),
         };
         Ok(tool_success(
             "Loaded one bounded session event.",
@@ -702,4 +749,62 @@ pub async fn serve(core: Arc<Core>, limits: McpLimits) -> Result<(), Box<dyn std
     .await?;
     service.waiting().await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_diagnostic_keeps_source_path_without_untrusted_reason() {
+        let error = CoreError::Parse {
+            diagnostic: agentsession_core::ParseDiagnostic::new("invalid provider source"),
+            path: "fixture/source.jsonl".into(),
+            reason: "unknown record PRIVATE_RECORD_SENTINEL at line 2 column 9".into(),
+        };
+        let diagnostic = core_diagnostic("session_get", &error).unwrap();
+        assert_eq!(diagnostic["tool"], "session_get");
+        assert_eq!(diagnostic["stage"], "source_parse");
+        assert_eq!(diagnostic["path"], "fixture/source.jsonl");
+        assert_eq!(diagnostic["cause"], "invalid provider source");
+        assert!(!diagnostic.to_string().contains("PRIVATE_RECORD_SENTINEL"));
+    }
+
+    #[tokio::test]
+    async fn blocking_panic_keeps_internal_wire_error_and_safe_diagnostic() {
+        let error = tokio::task::spawn_blocking(|| {
+            std::panic::panic_any(("PRIVATE_PANIC_SENTINEL",));
+        })
+        .await
+        .unwrap_err();
+        let diagnostic = blocking_diagnostic("session_get", &error);
+        assert_eq!(diagnostic["stage"], "spawn_blocking");
+        assert_eq!(diagnostic["tool"], "session_get");
+        assert_eq!(diagnostic["cause"], "blocking task panicked");
+        assert!(!diagnostic.to_string().contains("PRIVATE_PANIC_SENTINEL"));
+        let CallToolResponse::Complete(response) = blocking_error("session_get", error) else {
+            panic!("blocking failure must complete with a tool error");
+        };
+        let response = serde_json::to_value(response).unwrap();
+        assert_eq!(response["isError"], true);
+        assert_eq!(
+            response["content"],
+            json!([{"type": "text", "text": "internal_error: MCP operation failed."}])
+        );
+        assert!(response.get("structuredContent").is_none());
+    }
+
+    #[tokio::test]
+    async fn blocking_cancellation_has_a_distinct_diagnostic() {
+        let (ready, started) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            ready.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+        started.await.unwrap();
+        task.abort();
+        let error = task.await.unwrap_err();
+        let diagnostic = blocking_diagnostic("session_browse", &error);
+        assert_eq!(diagnostic["cause"], "blocking task cancelled");
+    }
 }

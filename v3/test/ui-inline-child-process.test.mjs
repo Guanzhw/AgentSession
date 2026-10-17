@@ -392,7 +392,13 @@ test('retained empty assistant, owned reasoning and tool stay inside the inline 
     })()`));
     assert.ok(source.anchor.startsWith('inline-'));
     assert.equal(source.hidden, true);
-    await command('fill', '.pane-search[data-scope="child"] input[type="search"]', 'Late child');
+    const childSearchInput = '.pane-search[data-scope="child"] input[type="search"]';
+    // Keep the continuation outside its 160px prefetch margin while focusing
+    // search, so this case exercises search loading the late page before the gap.
+    await command('eval', `document.querySelector(${JSON.stringify(childSearchInput)}).scrollIntoView({ block: 'end', behavior: 'instant' })`);
+    assert.equal(await command('eval', `document.querySelector('.inline-child-next').getBoundingClientRect().top > innerHeight + 160`), 'true',
+      'The child continuation is outside the prefetch margin before searching');
+    await command('fill', childSearchInput, 'Late child');
     await command('eval', `document.querySelector('.pane-search[data-scope="child"] button[type="submit"]').click()`);
     await waitFor(command, `Boolean(document.querySelector('.pane-search[data-scope="child"] .pane-search-result'))`,
       'late child search result');

@@ -724,8 +724,14 @@ export interface InheritedContextContentPage extends ContentPage {
   revision: string;
 }
 
+export interface ProtocolDiagnostic {
+  code: string;
+  event_id: string | null;
+}
+
 export class ApiRequestError extends Error {
-  constructor(public code: string, message: string) { super(message); }
+  constructor(public code: string, message: string,
+    public diagnostics: ProtocolDiagnostic[] = [], public diagnosticsTruncated = false) { super(message); }
 }
 
 export interface ContentProgress {
@@ -744,12 +750,21 @@ async function getJson<T>(url: string): Promise<T> {
     const detail = await response.text();
     let message = detail;
     let code = 'request_failed';
+    let diagnostics: ProtocolDiagnostic[] = [];
+    let diagnosticsTruncated = false;
     try {
       const parsed = JSON.parse(detail);
       if (typeof parsed?.error?.message === 'string') message = parsed.error.message;
       if (typeof parsed?.error?.code === 'string') code = parsed.error.code;
+      if (Array.isArray(parsed?.error?.diagnostics)) {
+        diagnostics = parsed.error.diagnostics.filter((item: unknown): item is ProtocolDiagnostic =>
+          typeof item === 'object' && item !== null && 'code' in item && typeof item.code === 'string'
+          && 'event_id' in item && (item.event_id === null || typeof item.event_id === 'string'));
+      }
+      diagnosticsTruncated = parsed?.error?.diagnosticsTruncated === true;
     } catch { /* Non-JSON transport errors retain their original text. */ }
-    throw new ApiRequestError(code, message || 'The local service returned HTTP ' + response.status + '.');
+    throw new ApiRequestError(code, message || 'The local service returned HTTP ' + response.status + '.',
+      diagnostics, diagnosticsTruncated);
   }
   return response.json() as Promise<T>;
 }

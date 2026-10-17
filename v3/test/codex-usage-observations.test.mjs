@@ -174,18 +174,18 @@ test('Codex separates unresolved legacy occurrences from proved requests',
     assert.equal(listed.find(item => item.session.sessionId === mixedSession)?.tokenCount, 260);
   });
 
-test('Stats JSON and CSV count no requests for a legacy-only Codex turn and mark coverage partial',
+test('Stats JSON and CSV retain legacy consumption without claiming request identity',
   { timeout: 30_000 }, async t => {
     const f = await serve(t, [legacyFixture]);
     const listed = await (await fetch(f.base + '/api/v3/sessions?provider=codex')).json();
-    assert.equal(listed.find(item => item.session.sessionId === legacySession)?.tokenCount, null);
+    assert.equal(listed.find(item => item.session.sessionId === legacySession)?.tokenCount, 9);
     const response = await fetch(statsUrl(f.base));
     assert.equal(response.status, 200, await response.clone().text());
     const report = await response.json();
     assert.equal(report.usageCoverage, 'partial');
     assert.equal(report.overview.unresolvedUsageObservationCount, 1);
     assert.equal(report.overview.recordedRequestCount, 0);
-    assert.equal(report.overview.knownTokenCount, 0);
+    assert.equal(report.overview.knownTokenCount, 9);
     assert.equal(report.overview.totalTokens, null);
     assert.equal(report.sessions.length, 1);
     assert.equal(report.sessions[0].recordedRequestCount, 0);
@@ -193,7 +193,8 @@ test('Stats JSON and CSV count no requests for a legacy-only Codex turn and mark
     assert.equal(report.dailyUsage.length, 1);
     assert.equal(report.dailyUsage[0].unresolvedUsageObservationCount, 1);
     assert.equal(report.dailyUsage[0].recordedRequestCount, 0);
-    assert.equal(report.dailyUsage[0].totalTokens, null);
+    assert.equal(report.dailyUsage[0].totalTokens, 9);
+    assert.equal(report.modelRanking[0].knownTokenCount, 9);
     assert.equal(report.sessions[0].unresolvedUsageObservationCount, 1);
 
     const drillQuery = new URLSearchParams(statsQuery);
@@ -212,6 +213,7 @@ test('Stats JSON and CSV count no requests for a legacy-only Codex turn and mark
       const filtered = await (await fetch(statsUrl(f.base, filteredQuery))).json();
       assert.equal(filtered.overview.unresolvedUsageObservationCount, 1, label);
       assert.equal(filtered.overview.recordedRequestCount, 0, label);
+      assert.equal(filtered.overview.knownTokenCount, 9, label);
       assert.equal(filtered.sessions[0].unresolvedUsageObservationCount, 1, label);
     }
 
@@ -229,7 +231,7 @@ test('Stats JSON and CSV count no requests for a legacy-only Codex turn and mark
     assert.equal(rows[0][columns['Usage Coverage']], 'partial');
     assert.equal(rows[0][columns['Unresolved Usage Observation Count']], '1');
     assert.equal(rows[0][columns.Requests], '0');
-    assert.equal(rows[0][columns['Total Tokens']], '');
+    assert.equal(rows[0][columns['Total Tokens']], '9');
   });
 
 test('Stats recaptures a version-5 cache row that counted anonymous legacy usage',
@@ -273,7 +275,9 @@ test('Stats recaptures a version-5 cache row that counted anonymous legacy usage
       'WHERE provider = ? AND session_id = ?').get('codex', legacySession);
     assert.ok(current.projection_version > 5, 'the v5 row is replaced by the current projection');
     const projection = JSON.parse(current.usage_json);
-    assert.deepEqual(projection.requests, []);
+    assert.equal(projection.requests.length, 1);
+    assert.equal(projection.requests[0].recorded_request, false);
+    assert.equal(projection.requests[0].tokens.total, 9);
     assert.equal(projection.observations.length, 1,
       'the upgraded projection retains the unresolved occurrence for filtered Stats reads');
     refreshed.close();
@@ -298,15 +302,15 @@ test('Stats browser shows unresolved occurrences separately from proved requests
     await browserCommand(browser, session, downloads, 'wait', '--load', 'networkidle');
     const pageText = async () => browserCommand(browser, session, downloads,
       'get', 'text', '.stats-page');
-    assert.match(await pageText(), /4 unresolved usage observation|4.*未解析用量观察/);
+    assert.match(await pageText(), /4 usage observation\(s\).*no proved request identity|4.*用量记录.*请求身份/);
     await browserCommand(browser, session, downloads,
       'select', 'select[aria-label="Request model"]', modelKey);
     await browserCommand(browser, session, downloads, 'wait', '--load', 'networkidle');
     const filteredPage = await pageText();
     assert.match(filteredPage,
-      /4 unresolved usage observation|4.*未解析用量观察/);
+      /4 usage observation\(s\).*no proved request identity|4.*用量记录.*请求身份/);
     assert.match(filteredPage,
-      /request model filter narrows proved requests only|请求模型筛选仅缩小已证明的请求范围/);
+      /model filter narrows attributed requests and token consumption|模型筛选作用于有归属的请求和 Token 用量/);
     await browserCommand(browser, session, downloads,
       'click', '.statistics-details > summary');
     assert.match(await pageText(),

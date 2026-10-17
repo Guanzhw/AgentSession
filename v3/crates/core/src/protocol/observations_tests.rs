@@ -39,7 +39,7 @@ fn evidence() -> Evidence {
     }
 }
 
-fn errors(input: ObservationCandidates) -> Vec<&'static str> {
+fn errors(input: ObservationCandidates) -> Vec<String> {
     let ProtocolError::Invalid { diagnostics } =
         finalize_observations(&stream(), input).unwrap_err()
     else {
@@ -66,6 +66,9 @@ fn usage_observation(id: &str, record: u64) -> UsageObservation {
             total: Some(2),
         },
         cumulative_tokens: None,
+        consumption_tokens: None,
+        model: None,
+        model_provider: None,
         provenance: Provenance {
             fidelity: Fidelity::Recorded,
             source_type: "test.usage".into(),
@@ -84,7 +87,11 @@ fn usage_observations_require_unique_source_anchored_occurrences() {
         usage_observations: vec![first, duplicate],
         ..Default::default()
     });
-    assert!(codes.contains(&"duplicate_or_missing_usage_observation_id"));
+    assert!(
+        codes
+            .iter()
+            .any(|code| code == "duplicate_or_missing_usage_observation_id")
+    );
 
     let mut wrong = usage_observation("wrong", 3);
     wrong.event_id = "event".into();
@@ -94,7 +101,8 @@ fn usage_observations_require_unique_source_anchored_occurrences() {
             usage_observations: vec![wrong],
             ..Default::default()
         })
-        .contains(&"invalid_usage_observation_anchor")
+        .iter()
+        .any(|code| code == "invalid_usage_observation_anchor")
     );
 }
 
@@ -193,8 +201,12 @@ fn observation_validator_rejects_wrong_source_anchor_and_duplicate_task_ids() {
         tasks: vec![task, incorrect],
         ..Default::default()
     });
-    assert!(codes.contains(&"duplicate_or_missing_observation_id"));
-    assert!(codes.contains(&"evidence_source_mismatch"));
+    assert!(
+        codes
+            .iter()
+            .any(|code| code == "duplicate_or_missing_observation_id")
+    );
+    assert!(codes.iter().any(|code| code == "evidence_source_mismatch"));
 }
 
 #[test]
@@ -250,7 +262,10 @@ fn observation_validator_rejects_dangling_work_and_relationship_identity() {
         "unknown_observation_run",
         "invalid_relationship_identity",
     ] {
-        assert!(codes.contains(&expected), "missing {expected}");
+        assert!(
+            codes.iter().any(|code| code == expected),
+            "missing {expected}"
+        );
     }
 }
 
@@ -493,7 +508,11 @@ fn branch_observation_rejects_head_without_a_matching_source_event() {
         }],
         ..Default::default()
     });
-    assert!(codes.contains(&"invalid_branch_topology_anchor"));
+    assert!(
+        codes
+            .iter()
+            .any(|code| code == "invalid_branch_topology_anchor")
+    );
 }
 
 #[test]
@@ -528,8 +547,16 @@ fn request_usage_rejects_duplicate_identity_and_wrong_record_anchor() {
         usage_records: vec![usage, wrong],
         ..Default::default()
     });
-    assert!(codes.contains(&"duplicate_or_missing_usage_id"));
-    assert!(codes.contains(&"invalid_usage_event_anchor"));
+    assert!(
+        codes
+            .iter()
+            .any(|code| code == "duplicate_or_missing_usage_id")
+    );
+    assert!(
+        codes
+            .iter()
+            .any(|code| code == "invalid_usage_event_anchor")
+    );
 }
 
 #[test]
@@ -568,8 +595,16 @@ fn context_result_requires_same_session_version_and_recorded_reader_anchor() {
         context_transformations: vec![transformation],
         ..Default::default()
     });
-    assert!(codes.contains(&"unknown_context_result_version"));
-    assert!(codes.contains(&"invalid_context_version_anchor"));
+    assert!(
+        codes
+            .iter()
+            .any(|code| code == "unknown_context_result_version")
+    );
+    assert!(
+        codes
+            .iter()
+            .any(|code| code == "invalid_context_version_anchor")
+    );
 }
 
 #[test]
@@ -595,7 +630,11 @@ fn context_observation_rejects_reader_ref_absent_from_its_source_event() {
         }],
         ..Default::default()
     });
-    assert!(codes.contains(&"context_reader_anchor_mismatch"));
+    assert!(
+        codes
+            .iter()
+            .any(|code| code == "context_reader_anchor_mismatch")
+    );
 }
 
 #[test]

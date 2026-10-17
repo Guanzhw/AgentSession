@@ -122,7 +122,6 @@ pub(super) fn observe<'a>(adapter: &'a CodexAdapter<'_>) -> Result<IndexObservat
         for entry in adapter
             .codex_inventory_observation_from_scan(&scan, &titles)?
             .entries
-            .expect("Codex inventory")
         {
             incoming.insert(entry.session_id.clone(), entry);
         }
@@ -187,7 +186,7 @@ pub(super) fn observe<'a>(adapter: &'a CodexAdapter<'_>) -> Result<IndexObservat
         }
     }
     let inventory = InventoryObservation {
-        entries: Some(incoming.values().cloned().collect()),
+        entries: incoming.values().cloned().collect(),
         source_uncertainty: unresolved
             .then_some((UNRESOLVED_SOURCE_DIAGNOSTIC, scan.unresolved.len())),
     };
@@ -348,7 +347,7 @@ mod tests {
     }
 
     fn entries(batch: &mut IndexObservationBatch<'_>) -> Vec<SourceEntry> {
-        batch.inventory.entries.take().unwrap()
+        std::mem::take(&mut batch.inventory.entries)
     }
 
     fn has(snapshot: &SessionSnapshot, text: &str) -> bool {
@@ -468,9 +467,7 @@ mod tests {
             scope: "catalog-cache",
         };
         let index = root.path().join("index");
-        let first = crate::index::refresh(&index, adapter.scope, "codex", &adapter)
-            .unwrap()
-            .unwrap();
+        let first = crate::index::refresh(&index, adapter.scope, "codex", &adapter).unwrap();
         append(&healthy, "HEALTHY-UPDATE");
         let writer_path = active.clone();
         let changed = std::rc::Rc::new(std::cell::Cell::new(false));
@@ -484,20 +481,16 @@ mod tests {
         });
         let refreshed = crate::index::refresh(&index, adapter.scope, "codex", &adapter);
         CODEX_STREAM_READ_HOOK.with(|hook| *hook.borrow_mut() = None);
-        let refreshed = refreshed.unwrap().unwrap();
+        let refreshed = refreshed.unwrap();
         assert!(changed.get());
         assert_ne!(refreshed.revision, first.revision);
         assert_eq!(refreshed.rows.len(), 2);
-        let next = crate::index::refresh(&index, adapter.scope, "codex", &adapter)
-            .unwrap()
-            .unwrap();
+        let next = crate::index::refresh(&index, adapter.scope, "codex", &adapter).unwrap();
         assert_ne!(
             next.revision, refreshed.revision,
             "append was not stamped as already indexed"
         );
-        let unchanged = crate::index::refresh(&index, adapter.scope, "codex", &adapter)
-            .unwrap()
-            .unwrap();
+        let unchanged = crate::index::refresh(&index, adapter.scope, "codex", &adapter).unwrap();
         assert_eq!(next.revision, unchanged.revision);
     }
 
@@ -510,21 +503,15 @@ mod tests {
             scope: "catalog-opening",
         };
         let index = root.path().join("index");
-        let first = crate::index::refresh(&index, adapter.scope, "codex", &adapter)
-            .unwrap()
-            .unwrap();
+        let first = crate::index::refresh(&index, adapter.scope, "codex", &adapter).unwrap();
         AFTER_SOURCE_SCAN.with(|hook| {
             *hook.borrow_mut() = Some(Box::new(move || {
                 append(&active, "APPEND-BETWEEN-SCAN-AND-PREFIX");
             }))
         });
-        let next = crate::index::refresh(&index, adapter.scope, "codex", &adapter)
-            .unwrap()
-            .unwrap();
+        let next = crate::index::refresh(&index, adapter.scope, "codex", &adapter).unwrap();
         assert_ne!(first.revision, next.revision);
-        let unchanged = crate::index::refresh(&index, adapter.scope, "codex", &adapter)
-            .unwrap()
-            .unwrap();
+        let unchanged = crate::index::refresh(&index, adapter.scope, "codex", &adapter).unwrap();
         assert_eq!(unchanged.revision, next.revision);
     }
 

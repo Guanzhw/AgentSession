@@ -58,7 +58,7 @@ impl SystemPromptEvidence {
             note: "Recorded prompt text and currently resolvable local instruction sources are shown with separate provenance. Current files may differ from the session's historical runtime.".into(),
             sections: Vec::new(),
             diagnostics: vec![PromptDiagnostic {
-                code: "hidden_prompt_unavailable",
+                code: "hidden_prompt_unavailable".into(),
                 message: "Provider-hidden or unrecorded prompt text cannot be recovered from local session data.".into(),
                 source: None,
             }],
@@ -103,7 +103,7 @@ impl SystemPromptEvidence {
     pub(crate) fn current_files(&mut self, summary: &SessionSummary, names: &[&str]) {
         let Some(directory) = summary.directory.as_deref() else {
             self.diagnostics.push(PromptDiagnostic {
-                code: "session_directory_unavailable",
+                code: "session_directory_unavailable".into(),
                 message: "Session source has no recorded working directory for local instruction resolution.".into(),
                 source: None,
             });
@@ -112,7 +112,7 @@ impl SystemPromptEvidence {
         let mut current = PathBuf::from(directory);
         if !current.is_absolute() {
             self.diagnostics.push(PromptDiagnostic {
-                code: "session_directory_unavailable",
+                code: "session_directory_unavailable".into(),
                 message: "Recorded working directory is not absolute.".into(),
                 source: Some(directory.into()),
             });
@@ -142,7 +142,7 @@ impl SystemPromptEvidence {
             == section_count
         {
             self.diagnostics.push(PromptDiagnostic {
-                code: "local_instruction_sources_unavailable",
+                code: "local_instruction_sources_unavailable".into(),
                 message: "No matching instruction file is currently resolvable along the recorded working-directory ancestry.".into(),
                 source: Some(directory.into()),
             });
@@ -156,7 +156,7 @@ impl SystemPromptEvidence {
             Ok(metadata) => metadata,
             Err(error) => {
                 self.diagnostics.push(PromptDiagnostic {
-                    code: "instruction_unreadable",
+                    code: "instruction_unreadable".into(),
                     message: error.to_string(),
                     source: Some(source),
                 });
@@ -165,7 +165,7 @@ impl SystemPromptEvidence {
         };
         if metadata.len() > MAX_BYTES {
             self.diagnostics.push(PromptDiagnostic {
-                code: "instruction_too_large",
+                code: "instruction_too_large".into(),
                 message: "Instruction file exceeds the 1 MiB evidence limit.".into(),
                 source: Some(source),
             });
@@ -175,7 +175,7 @@ impl SystemPromptEvidence {
             Ok(content) => content,
             Err(error) => {
                 self.diagnostics.push(PromptDiagnostic {
-                    code: "instruction_unreadable",
+                    code: "instruction_unreadable".into(),
                     message: error.to_string(),
                     source: Some(source),
                 });

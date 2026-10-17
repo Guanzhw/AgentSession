@@ -1,8 +1,8 @@
+import { browserPrerequisites } from './browser-prerequisites.mjs';
 import { onCleanup, temporaryDirectory } from '../../test/helpers/fixture-cleanup.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,15 +11,7 @@ import { freeFetchSafePort } from './fetch-safe-port.mjs';
 
 const repo = fileURLToPath(new URL('../../', import.meta.url));
 const ui = path.join(repo, 'v3', 'ui');
-const binaryName = process.platform === 'win32' ? 'agent-browser-win32-x64.exe'
-  : `agent-browser-${process.platform}-${process.arch}`;
-const browserBinary = [process.env.AGENTSESSION_V3_AGENT_BROWSER_BIN,
-  ...(process.env.PATH || '').split(path.delimiter).map(entry =>
-    path.join(entry, 'node_modules', 'agent-browser', 'bin', binaryName))]
-  .find(candidate => candidate && existsSync(candidate));
-const skip = !existsSync(path.join(ui, 'node_modules', 'vite'))
-  ? 'Install locked v3/ui dependencies.'
-  : !browserBinary ? 'The agent-browser CLI is required for browser QA.' : false;
+const { browserBinary, skip } = browserPrerequisites({ ui });
 
 const fixture = `
 <script>

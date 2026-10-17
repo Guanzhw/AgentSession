@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import type { ContentField, ContentProgress, ReaderBootstrap, ReaderChildPlacement, ReaderCollaborationSnapshot, ReaderEventRef, ReaderItem, ReaderSearchTarget, ReaderSegment, ReaderTocEntry, ReaderTocPage, RelationEntry, RelationParticipant, RuntimeExecutionEvent, SessionRef, ViewerMeta } from './api';
-  import { getContentPage, getReaderChildLocation, getReaderLocation, getReaderRelations, getReaderSegment, getReaderToc, getReaderExecutionEvents, getTeamMessageContentPage, getViewerMeta, mutateViewer } from './api';
+  import type { ContentField, ContentProgress, ProtocolDiagnostic, ReaderBootstrap, ReaderChildPlacement, ReaderCollaborationSnapshot, ReaderEventRef, ReaderItem, ReaderSearchTarget, ReaderSegment, ReaderTocEntry, ReaderTocPage, RelationEntry, RelationParticipant, RuntimeExecutionEvent, SessionRef, ViewerMeta } from './api';
+  import { ApiRequestError, getContentPage, getReaderChildLocation, getReaderLocation, getReaderRelations, getReaderSegment, getReaderToc, getReaderExecutionEvents, getTeamMessageContentPage, getViewerMeta, mutateViewer } from './api';
   import EventCard, { type DisplayItem, type ExecutionLandmark, type SearchReveal } from './EventCard.svelte';
   import InheritedContext from './InheritedContext.svelte';
   import InlineChildReader from './InlineChildReader.svelte';
@@ -16,7 +16,7 @@
   import ReaderContinuation from './ReaderContinuation.svelte';
   import { readerCollaborationIdentity, transcriptHandoffs } from './transcript-collaboration';
   import { groupReaderItems, groupReaderProcesses, type ProcessUnit, type ReaderBlock } from './reader-presentation';
-  import { errorText, language, protocolLabel, t, type Language } from './i18n';
+  import { diagnosticText, errorText, language, protocolLabel, t, type Language } from './i18n';
 
   export let provider: string;
   export let sessionId: string;
@@ -73,6 +73,8 @@
   let executionCursor: string | null = null;
   let executionLoading = false;
   let executionError = '';
+  let executionDiagnostics: ProtocolDiagnostic[] = [];
+  let executionDiagnosticsTruncated = false;
   let activeChildPath: SessionRef[] = childPathFromHash();
   let selectedChildSearch: ReaderSearchTarget | null = childSearchFromHash();
   let selectionHistoryVersion = 0;
@@ -491,6 +493,8 @@
     if (executionLoading || executionComplete) return;
     executionLoading = true;
     executionError = '';
+    executionDiagnostics = [];
+    executionDiagnosticsTruncated = false;
     try {
       const page = await getReaderExecutionEvents(provider, sessionId, bootstrap.revision, { cursor, limit: 200 });
       if (!active) return;
@@ -501,8 +505,14 @@
       executionCursor = page.nextCursor;
       executionComplete = page.nextCursor === null;
     } catch (cause) {
-      if (active) executionError = cause instanceof Error
-        ? cause.message : 'Recorded execution details could not be loaded.';
+      if (active) {
+        executionError = cause instanceof Error
+          ? cause.message : 'Recorded execution details could not be loaded.';
+        if (cause instanceof ApiRequestError) {
+          executionDiagnostics = cause.diagnostics;
+          executionDiagnosticsTruncated = cause.diagnosticsTruncated;
+        }
+      }
     } finally {
       if (active) executionLoading = false;
     }
@@ -1195,7 +1205,15 @@
               <button class="read-more" disabled={executionLoading} onclick={() => void loadExecutionFacts(executionCursor ?? undefined)}>
                 {executionLoading ? t($language, 'Loading…') : t($language, 'Retry')}
               </button>
-              {#if executionError}<p class="content-error" role="status">{executionError}</p>{/if}
+              <p class="content-error" role="status">{errorText($language, executionError)}</p>
+              {#if executionDiagnostics.length > 0}
+                <ul class="reader-execution-diagnostics">{#each executionDiagnostics as diagnostic}
+                  {@const label = diagnosticText($language, diagnostic.code)}
+                  <li>{#if label !== diagnostic.code}{label} {/if}<code>{diagnostic.code}</code>
+                    {#if diagnostic.event_id !== null}<code>{diagnostic.event_id}</code>{/if}</li>
+                {/each}</ul>
+              {/if}
+              {#if executionDiagnosticsTruncated}<p>{t($language, 'Additional diagnostic codes are omitted.')}</p>{/if}
             </details>
           {/if}
           {#if sessionDetailsOpen}

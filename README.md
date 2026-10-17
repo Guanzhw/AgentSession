@@ -11,21 +11,21 @@ Provider 数据库与 transcript 保持只读；收藏、标题和回收站状�
 [English](README.en.md) · [原生 CLI、配置与 MCP](v3/README.md) ·
 [验收契约](docs/design/agentsession-v3-acceptance-contract.md)
 
-## 3.0 稳定版
+## 3.0.1 稳定补丁版
 
-**3.0.0** 使用 npm `latest` 稳定版渠道。
-[更新说明](docs/releases/3.0.0.md)记录功能、升级步骤和实际验证范围；
+**3.0.1** 使用 npm `latest` 稳定版渠道。
+[更新说明](docs/releases/3.0.1.md)记录修复、升级步骤和实际验证范围；
 完整性能、资源及历史状态归因仍有开放项，见[验收账本](docs/specs/stable-readiness-2026-10/tasks.md)。
 
 ```sh
-npm install -g @acetamido/agentsession@3.0.0
-npm install -g @acetamido/agentsession-mcp@3.0.0
+npm install -g @acetamido/agentsession@3.0.1
+npm install -g @acetamido/agentsession-mcp@3.0.1
 agentsession
 ```
 
 预发布继续使用 npm `next` 渠道。[更新与升级说明](docs/releases/3.0.0.md)
 以公开版本 v1.10.1 为基准，涵盖默认端口、元数据副本导入和 MCP/API 迁移。
-四平台独立程序见 [GitHub Release](https://github.com/Guanzhw/AgentSession/releases/tag/v3.0.0)。
+四平台独立程序见 [GitHub Release](https://github.com/Guanzhw/AgentSession/releases/tag/v3.0.1)。
 
 从旧版升级时，请先按[元数据迁移指南](v3/README.md#viewer-metadata-import)
 导入旧收藏、标题和回收站状态，再进行新版元数据编辑。3.0.0 的 npm 入口支持
@@ -34,7 +34,7 @@ agentsession
 如果第三方 npm 镜像对新版本的 tarball 返回 `404`，可仅对本次安装指定官方源：
 
 ```sh
-npm install -g @acetamido/agentsession@3.0.0 @acetamido/agentsession-mcp@3.0.0 --registry https://registry.npmjs.org
+npm install -g @acetamido/agentsession@3.0.1 @acetamido/agentsession-mcp@3.0.1 --registry https://registry.npmjs.org
 ```
 
 这不会修改全局 npm registry 配置；官方源也报错时，应保留具体错误继续排查。
@@ -78,6 +78,16 @@ UTF-16 位置和 `contentRevision`，按有界正文窗口读取；浏览器 Bac
 
 ## 开发与状态
 
+3.0.1 修复：Token 统计默认按 Token 展示趋势、Harness 与模型份额。
+Codex 普通 `token_count` 记录按可核验的累计增量计入已知用量，重复快照不重复
+计数；请求数仍需要明确的请求身份。旧格式 `session_id` 会话头也可被发现。
+详见[统计修复决策](.agents/decisions/implemented/2026-10-12-codex-recorded-token-consumption.md)。
+
+3.0.1 架构修复同时修正 Claude pending 用量去重，保留 DSH 歧义会话诊断，并让
+Reader 续读保留具体 Protocol 错误。旧派生索引和 Reader 缓存会自动重新捕获；
+provider 原始数据与 Viewer 元数据保持原状。浏览器公开回归在 Linux x64 CI 必跑，
+本地浏览器工具独立安装，项目的 Node.js 22.15 开发要求保持。
+
 ```bash
 npm run review
 npm test
@@ -85,7 +95,7 @@ npm test
 
 [开发指南](AGENTS.md)规定代码归属和验证要求；
 [交付计划](docs/design/agentsession-v3-delivery-plan.md)记录剩余来源、性能、产品和
-平台门槛。3.0.0 的验证范围与发布裁决见更新说明；完整验收仍保留未补证项。2.0 的历史证据和迁移
+平台门槛。3.0.1 的证据边界见[更新说明](docs/releases/3.0.1.md)；完整验收仍保留未补证项。2.0 的历史证据和迁移
 决策保留原有范围，其实现可从 Git 历史恢复。
 
 ## 许可证

@@ -77,6 +77,7 @@ fn sqlite_storage_diagnostic(root: &Path) -> Option<Value> {
 
 fn parse_error(path: &Path, reason: impl Into<String>) -> CoreError {
     CoreError::Parse {
+        diagnostic: crate::ParseDiagnostic::new("invalid DSH source structure"),
         path: path.into(),
         reason: reason.into(),
     }
@@ -780,14 +781,14 @@ fn dsh_request_usage_records(
         let seq = row["seq"].as_u64().expect("validated DSH source sequence");
         let Some(tokens) = dsh_usage_tokens(sample, generation) else {
             diagnostics.push(Diagnostic {
-                code: "invalid_dsh_request_usage",
+                code: "invalid_dsh_request_usage".into(),
                 event_id: Some(format!("event:dsh:{seq}")),
             });
             continue;
         };
         if generation > 0 && slot.is_none() {
             diagnostics.push(Diagnostic {
-                code: "invalid_dsh_request_usage",
+                code: "invalid_dsh_request_usage".into(),
                 event_id: Some(format!("event:dsh:{seq}")),
             });
             continue;
@@ -841,10 +842,11 @@ fn complete_zstd_frames(bytes: &[u8], path: &Path) -> Result<Vec<(usize, usize)>
             break;
         }
         if bytes[offset..offset + 4] != [0x28, 0xb5, 0x2f, 0xfd] {
-            return Err(parse_error(
-                path,
-                format!("invalid Zstandard frame magic at byte {offset}"),
-            ));
+            return Err(CoreError::Parse {
+                path: path.into(),
+                reason: format!("invalid Zstandard frame magic at byte {offset}"),
+                diagnostic: crate::ParseDiagnostic::new("invalid Zstandard frame magic"),
+            });
         }
         offset += 4;
         if offset == bytes.len() {
@@ -853,10 +855,11 @@ fn complete_zstd_frames(bytes: &[u8], path: &Path) -> Result<Vec<(usize, usize)>
         let descriptor = bytes[offset];
         offset += 1;
         if descriptor & 0x18 != 0 {
-            return Err(parse_error(
-                path,
-                format!("reserved Zstandard frame header bit at byte {}", offset - 1),
-            ));
+            return Err(CoreError::Parse {
+                path: path.into(),
+                reason: format!("reserved Zstandard frame header bit at byte {}", offset - 1),
+                diagnostic: crate::ParseDiagnostic::new("reserved Zstandard frame header bit"),
+            });
         }
         let size_flag = descriptor >> 6;
         let single_segment = descriptor & 0x20 != 0;
@@ -885,10 +888,11 @@ fn complete_zstd_frames(bytes: &[u8], path: &Path) -> Result<Vec<(usize, usize)>
             offset += 3;
             let block_type = (header >> 1) & 3;
             if block_type == 3 {
-                return Err(parse_error(
-                    path,
-                    format!("reserved Zstandard block type at byte {}", offset - 3),
-                ));
+                return Err(CoreError::Parse {
+                    path: path.into(),
+                    reason: format!("reserved Zstandard block type at byte {}", offset - 3),
+                    diagnostic: crate::ParseDiagnostic::new("reserved Zstandard block type"),
+                });
             }
             let payload_bytes = if block_type == 1 { 1 } else { header >> 3 };
             if bytes.len() - offset < payload_bytes {
@@ -911,10 +915,13 @@ fn complete_zstd_frames(bytes: &[u8], path: &Path) -> Result<Vec<(usize, usize)>
         frames.push((start, offset));
     }
     if frames.is_empty() {
-        return Err(parse_error(
-            path,
-            "Zstandard session has no complete header frame",
-        ));
+        return Err(CoreError::Parse {
+            path: path.into(),
+            reason: "Zstandard session has no complete header frame".into(),
+            diagnostic: crate::ParseDiagnostic::new(
+                "Zstandard session has no complete header frame",
+            ),
+        });
     }
     Ok(frames)
 }
@@ -925,16 +932,21 @@ fn read_dsh_rows(path: &Path, bytes: &[u8]) -> Result<Vec<Value>> {
         let mut decoded = Vec::new();
         for (start, end) in complete_zstd_frames(bytes, path)? {
             decoded.extend(
-                zstd::stream::decode_all(&bytes[start..end]).map_err(|error| {
-                    parse_error(path, format!("Zstandard decode failed: {error}"))
+                zstd::stream::decode_all(&bytes[start..end]).map_err(|error| CoreError::Parse {
+                    path: path.into(),
+                    reason: format!("Zstandard decode failed: {error}"),
+                    diagnostic: crate::ParseDiagnostic::new("Zstandard decoding failed"),
                 })?,
             );
         }
         if !decoded.is_empty() && !decoded.ends_with(b"\n") {
-            return Err(parse_error(
-                path,
-                "complete Zstandard frame contains torn JSONL record",
-            ));
+            return Err(CoreError::Parse {
+                path: path.into(),
+                reason: "complete Zstandard frame contains torn JSONL record".into(),
+                diagnostic: crate::ParseDiagnostic::new(
+                    "complete Zstandard frame contains torn JSONL record",
+                ),
+            });
         }
         decoded
     } else {
@@ -950,10 +962,11 @@ fn read_dsh_rows(path: &Path, bytes: &[u8]) -> Result<Vec<Value>> {
             Ok(row) => rows.push(row),
             Err(_) if !compressed && line + 1 == lines.len() && !decoded.ends_with(b"\n") => break,
             Err(error) => {
-                return Err(parse_error(
-                    path,
-                    format!("invalid JSONL line {}: {error}", line + 1),
-                ));
+                return Err(CoreError::Parse {
+                    path: path.into(),
+                    reason: format!("invalid JSONL line {}: {error}", line + 1),
+                    diagnostic: crate::ParseDiagnostic::json(&error, line),
+                });
             }
         }
     }
@@ -3059,8 +3072,8 @@ fn dsh_protocol_bundle(path: &Path, scope: &str, session_id: &str) -> Result<Pro
 impl DshAdapter<'_> {
     fn source_path(&self, session_id: &str) -> Result<PathBuf> {
         let mut inventory = self.sources()?;
-        if let Some(error) = inventory.ambiguities.remove(session_id) {
-            return Err(error);
+        if let Some(ambiguity) = inventory.ambiguities.remove(session_id) {
+            return Err(ambiguity.error());
         }
         inventory
             .sources
@@ -3103,7 +3116,8 @@ impl DshAdapter<'_> {
                 .push((generation, path));
         }
         let mut inventory = SourceInventory::default();
-        for (id, entries) in found {
+        for (id, mut entries) in found {
+            entries.sort();
             let mixed = entries
                 .iter()
                 .any(|(_, path)| path.to_string_lossy().ends_with(".zstd"))
@@ -3111,13 +3125,13 @@ impl DshAdapter<'_> {
                     .iter()
                     .any(|(_, path)| !path.to_string_lossy().ends_with(".zstd"));
             if mixed {
-                let path = &entries[0].1;
                 inventory.ambiguities.insert(
                     id.clone(),
-                    parse_error(
-                        path,
-                        format!("mixed raw/Zstandard DSH generations for canonical session {id}"),
-                    ),
+                    SourceAmbiguity {
+                        session_id: id,
+                        code: "dsh_mixed_source_encodings".into(),
+                        candidates: entries,
+                    },
                 );
                 continue;
             }
@@ -3127,19 +3141,17 @@ impl DshAdapter<'_> {
                 .max()
                 .unwrap();
             let paths: Vec<_> = entries
-                .into_iter()
-                .filter_map(|(candidate, path)| (candidate == generation).then_some(path))
+                .iter()
+                .filter_map(|(candidate, path)| (*candidate == generation).then_some(path.clone()))
                 .collect();
             if paths.len() > 1 {
-                let path = paths[1].clone();
                 inventory.ambiguities.insert(
                     id.clone(),
-                    parse_error(
-                        &path,
-                        format!(
-                            "duplicate DSH generation v{generation} for canonical session {id}"
-                        ),
-                    ),
+                    SourceAmbiguity {
+                        session_id: id,
+                        code: "dsh_duplicate_source_generation".into(),
+                        candidates: entries,
+                    },
                 );
             } else if let Some(path) = paths.into_iter().next() {
                 inventory.sources.insert(id, path);
@@ -3147,12 +3159,98 @@ impl DshAdapter<'_> {
         }
         Ok(inventory)
     }
+
+    fn source_entries(&self) -> Result<Vec<SourceEntry>> {
+        let inventory = self.sources()?;
+        let mut entries = inventory
+            .sources
+            .into_iter()
+            .map(|(id, path)| SourceEntry::new(id, path))
+            .collect::<Result<Vec<_>>>()?;
+        for ambiguity in inventory.ambiguities.into_values() {
+            entries.push(ambiguity.entry()?);
+        }
+        entries.sort_by(|left, right| left.session_id.cmp(&right.session_id));
+        Ok(entries)
+    }
 }
 
 #[derive(Default)]
 struct SourceInventory {
     sources: BTreeMap<String, PathBuf>,
-    ambiguities: BTreeMap<String, CoreError>,
+    ambiguities: BTreeMap<String, SourceAmbiguity>,
+}
+
+struct SourceAmbiguity {
+    session_id: String,
+    code: &'static str,
+    candidates: Vec<(u8, PathBuf)>,
+}
+
+impl SourceAmbiguity {
+    fn error(&self) -> CoreError {
+        let reason = if self.code == "dsh_mixed_source_encodings" {
+            format!(
+                "mixed raw/Zstandard DSH generations for canonical session {}",
+                self.session_id
+            )
+        } else {
+            format!(
+                "duplicate DSH generation v{} for canonical session {}",
+                self.candidates
+                    .iter()
+                    .map(|(generation, _)| generation)
+                    .max()
+                    .unwrap(),
+                self.session_id
+            )
+        };
+        parse_error(&self.candidates[0].1, reason)
+    }
+
+    fn entry(&self) -> Result<SourceEntry> {
+        let mut digest = Sha256::new();
+        digest.update(self.code.as_bytes());
+        digest.update(self.session_id.as_bytes());
+        for (generation, path) in &self.candidates {
+            digest.update([*generation]);
+            digest.update(
+                SourceEntry::new(self.session_id.clone(), path.clone())?
+                    .signature
+                    .as_bytes(),
+            );
+        }
+        Ok(SourceEntry {
+            session_id: self.session_id.clone(),
+            path: self.candidates[0].1.clone(),
+            signature: format!("dsh-ambiguity:{:x}", digest.finalize()),
+        })
+    }
+
+    fn snapshot(&self, revision: String) -> SessionSnapshot {
+        SessionSnapshot {
+            summary: SessionSummary {
+                session: session_ref(&self.session_id),
+                title: self.session_id.clone(),
+                search_title: Some(self.session_id.clone()),
+                diagnostic: Some(self.code.into()),
+                directory: None,
+                created_at: None,
+                updated_at: None,
+                message_count: 0,
+                conversation_message_count: None,
+                token_count: None,
+                duration_ms: None,
+                summary_files: None,
+                summary_additions: None,
+                summary_deletions: None,
+                parent: None,
+            },
+            revision,
+            events: Vec::new(),
+            relations: Vec::new(),
+        }
+    }
 }
 
 impl ProviderAdapter for DshAdapter<'_> {
@@ -3313,7 +3411,30 @@ impl ProviderAdapter for DshAdapter<'_> {
     }
 
     fn storage_diagnostic(&self) -> Option<Value> {
-        sqlite_storage_diagnostic(self.root)
+        let mut diagnostic = sqlite_storage_diagnostic(self.root);
+        match self.sources() {
+            Ok(inventory) if !inventory.ambiguities.is_empty() => {
+                let mut counts = BTreeMap::<&str, usize>::new();
+                for ambiguity in inventory.ambiguities.values() {
+                    *counts.entry(ambiguity.code).or_default() += 1;
+                }
+                let source_diagnostics = counts.into_iter().map(|(code, count)| {
+                    serde_json::json!({"code": code, "affectedSessions": count})
+                }).collect::<Vec<_>>();
+                let value = diagnostic.get_or_insert_with(|| serde_json::json!({
+                    "code": "dsh_source_ambiguity",
+                    "note": "Some DeepSeek Harness sessions have ambiguous source generations; their history is unavailable."
+                }));
+                value["sourceDiagnostics"] = serde_json::json!(source_diagnostics);
+            }
+            Err(error) => {
+                let value = diagnostic.get_or_insert_with(|| serde_json::json!({}));
+                value["code"] = serde_json::json!("dsh_source_inventory_read_failed");
+                value["note"] = serde_json::json!(error.to_string());
+            }
+            _ => {}
+        }
+        diagnostic
     }
 
     fn protocol_capabilities(&self) -> super::ProtocolCapabilities {
@@ -3329,20 +3450,6 @@ impl ProviderAdapter for DshAdapter<'_> {
     }
     fn unavailable_diagnostic(&self) -> &'static str {
         "DeepSeek Harness sessions directory is unavailable"
-    }
-    fn list(&self) -> Result<Vec<SessionSummary>> {
-        let mut rows = Vec::new();
-        let inventory = self.sources()?;
-        for error in inventory.ambiguities.into_values() {
-            eprintln!("Skipping ambiguous DSH source: {error}");
-        }
-        for (id, path) in inventory.sources {
-            match load_dsh(&path, self.scope, &id) {
-                Ok(snapshot) => rows.push(snapshot.summary),
-                Err(error) => eprintln!("Skipping unreadable DSH source: {error}"),
-            }
-        }
-        Ok(rows)
     }
     fn load(&self, session_id: &str) -> Result<SessionSnapshot> {
         let path = self.source_path(session_id)?;
@@ -3472,23 +3579,51 @@ impl ProviderAdapter for DshAdapter<'_> {
         let path = self.source_path(session_id)?;
         dsh_protocol_bundle(&path, self.scope, session_id)
     }
-    fn supports_index(&self) -> bool {
-        true
-    }
-    fn inventory(&self) -> Result<Option<Vec<SourceEntry>>> {
-        let inventory = self.sources()?;
-        for error in inventory.ambiguities.into_values() {
-            eprintln!("Skipping ambiguous DSH source: {error}");
-        }
-        inventory
-            .sources
-            .into_iter()
-            .map(|(id, path)| SourceEntry::new(id, path))
-            .collect::<Result<Vec<_>>>()
-            .map(Some)
+    fn inventory(&self) -> Result<Vec<SourceEntry>> {
+        self.source_entries()
     }
     fn capture(&self, entry: &SourceEntry) -> Result<SessionSnapshot> {
+        let mut inventory = self.sources()?;
+        if let Some(ambiguity) = inventory.ambiguities.remove(&entry.session_id) {
+            let current = ambiguity.entry()?;
+            if current.signature != entry.signature || current.path != entry.path {
+                return Err(CoreError::SourceChanged);
+            }
+            return Ok(ambiguity.snapshot(current.signature));
+        }
+        if inventory.sources.get(&entry.session_id) != Some(&entry.path)
+            || SourceEntry::new(entry.session_id.clone(), entry.path.clone())?.signature
+                != entry.signature
+        {
+            return Err(CoreError::SourceChanged);
+        }
         load_dsh(&entry.path, self.scope, &entry.session_id)
+    }
+    fn source_signature(&self, entry: &SourceEntry) -> Result<String> {
+        let mut inventory = self.sources()?;
+        if let Some(ambiguity) = inventory.ambiguities.remove(&entry.session_id) {
+            return Ok(ambiguity.entry()?.signature);
+        }
+        let path = inventory
+            .sources
+            .remove(&entry.session_id)
+            .ok_or(CoreError::SourceChanged)?;
+        Ok(SourceEntry::new(entry.session_id.clone(), path)?.signature)
+    }
+    fn validate_inventory(&self, incoming: &BTreeMap<String, SourceEntry>) -> Result<()> {
+        let current = self
+            .source_entries()?
+            .into_iter()
+            .map(|entry| (entry.session_id, entry.signature))
+            .collect::<BTreeMap<_, _>>();
+        if current.len() != incoming.len()
+            || incoming
+                .iter()
+                .any(|(id, entry)| current.get(id) != Some(&entry.signature))
+        {
+            return Err(CoreError::SourceChanged);
+        }
+        Ok(())
     }
 }
 
@@ -4525,7 +4660,12 @@ mod tests {
             root: &root,
             scope: "public-dsh-test",
         };
-        let sessions = adapter.list().unwrap();
+        let sessions = {
+            let catalog_dir = tempfile::tempdir().unwrap();
+            crate::index::refresh(catalog_dir.path(), adapter.scope, PROVIDER, &adapter)
+                .unwrap()
+                .rows
+        };
         assert_eq!(sessions.len(), 3);
         let parent = adapter.load("dsh-v3-s2-root").unwrap();
         assert_eq!(parent.events.len(), 5);
@@ -4697,7 +4837,12 @@ mod tests {
             root: temp.path(),
             scope: "legacy-public-test",
         };
-        let listed = adapter.list().unwrap();
+        let listed = {
+            let catalog_dir = tempfile::tempdir().unwrap();
+            crate::index::refresh(catalog_dir.path(), adapter.scope, PROVIDER, &adapter)
+                .unwrap()
+                .rows
+        };
         assert_eq!(listed.len(), 1);
         let snapshot = adapter.load("legacy-public").unwrap();
         assert_eq!(snapshot.summary.session.session_id, "legacy-public");
@@ -4948,13 +5093,153 @@ mod tests {
             adapter
                 .inventory()
                 .unwrap()
-                .unwrap()
                 .iter()
                 .map(|entry| entry.session_id.as_str())
                 .collect::<Vec<_>>(),
-            ["healthy", "same"]
+            ["healthy", "mixed", "same"]
         );
-        assert_eq!(adapter.list().unwrap().len(), 2);
+        let entries = adapter.inventory().unwrap();
+        let mixed = entries
+            .iter()
+            .find(|entry| entry.session_id == "mixed")
+            .unwrap();
+        let snapshot = adapter.capture(mixed).unwrap();
+        assert_eq!(
+            snapshot.summary.diagnostic.as_deref(),
+            Some("dsh_mixed_source_encodings")
+        );
+        assert!(snapshot.summary.directory.is_none());
+        assert!(snapshot.summary.created_at.is_none());
+        assert!(snapshot.summary.updated_at.is_none());
+        assert!(snapshot.summary.token_count.is_none());
+        assert!(snapshot.events.is_empty());
+        assert_eq!(snapshot.revision, mixed.signature);
+        let catalog_dir = tempfile::tempdir().unwrap();
+        let published =
+            crate::index::refresh(catalog_dir.path(), adapter.scope, PROVIDER, &adapter).unwrap();
+        assert_eq!(published.rows.len(), 3);
+        assert_eq!(
+            published
+                .rows
+                .iter()
+                .filter(|row| row.diagnostic.is_none())
+                .count(),
+            2
+        );
+        let diagnostic = published
+            .rows
+            .iter()
+            .find(|row| row.session.session_id == "mixed")
+            .unwrap();
+        assert_eq!(
+            diagnostic.diagnostic.as_deref(),
+            Some("dsh_mixed_source_encodings")
+        );
+    }
+
+    #[test]
+    fn ambiguous_inventory_tracks_all_candidates_and_rejects_stale_captures() {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        let first = root.join("sessions/a/shared");
+        let second = root.join("sessions/b/shared");
+        fs::create_dir_all(&first).unwrap();
+        fs::create_dir_all(&second).unwrap();
+        let header = "{\"type\":\"session\",\"version\":3,\"id\":\"shared\",\"createdAt\":1,\"isSeeded\":false}\n";
+        let primary = first.join("session.v3.jsonl");
+        let duplicate = second.join("session.v3.jsonl");
+        let older = first.join("session.jsonl");
+        fs::write(&primary, header).unwrap();
+        let adapter = DshAdapter {
+            root,
+            scope: "candidate-test",
+        };
+        let healthy = adapter.source_entries().unwrap().remove(0);
+        fs::write(&duplicate, header).unwrap();
+        assert!(matches!(
+            adapter.capture(&healthy),
+            Err(CoreError::SourceChanged)
+        ));
+        let duplicated = adapter.source_entries().unwrap().remove(0);
+        assert_eq!(
+            adapter
+                .capture(&duplicated)
+                .unwrap()
+                .summary
+                .diagnostic
+                .as_deref(),
+            Some("dsh_duplicate_source_generation")
+        );
+        assert_eq!(
+            adapter.sources().unwrap().ambiguities["shared"]
+                .candidates
+                .len(),
+            2
+        );
+        assert_eq!(
+            adapter.source_signature(&duplicated).unwrap(),
+            duplicated.signature
+        );
+        let incoming = BTreeMap::from([("shared".into(), duplicated.clone())]);
+        adapter.validate_inventory(&incoming).unwrap();
+        fs::write(&older, "older candidate").unwrap();
+        assert!(matches!(
+            adapter.validate_inventory(&incoming),
+            Err(CoreError::SourceChanged)
+        ));
+        assert!(matches!(
+            adapter.capture(&duplicated),
+            Err(CoreError::SourceChanged)
+        ));
+        let with_older = adapter.source_entries().unwrap().remove(0);
+        assert_ne!(with_older.signature, duplicated.signature);
+        assert_eq!(
+            adapter.sources().unwrap().ambiguities["shared"]
+                .candidates
+                .len(),
+            3
+        );
+        fs::write(&older, "changed older candidate").unwrap();
+        assert_ne!(
+            adapter.source_signature(&with_older).unwrap(),
+            with_older.signature
+        );
+        let compressed = second.join("session.v2.jsonl.zstd");
+        fs::write(&compressed, "candidate stat only").unwrap();
+        let mixed = adapter.source_entries().unwrap().remove(0);
+        assert_eq!(
+            adapter
+                .capture(&mixed)
+                .unwrap()
+                .summary
+                .diagnostic
+                .as_deref(),
+            Some("dsh_mixed_source_encodings")
+        );
+        assert_eq!(
+            adapter.sources().unwrap().ambiguities["shared"]
+                .candidates
+                .len(),
+            4
+        );
+        assert_eq!(
+            adapter.storage_diagnostic().unwrap()["sourceDiagnostics"],
+            serde_json::json!([{"code":"dsh_mixed_source_encodings", "affectedSessions":1}])
+        );
+        for path in [&older, &duplicate, &compressed] {
+            fs::remove_file(path).unwrap();
+        }
+        assert!(matches!(
+            adapter.capture(&mixed),
+            Err(CoreError::SourceChanged)
+        ));
+        assert!(adapter.storage_diagnostic().is_none());
+        assert!(adapter.load("shared").unwrap().summary.diagnostic.is_none());
+        fs::remove_file(primary).unwrap();
+        assert!(matches!(
+            adapter.source_signature(&mixed),
+            Err(CoreError::SourceChanged)
+        ));
     }
 
     #[test]
@@ -4987,9 +5272,26 @@ mod tests {
             root: temp.path(),
             scope: "test",
         };
-        let listed = adapter.list().unwrap();
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].session.session_id, "healthy");
+        let listed = {
+            let catalog_dir = tempfile::tempdir().unwrap();
+            crate::index::refresh(catalog_dir.path(), adapter.scope, PROVIDER, &adapter)
+                .unwrap()
+                .rows
+        };
+        assert_eq!(listed.len(), 2);
+        let healthy = listed
+            .iter()
+            .find(|row| row.session.session_id == "healthy")
+            .unwrap();
+        assert!(healthy.diagnostic.is_none());
+        let diagnostic = listed
+            .iter()
+            .find(|row| row.session.session_id == "ambiguous")
+            .unwrap();
+        assert_eq!(
+            diagnostic.diagnostic.as_deref(),
+            Some("dsh_mixed_source_encodings")
+        );
         assert_eq!(adapter.load("healthy").unwrap().summary.message_count, 1);
         assert!(
             matches!(adapter.load("ambiguous"), Err(CoreError::Parse { reason, .. }) if reason.contains("mixed raw/Zstandard") && reason.contains("ambiguous"))

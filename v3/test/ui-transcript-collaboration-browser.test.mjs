@@ -1,7 +1,7 @@
+import { browserPrerequisites } from './browser-prerequisites.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -10,14 +10,12 @@ import { freeFetchSafePort } from './fetch-safe-port.mjs';
 const repo = fileURLToPath(new URL('../../', import.meta.url));
 const ui = path.join(repo, 'v3/ui');
 const require = createRequire(path.join(ui, 'package.json'));
-const { createServer } = require('vite');
-const binaryName = process.platform === 'win32' ? 'agent-browser-win32-x64.exe' : `agent-browser-${process.platform}-${process.arch}`;
-const browser = process.env.AGENTSESSION_V3_AGENT_BROWSER_BIN || (process.env.PATH || '').split(path.delimiter)
-  .map(entry => path.join(entry, 'node_modules/agent-browser/bin', binaryName)).find(existsSync);
+const { browserBinary: browser, skip } = browserPrerequisites({ ui });
 
 test('transcript gutter follows collapsed execution and returns to the canonical dispatch', {
-  timeout: 60_000, skip: !browser && 'agent-browser native binary is unavailable',
+  timeout: 60_000, skip,
 }, async t => {
+  const { createServer } = require('vite');
   const event = (messageId, segment = 'message') => ({ provider: 'codex', sessionId: 'parent', messageId, segment });
   const entries = [
     { type: 'coordination', observation: { kind: 'spawn', state: 'started', correlationId: 'call-1', eventId: 'dispatch', readerEvent: event('dispatch', 'tool'), fromActorPath: '/root', toActorPath: '/root/reviewer', fromSessionRef: null, toSessionRef: null } },

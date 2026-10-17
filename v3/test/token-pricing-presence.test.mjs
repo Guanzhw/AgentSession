@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { once } from 'node:events';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -86,25 +85,51 @@ async function setup(t, partialTotal = 14) {
   const dshSession = path.join(dirs.dsh, 'sessions/fixture/presence');
   await mkdir(dshSession, { recursive: true });
   await writeFile(path.join(dshSession, 'session.jsonl.zstd'), zstdCompressSync(jsonl(legacy)));
-  const port = await freeFetchSafePort();
-  const child = spawn(binary, ['serve', '--port', String(port), '--config', config,
-    '--opencode-db', dbPath, ...Object.entries(dirs).flatMap(([name, dir]) => [`--${name}-dir`, dir])],
-  { cwd: root, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
-  let stderr = ''; child.stderr.on('data', data => { stderr += data; });
+  let child;
+  let childClosed;
   t.after(async () => {
-    if (child.exitCode === null && child.signalCode === null) {
-      const close = once(child, 'close'); child.kill(); await close;
-    }
+    if (child?.exitCode === null && child.signalCode === null) child.kill();
+    await childClosed;
     assert.equal(path.dirname(root), path.join(repo, 'tmp'));
     await rm(root, { recursive: true, force: true });
   });
-  const origin = `http://127.0.0.1:${port}`;
-  for (let i = 0; i < 100; i++) {
-    if (child.exitCode !== null) throw new Error(stderr);
-    try { if ((await fetch(origin + '/api/providers')).ok) return origin; } catch {}
-    await new Promise(resolve => setTimeout(resolve, 100));
+  const deadline = Date.now() + 10_000;
+  let startupDiagnostics = '';
+  for (let attempt = 0; attempt < 3 && Date.now() < deadline; attempt++) {
+    const port = await freeFetchSafePort();
+    child = spawn(binary, ['serve', '--port', String(port), '--config', config,
+      '--opencode-db', dbPath, ...Object.entries(dirs).flatMap(([name, dir]) => [`--${name}-dir`, dir])],
+    { cwd: root, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    let spawnError;
+    let closed = false;
+    child.stderr.on('data', data => { stderr += data; });
+    child.once('error', error => { spawnError = error; });
+    childClosed = new Promise(resolve => child.once('close', () => { closed = true; resolve(); }));
+    const origin = `http://127.0.0.1:${port}`;
+    const listening = `AgentSession 3.0 listening on ${origin}`;
+    while (Date.now() < deadline) {
+      if (spawnError) throw spawnError;
+      if (closed) break;
+      if (stderr.split(/\r?\n/).includes(listening)) {
+        try {
+          if ((await fetch(origin + '/api/providers', {
+            signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+          })).ok) return origin;
+        } catch {}
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    startupDiagnostics += stderr;
+    if (!closed) throw new Error(`Startup failed: ${startupDiagnostics}`);
+    await childClosed;
+    // The port probe releases its socket before the native child can bind it.
+    // Only that observed bind race warrants another allocation and launch.
+    if (!/\bkind: AddrInUse\b/.test(stderr) || attempt === 2) {
+      throw new Error(`Startup failed: ${startupDiagnostics}`);
+    }
   }
-  throw new Error(`Startup failed: ${stderr}`);
+  throw new Error(`Startup failed: ${startupDiagnostics}`);
 }
 
 test('OpenCode pricing preserves source-absent dimensions and explicit zero separately', async t => {

@@ -83,7 +83,9 @@ test('rc.8 Reader/search and healthy inventory survive torn tails and mixed enco
     }
     assert.ok(ready);
     const listed = await json(`${origin}/api/v3/sessions?provider=${provider}`);
-    assert.deepEqual(listed.map(row => row.session.sessionId).sort(), ['healthy', 'rc8-public', 'torn-v3']);
+    assert.deepEqual(listed.map(row => row.session.sessionId).sort(), ['healthy', 'mixed', 'rc8-public', 'torn-v3']);
+    assert.equal(listed.find(row => row.session.sessionId === 'mixed')?.diagnostic,
+      'dsh_mixed_source_encodings');
     const rc8Reader = await json(`${origin}/api/v3/reader/${provider}/rc8-public/bootstrap`);
     assert.equal(rc8Reader.session.messageCount, 5);
     assert.ok(rc8Reader.segments.flatMap(page => page.items).some(item =>

@@ -81,6 +81,9 @@ impl ClaudeAdapter<'_> {
                 }
                 for entry in WalkDir::new(&project_path).follow_links(false).max_depth(7) {
                     let entry = entry.map_err(|error| CoreError::Parse {
+                        diagnostic: crate::ParseDiagnostic::new(
+                            "source directory traversal failed",
+                        ),
                         path: project_path.clone(),
                         reason: error.to_string(),
                     })?;
@@ -148,17 +151,6 @@ impl ProviderAdapter for ClaudeAdapter<'_> {
         "Claude Code transcripts are unavailable or unreadable"
     }
 
-    fn list(&self) -> Result<Vec<SessionSummary>> {
-        let mut summaries = Vec::new();
-        for (id, path) in self.sources()? {
-            // A bad transcript does not hide independently readable sessions.
-            if let Ok(snapshot) = load(&path, self.scope, &id) {
-                summaries.push(snapshot.summary);
-            }
-        }
-        Ok(summaries)
-    }
-
     fn load(&self, session_id: &str) -> Result<SessionSnapshot> {
         let sources = self.sources()?;
         let path = sources.get(session_id).ok_or_else(|| CoreError::NotFound {
@@ -212,6 +204,7 @@ impl ProviderAdapter for ClaudeAdapter<'_> {
             }
             let record =
                 serde_json::from_slice::<Value>(line).map_err(|error| CoreError::Parse {
+                    diagnostic: crate::ParseDiagnostic::json(&error, line_index),
                     path: path.clone(),
                     reason: format!("line {}: {error}", line_index + 1),
                 })?;
@@ -381,16 +374,11 @@ impl ProviderAdapter for ClaudeAdapter<'_> {
         finalize_protocol_bundle(stream, observations).map_err(CoreError::Protocol)
     }
 
-    fn supports_index(&self) -> bool {
-        true
-    }
-
-    fn inventory(&self) -> Result<Option<Vec<SourceEntry>>> {
+    fn inventory(&self) -> Result<Vec<SourceEntry>> {
         self.sources()?
             .into_iter()
             .map(|(id, path)| SourceEntry::new(id, path))
             .collect::<Result<Vec<_>>>()
-            .map(Some)
     }
 
     fn capture(&self, entry: &SourceEntry) -> Result<SessionSnapshot> {
@@ -440,6 +428,7 @@ fn load_bytes(
             continue;
         }
         let value = serde_json::from_slice::<Value>(line).map_err(|error| CoreError::Parse {
+            diagnostic: crate::ParseDiagnostic::json(&error, line_number),
             path: path.into(),
             reason: format!("line {}: {error}", line_number + 1),
         })?;
@@ -448,6 +437,7 @@ fn load_bytes(
     }
     if records.is_empty() {
         return Err(CoreError::Parse {
+            diagnostic: crate::ParseDiagnostic::new("empty transcript"),
             path: path.into(),
             reason: "empty transcript".into(),
         });
@@ -457,6 +447,9 @@ fn load_bytes(
         if let Some(agent) = record["agentId"].as_str() {
             if agent != expected_id {
                 return Err(CoreError::Parse {
+                    diagnostic: crate::ParseDiagnostic::new(
+                        "sidechain agent ID differs from canonical filename",
+                    ),
                     path: path.into(),
                     reason: "sidechain agent ID differs from canonical filename".into(),
                 });
@@ -485,8 +478,7 @@ fn load_bytes(
     let mut message_count = 0;
     let mut token_total = 0u64;
     let mut has_usage = false;
-    let mut seen_response_ids = HashSet::new();
-    let mut previous_fallback_usage = None::<u64>;
+    let mut usage_selector = ClaudeUsageSelector::default();
     let mut owner = None::<EventRef>;
     let mut pending_thinking = Vec::<String>::new();
     let mut pending_thinking_id = None::<String>;
@@ -517,26 +509,13 @@ fn load_bytes(
                 generated += 1;
                 id
             });
-        if kind == "assistant" {
-            if let Some(total) =
-                usage_total(&record["message"]["usage"]).or_else(|| usage_total(&record["usage"]))
-            {
-                let response_id = record["message"]["id"].as_str().filter(|id| !id.is_empty());
-                let first = if let Some(id) = response_id {
-                    previous_fallback_usage = None;
-                    seen_response_ids.insert(id.to_owned())
-                } else {
-                    let first = previous_fallback_usage != Some(total);
-                    previous_fallback_usage = Some(total);
-                    first
-                };
-                if first {
-                    token_total = token_total.saturating_add(total);
-                    has_usage = true;
-                }
+        if let Some(selection) = usage_selector.select(record) {
+            if selection.first {
+                token_total = token_total.saturating_add(usage_total(selection.usage));
+                has_usage = true;
             }
-        } else {
-            previous_fallback_usage = None;
+        }
+        if kind != "assistant" {
             if !pending_thinking.is_empty() {
                 let id = pending_thinking_id
                     .take()
@@ -1014,6 +993,7 @@ fn claude_protocol_stream_bytes(
             continue;
         }
         let record = serde_json::from_slice::<Value>(line).map_err(|error| CoreError::Parse {
+            diagnostic: crate::ParseDiagnostic::json(&error, line_index),
             path: path.into(),
             reason: format!("line {}: {error}", line_index + 1),
         })?;
@@ -1023,7 +1003,7 @@ fn claude_protocol_stream_bytes(
             .ok_or_else(|| {
                 CoreError::Protocol(ProtocolError::Invalid {
                     diagnostics: vec![Diagnostic {
-                        code: "invalid_claude_record_type",
+                        code: "invalid_claude_record_type".into(),
                         event_id: Some(format!("event:claude:{line_index}")),
                     }],
                 })
@@ -1037,7 +1017,7 @@ fn claude_protocol_stream_bytes(
             if !valid {
                 return Err(CoreError::Protocol(ProtocolError::Invalid {
                     diagnostics: vec![Diagnostic {
-                        code: "invalid_claude_message_content",
+                        code: "invalid_claude_message_content".into(),
                         event_id: Some(format!("event:claude:{line_index}")),
                     }],
                 }));
@@ -1108,53 +1088,21 @@ fn claude_request_usage_with_owner(
         session_id: session_id.into(),
     };
     let mut usage_records = Vec::<UsageRecord>::new();
-    let mut response_records = HashMap::<String, usize>::new();
-    let mut previous_fallback = None::<(
-        (
-            Option<u64>,
-            Option<u64>,
-            Option<u64>,
-            Option<u64>,
-            Option<u64>,
-        ),
-        Option<usize>,
-    )>;
-    let mut usage_observed = false;
+    let mut selector = ClaudeUsageSelector::default();
 
     for (line_index, line) in bytes.split(|byte| *byte == b'\n').enumerate() {
         if line.iter().all(u8::is_ascii_whitespace) {
             continue;
         }
         let record = serde_json::from_slice::<Value>(line).map_err(|error| CoreError::Parse {
+            diagnostic: crate::ParseDiagnostic::json(&error, line_index),
             path: path.into(),
             reason: format!("line {}: {error}", line_index + 1),
         })?;
-        if record["type"] != "assistant" {
-            previous_fallback = None;
-            continue;
-        }
-        let usage = record["message"].get("usage").unwrap_or(&Value::Null);
-        let usage = if usage.is_null() {
-            record.get("usage").unwrap_or(&Value::Null)
-        } else {
-            usage
-        };
-        let Some(tokens) = claude_request_tokens(usage) else {
+        let Some(selection) = selector.select(&record) else {
             continue;
         };
-        usage_observed = true;
-
         let response_id = record["message"]["id"].as_str().filter(|id| !id.is_empty());
-        if response_id.is_some() {
-            previous_fallback = None;
-        }
-        let signature = claude_usage_signature(&tokens, usage);
-        if claude_usage_is_pending(usage, &tokens) {
-            if response_id.is_none() {
-                previous_fallback = Some((signature, None));
-            }
-            continue;
-        }
 
         let native_id = record["uuid"]
             .as_str()
@@ -1187,7 +1135,7 @@ fn claude_request_usage_with_owner(
             run_id: None,
             event_id,
             turn_id: None,
-            tokens,
+            tokens: selection.tokens,
             context_origin_slices: vec![],
             provenance: Provenance {
                 fidelity,
@@ -1196,34 +1144,87 @@ fn claude_request_usage_with_owner(
             },
         };
 
-        if let Some(response_id) = response_id {
-            if let Some(existing) = response_records.get(response_id).copied() {
-                if usage_records[existing].event_id.is_none() && request.event_id.is_some() {
-                    usage_records[existing] = request;
-                }
-                continue;
-            }
-            response_records.insert(response_id.into(), usage_records.len());
+        if selection.first {
             usage_records.push(request);
-            continue;
+        } else if usage_records[selection.index].event_id.is_none() && request.event_id.is_some() {
+            usage_records[selection.index] = request;
         }
-
-        if let Some((previous_signature, previous_index)) = previous_fallback {
-            if previous_signature == signature {
-                if let Some(existing) = previous_index {
-                    if usage_records[existing].event_id.is_none() && request.event_id.is_some() {
-                        usage_records[existing] = request;
-                    }
-                }
-                continue;
-            }
-        }
-        let index = usage_records.len();
-        usage_records.push(request);
-        previous_fallback = Some((signature, Some(index)));
     }
 
-    Ok((usage_records, usage_observed))
+    Ok((usage_records, selector.observed))
+}
+
+type ClaudeUsageSignature = (
+    Option<u64>,
+    Option<u64>,
+    Option<u64>,
+    Option<u64>,
+    Option<u64>,
+);
+
+#[derive(Default)]
+struct ClaudeUsageSelector {
+    response_records: HashMap<String, usize>,
+    previous_fallback: Option<(ClaudeUsageSignature, usize)>,
+    selected_count: usize,
+    observed: bool,
+}
+
+struct ClaudeUsageSelection<'a> {
+    usage: &'a Value,
+    tokens: UsageTokenComponents,
+    index: usize,
+    first: bool,
+}
+
+impl ClaudeUsageSelector {
+    fn select<'a>(&mut self, record: &'a Value) -> Option<ClaudeUsageSelection<'a>> {
+        if record["type"] != "assistant" {
+            self.previous_fallback = None;
+            return None;
+        }
+        let nested = &record["message"]["usage"];
+        let usage = if nested.is_null() {
+            &record["usage"]
+        } else {
+            nested
+        };
+        let tokens = claude_request_tokens(usage)?;
+        self.observed = true;
+        let response_id = record["message"]["id"].as_str().filter(|id| !id.is_empty());
+        if response_id.is_some() {
+            self.previous_fallback = None;
+        }
+        let signature = claude_usage_signature(&tokens, usage);
+        if claude_usage_is_pending(usage, &tokens) {
+            if response_id.is_none() {
+                self.previous_fallback = None;
+            }
+            return None;
+        }
+        let existing = if let Some(response_id) = response_id {
+            self.response_records.get(response_id).copied()
+        } else {
+            self.previous_fallback
+                .and_then(|(previous, index)| (previous == signature).then_some(index))
+        };
+        let index = existing.unwrap_or(self.selected_count);
+        let first = existing.is_none();
+        if first {
+            self.selected_count += 1;
+            if let Some(response_id) = response_id {
+                self.response_records.insert(response_id.into(), index);
+            } else {
+                self.previous_fallback = Some((signature, index));
+            }
+        }
+        Some(ClaudeUsageSelection {
+            usage,
+            tokens,
+            index,
+            first,
+        })
+    }
 }
 
 fn claude_request_tokens(usage: &Value) -> Option<UsageTokenComponents> {
@@ -1277,16 +1278,7 @@ fn claude_request_tokens(usage: &Value) -> Option<UsageTokenComponents> {
     })
 }
 
-fn claude_usage_signature(
-    tokens: &UsageTokenComponents,
-    usage: &Value,
-) -> (
-    Option<u64>,
-    Option<u64>,
-    Option<u64>,
-    Option<u64>,
-    Option<u64>,
-) {
+fn claude_usage_signature(tokens: &UsageTokenComponents, usage: &Value) -> ClaudeUsageSignature {
     (
         tokens.input,
         tokens.cache_read,
@@ -1440,10 +1432,7 @@ fn text_value(value: Option<&Value>) -> String {
     }
 }
 
-fn usage_total(usage: &Value) -> Option<u64> {
-    if !usage.is_object() {
-        return None;
-    }
+fn usage_total(usage: &Value) -> u64 {
     let field = |name: &str| usage[name].as_u64().unwrap_or(0);
     let cache_creation = usage["cache_creation_input_tokens"]
         .as_u64()
@@ -1455,12 +1444,10 @@ fn usage_total(usage: &Value) -> Option<u64> {
                     .as_u64()
                     .unwrap_or(0)
         });
-    Some(
-        field("input_tokens")
-            + field("output_tokens")
-            + field("cache_read_input_tokens")
-            + cache_creation,
-    )
+    field("input_tokens")
+        + field("output_tokens")
+        + field("cache_read_input_tokens")
+        + cache_creation
 }
 
 fn timestamp_ms(value: &Value) -> Option<i64> {
@@ -1679,6 +1666,62 @@ fn push_event(
 mod tests {
     use super::*;
     use crate::protocol::EventQuery;
+
+    fn usage_snapshot(rows: &[Value]) -> SessionSnapshot {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../tmp");
+        fs::create_dir_all(&root).unwrap();
+        let dir = tempfile::Builder::new()
+            .prefix("claude-usage-selection-")
+            .tempdir_in(root)
+            .unwrap();
+        let path = dir.path().join("session.jsonl");
+        fs::write(
+            &path,
+            rows.iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n",
+        )
+        .unwrap();
+        load(&path, "fixture", "session").unwrap()
+    }
+
+    #[test]
+    fn usage_selection_pending_response_does_not_claim_final_usage() {
+        let row = |uuid, usage| {
+            serde_json::json!({"type":"assistant", "uuid":uuid,
+            "message":{"id":"response-1", "content":[], "usage":usage}})
+        };
+        let pending = row(
+            "pending",
+            serde_json::json!({"input_tokens":0,"output_tokens":0}),
+        );
+        let final_row = row(
+            "final",
+            serde_json::json!({"input_tokens":10,"output_tokens":4}),
+        );
+        let snapshot = usage_snapshot(&[pending.clone(), final_row.clone(), final_row]);
+        assert_eq!(snapshot.summary.token_count, Some(14));
+        assert_eq!(usage_snapshot(&[pending]).summary.token_count, None);
+    }
+
+    #[test]
+    fn usage_selection_legacy_equal_totals_keep_distinct_component_signatures() {
+        let row = |uuid, input, output| {
+            serde_json::json!({"type":"assistant", "uuid":uuid,
+            "message":{"content":[],"usage":{"input_tokens":input,"output_tokens":output}}})
+        };
+        let first = row("first", 8, 2);
+        let duplicate = row("fragment", 8, 2);
+        let distinct = row("different-components", 7, 3);
+        assert_eq!(
+            usage_snapshot(&[first, duplicate, distinct])
+                .summary
+                .token_count,
+            Some(20)
+        );
+    }
 
     #[test]
     fn current_structured_agent_launch_records_child_dispatch_without_a_run() {

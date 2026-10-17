@@ -18,6 +18,56 @@ use std::sync::Arc;
 
 static UI: Dir<'_> = include_dir!("$OUT_DIR/static");
 
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+    use agentsession_core::protocol::{Diagnostic, ProtocolError};
+
+    async fn error_json(error: CoreError) -> (StatusCode, Value) {
+        let response = ApiError::from(error).into_response();
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        (status, serde_json::from_slice(&body).unwrap())
+    }
+
+    #[tokio::test]
+    async fn protocol_invalid_diagnostics_are_bounded_and_keep_recorded_identity() {
+        for count in [0, 20, 21] {
+            let diagnostics = (0..count)
+                .map(|index| Diagnostic {
+                    code: "duplicate_event_id".into(),
+                    event_id: Some(format!("event-{index}")),
+                })
+                .collect();
+            let (status, body) =
+                error_json(CoreError::Protocol(ProtocolError::Invalid { diagnostics })).await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(body["error"]["code"], "protocol_invalid");
+            assert_eq!(body["error"]["diagnosticsTruncated"], count > 20);
+            let details = body["error"]["diagnostics"].as_array().unwrap();
+            assert_eq!(details.len(), count.min(20));
+            if count > 0 {
+                assert_eq!(
+                    details[0],
+                    json!({"code": "duplicate_event_id", "event_id": "event-0"})
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn ordinary_errors_keep_the_existing_json_contract() {
+        let (status, body) = error_json(CoreError::InvalidCursor).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            body,
+            json!({"error": {"code": "invalid_cursor", "message": "invalid Reader cursor"}})
+        );
+    }
+}
+
 #[path = "legacy_lists.rs"]
 mod legacy_lists;
 
@@ -26,10 +76,20 @@ struct ApiError {
     status: StatusCode,
     code: &'static str,
     message: String,
+    diagnostics: Option<(Vec<agentsession_core::protocol::Diagnostic>, bool)>,
 }
 
 impl From<CoreError> for ApiError {
     fn from(error: CoreError) -> Self {
+        let diagnostics = match &error {
+            CoreError::Protocol(agentsession_core::protocol::ProtocolError::Invalid {
+                diagnostics,
+            }) => Some((
+                diagnostics.iter().take(20).cloned().collect(),
+                diagnostics.len() > 20,
+            )),
+            _ => None,
+        };
         let (status, code) = match error {
             CoreError::Unavailable(_) => (StatusCode::SERVICE_UNAVAILABLE, "provider_unavailable"),
             CoreError::NotFound { .. } => (StatusCode::NOT_FOUND, "session_not_found"),
@@ -60,17 +120,19 @@ impl From<CoreError> for ApiError {
             status,
             code,
             message: error.to_string(),
+            diagnostics,
         }
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (
-            self.status,
-            Json(json!({"error": {"code": self.code, "message": self.message}})),
-        )
-            .into_response()
+        let mut error = json!({"code": self.code, "message": self.message});
+        if let Some((diagnostics, truncated)) = self.diagnostics {
+            error["diagnostics"] = json!(diagnostics);
+            error["diagnosticsTruncated"] = json!(truncated);
+        }
+        (self.status, Json(json!({"error": error}))).into_response()
     }
 }
 
@@ -78,6 +140,7 @@ fn joined_error(error: tokio::task::JoinError) -> ApiError {
     ApiError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "internal_error",
+        diagnostics: None,
         message: error.to_string(),
     }
 }
@@ -94,6 +157,7 @@ async fn system_prompts(
         return Err(ApiError {
             status: StatusCode::NOT_FOUND,
             code: "provider_not_found",
+            diagnostics: None,
             message: format!("provider {provider} was not found"),
         });
     }
@@ -149,6 +213,7 @@ async fn source_stats(
         return Err(ApiError {
             status: StatusCode::NOT_FOUND,
             code: "provider_not_found",
+            diagnostics: None,
             message: format!("provider {provider} was not found"),
         });
     }
@@ -246,6 +311,7 @@ async fn stats_json(
     let body = serde_json::to_vec_pretty(&report).map_err(|error| ApiError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "serialization_error",
+        diagnostics: None,
         message: error.to_string(),
     })?;
     Ok((
@@ -332,6 +398,7 @@ fn trusted_mutation(headers: &HeaderMap) -> Result<(), ApiError> {
         return Err(ApiError {
             status: StatusCode::FORBIDDEN,
             code: "untrusted_origin",
+            diagnostics: None,
             message: "Viewer mutations require a loopback same-origin request".into(),
         });
     }
@@ -415,6 +482,7 @@ fn retired_session_api(
         return Err(ApiError {
             status: StatusCode::NOT_FOUND,
             code: "not_found",
+            diagnostics: None,
             message: "API route not found".into(),
         });
     };
@@ -780,6 +848,7 @@ async fn protocol_events(
         serde_json::to_value(page).map_err(|error| ApiError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: "serialization_error",
+            diagnostics: None,
             message: error.to_string(),
         })
     })
@@ -914,6 +983,7 @@ async fn protocol_domain(
             return Err(ApiError {
                 status: StatusCode::NOT_FOUND,
                 code: "runtime_domain_not_found",
+                diagnostics: None,
                 message: "unknown runtime domain".into(),
             });
         }
@@ -1312,6 +1382,7 @@ async fn settings_update(
         return Err(ApiError {
             status: StatusCode::FORBIDDEN,
             code: "untrusted_origin",
+            diagnostics: None,
             message: "Saving settings requires a same-origin request".into(),
         });
     }
@@ -1327,11 +1398,13 @@ async fn settings_update(
         crate::config::SettingsError::Invalid(message) => ApiError {
             status: StatusCode::BAD_REQUEST,
             code: "invalid_settings",
+            diagnostics: None,
             message,
         },
         crate::config::SettingsError::Save(message) => ApiError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: "settings_save_failed",
+            diagnostics: None,
             message,
         },
     })
@@ -1374,6 +1447,7 @@ async fn resume_launch(
         return Err(ApiError {
             status: StatusCode::FORBIDDEN,
             code: "terminal_launch_forbidden",
+            diagnostics: None,
             message: "Terminal launch requires a same-origin request and startup permission".into(),
         });
     }
@@ -1382,6 +1456,7 @@ async fn resume_launch(
         crate::resume::launch(info, &config).map_err(|message| ApiError {
             status: StatusCode::CONFLICT,
             code: "resume_unavailable",
+            diagnostics: None,
             message,
         })
     })

@@ -222,7 +222,7 @@
   <div class="stats-intro">
     <p class="eyebrow">{t($language, 'Recorded usage')}</p>
     <h1>{t($language, 'Token statistics')}</h1>
-    <p>{t($language, 'Inspect proved request usage and unresolved source observations. Days use UTC.')}</p>
+    <p>{t($language, 'Inspect recorded token usage and requests. Days use UTC.')}</p>
   </div>
 
   <div class="stats-toolbar">
@@ -321,15 +321,15 @@
       </div>
     {/if}
     <div class="stats-kpis">
+      <article class="stats-known-tokens"><span>{t($language, 'Known token subtotal')}</span><strong>{noReadableSources ? '—' : count(report.overview.knownTokenCount)}</strong></article>
       <article><span>{t($language, 'Included sessions')}</span><strong>{noReadableSources ? '—' : count(report.overview.totalSessions)}</strong></article>
       <article><span>{t($language, 'Recorded requests')}</span><strong>{noReadableSources ? '—' : count(report.overview.recordedRequestCount)}</strong></article>
-      <article class="stats-known-tokens"><span>{t($language, 'Known token subtotal')}</span><strong>{noReadableSources ? '—' : count(report.overview.knownTokenCount)}</strong></article>
       <article class="stats-unknown-requests"><span>{t($language, 'Requests with unknown total')}</span><strong>{noReadableSources ? '—' : count(report.overview.unknownTokenRequestCount)}</strong></article>
     </div>
     {#if !noReadableSources}
-    <p class="stats-note">{count(report.overview.unresolvedUsageObservationCount)} {t($language, 'unresolved usage observation(s) remain separate from proved requests and token totals.')}</p>
+    <p class="stats-note">{count(report.overview.unresolvedUsageObservationCount)} {t($language, 'usage observation(s) have no proved request identity. Verified token increments are included in known tokens.')}</p>
     {#if report.usageRange.model}
-      <p class="stats-note">{t($language, 'The request model filter narrows proved requests only. Unresolved observations remain counted under the selected source, date, directory, project, and session filters because their model is unknown.')}</p>
+      <p class="stats-note">{t($language, 'The model filter narrows attributed requests and token consumption. Observation counts retain the selected source, date, directory, project, and session filters.')}</p>
     {/if}
     {#if report.overview.untimedRequestCount > 0}
       <p class="stats-note">{count(report.overview.untimedRequestCount)} {t($language, 'request(s) have no recorded time and cannot be assigned to a UTC day.')}</p>
