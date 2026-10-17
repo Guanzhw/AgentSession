@@ -1012,27 +1012,35 @@
     const keepReadingFocus = focusRect && focusRect.top >= -1 && focusRect.bottom <= window.innerHeight + 1;
     searchReveals = { [eventKey(match.event)]: { field: match.field, offset: match.offset,
       matchLength: match.matchLength, text: page.text, totalChars: page.totalChars } };
-    await tick();
-    // The target card's automatic body read can move the match after it mounts.
-    await contentLoads.get(eventKey(match.event) + ':body');
-    await tick();
-    if (active && request === searchSelectionGeneration && navigation === locationGeneration) {
-      const event = document.getElementById(stableAnchor(match.event));
-      for (let ancestor = event?.parentElement; ancestor; ancestor = ancestor.parentElement) {
-        if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
-      }
-      if (restoring) {
-        if (keepReadingFocus && document.activeElement === readingFocus) {
-          readingFocus?.scrollIntoView({ behavior: 'instant', block: 'nearest' });
+    const positionMatch = async (): Promise<void> => {
+      await tick();
+      // The target card's automatic body read can move the match after it mounts.
+      await contentLoads.get(eventKey(match.event) + ':body');
+      await tick();
+      if (active && request === searchSelectionGeneration && navigation === locationGeneration) {
+        const event = document.getElementById(stableAnchor(match.event));
+        for (let ancestor = event?.parentElement; ancestor; ancestor = ancestor.parentElement) {
+          if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
         }
-        return;
+        if (restoring) {
+          if (keepReadingFocus && document.activeElement === readingFocus) {
+            readingFocus?.scrollIntoView({ behavior: 'instant', block: 'nearest' });
+          }
+          return;
+        }
+        const region = event?.querySelector<HTMLElement>('.search-reveal');
+        region?.focus({ preventScroll: true });
+        const mark = region?.querySelector('mark');
+        if (mark) mark.scrollIntoView({ behavior: 'instant', block: 'center' });
+        else scrollToEvent(match.event);
       }
-      const region = event?.querySelector<HTMLElement>('.search-reveal');
-      region?.focus({ preventScroll: true });
-      const mark = region?.querySelector('mark');
-      if (mark) mark.scrollIntoView({ behavior: 'instant', block: 'center' });
-      else scrollToEvent(match.event);
-    }
+    };
+    if (restoring || fromLocation) await positionMatch();
+    else void positionMatch().catch(cause => {
+      if (active && request === searchSelectionGeneration && navigation === locationGeneration) {
+        locationError = cause instanceof Error ? cause.message : 'The matching source could not be opened.';
+      }
+    });
   }
 
   async function openRuntimeSource(target: ReaderEventRef, sourceRevision: string): Promise<void> {
