@@ -1,5 +1,16 @@
 # AgentSession 3.0：可执行重建计划
 
+2026-10-17 当前版本为 **3.0.1 稳定版发布候选**，已获提交和发布授权。
+本版整合 Codex 发现与累计 Token、Claude 用量、DSH 歧义诊断、Reader 错误持久化、
+MCP 安全诊断、Linux 浏览器门槛、统一索引列表及元数据批量预检修复，并保留 main
+的实时 Codex catalog、OpenCode WAL、夹具清理及缺失子历史提示。
+[3.0.1 更新说明](../releases/3.0.1.md)是本版安装与证据边界入口。
+最终合并提交的完整 CI、四平台发布流程及公开安装验证尚未执行完成。
+此前冻结 Windows 完整检查记录为 Rust core 266、app 10 通过，18 忽略；Node
+778 通过、50 条件跳过、0 失败，review 通过；Windows/Linux x64 浏览器各 43 项
+通过。这些记录仅覆盖各自输入与产物，不视为整合后的提交重跑。性能、资源及历史
+STATE-01 门槛保持下方原状态，后续用确切发布提交的结果更新本入口。
+
 2026-10-17 七项最终验收收尾：Claude 完全缺失 `usage` 的两项公开 HTTP 验收已补齐，
 确认全缺失时摘要保持未知、Protocol 不伪造请求，混合正常记录时保留已知合计，
 且缺失记录不抢占同一 response ID；原消息保持可读。最终工作树的完整 `npm test`
@@ -57,7 +68,7 @@ direct history-base 身份校验恢复一致。最终 Rust 263 项通过、18 �
 CORE-14 的新增累计消耗范围保持 U，既有 canonical 金标保留历史范围。下一步按
 实际新机器配置复核，并为混合历史及重置段补充来源金标；本轮不扩大完整覆盖声明。
 
-更新：2026-10-12；当前工作区已按用户要求整合为**唯一 Rust/Svelte 3.0 实现与默认启动入口**。历史 S3/S4/S5 结果保留原有日期、产物和范围，当前稳定版进度见下方入口。本文件是3.0阶段与下一步的唯一进度入口。
+更新：2026-10-17；当前工作区已按用户要求整合为**唯一 Rust/Svelte 3.0 实现与默认启动入口**。历史 S3/S4/S5 结果保留原有日期、产物和范围，当前稳定版进度见下方入口。本文件是3.0阶段与下一步的唯一进度入口。
 进度、退出门槛与下一动作入口；架构选择见
 [Rust-first 架构方案](agentsession-rust-first-architecture.md)，不在这里复制其设计。
 
@@ -78,6 +89,9 @@ MCP 与安装产物均通过；相同语义和负载的性能结果可复核；�
 
 ## 当前工作区与下一动作
 
+当前下一动作：完成 3.0.1 整合提交的检查、发布及公开安装验证，按实际结果更新
+[本版说明](../releases/3.0.1.md)。以下 rc.4 与 3.0.0 记录保留各自历史范围。
+
 已发布 `v3.0.0-rc.4`，确切提交为 `d74d5088388118d8df7dd622a7ef17f4be0c73ed`。
 2026-10-11 通过只读 `gh run view` 重新核对：
 [发布 38132614812](https://github.com/Guanzhw/AgentSession/actions/runs/38132614812)、
@@ -88,12 +102,12 @@ macOS arm64 四个实际宿主完成构建、便携装包、Web/MCP、安装器�
 组合 tarball 离线安装及启动通过，npm `next` 与 GitHub prerelease 发布成功。
 平台 CI 子结果已取得，稳定版的来源、完整桌面产品与资源门槛仍按下表补证。
 
-当前[follow-through spec](../specs/prerelease-followthrough-2026-10/requirements.md)
-中的 npm 命令路由、升级指导及私有来源测试报告修复属于 **Unreleased**；
+历史[follow-through spec](../specs/prerelease-followthrough-2026-10/requirements.md)
+中的 npm 命令路由、升级指导及私有来源测试报告修复已随 **3.0.0** 发布；
 rc.4 的既有行为、产物和 tag 保持其已发布身份。RC.1/2 失败及 RC.3 取消记录保留于
 [预发布验证记录](prerelease-validation-20261011.md)，不由新成功结果改写。
 
-当前本地 Reader journey 修复同属 **Unreleased**，范围见
+Reader journey 修复已随 **3.0.0** 发布，范围见
 [新规格](../specs/reader-journey-repair-2026-10/requirements.md)，实际实施、验证与剩余工作见
 [任务账本](../specs/reader-journey-repair-2026-10/tasks.md)。本轮修复不关闭下表的稳定版门槛
 或已有平台、来源与性能验收项。
@@ -108,10 +122,10 @@ rc.4 的既有行为、产物和 tag 保持其已发布身份。RC.1/2 失败及
 默认地址为 `http://127.0.0.1:3457`。用户来源与既有元数据保持，详细命令见
 [开发指南](../../AGENTS.md)和[原生运行说明](../../v3/README.md)。
 
-Unreleased follow-through 已完成 Windows x64 本地验收与独立 review：Rust 242 通过、
+3.0.0 follow-through 曾完成 Windows x64 本地验收与独立 review：Rust 242 通过、
 18 显式忽略，元数据／安装相关 11 项通过；缺私有 manifest 的显式 opt-in 按预期失败。
 具体命令、复用的原生程序身份及边界见[执行账本](../specs/prerelease-followthrough-2026-10/tasks.md)。
-下一动作：后续候选发布前在确切版本上验证本次修复的四平台安装行为，并按下表推进
+历史下一动作：后续候选发布前在确切版本上验证本次修复的四平台安装行为，并按下表推进
 仍缺的真实来源、阅读体验与资源证据。
 以下 S0–S5 比较阶段、Oct1/Oct2 的“当前”产物、
 端口、测试结果和下一动作属于各自日期的历史记录，不代表重新执行或要求日常维护 2.0。

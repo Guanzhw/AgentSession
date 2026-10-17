@@ -1,6 +1,28 @@
 # Changelog
 
-## Unreleased
+## 3.0.1 - Release candidate
+
+- Restore fresh Codex discovery using canonical session identity, including legacy
+  headers. Token statistics count cumulative increments without repeating snapshots;
+  recorded request identity remains required for request counts.
+- Deduplicate Claude pending usage by response and retain recorded usage components.
+  Missing usage remains unknown and does not claim a request or displace later usage.
+- Publish ambiguous DSH sessions as diagnostic rows with unknown counts, partial
+  search coverage and explicit excluded-source statistics.
+- Preserve Reader Protocol errors and bounded HTTP 422 `protocol_invalid`
+  diagnostics. Summary schema 16, Reader cache 3 and projection 11 automatically
+  refresh derived state while preserving provider data and Viewer metadata.
+- Add safe native MCP stderr diagnostics with unchanged wire responses, require
+  Linux x64 public browser checks with agent-browser 0.39.1, remove the unused
+  non-indexed listing path, and share batch metadata preflight/writes.
+- Retain live Codex catalog consistency, OpenCode WAL handling, fixture cleanup
+  and missing-child Reader guidance from the integrated main branch.
+- Final integrated CI and publication checks are pending. Earlier scoped Windows
+  validation passed Rust core 266/app 10 with 18 ignored probes, and Node 778
+  with 50 conditional skips; it is not a test of the combined release commit.
+  See the [release notes](docs/releases/3.0.1.md) for evidence and open gates.
+
+## 3.0.0 - 2026-10-12
 
 - DeepSeek Harness generation-four sources are discovered and read by the
   owning adapter, including first-class tool results and complete mailbox
@@ -13,8 +35,8 @@
 - Stable `3.x.y` publication selects npm `latest` and a normal GitHub release;
   prerelease versions retain `next`. Both channels keep the same exact
   tag/commit, four-platform, immutable artifact and provenance checks. Manual
-  validation prepares artifacts without publishing. The current `3.0.0`
-  workspace version is an unpublished local candidate.
+  validation prepares artifacts without publishing. Version `3.0.0` was published
+  as a stable release.
 
 - Global content-search links carry normalized UTF-16 match positions and a
   Reader `contentRevision`, revealing and highlighting a bounded body window.

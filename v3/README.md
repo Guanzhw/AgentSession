@@ -18,7 +18,9 @@ records the current default. The [3.0.0-rc.4 release notes](../docs/releases/3.0
 describe the prerelease distribution and upgrade from public v1.10.1.
 Remaining acceptance gates retain their recorded evidence scope.
 
-The current source version is **3.0.0, an unpublished local stable candidate**.
+The current source version is **3.0.1, a stable release candidate**.
+The [3.0.1 notes](../docs/releases/3.0.1.md) describe the included repairs and
+evidence boundaries; final integrated CI and public publication checks are pending.
 The [stable-readiness ledger](../docs/specs/stable-readiness-2026-10/tasks.md)
 owns its current validation and release decision. Stable publication uses npm
 `latest` and a normal GitHub release; prerelease versions continue to use `next`.
@@ -30,7 +32,7 @@ delete asks for confirmation. `POST /api/sessions/batch` accepts
 `{action,items:[{provider,id}]}` for these Viewer-only changes and reports
 `{ok,affected,skipped}`. Provider transcripts are never changed.
 
-## Local Reader journey changes (Unreleased)
+## Reader journey changes (released in 3.0.0)
 
 Library rows expose each node's own `starred` state. **Only starred** sends
 `starredOnly=true` to both `/api/v3/library/sessions` and
@@ -60,7 +62,7 @@ zero rows displays **Trash is empty**. Partial and failed reads offer **Retry
 Trash**. Source issues link to the provider's focused Settings source section,
 with the startup path and restart guidance described below.
 
-These changes are local and unreleased. The
+These changes shipped in 3.0.0. The
 [repair specification](../docs/specs/reader-journey-repair-2026-10/requirements.md)
 defines scope; the [execution record](../docs/specs/reader-journey-repair-2026-10/tasks.md)
 owns actual validation. Published rc.4 and existing acceptance gates retain
@@ -68,12 +70,12 @@ their recorded scope.
 
 ## HTTP contract migration
 
-Local unreleased architecture repairs preserve invalid Reader execution
+The 3.0.1 release candidate preserves invalid Reader execution
 evidence as HTTP 422 `protocol_invalid`. Its error object additionally includes
 `diagnostics` (existing `code` / `event_id` shape, at most 20 entries) and
 `diagnosticsTruncated`. Readable conversation content remains available. Reader
-schema 1/2 caches upgrade to schema 3 and recapture the old projection on the
-next bootstrap; provider records and Viewer metadata are not migrated. See the
+schema 1/2 caches upgrade to schema 3; summary schema 16 and projection version 11
+recapture older derived data on the next bootstrap; provider records and Viewer metadata are not migrated. See the
 [Reader decision](../.agents/decisions/implemented/2026-10-17-reader-protocol-failure-persistence.md).
 
 Known ambiguous DSH sessions now appear as diagnostic rows with unknown
@@ -91,8 +93,8 @@ is not logged. Blocking failures distinguish panic from cancellation without
 logging their payload. Batch Viewer actions preflight
 each source once and retain their existing transaction and partial-commit rules.
 
-The Linux x64 native/release jobs require public browser regressions. Optional
-local browser tooling has its own Node 24+ manifest and lockfile under
+The Linux x64 native/release jobs require public browser regressions using
+locked agent-browser 0.39.1. Optional local browser tooling has its own Node 24+ manifest and lockfile under
 `v3/test/browser-tools`; root development still supports Node 22.15. Set
 `AGENTSESSION_V3_AGENT_BROWSER_BIN` to the native browser executable and
 `AGENTSESSION_V3_REQUIRE_BROWSER=1` to require browser prerequisites locally.
